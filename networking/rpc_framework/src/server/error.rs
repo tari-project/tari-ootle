@@ -27,7 +27,7 @@ use libp2p::{PeerId, StreamProtocol};
 use prost::DecodeError;
 use tokio::sync::oneshot;
 
-use crate::{handshake::RpcHandshakeError, proto, server::early_close::EarlyCloseError};
+use crate::{handshake::RpcHandshakeError, server::early_close::EarlyCloseError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RpcServerError {
@@ -47,8 +47,8 @@ pub enum RpcServerError {
     HandshakeError(#[from] RpcHandshakeError),
     #[error("Service not found for protocol `{0}`")]
     ProtocolServiceNotFound(StreamProtocol),
-    #[error("Unexpected incoming message")]
-    UnexpectedIncomingMessage(proto::RpcRequest),
+    #[error("Unexpected incoming message: {0}")]
+    UnexpectedIncomingMessage(String),
     #[error("Unexpected incoming MALFORMED message")]
     UnexpectedIncomingMessageMalformed,
     #[error("Client interrupted stream")]

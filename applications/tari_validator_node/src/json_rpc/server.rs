@@ -20,25 +20,35 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{future::IntoFuture, net::SocketAddr, sync::Arc};
 
-use axum::{extract::Extension, routing::post, Router};
+use axum::{
+    extract::Extension,
+    response::IntoResponse,
+    routing::{get, post},
+    Json,
+    Router,
+};
 use axum_jrpc::{error::JsonRpcErrorReason, JrpcResult, JsonRpcAnswer, JsonRpcExtractor};
 use log::*;
+use serde_json::json;
+use tari_consensus::hotstuff::ConsensusCurrentState;
+use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
 use tower_http::cors::CorsLayer;
 
 use super::handlers::JsonRpcHandlers;
 
 const LOG_TARGET: &str = "tari::validator_node::json_rpc";
 
-pub fn spawn_json_rpc(
-    mut preferred_address: SocketAddr,
+pub async fn spawn_json_rpc(
+    preferred_address: SocketAddr,
     handlers: JsonRpcHandlers,
     #[cfg(feature = "metrics")] registry: prometheus_client::registry::Registry,
 ) -> Result<SocketAddr, anyhow::Error> {
     let router = Router::new()
         .route("/", post(handler))
-        .route("/json_rpc", post(handler));
+        .route("/json_rpc", post(handler))
+        .route("/health", get(health_check));
     #[cfg(feature = "metrics")]
     let router = router.route(
         "/_metrics",
@@ -48,18 +58,11 @@ pub fn spawn_json_rpc(
         .layer(Extension(Arc::new(handlers)))
         .layer(CorsLayer::permissive());
 
-    let server = axum::Server::try_bind(&preferred_address).or_else(|_| {
-        warn!(
-            target: LOG_TARGET,
-            "🌐 Failed to bind on preferred address {}. Trying OS-assigned", preferred_address
-        );
-        preferred_address.set_port(0);
-        axum::Server::try_bind(&preferred_address)
-    })?;
-    let server = server.serve(router.into_make_service());
-    let addr = server.local_addr();
+    let listener = try_bind_with_fallback(preferred_address).await?;
+    let server = axum::serve(listener, router);
+    let addr = server.local_addr()?;
     info!(target: LOG_TARGET, "🌐 JSON-RPC listening on {}", addr);
-    tokio::spawn(server);
+    tokio::spawn(server.into_future());
 
     Ok(addr)
 }
@@ -83,7 +86,6 @@ async fn handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: Js
         "get_filtered_blocks_count" => handlers.get_filtered_blocks_count(value).await,
         // Template
         "get_template" => handlers.get_template(value).await,
-        "get_templates" => handlers.get_templates(value).await,
         // Validator Node
         "get_identity" => handlers.get_identity(value).await,
         "get_mempool_stats" => handlers.get_mempool_stats(value).await,
@@ -120,4 +122,29 @@ async fn handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: Js
         }
     }
     result
+}
+
+async fn health_check(Extension(handlers): Extension<Arc<JsonRpcHandlers>>) -> impl IntoResponse {
+    let is_net_ok = handlers.networking_is_active();
+    let status = handlers.consensus_status();
+    let is_ok = is_net_ok &&
+        matches!(
+            status,
+            ConsensusCurrentState::Idle |
+                ConsensusCurrentState::Running |
+                ConsensusCurrentState::Syncing |
+                ConsensusCurrentState::CheckSync
+        );
+
+    let body = json!({
+        "status": if is_ok { "ok" } else { "error" },
+        "networking_ok": is_net_ok,
+        "consensus_status": status,
+    });
+
+    if is_ok {
+        (axum::http::StatusCode::OK, Json(body)).into_response()
+    } else {
+        (axum::http::StatusCode::SERVICE_UNAVAILABLE, Json(body)).into_response()
+    }
 }

@@ -7,10 +7,12 @@ mod epoch_manager_service;
 mod error;
 mod handle;
 mod initializer;
+mod network_description;
 mod types;
 
 pub use config::EpochManagerConfig;
 pub use epoch_manager::EpochManager;
 pub use handle::EpochManagerHandle;
 pub use initializer::spawn_service;
+pub use network_description::*;
 pub use types::*;

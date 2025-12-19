@@ -168,14 +168,14 @@ impl FromIterator<PeerId> for MulticastDestination {
 pub struct NetworkingHandle<TMsg: MessageSpec> {
     tx_request: mpsc::Sender<NetworkingRequest<TMsg>>,
     local_peer_id: PeerId,
-    tx_events: broadcast::Sender<NetworkingEvent>,
+    tx_events: broadcast::WeakSender<NetworkingEvent>,
 }
 
 impl<TMsg: MessageSpec> NetworkingHandle<TMsg> {
     pub(super) fn new(
         local_peer_id: PeerId,
         tx_request: mpsc::Sender<NetworkingRequest<TMsg>>,
-        tx_events: broadcast::Sender<NetworkingEvent>,
+        tx_events: broadcast::WeakSender<NetworkingEvent>,
     ) -> Self {
         Self {
             tx_request,
@@ -184,8 +184,15 @@ impl<TMsg: MessageSpec> NetworkingHandle<TMsg> {
         }
     }
 
+    pub fn is_closed(&self) -> bool {
+        self.tx_request.is_closed()
+    }
+
     pub fn subscribe_events(&self) -> broadcast::Receiver<NetworkingEvent> {
-        self.tx_events.subscribe()
+        self.tx_events
+            .upgrade()
+            .unwrap_or_else(|| broadcast::Sender::new(1))
+            .subscribe()
     }
 
     pub async fn is_subscribed_to_topic<T: Into<String>>(&self, topic: T) -> Result<bool, NetworkingError> {
@@ -218,7 +225,7 @@ impl<TMsg: MessageSpec> NetworkingHandle<TMsg> {
     }
 
     pub async fn open_substream(
-        &mut self,
+        &self,
         peer_id: PeerId,
         protocol_id: &StreamProtocol,
     ) -> Result<NegotiatedSubstream<Substream>, NetworkingError> {
@@ -236,7 +243,7 @@ impl<TMsg: MessageSpec> NetworkingHandle<TMsg> {
     }
 
     pub async fn open_framed_substream(
-        &mut self,
+        &self,
         peer_id: PeerId,
         protocol_id: &StreamProtocol,
         max_frame_size: usize,
@@ -245,12 +252,12 @@ impl<TMsg: MessageSpec> NetworkingHandle<TMsg> {
         Ok(framing::canonical(substream.stream, max_frame_size))
     }
 
-    pub async fn connect_rpc<T>(&mut self, peer_id: PeerId) -> Result<T, NetworkingError>
+    pub async fn connect_rpc<T>(&self, peer_id: PeerId) -> Result<T, NetworkingError>
     where T: From<RpcClient> + NamedProtocolService {
         self.connect_rpc_using_builder(RpcClientBuilder::new(peer_id)).await
     }
 
-    pub async fn connect_rpc_using_builder<T>(&mut self, builder: RpcClientBuilder<T>) -> Result<T, NetworkingError>
+    pub async fn connect_rpc_using_builder<T>(&self, builder: RpcClientBuilder<T>) -> Result<T, NetworkingError>
     where T: From<RpcClient> + NamedProtocolService {
         let protocol = StreamProtocol::new(T::PROTOCOL_NAME);
         debug!(

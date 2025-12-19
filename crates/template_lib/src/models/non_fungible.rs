@@ -8,9 +8,9 @@ use tari_template_abi::{
     rust::{fmt, fmt::Display, str::FromStr, write},
     EngineOp,
 };
-use tari_template_lib_types::{serde_helpers, Hash};
+use tari_template_lib_types::{hex::write_hex_fmt, serde_helpers, Hash};
 
-use super::BinaryTag;
+use super::{address_prefixes, BinaryTag};
 use crate::{
     args::{InvokeResult, NonFungibleAction, NonFungibleInvokeArg},
     constants::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
@@ -21,11 +21,7 @@ use crate::{
 
 /// The unique identification of a non-fungible token inside it's parent resource
 #[derive(Debug, Clone, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize, Hash)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub enum NonFungibleId {
     U256(
@@ -177,9 +173,9 @@ impl NonFungibleId {
         }
     }
 
-    pub fn as_u256(&self) -> Option<[u8; 32]> {
+    pub fn as_u256(&self) -> Option<&[u8; 32]> {
         match self {
-            NonFungibleId::U256(i) => Some(*i),
+            NonFungibleId::U256(i) => Some(i),
             _ => None,
         }
     }
@@ -207,39 +203,13 @@ const TAG: u64 = BinaryTag::NonFungibleAddress.as_u64();
 
 /// The unique identifier of a non-fungible index in the Tari network
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct NonFungibleAddress(BorTag<NonFungibleAddressContents, TAG>);
-
-#[cfg(feature = "borsh")]
-mod borsh_impl {
-    use std::io::Read;
-
-    use super::*;
-
-    impl borsh::BorshSerialize for NonFungibleAddress {
-        fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-            ::borsh::BorshSerialize::serialize(self.0.inner(), writer)
-        }
-    }
-
-    impl borsh::BorshDeserialize for NonFungibleAddress {
-        fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
-            Ok(Self(BorTag::new(borsh::BorshDeserialize::deserialize_reader(reader)?)))
-        }
-    }
-}
 
 /// A NonFungibleId namespaced by a ResourceAddress.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct NonFungibleAddressContents {
     resource_address: ResourceAddress,
@@ -315,10 +285,8 @@ impl From<RistrettoPublicKeyBytes> for NonFungibleAddress {
 
 impl Display for NonFungibleAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "nft_")?;
-        for byte in self.resource_address().as_bytes() {
-            write!(f, "{:02x}", byte)?;
-        }
+        write!(f, "{}_", address_prefixes::NON_FUNGIBLE)?;
+        write_hex_fmt(f, self.resource_address().as_bytes())?;
         write!(f, "_{}", self.id())
     }
 }

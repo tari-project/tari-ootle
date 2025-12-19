@@ -43,13 +43,12 @@ async fn run(cli: cli::CommonArgs, _args: cli::RunArgs) -> anyhow::Result<()> {
     info!("⏳️ Creating other accounts...");
 
     let mut accounts = vec![];
-    for i in 0..5 {
-        // We have to break up the transactions into batches because otherwise the indexer opens too many RPC sessions
-        // which then cause submit failures (starts to error at about 250 per batch)
-        let start = i * 200;
-        let end = start + 200;
+    for i in 0..20 {
+        // We have to break up the transactions into batches due to log and event limits
+        let start = i * 50;
+        let end = start + 50;
         accounts.extend(runner.create_accounts(&primary_account, start + 1..=end).await?);
-        info!("⏳️ Created 200 accounts...");
+        info!("⏳️ Created {}/1000 accounts...", end);
     }
     info!("✅ Created all accounts");
 
@@ -62,8 +61,8 @@ async fn run(cli: cli::CommonArgs, _args: cli::RunArgs) -> anyhow::Result<()> {
 
     info!("⏳️ Creating 1000 tariswap components...");
     let mut tariswaps = vec![];
-    for _ in 0..4 {
-        tariswaps.extend(runner.create_tariswaps(&primary_account, &faucet, 250).await?);
+    for _ in 0..40 {
+        tariswaps.extend(runner.create_tariswaps(&primary_account, &faucet, 25).await?);
     }
     info!("✅ Created 1000 tariswaps");
 

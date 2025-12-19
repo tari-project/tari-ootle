@@ -21,14 +21,9 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { ChangeEvent } from "react";
-import type {
-  Amount,
-  ClaimBurnProof,
-  FinalizeResult,
-  SubstateId,
-  Transaction,
-  TransactionStatus,
-} from "@tari-project/typescript-bindings";
+import type { Amount, SubstateId, NonFungibleId } from "@tari-project/typescript-bindings";
+import { XTR_CURRENCY } from "@utils/constants";
+import useCurrencyStore from "@store/currencyStore";
 
 export const renderJson = (json: any) => {
   if (Array.isArray(json)) {
@@ -66,6 +61,7 @@ export const renderJson = (json: any) => {
 
   if (typeof json === "string") return <span className="string">"{json}"</span>;
   if (typeof json === "number") return <span className="number">{json}</span>;
+  if (typeof json === "boolean") return <span className="number">{String(json)}</span>;
   return <span className="other">{json || "null"}</span>;
 };
 
@@ -154,7 +150,7 @@ export function emptyRows(page: number, rowsPerPage: number, array: Array<any> |
 }
 
 export function handleChangePage(
-  event: unknown,
+  _event: unknown,
   newPage: number,
   setPage: React.Dispatch<React.SetStateAction<number>>,
 ) {
@@ -254,4 +250,135 @@ export function bigintToDecimalString(int: bigint | Amount, decimalPlaces: numbe
 
   const padding = "0".repeat(decimalPlaces - fractionalValues.length);
   return `${wholeValues}.${padding}${fractionalValues}`;
+}
+
+export const formatCurrency = (amount: number | bigint | Amount): string => {
+  const { currencySymbol } = useCurrencyStore.getState();
+
+  if (typeof amount === "bigint") {
+    const divisor = BigInt(XTR_CURRENCY.DIVISOR);
+    const integerPart = amount / divisor;
+    const remainder = amount % divisor;
+
+    const fractionalPart = remainder.toString().padStart(XTR_CURRENCY.DECIMALS, "0");
+
+    return `${Number(integerPart).toLocaleString("en-US")}.${fractionalPart} ${currencySymbol}`;
+  } else if (typeof amount === "number") {
+    if (isNaN(amount)) {
+      return `0 ${currencySymbol}`;
+    }
+    const convertedAmount = amount / XTR_CURRENCY.DIVISOR;
+    return `${convertedAmount.toLocaleString("en-US", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: XTR_CURRENCY.DECIMALS,
+    })} ${currencySymbol}`;
+  } else if (typeof amount === "string") {
+    // Handle Amount type
+    try {
+      const numericAmount = BigInt(amount);
+      const divisor = BigInt(XTR_CURRENCY.DIVISOR);
+      const integerPart = numericAmount / divisor;
+      const remainder = numericAmount % divisor;
+
+      const fractionalPart = remainder.toString().padStart(XTR_CURRENCY.DECIMALS, "0");
+
+      return `${Number(integerPart).toLocaleString("en-US")}.${fractionalPart} ${currencySymbol}`;
+    } catch (error) {
+      console.error("Failed to parse Amount:", amount, error);
+      return `0 ${currencySymbol}`;
+    }
+  } else {
+    // Handle any other type (object, etc.)
+    try {
+      const stringValue = String(amount);
+      const numericAmount = BigInt(stringValue);
+      const divisor = BigInt(XTR_CURRENCY.DIVISOR);
+      const integerPart = numericAmount / divisor;
+      const remainder = numericAmount % divisor;
+
+      const fractionalPart = remainder.toString().padStart(XTR_CURRENCY.DECIMALS, "0");
+
+      return `${Number(integerPart).toLocaleString("en-US")}.${fractionalPart} ${currencySymbol}`;
+    } catch (error) {
+      console.error("Failed to parse Amount:", amount, error);
+      return `0 ${currencySymbol}`;
+    }
+  }
+};
+
+// Helper function for formatting currency amounts
+export const formatDisplayCurrency = (
+  amount: number,
+  divisibility: number,
+  currencySymbol: string | undefined,
+): string => {
+  if (isNaN(amount)) {
+    return `0 ${currencySymbol}`;
+  }
+  return `${amount.toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: divisibility,
+  })} ${currencySymbol}`;
+};
+
+export function validateHash(hash: string): boolean {
+  const regex = /^[a-fA-F0-9]{64}$/;
+  return regex.test(hash);
+}
+
+const normalizeTimestamp = (rawTimestamp: string | null | undefined): Date | null => {
+  if (!rawTimestamp) return null;
+
+  let formatted = rawTimestamp;
+
+  if (!formatted.includes("T")) {
+    formatted = formatted.replace(" ", "T");
+  }
+
+  if (formatted.endsWith(".0")) {
+    formatted = formatted.slice(0, -2);
+  }
+
+  if (!/[Z+\-]\d{2}:?\d{2}$/.test(formatted)) {
+    formatted += "Z";
+  }
+
+  const date = new Date(formatted);
+  return isNaN(date.getTime()) ? null : date;
+};
+
+export const formatTimestamp = (rawTimestamp: string | null | undefined): string => {
+  const date = normalizeTimestamp(rawTimestamp);
+
+  if (!date) return "";
+
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+};
+
+export const parseTimestamp = (rawTimestamp: string | null | undefined): Date | null => {
+  return normalizeTimestamp(rawTimestamp);
+};
+
+export function displayNftId(nftId: NonFungibleId): string {
+  if ("U256" in nftId) {
+    return `NFT #${shortenString(toHexString(nftId.U256))}`;
+  }
+  if ("Uint64" in nftId) {
+    return `NFT #${nftId.Uint64}`;
+  }
+  if ("Uint32" in nftId) {
+    return `NFT #${nftId.Uint32}`;
+  }
+  if ("String" in nftId) {
+    return `NFT #${nftId.String}`;
+  }
+
+  return `NFT #${JSON.stringify(nftId)}`;
 }

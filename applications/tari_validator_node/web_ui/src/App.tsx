@@ -27,7 +27,6 @@ import ValidatorNode from "./routes/VN/ValidatorNode";
 import Connections from "./routes/Connections/Connections";
 import Fees from "./routes/Fees/Fees";
 import Blocks from "./routes/Blocks/Blocks";
-import Templates from "./routes/Templates/Templates";
 import ValidatorNodes from "./routes/ValidatorNodes/ValidatorNodes";
 import ErrorPage from "./routes/ErrorPage";
 import TemplateFunctions from "./routes/VN/Components/TemplateFunctions";
@@ -88,11 +87,6 @@ export const breadcrumbRoutes = [
     label: "Blocks",
     path: "/blocks/:blockId",
     dynamic: true,
-  },
-  {
-    label: "Templates",
-    path: "/templates",
-    dynamic: false,
   },
   {
     label: "Validator Nodes",
@@ -163,7 +157,10 @@ export default function App() {
   useEffect(() => {
     if (epoch !== undefined && identity !== undefined) {
       // The *10 is from the hardcoded constant in VN.
-      getShardKey({ epoch: epoch.current_epoch, public_key: identity.public_key }).then((response) => {
+      getShardKey({
+        epoch: epoch.current_epoch,
+        public_key: identity.public_key,
+      }).then((response) => {
         setShardKey(response.shard_key);
       });
     }
@@ -179,7 +176,6 @@ export default function App() {
             <Route path="connections" element={<Connections />} />
             <Route path="fees" element={<Fees />} />
             <Route path="blocks" element={<Blocks />} />
-            <Route path="templates" element={<Templates />} />
             <Route path="vns" element={<ValidatorNodes />} />
             <Route path="mempool" element={<Mempool />} />
             <Route path="transactions/:transactionHash" element={<TransactionDetails />} />

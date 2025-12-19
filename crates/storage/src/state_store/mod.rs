@@ -18,12 +18,12 @@ use tari_consensus_types::{
     LastVoted,
     LeafBlock,
     LockedBlock,
+    PcId,
     ProposalCertificate,
-    QcId,
     TcId,
     TimeoutCertificate,
 };
-use tari_engine_types::{confidential::UnclaimedConfidentialOutput, substate::SubstateId};
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{
     shard::Shard,
     Epoch,
@@ -31,9 +31,9 @@ use tari_ootle_common_types::{
     NodeHeight,
     NumPreshards,
     ShardGroup,
+    ShardStateVersions,
     SubstateAddress,
     ToSubstateAddress,
-    VersionedSubstateId,
     VersionedSubstateIdRef,
 };
 use tari_state_tree::{
@@ -53,9 +53,7 @@ use crate::{
         Block,
         BlockDiff,
         BlockTransactionExecution,
-        BurntUtxo,
         EpochCheckpoint,
-        EpochStateRoot,
         Evidence,
         ForeignParkedProposal,
         ForeignProposal,
@@ -65,12 +63,13 @@ use crate::{
         LockedSubstateValue,
         NoVoteReason,
         PendingShardStateTreeDiff,
-        StateTransition,
-        StateTransitionId,
+        StateVersionTransitions,
         SubstateChange,
         SubstateLock,
         SubstatePledges,
         SubstateRecord,
+        SubstateUpdateBatch,
+        SubstateValueFilterFlags,
         TransactionExecution,
         TransactionPoolRecord,
         TransactionPoolStage,
@@ -132,6 +131,7 @@ pub trait StateStoreReadTransaction: Sized {
     fn last_sent_new_view_get(&self, epoch: Epoch) -> Result<LastSentNewView, StorageError>;
     fn high_pc_get(&self, epoch: Epoch) -> Result<HighPc, StorageError>;
     fn high_tc_get(&self, epoch: Epoch) -> Result<HighTc, StorageError>;
+    fn is_block_in_end_of_epoch_chain(&self, block_id: &BlockId) -> Result<bool, StorageError>;
     fn foreign_proposals_get_any<'a, I: IntoIterator<Item = &'a BlockId>>(
         &self,
         block_ids: I,
@@ -197,6 +197,7 @@ pub trait StateStoreReadTransaction: Sized {
     ) -> Result<u64, StorageError>;
 
     fn block_diffs_get(&self, block_id: &BlockId) -> Result<BlockDiff, StorageError>;
+
     fn block_diffs_get_last_change_for_substate(
         &self,
         block_id: &BlockId,
@@ -209,10 +210,10 @@ pub trait StateStoreReadTransaction: Sized {
     ) -> Result<SubstateChange, StorageError>;
 
     // -------------------------------- ProposalCertificate -------------------------------- //
-    fn proposal_certificates_get(&self, epoch: Epoch, qc_id: &QcId) -> Result<ProposalCertificate, StorageError>;
+    fn proposal_certificates_get(&self, epoch: Epoch, qc_id: &PcId) -> Result<ProposalCertificate, StorageError>;
     fn proposal_certificates_get_many<'a, I>(&self, qc_ids: I) -> Result<Vec<ProposalCertificate>, StorageError>
     where
-        I: IntoIterator<Item = &'a (Epoch, QcId)>,
+        I: IntoIterator<Item = &'a (Epoch, PcId)>,
         I::IntoIter: ExactSizeIterator;
 
     // -------------------------------- TimeoutCertificate -------------------------------- //
@@ -229,7 +230,7 @@ pub trait StateStoreReadTransaction: Sized {
         transaction_id: &TransactionId,
     ) -> Result<TransactionPoolRecord, StorageError>;
     fn transaction_pool_exists(&self, transaction_id: &TransactionId) -> Result<bool, StorageError>;
-    fn transaction_pool_get_all(&self) -> Result<Vec<TransactionPoolRecord>, StorageError>;
+    fn transaction_pool_get_all(&self, limit: usize) -> Result<Vec<TransactionPoolRecord>, StorageError>;
     fn transaction_pool_get_many_ready(
         &self,
         max_txs: usize,
@@ -283,22 +284,40 @@ pub trait StateStoreReadTransaction: Sized {
     ) -> Result<HashMap<Shard, Vec<PendingShardStateTreeDiff>>, StorageError>;
 
     // -------------------------------- State transitions -------------------------------- //
-    fn state_transitions_get_n_after(
+    fn state_transitions_get_starting_at(
         &self,
-        n: usize,
-        id: StateTransitionId,
-        end_epoch: Epoch,
-    ) -> Result<Vec<StateTransition>, StorageError>;
+        shard: Shard,
+        state_version: Version,
+        value_filters: SubstateValueFilterFlags,
+    ) -> Result<StateVersionTransitions, StorageError>;
 
-    fn state_transitions_get_last_id(&self, shard: Shard) -> Result<StateTransitionId, StorageError>;
+    // -------------------------------- State Tree -------------------------------- //
 
-    fn state_tree_nodes_get(&self, shard: Shard, key: &NodeKey) -> Result<Node, StorageError>;
+    fn state_tree_nodes_get(&self, shard: Shard, key: &NodeKey) -> Result<Node<StateTreePayload>, StorageError>;
+    fn state_tree_nodes_get_all_by_state_version(
+        &self,
+        shard: Shard,
+        state_version: Version,
+    ) -> Result<Vec<(NodeKey, Node<StateTreePayload>)>, StorageError>;
     fn state_tree_versions_get_latest(&self, shard: Shard) -> Result<Option<Version>, StorageError>;
+    fn state_tree_versions_get_latest_for_shard_group(
+        &self,
+        shard_group: ShardGroup,
+    ) -> Result<ShardStateVersions, StorageError>;
 
     // -------------------------------- Epoch checkpoint -------------------------------- //
-    fn epoch_checkpoint_get(&self, epoch: Epoch) -> Result<EpochCheckpoint, StorageError>;
+    fn epoch_checkpoint_get_all_from_epoch(
+        &self,
+        epoch: Epoch,
+        limit: usize,
+    ) -> Result<Vec<EpochCheckpoint>, StorageError>;
+    fn epoch_checkpoint_get_by_shard_group(
+        &self,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> Result<EpochCheckpoint, StorageError>;
 
-    fn previous_epoch_state_root_get(&self) -> Result<EpochStateRoot, StorageError>;
+    fn epoch_checkpoint_get_last(&self) -> Result<EpochCheckpoint, StorageError>;
 
     // -------------------------------- Foreign Substate Pledges -------------------------------- //
     fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(
@@ -315,19 +334,8 @@ pub trait StateStoreReadTransaction: Sized {
         &self,
         transaction_id: &TransactionId,
     ) -> Result<SubstatePledges, StorageError>;
-
-    // -------------------------------- BurntUtxos -------------------------------- //
-    fn burnt_utxos_get(
-        &self,
-        commitment: &UnclaimedConfidentialOutputAddress,
-    ) -> Result<UnclaimedConfidentialOutput, StorageError>;
-    fn burnt_utxos_get_all_unproposed(
-        &self,
-        leaf_block: &BlockId,
-        limit: usize,
-    ) -> Result<HashMap<UnclaimedConfidentialOutputAddress, UnclaimedConfidentialOutput>, StorageError>;
-
-    fn burnt_utxos_count(&self) -> Result<u64, StorageError>;
+    // -------------------------------- Parked blocks / Missing Transactions -------------------------------- //
+    fn parked_block_exists(&self, block_id: &BlockId) -> Result<bool, StorageError>;
 
     // -------------------------------- Foreign parked block -------------------------------- //
     fn foreign_parked_blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError>;
@@ -366,8 +374,8 @@ pub trait StateStoreWriteTransaction {
     fn blocks_set_qcs(
         &mut self,
         block_id: &BlockId,
-        commit_qc_id: Option<&QcId>,
-        justify_qc_id: Option<&QcId>,
+        commit_qc_id: Option<&PcId>,
+        justify_qc_id: Option<&PcId>,
     ) -> Result<(), StorageError>;
 
     // -------------------------------- BlockDiff -------------------------------- //
@@ -488,15 +496,9 @@ pub trait StateStoreWriteTransaction {
 
     fn substate_locks_remove_any_by_block_id(&mut self, block_id: &BlockId) -> Result<(), StorageError>;
 
-    fn substates_create(&mut self, substate: &SubstateRecord) -> Result<(), StorageError>;
-    fn substates_down(
-        &mut self,
-        versioned_substate_id: VersionedSubstateId,
-        shard: Shard,
-        epoch: Epoch,
-        destroyed_block_height: NodeHeight,
-        destroyed_qc_id: &QcId,
-    ) -> Result<(), StorageError>;
+    // -------------------------------- Substates -------------------------------- //
+
+    fn substates_commit_batch(&mut self, update_batch: SubstateUpdateBatch) -> Result<(), StorageError>;
     fn substates_prune_downed_values(&mut self, epoch: Epoch) -> Result<(), StorageError>;
 
     // -------------------------------- Foreign pledges -------------------------------- //
@@ -530,7 +532,7 @@ pub trait StateStoreWriteTransaction {
     fn state_tree_nodes_batch_insert(
         &mut self,
         shard: Shard,
-        nodes: Vec<(NodeKey, Node<Version>)>,
+        nodes: Vec<(NodeKey, Node<StateTreePayload>)>,
     ) -> Result<(), StorageError>;
 
     fn state_tree_nodes_record_stale_tree_nodes(
@@ -545,23 +547,6 @@ pub trait StateStoreWriteTransaction {
 
     // -------------------------------- Epoch checkpoint -------------------------------- //
     fn epoch_checkpoint_save(&mut self, checkpoint: &EpochCheckpoint) -> Result<(), StorageError>;
-
-    // -------------------------------- Epoch state root -------------------------------- //
-    fn previous_epoch_state_root_set(&mut self, epoch_state_root: &EpochStateRoot) -> Result<(), StorageError>;
-
-    // -------------------------------- BurntUtxo -------------------------------- //
-    fn burnt_utxos_insert(&mut self, burnt_utxo: &BurntUtxo) -> Result<(), StorageError>;
-    fn burnt_utxos_set_proposed_block(
-        &mut self,
-        commitment: &UnclaimedConfidentialOutputAddress,
-        proposed_in_block: &BlockId,
-    ) -> Result<(), StorageError>;
-    fn burnt_utxos_clear_proposed_block(&mut self, proposed_in_block: &BlockId) -> Result<(), StorageError>;
-    fn burnt_utxos_delete(
-        &mut self,
-        commitment: &UnclaimedConfidentialOutputAddress,
-        proposed_in_block: &BlockId,
-    ) -> Result<(), StorageError>;
 
     // -------------------------------- Lock conflicts -------------------------------- //
     fn lock_conflicts_insert_all<'a, I: IntoIterator<Item = (&'a TransactionId, &'a Vec<LockConflict>)>>(
@@ -605,11 +590,7 @@ pub trait StateStoreWriteTransaction {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Ordering {
     #[default]
     Ascending,

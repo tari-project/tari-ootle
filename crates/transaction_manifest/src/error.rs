@@ -40,4 +40,6 @@ pub enum ManifestError {
     InvalidVariableType(String),
     #[error("Template alias '{alias}' not defined")]
     TemplateAliasNotDefined { alias: String },
+    #[error("Invalid instruction: {reason}")]
+    InvalidInstruction { reason: String },
 }

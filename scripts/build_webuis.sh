@@ -26,7 +26,7 @@ function usage() {
   echo "Usage: $0 [-h|--help] [-t|--check-typescript] [-k|--skip-bindings]"
   echo "  -h|--help    This help"
   echo "  -t|--check-typescript    Check that typescript compiles without building"
-  echo "  -k|--skip-bindings     Skip generating bindings (only build the typescript)"
+  echo "  -b|--build-bindings     Generating bindings"
   exit 1
 }
 
@@ -40,13 +40,13 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       usage
       ;;
-    -kt|-tk)
+    -bt|-tb)
       check_typescript=true
-      skip_bindings=true
+      build_bindings=true
       shift
       ;;
-    -k|--skip-bindings)
-      skip_bindings=true
+    -b|--build-bindings)
+      build_bindings=true
       shift
       ;;
     -t|--check-typescript)
@@ -61,14 +61,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 pushd $base_path/bindings > /dev/null
-if [ -z "${skip_bindings}" ]; then
-	# Build bindings
-	echo "Building Bindings..."
-	pnpm install
+if [ ! -z "${build_bindings}" ]; then
+  # Build bindings
+  echo "Building Bindings..."
+  pnpm install
   pnpm run build
 else
-	echo "Building Bindings (Dist only)..."
-	pnpm install
+  echo "Building Bindings (Dist only)..."
+  pnpm install
   pnpm run build-dev # build with the TS definitions included
 fi
 popd > /dev/null
@@ -77,6 +77,7 @@ function build() {
   pushd $base_path/$1 > /dev/null
   pnpm install > /dev/null
   if [ -z ${check_typescript+x} ]; then
+    pnpm run clean-dist
     pnpm run build
   else
     npx tsc
@@ -89,13 +90,15 @@ set +e
 echo "Building Wallet client..."
 build clients/javascript/wallet_daemon_client
 
+echo "Building Indexer client..."
+build clients/javascript/indexer_client
+
 # Build webuis
 echo "Building Validator Node Web UI..."
 build applications/tari_validator_node/web_ui
 
 echo "Building Wallet Web UI..."
 build applications/tari_walletd/web_ui
-
 
 echo "Building Indexer Web UI..."
 build applications/tari_indexer/web_ui

@@ -3,7 +3,8 @@
 
 use bnum::BUint;
 use newtype_ops::newtype_ops;
-use tari_template_abi::rust::{cmp, fmt, iter::Sum, ops::Neg, str::FromStr};
+use serde::ser::Error;
+use tari_template_abi::rust::{cmp, fmt, fmt::Debug, iter::Sum, str::FromStr, write};
 
 use crate::{impl_from, partial_eq_impl, partial_ord_impl};
 
@@ -18,24 +19,20 @@ pub type I192 = bnum::BInt<3>; // 3 x 64 bits = 192 bits
 /// This allows Tari to support a massive number tokens within resources.
 /// e.g. 2 ETH = 2 x 10^18 Gwei.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Amount(#[cfg_attr(feature = "ts", ts(type = "string | number"))] pub(super) I192);
 
 impl Amount {
     pub const BITS: usize = I192::BITS as usize;
     pub const BYTE_SIZE: usize = I192::BYTES as usize;
     /// The maximum value that an `Amount` can hold.
-    pub const MAX: Self = Self::new(I192::MAX);
+    pub const MAX: Self = Self(I192::MAX);
     /// The minimum value that an `Amount` can hold.
-    pub const MIN: Self = Self::new(I192::MIN);
+    pub const MIN: Self = Self(I192::MIN);
     /// The number of u64 digits used to represent a Amount i.e. 3
     pub const NUM_DIGITS: usize = Self::BITS / u64::BITS as usize;
     /// The value of one, represented as an `Amount`.
-    pub const ONE: Self = Self::new(I192::ONE);
+    pub const ONE: Self = Self(I192::ONE);
     /// The value of one hundred, represented as an `Amount`.
     pub const ONE_HUNDRED: Self = Self::from_le_digits([100, 0, 0]);
     /// The value of one thousand, represented as an `Amount`.
@@ -43,7 +40,7 @@ impl Amount {
     /// The value of ten, represented as an `Amount`.
     pub const TEN: Self = Self::from_le_digits([10, 0, 0]);
     /// The value of zero, represented as an `Amount`.
-    pub const ZERO: Self = Self::new(I192::ZERO);
+    pub const ZERO: Self = Self(I192::ZERO);
     /// The number of u64 digits used to represent a Amount i.e. 3
     /// This is internal but needs to be public for macros
     pub const _U64_BYTES: usize = (u64::BITS / 8) as usize;
@@ -51,13 +48,9 @@ impl Amount {
     /// This is internal but needs to be public for macros
     pub const _U64_BYTE_SHIFT: usize = Self::_U64_BYTES.trailing_zeros() as usize;
 
-    /// Creates a new `Amount` from an `i64` value.
-    pub const fn new(amount: I192) -> Self {
-        Self(amount)
-    }
-
-    pub fn from_u64(amount: u64) -> Self {
-        Self::new(I192::from(amount))
+    /// Creates a new `Amount` from an integer value.
+    pub fn new<T: Into<I192>>(amount: T) -> Self {
+        Self(amount.into())
     }
 
     /// A value of zero.
@@ -85,6 +78,14 @@ impl Amount {
         self.inner_value().is_negative()
     }
 
+    pub const fn from_u64(value: u64) -> Self {
+        type U192 = bnum::BUint<3>;
+        let be_bytes = value.to_be_bytes();
+        let bits = U192::from_be_slice(&be_bytes).expect("infallible");
+        let n = I192::from_bits(bits);
+        Self(n)
+    }
+
     /// Returns the inner value of this amount as an `I192`.
     const fn inner_value(&self) -> &I192 {
         &self.0
@@ -96,9 +97,9 @@ impl Amount {
 
     /// Returns the value of this amount + other. Returns `None` if the result underflows or overflows.
     pub const fn checked_add(&self, other: Self) -> Option<Self> {
-        // match is to allow const function
+        // match is because const map operations are not yet stable
         match self.inner_value().checked_add(other.into_inner_value()) {
-            Some(value) => Some(Self::new(value)),
+            Some(value) => Some(Self(value)),
             None => None,
         }
     }
@@ -113,37 +114,39 @@ impl Amount {
 
     /// Returns the sum of two amounts, saturating at `i64::MAX` if the result exceeds it.
     pub const fn saturating_add(&self, other: Self) -> Self {
-        Self::new(self.into_inner_value().saturating_add(other.into_inner_value()))
+        Self(self.into_inner_value().saturating_add(other.into_inner_value()))
     }
 
     /// Returns the difference of two amounts, saturating at `0` if the result is negative.
     pub const fn checked_sub(&self, other: Self) -> Option<Self> {
         match self.into_inner_value().checked_sub(other.into_inner_value()) {
-            Some(value) => Some(Self::new(value)),
+            Some(value) => Some(Self(value)),
             None => None,
         }
     }
 
-    pub fn sum_from_positive<I: Iterator<Item = Self>>(iter: I) -> Option<Self> {
+    pub fn sum_from_positive<A: Into<Self>, I: Iterator<Item = A>>(iter: I) -> Option<Self> {
         let mut sum = Self::zero();
         for amount in iter {
-            sum = sum.checked_add_positive(amount)?;
+            sum = sum.checked_add_positive(amount.into())?;
         }
         Some(sum)
     }
 
-    /// Returns the difference of two amounts, saturating at `0` if the result is negative.
+    /// Returns the difference of two amounts, saturating at `Amount::MIN` if the result underflows.
+    /// If negative results are not desired, use `saturating_sub_positive`.
     pub const fn saturating_sub(&self, other: Self) -> Self {
-        Self::new(self.into_inner_value().saturating_sub(other.into_inner_value()))
+        Self(self.into_inner_value().saturating_sub(other.into_inner_value()))
     }
 
-    /// Returns the difference of two amounts, returning `None` if the result is negative.
-    pub fn saturating_sub_positive(&self, other: Self) -> Option<Self> {
+    /// Returns the difference of two amounts, returning 0 if the result would be negative.
+    /// Input numbers may be negative.
+    pub fn saturating_sub_positive(&self, other: Self) -> Self {
         if *self < other {
-            return None;
+            return Self::zero();
         }
 
-        Some(Self::new(self.inner_value() - other.inner_value()))
+        Self(self.inner_value().saturating_sub(other.into_inner_value()))
     }
 
     /// Returns the difference of two amounts, returning `None` if the result is negative or if either amount is
@@ -152,26 +155,30 @@ impl Amount {
         if self.is_negative() || other.is_negative() {
             return None;
         }
-        self.saturating_sub_positive(other)
+        if *self < other {
+            return None;
+        }
+
+        self.checked_sub(other)
     }
 
     /// Returns the product of two amounts, returning `None` if the result overflows.
-    pub const fn checked_mul(&self, other: &Self) -> Option<Self> {
+    pub const fn checked_mul(&self, other: Self) -> Option<Self> {
         match self.into_inner_value().checked_mul(other.into_inner_value()) {
-            Some(value) => Some(Self::new(value)),
+            Some(value) => Some(Self(value)),
             None => None,
         }
     }
 
     /// Returns the product of two amounts, saturating at `i64::MAX` if the result exceeds it.
-    pub const fn saturating_mul(&self, other: &Self) -> Self {
-        Self::new(self.into_inner_value().saturating_mul(other.into_inner_value()))
+    pub const fn saturating_mul(&self, other: Self) -> Self {
+        Self(self.into_inner_value().saturating_mul(other.into_inner_value()))
     }
 
     /// Returns the quotient of two amounts, returning `None` if the divisor is zero or if the result overflows.
     pub const fn checked_div(&self, other: Self) -> Option<Self> {
         match self.into_inner_value().checked_div(other.into_inner_value()) {
-            Some(value) => Some(Self::new(value)),
+            Some(value) => Some(Self(value)),
             None => None,
         }
     }
@@ -195,10 +202,10 @@ impl Amount {
 
         // If the remainder is zero or the result is negative, we round down
         if rem.is_zero() || div.is_negative() {
-            Some(Self::new(div))
+            Some(Self(div))
         } else {
             // Otherwise, we round up
-            Some(Self::new(div.add(I192::ONE)))
+            Some(Self(div.add(I192::ONE)))
         }
     }
 
@@ -212,7 +219,7 @@ impl Amount {
 
     /// Returns the quotient of two amounts, saturating at `i64::MAX` if the result exceeds it.
     pub const fn saturating_div(&self, other: &Self) -> Self {
-        Self::new(self.into_inner_value().saturating_div(other.into_inner_value()))
+        Self(self.into_inner_value().saturating_div(other.into_inner_value()))
     }
 
     /// Returns the value as an u64 if possible, otherwise returns None.
@@ -272,15 +279,29 @@ impl Amount {
 
     pub const fn from_le_digits(digits: [u64; Self::NUM_DIGITS]) -> Self {
         let out = I192::from_bits(BUint::<3>::from_digits(digits));
-        Self::new(out)
+        Self(out)
     }
 
     pub fn from_le_slice(bytes: &[u8]) -> Option<Self> {
-        I192::from_le_slice(bytes).map(Self::new)
+        I192::from_le_slice(bytes).map(Self)
     }
 
     pub fn to_le_digits(&self) -> [u64; Self::NUM_DIGITS] {
         *self.inner_value().to_bits().digits()
+    }
+
+    #[cfg(feature = "extra-arith")]
+    pub fn checked_sqrt(&self) -> Option<Self> {
+        use num_integer::Roots;
+        if self.is_negative() {
+            return None;
+        }
+        if self.is_zero() {
+            return Some(Self::zero());
+        }
+        let inner = self.into_inner_value();
+        let sqrt_inner = inner.sqrt();
+        Some(Self(sqrt_inner))
     }
 
     /// If the amount is negative (< 0), returns `None`, otherwise returns `Some(self)`.
@@ -301,12 +322,25 @@ impl Amount {
         }
     }
 
+    /// Returns the amount raised to the power of `exp`.
+    pub const fn pow(&self, exp: u32) -> Self {
+        Self(self.into_inner_value().pow(exp))
+    }
+
+    /// Returns the amount raised to the power of `exp`, returning `None` if the result overflows.
+    pub const fn checked_pow(&self, exp: u32) -> Option<Self> {
+        match self.into_inner_value().checked_pow(exp) {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
+    }
+
     /// Parses a string as an `Amount` in the specified radix.
     ///
     /// This function works in constant context, allowing it to be used to define constants.
     pub const fn try_from_str_radix(s: &str, radix: u32) -> Option<Self> {
         match I192::from_str_radix(s, radix) {
-            Ok(value) => Some(Self::new(value)),
+            Ok(value) => Some(Self(value)),
             Err(_) => None,
         }
     }
@@ -321,11 +355,55 @@ impl Amount {
             None => panic!("Failed to parse Amount from string"),
         }
     }
+
+    /// Formats the amount as a decimal string with the specified number of decimal places.
+    ///
+    /// ## Panics
+    /// Panics if `decimals` is greater than 57.
+    pub fn to_decimal_string(&self, decimals: u32) -> String {
+        let mut s = String::new();
+        self.fmt_decimals(&mut s, decimals)
+            .expect("fmt with String is infallible");
+        s
+    }
+
+    pub fn fmt_decimals<F: fmt::Write>(&self, f: &mut F, decimals: u32) -> fmt::Result {
+        if decimals == 0 {
+            write!(f, "{}", self.inner_value())?;
+            return Ok(());
+        }
+
+        // I192 can represent up to ~10^57, so 57 decimal places is a safe upper bound
+        if decimals > 57 {
+            return Err(fmt::Error::custom("Too many decimal places"));
+        }
+
+        let ten = I192::from(10);
+        let divisor = ten.pow(decimals);
+        let integer_part = self.inner_value().div(divisor);
+        let fractional_part = self.inner_value().rem(divisor).abs();
+
+        if self.is_negative() && integer_part.is_zero() && !fractional_part.is_zero() {
+            write!(f, "-")?;
+        }
+
+        // Format fractional part with leading zeros
+        write!(f, "{}.", integer_part)?;
+
+        // TODO: calculate the decimal string without allocating a string first
+        let fractional_str = fractional_part.to_string();
+        let mut padding_needed = decimals as usize - fractional_str.len();
+        while padding_needed > 0 {
+            write!(f, "0")?;
+            padding_needed -= 1;
+        }
+        write!(f, "{}", fractional_part)
+    }
 }
 
 impl fmt::Display for Amount {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.inner_value())
+        fmt::Display::fmt(self.inner_value(), f)
     }
 }
 
@@ -334,7 +412,7 @@ impl FromStr for Amount {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let value = I192::from_str_radix(s, 10)?;
-        Ok(Self::new(value))
+        Ok(Self(value))
     }
 }
 
@@ -344,8 +422,8 @@ impl Default for Amount {
     }
 }
 
-newtype_ops! { [Amount] {add sub mul div} {:=} Self Self }
-newtype_ops! { [Amount] {add sub mul div} {:=} &Self &Self }
+newtype_ops! { [Amount] {add sub mul div rem neg} {:=} Self Self }
+newtype_ops! { [Amount] {add sub mul div rem neg} {:=} &Self &Self }
 
 impl_from!(Amount, u8);
 impl_from!(Amount, i8);
@@ -360,20 +438,6 @@ impl_from!(Amount, i128);
 impl_from!(Amount, usize);
 impl_from!(Amount, isize);
 
-// impl From<Amount> for Amount {
-//     fn from(value: Amount) -> Self {
-//         Self::new(value.as_signed_value().into())
-//     }
-// }
-//
-// impl TryFrom<Amount> for Amount {
-//     type Error = bnum::errors::TryFromIntError;
-//
-//     fn try_from(value: Amount) -> Result<Self, Self::Error> {
-//         Ok(Amount::new(value.into_inner_value().try_into()?))
-//     }
-// }
-
 impl TryFrom<Amount> for usize {
     type Error = bnum::errors::TryFromIntError;
 
@@ -381,36 +445,6 @@ impl TryFrom<Amount> for usize {
         value.into_inner_value().try_into()
     }
 }
-
-impl Neg for Amount {
-    type Output = Self;
-
-    fn neg(self) -> Self::Output {
-        Self::new(-self.inner_value())
-    }
-}
-
-// impl PartialEq<Amount> for Amount {
-//     fn eq(&self, other: &Amount) -> bool {
-//         self.into_inner_value()
-//             .try_into()
-//             .ok()
-//             .map(|n: i64| n == other.as_signed_value())
-//             .unwrap_or(false)
-//     }
-// }
-//
-// impl PartialOrd<Amount> for Amount {
-//     fn partial_cmp(&self, other: &Amount) -> Option<cmp::Ordering> {
-//         if self.is_negative() {
-//             return Some(cmp::Ordering::Less);
-//         }
-//         match self.into_inner_value().try_into().map(Amount::new) {
-//             Ok(value) => Some(value.cmp(other)),
-//             Err(_) => Some(cmp::Ordering::Greater),
-//         }
-//     }
-// }
 
 impl PartialOrd<usize> for Amount {
     fn partial_cmp(&self, other: &usize) -> Option<cmp::Ordering> {
@@ -460,7 +494,7 @@ mod borsh_impl {
 
 impl Sum for Amount {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        Self::new(iter.map(|a| a.into_inner_value()).sum())
+        Self(iter.map(|a| a.into_inner_value()).sum())
     }
 }
 
@@ -492,10 +526,18 @@ mod tests {
         assert_eq!(c, Amount::from(10));
         let d = a.checked_sub(b).unwrap();
         assert_eq!(d, Amount::from(-2));
-        let e = a.checked_mul(&b).unwrap();
+        let d = a.checked_sub_positive(b);
+        assert!(d.is_none());
+        let e = a.checked_mul(b).unwrap();
         assert_eq!(e, Amount::from(24));
         let f = b.checked_div(a).unwrap();
         assert_eq!(f, Amount::from(1));
+        let g = Amount::from(7);
+        let h = g.checked_div_ceil(Amount::from(2)).unwrap();
+        assert_eq!(h, 4);
+        let i = Amount::from(8);
+        let j = i.checked_pow(3).unwrap();
+        assert_eq!(j, Amount::from(512));
 
         // Test overflow
         let max = Amount::MAX;
@@ -503,12 +545,70 @@ mod tests {
         assert!(overflow_add.is_none(), "Overflow should return None");
         let overflow_sub = Amount::MIN.checked_sub(Amount::from(1));
         assert!(overflow_sub.is_none(), "Underflow should return None");
-        let overflow_mul = max.checked_mul(&Amount::from(2));
+        let overflow_mul = max.checked_mul(Amount::from(2));
         assert!(overflow_mul.is_none(), "Overflow should return None");
         let overflow_div = Amount::from(1).checked_div(Amount::zero());
         assert!(overflow_div.is_none(), "Division by zero should return None");
         let overflow_div_ceil = Amount::from(1).checked_div_ceil(Amount::zero());
         assert!(overflow_div_ceil.is_none(), "Division by zero should return None");
+        let overflow_pow = max.checked_pow(10);
+        assert!(overflow_pow.is_none(), "Overflow should return None");
+    }
+
+    #[test]
+    fn to_and_from_u64() {
+        let a = Amount::from_u64(1234567890);
+        assert_eq!(a, 1234567890);
+        let a = Amount::from_u64(u64::MAX);
+        assert_eq!(a, u64::MAX);
+    }
+
+    #[test]
+    fn saturating_arithmetic() {
+        let a = Amount::from(4);
+        let b = Amount::from(6);
+        let c = a.saturating_add(Amount::MAX);
+        assert_eq!(c, Amount::MAX);
+        let d = a.saturating_sub_positive(b);
+        assert_eq!(d, Amount::ZERO);
+        let d = a.saturating_sub_positive(Amount::from(-100));
+        assert_eq!(d, 104);
+        let e = a.saturating_mul(Amount::MAX);
+        assert_eq!(e, Amount::MAX);
+        let f = b.saturating_div(&a);
+        assert_eq!(f, Amount::from(1));
+
+        // Test saturating overflow
+        let max = Amount::MAX;
+        let overflow_add = max.saturating_add(Amount::from(1));
+        assert_eq!(
+            overflow_add,
+            Amount::MAX,
+            "Saturating add should return MAX on overflow"
+        );
+        let overflow_sub = Amount::MIN.saturating_sub(Amount::from(1));
+        assert_eq!(
+            overflow_sub,
+            Amount::MIN,
+            "Saturating sub should return MIN on underflow"
+        );
+        let overflow_mul = max.saturating_mul(Amount::from(2));
+        assert_eq!(
+            overflow_mul,
+            Amount::MAX,
+            "Saturating mul should return MAX on overflow"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "extra-arith")]
+    fn extra_arithmetic() {
+        let k = Amount::from(27);
+        let l = k.checked_sqrt().unwrap();
+        assert_eq!(l, Amount::from(5));
+
+        let negative_sqrt = Amount::from(-4).checked_sqrt();
+        assert!(negative_sqrt.is_none(), "Square root of negative should return None");
     }
 
     #[test]
@@ -586,5 +686,39 @@ mod tests {
         assert_eq!(N, Amount::from(12345678901234567890u128));
         const N2: Amount = Amount::from_str_radix("-12345678901234567890", 10);
         assert_eq!(N2, Amount::from(-12345678901234567890i128));
+    }
+
+    #[test]
+    fn fmt_decimals() {
+        let a = Amount::from(123456);
+        assert_eq!(a.to_decimal_string(0), "123456");
+        assert_eq!(a.to_decimal_string(2), "1234.56");
+        assert_eq!(a.to_decimal_string(5), "1.23456");
+        assert_eq!(a.to_decimal_string(6), "0.123456");
+        assert_eq!(a.to_decimal_string(8), "0.00123456");
+
+        assert_eq!(
+            a.to_decimal_string(57),
+            "0.000000000000000000000000000000000000000000000000000123456"
+        );
+
+        // > 57 decimals errors
+        let mut s = String::new();
+        a.fmt_decimals(&mut s, 58).unwrap_err();
+
+        let b = Amount::from(-123456);
+        assert_eq!(b.to_decimal_string(0), "-123456");
+        assert_eq!(b.to_decimal_string(2), "-1234.56");
+        assert_eq!(b.to_decimal_string(5), "-1.23456");
+        assert_eq!(b.to_decimal_string(6), "-0.123456");
+        assert_eq!(b.to_decimal_string(8), "-0.00123456");
+
+        let c = Amount::from(1000);
+        assert_eq!(c.to_decimal_string(3), "1.000");
+        assert_eq!(c.to_decimal_string(5), "0.01000");
+
+        let c = Amount::from(-1000);
+        assert_eq!(c.to_decimal_string(3), "-1.000");
+        assert_eq!(c.to_decimal_string(8), "-0.00001000");
     }
 }

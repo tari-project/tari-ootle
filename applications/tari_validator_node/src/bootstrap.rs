@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashMap, fs, io, str::FromStr};
+use std::{collections::HashMap, fs, io, str::FromStr, sync::Arc};
 
 use anyhow::{anyhow, Context};
 use futures::{future, FutureExt};
@@ -36,40 +36,36 @@ use tari_consensus::consensus_constants::ConsensusConstants;
 #[cfg(not(feature = "metrics"))]
 use tari_consensus::traits::hooks::NoopHooks;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_engine::{fees::FeeTable, transaction::TransactionProcessorConfig};
 use tari_engine_types::ToByteType;
 use tari_epoch_manager::{
     service::{EpochManagerConfig, EpochManagerHandle},
     EpochManagerReader,
 };
 use tari_epoch_oracles::{
-    base_layer::BaseLayerOracle,
-    configured::{ConfiguredEpochOracle, IntervalEpochTicker},
+    base_layer::{BaseLayerEpochOracleConfig, BaseLayerEpochOracleFeatures, BaseLayerOracle},
+    configured::{ConfiguredEpochOracle, RealTimeEpochTicker},
     hybrid::{watch_ticker, HybridEpochOracle},
     store::EpochOracleStore,
     EpochOracle,
 };
-use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_ootle_app_utilities::{
+    claim_burn_proof_verifier::TariClaimBurnProofVerifier,
     common::verify_correct_network,
     configuration::convert_network_to_l1_network,
     epoch_oracle_config::{BaseLayerOracleConfig, EpochOracleType},
+    fee_tables::get_fee_table_by_network,
     keypair::RistrettoKeypair,
     seed_peer::SeedPeer,
-    substate_file_cache::SubstateFileCache,
-    template_download_queue::TemplateDownloadQueue,
     transaction_executor::TariTransactionProcessor,
-    utxo_store::StateUtxoStore,
 };
-use tari_ootle_common_types::{Network, PeerAddress};
+use tari_ootle_common_types::{services::template_provider::TemplateProvider, Network, PeerAddress};
 use tari_ootle_p2p::TariMessagingSpec;
 use tari_ootle_storage::{global::GlobalDb, StateStore};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_rpc_framework::RpcServer;
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_rocksdb::DatabaseOptions;
-use tari_template_manager::{implementation::TemplateManager, interface::TemplateManagerHandle};
 use tari_transaction::Transaction;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 use tokio::{
@@ -81,8 +77,8 @@ use tokio::{
 use crate::consensus::metrics::PrometheusConsensusMetrics;
 use crate::{
     consensus::{self, ConsensusHandle, TarBlockTransactionExecutor, ValidationContext},
-    dry_run_transaction_processor::DryRunTransactionProcessor,
     file_l1_submitter::FileLayerOneSubmitter,
+    genesis_state::create_genesis_state,
     p2p::{
         create_tari_validator_node_rpc_service,
         services::{
@@ -92,12 +88,10 @@ use crate::{
         },
         NopLogger,
     },
-    state_bootstrap::bootstrap_state,
-    substate_resolver::TariSubstateResolver,
+    state_store_template_provider::StateStoreTemplateProvider,
     transaction_validators::{
+        BasicValidations,
         EpochRangeValidator,
-        FeeTransactionValidator,
-        HasInputs,
         TemplateExistsValidator,
         TransactionDryRunValidator,
         TransactionNetworkValidator,
@@ -199,18 +193,18 @@ pub async fn spawn_services(
                     if let Some(peer_id) = server.to_peer_id() {
                         let addr = server.address().clone();
                         builder.with_rendezvous_server(peer_id, addr)
-                    } else{
+                    } else {
                         warn!(target: LOG_TARGET, "Rendezvous server peer ID is not set, skipping rendezvous server configuration");
                         builder
                     }
-                },
+                }
                 None => builder,
             }
         });
 
     #[cfg(feature = "metrics")]
     {
-        network_builder = network_builder.with_metrics_registry(metrics_registry);
+        network_builder = network_builder.with_metrics(metrics_registry);
     }
     let (mut networking, join_handle) = network_builder.spawn(shutdown.clone())?;
     handles.push(join_handle);
@@ -219,16 +213,13 @@ pub async fn spawn_services(
 
     info!(target: LOG_TARGET, "State store initializing");
 
-    let sidechain_id = config
-        .validator_node
-        .validator_node_sidechain_id
-        .as_ref()
-        .map(|pk| pk.to_byte_type());
+    let state_store = ValidatorNodeStateStore::open(
+        &config.validator_node.state_db_path,
+        // TODO: just enable it always for now, later make it configurable and default to true for testnets
+        DatabaseOptions::default().with_debugging_data(true),
+    )?;
 
-    let state_store = ValidatorNodeStateStore::open(&config.validator_node.state_db_path, DatabaseOptions::default())?;
-
-    state_store
-        .with_write_tx(|tx| bootstrap_state(tx, config.network, consensus_constants.num_preshards, sidechain_id))?;
+    state_store.with_write_tx(|tx| create_genesis_state(tx, config.network, consensus_constants.num_preshards))?;
 
     info!(target: LOG_TARGET, "Epoch manager initializing");
     let epoch_manager_config = EpochManagerConfig {
@@ -245,8 +236,6 @@ pub async fn spawn_services(
     // Epoch event scanner
     let epoch_event_oracle = create_epoch_oracle(&config, global_db.clone(), &consensus_constants).await?;
 
-    let (template_queue_sender, template_queue_receiver) = TemplateDownloadQueue::create();
-
     let layer_one_transaction_submitter = FileLayerOneSubmitter::new(config.get_layer_one_transaction_base_path());
 
     // Epoch manager
@@ -256,8 +245,6 @@ pub async fn spawn_services(
             global_db.clone(),
             keypair.public_key().to_byte_type(),
             epoch_event_oracle,
-            StateUtxoStore::new(state_store.clone()),
-            template_queue_sender,
             layer_one_transaction_submitter.clone(),
             shutdown.clone(),
         );
@@ -268,25 +255,10 @@ pub async fn spawn_services(
 
     info!(target: LOG_TARGET, "Template manager initializing");
     // Template manager
-    let template_manager = TemplateManager::initialize(global_db.clone(), config.validator_node.templates.clone())?;
-    let (template_manager_service, join_handle) = tari_template_manager::implementation::spawn(
-        template_manager.clone(),
-        epoch_manager.clone(),
-        validator_node_client_factory.clone(),
-        template_queue_receiver,
-        shutdown.clone(),
-    );
-    handles.push(join_handle);
+    let template_provider = StateStoreTemplateProvider::new(state_store.clone(), &config.validator_node.templates);
 
     info!(target: LOG_TARGET, "Payload processor initializing");
     // Payload processor
-    let fee_table = FeeTable {
-        per_transaction_weight_cost: 1,
-        per_module_call_cost: 1,
-        per_byte_storage_cost: 1,
-        per_event_cost: 1,
-        per_log_cost: 1,
-    };
 
     let (tx_hotstuff_events, _) = broadcast::channel(100);
     // Consensus gossip
@@ -316,16 +288,16 @@ pub async fn spawn_services(
         message_logger.clone(),
     );
 
-    // Consensus
-    let payload_processor = TariTransactionProcessor::new(
-        TransactionProcessorConfig::new(config.network)
-            .with_template_binary_max_size_bytes(consensus_constants.template_binary_max_size_bytes),
-        template_manager.clone(),
-        fee_table,
+    // Transaction executor
+    let fee_table = get_fee_table_by_network(config.network);
+    let transaction_processor = TariTransactionProcessor::new(
+        template_provider.clone(),
+        fee_table.clone(),
+        Arc::new(TariClaimBurnProofVerifier::new(config.network, global_db.clone())),
     );
     let transaction_executor = TarBlockTransactionExecutor::new(
-        payload_processor.clone(),
-        create_consensus_transaction_validator(config.network, template_manager.clone()).boxed(),
+        transaction_processor,
+        create_consensus_transaction_validator(config.network, template_provider.clone()).boxed(),
     );
 
     #[cfg(feature = "metrics")]
@@ -335,9 +307,17 @@ pub async fn spawn_services(
     #[cfg(not(feature = "metrics"))]
     let metrics = NoopHooks;
 
+    let sidechain_id = config
+        .validator_node
+        .validator_node_sidechain_id
+        .as_ref()
+        .map(|pk| pk.to_byte_type());
+
+    // Consensus
     let signing_service = consensus::TariSignatureService::new(keypair.clone());
     let (consensus_join_handle, consensus_handle) = consensus::spawn(
         config.network,
+        &config.validator_node.consensus,
         sidechain_id,
         state_store.clone(),
         local_address,
@@ -351,14 +331,13 @@ pub async fn spawn_services(
         transaction_executor,
         tx_hotstuff_events,
         consensus_constants.clone(),
-        template_manager_service.clone(),
     )
     .await;
     handles.push(consensus_join_handle);
 
     let (mempool, join_handle) = mempool::spawn(
         epoch_manager.clone(),
-        create_mempool_transaction_validator(config.network, template_manager.clone()),
+        create_mempool_transaction_validator(config.network, template_provider.clone()),
         state_store.clone(),
         consensus_handle.clone(),
         networking.clone(),
@@ -368,34 +347,18 @@ pub async fn spawn_services(
     );
     handles.push(join_handle);
 
-    // substate cache
-    let substate_cache_dir = config.common.base_path.join("substate_cache");
-    let substate_cache = SubstateFileCache::new(substate_cache_dir)
-        .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Substate cache error: {}", e)))?;
-
-    // Dry-run services (TODO: should we implement dry-run on validator nodes, or just keep it in the indexer?)
-    let scanner = SubstateScanner::new(
-        epoch_manager.clone(),
-        validator_node_client_factory.clone(),
-        substate_cache,
-    );
-    let substate_resolver = TariSubstateResolver::new(state_store.clone(), scanner);
-
     spawn_p2p_rpc(
         &config,
         &mut networking,
         epoch_manager.clone(),
         state_store.clone(),
         mempool.clone(),
-        template_manager_service.clone(),
+        consensus_handle.clone(),
     )
     .await?;
     // Save final node identity after comms has initialized. This is required because the public_address can be
     // changed by comms during initialization when using tor.
     save_identities(&config, &keypair)?;
-
-    let dry_run_transaction_processor =
-        DryRunTransactionProcessor::new(epoch_manager.clone(), payload_processor, substate_resolver);
 
     Ok(Services {
         config,
@@ -404,10 +367,9 @@ pub async fn spawn_services(
         mempool,
         epoch_manager,
         global_db,
-        template_manager: template_manager_service,
+        template_provider,
         consensus_handle,
         state_store,
-        dry_run_transaction_processor,
         handles,
         layer_one_transaction_submitter,
     })
@@ -430,9 +392,8 @@ pub struct Services<TStore> {
     pub networking: NetworkingHandle<TariMessagingSpec>,
     pub mempool: MempoolHandle,
     pub epoch_manager: EpochManagerHandle<PeerAddress>,
-    pub template_manager: TemplateManagerHandle,
+    pub template_provider: StateStoreTemplateProvider<ValidatorNodeStateStore>,
     pub consensus_handle: ConsensusHandle,
-    pub dry_run_transaction_processor: DryRunTransactionProcessor<TStore>,
     pub state_store: TStore,
     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     pub layer_one_transaction_submitter: FileLayerOneSubmitter,
@@ -447,32 +408,15 @@ impl<TStore> Services<TStore> {
         let (res, _, _) = future::select_all(fused).await;
         res.unwrap_or_else(|e| Err(anyhow!("Task panicked: {}", e)))
     }
+
+    pub async fn join_all(self) -> Result<(), anyhow::Error> {
+        let results = future::try_join_all(self.handles).await?;
+        for res in results {
+            res?;
+        }
+        Ok(())
+    }
 }
-// pub struct Services {
-//     pub keypair: RistrettoKeypair,
-//     pub networking: NetworkingHandle<TariMessagingSpec>,
-//     pub mempool: MempoolHandle,
-//     pub epoch_manager: EpochManagerHandle<PeerAddress>,
-//     pub template_manager: TemplateManagerHandle,
-//     pub consensus_handle: ConsensusHandle,
-//     // pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
-//     pub dry_run_transaction_processor: DryRunTransactionProcessor,
-//     // pub validator_node_client_factory: TariValidatorNodeRpcClientFactory,
-//     // pub consensus_gossip_service: ConsensusGossipHandle,
-//     pub state_store: SqliteStateStore<PeerAddress>,
-//     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
-//
-//     pub handles: Vec<JoinHandle<Result<(), anyhow::Error>>>,
-// }
-//
-// impl Services {
-//     pub async fn on_any_exit(&mut self) -> Result<(), anyhow::Error> {
-//         // JoinHandler panics if polled again after reading the Result, we fuse the future to prevent this.
-//         let fused = self.handles.iter_mut().map(|h| h.fuse());
-//         let (res, _, _) = future::select_all(fused).await;
-//         res.unwrap_or_else(|e| Err(anyhow!("Task panicked: {}", e)))
-//     }
-// }
 
 async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
     config: &ApplicationConfig,
@@ -480,7 +424,7 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
     epoch_manager: EpochManagerHandle<PeerAddress>,
     shard_store_store: TStateStore,
     mempool: MempoolHandle,
-    template_manager: TemplateManagerHandle,
+    consensus: ConsensusHandle,
 ) -> anyhow::Result<()> {
     let rpc_server = RpcServer::builder()
         .with_maximum_simultaneous_sessions(config.validator_node.rpc.max_simultaneous_sessions)
@@ -488,9 +432,9 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
         .finish()
         .add_service(create_tari_validator_node_rpc_service(
             epoch_manager,
-            template_manager,
             shard_store_store,
             mempool,
+            consensus,
         ));
 
     let (notify_tx, notify_rx) = mpsc::unbounded_channel();
@@ -501,21 +445,20 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
     Ok(())
 }
 
-pub fn create_mempool_transaction_validator(
+pub fn create_mempool_transaction_validator<TProvider: TemplateProvider>(
     network: Network,
-    template_manager: TemplateManager<PeerAddress>,
+    template_manager: TProvider,
 ) -> impl Validator<Transaction, Context = (), Error = TransactionValidationError> {
     TransactionNetworkValidator::new(network)
         .and_then(TransactionDryRunValidator)
-        .and_then(HasInputs::new())
-        .and_then(FeeTransactionValidator)
+        .and_then(BasicValidations::new())
         .and_then(TransactionSignatureValidator)
         .and_then(TemplateExistsValidator::new(template_manager))
 }
 
-pub fn create_consensus_transaction_validator(
+pub fn create_consensus_transaction_validator<TProvider: TemplateProvider>(
     network: Network,
-    template_manager: TemplateManager<PeerAddress>,
+    template_manager: TProvider,
 ) -> impl Validator<Transaction, Context = ValidationContext, Error = TransactionValidationError> {
     WithContext::<ValidationContext, _, _>::new()
         .map_context(|_| (), create_mempool_transaction_validator(network, template_manager))
@@ -552,10 +495,14 @@ async fn create_epoch_oracle<TStore: EpochOracleStore + Send + Clone + 'static>(
     config: &ApplicationConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
-) -> Result<EpochOracle<TStore>, ExitError> {
+) -> anyhow::Result<EpochOracle<TStore>> {
     match config.epoch_oracle.oracle_type {
         EpochOracleType::BaseLayer => {
-            let oracle = create_base_layer_epoch_oracle(config, store, consensus_constants).await?;
+            let features = BaseLayerEpochOracleFeatures {
+                sync_headers: true,
+                sync_validator_node_changes: true,
+            };
+            let oracle = create_base_layer_epoch_oracle(config, store, consensus_constants, features).await?;
             Ok(EpochOracle::BaseLayer(oracle))
         },
         EpochOracleType::Configured => {
@@ -573,46 +520,49 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + 'static>(
     config: &ApplicationConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
-) -> Result<BaseLayerOracle<TStore>, ExitError> {
+    features: BaseLayerEpochOracleFeatures,
+) -> anyhow::Result<BaseLayerOracle<TStore>> {
     let mut base_node_client = create_base_layer_client(config.network, &config.epoch_oracle.base_layer).await?;
     verify_correct_network(&mut base_node_client, config.network).await?;
     Ok(BaseLayerOracle::new(
         store,
         base_node_client,
-        consensus_constants.base_layer_confirmations,
-        config.epoch_oracle.base_layer.scanning_interval,
-        config
-            .validator_node
-            .validator_node_sidechain_id
-            .as_ref()
-            .map(|p| p.to_byte_type()),
-        config
-            .validator_node
-            .burnt_utxo_sidechain_id
-            .as_ref()
-            .map(|p| p.to_byte_type()),
-        config
-            .validator_node
-            .template_sidechain_id
-            .as_ref()
-            .map(|p| p.to_byte_type()),
+        BaseLayerEpochOracleConfig {
+            start_height: 0,
+            height_lag: consensus_constants.base_layer_confirmations,
+            scanning_interval: config.epoch_oracle.base_layer.scanning_interval,
+            sidechain_id: config
+                .validator_node
+                .validator_node_sidechain_id
+                .as_ref()
+                .map(|p| p.to_byte_type()),
+            features,
+        },
+        config.network,
     ))
 }
 
 async fn create_configured_epoch_oracle<TStore: EpochOracleStore + Send>(
     config: &ApplicationConfig,
     store: TStore,
-) -> Result<ConfiguredEpochOracle<TStore, IntervalEpochTicker>, ExitError> {
+) -> anyhow::Result<ConfiguredEpochOracle<TStore, RealTimeEpochTicker>> {
     let oracle_config = config.epoch_oracle.configured.load().await?;
-    Ok(ConfiguredEpochOracle::new(oracle_config, store))
+    let oracle = ConfiguredEpochOracle::create(oracle_config, store)?;
+    Ok(oracle)
 }
 
 async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + Clone + Send + 'static>(
     config: &ApplicationConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
-) -> Result<HybridEpochOracle<TStore>, ExitError> {
-    let base_layer_oracle = create_base_layer_epoch_oracle(config, store.clone(), consensus_constants).await?;
+) -> anyhow::Result<HybridEpochOracle<TStore>> {
+    let features = BaseLayerEpochOracleFeatures {
+        sync_headers: true,
+        // Dont sync validator node changes as they are handled by the configured oracle
+        sync_validator_node_changes: false,
+    };
+    let base_layer_oracle =
+        create_base_layer_epoch_oracle(config, store.clone(), consensus_constants, features).await?;
     let oracle_config = config.epoch_oracle.configured.load().await?;
     let (ticker, trigger) = watch_ticker();
     let configured_oracle = ConfiguredEpochOracle::with_custom_ticker(oracle_config, store, ticker);

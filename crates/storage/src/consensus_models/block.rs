@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap},
     fmt::{Debug, Display, Formatter},
     iter,
     ops::Deref,
@@ -20,8 +20,9 @@ use tari_consensus_types::{
     LastVoted,
     LeafBlock,
     LockedBlock,
+    PcId,
     ProposalCertificate,
-    QcId,
+    ShardGroupAccumulatedData,
     TimeoutCertificate,
 };
 use tari_engine_types::transaction_receipt::TransactionReceiptAddress;
@@ -37,11 +38,10 @@ use tari_ootle_common_types::{
     NodeHeight,
     NumPreshards,
     ShardGroup,
-    ToSubstateAddress,
     VersionedSubstateId,
     VersionedSubstateIdRef,
 };
-use tari_state_tree::{compute_proof_for_hashes, SparseMerkleProofExt, StateTreeError, TreeHash};
+use tari_state_tree::{compute_proof_for_hashes, SparseMerkleProofExt, StateTreeError, TreeHash, Version};
 use tari_template_lib::{prelude::SchnorrSignatureBytes, types::crypto::RistrettoPublicKeyBytes};
 use tari_transaction::TransactionId;
 use time::PrimitiveDateTime;
@@ -53,16 +53,21 @@ use super::{
     EvictNodeAtom,
     ForeignProposalAtom,
     ForeignProposalRecord,
-    MintConfidentialOutputAtom,
     PendingShardStateTreeDiff,
-    SubstateChange,
-    SubstateDestroyedProof,
+    SubstateDestroy,
     SubstateRecord,
     TransactionAtom,
     ValidatorStatsUpdate,
 };
 use crate::{
-    consensus_models::{block_header::BlockHeader, Command, SubstateCreatedProof, SubstateUpdate, TransactionRecord},
+    consensus_models::{
+        block_header::BlockHeader,
+        substate_update_batch::SubstateUpdateBatch,
+        Command,
+        SubstateCreate,
+        SubstateUpdateProof,
+        TransactionRecord,
+    },
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
@@ -74,16 +79,14 @@ const LOG_TARGET: &str = "tari::ootle::storage::consensus_models::block";
 pub enum BlockError {
     #[error("Error computing command merkle hash: {0}")]
     StateTreeError(#[from] StateTreeError),
+    #[error("Invalid shard state versions: {details}")]
+    InvalidShardStateVersions { details: String },
     #[error("Merke proof generation command index out of bounds: {index}/{len}")]
     MerkleProofGenerationCommandIndexOutOfBounds { index: usize, len: usize },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Block {
     header: BlockHeader,
     /// Collection of signatures that justify a previous block and potentially a change to the next higher view.
@@ -96,10 +99,10 @@ pub struct Block {
     // Metadata - not included in the block hash
     /// The QC that justified this block
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
-    justify_qc_id: Option<QcId>,
+    justify_qc_id: Option<PcId>,
     /// The QC that caused this block to be committed
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
-    commit_qc_id: Option<QcId>,
+    commit_qc_id: Option<PcId>,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     block_time: Option<u64>,
     /// Timestamp when was this stored.
@@ -126,6 +129,7 @@ impl Block {
         signature: SchnorrSignatureBytes,
         timestamp: u64,
         epoch_hash: FixedHash,
+        accumulated_data: ShardGroupAccumulatedData,
         extra_data: ExtraData,
     ) -> Result<Self, BlockError> {
         let header = BlockHeader::create(
@@ -142,6 +146,7 @@ impl Block {
             signature,
             timestamp,
             epoch_hash,
+            accumulated_data,
             extra_data,
         )?;
         Ok(Self::new(header, justify, commands, high_tc))
@@ -191,6 +196,8 @@ impl Block {
             shard_group,
             state_merkle_root,
             epoch_hash,
+            // Each genesis block starts with zero accumulated data
+            ShardGroupAccumulatedData::default(),
             extra_data,
         );
         Self::new(header, justify, BTreeSet::new(), None)
@@ -261,10 +268,6 @@ impl Block {
 
     pub fn all_node_evictions(&self) -> impl Iterator<Item = &EvictNodeAtom> + '_ {
         self.commands.iter().filter_map(|c| c.evict_node())
-    }
-
-    pub fn all_confidential_output_mints(&self) -> impl Iterator<Item = &MintConfidentialOutputAtom> + '_ {
-        self.commands.iter().filter_map(|c| c.mint_confidential_output())
     }
 
     pub fn all_local_accept(&self) -> impl Iterator<Item = &TransactionAtom> + '_ {
@@ -398,7 +401,7 @@ impl Block {
         self.justify_qc_id.is_some()
     }
 
-    pub fn justify_qc_id(&self) -> Option<QcId> {
+    pub fn justify_qc_id(&self) -> Option<PcId> {
         self.justify_qc_id
     }
 
@@ -443,15 +446,15 @@ impl Block {
         Ok(proof)
     }
 
-    pub fn set_justify_qc(&mut self, justify_qc_id: QcId) {
+    pub fn set_justify_qc(&mut self, justify_qc_id: PcId) {
         self.justify_qc_id = Some(justify_qc_id);
     }
 
-    pub fn set_commit_qc(&mut self, commit_qc_id: QcId) {
+    pub fn set_commit_qc(&mut self, commit_qc_id: PcId) {
         self.commit_qc_id = Some(commit_qc_id);
     }
 
-    pub fn commit_qc_id(&self) -> Option<&QcId> {
+    pub fn commit_qc_id(&self) -> Option<&PcId> {
         self.commit_qc_id.as_ref()
     }
 }
@@ -555,10 +558,6 @@ impl Block {
         Ok(())
     }
 
-    pub fn remove_diff<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<(), StorageError> {
-        tx.block_diffs_remove(self.id())
-    }
-
     pub fn remove_pending_tree_diff_and_return<TTx: StateStoreWriteTransaction>(
         &self,
         tx: &mut TTx,
@@ -577,61 +576,96 @@ impl Block {
         tx.blocks_delete(block_id)
     }
 
-    pub fn commit_diff<TTx>(&self, tx: &mut TTx, commit_qc_id: &QcId, block_diff: BlockDiff) -> Result<(), StorageError>
+    pub fn commit_block_without_state_changes<TTx>(&self, tx: &mut TTx, commit_qc_id: &PcId) -> Result<(), StorageError>
     where
         TTx: StateStoreWriteTransaction + Deref,
         TTx::Target: StateStoreReadTransaction,
     {
-        if block_diff.block_id() != self.id() {
-            return Err(StorageError::QueryError {
-                reason: format!(
-                    "[commit_diff] Block ID mismatch. Expected: {}, got: {}",
-                    self.id(),
-                    block_diff.block_id()
-                ),
-            });
-        }
+        self.commit_block(tx, commit_qc_id, &HashMap::new())
+    }
 
-        if self.is_dummy() && !block_diff.is_empty() {
-            return Err(StorageError::QueryError {
-                reason: format!(
-                    "[commit_diff] Dummy block cannot have any substate changes. Block ID: {}",
-                    self.id()
-                ),
-            });
-        }
-
-        if !self.is_dummy() {
-            block_diff.remove(tx)?;
-        }
-
-        let BlockDiff { changes, .. } = block_diff;
-
-        let justify_qc_id = self.justify().calculate_id();
-
-        for change in changes {
-            match change {
-                SubstateChange::Up { id, shard, substate } => {
-                    let version = substate.version();
-                    SubstateRecord::new(
-                        id,
-                        version,
-                        substate.into_substate_value(),
-                        shard,
-                        self.epoch(),
-                        *self.id(),
-                        justify_qc_id,
-                    )
-                    .create(tx)?;
-                },
-                SubstateChange::Down { id, shard } => {
-                    SubstateRecord::destroy(tx, id, shard, self.epoch(), self.height(), &justify_qc_id)?;
-                },
-            }
-        }
-
+    pub fn commit_block<TTx>(
+        &self,
+        tx: &mut TTx,
+        commit_qc_id: &PcId,
+        version_updates: &HashMap<Shard, Version>,
+    ) -> Result<(), StorageError>
+    where
+        TTx: StateStoreWriteTransaction + Deref,
+        TTx::Target: StateStoreReadTransaction,
+    {
         // Set the QC that caused this block to be committed, marking it as committed
         tx.blocks_set_qcs(self.id(), Some(commit_qc_id), None)?;
+
+        if self.is_dummy() {
+            info!(
+                target: LOG_TARGET,
+                "🍼 COMMIT dummy block {}", self
+            );
+            return Ok(());
+        }
+
+        let Some(block_diff) = self.get_diff(&**tx).optional()? else {
+            info!(
+                target: LOG_TARGET,
+                "🌳 COMMIT block {} with no substate change(s)", self
+            );
+
+            // No diff to commit
+            return Ok(());
+        };
+
+        // Consume the block diff
+        block_diff.remove(tx)?;
+
+        info!(
+            target: LOG_TARGET,
+            "🌳 COMMIT block {} with {} substate change(s)", self, block_diff.len()
+        );
+
+        let changes = block_diff.into_changes();
+
+        let batch = changes.into_iter()
+            .filter(|change| {
+                if self.shard_group().contains_or_global(&change.shard()) {
+                    true
+                } else {
+                    // This should have been filtered out already, but just in case
+                    warn!(
+                    target: LOG_TARGET,
+                    "❓️ Skipping substate change {} for shard {} in block {} because it is not in the shard group {}",
+                    change.as_change_string(),
+                    change.shard(),
+                    self.id(),
+                    self.shard_group()
+                );
+                    false
+                }
+            })
+            // Group by shard
+            .try_fold(SubstateUpdateBatch::new(self.epoch()), |mut batch, change| {
+                let Some(state_version) =
+                    version_updates
+                        .get(&change.shard())
+                        .copied() else {
+                    // A panic may be more appropriate here, this should never happen
+                    return Err(StorageError::DataInconsistency {
+                        details: format!(
+                            "NEVER HAPPEN: Shard state version for shard {} not found in block {}",
+                            change.shard(),
+                            self.id()
+                        ),
+                    });
+                };
+
+                batch.with_transition(change.shard(), state_version)
+                    .push(change.into_transition());
+
+                Ok(batch)
+            })?;
+
+        SubstateRecord::commit_batch(tx, batch)?;
+
         Ok(())
     }
 
@@ -642,7 +676,7 @@ impl Block {
     pub fn add_justify_qc<TTx: StateStoreWriteTransaction>(
         &mut self,
         tx: &mut TTx,
-        qc_id: &QcId,
+        qc_id: &PcId,
     ) -> Result<(), StorageError> {
         self.justify_qc_id = Some(*qc_id);
         tx.blocks_set_qcs(self.id(), None, Some(qc_id))
@@ -732,7 +766,10 @@ impl Block {
         &self,
         tx: &TTx,
         num_preshards: NumPreshards,
-    ) -> Result<Vec<SubstateUpdate>, StorageError> {
+    ) -> Result<Vec<SubstateUpdateProof>, StorageError> {
+        // The block diff is removed as soon as it is committed, so we need to reconstruct the substate updates from the
+        // committed transactions. TODO: this does not include "implicit" state transitions i.e. validator fee
+        // pools.
         let committed = self
             .commands()
             .iter()
@@ -751,11 +788,8 @@ impl Block {
             let outputs = execution.resulting_outputs();
             let outputs = outputs
                 .iter()
-                .map(|lock| lock.versioned_substate_id().as_ref())
-                .filter(|id| {
-                    self.shard_group()
-                        .contains_or_global(&id.to_substate_address().to_shard(num_preshards))
-                });
+                .map(|lock| lock.versioned_substate_id().as_versioned_ref())
+                .filter(|id| self.shard_group().contains_or_global(&id.to_shard(num_preshards)));
 
             let substates = SubstateRecord::get_all(tx, outputs)?;
             for substate in substates {
@@ -768,18 +802,18 @@ impl Block {
                     // TODO: This is currently not used - if we need this in future, we can include the state hash en
                     //       lieu of the actual state which does not exist
                     // if substate.created_by_transaction == transaction.id
-                    // {     updates.push(SubstateUpdate::Create(SubstateCreatedProof {
+                    // {     updates.push(SubstateUpdate::Create(SubstateCreate {
                     //         // created_qc: substate.get_created_quorum_certificate(tx)?,
                     //         substate: substate.try_into()?,
                     //     }));
                     // } else {
-                    updates.push(SubstateUpdate::Destroy(SubstateDestroyedProof {
+                    updates.push(SubstateUpdateProof::Destroy(SubstateDestroy {
                         substate_id: substate.substate_id.clone(),
                         version: substate.version,
                         // justify: ProposalCertificate::get(tx, &destroyed.justify)?,
                     }));
                 } else {
-                    updates.push(SubstateUpdate::Create(SubstateCreatedProof {
+                    updates.push(SubstateUpdateProof::Create(SubstateCreate {
                         // created_qc: substate.get_created_quorum_certificate(tx)?,
                         substate: substate.into(),
                     }));
@@ -793,7 +827,7 @@ impl Block {
     pub fn get_transaction_receipts<TTx: StateStoreReadTransaction>(
         &self,
         tx: &TTx,
-    ) -> Result<Vec<SubstateCreatedProof>, StorageError> {
+    ) -> Result<Vec<SubstateCreate>, StorageError> {
         let committed = self
             .commands()
             .iter()
@@ -809,7 +843,7 @@ impl Block {
         let receipts = receipts
             .into_iter()
             .map(|receipt| {
-                Ok::<_, StorageError>(SubstateCreatedProof {
+                Ok::<_, StorageError>(SubstateCreate {
                     substate: receipt.into(),
                 })
             })
@@ -847,11 +881,13 @@ impl Block {
         let locked = LockedBlock::get(tx, self.epoch())?;
 
         // Liveness rules
-        if self.justify().height() > locked.height() {
+        //  (qc.viewNumber > lockedQC.viewNumber)
+        if self.max_certificate_height() > locked.height() {
             return Ok(true);
         }
 
         // Safety rule
+        // (node extends from lockedQC.node)
         if self.extends_pending(tx, locked.block_id())? {
             return Ok(true);
         }
@@ -863,6 +899,13 @@ impl Block {
             locked,
         );
         Ok(false)
+    }
+
+    pub fn is_epoch_end_proposed_in_chain<TTx: StateStoreReadTransaction>(
+        &self,
+        tx: &TTx,
+    ) -> Result<bool, StorageError> {
+        tx.is_block_in_end_of_epoch_chain(self.id())
     }
 
     pub fn get_block_pledge<TTx: StateStoreReadTransaction>(
@@ -1036,7 +1079,6 @@ where
     tx.transaction_pool_state_updates_remove_any_by_block_id(block_id)?;
     tx.block_transaction_executions_remove_any_by_block_id(block_id)?;
     tx.foreign_proposals_clear_proposed_in(block_id).optional()?;
-    tx.burnt_utxos_clear_proposed_block(block_id)?;
     tx.lock_conflicts_remove_by_block_id(block_id)?;
 
     Block::delete_record(tx, block_id)?;

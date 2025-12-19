@@ -20,14 +20,17 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashMap, fs};
+use std::{collections::HashMap, fs, str::FromStr};
 
-use tari_engine_types::{instruction::Instruction, substate::SubstateId};
+use tari_bor::cbor;
+use tari_engine_types::substate::SubstateId;
 use tari_template_lib::{
-    call_args,
-    models::{ComponentAddress, ResourceAddress},
+    constants::XTR,
+    models::ComponentAddress,
+    prelude::RistrettoPublicKeyBytes,
     types::{ObjectKey, TemplateAddress},
 };
+use tari_transaction::{call_args, Instruction};
 use tari_transaction_manifest::{parse_manifest, ManifestInstructions};
 
 #[test]
@@ -37,7 +40,6 @@ fn manifest_smoke_test() {
     let account_component = ComponentAddress::new([0u8; ObjectKey::LENGTH].into());
     let picture_seller_component = ComponentAddress::new([1u8; ObjectKey::LENGTH].into());
     let test_faucet_component = ComponentAddress::new([2u8; ObjectKey::LENGTH].into());
-    let xtr_resource = ResourceAddress::from([3u8; ObjectKey::LENGTH]);
     let picture_seller_template =
         TemplateAddress::from_hex("c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7").unwrap();
 
@@ -51,7 +53,6 @@ fn manifest_smoke_test() {
             "test_faucet".to_string(),
             SubstateId::Component(test_faucet_component).into(),
         ),
-        ("xtr_resource".to_string(), SubstateId::Resource(xtr_resource).into()),
     ]);
     let ManifestInstructions {
         instructions,
@@ -61,36 +62,49 @@ fn manifest_smoke_test() {
     let expected = vec![
         Instruction::CallFunction {
             address: picture_seller_template,
-            function: "new".to_string(),
+            function: "new".try_into().unwrap(),
             args: call_args![1_000u64],
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: 0 },
         Instruction::CallMethod {
             call: test_faucet_component.into(),
-            method: "take_free_coins".to_string(),
-            args: call_args![Amount(1_000)],
+            method: "take_free_coins".try_into().unwrap(),
+            args: call_args![1000],
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: 1 },
         Instruction::CallMethod {
             call: account_component.into(),
-            method: "deposit".to_string(),
+            method: "deposit".try_into().unwrap(),
             args: call_args![Workspace(1)],
         },
         Instruction::CallMethod {
             call: account_component.into(),
-            method: "withdraw".to_string(),
-            args: call_args![xtr_resource, Amount(1_000)],
+            method: "set_public_key".try_into().unwrap(),
+            args: call_args![
+                RistrettoPublicKeyBytes::from_hex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+                    .unwrap(),
+                ComponentAddress::from_str(
+                    "component_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                )
+                .unwrap(),
+                cbor!({"some" => {"data" => [1, 2, 3]}}).unwrap()
+            ],
+        },
+        Instruction::CallMethod {
+            call: account_component.into(),
+            method: "withdraw".try_into().unwrap(),
+            args: call_args![XTR, 1_000],
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: 2 },
         Instruction::CallMethod {
             call: picture_seller_component.into(),
-            method: "buy".to_string(),
+            method: "buy".try_into().unwrap(),
             args: call_args![Workspace(2)],
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: 3 },
         Instruction::CallMethod {
             call: account_component.into(),
-            method: "deposit".to_string(),
+            method: "deposit".try_into().unwrap(),
             args: call_args![Workspace(3)],
         },
     ];

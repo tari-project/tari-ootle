@@ -25,24 +25,24 @@ use std::{
     time::Duration,
 };
 
-use borsh::BorshSerialize;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tari_template_lib::types::Hash;
+use tari_template_lib::{
+    models::{ComponentAddress, ResourceAddress},
+    types::{Hash, TemplateAddress},
+};
 
 use crate::{
     events::Event,
     fees::FeeReceipt,
     instruction_result::InstructionResult,
     logs::LogEntry,
+    resource::Resource,
     substate::SubstateDiff,
+    transaction_receipt::TransactionReceipt,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ExecuteResult {
     /// The finalized result to commit. If the fee transaction succeeds but the transaction fails, this will be accept.
     pub finalize: FinalizeResult,
@@ -59,12 +59,14 @@ impl ExecuteResult {
     }
 
     /// Returns the ExecuteResult if successful, or panic if the transaction was not successful.
+    #[track_caller]
     pub fn unwrap_success(self) -> Self {
         self.expect_success();
         self
     }
 
     /// Returns the SubstateDiff if the transaction was successful, or panic if the transaction was not successful.
+    #[track_caller]
     pub fn expect_success(&self) -> &SubstateDiff {
         let diff = self.expect_finalization_success();
 
@@ -76,6 +78,7 @@ impl ExecuteResult {
     }
 
     /// Returns the RejectReason if the transaction failed, or panic if the transaction was successful.
+    #[track_caller]
     pub fn expect_failure(&self) -> &RejectReason {
         if let Some(reason) = self.finalize.result.any_reject() {
             reason
@@ -84,6 +87,7 @@ impl ExecuteResult {
         }
     }
 
+    #[track_caller]
     pub fn expect_finalization_failure(&self) -> &RejectReason {
         match self.finalize.result {
             TransactionResult::Accept(_) => panic!("Expected transaction to fail but it succeeded"),
@@ -92,6 +96,7 @@ impl ExecuteResult {
         }
     }
 
+    #[track_caller]
     pub fn expect_fee_accept_transaction_reject(&self) -> (&SubstateDiff, &RejectReason) {
         match self.finalize.result {
             TransactionResult::AcceptFeeRejectRest(ref diff, ref reason) => (diff, reason),
@@ -102,6 +107,7 @@ impl ExecuteResult {
         }
     }
 
+    #[track_caller]
     pub fn expect_transaction_failure(&self) -> &RejectReason {
         if let Some(reason) = self.finalize.any_reject() {
             reason
@@ -110,6 +116,7 @@ impl ExecuteResult {
         }
     }
 
+    #[track_caller]
     pub fn expect_finalization_success(&self) -> &SubstateDiff {
         match self.finalize.result {
             TransactionResult::Accept(ref diff) => diff,
@@ -118,12 +125,14 @@ impl ExecuteResult {
         }
     }
 
+    #[track_caller]
     pub fn expect_fees_paid_in_full(&self) -> &FeeReceipt {
         let receipt = &self.finalize.fee_receipt;
         assert!(receipt.is_paid_in_full(), "Fees not paid in full");
         receipt
     }
 
+    #[track_caller]
     pub fn expect_return<T: DeserializeOwned>(&self, index: usize) -> T {
         self.finalize
             .execution_results
@@ -135,11 +144,7 @@ impl ExecuteResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct FinalizeResult {
     pub transaction_hash: Hash,
     pub events: Vec<Event>,
@@ -178,13 +183,18 @@ impl FinalizeResult {
         }
     }
 
-    /// Returns the accept diff if the transaction was accepted, otherwise None.
-    /// Acceptance includes fee-only acceptance.
+    /// Returns the substate diff if the fee and main intents were accepted, otherwise None.
     pub fn accept(&self) -> Option<&SubstateDiff> {
         self.result.accept()
     }
 
-    pub fn into_accept(self) -> Option<SubstateDiff> {
+    /// Returns the accept diff if the transaction was accepted, otherwise None.
+    /// Acceptance includes fee-only acceptance.
+    pub fn any_accept(&self) -> Option<&SubstateDiff> {
+        self.result.any_accept()
+    }
+
+    pub fn into_any_accept(self) -> Option<SubstateDiff> {
         match self.result {
             TransactionResult::Accept(diff) => Some(diff),
             TransactionResult::AcceptFeeRejectRest(diff, _) => Some(diff),
@@ -198,6 +208,10 @@ impl FinalizeResult {
 
     pub fn any_reject(&self) -> Option<&RejectReason> {
         self.result.any_reject()
+    }
+
+    pub fn reject(&self) -> Option<&RejectReason> {
+        self.result.reject()
     }
 
     pub fn fee_accept_transaction_reject(&self) -> Option<(&SubstateDiff, &RejectReason)> {
@@ -219,14 +233,45 @@ impl FinalizeResult {
     pub fn is_reject(&self) -> bool {
         matches!(self.result, TransactionResult::Reject(_))
     }
+
+    pub fn get_transaction_receipt(&self) -> Option<&TransactionReceipt> {
+        self.result.any_accept().and_then(|diff| {
+            diff.up_iter()
+                .find_map(|(_, s)| s.substate_value().as_transaction_receipt())
+        })
+    }
+
+    pub fn get_components_by_template(&self, template_address: &TemplateAddress) -> Vec<ComponentAddress> {
+        let mut components = Vec::new();
+        if let Some(diff) = self.any_accept() {
+            for (id, substate) in diff.up_iter() {
+                if let Some(component) = substate.substate_value().as_component() {
+                    if component.template_address == *template_address {
+                        components.push(
+                            id.as_component_address()
+                                .expect("Substate value is a component but address is not a component address"),
+                        );
+                    }
+                }
+            }
+        }
+        components
+    }
+
+    pub fn created_resources(&self) -> impl Iterator<Item = (ResourceAddress, &Resource)> + '_ {
+        self.any_accept()
+            .into_iter()
+            .flat_map(|diff| diff.up_iter())
+            .filter_map(|(id, s)| {
+                s.substate_value()
+                    .as_resource()
+                    .and_then(|r| id.as_resource_address().map(|a| (a, r)))
+            })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum TransactionResult {
     Accept(SubstateDiff),
     AcceptFeeRejectRest(SubstateDiff, RejectReason),
@@ -245,12 +290,19 @@ impl TransactionResult {
     pub fn accept(&self) -> Option<&SubstateDiff> {
         match self {
             Self::Accept(substate_diff) => Some(substate_diff),
+            _ => None,
+        }
+    }
+
+    pub fn any_accept(&self) -> Option<&SubstateDiff> {
+        match self {
+            Self::Accept(substate_diff) => Some(substate_diff),
             Self::AcceptFeeRejectRest(substate_diff, _) => Some(substate_diff),
             Self::Reject(_) => None,
         }
     }
 
-    pub fn into_accept(self) -> Option<SubstateDiff> {
+    pub fn into_any_accept(self) -> Option<SubstateDiff> {
         match self {
             Self::Accept(substate_diff) => Some(substate_diff),
             Self::AcceptFeeRejectRest(substate_diff, _) => Some(substate_diff),
@@ -278,6 +330,13 @@ impl TransactionResult {
             Self::Accept(_) => None,
             Self::AcceptFeeRejectRest(_, reject_result) => Some(reject_result),
             Self::Reject(reject_result) => Some(reject_result),
+        }
+    }
+
+    pub fn reject(&self) -> Option<&RejectReason> {
+        match self {
+            Self::Reject(reject_result) => Some(reject_result),
+            _ => None,
         }
     }
 
@@ -309,14 +368,10 @@ impl Display for TransactionResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum RejectReason {
     ExecutionFailure(String),
-    OneOrMoreInputsNotFound(String),
+    SubstateNotFound(String),
     FailedToLockInputs(String),
     FailedToLockOutputs(String),
     ForeignPledgeInputConflict,
@@ -326,6 +381,7 @@ pub enum RejectReason {
         abort_reason: AbortReason,
     },
     InsufficientFeesPaid(String),
+    FeePaymentInMainIntent,
     Abort {
         reason: AbortReason,
     },
@@ -334,14 +390,14 @@ pub enum RejectReason {
 impl Display for RejectReason {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            RejectReason::ExecutionFailure(msg) => write!(f, "Execution failure: {}", msg),
-            RejectReason::OneOrMoreInputsNotFound(msg) => write!(f, "One or more inputs not found: {}", msg),
-            RejectReason::FailedToLockInputs(msg) => write!(f, "Failed to lock inputs: {}", msg),
-            RejectReason::FailedToLockOutputs(msg) => write!(f, "Failed to lock outputs: {}", msg),
-            RejectReason::ForeignPledgeInputConflict => {
+            Self::ExecutionFailure(msg) => write!(f, "Execution failure: {}", msg),
+            Self::SubstateNotFound(msg) => write!(f, "Substates not found: {}", msg),
+            Self::FailedToLockInputs(msg) => write!(f, "Failed to lock inputs: {}", msg),
+            Self::FailedToLockOutputs(msg) => write!(f, "Failed to lock outputs: {}", msg),
+            Self::ForeignPledgeInputConflict => {
                 write!(f, "Transaction conflicts with an existing foreign pledge",)
             },
-            RejectReason::ForeignShardGroupDecidedToAbort {
+            Self::ForeignShardGroupDecidedToAbort {
                 start_shard,
                 end_shard,
                 abort_reason,
@@ -351,18 +407,17 @@ impl Display for RejectReason {
                     "Foreign shard group ({start_shard}-{end_shard}) decided to abort: {abort_reason}"
                 )
             },
-            RejectReason::InsufficientFeesPaid(msg) => write!(f, "Insufficient fees paid: {}", msg),
-            RejectReason::Abort { reason } => write!(f, "Abnormal abort: {reason}"),
+            Self::InsufficientFeesPaid(msg) => write!(f, "Insufficient fees paid: {}", msg),
+            Self::FeePaymentInMainIntent => {
+                write!(f, "Fee payment found in main intent instead of fee intent")
+            },
+            Self::Abort { reason } => write!(f, "Abnormal abort: {reason}"),
         }
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize, BorshSerialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize, borsh::BorshSerialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum AbortReason {
     ForeignPledgeInputConflict,
     LockInputsFailed,
@@ -371,6 +426,7 @@ pub enum AbortReason {
     ExecutionFailure,
     OneOrMoreInputsNotFound,
     InsufficientFeesPaid,
+    FeePaymentInMainIntent,
 }
 
 impl Display for AbortReason {
@@ -384,12 +440,13 @@ impl From<&RejectReason> for AbortReason {
         match reject_reason {
             RejectReason::Abort { reason } => *reason,
             RejectReason::ExecutionFailure(_) => Self::ExecutionFailure,
-            RejectReason::OneOrMoreInputsNotFound(_) => Self::OneOrMoreInputsNotFound,
+            RejectReason::SubstateNotFound(_) => Self::OneOrMoreInputsNotFound,
             RejectReason::ForeignPledgeInputConflict => Self::ForeignPledgeInputConflict,
             RejectReason::FailedToLockInputs(_) => Self::LockInputsFailed,
             RejectReason::FailedToLockOutputs(_) => Self::LockOutputsFailed,
             RejectReason::ForeignShardGroupDecidedToAbort { abort_reason, .. } => *abort_reason,
             RejectReason::InsufficientFeesPaid(_) => Self::InsufficientFeesPaid,
+            RejectReason::FeePaymentInMainIntent => Self::FeePaymentInMainIntent,
         }
     }
 }

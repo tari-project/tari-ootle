@@ -28,19 +28,18 @@ use tari_engine::{
 };
 use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason},
-    instruction::Instruction,
     substate::SubstateId,
     virtual_substate::{VirtualSubstate, VirtualSubstateId},
 };
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
-    call_args,
-    models::{ComponentAddress, NonFungible, NonFungibleAddress, NonFungibleId, ResourceAddress},
-    types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
+    constants::XTR,
+    models::{ComponentAddress, NonFungible, NonFungibleAddress, ResourceAddress},
+    types::{crypto::RistrettoPublicKeyBytes, Amount, TemplateAddress},
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
-use tari_transaction::{args, Transaction};
+use tari_transaction::{args, call_args, Transaction};
 use tari_transaction_manifest::ManifestValue;
 use tari_utilities::hex::to_hex;
 use wasmer::ExportError;
@@ -60,6 +59,7 @@ fn test_state() {
     // constructor
     let component_address1: ComponentAddress = template_test.call_function("State", "new", call_args![], vec![]);
     template_test.assert_calls(&[
+        "workspace_invoke",
         "emit_log",
         "component_invoke",
         "set_last_instruction_output",
@@ -74,7 +74,7 @@ fn test_state() {
     assert_eq!(component.module_name, "State");
 
     let component = store.get_component(component_address2).unwrap();
-    assert_eq!(component.owner_key, Some(template_test.get_test_public_key_bytes()));
+    assert_eq!(component.owner_key, Some(template_test.to_public_key_bytes()));
     assert_eq!(component.module_name, "State");
 
     // call the "set" method to update the instance value
@@ -98,7 +98,7 @@ fn state_create_multiple_in_one_call() {
     let mut count = 0usize;
     template_test
         .read_only_state_store()
-        .with_substates(|s| {
+        .with_substates(|_, s| {
             if s.substate_value()
                 .component()
                 .filter(|a| a.template_address == template_address)
@@ -151,6 +151,22 @@ fn test_composed() {
 
 #[test]
 fn test_buggy_template() {
+    // Uncomment the following lines to print the ABI bytes
+    // let bytes = tari_bor::encode_with_len(&tari_template_abi::TemplateDef::V1(tari_template_abi::TemplateDefV1 {
+    //     template_name: "Buggy".to_string(),
+    //     tari_version: tari_template_abi::version::MINIMUM_SUPPORTED_WASM_ABI_VERSION.to_string(),
+    //     functions: vec![],
+    // }));
+    // println!("pub static _ABI_TEMPLATE_DEF: [u8; {}] = [", bytes.len());
+    // for chunk in bytes.chunks(16) {
+    //     print!("    ");
+    //     for byte in chunk {
+    //         print!("{}, ", byte);
+    //     }
+    //     println!();
+    // }
+    // println!("];");
+
     let err = compile_template("tests/templates/buggy", &["return_null_abi"])
         .unwrap()
         .load_template()
@@ -181,10 +197,11 @@ fn test_buggy_template() {
         TemplateLoaderError::WasmModuleError(WasmExecutionError::AbiDecodeError(_))
     ));
 
-    let err = compile_template("tests/templates/buggy", &[])
+    let err = compile_template("tests/templates/buggy", &["no_template_def"])
         .unwrap()
         .load_template()
         .unwrap_err();
+
     assert!(matches!(
         err,
         TemplateLoaderError::WasmModuleError(WasmExecutionError::ExportError(ExportError::Missing(_)))
@@ -219,28 +236,20 @@ fn test_engine_errors() {
     let mut test = TemplateTest::new(vec!["tests/templates/errors"]);
 
     // check that public methods can still internally call private ones
-    let result = test
-        .try_execute(
-            Transaction::builder()
-                .call_function(test.get_template_address("Errors"), "invalid_engine_call", args![])
-                .build_and_seal(&Default::default()),
-            vec![],
-        )
-        .unwrap();
-
-    let RejectReason::ExecutionFailure(reason) = result.finalize.result.any_reject().unwrap() else {
-        panic!(
-            "Unexpected transaction reject reason: {}",
-            result.finalize.result.fee_reject().unwrap()
-        );
-    };
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .call_function(test.get_template_address("Errors"), "invalid_engine_call", args![])
+            .build_and_seal(&Default::default()),
+        vec![],
+    );
 
     // Check that the engine error is captured in the execution result rather than the WASM panic message (Panic! Engine
     // call returned null for op VaultInvoke)
-    assert_eq!(
+    assert_reject_reason(
         reason,
-        "Runtime error: Substate 'resource_7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b' not \
-         found or is not a transaction input"
+        RejectReason::SubstateNotFound(
+            "resource_7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b not found".to_string(),
+        ),
     );
 }
 
@@ -325,7 +334,7 @@ fn test_random() {
 fn test_errors_on_infinite_loop() {
     let mut test = TemplateTest::new(vec!["tests/templates/infinity_loop"]);
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(test.get_template_address("InfinityLoopTest"), "infinity_loop", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -335,6 +344,8 @@ fn test_errors_on_infinite_loop() {
 }
 
 mod errors {
+    use tari_transaction::Instruction;
+
     use super::*;
 
     #[test]
@@ -346,7 +357,7 @@ mod errors {
                 vec![],
                 vec![Instruction::CallFunction {
                     address: template_test.get_template_address("Errors"),
-                    function: "panic".to_string(),
+                    function: "panic".try_into().unwrap(),
                     args: args![],
                 }],
                 vec![],
@@ -373,7 +384,7 @@ mod errors {
                 vec![],
                 vec![Instruction::CallFunction {
                     address: template_test.get_template_address("Errors"),
-                    function: "please_pass_invalid_args".to_string(),
+                    function: "please_pass_invalid_args".try_into().unwrap(),
                     args: call_args![text],
                 }],
                 vec![],
@@ -417,6 +428,7 @@ mod consensus {
 
 mod fungible {
     use tari_template_lib::types::Amount;
+    use tari_transaction::Instruction;
 
     use super::*;
 
@@ -431,7 +443,7 @@ mod fungible {
             .execute_and_commit(
                 vec![Instruction::CallFunction {
                     address: faucet_template,
-                    function: "mint".to_string(),
+                    function: "mint".try_into().unwrap(),
                     args: call_args![initial_supply],
                 }],
                 vec![],
@@ -449,8 +461,8 @@ mod fungible {
 
         let owner_proof = template_test.owner_proof();
         let result = template_test.build_and_execute(
-            Transaction::builder()
-                .call_method(faucet_component, "burn_coins", args![Amount(500)])
+            Transaction::builder_localnet()
+                .call_method(faucet_component, "burn_coins", args![500])
                 .call_method(faucet_component, "total_supply", args![]),
             vec![owner_proof.clone()],
         );
@@ -462,7 +474,7 @@ mod fungible {
         );
 
         let result = template_test.build_and_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(faucet_component, "burn_coins", args![
                     initial_supply - Amount::from(500)
                 ])
@@ -478,7 +490,7 @@ mod fungible {
 
         template_test
             .build_and_execute(
-                Transaction::builder().call_method(faucet_component, "burn_coins", args![Amount(1)]),
+                Transaction::builder_localnet().call_method(faucet_component, "burn_coins", args![1]),
                 vec![],
             )
             .expect_failure();
@@ -639,10 +651,6 @@ mod basic_nft {
         template_test
             .execute_and_commit_manifest(
                 r#"
-            let account = var!["account"];
-            let sparkle_nft_resource = var!["nft_resx"];
-            account.get_non_fungible_ids(sparkle_nft_resource);
-
             let sparkle_nft = var!["nft"];
             let sparkle_nft_id = var!["nft_id"];
             sparkle_nft.inc_brightness(sparkle_nft_id, 10u32);
@@ -877,7 +885,7 @@ mod basic_nft {
 }
 
 mod emoji_id {
-    use tari_template_lib::{call_args, constants::XTR, types::Amount};
+    use tari_template_lib::{constants::XTR, types::Amount};
 
     use super::*;
 
@@ -901,8 +909,8 @@ mod emoji_id {
         emoji_id: &EmojiId,
         price: Amount,
         owner_proof: NonFungibleAddress,
-    ) -> Result<FinalizeResult, anyhow::Error> {
-        let transaction = Transaction::builder()
+    ) -> Result<FinalizeResult, String> {
+        let transaction = Transaction::builder_localnet()
             .call_method(account_address, "withdraw", args![faucet_resource, price])
             .put_last_instruction_output_on_workspace("payment")
             .call_method(emoji_id_minter, "mint", args![emoji_id, Workspace("payment")])
@@ -912,7 +920,7 @@ mod emoji_id {
 
         let result = test.execute_and_commit_on_success(transaction, vec![owner_proof]);
         if let Some(reason) = result.finalize.result.any_reject() {
-            return Err(anyhow::anyhow!("Minting emoji id failed: {reason}"));
+            return Err(format!("Minting emoji id failed: {reason}"));
         }
         Ok(result.finalize)
     }
@@ -931,7 +939,11 @@ mod emoji_id {
         let price = Amount::from(20);
         let result = test
             .build_and_execute(
-                Transaction::builder().call_function(emoji_id_template, "new", args![XTR, max_emoji_id_len, price]),
+                Transaction::builder_localnet().call_function(emoji_id_template, "new", args![
+                    XTR,
+                    max_emoji_id_len,
+                    price
+                ]),
                 vec![owner_proof.clone()],
             )
             .unwrap_success();
@@ -1010,34 +1022,23 @@ mod emoji_id {
 }
 
 mod tickets {
-    use tari_template_lib::{
-        call_args,
-        constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS},
-        types::Amount,
-    };
-
     use super::*;
-
-    #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-    pub struct Ticket {
-        pub is_redeemed: bool,
-    }
 
     #[test]
     #[allow(clippy::too_many_lines)]
     fn buy_and_redeem_ticket() {
-        let mut template_test = TemplateTest::new(vec!["tests/templates/nft/tickets"]);
+        let mut test = TemplateTest::new(vec!["tests/templates/nft/tickets"]);
 
         // create an account
-        let (account_address, owner_proof, secret) = template_test.create_funded_account();
+        let (account_address, owner_proof, secret) = test.create_funded_account();
 
         // initialize the ticket seller
-        let ticket_template = template_test.get_template_address("TicketSeller");
+        let ticket_template = test.get_template_address("TicketSeller");
         let initial_supply = 10;
         let price = Amount::from(20);
         let event_description = "My music festival".to_string();
-        let result = template_test.execute_expect_success(
-            Transaction::builder()
+        let result = test.execute_expect_success(
+            Transaction::builder_localnet()
                 .call_function(ticket_template, "new", args![initial_supply, price, event_description])
                 .build_and_seal(&secret),
             vec![owner_proof.clone()],
@@ -1052,22 +1053,12 @@ mod tickets {
             .unwrap();
 
         // at the beginning we have the initial supply of tickets
-        let total_supply: Amount = template_test.call_method(ticket_seller, "total_supply", args![], vec![]);
+        let total_supply: Amount = test.call_method(ticket_seller, "total_supply", args![], vec![]);
         assert_eq!(total_supply, initial_supply);
 
-        // get some funds into the account
-        template_test.execute_expect_success(
-            Transaction::builder()
-                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take_free_coins", args![])
-                .put_last_instruction_output_on_workspace("coins")
-                .call_method(account_address, "deposit", args![Workspace("coins")])
-                .build_and_seal(&secret),
-            vec![],
-        );
-
         // buy a ticket
-        template_test.execute_expect_success(
-            Transaction::builder()
+        test.execute_expect_success(
+            Transaction::builder_localnet()
                 .call_method(account_address, "withdraw", args![XTR, Amount(20)])
                 .put_last_instruction_output_on_workspace("payment")
                 .call_method(ticket_seller, "buy_ticket", args![Workspace("payment")])
@@ -1078,12 +1069,12 @@ mod tickets {
         );
 
         // redeem a ticket
-        let ticket_ids: Vec<NonFungibleId> = template_test.call_method(
-            account_address,
-            "get_non_fungible_ids",
-            call_args![ticket_resource],
-            vec![],
-        );
+        let vaults = test
+            .read_only_state_store()
+            .get_vaults_for_account(account_address)
+            .unwrap();
+        let vault = vaults.get(&ticket_resource).unwrap();
+        let ticket_ids = vault.get_non_fungible_ids();
         assert_eq!(ticket_ids.len(), 1);
         let ticket_id = ticket_ids.first().unwrap().clone();
 
@@ -1095,19 +1086,18 @@ mod tickets {
             ("ticket_addr", ManifestValue::NonFungibleId(ticket_id.clone())),
         ];
 
-        template_test
-            .execute_and_commit_manifest(
-                r#"
+        test.execute_and_commit_manifest(
+            r#"
                 let account = var!["account"];
                 let ticket_seller = var!["ticket_seller"];
                 let ticket_addr = var!["ticket_addr"];
 
                 ticket_seller.redeem_ticket(ticket_addr);
             "#,
-                vars.clone(),
-                vec![],
-            )
-            .unwrap();
+            vars.clone(),
+            vec![],
+        )
+        .unwrap();
 
         #[derive(Debug, Clone, Serialize, Deserialize, Default)]
         pub struct Ticket {
@@ -1115,7 +1105,7 @@ mod tickets {
         }
 
         let ticket_substate_addr = SubstateId::NonFungible(NonFungibleAddress::new(ticket_resource, ticket_id));
-        let ticket_nft = template_test
+        let ticket_nft = test
             .read_only_state_store()
             .get_substate(&ticket_substate_addr)
             .unwrap()
@@ -1133,113 +1123,6 @@ mod tickets {
         );
     }
 }
-
-// mod nft_indexes {
-//     use super::*;
-//
-//     fn setup() -> (
-//         TemplateTest,
-//         (ComponentAddress, NonFungibleAddress),
-//         ComponentAddress,
-//         SubstateId,
-//     ) {
-//         let mut template_test = TemplateTest::new(vec!["tests/templates/nft/nft_list"]);
-//
-//         let (account_address, owner_token, _) = template_test.create_funded_account();
-//         let nft_component: ComponentAddress = template_test.call_function("SparkleNft", "new", args![], vec![]);
-//
-//         let nft_resx = template_test.get_previous_output_address(SubstateType::Resource);
-//
-//         // TODO: cleanup
-//         (template_test, (account_address, owner_token), nft_component, nft_resx)
-//     }
-//
-//     #[test]
-//     #[allow(clippy::too_many_lines)]
-//     fn new_nft_index() {
-//         let (mut template_test, (account_address, owner_proof), nft_component, nft_resx) = setup();
-//
-//         let vars = vec![
-//             ("account", account_address.into()),
-//             ("nft", nft_component.into()),
-//             ("nft_resx", nft_resx.clone().into()),
-//         ];
-//
-//         let total_supply: Amount =
-//             template_test.call_method(nft_component, "total_supply", args![], vec![owner_proof.clone()]);
-//         assert_eq!(total_supply, Amount(0));
-//
-//         let result = template_test
-//             .execute_and_commit_manifest(
-//                 r#"
-//             let account = var!["account"];
-//             let sparkle_nft = var!["nft"];
-//
-//             let nft_bucket = sparkle_nft.mint();
-//             account.deposit(nft_bucket);
-//         "#,
-//                 vars.clone(),
-//                 vec![owner_proof.clone()],
-//             )
-//             .unwrap();
-//
-//         let diff = result.finalize.result.expect("execution failed");
-//
-//         // Resource is changed
-//         assert_eq!(diff.down_iter().filter(|(addr, _)| addr.is_resource()).count(), 1);
-//         assert_eq!(diff.up_iter().filter(|(addr, _)| addr.is_resource()).count(), 1);
-//
-//         // NFT component changed
-//         assert_eq!(diff.down_iter().filter(|(addr, _)| addr.is_component()).count(), 1);
-//         assert_eq!(diff.up_iter().filter(|(addr, _)| addr.is_component()).count(), 1);
-//
-//         // One new vault created
-//         assert_eq!(diff.down_iter().filter(|(addr, _)| addr.is_vault()).count(), 0);
-//         assert_eq!(diff.up_iter().filter(|(addr, _)| addr.is_vault()).count(), 1);
-//
-//         // One new NFT minted
-//         assert_eq!(diff.down_iter().filter(|(addr, _)| addr.is_non_fungible()).count(), 0);
-//         assert_eq!(diff.up_iter().filter(|(addr, _)| addr.is_non_fungible()).count(), 1);
-//
-//         // One new NFT minted
-//         assert_eq!(diff.down_iter().filter(|(addr, _)| addr.is_non_fungible()).count(), 0);
-//         assert_eq!(diff.up_iter().filter(|(addr, _)| addr.is_non_fungible()).count(), 1);
-//         let (nft_addr, _) = diff.up_iter().find(|(addr, _)| addr.is_non_fungible()).unwrap();
-//
-//         // One new NFT index
-//         assert_eq!(
-//             diff.down_iter()
-//                 .filter(|(addr, _)| addr.is_non_fungible_index())
-//                 .count(),
-//             0
-//         );
-//         assert_eq!(
-//             diff.up_iter().filter(|(addr, _)| addr.is_non_fungible_index()).count(),
-//             1
-//         );
-//         let (index_addr, index) = diff.up_iter().find(|(addr, _)| addr.is_non_fungible_index()).unwrap();
-//         // The nft index address is composed of the resource address
-//         assert_eq!(
-//             nft_resx.as_resource_address().unwrap(),
-//             index_addr
-//                 .as_non_fungible_index_address()
-//                 .unwrap()
-//                 .resource_address()
-//                 .to_owned(),
-//         );
-//         // The index references the newly minted nft
-//         let referenced_address = index
-//             .substate_value()
-//             .non_fungible_index()
-//             .unwrap()
-//             .referenced_address();
-//         assert_eq!(nft_addr.to_address_string(), referenced_address.to_string());
-//
-//         // The total supply of the resource is increased
-//         let total_supply: Amount = template_test.call_method(nft_component, "total_supply", args![],
-// vec![owner_proof]);         assert_eq!(total_supply, Amount(1));
-//     }
-// }
 
 #[test]
 fn test_builtin_templates() {

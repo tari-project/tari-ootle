@@ -35,22 +35,28 @@ use tari_bor::decode_exact;
 use tari_engine::abi::Type;
 use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason, TransactionResult},
-    instruction::Instruction,
     instruction_result::InstructionResult,
     parse_template_address,
     substate::{SubstateDiff, SubstateId, SubstateValue},
 };
+use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{Epoch, SubstateAddress, SubstateRequirement};
-use tari_ootle_wallet_sdk::apis::confidential_transfer::ConfidentialTransferInputSelection;
+use tari_ootle_wallet_sdk::{apis::confidential_transfer::UtxoInputSelection, crypto::memo::Memo};
 use tari_template_lib::{
-    args::InstructionArg,
-    call_arg,
-    constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
+    constants::STEALTH_TARI_RESOURCE_ADDRESS,
     models::{BucketId, NonFungibleAddress, NonFungibleId},
     prelude::{ResourceAddress, RistrettoPublicKeyBytes},
     types::{Amount, TemplateAddress},
 };
-use tari_transaction::{args, Transaction, TransactionId, UnsignedTransaction};
+use tari_transaction::{
+    args,
+    args::InstructionArg,
+    call_arg,
+    Instruction,
+    Transaction,
+    TransactionId,
+    UnsignedTransaction,
+};
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 use tari_wallet_daemon_client::{
     types::{
@@ -139,7 +145,7 @@ pub struct SendArgs {
 #[derive(Debug, Args, Clone)]
 pub struct ConfidentialTransferArgs {
     amount: u64,
-    destination_public_key: FromHex<Vec<u8>>,
+    destination_address: OotleAddress,
     #[clap(flatten)]
     common: CommonSubmitArgs,
     #[clap(long, short = 'a', alias = "account")]
@@ -147,6 +153,9 @@ pub struct ConfidentialTransferArgs {
     /// The address of the resource to send. If not provided, use the default Tari confidential resource
     #[clap(long)]
     resource_address: Option<ResourceAddress>,
+    /// An optional memo to include in the confidential output
+    #[clap(long, short = 'm')]
+    memo_message: Option<String>,
 }
 
 #[derive(Debug, Subcommand, Clone)]
@@ -213,7 +222,7 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
             args,
         } => Instruction::CallFunction {
             address: template_address.into_inner(),
-            function: function_name,
+            function: function_name.try_into()?,
             args: args.into_iter().map(|s| s.into_arg()).collect(),
         },
         CliInstruction::CallMethod {
@@ -225,7 +234,7 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
                 .as_component_address()
                 .ok_or_else(|| anyhow!("Invalid component address: {}", component_address))?
                 .into(),
-            method: method_name,
+            method: method_name.try_into()?,
             args: args.into_iter().map(|s| s.into_arg()).collect(),
         },
     };
@@ -237,11 +246,15 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
         fee_account = client.accounts_get_default().await?.account;
     }
 
+    let owner_key_id = fee_account
+        .owner_key_id
+        .ok_or_else(|| anyhow!("Fee account does not have an owner key ID"))?;
+
     let SettingsGetResponse { network, .. } = client.get_settings().await?;
 
-    let mut builder = Transaction::builder()
+    let mut builder = Transaction::builder_localnet()
         .for_network(network.byte)
-        .fee_transaction_pay_from_component(fee_account.address, common.max_fee.unwrap_or(1000))
+        .pay_fee_from_component(fee_account.component_address, common.max_fee.unwrap_or(1000))
         .add_instruction(instruction)
         .with_inputs(common.inputs)
         .with_min_epoch(common.min_epoch.map(Epoch))
@@ -250,10 +263,11 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
     if let Some(dump_account) = common.dump_outputs_into {
         let AccountGetResponse { account, .. } = client.accounts_get(dump_account).await?;
 
-        builder =
-            builder
-                .put_last_instruction_output_on_workspace("bucket")
-                .call_method(account.address, "deposit", args![Workspace("bucket")]);
+        builder = builder.put_last_instruction_output_on_workspace("bucket").call_method(
+            account.component_address,
+            "deposit",
+            args![Workspace("bucket")],
+        );
     }
 
     let transaction = builder.build_unsigned_transaction();
@@ -265,20 +279,22 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
         let resp = client
             .submit_transaction_dry_run(TransactionSubmitDryRunRequest {
                 transaction,
-                signing_key_index: None,
+                seal_signer: owner_key_id,
+                other_signers: vec![],
                 detect_inputs: common.detect_inputs.unwrap_or(true),
                 detect_inputs_use_unversioned: true,
-                proof_ids: vec![],
+                lock_ids: vec![],
             })
             .await?;
         wait_transaction_result(resp.transaction_id, client).await?;
     } else {
         let request = TransactionSubmitRequest {
             transaction,
-            signing_key_index: None,
+            seal_signer: owner_key_id,
+            other_signers: vec![],
             detect_inputs: common.detect_inputs.unwrap_or(true),
             detect_inputs_use_unversioned: true,
-            proof_ids: vec![],
+            lock_ids: vec![],
         };
         let resp = client.submit_transaction(&request).await?;
         wait_transaction_result(resp.transaction_id, client).await?;
@@ -302,14 +318,20 @@ async fn handle_submit_manifest(
         fee_account = client.accounts_get_default().await?.account;
     }
 
+    let owner_key_id = fee_account
+        .owner_key_id
+        .ok_or_else(|| anyhow!("Fee account does not have an owner key ID"))?;
+
     let SettingsGetResponse { network, .. } = client.get_settings().await?;
 
-    let builder = Transaction::builder()
+    let builder = Transaction::builder_localnet()
         .for_network(network.byte)
         .with_fee_instructions_builder(|builder| {
-            builder
-                .with_instructions(instructions.fee_instructions)
-                .call_method(fee_account.address, "pay_fee", args![common.max_fee.unwrap_or(1000)])
+            builder.with_instructions(instructions.fee_instructions).call_method(
+                fee_account.component_address,
+                "pay_fee",
+                args![common.max_fee.unwrap_or(1000)],
+            )
         })
         .with_instructions(instructions.instructions)
         .with_inputs(common.inputs)
@@ -326,20 +348,22 @@ async fn handle_submit_manifest(
         let resp = client
             .submit_transaction_dry_run(TransactionSubmitDryRunRequest {
                 transaction,
-                signing_key_index: Some(fee_account.key_index),
+                seal_signer: owner_key_id,
+                other_signers: vec![],
                 detect_inputs: common.detect_inputs.unwrap_or(true),
                 detect_inputs_use_unversioned: true,
-                proof_ids: vec![],
+                lock_ids: vec![],
             })
             .await?;
         summarize(&resp.result.finalize, timer.elapsed());
     } else {
         let request = TransactionSubmitRequest {
             transaction,
-            signing_key_index: Some(fee_account.key_index),
+            seal_signer: owner_key_id,
+            other_signers: vec![],
             detect_inputs: common.detect_inputs.unwrap_or(true),
             detect_inputs_use_unversioned: true,
-            proof_ids: vec![],
+            lock_ids: vec![],
         };
 
         let resp = client.submit_transaction(&request).await?;
@@ -373,11 +397,26 @@ pub async fn handle_send(args: SendArgs, client: &mut WalletDaemonClient) -> Res
             dry_run: false,
         })
         .await?;
+    let resp = client
+        .wait_transaction_result(TransactionWaitResultRequest {
+            transaction_id: resp.transaction_id,
+            timeout_secs: common.wait_for_result_timeout_secs,
+        })
+        .await?;
+    if resp.timed_out {
+        println!("❌ Transaction {} result timed out.", resp.transaction_id);
+        println!();
+        return Ok(());
+    }
 
     println!("Transaction: {}", resp.transaction_id);
-    println!("Fee: {} ({} refunded)", resp.fee, resp.fee_refunded);
+    println!(
+        "Fee: {} ({} refunded)",
+        resp.final_fee,
+        resp.result.as_ref().unwrap().fee_receipt.total_refunded()
+    );
     println!();
-    summarize_finalize_result(&resp.result);
+    summarize_finalize_result(resp.result.as_ref().unwrap());
 
     Ok(())
 }
@@ -390,31 +429,44 @@ pub async fn handle_confidential_transfer(
         source_account,
         resource_address,
         amount,
-        destination_public_key,
+        destination_address,
         common,
+        memo_message,
     } = args;
 
     // let AccountByNameResponse { account, .. } = client.accounts_get_by_name(&source_account_name).await?;
-    let destination_public_key =
-        RistrettoPublicKeyBytes::from_bytes(&destination_public_key.into_inner()).map_err(anyhow::Error::msg)?;
     let resp = client
         .accounts_confidential_transfer(ConfidentialTransferRequest {
             account: source_account,
-            input_selection: ConfidentialTransferInputSelection::PreferConfidential,
+            input_selection: UtxoInputSelection::PreferConfidential,
             amount: amount.into(),
-            resource_address: resource_address.unwrap_or(CONFIDENTIAL_TARI_RESOURCE_ADDRESS),
-            destination_public_key,
+            resource_address: resource_address.unwrap_or(STEALTH_TARI_RESOURCE_ADDRESS),
+            destination_address,
             max_fee: common.max_fee,
             output_to_revealed: false,
             proof_from_badge_resource: None,
+            memo: memo_message
+                .map(|s| Memo::new_message(s).ok_or_else(|| anyhow!("Invalid memo length")))
+                .transpose()?,
             dry_run: false,
         })
         .await?;
+    let resp = client
+        .wait_transaction_result(TransactionWaitResultRequest {
+            transaction_id: resp.transaction_id,
+            timeout_secs: common.wait_for_result_timeout_secs,
+        })
+        .await?;
+    if resp.timed_out {
+        println!("❌ Transaction result timed out.",);
+        println!();
+        return Ok(());
+    }
 
     println!("Transaction: {}", resp.transaction_id);
-    println!("Fee: {}", resp.fee);
+    println!("Fee: {}", resp.final_fee);
     println!();
-    summarize_finalize_result(&resp.result);
+    summarize_finalize_result(&resp.result.unwrap());
 
     Ok(())
 }
@@ -517,7 +569,7 @@ pub fn print_substate_diff(diff: &SubstateDiff) {
             SubstateValue::NonFungible(_) => {
                 println!("      ▶ NFT: {}", id);
             },
-            SubstateValue::UnclaimedConfidentialOutput(_) => {
+            SubstateValue::ClaimedOutputTombstone(_) => {
                 println!("      ▶ Layer 1 commitment: {}", id);
             },
             SubstateValue::Template(_) => {
@@ -746,7 +798,7 @@ impl FromStr for CliArg {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some(file) = s.strip_prefix('@') {
             let base64_data = fs::read_to_string(file).map_err(|e| anyhow!("Failed to read file {}: {}", file, e))?;
-            return Ok(CliArg::Blob(decode_exact(&base64::decode(base64_data)?)?));
+            return Ok(CliArg::Blob(decode_exact(&base64_decode(base64_data)?)?));
         }
 
         if let Ok(v) = s.parse::<u64>() {
@@ -820,7 +872,7 @@ impl CliArg {
                 SubstateId::Component(v) => call_arg!(v),
                 SubstateId::Resource(v) => call_arg!(v),
                 SubstateId::Vault(v) => call_arg!(v),
-                SubstateId::UnclaimedConfidentialOutput(v) => call_arg!(v),
+                SubstateId::ClaimedOutputTombstone(v) => call_arg!(v),
                 SubstateId::NonFungible(v) => call_arg!(v),
                 SubstateId::TransactionReceipt(v) => call_arg!(v),
                 SubstateId::Template(v) => call_arg!(v),
@@ -927,11 +979,11 @@ fn parse_globals(globals: Vec<String>) -> Result<HashMap<String, ManifestValue>,
                     let contents = fs::read_to_string(url.path())
                         .map_err(|err| anyhow!("Failed to read file '{}': {}", &url, err))?;
 
-                    base64::decode(contents.trim())
+                    base64_decode(contents.trim())
                         .map_err(|err| anyhow!("Failed to decode base64 file '{}': {}", url, err))?
                 },
                 "data" => {
-                    base64::decode(url.path()).map_err(|err| anyhow!("Failed to decode base64 '{}': {}", url, err))?
+                    base64_decode(url.path()).map_err(|err| anyhow!("Failed to decode base64 '{}': {}", url, err))?
                 },
                 scheme => anyhow::bail!("Unsupported scheme '{}'", scheme),
             };
@@ -944,4 +996,9 @@ fn parse_globals(globals: Vec<String>) -> Result<HashMap<String, ManifestValue>,
         }
     }
     Ok(result)
+}
+
+fn base64_decode<T: AsRef<[u8]>>(s: T) -> Result<Vec<u8>, base64::DecodeError> {
+    use base64::Engine;
+    base64::prelude::BASE64_STANDARD.decode(s)
 }

@@ -9,12 +9,14 @@ use tari_template_lib::{
     models::{
         BinaryTag,
         BucketId,
+        ClaimedOutputTombstoneAddress,
         ComponentAddressAllocation,
         NonFungibleAddressContents,
         ProofId,
         ResourceAddress,
         ResourceAddressAllocation,
-        UnclaimedConfidentialOutputAddress,
+        UtxoAddress,
+        UtxoAddressContents,
         VaultId,
     },
     prelude::{ComponentAddress, Metadata, NonFungibleAddress},
@@ -26,19 +28,13 @@ use crate::{
     serde_with,
     substate::SubstateId,
     transaction_receipt::TransactionReceiptAddress,
-    UtxoAddress,
-    UtxoAddressContents,
     ValidatorFeePoolAddress,
 };
 
 const MAX_VISITOR_DEPTH: usize = 50;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct IndexedValue {
     indexed: IndexedWellKnownTypes,
     #[serde(with = "serde_with::cbor_value")]
@@ -143,22 +139,17 @@ impl Default for IndexedValue {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct IndexedWellKnownTypes {
     bucket_ids: Vec<BucketId>,
     proof_ids: Vec<ProofId>,
     component_addresses: Vec<ComponentAddress>,
     resource_addresses: Vec<ResourceAddress>,
     transaction_receipt_addresses: Vec<TransactionReceiptAddress>,
-    // #[serde(with = "serde_with::hex::vec")]
     non_fungible_addresses: Vec<NonFungibleAddress>,
     vault_ids: Vec<VaultId>,
     metadata: Vec<Metadata>,
-    unclaimed_confidential_output_address: Vec<UnclaimedConfidentialOutputAddress>,
+    unclaimed_confidential_output_address: Vec<ClaimedOutputTombstoneAddress>,
     published_template_addresses: Vec<PublishedTemplateAddress>,
     validator_node_fee_pools: Vec<ValidatorFeePoolAddress>,
     #[serde(default)]
@@ -216,38 +207,38 @@ impl IndexedWellKnownTypes {
     }
 
     /// Checks if a value contains a substate with the given address. This function does not allocate.
-    pub fn value_contains_substate(value: &tari_bor::Value, address: &SubstateId) -> Result<bool, IndexedValueError> {
+    pub fn value_contains_substate(value: &tari_bor::Value, id: &SubstateId) -> Result<bool, IndexedValueError> {
         let mut found = false;
         tari_bor::walk_all(
             value,
             &mut |value: WellKnownTariValue| {
                 match value {
                     WellKnownTariValue::ComponentAddress(addr) => {
-                        found = *address == addr;
+                        found = *id == addr;
                     },
                     WellKnownTariValue::ResourceAddress(addr) => {
-                        found = *address == addr;
+                        found = *id == addr;
                     },
                     WellKnownTariValue::TransactionReceiptAddress(addr) => {
-                        found = *address == addr;
+                        found = *id == addr;
                     },
                     WellKnownTariValue::NonFungibleAddress(addr) => {
-                        found = *address == addr;
+                        found = *id == addr;
                     },
                     WellKnownTariValue::VaultId(addr) => {
-                        found = *address == addr;
+                        found = *id == addr;
                     },
-                    WellKnownTariValue::UnclaimedConfidentialOutputAddress(addr) => {
-                        found = *address == addr;
+                    WellKnownTariValue::ClaimedOutputTombstoneAddress(addr) => {
+                        found = *id == addr;
                     },
                     WellKnownTariValue::PublishedTemplateAddress(addr) => {
-                        found = *address == addr;
+                        found = *id == addr;
                     },
                     WellKnownTariValue::ValidatorNodeFeePool(addr) => {
-                        found = *address == addr;
+                        found = *id == addr;
                     },
                     WellKnownTariValue::Utxo(addr) => {
-                        found = *address == addr;
+                        found = *id == addr;
                     },
                     WellKnownTariValue::BucketId(_) |
                     WellKnownTariValue::Metadata(_) |
@@ -401,7 +392,7 @@ pub enum WellKnownTariValue {
     Metadata(Metadata),
     VaultId(VaultId),
     ProofId(ProofId),
-    UnclaimedConfidentialOutputAddress(UnclaimedConfidentialOutputAddress),
+    ClaimedOutputTombstoneAddress(ClaimedOutputTombstoneAddress),
     PublishedTemplateAddress(PublishedTemplateAddress),
     ValidatorNodeFeePool(ValidatorFeePoolAddress),
     ComponentAddressAllocation(ComponentAddressAllocation),
@@ -448,9 +439,9 @@ impl FromTagAndValue for WellKnownTariValue {
                 let value: u32 = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::ProofId(value.into()))
             },
-            BinaryTag::UnclaimedConfidentialOutputAddress => {
+            BinaryTag::ClaimedOutputTombstoneAddress => {
                 let value: ObjectKey = value.deserialized().map_err(BorError::from)?;
-                Ok(Self::UnclaimedConfidentialOutputAddress(value.into()))
+                Ok(Self::ClaimedOutputTombstoneAddress(value.into()))
             },
             BinaryTag::TemplateAddress => {
                 let value: Hash = value.deserialized().map_err(BorError::from)?;
@@ -486,7 +477,7 @@ pub struct IndexedValueVisitor {
     non_fungible_addresses: Vec<NonFungibleAddress>,
     vault_ids: Vec<VaultId>,
     metadata: Vec<Metadata>,
-    unclaimed_confidential_output_addresses: Vec<UnclaimedConfidentialOutputAddress>,
+    unclaimed_confidential_output_addresses: Vec<ClaimedOutputTombstoneAddress>,
     published_templates: Vec<PublishedTemplateAddress>,
     validator_node_fee_pools: Vec<ValidatorFeePoolAddress>,
     utxos: Vec<UtxoAddress>,
@@ -544,7 +535,7 @@ impl ValueVisitor<WellKnownTariValue> for IndexedValueVisitor {
             WellKnownTariValue::ProofId(proof_id) => {
                 self.proofs.push(proof_id);
             },
-            WellKnownTariValue::UnclaimedConfidentialOutputAddress(address) => {
+            WellKnownTariValue::ClaimedOutputTombstoneAddress(address) => {
                 self.unclaimed_confidential_output_addresses.push(address);
             },
             WellKnownTariValue::PublishedTemplateAddress(template) => {

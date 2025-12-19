@@ -32,7 +32,7 @@ mod template {
     }
 
     impl NftFaucet {
-        pub fn mint(&mut self, amount: Amount, mutable_data: Value) -> Bucket {
+        pub fn mint(&mut self, amount: Amount, mutable_data: tari_bor::Value) -> Bucket {
             if amount.is_zero() || amount.is_negative() {
                 panic!("Amount must be greater than zero");
             }
@@ -43,7 +43,7 @@ mod template {
             let owner = CallerContext::transaction_signer_public_key().to_string();
 
             let mut metadata = Metadata::new();
-            metadata.insert("original_owner", &owner);
+            metadata.insert("original_minter", &owner);
 
             let mut counter = 0;
             let amount_to_mint = amount.to_u64_checked().expect("Amount must be a positive");

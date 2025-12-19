@@ -5,7 +5,7 @@ use tari_template_lib::prelude::*;
 
 #[template]
 mod template {
-
+    const FAUCET_MAX: u64 = 1_000_000_000;
     use super::*;
 
     pub struct XtrFaucet {
@@ -14,28 +14,45 @@ mod template {
 
     impl XtrFaucet {
         pub fn take(&self, amount: Amount) -> Bucket {
+            assert!(
+                amount <= FAUCET_MAX,
+                "Requested amount {} exceeds faucet max of {}",
+                amount,
+                FAUCET_MAX
+            );
             debug!("Withdrawing {} coins from faucet", amount);
-            let signer = CallerContext::transaction_signer_public_key();
-            emit_event("take", [("amount", amount.to_string()), ("signer", signer.to_string())]);
+            emit_event("take", [("amount", amount.to_string())]);
             self.vault.withdraw(amount)
         }
 
         pub fn take_confidential(
             &self,
             amount: Amount,
-            output: ConfidentialOutputStatement,
-            balance_proof: BalanceProofSignature,
-        ) -> Bucket {
-            // Withdraws revealed funds into the given confidential output
-            let proof = ConfidentialWithdrawProof::revealed_to_confidential(amount, output, balance_proof);
+            output: StealthOutputsStatement,
+            balance_proof: Option<BalanceProofSignature>,
+        ) -> Option<Bucket> {
+            assert!(
+                amount <= FAUCET_MAX,
+                "Requested amount {} exceeds faucet max of {}",
+                amount,
+                FAUCET_MAX
+            );
+            let revealed_bucket = self.vault.withdraw(amount);
+            let transfer = StealthTransferStatement {
+                inputs_statement: StealthInputsStatement::new_revealed_only(amount),
+                outputs_statement: output,
+                balance_proof,
+            };
+
             debug!("Withdrawing {} coins from faucet into confidential output", amount);
-            let signer = CallerContext::transaction_signer_public_key();
             emit_event("take", [
                 ("amount", amount.to_string()),
                 ("confidential", "true".to_string()),
-                ("signer", signer.to_string()),
             ]);
-            self.vault.withdraw_confidential(proof)
+
+            self.vault
+                .to_resource_manager()
+                .stealth_transfer_with_opt_input_bucket(transfer, Some(revealed_bucket))
         }
     }
 }

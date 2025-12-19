@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use axum::headers::authorization::Bearer;
+use axum_extra::headers::authorization::Bearer;
 use tari_ootle_common_types::optional::Optional;
 use tari_ootle_wallet_sdk::apis::config::ConfigKey;
 use tari_wallet_daemon_client::{
@@ -39,9 +39,9 @@ pub async fn handle_set(
     token: Option<&Bearer>,
     req: SettingsSetRequest,
 ) -> Result<SettingsSetResponse, anyhow::Error> {
-    let mut sdk = context.wallet_sdk().clone();
+    let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
-    sdk.get_network_interface_mut().set_endpoint(&req.indexer_url)?;
-    sdk.config_api().set(ConfigKey::IndexerUrl, &req.indexer_url, false)?;
+    sdk.get_network_interface().set_endpoint(&req.indexer_url)?;
+    sdk.config_api().set(ConfigKey::IndexerUrl, &req.indexer_url)?;
     Ok(SettingsSetResponse {})
 }

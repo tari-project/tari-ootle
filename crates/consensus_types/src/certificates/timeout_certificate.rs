@@ -10,11 +10,7 @@ use tari_ootle_common_types::{hashing::timeout_certificate_id_hasher, Epoch, Nod
 use crate::{validator_signature::ValidatorSignatureBytes, HighTc, TcId};
 
 #[derive(Debug, Clone, Hash, Deserialize, Serialize, BorshSerialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TimeoutCertificate {
     epoch: Epoch,
     height: NodeHeight,

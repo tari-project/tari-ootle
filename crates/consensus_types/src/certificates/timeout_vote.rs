@@ -26,12 +26,6 @@ impl TimeoutVote {
 }
 
 impl Vote for TimeoutVote {
-    type Key = (Epoch, NodeHeight);
-
-    fn key(&self) -> Self::Key {
-        (self.epoch, self.height)
-    }
-
     fn epoch(&self) -> Epoch {
         self.epoch
     }

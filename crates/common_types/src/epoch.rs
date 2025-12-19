@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, BorshSerialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(feature = "ts", derive(TS), ts(export))]
 pub struct Epoch(#[cfg_attr(feature = "ts", ts(type = "number"))] pub u64);
 
 impl Epoch {
@@ -57,8 +57,14 @@ impl Epoch {
         Epoch(self.0.saturating_sub(other.into().0))
     }
 
-    pub fn checked_sub(&self, other: Self) -> Option<Epoch> {
-        self.0.checked_sub(other.0).map(Epoch)
+    pub fn checked_sub<T: Into<Self>>(&self, other: T) -> Option<Epoch> {
+        let other = other.into();
+        self.0.checked_sub(other.as_u64()).map(Epoch)
+    }
+
+    pub fn checked_add<T: Into<Self>>(&self, other: T) -> Option<Epoch> {
+        let other = other.into();
+        self.0.checked_add(other.as_u64()).map(Epoch)
     }
 }
 

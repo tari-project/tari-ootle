@@ -7,7 +7,7 @@
     "height": 18,
     "epoch": 5,
     "shard_group": {
-      "start": 0,
+      "start": 1,
       "end_inclusive": 127
     },
     "proposed_by": "584b42ac801387ab50e4af50aaea63ff9cf0b4ae8fe199157e811b0eae67cf51",
@@ -20,6 +20,9 @@
     },
     "timestamp": 1733818570,
     "epoch_hash": "99c5d0b18045f1c675c55ec9dd4ba08e06e101e57b9b0c8c44f6ec00f7257e94",
+    "accumulated_data": {
+      "total_exhaust_burn": 0
+    },
     "extra_data": {}
   },
   "justify": {
@@ -30,7 +33,7 @@
     "height": 0,
     "epoch": 5,
     "shard_group": {
-      "start": 0,
+      "start": 1,
       "end_inclusive": 127
     },
     "signatures": [],

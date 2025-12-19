@@ -21,29 +21,27 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 mod block_sync_task;
-mod service_impl;
+mod rpc_impl;
 mod state_sync_task;
-mod template_sync_task;
 
-pub use service_impl::ValidatorNodeRpcServiceImpl;
+pub use rpc_impl::ValidatorNodeRpcServiceImpl;
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_ootle_common_types::PeerAddress;
 use tari_ootle_storage::StateStore;
-use tari_template_manager::interface::TemplateManagerHandle;
 use tari_validator_node_rpc::rpc_service::ValidatorNodeRpcServer;
 
-use crate::p2p::services::mempool::MempoolHandle;
+use crate::{consensus::ConsensusHandle, p2p::services::mempool::MempoolHandle};
 
 pub fn create_tari_validator_node_rpc_service<TStateStore: StateStore + Send + Sync + Clone + 'static>(
     epoch_manager: EpochManagerHandle<PeerAddress>,
-    template_manager: TemplateManagerHandle,
     shard_store_store: TStateStore,
     mempool: MempoolHandle,
+    consensus: ConsensusHandle,
 ) -> ValidatorNodeRpcServer<ValidatorNodeRpcServiceImpl<TStateStore>> {
     ValidatorNodeRpcServer::new(ValidatorNodeRpcServiceImpl::new(
         epoch_manager,
-        template_manager,
         shard_store_store,
         mempool,
+        consensus,
     ))
 }

@@ -13,10 +13,13 @@ use crate::{
         BlockIdSeqSubstateIdVersion,
         DefaultCodec,
         DefaultCodecRef,
+        KeyPrefix,
         SubstateIdBlockIdVersionSeq,
         SubstateIdCodec,
         UnitCodec,
     },
+    column_families::block::BlockCf,
+    prefixed,
     traits::{Cf, QueryCf},
 };
 
@@ -38,10 +41,12 @@ pub struct BlockDiffKey {
     pub substate_id: SubstateId,
     pub version: u32,
     pub is_up: bool,
-    /// Retains the ordering of the substate changes in the block. This limits the mximum number of substate changes in
-    /// a block to u32::MAX (4,294,967,295).
+    /// Retains the ordering of the substate changes in the block. This limits the maximum number of substate changes
+    /// in a block to u32::MAX (4,294,967,295).
     pub sequence: u32,
 }
+
+prefixed!(BlockDiffPrefix, KeyPrefix::BlockDiffs);
 
 /// Ordered substate transitions for a block.
 /// Schema: (BlockId, Seq, SubstateId, Version, IsUp) -> Vec<SubstateChange>
@@ -50,11 +55,12 @@ pub struct BlockDiffCf;
 impl Cf for BlockDiffCf {
     type Key = BlockDiffKey;
     type KeyCodec = BlockDiffKeyCodec<BlockIdSeqSubstateIdVersion>;
+    type Prefix = BlockDiffPrefix;
     type Value = SubstateChange;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "block_diff"
+        BlockCf::name()
     }
 }
 
@@ -73,6 +79,7 @@ pub struct BlockDiffModelRef<'a> {
 impl<'a> Cf for BlockDiffModelRef<'a> {
     type Key = <BlockDiffCf as Cf>::Key;
     type KeyCodec = <BlockDiffCf as Cf>::KeyCodec;
+    type Prefix = <BlockDiffCf as Cf>::Prefix;
     type Value = BlockDiffRef<'a>;
     type ValueCodec = DefaultCodecRef<Self::Value>;
 
@@ -91,6 +98,8 @@ impl QueryCf for ByBlockIdQuery {
     type KeyCodec = BlockIdCodec;
 }
 
+prefixed!(SubstateIdBlockDiffPrefix, KeyPrefix::BlockDiffsBySubstateId);
+
 /// Query for block diffs by substate id. This is a secondary index that allows querying by substate id.
 /// Schema: (SubstateId, BlockId, Version, Seq) -> ()
 pub struct SubstateIdIndex;
@@ -98,11 +107,12 @@ pub struct SubstateIdIndex;
 impl Cf for SubstateIdIndex {
     type Key = BlockDiffKey;
     type KeyCodec = BlockDiffKeyCodec<SubstateIdBlockIdVersionSeq>;
+    type Prefix = SubstateIdBlockDiffPrefix;
     type Value = ();
     type ValueCodec = UnitCodec;
 
     fn name() -> &'static str {
-        "block_diff_substate_id_idx"
+        BlockCf::name()
     }
 }
 

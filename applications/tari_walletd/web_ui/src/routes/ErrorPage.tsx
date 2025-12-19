@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useRouteError, isRouteErrorResponse } from "react-router-dom";
-import { StyledPaper } from "../Components/StyledComponents";
+import { StyledPaper } from "@components/StyledComponents";
 import Typography from "@mui/material/Typography";
 import Grid from "@mui/material/Grid";
 

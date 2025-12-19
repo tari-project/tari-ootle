@@ -66,7 +66,7 @@ use crate::{
     ReachabilityMode,
 };
 
-const LOG_TARGET: &str = "tari::ootle::networking::service::worker";
+const LOG_TARGET: &str = "tari::networking::service::worker";
 
 type ReplyTx<T> = oneshot::Sender<Result<T, NetworkingError>>;
 
@@ -197,6 +197,7 @@ where
                 },
 
                 _ = self.shutdown_signal.wait() => {
+                    info!(target: LOG_TARGET, "💤 Networking service shutting down");
                     break;
                 }
             }
@@ -406,11 +407,18 @@ where
             info!(target: LOG_TARGET, "🥾 BOOTSTRAP: dialing {} seed peers", self.seed_peers.len());
             for (peer, addr) in self.seed_peers.drain(..) {
                 let opts = match peer {
-                    Some(peer) => DialOpts::peer_id(peer)
-                        .addresses(vec![addr])
-                        .condition(PeerCondition::DisconnectedAndNotDialing)
-                        .extend_addresses_through_behaviour()
-                        .build(),
+                    Some(peer) => {
+                        self.swarm
+                            .behaviour_mut()
+                            .peer_store
+                            .store_mut()
+                            .add_address(&peer, &addr);
+                        DialOpts::peer_id(peer)
+                            .addresses(vec![addr])
+                            .condition(PeerCondition::DisconnectedAndNotDialing)
+                            .extend_addresses_through_behaviour()
+                            .build()
+                    },
                     None => DialOpts::unknown_peer_id().address(addr).build(),
                 };
 
@@ -428,6 +436,13 @@ where
         if self.active_connections.len() < self.relays.num_possible_relays() {
             info!(target: LOG_TARGET, "🥾 BOOTSTRAP: dialing {} known relay peers", self.relays.num_possible_relays());
             for (peer, addrs) in self.relays.possible_relays() {
+                for addr in addrs {
+                    self.swarm
+                        .behaviour_mut()
+                        .peer_store
+                        .store_mut()
+                        .add_address(peer, addr);
+                }
                 self.swarm
                     .dial(
                         DialOpts::peer_id(*peer)
@@ -539,7 +554,7 @@ where
                 }
             },
             e => {
-                debug!(target: LOG_TARGET, "🌎️ Swarm event: {:?}", e);
+                trace!(target: LOG_TARGET, "🌎️ Swarm event: {:?}", e);
             },
         }
 
@@ -568,7 +583,11 @@ where
                     {
                         c.ping_latency = Some(*t);
                     }
-                    debug!(target: LOG_TARGET, "🏓 Ping: peer={}, connection={}, t={:.2?}", peer, connection, t);
+                    if self.config.high_ping_warning_threshold.is_some_and(|th| th < *t) {
+                        warn!(target: LOG_TARGET, "🏓 Slow ping: peer={}, connection={}, t={:.2?}", peer, connection, t);
+                    } else {
+                        trace!(target: LOG_TARGET, "🏓 Ping: peer={}, connection={}, t={:.2?}", peer, connection, t);
+                    }
                 },
                 Err(err) => {
                     warn!(target: LOG_TARGET, "🏓 Ping failed: peer={}, connection={}, error={}", peer, connection, err);
@@ -1019,6 +1038,9 @@ where
                 error,
             } => {
                 debug!(target: LOG_TARGET, "Inbound substream failed from peer {peer_id} with stream id {stream_id}: {error}");
+                if let Some(waiting_reply) = self.pending_substream_requests.remove(&stream_id) {
+                    let _ignore = waiting_reply.send(Err(NetworkingError::FailedToOpenSubstream(error)));
+                }
             },
             OutboundFailure {
                 error,
@@ -1031,7 +1053,6 @@ where
                     let _ignore = waiting_reply.send(Err(NetworkingError::FailedToOpenSubstream(error)));
                 }
             },
-            Error(_) => {},
         }
     }
 

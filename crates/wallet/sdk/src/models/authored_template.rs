@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use tari_template_abi::{FunctionDef, TemplateDef};
-use tari_template_lib::prelude::{RistrettoPublicKeyBytes, TemplateAddress};
+use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AuthoredTemplateModel {

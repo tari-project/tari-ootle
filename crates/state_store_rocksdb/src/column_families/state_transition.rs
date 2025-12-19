@@ -21,20 +21,53 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use serde::{Deserialize, Serialize};
-use tari_ootle_common_types::{shard::Shard, SubstateAddress};
-use tari_ootle_storage::consensus_models::StateTransitionId;
+use tari_ootle_common_types::{shard::Shard, Epoch, SubstateAddress};
 use tari_state_tree::Version;
 
 use crate::{
-    codecs::{DefaultCodec, EpochCodec, NumberCodec, ShardCodec, StateTransitionIdCodec},
-    traits::{Cf, QueryCf},
+    codecs::{DefaultVersionedCodec, KeyPrefix, NumberCodec, ShardCodec},
+    column_families::cf_names,
+    prefixed,
+    traits::{Cf, QueryCf, Versioned},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateTransitionModelData {
+pub struct StateTransitionModelDataV1 {
+    pub epoch: Epoch,
+    pub transitions: Vec<StateTransitionRecordData>,
+    pub state_version: Version,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum VersionedStateTransitionModelData {
+    V1(StateTransitionModelDataV1),
+}
+
+impl Versioned for VersionedStateTransitionModelData {
+    type Latest = StateTransitionModelDataV1;
+
+    fn upgrade_single_step(self) -> (Self, bool) {
+        match self {
+            Self::V1(_) => (self, false), // No upgrades available
+        }
+    }
+
+    fn into_latest(self) -> Self::Latest {
+        match self {
+            Self::V1(record) => record,
+        }
+    }
+}
+
+impl From<StateTransitionModelDataV1> for VersionedStateTransitionModelData {
+    fn from(record: StateTransitionModelDataV1) -> Self {
+        Self::V1(record)
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateTransitionRecordData {
     pub substate_address: SubstateAddress,
     pub transition: StateTransitionType,
-    pub state_version: Version,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -43,44 +76,26 @@ pub enum StateTransitionType {
     Down,
 }
 
+prefixed!(StateTransitionPrefix, KeyPrefix::StateTransitions);
+
 pub struct StateTransitionCf;
 
 impl Cf for StateTransitionCf {
-    type Key = StateTransitionId;
-    type KeyCodec = StateTransitionIdCodec<ShardCodec, NumberCodec<u64>, EpochCodec>;
-    type Value = StateTransitionModelData;
-    type ValueCodec = DefaultCodec<Self::Value>;
+    type Key = (Shard, Version);
+    type KeyCodec = (ShardCodec, NumberCodec<Version>);
+    type Prefix = StateTransitionPrefix;
+    type Value = StateTransitionModelDataV1;
+    type ValueCodec = DefaultVersionedCodec<VersionedStateTransitionModelData>;
 
     fn name() -> &'static str {
-        "state_transitions"
+        cf_names::CHAIN_METADATA
     }
 }
 
-pub struct ByShardQuery;
+pub struct ByShardAndStateVersionQuery;
 
-impl QueryCf for ByShardQuery {
+impl QueryCf for ByShardAndStateVersionQuery {
     type Cf = StateTransitionCf;
-    type Key = Shard;
-    type KeyCodec = ShardCodec;
-}
-
-pub struct ByShardAndIdQuery;
-
-impl QueryCf for ByShardAndIdQuery {
-    type Cf = StateTransitionCf;
-    type Key = (Shard, u64);
-    type KeyCodec = (ShardCodec, NumberCodec<u64>);
-}
-
-pub struct ShardSeqIndex;
-
-impl Cf for ShardSeqIndex {
-    type Key = Shard;
-    type KeyCodec = ShardCodec;
-    type Value = u64;
-    type ValueCodec = NumberCodec<Self::Value>;
-
-    fn name() -> &'static str {
-        "state_transition_shard_seq_idx"
-    }
+    type Key = (Shard, Version);
+    type KeyCodec = (ShardCodec, NumberCodec<Version>);
 }

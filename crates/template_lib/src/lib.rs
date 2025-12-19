@@ -46,6 +46,7 @@ pub mod auth;
 
 #[macro_use]
 pub mod args;
+#[macro_use]
 pub mod models;
 
 pub mod component;
@@ -84,4 +85,5 @@ pub mod constants;
 #[macro_use]
 mod newtype_serde_macros;
 #[macro_use]
+#[cfg(target_arch = "wasm32")]
 pub mod macros;

@@ -1,7 +1,7 @@
 [package]
 name = "tari_template_lib"
 description = "Tari template library provides abstrations that interface with the Tari validator engine"
-version = "0.13.0"
+version = "0.14.0"
 edition.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -25,5 +25,6 @@ default = ["macro", "std"]
 macro = ["tari_template_macros"]
 std = ["serde/std", "tari_bor/std", "tari_template_abi/std", "tari_template_lib_types/std"]
 alloc = ["serde/alloc", "tari_bor/alloc", "tari_template_abi/alloc"]
-ts = ["ts-rs", "tari_bor/ts"]
-borsh = ["dep:borsh", "tari_template_lib_types/borsh"]
+ts = ["ts-rs", "tari_bor/ts", "tari_template_abi/ts", "tari_template_lib_types/ts"]
+borsh = ["dep:borsh", "tari_template_lib_types/borsh", "tari_bor/borsh"]
+extra-arith = ["tari_template_lib_types/extra-arith"]

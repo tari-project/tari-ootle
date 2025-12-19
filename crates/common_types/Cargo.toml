@@ -19,6 +19,7 @@ libp2p-identity = { workspace = true, features = ["sr25519", "serde", "peerid"] 
 
 borsh = { workspace = true }
 blake2 = { workspace = true }
+bounded-vec = { workspace = true, features = ["serde"] }
 digest = { workspace = true }
 ethnum = { workspace = true }
 newtype-ops = { workspace = true }

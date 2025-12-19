@@ -36,8 +36,8 @@ impl<'a, TTx> ShardScopedTreeStoreReader<'a, TTx> {
     }
 }
 
-impl<TTx: StateStoreReadTransaction> TreeStoreReader<Version> for ShardScopedTreeStoreReader<'_, TTx> {
-    fn get_node(&self, key: &NodeKey) -> Result<Node<Version>, tari_state_tree::JmtStorageError> {
+impl<TTx: StateStoreReadTransaction> TreeStoreReader<StateTreePayload> for ShardScopedTreeStoreReader<'_, TTx> {
+    fn get_node(&self, key: &NodeKey) -> Result<Node<StateTreePayload>, tari_state_tree::JmtStorageError> {
         self.tx
             .state_tree_nodes_get(self.shard, key)
             .optional()
@@ -63,7 +63,7 @@ impl<'a, TTx: StateStoreWriteTransaction> ShardScopedTreeStoreWriter<'a, TTx> {
         Self { shard, tx }
     }
 
-    pub fn set_version(&mut self, version: Version) -> Result<(), tari_state_tree::JmtStorageError> {
+    pub fn set_state_version(&mut self, version: Version) -> Result<(), tari_state_tree::JmtStorageError> {
         self.tx
             .state_tree_shard_versions_set(self.shard, version)
             .map_err(|e| tari_state_tree::JmtStorageError::UnexpectedError(e.to_string()))
@@ -81,7 +81,7 @@ impl<'a, TTx: StateStoreWriteTransaction> ShardScopedTreeStoreWriter<'a, TTx> {
 
     pub fn insert_nodes(
         &mut self,
-        nodes: Vec<(NodeKey, Node<Version>)>,
+        nodes: Vec<(NodeKey, Node<StateTreePayload>)>,
     ) -> Result<(), tari_state_tree::JmtStorageError> {
         self.tx
             .state_tree_nodes_batch_insert(self.shard, nodes)

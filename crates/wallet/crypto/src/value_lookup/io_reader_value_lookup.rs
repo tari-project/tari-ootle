@@ -7,7 +7,7 @@ use std::{
     ops::RangeInclusive,
 };
 
-use tari_engine_types::crypto::ValueLookupTable;
+use tari_engine_types::crypto::{AndThenLookup, MapErrLookup, ValueLookupTable};
 
 use crate::value_lookup::header::LookupHeader;
 
@@ -34,9 +34,21 @@ impl<'a, R: Read + Seek> IoReaderValueLookup<'a, R> {
         })
     }
 
+    pub fn with_fallback<T: ValueLookupTable + 'a>(self, fallback: T) -> impl ValueLookupTable<Error = io::Error> + 'a {
+        AndThenLookup::new(
+            self,
+            MapErrLookup::new(fallback, |err| {
+                io::Error::other(format!("Lookup fallback error: {err}"))
+            }),
+        )
+    }
+
     fn seek_and_buffer_to_value(&mut self, value: u64) -> io::Result<()> {
+        // Seek to the position of the value. Value must be in range.
+        assert!(self.header.is_in_range(value));
+        let offset_val = value - self.header.min;
         self.reader
-            .seek(io::SeekFrom::Start(value * 32 + LookupHeader::SIZE as u64))?;
+            .seek(io::SeekFrom::Start(offset_val * 32 + LookupHeader::SIZE as u64))?;
         self.buffer_next()?;
         Ok(())
     }
@@ -110,8 +122,8 @@ mod tests {
     fn generate_lookup_data(min: u64, max: u64) -> Vec<u8> {
         let mut data = Vec::with_capacity(LOOKAHEAD_BUFFER_SIZE + 32 * (max - min + 1) as usize);
         data.extend_from_slice(LOOKUP_HEADER_LEADING_BYTES);
-        data.extend_from_slice(&min.to_le_bytes());
-        data.extend_from_slice(&max.to_le_bytes());
+        data.extend_from_slice(&min.to_be_bytes());
+        data.extend_from_slice(&max.to_be_bytes());
         for i in min..=max {
             let byte = i % u64::from(u8::MAX);
             data.extend_from_slice(&[byte as u8; 32]);
@@ -125,6 +137,21 @@ mod tests {
         let mut reader = Cursor::new(lookup_data.as_slice());
         let lookup = IoReaderValueLookup::load(&mut reader).unwrap();
         assert_eq!(lookup.range(), 0..=10);
+    }
+
+    #[test]
+    fn it_reads_from_the_data_from_offset_start() {
+        const START: u64 = 1024 * 1024;
+        const END: u64 = 2 * 1024 * 1024;
+        let lookup_data = generate_lookup_data(START, END);
+        let mut reader = Cursor::new(lookup_data.as_slice());
+        let mut lookup = IoReaderValueLookup::load(&mut reader).unwrap();
+        assert!(lookup.lookup(START - 1).unwrap().is_none());
+        for v in START..=END {
+            let value = lookup.lookup(v).unwrap().unwrap();
+            let byte = v % u64::from(u8::MAX);
+            assert_eq!(value, [byte as u8; 32], "Failed at value {}", v);
+        }
     }
 
     #[test]

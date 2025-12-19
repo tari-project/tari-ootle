@@ -25,8 +25,8 @@ use std::{net::SocketAddr, path::PathBuf};
 use clap::{Args, Parser};
 use minotari_app_utilities::common_cli_args::CommonCliArgs;
 use tari_common::configuration::{ConfigOverrideProvider, Network as L1Network};
+use tari_common_types::seeds::seed_words::SeedWords;
 use tari_crypto::tari_utilities::SafePassword;
-use tari_key_manager::SeedWords;
 use tari_ootle_app_utilities::configuration::convert_l1_network_to_network;
 use tari_ootle_common_types::Network;
 use url::Url;
@@ -49,11 +49,13 @@ pub struct Cli {
     pub json_rpc_address: Option<SocketAddr>,
     #[clap(long, env = "TARI_WALLET_WEB_UI_JSON_RPC_PUBLIC_URL")]
     pub web_ui_public_json_rpc_url: Option<String>,
+    #[clap(short = 'w', long, env = "TARI_WALLET_WEB_UI_JSON_RPC_PUBLIC_URL")]
+    pub web_ui_listen_addr: Option<SocketAddr>,
     #[clap(long, env = "SIGNALING_SERVER_ADDRESS")]
     pub signaling_server_address: Option<SocketAddr>,
     #[clap(long, short = 'i', alias = "indexer-url")]
-    /// Indexer JSON-RPC url override
-    pub indexer_json_rpc_url: Option<Url>,
+    /// Indexer API url override
+    pub indexer_api_url: Option<Url>,
     #[clap(flatten)]
     pub wallet_restore: WalletRestoreArgs,
     /// The OS keyring is used to store and retrieve a randomly generated password. This is used for wallet encryption.
@@ -90,32 +92,38 @@ impl ConfigOverrideProvider for Cli {
         overrides.push(("ootle_wallet_daemon.override_from".to_string(), network.to_string()));
         if let Some(json_rpc_address) = self.json_rpc_address {
             overrides.push((
-                "ootle_wallet_daemon.json_rpc_address".to_string(),
+                format!("{}.ootle_wallet_daemon.json_rpc_address", network),
                 json_rpc_address.to_string(),
             ));
         }
         if let Some(ref json_rpc_url) = self.web_ui_public_json_rpc_url {
             overrides.push((
-                "ootle_wallet_daemon.web_ui_public_json_rpc_url".to_string(),
+                format!("{}.ootle_wallet_daemon.web_ui_public_json_rpc_url", network),
                 json_rpc_url.to_string(),
             ));
         }
         if let Some(ref signaling_server_address) = self.signaling_server_address {
             overrides.push((
-                "ootle_wallet_daemon.signaling_server_address".to_string(),
+                format!("{}.ootle_wallet_daemon.signaling_server_address", network),
                 signaling_server_address.to_string(),
             ));
         }
-        if let Some(ref indexer_json_rpc_url) = self.indexer_json_rpc_url {
+        if let Some(ref indexer_api_url) = self.indexer_api_url {
             overrides.push((
-                "ootle_wallet_daemon.indexer_json_rpc_url".to_string(),
-                indexer_json_rpc_url.to_string(),
+                format!("{}.ootle_wallet_daemon.indexer_api_url", network),
+                indexer_api_url.to_string(),
             ));
         }
         if let Some(ref file) = self.value_lookup_table_file {
             overrides.push((
-                "ootle_wallet_daemon.value_lookup_table_file".to_string(),
+                format!("{}.ootle_wallet_daemon.value_lookup_table_file", network),
                 file.display().to_string(),
+            ));
+        }
+        if let Some(ref listen_addr) = self.web_ui_listen_addr {
+            overrides.push((
+                format!("{}.ootle_wallet_daemon.web_ui_address", network),
+                listen_addr.to_string(),
             ));
         }
         overrides
@@ -127,11 +135,20 @@ pub enum Subcommand {
     #[clap(name = "run", about = "Run the wallet daemon")]
     Run,
     #[clap(about = "Generate a new key and output the public key")]
-    CreateKey {
+    CreateAccount {
+        #[clap(long)]
+        name: Option<String>,
         #[clap(long, alias = "key")]
         key_index: Option<u64>,
         #[clap(long)]
         set_active: bool,
+        #[clap(long, alias = "output", short = 'o')]
+        output_path: Option<PathBuf>,
+    },
+    #[clap(about = "Generate a key to use for resources with viewable balances")]
+    NewViewableBalanceKey {
+        #[clap(long, alias = "key")]
+        key_index: u64,
         #[clap(long, alias = "output", short = 'o')]
         output_path: Option<PathBuf>,
     },

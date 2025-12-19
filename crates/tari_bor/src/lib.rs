@@ -86,6 +86,11 @@ pub fn encoded_len<T: Serialize + ?Sized>(val: &T) -> Result<usize, BorError> {
     encode_into_writer(val, &mut counter)?;
     Ok(counter.get())
 }
+pub fn encoded_len_with_limit<T: Serialize + ?Sized>(val: &T, limit: usize) -> Result<usize, BorError> {
+    let mut counter = ByteCounter::with_limit(limit);
+    encode_into_writer(val, &mut counter)?;
+    Ok(counter.get())
+}
 
 /// Encodes any Rust type using CBOR
 pub fn to_value<T: Serialize + ?Sized>(val: &T) -> Result<Value, BorError> {
@@ -145,11 +150,19 @@ where E: fmt::Display {
 #[derive(Debug, Clone, Default)]
 pub struct ByteCounter {
     count: usize,
+    limit: Option<usize>,
 }
 
 impl ByteCounter {
     pub fn new() -> Self {
         Default::default()
+    }
+
+    pub fn with_limit(limit: usize) -> Self {
+        Self {
+            count: 0,
+            limit: Some(limit),
+        }
     }
 
     pub fn get(&self) -> usize {
@@ -164,8 +177,12 @@ impl Write for &mut ByteCounter {
     type Error = ByteCounterError;
 
     fn write_all(&mut self, data: &[u8]) -> Result<(), Self::Error> {
-        let len = data.len();
-        self.count += len;
+        self.count = self.count.checked_add(data.len()).ok_or(ByteCounterError)?;
+        if let Some(limit) = self.limit {
+            if self.count > limit {
+                return Err(ByteCounterError);
+            }
+        }
         Ok(())
     }
 

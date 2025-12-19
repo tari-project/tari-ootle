@@ -2,19 +2,19 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     str::FromStr,
 };
 
 use cucumber::{given, then, when};
 use integration_tests::{
     indexer::{spawn_indexer, IndexerProcess},
+    util::cucumber_log,
     TariWorld,
 };
 use libp2p::Multiaddr;
-use tari_crypto::tari_utilities::hex::Hex;
 use tari_indexer_client::types::AddPeerRequest;
-use tari_ootle_common_types::displayable::Displayable;
+use tari_ootle_common_types::{displayable::Displayable, Epoch};
 
 #[when(expr = "indexer {word} connects to all other validators")]
 async fn given_validator_connects_to_other_vns(world: &mut TariWorld, name: String) {
@@ -25,11 +25,11 @@ async fn given_validator_connects_to_other_vns(world: &mut TariWorld, name: Stri
         .map(|vn| {
             (
                 vn.public_key,
-                Multiaddr::from_str(&format!("/ip4/127.0.0.1/tcp/{}", vn.port)).unwrap(),
+                Multiaddr::from_str(&format!("/ip4/127.0.0.1/tcp/{}", vn.p2p_port)).unwrap(),
             )
         });
 
-    let mut cli = indexer.get_jrpc_indexer_client();
+    let mut cli = indexer.get_indexer_client();
     for (pk, addr) in details {
         if let Err(err) = cli
             .add_peer(AddPeerRequest {
@@ -46,25 +46,17 @@ async fn given_validator_connects_to_other_vns(world: &mut TariWorld, name: Stri
     }
 }
 
-#[then(expr = "indexer {word} has scanned to height {int}")]
-async fn indexer_has_scanned_to_height(world: &mut TariWorld, name: String, block_height: u64) {
+#[then(expr = "indexer {word} has scanned to at least height {int}")]
+pub async fn indexer_has_scanned_to_at_least_height(world: &mut TariWorld, name: String, block_height: u64) {
     let indexer = world.get_indexer(&name);
-    let mut client = indexer.get_jrpc_indexer_client();
+    let mut client = indexer.get_indexer_client();
     let mut last_block_height = 0;
     let mut remaining = 10;
     loop {
         let stats = client.get_epoch_manager_stats().await.expect("Failed to get stats");
-        if stats.current_block_height == block_height {
+        if stats.current_block_height >= block_height {
             return;
         }
-
-        assert!(
-            stats.current_block_height <= block_height,
-            "Indexer {} has scanned past block height {} to height {}",
-            name,
-            block_height,
-            stats.current_block_height
-        );
 
         if stats.current_block_height != last_block_height {
             last_block_height = stats.current_block_height;
@@ -99,35 +91,19 @@ async fn start_indexer_connected_to_a_base_node(world: &mut TariWorld, indexer_n
     spawn_indexer(world, indexer_name, bn_name).await;
 }
 
-#[given(expr = "{word} indexer GraphQL request works")]
+#[then(expr = "{word} indexer GraphQL request works")]
 async fn works_indexer_graphql(world: &mut TariWorld, indexer_name: String) {
-    let indexer: &mut IndexerProcess = world.indexers.get_mut(&indexer_name).unwrap();
-    // insert event mock data in the substate manager database
-    indexer.insert_event_mock_data().await;
+    let indexer = world.indexers.get(&indexer_name).unwrap();
     let mut graphql_client = indexer.get_graphql_indexer_client().await;
-    let template_address = [0u8; 32];
-    let tx_hash = [0u8; 32];
-    let query = format!(
-        "{{ getEventsForTransaction(txHash: {:?}) {{ substateId, templateAddress, txHash, topic, payload }}
-    }}",
-        tx_hash.to_hex()
-    );
+    let query = r#"{ getEvents { substateId, templateAddress, txHash, topic, payload } }"#.to_string();
     let res = graphql_client
         .send_request::<HashMap<String, Vec<tari_indexer::graphql::model::events::Event>>>(&query, None, None)
         .await
         .expect("Failed to obtain getEventsForTransaction query result");
-    let res = res.get("getEventsForTransaction").unwrap();
-    assert_eq!(res.len(), 1);
-    assert_eq!(res[0].template_address, template_address);
-    assert_eq!(res[0].tx_hash, tx_hash);
-    assert_eq!(res[0].topic, "my_event");
-    assert_eq!(
-        res[0].payload,
-        BTreeMap::from([("my".to_string(), "event".to_string())])
-    );
+    res.get("getEvents").unwrap();
 }
 
-#[when(expr = "indexer {word} scans the network events for account {word} has topics {word}")]
+#[when(expr = "indexer {word} scans the network events for account {word} with topics {word}")]
 async fn indexer_scans_network_events(
     world: &mut TariWorld,
     indexer_name: String,
@@ -137,15 +113,11 @@ async fn indexer_scans_network_events(
     let indexer: &mut IndexerProcess = world.indexers.get_mut(&indexer_name).unwrap_or_else(|| {
         panic!("Indexer {} not found", indexer_name);
     });
-    let accounts_component_addresses = world.outputs.get(&account_name).expect("Account name not found");
-    let component_address = accounts_component_addresses
-        .into_iter()
-        .find(|(k, _)| k.contains("components/Account"))
-        .map(|(_, v)| v)
-        .expect("Did not find component address");
-
+    let account = world.wallet_accounts.get(&account_name).unwrap_or_else(|| {
+        panic!("No wallet account found with name {}", account_name);
+    });
     let mut graphql_client = indexer.get_graphql_indexer_client().await;
-    let query = r#"{{ getEvents() {{ substateId, templateAddress, txHash, topic, payload }} }}"#.to_string();
+    let query = r#"{ getEvents { substateId, templateAddress, txHash, topic, payload } }"#.to_string();
     let res = graphql_client
         .send_request::<HashMap<String, Vec<tari_indexer::graphql::model::events::Event>>>(&query, None, None)
         .await
@@ -154,18 +126,19 @@ async fn indexer_scans_network_events(
     let events = res.get("getEvents").unwrap();
     let topics_for_component = events
         .iter()
-        .filter(|e| e.substate_id == Some(component_address.substate_id.to_string()))
+        .filter(|e| e.substate_id == Some(account.component_address().to_string()))
         .map(|e| e.topic.as_str())
         .collect::<HashSet<_>>();
 
-    let topics = topics_str.split(',');
-    for (ind, topic) in topics.enumerate() {
+    let expected_topics = topics_str.split(',');
+    for (ind, topic) in expected_topics.enumerate() {
         assert!(
             topics_for_component.contains(topic),
-            "Unexpected topic at index {}. Events emitted were {}. Expected topic {}",
+            "Unexpected topic at index {}. Events emitted were {}. Expected topic {} (ALL {:?})",
             ind,
             topics_for_component.display(),
-            topic
+            topic,
+            events
         );
     }
 }
@@ -244,4 +217,82 @@ async fn assert_indexer_non_fungible_list(
         count,
         nfts.len()
     );
+}
+
+#[then(expr = "I wait for the indexer {word} to sync with the network")]
+async fn i_wait_for_the_indexer_to_sync_with_the_network(world: &mut TariWorld, indexer_name: String) {
+    let vn = world
+        .validator_nodes
+        .values()
+        .chain(world.vn_seeds.values())
+        .find(|vn| !vn.shutdown.is_triggered())
+        .expect(
+            "No running validator nodes found. An indexer must be connected to a running validator node to sync with \
+             the network",
+        );
+    let consensus_stats = vn
+        .get_client()
+        .get_consensus_status()
+        .await
+        .expect("Failed to get epoch stats from VN");
+    if consensus_stats.state != "Running" {
+        panic!(
+            "Validator node {} is not running. An indexer must be connected to a running validator node to sync with \
+             the network",
+            vn.name
+        );
+    }
+    let epoch = consensus_stats.epoch;
+    let prev_epoch = epoch.checked_sub(Epoch(1)).expect("Epoch is zero");
+    let state_versions = consensus_stats
+        .state_versions
+        .unwrap_or_else(|| panic!("No state versions found in consensus stats for running VN {}", vn.name));
+
+    let indexer = world.get_indexer(&indexer_name);
+    assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
+    let mut client = indexer.get_indexer_client();
+    let mut remaining_attempts = 60;
+    loop {
+        if remaining_attempts == 0 {
+            panic!(
+                "Indexer {} did not sync with the network in time. Current epoch: {}",
+                indexer_name, prev_epoch
+            );
+        }
+
+        remaining_attempts -= 1;
+        let state = client.get_network_sync_state().await.unwrap();
+        if let Some(ref progress) = state.sync_progress {
+            if progress.last_state_versions.is_empty() {
+                cucumber_log(format!(
+                    "Waiting for indexer {} to sync. Current epoch: {}, no checkpoint progress yet",
+                    indexer_name, prev_epoch
+                ));
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                continue;
+            }
+            if let Some((shard, (state_version, epoch))) = progress
+                .last_state_versions
+                .iter()
+                // If the indexer is not at the epoch and not scanned to the state version for the shard, we are not synced
+                .find(|(s, (v, e))| *e < prev_epoch || state_versions.get(s).is_none_or(|sv| sv > v))
+            {
+                cucumber_log(format!(
+                    "Waiting for indexer {} to sync. Current epoch: {}, shard_group: {}, state_version: {}, scanned \
+                     epoch: {}",
+                    indexer_name, prev_epoch, shard, state_version, epoch
+                ));
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                continue;
+            }
+
+            break;
+        } else {
+            cucumber_log(format!(
+                "Waiting for indexer {} to sync. Current epoch: {}, no sync progress yet",
+                indexer_name, prev_epoch
+            ));
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    }
 }

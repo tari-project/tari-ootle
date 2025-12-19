@@ -12,10 +12,10 @@ use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, Decision};
 use tari_engine_types::serde_with;
 use tari_ootle_common_types::{hashing::command_hasher, Epoch, ShardGroup};
-use tari_template_lib::{models::UnclaimedConfidentialOutputAddress, types::crypto::RistrettoPublicKeyBytes};
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 
-use super::{ForeignProposalAtom, LeaderFee, MintConfidentialOutputAtom, TransactionRecord};
+use super::{ForeignProposalAtom, LeaderFee, TransactionRecord};
 use crate::{
     consensus_models::evidence::Evidence,
     StateStoreReadTransaction,
@@ -24,11 +24,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionAtom {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub id: TransactionId,
@@ -65,11 +61,7 @@ impl Display for TransactionAtom {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Command {
     // Transaction Commands
     /// Request validators to prepare a local-only transaction
@@ -86,7 +78,6 @@ pub enum Command {
     SomeAccept(TransactionAtom),
     // Validator node commands
     ForeignProposal(ForeignProposalAtom),
-    MintConfidentialOutput(MintConfidentialOutputAtom),
     EvictNode(EvictNodeAtom),
     EndEpoch,
 }
@@ -95,10 +86,8 @@ pub enum Command {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum CommandOrdering<'a> {
     EvictNode,
-    // EvictNode,
     /// Foreign proposals should come first in the block so that they are processed before commands
     ForeignProposal(ShardGroup, &'a BlockId),
-    MintConfidentialOutput(&'a UnclaimedConfidentialOutputAddress),
     TransactionId(&'a TransactionId),
     EndEpoch,
 }
@@ -111,10 +100,7 @@ impl Command {
             Command::AllAccept(tx) |
             Command::SomeAccept(tx) |
             Command::LocalOnly(tx) => Some(tx),
-            Command::ForeignProposal(_) |
-            Command::MintConfidentialOutput(_) |
-            Command::EvictNode(_) |
-            Command::EndEpoch => None,
+            Command::ForeignProposal(_) | Command::EvictNode(_) | Command::EndEpoch => None,
         }
     }
 
@@ -129,7 +115,6 @@ impl Command {
                 // Order by shard group then by block id
                 CommandOrdering::ForeignProposal(foreign_proposal.shard_group, &foreign_proposal.block_id)
             },
-            Command::MintConfidentialOutput(mint) => CommandOrdering::MintConfidentialOutput(&mint.commitment),
             Command::EvictNode(_) => CommandOrdering::EvictNode,
             Command::EndEpoch => CommandOrdering::EndEpoch,
         }
@@ -170,13 +155,6 @@ impl Command {
     pub fn evict_node(&self) -> Option<&EvictNodeAtom> {
         match self {
             Command::EvictNode(atom) => Some(atom),
-            _ => None,
-        }
-    }
-
-    pub fn mint_confidential_output(&self) -> Option<&MintConfidentialOutputAtom> {
-        match self {
-            Command::MintConfidentialOutput(mint) => Some(mint),
             _ => None,
         }
     }
@@ -222,10 +200,6 @@ impl Command {
         matches!(self, Command::EndEpoch)
     }
 
-    pub fn is_mint_confidential_output(&self) -> bool {
-        matches!(self, Command::MintConfidentialOutput(_))
-    }
-
     pub fn is_local_prepare(&self) -> bool {
         matches!(self, Command::LocalPrepare(_))
     }
@@ -256,18 +230,13 @@ impl Display for Command {
             Command::AllAccept(tx) => write!(f, "AllAccept({}, {})", tx.id, tx.decision),
             Command::SomeAccept(tx) => write!(f, "SomeAccept({}, {})", tx.id, tx.decision),
             Command::ForeignProposal(fp) => write!(f, "ForeignProposal {}", fp.block_id),
-            Command::MintConfidentialOutput(mint) => write!(f, "MintConfidentialOutput({})", mint.commitment),
             Command::EvictNode(atom) => write!(f, "EvictNode({atom})"),
             Command::EndEpoch => write!(f, "EndEpoch"),
         }
     }
 }
 
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
 pub struct EvictNodeAtom {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
@@ -293,9 +262,7 @@ impl Display for EvictNodeAtom {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeSet, str::FromStr};
-
-    use tari_template_lib::models::UnclaimedConfidentialOutputAddress;
+    use std::collections::BTreeSet;
 
     use super::*;
 
@@ -309,20 +276,20 @@ mod tests {
             CommandOrdering::ForeignProposal(ShardGroup::new(0, 64), &BlockId::zero()) <
                 CommandOrdering::TransactionId(&TransactionId::default())
         );
-        let commitment = UnclaimedConfidentialOutputAddress::from_str(
-            "commitment_0000000000000000000000000000000000000000000000000000000000000000",
-        )
-        .unwrap();
+        let tx_id = TransactionId::new([1; 32]);
 
-        assert!(
-            CommandOrdering::MintConfidentialOutput(&commitment) <
-                CommandOrdering::TransactionId(&TransactionId::default())
-        );
-        assert!(CommandOrdering::MintConfidentialOutput(&commitment) < CommandOrdering::EndEpoch);
+        assert!(CommandOrdering::TransactionId(&TransactionId::default()) < CommandOrdering::TransactionId(&tx_id));
+        assert!(CommandOrdering::TransactionId(&tx_id) < CommandOrdering::EndEpoch);
         let mut set = BTreeSet::new();
         let cmds = [
             Command::EndEpoch,
-            Command::MintConfidentialOutput(MintConfidentialOutputAtom { commitment }),
+            Command::AllAccept(TransactionAtom {
+                id: TransactionId::new([1; 32]),
+                decision: Decision::Commit,
+                evidence: Evidence::default(),
+                transaction_fee: 0,
+                leader_fee: None,
+            }),
             Command::ForeignProposal(ForeignProposalAtom {
                 block_id: BlockId::zero(),
                 shard_group: ShardGroup::new(0, 64),
@@ -335,7 +302,7 @@ mod tests {
                 leader_fee: None,
             }),
         ];
-        let expected = [cmds[2].clone(), cmds[1].clone(), cmds[3].clone(), cmds[0].clone()];
+        let expected = [cmds[2].clone(), cmds[3].clone(), cmds[1].clone(), cmds[0].clone()];
         set.extend(cmds);
 
         // Check the ordering in the set

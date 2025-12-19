@@ -28,18 +28,15 @@ use tari_template_abi::rust::{
 };
 use tari_template_lib_types::{EntityId, KeyParseError, ObjectKey};
 
-use super::BinaryTag;
-use crate::{newtype_struct_serde_impl, prelude::CONFIDENTIAL_TARI_RESOURCE_ADDRESS};
+use super::{address_prefixes, BinaryTag};
+use crate::{newtype_struct_serde_impl, prelude::STEALTH_TARI_RESOURCE_ADDRESS};
 
 const TAG: u64 = BinaryTag::ResourceAddress.as_u64();
 
 /// The globally-unique identifier of a resource.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct ResourceAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl ResourceAddress {
@@ -47,7 +44,7 @@ impl ResourceAddress {
         Self(BorTag::new(key))
     }
 
-    pub fn as_object_key(&self) -> &ObjectKey {
+    pub const fn as_object_key(&self) -> &ObjectKey {
         self.0.inner()
     }
 
@@ -65,7 +62,7 @@ impl ResourceAddress {
     }
 
     pub fn is_tari(&self) -> bool {
-        *self == CONFIDENTIAL_TARI_RESOURCE_ADDRESS
+        *self == STEALTH_TARI_RESOURCE_ADDRESS
     }
 }
 
@@ -86,7 +83,7 @@ impl<T: Into<ObjectKey>> From<T> for ResourceAddress {
 
 impl Display for ResourceAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "resource_{}", *self.0)
+        write!(f, "{}_{}", address_prefixes::RESOURCE, *self.0)
     }
 }
 
@@ -97,26 +94,6 @@ impl AsRef<[u8]> for ResourceAddress {
 }
 
 newtype_struct_serde_impl!(ResourceAddress, BorTag<ObjectKey, TAG>);
-
-#[cfg(feature = "borsh")]
-mod borsh_impl {
-    use std::io::Read;
-
-    use super::*;
-
-    impl borsh::BorshSerialize for ResourceAddress {
-        fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-            borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
-        }
-    }
-
-    impl borsh::BorshDeserialize for ResourceAddress {
-        fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
-            let key = borsh::BorshDeserialize::deserialize_reader(reader)?;
-            Ok(ResourceAddress::new(ObjectKey::from_array(key)))
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

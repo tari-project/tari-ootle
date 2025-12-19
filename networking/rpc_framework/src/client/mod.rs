@@ -75,7 +75,7 @@ use crate::{
     RpcStatus,
 };
 
-const LOG_TARGET: &str = "comms::rpc::client";
+const LOG_TARGET: &str = "libp2p::rpc::client";
 
 #[derive(Clone)]
 pub struct RpcClient {

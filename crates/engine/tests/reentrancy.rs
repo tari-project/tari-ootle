@@ -15,8 +15,8 @@ fn it_prevents_reentrant_withdraw() {
     let (account, _, _) = test.create_empty_account();
 
     let result = test.execute_expect_success(
-        Transaction::builder()
-            .call_function(faucet_addr, "mint", args![Amount(1000)])
+        Transaction::builder_localnet()
+            .call_function(faucet_addr, "mint", args![1000])
             .build_and_seal(test.secret_key()),
         vec![],
     );
@@ -26,7 +26,7 @@ fn it_prevents_reentrant_withdraw() {
         .unwrap();
 
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(faucet, "take_free_coins", args![])
             .put_last_instruction_output_on_workspace("bucket")
             .call_function(template_addr, "with_bucket", args![Workspace("bucket")])
@@ -39,9 +39,9 @@ fn it_prevents_reentrant_withdraw() {
         .unwrap();
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(reentrancy, "get_balance", args![])
-            .call_method(reentrancy, "reentrant_withdraw", args![Amount(1000)])
+            .call_method(reentrancy, "reentrant_withdraw", args![1000])
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(reentrancy, "get_balance", args![])
             .call_method(account, "deposit", args![Workspace("bucket")])
@@ -61,7 +61,7 @@ fn it_allows_multiple_immutable_access_to_component() {
     let reentrancy: ComponentAddress = test.call_function("Reentrancy", "new", args![], vec![]);
 
     test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(reentrancy, "reentrant_access_immutable", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -75,7 +75,7 @@ fn it_prevents_read_access_to_mutating_component() {
     let reentrancy: ComponentAddress = test.call_function("Reentrancy", "new", args![], vec![]);
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(reentrancy, "reentrant_access", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -96,7 +96,7 @@ fn it_prevents_multiple_mutable_access_to_component() {
     let reentrancy: ComponentAddress = test.call_function("Reentrancy", "new", args![], vec![]);
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(reentrancy, "reentrant_access_mut", args![])
             .build_and_seal(test.secret_key()),
         vec![],

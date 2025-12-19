@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_consensus_types::{BlockId, Decision, LeafBlock, ProposalCertificate, QcId, ValidatorSignatureBytes};
+use tari_consensus_types::{BlockId, Decision, LeafBlock, PcId, ProposalCertificate, ValidatorSignatureBytes};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::commit_result::RejectReason;
 use tari_ootle_common_types::{
@@ -12,7 +12,6 @@ use tari_ootle_common_types::{
     NumPreshards,
     ShardGroup,
     SubstateAddress,
-    VersionedSubstateId,
 };
 use tari_ootle_storage::{
     consensus_models::{
@@ -119,7 +118,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                         target: LOG_TARGET,
                         "⚠️ Foreign LocalPrepare proposal ({}) received LOCAL_PREPARE for transaction {} but current transaction stage is {}. Ignoring.",
                         proposal,
-                        tx_rec.transaction_id(),
+                        tx_rec.id(),
                         tx_rec.current_stage()
                     );
                     continue;
@@ -132,20 +131,18 @@ pub fn process_foreign_block<TStore: StateStore>(
                         info!(
                             target: LOG_TARGET,
                             "⚠️ Foreign committee ABORT transaction {}. Update overall decision to ABORT. Local stage: {}, Leaf: {}",
-                            tx_rec.transaction_id(), tx_rec.current_stage(), local_leaf
+                            tx_rec.id(), tx_rec.current_stage(), local_leaf
                         );
 
                         // Add an abort execution since we previously decided to commit
-                        let exec = TransactionExecution::abort(
-                            tx_rec.transaction_id(),
-                            RejectReason::ForeignShardGroupDecidedToAbort {
+                        let exec =
+                            TransactionExecution::abort(tx_rec.id(), RejectReason::ForeignShardGroupDecidedToAbort {
                                 start_shard: foreign_shard_group.start().as_u32(),
                                 end_shard: foreign_shard_group.end().as_u32(),
                                 abort_reason,
-                            },
-                        );
+                            });
                         tx_rec.set_local_decision(exec.decision());
-                        proposed_block_change_set.add_transaction_execution(*tx_rec.transaction_id(), exec)?;
+                        proposed_block_change_set.add_transaction_execution(*tx_rec.id(), exec)?;
                     }
                 }
 
@@ -196,7 +193,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     if let Some(conflicting_transaction_id) =
                         LockedSubstateValue::get_transaction_id_that_conflicts_with_write_locks(
                             substate_store.read_transaction(),
-                            tx_rec.transaction_id(),
+                            tx_rec.id(),
                             inputs,
                         )?
                     {
@@ -242,22 +239,20 @@ pub fn process_foreign_block<TStore: StateStore>(
                                 target: LOG_TARGET,
                                 "⚠️ Foreign proposal {} received for transaction {} but a conflicting transaction ({}) has already been prepared by this node. Abort.",
                                 proposal,
-                                tx_rec.transaction_id(),
+                                tx_rec.id(),
                                 conflicting_transaction_id
                             );
 
                             // Add an abort execution since we previously decided to commit
-                            let exec = TransactionExecution::abort(
-                                tx_rec.transaction_id(),
-                                RejectReason::ForeignPledgeInputConflict,
-                            );
+                            let exec =
+                                TransactionExecution::abort(tx_rec.id(), RejectReason::ForeignPledgeInputConflict);
                             tx_rec.set_local_decision(exec.decision());
-                            proposed_block_change_set.add_transaction_execution(*tx_rec.transaction_id(), exec)?;
+                            proposed_block_change_set.add_transaction_execution(*tx_rec.id(), exec)?;
                         } else {
                             info!(
                                 target: LOG_TARGET,
                                 "Transaction {} conflicts with {} but does not conflict with any foreign pledges. No need to abort.",
-                                tx_rec.transaction_id(),
+                                tx_rec.id(),
                                 conflicting_transaction_id
                             );
                         }
@@ -288,7 +283,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     info!(
                         target: LOG_TARGET,
                         "🧩 FOREIGN PROPOSAL {foreign_shard_group}: (Initial sequence from LocalPrepare) Transaction is ready for Prepare({}, {}) Local Stage: {}",
-                        tx_rec.transaction_id(),
+                        tx_rec.id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage()
                     );
@@ -306,7 +301,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                         info!(
                             target: LOG_TARGET,
                             "🧩 FOREIGN PROPOSAL {foreign_shard_group}: (Initial sequence from LocalPrepare) Transaction is ready for Prepare({}, {}) Local Stage: {}",
-                            tx_rec.transaction_id(),
+                            tx_rec.id(),
                             tx_rec.current_decision(),
                             tx_rec.current_stage()
                         );
@@ -316,7 +311,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                         info!(
                             target: LOG_TARGET,
                             "🧩 FOREIGN PROPOSAL {foreign_shard_group}: (Initial sequence from LocalPrepare) Transaction is NOT ready for Prepare({}, {}) Local Stage: {}",
-                            tx_rec.transaction_id(),
+                            tx_rec.id(),
                             tx_rec.current_decision(),
                             tx_rec.current_stage()
                         );
@@ -335,7 +330,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     info!(
                         target: LOG_TARGET,
                         "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Transaction is ready for propose AllPrepared({}, {}) Local Stage: {}",
-                        tx_rec.transaction_id(),
+                        tx_rec.id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage()
                     );
@@ -346,7 +341,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                         target: LOG_TARGET,
                         "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Transaction is NOT ready for AllPrepared({}, {}) Local Stage: {}, \
                         All Justified: {}. Waiting for local proposal and/or additional foreign proposals for all other shard groups.",
-                        tx_rec.transaction_id(),
+                        tx_rec.id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage(),
                         tx_rec.evidence().all_input_shard_groups_prepared(local_shard_group)
@@ -395,7 +390,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                         target: LOG_TARGET,
                         "⚠️ Foreign proposal {} received LOCAL_ACCEPT for transaction {} but current transaction stage is {}. Ignoring.",
                         proposal,
-                        tx_rec.transaction_id(),
+                        tx_rec.id(),
                         tx_rec.current_stage(),
                     );
                     continue;
@@ -408,19 +403,17 @@ pub fn process_foreign_block<TStore: StateStore>(
                         info!(
                             target: LOG_TARGET,
                             "⚠️ Foreign {foreign_shard_group} ABORT {}. Update overall decision to ABORT. Local stage: {}, Leaf: {}",
-                            tx_rec.transaction_id(), tx_rec.current_stage(), local_leaf
+                            tx_rec.id(), tx_rec.current_stage(), local_leaf
                         );
                         // Add an abort execution since we previously decided to commit
-                        let exec = TransactionExecution::abort(
-                            tx_rec.transaction_id(),
-                            RejectReason::ForeignShardGroupDecidedToAbort {
+                        let exec =
+                            TransactionExecution::abort(tx_rec.id(), RejectReason::ForeignShardGroupDecidedToAbort {
                                 start_shard: foreign_shard_group.start().as_u32(),
                                 end_shard: foreign_shard_group.end().as_u32(),
                                 abort_reason,
-                            },
-                        );
+                            });
                         tx_rec.set_local_decision(exec.decision());
-                        proposed_block_change_set.add_transaction_execution(*tx_rec.transaction_id(), exec)?;
+                        proposed_block_change_set.add_transaction_execution(*tx_rec.id(), exec)?;
                     }
                 }
 
@@ -477,7 +470,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                         info!(
                             target: LOG_TARGET,
                             "🧩 FOREIGN PROPOSAL {foreign_shard_group}: (Initial sequence from LocalAccept) Transaction is ready for Prepare({}, {}) Local Stage: {}",
-                            tx_rec.transaction_id(),
+                            tx_rec.id(),
                             tx_rec.current_decision(),
                             tx_rec.current_stage()
                         );
@@ -488,7 +481,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                         info!(
                             target: LOG_TARGET,
                             "🧩 FOREIGN PROPOSAL {foreign_shard_group}: (Initial sequence from LocalAccept) Transaction is NOT ready for Prepare({}, {}) Local Stage: {}",
-                            tx_rec.transaction_id(),
+                            tx_rec.id(),
                             tx_rec.current_decision(),
                             tx_rec.current_stage()
                         );
@@ -504,7 +497,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     info!(
                         target: LOG_TARGET,
                         "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Transaction is ready for propose ALL_PREPARED({}, {}) Local Stage: {}",
-                        tx_rec.transaction_id(),
+                        tx_rec.id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage()
                     );
@@ -518,7 +511,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     info!(
                         target: LOG_TARGET,
                         "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Transaction is ready for propose ALL_ACCEPT({}, {}) Local Stage: {}",
-                        tx_rec.transaction_id(),
+                        tx_rec.id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage()
                     );
@@ -528,7 +521,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     info!(
                         target: LOG_TARGET,
                         "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Transaction is NOT ready for AllAccept({}, {}) Local Stage: {}, All Justified: {}. Waiting for local or foreign proposal.",
-                        tx_rec.transaction_id(),
+                        tx_rec.id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage(),
                         tx_rec.evidence().all_shard_groups_accepted()
@@ -552,8 +545,7 @@ pub fn process_foreign_block<TStore: StateStore>(
             Command::SomeAccept(_) |
             Command::LocalOnly(_) |
             Command::ForeignProposal(_) |
-            Command::EvictNode(_) |
-            Command::MintConfidentialOutput(_) => {
+            Command::EvictNode(_) => {
                 // Disregard
                 continue;
             },
@@ -622,11 +614,7 @@ fn add_pledges(
                 }
             })?;
             let output_pledges = foreign_sg_evidence.output_pledge_iter().collect();
-            proposed_block_change_set.add_foreign_pledges(
-                transaction.transaction_id(),
-                foreign_shard_group,
-                output_pledges,
-            );
+            proposed_block_change_set.add_foreign_pledges(transaction.id(), foreign_shard_group, output_pledges);
 
             let Some(pledges) = block_pledge.get_all_pledges_for_evidence(foreign_sg_evidence) else {
                 if transaction.evidence().is_committee_output_only(foreign_shard_group) {
@@ -676,7 +664,7 @@ fn add_pledges(
                 pledges.display()
             );
 
-            proposed_block_change_set.add_foreign_pledges(transaction.transaction_id(), foreign_shard_group, pledges);
+            proposed_block_change_set.add_foreign_pledges(transaction.id(), foreign_shard_group, pledges);
         },
         Decision::Abort(reason) => {
             debug!(target: LOG_TARGET, "Transaction {} was ABORTED by foreign node ({}). No pledges expected.", atom.id, reason);
@@ -698,7 +686,7 @@ fn has_all_foreign_input_pledges<TTx: StateStoreReadTransaction>(
         .filter(|(sg, _)| local_committee_info.shard_group() != **sg)
         .flat_map(|(_, ev)| ev.inputs());
 
-    let current_pledges = proposed_block_change_set.get_foreign_pledges(tx_rec.transaction_id());
+    let current_pledges = proposed_block_change_set.get_foreign_pledges(tx_rec.id());
 
     for (id, data) in foreign_inputs {
         let Some(data) = data else {
@@ -715,7 +703,7 @@ fn has_all_foreign_input_pledges<TTx: StateStoreReadTransaction>(
         }
 
         if tx.foreign_substate_pledges_exists_for_transaction_and_address(
-            tx_rec.transaction_id(),
+            tx_rec.id(),
             SubstateAddress::from_substate_id(id, data.version),
         )? {
             continue;
@@ -723,7 +711,7 @@ fn has_all_foreign_input_pledges<TTx: StateStoreReadTransaction>(
         debug!(
             target: LOG_TARGET,
             "Transaction {} is missing a pledge for input {}",
-            tx_rec.transaction_id(),
+            tx_rec.id(),
             id
         );
         return Ok(false);
@@ -770,7 +758,7 @@ fn get_or_sequence_transaction<TTx: StateStoreReadTransaction>(
                     num_preshards,
                     num_committees,
                     transaction.transaction.all_inputs_iter(),
-                    [VersionedSubstateId::new(transaction_id.into_receipt_address(), 0)],
+                    transaction.transaction.known_outputs_iter(),
                 );
 
                 let pool_tx =
@@ -790,7 +778,7 @@ fn get_or_sequence_transaction<TTx: StateStoreReadTransaction>(
     }
 }
 
-fn calculate_qc_id_from_sidechain_qc(qc: &tari_sidechain::QuorumCertificate) -> QcId {
+fn calculate_qc_id_from_sidechain_qc(qc: &tari_sidechain::QuorumCertificate) -> PcId {
     let signatures = qc
         .signatures
         .iter()

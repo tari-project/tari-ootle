@@ -24,10 +24,14 @@ import type {
   AccountGetDefaultRequest,
   AccountGetRequest,
   AccountGetResponse,
+  AccountsAssociateStealthResourceRequest,
+  AccountsAssociateStealthResourceResponse,
   AccountsCreateFreeTestCoinsRequest,
   AccountsCreateFreeTestCoinsResponse,
   AccountsCreateRequest,
   AccountsCreateResponse,
+  AccountsRenameRequest,
+  AccountsRenameResponse,
   AccountSetDefaultRequest,
   AccountSetDefaultResponse,
   AccountsGetBalancesRequest,
@@ -63,13 +67,13 @@ import type {
   MintFaucetNftResponse,
   PublishTemplateRequest,
   PublishTemplateResponse,
-  RevealFundsRequest,
-  RevealFundsResponse,
   SettingsGetResponse,
   SettingsSetRequest,
   SettingsSetResponse,
   StealthTransferRequest,
   StealthTransferResponse,
+  StealthUtxosListRequest,
+  StealthUtxosListResponse,
   SubstatesGetRequest,
   SubstatesGetResponse,
   SubstatesListRequest,
@@ -103,10 +107,13 @@ import type {
   WebauthnStartRegisterResponse,
   WebRtcStartRequest,
   WebRtcStartResponse,
+  StealthUtxosDecryptValueRequest,
+  StealthUtxosDecryptValueResponse,
+  TransactionSubmitDryRunResponse,
 } from "@tari-project/typescript-bindings";
 import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
-import useAuthStore from "../store/authStore";
-import { AUTH_TOKEN_FOR_NONE_AUTH } from "../routes/Auth/Auth";
+import useAuthStore from "@store/authStore";
+import { AUTH_TOKEN_FOR_NONE_AUTH } from "@routes/Auth/Auth";
 
 let clientInstance: WalletDaemonClient | null = null;
 let pendingClientInstance: Promise<WalletDaemonClient> | null = null;
@@ -246,7 +253,7 @@ export const keysSetActive = (request: KeysSetActiveRequest): Promise<KeysSetAct
 
 export const transactionsSubmit = (request: TransactionSubmitRequest): Promise<TransactionSubmitResponse> =>
   client().then((c) => c.submitTransaction(request));
-export const submitTransactionDryRun = (request: TransactionSubmitRequest): Promise<TransactionSubmitResponse> =>
+export const submitTransactionDryRun = (request: TransactionSubmitRequest): Promise<TransactionSubmitDryRunResponse> =>
   client().then((c) => c.submitTransactionDryRun(request));
 export const transactionsGet = (request: TransactionGetRequest): Promise<TransactionGetResponse> =>
   client().then((c) => c.transactionsGet(request));
@@ -265,13 +272,12 @@ export const transactionsSubmitManifest = (
 ): Promise<TransactionSubmitManifestResponse> => client().then((c) => c.submitTransactionManifest(request));
 
 // accounts
-export const accountsRevealFunds = (request: RevealFundsRequest): Promise<RevealFundsResponse> =>
-  client().then((c) => c.accountsRevealFunds(request));
 export const accountsClaimBurn = (request: ClaimBurnRequest): Promise<ClaimBurnResponse> =>
   client().then((c) => c.accountsClaimBurn(request));
 export const accountsCreate = (request: AccountsCreateRequest): Promise<AccountsCreateResponse> =>
   client().then((c) => c.accountsCreate(request));
-
+export const accountsRename = (request: AccountsRenameRequest): Promise<AccountsRenameResponse> =>
+  client().then((c) => c.accountsRename(request));
 export const accountsList = (request: AccountsListRequest): Promise<AccountsListResponse> =>
   client().then((c) => c.accountsList(request));
 export const accountsGetBalances = (request: AccountsGetBalancesRequest): Promise<AccountsGetBalancesResponse> =>
@@ -284,6 +290,10 @@ export const accountsTransfer = (request: AccountsTransferRequest): Promise<Acco
 export const accountsConfidentialTransfer = (
   request: ConfidentialTransferRequest,
 ): Promise<ConfidentialTransferResponse> => client().then((c) => c.confidentialTransfer(request));
+export const accountsAssociateStealthResource = (
+  request: AccountsAssociateStealthResourceRequest,
+): Promise<AccountsAssociateStealthResourceResponse> =>
+  client().then((c) => c.accountsAssociateStealthResource(request));
 export const accountsStealthTransfer = (request: StealthTransferRequest): Promise<StealthTransferResponse> =>
   client().then((c) => c.stealthTransfer(request));
 export const accountsSetDefault = (request: AccountSetDefaultRequest): Promise<AccountSetDefaultResponse> =>
@@ -300,6 +310,10 @@ export const accountsGetDefault = (request: AccountGetDefaultRequest): Promise<A
 export const confidentialViewVaultBalance = (
   request: ConfidentialViewVaultBalanceRequest,
 ): Promise<ConfidentialViewVaultBalanceResponse> => client().then((c) => c.viewVaultBalance(request));
+
+export const stealthDecryptUtxoBalance = (
+  request: StealthUtxosDecryptValueRequest,
+): Promise<StealthUtxosDecryptValueResponse> => client().then((c) => c.stealthUtxosDecryptValue(request));
 
 // nfts
 export const nftList = (request: ListNftsRequest): Promise<ListNftsResponse> =>
@@ -331,3 +345,7 @@ export const templatesListAuthored = (request: TemplatesListAuthoredRequest): Pr
 
 // info
 export const walletGetInfo = (): Promise<WalletGetInfoResponse> => client().then((c) => c.walletGetInfo());
+
+// utxos
+export const stealthUtxosList = (request: StealthUtxosListRequest): Promise<StealthUtxosListResponse> =>
+  client().then((c) => c.stealthUtxosList(request));

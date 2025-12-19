@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "module": "ES2020",
+    "target": "ESNext",
+    "moduleResolution": "node",
+    "declaration": true,
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "esModuleInterop": true,
+    // Required for wallet web ui to build
+    "composite": true
+  },
+  "include": [
+    "src/**/*"
+  ],
+  "references": [
+    {
+      "path": "../../../bindings"
+    }
+  ]
+}

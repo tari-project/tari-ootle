@@ -20,23 +20,25 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useAccountsGetDefault } from "../../api/hooks/useAccounts";
-import useAccountStore from "../../store/accountStore";
-import Onboarding from "../Onboarding/Onboarding";
+import { useAccountsGetDefault } from "@api/hooks/useAccounts";
+import useAccountStore from "@store/accountStore";
+import Onboarding from "@routes/Onboarding/Onboarding";
 import MyAssets from "./Components/MyAssets";
 import { useEffect } from "react";
-import FetchStatusCheck from "../../Components/FetchStatusCheck";
-import useAuthStore from "../../store/authStore";
+import FetchStatusCheck from "@components/FetchStatusCheck";
+import useAuthStore from "@store/authStore";
 
 function AssetVault() {
-  const { account, setAccount, setPublicKey } = useAccountStore();
+  const account = useAccountStore((state) => state.account);
+  const setAccount = useAccountStore((state) => state.setAccount);
+  const setOotleAddress = useAccountStore((state) => state.setOotleAddress);
   const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
   const authStore = useAuthStore();
 
   useEffect(() => {
     if (!isError && defaultAccount) {
       setAccount(defaultAccount.account);
-      setPublicKey(defaultAccount.public_key);
+      setOotleAddress(defaultAccount.address);
     }
 
     if (error) {

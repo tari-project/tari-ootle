@@ -38,6 +38,8 @@ create table validator_nodes
     power                bigint                            not null
 );
 
+CREATE INDEX validator_nodes_address_index ON validator_nodes (address);
+
 CREATE TABLE committees
 (
     id                INTEGER PRIMARY KEY autoincrement NOT NULL,
@@ -80,8 +82,8 @@ create unique index templates_template_address_index on templates (template_addr
 
 create table epochs
 (
-    epoch             bigint primary key not null,
-    validator_node_mr blob               not null
+    epoch      bigint primary key not null,
+    epoch_hash blob               not null
 );
 
 create table bmt_cache
@@ -99,4 +101,17 @@ CREATE TABLE layer_one_transactions
     submitted_at DATETIME                          NULL,
     is_observed  BOOLEAN                           NOT NULL DEFAULT '0'
 );
+
+CREATE TABLE block_headers
+(
+    id                         INTEGER PRIMARY KEY autoincrement NOT NULL,
+    epoch                      BIGINT                            NOT NULL,
+    height                     BIGINT                            NOT NULL,
+    block_hash                 BLOB                              NOT NULL,
+    kernel_merkle_root         BLOB                              NOT NULL,
+    validator_node_merkle_root BLOB                              NOT NULL,
+    created_at                 DATETIME                          NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX block_headers_block_hash_epoch_idx ON block_headers (block_hash, epoch);
 

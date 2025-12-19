@@ -57,7 +57,6 @@ impl ProcessDefinition for MinotariWallet {
             .arg("--enable-grpc")
             .arg("--password")
             .arg("password")
-            .arg(format!("-pwallet.custom_base_node={}", base_node_addresses[0]))
             .arg("-pwallet.p2p.transport.type=tcp")
             .arg(format!(
                 "-pwallet.p2p.transport.tcp.listener_address={listener_address}"
@@ -65,7 +64,7 @@ impl ProcessDefinition for MinotariWallet {
             .arg(format!("-pwallet.p2p.public_addresses={public_address}"))
             .arg(format!("-pwallet.grpc_address=/ip4/{listen_ip}/tcp/{grpc_port}"))
             .arg(format!(
-                "-pwallet.http_client_url=http://{listen_ip}:{base_node_api_port}"
+                "-pwallet.http_server_url=http://{listen_ip}:{base_node_api_port}"
             ))
             .args(["--non-interactive", "-pwallet.p2p.allow_test_addresses=true"])
             .arg(format!(

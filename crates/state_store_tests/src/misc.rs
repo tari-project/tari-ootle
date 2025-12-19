@@ -10,13 +10,13 @@ use tari_consensus_types::{
     LastVoted,
     LeafBlock,
     LockedBlock,
+    PcId,
     ProposalVote,
-    QcId,
     ValidatorSignatureBytes,
 };
 use tari_ootle_common_types::{optional::Optional, Epoch, Network, NodeHeight, ShardGroup};
 use tari_ootle_storage::{
-    consensus_models::{Block, EndOfEpochCommand, EpochCheckpoint},
+    consensus_models::{Block, EndOfEpochCommand, EpochCheckpoint, TreeRootSummary},
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
@@ -31,13 +31,9 @@ use crate::{
 };
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn miscellaneous_rocksdb() {
     let (db, _tmp) = create_rocksdb();
-    miscellaneous_operations(db);
-}
-
-#[allow(clippy::too_many_lines)]
-fn miscellaneous_operations(db: impl StateStore) {
     let mut tx = db.create_write_tx().unwrap();
 
     // last voted
@@ -151,7 +147,7 @@ fn miscellaneous_operations(db: impl StateStore) {
         block_id: BlockId::zero(),
         epoch,
         block_height: NodeHeight(123),
-        qc_id: QcId::zero(),
+        qc_id: PcId::zero(),
     };
     tx.high_pc_set(&high_qc).unwrap();
     let res = tx.high_pc_get(epoch).unwrap();
@@ -166,8 +162,11 @@ fn miscellaneous_operations(db: impl StateStore) {
     // epoch checkpoints
     let shard_group = ShardGroup::all_shards(TEST_NUM_PRESHARDS);
     let block = Block::zero_block(Network::LocalNet, TEST_NUM_PRESHARDS);
-    let mut shard_roots = IndexMap::new();
-    shard_roots.insert(shard_group.start(), TreeHash::zero());
+    let mut shard_summary = IndexMap::new();
+    shard_summary.insert(shard_group.start(), TreeRootSummary {
+        root_hash: TreeHash::zero(),
+        state_version: 0,
+    });
     let key = TreeHash::new([1; 32]);
     let (_, inclusion_proof) = compute_proof_for_hashes([key].into_iter(), key).unwrap();
     let commit_proof = SidechainBlockCommitProof {
@@ -185,15 +184,20 @@ fn miscellaneous_operations(db: impl StateStore) {
             state_merkle_root: Default::default(),
             command_merkle_root: Default::default(),
             signature: Default::default(),
+            accumulated_data: Default::default(),
             metadata_hash: Default::default(),
         },
         proof_elements: vec![],
     };
     let proof = CommandCommitProof::new(EndOfEpochCommand, commit_proof, inclusion_proof);
-    let epoch_checkpoint = EpochCheckpoint::new(proof, shard_roots);
+    let epoch_checkpoint = EpochCheckpoint::new(proof, shard_summary);
 
     tx.epoch_checkpoint_save(&epoch_checkpoint).unwrap();
-    let res = tx.epoch_checkpoint_get(block.epoch()).unwrap();
+    let res = tx
+        .epoch_checkpoint_get_all_from_epoch(block.epoch(), 1)
+        .unwrap()
+        .pop()
+        .unwrap();
     assert_eq_debug(&res, &epoch_checkpoint);
 
     // foreign parked blocks

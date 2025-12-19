@@ -14,11 +14,7 @@ use tari_ootle_common_types::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct VersionedSubstateIdLockIntent {
     versioned_substate_id: VersionedSubstateId,
     lock_type: SubstateLockType,

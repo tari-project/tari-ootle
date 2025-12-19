@@ -28,13 +28,13 @@ import Button from "@mui/material/Button";
 import Grid from "@mui/material/Grid";
 import Typography from "@mui/material/Typography";
 import { useTheme } from "@mui/material/styles";
-import Loading from "../../Components/Loading";
-import { useAccountsCreate } from "../../api/hooks/useAccounts";
-import useAccountStore from "../../store/accountStore";
+import Loading from "@components/Loading";
+import { useAccountsCreate } from "@api/hooks/useAccounts";
+import useAccountStore from "@store/accountStore";
 
 function Onboarding() {
   const { mutate, status } = useAccountsCreate();
-  const { setAccount, setPublicKey, setPopup } = useAccountStore();
+  const { setAccount, setOotleAddress, setPopup } = useAccountStore();
   const theme = useTheme();
 
   const [accountFormState, setAccountFormState] = useState({
@@ -50,7 +50,7 @@ function Onboarding() {
       {
         onSuccess: (resp) => {
           setAccount(resp.account);
-          setPublicKey(resp.public_key);
+          setOotleAddress(resp.address);
         },
         onError: (e) => {
           setPopup({ title: "Account create failed: " + e, error: true });
@@ -66,7 +66,7 @@ function Onboarding() {
     });
   };
 
-  if (status === "loading") {
+  if (status === "pending") {
     return <Loading />;
   }
 
@@ -109,7 +109,7 @@ function Onboarding() {
                 textAlign: "center",
               }}
             >
-              Create your test account below to get started
+              Give your account a friendly name to get started
             </Typography>
             <Form
               onSubmit={handleCreateAccount}

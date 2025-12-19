@@ -32,7 +32,6 @@ import type {
   GetBlocksResponse,
   GetCommitteeRequest,
   GetCommitteeResponse,
-  VNGetCommsStatsResponse,
   VNGetConnectionsResponse,
   GetEpochManagerStatsResponse,
   VNGetIdentityResponse,
@@ -45,12 +44,8 @@ import type {
   GetStateResponse,
   VNGetSubstateRequest,
   VNGetSubstateResponse,
-  GetSubstatesByTransactionRequest,
-  GetSubstatesByTransactionResponse,
   GetTemplateRequest,
   GetTemplateResponse,
-  GetTemplatesRequest,
-  GetTemplatesResponse,
   GetTransactionRequest,
   GetTransactionResponse,
   VNGetTransactionResultRequest,
@@ -60,8 +55,6 @@ import type {
   ListBlocksResponse,
   VNSubmitTransactionRequest,
   VNSubmitTransactionResponse,
-  VNGetValidatorFeesRequest,
-  VNGetValidatorFeesResponse,
 } from "@tari-project/typescript-bindings";
 
 
@@ -129,8 +122,6 @@ export const getFilteredBlocksCount = (request: GetFilteredBlocksCountRequest): 
 // Template
 export const getTemplate = (request: GetTemplateRequest): Promise<GetTemplateResponse> =>
   jsonRpc("get_template", request);
-export const getTemplates = (request: GetTemplatesRequest): Promise<GetTemplatesResponse> =>
-  jsonRpc("get_templates", request);
 
 // Validator Node
 export const getIdentity = (): Promise<VNGetIdentityResponse> => jsonRpc("get_identity");
@@ -143,10 +134,9 @@ export const getCommittee = (request: GetCommitteeRequest): Promise<GetCommittee
   jsonRpc("get_committee", request);
 export const getAllVns = (request: VNGetAllVnsRequest): Promise<VNGetAllVnsResponse> => jsonRpc("get_all_vns", request);
 export const getNetworkCommittees = (): Promise<GetNetworkCommitteeResponse> => jsonRpc("get_network_committees", {});
-export const getFees = (request: VNGetValidatorFeesRequest): Promise<VNGetValidatorFeesResponse> =>
-  jsonRpc("get_fees", request);
+// export const getFees = (request: VNGetValidatorFeesRequest): Promise<VNGetValidatorFeesResponse> =>
+//   jsonRpc("get_fees", request);
 
 // Comms
 export const addPeer = (request: VNAddPeerRequest) => jsonRpc("add_peer", request);
-export const getCommsStats = (): Promise<VNGetCommsStatsResponse> => jsonRpc("get_comms_stats");
 export const getConnections = (): Promise<VNGetConnectionsResponse> => jsonRpc("get_connections");

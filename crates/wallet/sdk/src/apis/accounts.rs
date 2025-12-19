@@ -1,20 +1,25 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
+use std::collections::HashSet;
+
 use tari_engine_types::{
     component::derive_component_address_from_public_key,
     indexed_value::IndexedWellKnownTypes,
+    FromByteType,
     ToByteType,
 };
+use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     substate_type::SubstateType,
+    Epoch,
+    Network,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     models::{ComponentAddress, ResourceAddress, VaultId},
-    prelude::{ResourceType, RistrettoPublicKeyBytes},
+    prelude::{ResourceType, RistrettoPublicKeyBytes, XTR},
     types::Amount,
 };
 
@@ -24,86 +29,132 @@ use crate::{
         key_manager::{KeyManagerApi, KeyManagerApiError},
         substate::{SubstatesApi, ValidatorScanResult},
     },
-    models::{Account, AccountUpdate, AccountWithPublicKey, VaultBalance, VaultModel},
-    network::WalletNetworkInterface,
-    storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+    models::{
+        Account,
+        AccountUpdate,
+        AccountWithAddress,
+        EpochBirthday,
+        KeyId,
+        KeyIdOrPublicKey,
+        VaultBalance,
+        VaultModel,
+        WalletOotleAddressWithKeyIds,
+    },
+    spec::WalletSdkSpec,
+    storage::{
+        CommittableStore,
+        ReadableWalletStore,
+        WalletStorageError,
+        WalletStoreReader,
+        WalletStoreWriter,
+        WriteableWalletStore,
+    },
 };
 
-pub struct AccountsApi<'a, TStore, TNetworkInterface> {
-    store: &'a TStore,
-    substates_api: SubstatesApi<'a, TStore, TNetworkInterface>,
-    key_manager_api: KeyManagerApi<'a, TStore>,
+pub struct AccountsApi<'a, TSpec: WalletSdkSpec> {
+    network: Network,
+    store: &'a TSpec::Store,
+    substates_api: SubstatesApi<'a, TSpec::Store, TSpec::NetworkInterface>,
+    key_manager_api: KeyManagerApi<'a, TSpec>,
+    epoch_birthday: EpochBirthday,
 }
 
 pub fn derive_account_address_from_public_key(public_key: &RistrettoPublicKeyBytes) -> ComponentAddress {
     derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, public_key)
 }
 
-impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetworkInterface> {
+impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
     pub fn new(
-        store: &'a TStore,
-        substates_api: SubstatesApi<'a, TStore, TNetworkInterface>,
-        key_manager_api: KeyManagerApi<'a, TStore>,
+        network: Network,
+        store: &'a TSpec::Store,
+        substates_api: SubstatesApi<'a, TSpec::Store, TSpec::NetworkInterface>,
+        key_manager_api: KeyManagerApi<'a, TSpec>,
+        epoch_birthday: EpochBirthday,
     ) -> Self {
         Self {
+            network,
             store,
             substates_api,
             key_manager_api,
+            epoch_birthday,
         }
+    }
+
+    pub fn derive_account_address_from_public_key(&self, public_key: &RistrettoPublicKeyBytes) -> ComponentAddress {
+        derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, public_key)
     }
 
     pub fn create_account(
         &self,
         account_name: Option<&str>,
         is_default: bool,
-        key_id: Option<u64>,
-    ) -> Result<AccountWithPublicKey, AccountsApiError> {
-        let owner_key = match key_id {
-            Some(id) => self.key_manager_api.derive_account_key(id)?,
-            None => self.key_manager_api.next_account_key()?,
-        };
-        let owner_public_key = RistrettoPublicKey::from_secret_key(&owner_key.key).to_byte_type();
-        let account_address = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &owner_public_key);
+        account_address: WalletOotleAddressWithKeyIds,
+    ) -> Result<AccountWithAddress, AccountsApiError> {
+        let account_public_key = account_address.address.account_key().to_byte_type();
+        let account_component_address = derive_account_address_from_public_key(&account_public_key);
 
-        self.store.with_write_tx(|tx| {
-            if let Some(name) = account_name {
-                if tx.accounts_get_by_name(name).optional()?.is_some() {
-                    return Err(AccountsApiError::AccountNameAlreadyExists { name: name.to_string() });
-                }
-            }
+        let birthday_epoch = self.epoch_birthday.calculate_current_epoch();
 
-            tx.accounts_insert(account_name, &account_address, owner_key.key_index, false, is_default)?;
-            Ok(AccountWithPublicKey {
-                account: Account {
-                    name: account_name.map(String::from),
-                    address: account_address,
-                    key_index: owner_key.key_index,
-                    is_confirmed_on_chain: false,
-                    is_default,
-                },
-                owner_public_key,
-            })
+        self.add_account(
+            account_name,
+            &account_component_address,
+            account_address.view_only_key_id,
+            account_address.owner_key_id,
+            birthday_epoch,
+            false,
+            is_default,
+        )?;
+
+        Ok(AccountWithAddress {
+            account: Account {
+                name: account_name.map(String::from),
+                component_address: account_component_address,
+                view_only_key_id: account_address.view_only_key_id,
+                owner_key_id: Some(account_address.owner_key_id),
+                owner_public_key: account_public_key,
+                birthday_epoch,
+                is_confirmed_on_chain: false,
+                is_default,
+            },
+            address: account_address.address.to_byte_type(),
         })
     }
 
-    pub fn add_account(
+    pub fn add_account<K: Into<KeyIdOrPublicKey>>(
         &self,
         account_name: Option<&str>,
         account_address: &ComponentAddress,
-        owner_key_index: u64,
+        view_only_key_id: KeyId,
+        owner_key: K,
+        birthday_epoch: Epoch,
         is_confirmed_on_chain: bool,
         is_default: bool,
     ) -> Result<(), AccountsApiError> {
+        let (owner_pk, owner_key_id) = match owner_key.into() {
+            KeyIdOrPublicKey::KeyId(key_id) => {
+                let pk = self.key_manager_api.get_key(key_id)?.to_public_key().to_byte_type();
+                (pk, Some(key_id))
+            },
+            KeyIdOrPublicKey::PublicKey(pk) => (pk, None),
+        };
         self.store.with_write_tx(|tx| {
             if let Some(name) = account_name {
                 if tx.accounts_get_by_name(name).optional()?.is_some() {
                     return Err(AccountsApiError::AccountNameAlreadyExists { name: name.to_string() });
                 }
             }
+
+            let mut associated_stealth_resources = HashSet::new();
+            associated_stealth_resources.insert(XTR);
+
             tx.accounts_insert(
                 account_name,
                 account_address,
-                owner_key_index,
+                view_only_key_id,
+                owner_key_id,
+                &owner_pk,
+                &associated_stealth_resources,
+                birthday_epoch,
                 is_confirmed_on_chain,
                 is_default,
             )?;
@@ -114,7 +165,7 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
     pub fn update_account(
         &self,
         account_address: &ComponentAddress,
-        update: AccountUpdate,
+        update: AccountUpdate<'_>,
     ) -> Result<(), AccountsApiError> {
         self.store.with_write_tx(|tx| {
             tx.accounts_update(account_address, update)?;
@@ -122,15 +173,13 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
         })
     }
 
-    pub fn get_many(&self, offset: u64, limit: u64) -> Result<Vec<Account>, AccountsApiError> {
-        let mut tx = self.store.create_read_tx()?;
-        let accounts = tx.accounts_get_many(offset, limit)?;
+    pub fn get_many(&self, offset: usize, limit: usize) -> Result<Vec<Account>, AccountsApiError> {
+        let accounts = self.store.with_read_tx(|tx| tx.accounts_get_many(offset, limit))?;
         Ok(accounts)
     }
 
     pub fn count(&self) -> Result<u64, AccountsApiError> {
-        let mut tx = self.store.create_read_tx()?;
-        let count = tx.accounts_count()?;
+        let count = self.store.with_read_tx(|tx| tx.accounts_count())?;
         Ok(count)
     }
 
@@ -138,23 +187,21 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
         self.count().map(|count| count > 0)
     }
 
-    pub fn get_default(&self) -> Result<AccountWithPublicKey, AccountsApiError> {
-        // TODO: be careful not to use the key manager with a read transaction open as this will deadlock. The DB
-        // transaction should be passed into the SDK methods to avoid this.
+    pub fn get_default(&self) -> Result<AccountWithAddress, AccountsApiError> {
         let account = self.store.with_read_tx(|tx| tx.accounts_get_default())?;
-        let (_, pk) = self.key_manager_api.derive_account_keypair(account.key_index)?;
-        Ok(AccountWithPublicKey {
+        let address = self.get_address_for_account(&account)?;
+        Ok(AccountWithAddress {
             account,
-            owner_public_key: pk.to_byte_type(),
+            address: address.to_byte_type(),
         })
     }
 
-    pub fn get_account_by_name(&self, name: &str) -> Result<AccountWithPublicKey, AccountsApiError> {
+    pub fn get_account_by_name(&self, name: &str) -> Result<AccountWithAddress, AccountsApiError> {
         let account = self.store.with_read_tx(|tx| tx.accounts_get_by_name(name))?;
-        let (_, pk) = self.key_manager_api.derive_account_keypair(account.key_index)?;
-        Ok(AccountWithPublicKey {
+        let address = self.get_address_for_account(&account)?;
+        Ok(AccountWithAddress {
             account,
-            owner_public_key: pk.to_byte_type(),
+            address: address.to_byte_type(),
         })
     }
 
@@ -182,12 +229,70 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
         Ok(self.get_account_by_address(address).optional()?.is_some())
     }
 
-    pub fn get_account_by_address(&self, address: &ComponentAddress) -> Result<AccountWithPublicKey, AccountsApiError> {
+    pub fn get_account_by_address(&self, address: &ComponentAddress) -> Result<AccountWithAddress, AccountsApiError> {
         let account = self.store.with_read_tx(|tx| tx.accounts_get(address))?;
-        let (_, pk) = self.key_manager_api.derive_account_keypair(account.key_index)?;
-        Ok(AccountWithPublicKey {
+        let address = self.get_address_for_account(&account)?;
+        Ok(AccountWithAddress {
             account,
-            owner_public_key: pk.to_byte_type(),
+            address: address.to_byte_type(),
+        })
+    }
+
+    pub fn get_address_for_account(&self, account: &Account) -> Result<RistrettoOotleAddress, AccountsApiError> {
+        let view_only_key = match account.view_only_key_id {
+            KeyId::Derived { key_branch, index } => {
+                let view_only_key = self.key_manager_api.derive_key(key_branch, index)?;
+                view_only_key.to_public_key()
+            },
+            KeyId::Imported { local_key_id } => {
+                let imported = self.key_manager_api.get_imported_key(local_key_id)?;
+                imported.to_public_key()
+            },
+        };
+        let address = RistrettoOotleAddress::new(
+            self.network,
+            view_only_key,
+            account
+                .owner_public_key()
+                .try_from_byte_type()
+                .map_err(|e| WalletStorageError::DataInconsistent {
+                    operation: "get_address_for_account",
+                    details: format!("Failed to convert owner public key from byte type: {e}"),
+                })?,
+        );
+        Ok(address)
+    }
+
+    pub fn associate_stealth_resource(
+        &self,
+        account_address: &ComponentAddress,
+        stealth_resource_address: ResourceAddress,
+    ) -> Result<(), AccountsApiError> {
+        self.store
+            .with_write_tx(|tx| tx.accounts_add_stealth_resource(account_address, stealth_resource_address))?;
+        Ok(())
+    }
+
+    pub fn get_associated_stealth_resources(
+        &self,
+        address: &ComponentAddress,
+    ) -> Result<HashSet<ResourceAddress>, AccountsApiError> {
+        let resources = self
+            .store
+            .with_read_tx(|tx| tx.accounts_get_associated_stealth_resources(address))?;
+        Ok(resources)
+    }
+
+    pub fn get_account_by_public_key(
+        &self,
+        public_key: &RistrettoPublicKeyBytes,
+    ) -> Result<AccountWithAddress, AccountsApiError> {
+        let account_address = derive_account_address_from_public_key(public_key);
+        let account = self.store.with_read_tx(|tx| tx.accounts_get(&account_address))?;
+        let address = self.get_address_for_account(&account)?;
+        Ok(AccountWithAddress {
+            account,
+            address: address.to_byte_type(),
         })
     }
 
@@ -237,6 +342,16 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
         Ok(exists)
     }
 
+    pub fn rename_account(&self, account_addr: &ComponentAddress, new_name: &str) -> Result<(), AccountsApiError> {
+        let mut tx = self.store.create_write_tx()?;
+        tx.accounts_update(account_addr, AccountUpdate {
+            name: Some(new_name),
+            ..Default::default()
+        })?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn set_default_account(&self, account_addr: &ComponentAddress) -> Result<(), AccountsApiError> {
         let mut tx = self.store.create_write_tx()?;
         tx.accounts_set_default(account_addr)?;
@@ -282,11 +397,8 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
     }
 }
 
-impl<'a, TStore, TNetworkInterface> AccountsApi<'a, TStore, TNetworkInterface>
-where
-    TStore: WalletStore,
-    TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError,
+impl<'a, TSpec> AccountsApi<'a, TSpec>
+where TSpec: WalletSdkSpec
 {
     pub async fn resolve_account_by_public_key(
         &self,
@@ -310,7 +422,9 @@ where
             .await
             .optional()?
         {
-            Some(ValidatorScanResult { address, substate, .. }) => {
+            Some(ValidatorScanResult {
+                id: address, substate, ..
+            }) => {
                 let indexed_component = substate
                     .component()
                     .map(|c| IndexedWellKnownTypes::from_value(c.state()))

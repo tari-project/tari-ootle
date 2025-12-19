@@ -26,9 +26,10 @@ use anyhow::Context;
 use log::*;
 use serde_json::json;
 use tari_common::initialize_logging;
-use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
+use tari_crypto::tari_utilities::ByteArray;
+use tari_engine_types::ToByteType;
 use tari_ootle_app_utilities::configuration::load_configuration;
-use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
+use tari_ootle_wallet_sdk::{cipher_seed::CipherSeedRestore, models::KeyBranch};
 use tari_ootle_walletd::{
     cli::{Cli, Subcommand},
     config::ApplicationConfig,
@@ -40,9 +41,10 @@ use tari_shutdown::Shutdown;
 
 const LOG_TARGET: &str = "tari::wallet_daemon";
 
+#[allow(clippy::too_many_lines)]
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    // Setup a panic hook which prints the default rust panic message but also exits the process. This makes a panic in
+    // Set up a panic hook which prints the default rust panic message but also exits the process. This makes a panic in
     // any thread "crash" the system instead of silently continuing.
     let default_hook = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
@@ -50,7 +52,7 @@ async fn main() -> Result<(), anyhow::Error> {
         process::exit(1);
     }));
 
-    let cli = Cli::init();
+    let mut cli = Cli::init();
     let config_path = cli.common.config_path();
     let cfg = load_configuration(config_path, true, &cli, cli.network_override())?;
     let mut config = ApplicationConfig::load_from(&cfg)?;
@@ -58,32 +60,101 @@ async fn main() -> Result<(), anyhow::Error> {
     if let Some(network) = cli.network_override() {
         config.ootle_wallet_daemon.network = network;
     }
+    if let Some(password) = cli.override_keyring_password.take() {
+        config.ootle_wallet_daemon.override_keyring_password = Some(password);
+    }
 
     match &cli.command {
         Some(Subcommand::Run) | None => run(cli, config).await?,
-        // TODO: rather implement create account and return the key
-        Some(Subcommand::CreateKey {
+        Some(Subcommand::CreateAccount {
+            name,
             key_index,
             set_active,
             output_path,
         }) => {
             let wallet_store = init_wallet_store(&config)?;
-            let mut sdk = initialize_wallet_sdk(&cli, &config, wallet_store)?;
-            sdk.initialize_cipher_seed(cli.wallet_restore.seed_words.as_ref())?;
+            let mut sdk = initialize_wallet_sdk(&config, wallet_store)?;
+            sdk.initialize_cipher_seed(
+                cli.wallet_restore
+                    .seed_words
+                    .as_ref()
+                    .map(CipherSeedRestore::FromSeedWords)
+                    .unwrap_or_default(),
+            )?;
             let km = sdk.key_manager_api();
-            let secret = if let Some(index) = key_index {
-                km.derive_account_key(*index)?
+            let account_address = if let Some(index) = key_index {
+                km.derive_account_address(*index)?
             } else {
-                km.next_account_key()?
+                km.next_account_address()?
             };
 
+            let public_key = account_address.address.account_key().to_byte_type();
+            let view_only_public_key = account_address.address.view_only_key().to_byte_type();
+            let account_addr = sdk.accounts_api().derive_account_address_from_public_key(&public_key);
+            let is_default = !sdk.accounts_api().any_accounts_exist()?;
+            let birthday_epoch = sdk.calculate_birthday_epoch();
+            sdk.accounts_api().add_account(
+                name.as_deref(),
+                &account_addr,
+                account_address.view_only_key_id,
+                account_address.owner_key_id,
+                birthday_epoch,
+                false,
+                is_default,
+            )?;
+
             if *set_active {
-                km.set_active_key(KeyBranch::Account, secret.key_index)?;
+                if let Some(index) = account_address.owner_key_id.derived_index() {
+                    km.set_active_key(KeyBranch::Account, index)?;
+                }
             }
 
+            let view_only_secret = km.get_key(account_address.view_only_key_id)?;
+
             let json = json!({
-                "public_key": RistrettoPublicKey::from_secret_key(&secret.key),
-                "key_index": secret.key_index,
+                "component_address": account_addr,
+                "address": account_address.address.to_byte_type(),
+                "account_public_key": public_key,
+                "view_only_public_key": view_only_public_key,
+                "view_only_private_key": hex::encode(view_only_secret.secret().as_bytes()),
+                "key_index": account_address.view_only_key_id,
+            });
+            match output_path {
+                Some(path) => {
+                    let mut file = fs::File::options()
+                        .create(true)
+                        .write(true)
+                        .truncate(true)
+                        .open(path)
+                        .context("failed to open file for writing")?;
+                    serde_json::to_writer_pretty(&mut file, &json).context("failed to encode key json to file")?;
+                    println!("Key written to {}", path.display());
+                },
+                None => {
+                    println!("{}", json);
+                },
+            }
+
+            return Ok(());
+        },
+        Some(Subcommand::NewViewableBalanceKey { key_index, output_path }) => {
+            let wallet_store = init_wallet_store(&config)?;
+            let mut sdk = initialize_wallet_sdk(&config, wallet_store)?;
+            sdk.initialize_cipher_seed(
+                cli.wallet_restore
+                    .seed_words
+                    .as_ref()
+                    .map(CipherSeedRestore::FromSeedWords)
+                    .unwrap_or_default(),
+            )?;
+            let km = sdk.key_manager_api();
+            let key = km.get_elgamal_encrypted_view_key(*key_index)?;
+            let public_key = key.to_public_key().to_byte_type();
+
+            let json = json!({
+                "viewable_balance_public_key": public_key,
+                "viewable_balance_private_key": hex::encode(key.key.as_bytes()),
+                "key_index": key_index,
             });
             match output_path {
                 Some(path) => {
@@ -105,9 +176,17 @@ async fn main() -> Result<(), anyhow::Error> {
         },
         Some(Subcommand::SeedWords) => {
             let wallet_store = init_wallet_store(&config)?;
-            let mut sdk = initialize_wallet_sdk(&cli, &config, wallet_store)?;
-            sdk.initialize_cipher_seed(cli.wallet_restore.seed_words.as_ref())?;
-            let seed_words = sdk.load_seed_words()?;
+            let mut sdk = initialize_wallet_sdk(&config, wallet_store)?;
+            sdk.initialize_cipher_seed(
+                cli.wallet_restore
+                    .seed_words
+                    .as_ref()
+                    .map(CipherSeedRestore::FromSeedWords)
+                    .unwrap_or(CipherSeedRestore::CreateNewIfRequired),
+            )?;
+            let seed_words = sdk
+                .load_seed_words()?
+                .expect("Bug: seed words were initialized however load_seed_words returned None");
             println!("{}", seed_words.join(" ").reveal())
         },
     }
@@ -124,7 +203,7 @@ async fn run(cli: Cli, config: ApplicationConfig) -> Result<(), anyhow::Error> {
 
     if let Err(e) = initialize_logging(
         &cli.common.log_config_path("ootle_wallet_daemon"),
-        &cli.common.get_base_path(),
+        config.common.base_path(),
         include_str!("../log4rs_sample.yml"),
     ) {
         eprintln!("{}", e);
@@ -135,8 +214,8 @@ async fn run(cli: Cli, config: ApplicationConfig) -> Result<(), anyhow::Error> {
         target: LOG_TARGET,
         "🟢 Starting wallet on {} connected to indexer {}",
         config.ootle_wallet_daemon.network,
-        config.ootle_wallet_daemon.indexer_json_rpc_url
+        config.ootle_wallet_daemon.indexer_api_url
     );
 
-    run_tari_ootle_walletd(cli, config, shutdown_signal).await
+    run_tari_ootle_walletd(config, cli.wallet_restore.seed_words.as_ref(), shutdown_signal).await
 }

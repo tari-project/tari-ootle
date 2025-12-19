@@ -1,25 +1,38 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use anyhow::anyhow;
+use std::io::{Read, Write};
+
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
-    codecs::{DbCodec, EncodeVec},
+    codecs::{DbCodec, EncodeVec, FixedBytesCodec},
     error::RocksDbStorageError,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct PublicKeyCodec;
+pub struct PublicKeyCodec {
+    inner: FixedBytesCodec<{ RistrettoPublicKeyBytes::length() }>,
+}
 
 impl DbCodec<RistrettoPublicKeyBytes> for PublicKeyCodec {
-    fn encode(&self, value: &RistrettoPublicKeyBytes) -> Result<EncodeVec, RocksDbStorageError> {
-        Ok(EncodeVec::from_slice(value.as_bytes()))
+    fn encode_len(&self, value: &RistrettoPublicKeyBytes) -> Result<usize, RocksDbStorageError> {
+        self.inner.encode_len(value)
     }
 
-    fn decode(&self, bytes: &[u8]) -> Result<RistrettoPublicKeyBytes, RocksDbStorageError> {
-        RistrettoPublicKeyBytes::from_bytes(bytes).map_err(|e| RocksDbStorageError::DecodeError {
-            source: anyhow!("RistrettoPublicKeyBytes: {}", e),
-        })
+    fn encode_into<W: Write>(
+        &self,
+        value: &RistrettoPublicKeyBytes,
+        writer: &mut W,
+    ) -> Result<(), RocksDbStorageError> {
+        self.inner.encode_into(value, writer)
+    }
+
+    fn encode(&self, value: &RistrettoPublicKeyBytes) -> Result<EncodeVec, RocksDbStorageError> {
+        self.inner.encode(value)
+    }
+
+    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<RistrettoPublicKeyBytes, RocksDbStorageError> {
+        self.inner.decode_reader(reader)
     }
 }

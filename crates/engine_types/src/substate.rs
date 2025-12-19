@@ -22,7 +22,8 @@
 
 use std::{
     any,
-    fmt::{Display, Formatter},
+    fmt,
+    fmt::{Debug, Display, Formatter},
     str::FromStr,
 };
 
@@ -31,14 +32,23 @@ use serde::{Deserialize, Serialize};
 use tari_bor::{decode, decode_exact, encode, BorError};
 use tari_common_types::types::FixedHash;
 use tari_template_lib::{
-    models::{ComponentAddress, NonFungibleAddress, ResourceAddress, UnclaimedConfidentialOutputAddress, VaultId},
+    constants::STEALTH_TARI_RESOURCE_ADDRESS,
+    models::{
+        address_prefixes,
+        ClaimedOutputTombstoneAddress,
+        ComponentAddress,
+        NonFungibleAddress,
+        ResourceAddress,
+        UtxoAddress,
+        VaultId,
+    },
     prelude::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
-    types::{Hash, ObjectKey},
+    types::{Hash, ObjectKey, TemplateAddress},
 };
 
 use crate::{
     component::ComponentHeader,
-    confidential::UnclaimedConfidentialOutput,
+    confidential::ClaimedOutputTombstone,
     hashing::{hasher32, substate_value_hasher32, EngineHashDomainLabel},
     non_fungible::NonFungibleContainer,
     published_template::{PublishedTemplate, PublishedTemplateAddress},
@@ -46,18 +56,13 @@ use crate::{
     transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
     utxo::Utxo,
     vault::Vault,
-    UtxoAddress,
     ValidatorFeePool,
     ValidatorFeePoolAddress,
     ValidatorFeeWithdrawal,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Substate {
     substate: SubstateValue,
     version: u32,
@@ -116,16 +121,12 @@ pub fn hash_substate(substate: &SubstateValue, version: u32) -> FixedHash {
 // BorshDeserialize is implemented for this struct because we de/encode keys in the database using this format
 /// Base object address, version tuples
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, BorshSerialize, BorshDeserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, type = "string"))]
 pub enum SubstateId {
     Component(ComponentAddress),
     Resource(ResourceAddress),
     Vault(VaultId),
-    UnclaimedConfidentialOutput(UnclaimedConfidentialOutputAddress),
+    ClaimedOutputTombstone(ClaimedOutputTombstoneAddress),
     NonFungible(NonFungibleAddress),
     TransactionReceipt(TransactionReceiptAddress),
     Template(PublishedTemplateAddress),
@@ -134,49 +135,49 @@ pub enum SubstateId {
 }
 
 impl SubstateId {
-    pub fn as_component_address(&self) -> Option<ComponentAddress> {
+    pub const fn as_component_address(&self) -> Option<ComponentAddress> {
         match self {
             Self::Component(addr) => Some(*addr),
             _ => None,
         }
     }
 
-    pub fn as_vault_id(&self) -> Option<VaultId> {
+    pub const fn as_vault_id(&self) -> Option<VaultId> {
         match self {
             Self::Vault(id) => Some(*id),
             _ => None,
         }
     }
 
-    pub fn as_resource_address(&self) -> Option<ResourceAddress> {
+    pub const fn as_resource_address(&self) -> Option<ResourceAddress> {
         match self {
             Self::Resource(address) => Some(*address),
             _ => None,
         }
     }
 
-    pub fn as_unclaimed_confidential_output_address(&self) -> Option<UnclaimedConfidentialOutputAddress> {
+    pub const fn as_unclaimed_confidential_output_address(&self) -> Option<ClaimedOutputTombstoneAddress> {
         match self {
-            Self::UnclaimedConfidentialOutput(address) => Some(*address),
+            Self::ClaimedOutputTombstone(address) => Some(*address),
             _ => None,
         }
     }
 
-    pub fn as_template(&self) -> Option<PublishedTemplateAddress> {
+    pub const fn as_template(&self) -> Option<PublishedTemplateAddress> {
         match self {
             Self::Template(address) => Some(*address),
             _ => None,
         }
     }
 
-    pub fn as_transaction_receipt_address(&self) -> Option<TransactionReceiptAddress> {
+    pub const fn as_transaction_receipt_address(&self) -> Option<TransactionReceiptAddress> {
         match self {
             Self::TransactionReceipt(address) => Some(*address),
             _ => None,
         }
     }
 
-    pub fn as_validator_fee_pool_address(&self) -> Option<ValidatorFeePoolAddress> {
+    pub const fn as_validator_fee_pool_address(&self) -> Option<ValidatorFeePoolAddress> {
         match self {
             Self::ValidatorFeePool(address) => Some(*address),
             _ => None,
@@ -213,7 +214,7 @@ impl SubstateId {
 
                 ObjectKey::new(addr.resource_address().as_entity_id(), key)
             },
-            SubstateId::UnclaimedConfidentialOutput(addr) => *addr.as_object_key(),
+            SubstateId::ClaimedOutputTombstone(addr) => *addr.as_object_key(),
             SubstateId::TransactionReceipt(addr) => *addr.as_object_key(),
             SubstateId::Template(addr) => *addr.as_object_key(),
             SubstateId::ValidatorFeePool(addr) => *addr.as_object_key(),
@@ -229,30 +230,32 @@ impl SubstateId {
         }
     }
 
-    // TODO: look at using BECH32 standard
     pub fn to_address_string(&self) -> String {
         self.to_string()
     }
 
-    pub fn as_non_fungible_address(&self) -> Option<&NonFungibleAddress> {
+    pub const fn as_non_fungible_address(&self) -> Option<&NonFungibleAddress> {
         match self {
             SubstateId::NonFungible(addr) => Some(addr),
             _ => None,
         }
     }
 
-    pub fn is_resource(&self) -> bool {
+    pub const fn is_resource(&self) -> bool {
         matches!(self, Self::Resource(_))
     }
 
-    pub fn is_component(&self) -> bool {
+    pub const fn is_component(&self) -> bool {
         matches!(self, Self::Component(_))
     }
 
-    pub fn is_root(&self) -> bool {
+    pub const fn is_root(&self) -> bool {
         // A component and utxo are "root" substates i.e. they may not have a parent node. NOTE: this concept isn't
         // well-defined right now, this is simply used to prevent components being detected as dangling.
-        matches!(self, Self::Component(_) | Self::Utxo(_))
+        matches!(
+            self,
+            Self::Component(_) | Self::Utxo(_) | Self::ClaimedOutputTombstone(_)
+        )
     }
 
     pub fn is_public_key_identity(&self) -> bool {
@@ -263,40 +266,43 @@ impl SubstateId {
         self.is_public_key_identity()
     }
 
-    pub fn is_vault(&self) -> bool {
+    pub const fn is_vault(&self) -> bool {
         matches!(self, Self::Vault(_))
     }
 
-    pub fn is_non_fungible(&self) -> bool {
+    pub const fn is_non_fungible(&self) -> bool {
         matches!(self, Self::NonFungible(_))
     }
 
-    pub fn is_layer1_commitment(&self) -> bool {
-        matches!(self, Self::UnclaimedConfidentialOutput(_))
+    pub const fn is_claimed_output_tombstone(&self) -> bool {
+        matches!(self, Self::ClaimedOutputTombstone(_))
     }
 
-    pub fn is_transaction_receipt(&self) -> bool {
+    pub const fn is_transaction_receipt(&self) -> bool {
         matches!(self, Self::TransactionReceipt(_))
     }
 
-    pub fn is_template(&self) -> bool {
+    pub const fn is_template(&self) -> bool {
         matches!(self, Self::Template(_))
     }
 
-    pub fn is_validator_fee_pool(&self) -> bool {
+    pub const fn is_validator_fee_pool(&self) -> bool {
         matches!(self, Self::ValidatorFeePool(_))
     }
 
-    pub fn is_utxo_address(&self) -> bool {
+    pub const fn is_utxo(&self) -> bool {
         matches!(self, Self::Utxo(_))
     }
 
-    pub fn is_global(&self) -> bool {
+    pub const fn is_global(&self) -> bool {
         self.is_template()
     }
 
     pub fn is_read_only(&self) -> bool {
-        matches!(self, Self::TransactionReceipt(_) | Self::Template(_))
+        matches!(self, Self::TransactionReceipt(_) | Self::Template(_)) || {
+            let addr = self.as_resource_address();
+            addr == Some(STEALTH_TARI_RESOURCE_ADDRESS) || addr == Some(PUBLIC_IDENTITY_RESOURCE_ADDRESS)
+        }
     }
 }
 
@@ -324,9 +330,9 @@ impl From<NonFungibleAddress> for SubstateId {
     }
 }
 
-impl From<UnclaimedConfidentialOutputAddress> for SubstateId {
-    fn from(address: UnclaimedConfidentialOutputAddress) -> Self {
-        Self::UnclaimedConfidentialOutput(address)
+impl From<ClaimedOutputTombstoneAddress> for SubstateId {
+    fn from(address: ClaimedOutputTombstoneAddress) -> Self {
+        Self::ClaimedOutputTombstone(address)
     }
 }
 
@@ -422,12 +428,12 @@ impl TryFrom<SubstateId> for NonFungibleAddress {
     }
 }
 
-impl TryFrom<SubstateId> for UnclaimedConfidentialOutputAddress {
+impl TryFrom<SubstateId> for ClaimedOutputTombstoneAddress {
     type Error = InvalidSubstateIdVariant;
 
     fn try_from(value: SubstateId) -> Result<Self, Self::Error> {
         match value {
-            SubstateId::UnclaimedConfidentialOutput(addr) => Ok(addr),
+            SubstateId::ClaimedOutputTombstone(addr) => Ok(addr),
             _ => Err(InvalidSubstateIdVariant {
                 substate_id: value,
                 expected: any::type_name::<Self>(),
@@ -467,15 +473,15 @@ impl TryFrom<SubstateId> for PublishedTemplateAddress {
 impl Display for SubstateId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            SubstateId::Component(addr) => write!(f, "{addr}"),
-            SubstateId::Resource(addr) => write!(f, "{addr}"),
-            SubstateId::Vault(addr) => write!(f, "{addr}"),
-            SubstateId::NonFungible(addr) => write!(f, "{addr}"),
-            SubstateId::UnclaimedConfidentialOutput(commitment_address) => write!(f, "{commitment_address}"),
-            SubstateId::TransactionReceipt(addr) => write!(f, "{addr}"),
-            SubstateId::Template(addr) => write!(f, "{addr}"),
-            SubstateId::ValidatorFeePool(addr) => write!(f, "{addr}"),
-            SubstateId::Utxo(addr) => write!(f, "{addr}"),
+            SubstateId::Component(addr) => fmt::Display::fmt(addr, f),
+            SubstateId::Resource(addr) => fmt::Display::fmt(addr, f),
+            SubstateId::Vault(addr) => fmt::Display::fmt(addr, f),
+            SubstateId::NonFungible(addr) => fmt::Display::fmt(addr, f),
+            SubstateId::ClaimedOutputTombstone(addr) => fmt::Display::fmt(addr, f),
+            SubstateId::TransactionReceipt(addr) => fmt::Display::fmt(addr, f),
+            SubstateId::Template(addr) => fmt::Display::fmt(addr, f),
+            SubstateId::ValidatorFeePool(addr) => fmt::Display::fmt(addr, f),
+            SubstateId::Utxo(addr) => fmt::Display::fmt(addr, f),
         }
     }
 }
@@ -489,44 +495,44 @@ impl FromStr for SubstateId {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.split_once('_') {
-            Some(("component", addr)) => {
+            Some((address_prefixes::COMPONENT, addr)) => {
                 let addr = ComponentAddress::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::Component(addr))
             },
-            Some(("resource", addr)) => {
+            Some((address_prefixes::RESOURCE, addr)) => {
                 // resource_xxxxx
                 let addr = ResourceAddress::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::Resource(addr))
             },
-            Some(("nft", rest)) => {
+            Some((address_prefixes::NON_FUNGIBLE, rest)) => {
                 // nft_{resource_hex}_{id_type}_{id}
                 let addr = NonFungibleAddress::from_str(rest).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::NonFungible(addr))
             },
-            Some(("vault", addr)) => {
+            Some((address_prefixes::VAULT, addr)) => {
                 let id = VaultId::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::Vault(id))
             },
-            Some(("commitment", addr)) => {
-                let commitment_address = UnclaimedConfidentialOutputAddress::from_hex(addr)
+            Some((address_prefixes::CLAIMED_OUTPUT_TOMBSTONE, addr)) => {
+                let address = ClaimedOutputTombstoneAddress::from_hex(addr)
                     .map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
-                Ok(SubstateId::UnclaimedConfidentialOutput(commitment_address))
+                Ok(SubstateId::ClaimedOutputTombstone(address))
             },
-            Some(("txreceipt", addr)) => {
+            Some((address_prefixes::TRANSACTION_RECEIPT, addr)) => {
                 let tx_receipt_addr =
                     TransactionReceiptAddress::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
                 Ok(SubstateId::TransactionReceipt(tx_receipt_addr))
             },
-            Some(("template", addr)) => {
+            Some((address_prefixes::TEMPLATE, addr)) => {
                 let addr = Hash::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
                 Ok(SubstateId::Template(addr.into()))
             },
-            Some(("vnfp", addr)) => {
+            Some((address_prefixes::VALIDATOR_FEE_POOL, addr)) => {
                 let addr =
                     ValidatorFeePoolAddress::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
                 Ok(SubstateId::ValidatorFeePool(addr))
             },
-            Some(("utxo", addr)) => {
+            Some((address_prefixes::UTXO, addr)) => {
                 let addr = UtxoAddress::from_str(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
                 Ok(SubstateId::Utxo(addr))
             },
@@ -555,25 +561,21 @@ macro_rules! impl_partial_eq {
 impl_partial_eq!(ComponentAddress, Component);
 impl_partial_eq!(ResourceAddress, Resource);
 impl_partial_eq!(VaultId, Vault);
-impl_partial_eq!(UnclaimedConfidentialOutputAddress, UnclaimedConfidentialOutput);
+impl_partial_eq!(ClaimedOutputTombstoneAddress, ClaimedOutputTombstone);
 impl_partial_eq!(NonFungibleAddress, NonFungible);
 impl_partial_eq!(TransactionReceiptAddress, TransactionReceipt);
 impl_partial_eq!(PublishedTemplateAddress, Template);
 impl_partial_eq!(ValidatorFeePoolAddress, ValidatorFeePool);
 impl_partial_eq!(UtxoAddress, Utxo);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum SubstateValue {
     Component(ComponentHeader),
     Resource(Box<Resource>),
     Vault(Vault),
     NonFungible(NonFungibleContainer),
-    UnclaimedConfidentialOutput(UnclaimedConfidentialOutput),
+    ClaimedOutputTombstone(ClaimedOutputTombstone),
     TransactionReceipt(TransactionReceipt),
     Template(PublishedTemplate),
     ValidatorFeePool(ValidatorFeePool),
@@ -644,9 +646,9 @@ impl SubstateValue {
         }
     }
 
-    pub fn into_unclaimed_confidential_output(self) -> Option<UnclaimedConfidentialOutput> {
+    pub fn into_unclaimed_confidential_output(self) -> Option<ClaimedOutputTombstone> {
         match self {
-            SubstateValue::UnclaimedConfidentialOutput(output) => Some(output),
+            SubstateValue::ClaimedOutputTombstone(output) => Some(output),
             _ => None,
         }
     }
@@ -728,9 +730,9 @@ impl SubstateValue {
         }
     }
 
-    pub fn as_unclaimed_confidential_output(&self) -> Option<&UnclaimedConfidentialOutput> {
+    pub fn as_claimed_output_tombstone(&self) -> Option<&ClaimedOutputTombstone> {
         match self {
-            SubstateValue::UnclaimedConfidentialOutput(output) => Some(output),
+            SubstateValue::ClaimedOutputTombstone(output) => Some(output),
             _ => None,
         }
     }
@@ -768,6 +770,17 @@ impl SubstateValue {
             SubstateValue::Utxo(utxo) => Some(utxo),
             _ => None,
         }
+    }
+
+    pub fn as_utxo_mut(&mut self) -> Option<&mut Utxo> {
+        match self {
+            SubstateValue::Utxo(utxo) => Some(utxo),
+            _ => None,
+        }
+    }
+
+    pub fn related_template_address(&self) -> Option<TemplateAddress> {
+        self.as_component().map(|c| c.template_address)
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -809,9 +822,9 @@ impl From<TransactionReceipt> for SubstateValue {
     }
 }
 
-impl From<UnclaimedConfidentialOutput> for SubstateValue {
-    fn from(output: UnclaimedConfidentialOutput) -> Self {
-        Self::UnclaimedConfidentialOutput(output)
+impl From<ClaimedOutputTombstone> for SubstateValue {
+    fn from(output: ClaimedOutputTombstone) -> Self {
+        Self::ClaimedOutputTombstone(output)
     }
 }
 
@@ -834,11 +847,7 @@ impl From<Utxo> for SubstateValue {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SubstateDiff {
     up_substates: Vec<(SubstateId, Substate)>,
     down_substates: Vec<(SubstateId, u32)>,
@@ -967,7 +976,7 @@ mod tests {
             );
             check("vnfp_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
             check("txreceipt_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
-            check("commitment_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
+            check("tombstone_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
             check("template_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
             check("utxo_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
         }

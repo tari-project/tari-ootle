@@ -29,19 +29,14 @@ use tari_template_abi::{call_engine, rust::fmt, EngineOp};
 use crate::{
     args::{InvokeResult, ProofAction, ProofInvokeArg, ProofRef},
     models::{BinaryTag, NonFungibleId, ResourceAddress},
-    prelude::ResourceType,
-    types::Amount,
+    types::{Amount, ResourceType},
 };
 
 const TAG: u64 = BinaryTag::ProofId.as_u64();
 
 /// The unique identification of a proof during a transaction execution
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Ord, PartialOrd, Hash)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ProofId(BorTag<u32, TAG>);
 
 impl From<u32> for ProofId {

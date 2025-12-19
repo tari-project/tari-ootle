@@ -120,6 +120,7 @@ where
     }
 
     pub async fn run(&mut self, mut context: ConsensusWorkerContext<TSpec>) {
+        info!(target: LOG_TARGET, "🚀 Starting Consensus state machine worker");
         // When starting up we will wait a bit.
         // Context: in swarm, we start on epoch 2, then quickly go to epoch 3. This causes some nodes to start consensus
         // on epoch 2 and some on epoch 3.
@@ -134,6 +135,7 @@ where
             state = self.transition(state, next_event);
             let _ignore = context.tx_current_state.send((&state).into());
             if state.is_shutdown() {
+                info!(target: LOG_TARGET, "💤 Consensus state machine shutting down");
                 break;
             }
         }
@@ -143,6 +145,7 @@ where
     where Fut: Future<Output = Result<ConsensusStateEvent, HotStuffError>> {
         let mut shutdown_signal = self.shutdown_signal.clone();
         let result = tokio::select! {
+            biased;
             _ = shutdown_signal.wait() => Ok(ConsensusStateEvent::Shutdown),
             ret = fut => ret,
         };

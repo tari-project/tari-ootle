@@ -77,6 +77,7 @@ impl BlockStore for Block {
 
         // b <- b'.justify.node
         let commit_node = new_locked.justify().calculate_block_id();
+        // b''.parent() == b'.id() && b'.parent() == b.id()
         if justified_node.parent() == new_locked.id() && *new_locked.parent() == commit_node {
             debug!(
                 target: LOG_TARGET,

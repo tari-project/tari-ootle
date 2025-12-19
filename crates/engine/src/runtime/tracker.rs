@@ -22,25 +22,24 @@
 
 use std::sync::{Arc, Mutex, RwLock};
 
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
 use log::*;
 use tari_engine_types::{
-    commit_result::{FinalizeResult, TransactionResult},
+    commit_result::{FinalizeResult, RejectReason, TransactionResult},
     component::{ComponentBody, ComponentHeader},
-    confidential::UnclaimedConfidentialOutput,
     events::Event,
     fees::FeeSource,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     lock::LockFlag,
     logs::LogEntry,
-    substate::{SubstateId, SubstateValue},
+    substate::{Substate, SubstateId, SubstateValue},
+    transaction_receipt::FinalizeOutcome,
     virtual_substate::VirtualSubstates,
-    UtxoAddress,
 };
 use tari_ootle_common_types::Epoch;
 use tari_template_lib::{
     auth::{ComponentAccessRules, OwnerRule},
-    models::{ComponentAddress, ComponentAddressAllocation, Metadata, UnclaimedConfidentialOutputAddress},
+    models::{ComponentAddress, ComponentAddressAllocation, Metadata},
     prelude::{RistrettoPublicKeyBytes, TemplateAddress},
     types::Hash,
 };
@@ -102,13 +101,13 @@ impl StateTracker {
         })
     }
 
-    pub fn add_event(&self, event: Event) {
+    pub fn add_event(&self, event: Event) -> Result<(), RuntimeError> {
         debug!(target: LOG_TARGET, "Emit: {event}");
-        self.write_with(|state| state.push_event(event));
+        self.write_with(|state| state.push_event(event))
     }
 
-    pub fn add_log(&self, log: LogEntry) {
-        self.write_with(|state| state.push_log(log));
+    pub fn add_log(&self, log: LogEntry) -> Result<(), RuntimeError> {
+        self.write_with(|state| state.push_log(log))
     }
 
     pub fn take_events(&self) -> Vec<Event> {
@@ -129,29 +128,6 @@ impl StateTracker {
 
     pub fn get_template_module_name(&self) -> Result<String, RuntimeError> {
         self.read_with(|state| state.current_template().map(|(_, name)| name.to_string()))
-    }
-
-    pub fn take_unclaimed_confidential_output(
-        &self,
-        address: UnclaimedConfidentialOutputAddress,
-    ) -> Result<UnclaimedConfidentialOutput, RuntimeError> {
-        self.write_with(|state| {
-            let output_lock = state.write_lock_substate(&address.into())?;
-            let output = state
-                .get_locked_substate(&output_lock)?
-                .as_unclaimed_confidential_output()
-                .cloned()
-                .ok_or_else(|| RuntimeError::InvariantError {
-                    function: "StateTracker::take_unclaimed_confidential_output",
-                    details: format!(
-                        "Expected substate at address {} to be an UnclaimedConfidentialOutput",
-                        address
-                    ),
-                })?;
-            state.claim_confidential_output(&address)?;
-            state.unlock_substate(output_lock)?;
-            Ok(output)
-        })
     }
 
     pub fn new_component(
@@ -206,11 +182,10 @@ impl StateTracker {
             state.push_event(Event::std(
                 Some(substate_id),
                 template_address,
-                state.transaction_hash(),
                 "component",
                 "created",
                 Metadata::from([("module_name".to_string(), module_name)]),
-            ));
+            ))?;
 
             debug!(target: LOG_TARGET, "New component created: {}", component_address);
             Ok(component_address)
@@ -270,41 +245,76 @@ impl StateTracker {
 
         self.write_with(|state| {
             debug!(target: LOG_TARGET, "Add fee: source: {:?}, amount: {}", source, amount);
-            state.fee_state_mut().fee_charges.insert(source, amount);
+            state.fee_state_mut().add_charge(source, amount);
         })
     }
 
-    pub fn finalize(
-        &self,
-        mut substates_to_persist: IndexMap<SubstateId, SubstateValue>,
-        downed_utxos: IndexSet<UtxoAddress>,
-    ) -> Result<FinalizeResult, RuntimeError> {
+    pub fn finalize(&self, failure: Option<RejectReason>) -> Result<FinalizeResult, RuntimeError> {
+        let failure = failure.or_else(|| {
+            self.read_with(|state| {
+                let fee_state = state.fee_state();
+                if fee_state.is_paid_in_full() {
+                    None
+                } else {
+                    Some(RejectReason::InsufficientFeesPaid(format!(
+                        "Required fees {} but {} paid",
+                        fee_state.total_charges(),
+                        fee_state.total_payments()
+                    )))
+                }
+            })
+        });
+
+        if let Some(reason) = failure {
+            let mut checkpoint_state = self.take_fee_checkpoint().ok_or(RuntimeError::NoFeeCheckpoint)?;
+            let mut substates_to_persist = checkpoint_state.take_mutated_substates();
+            // Process fees and refunds based on the fee checkpoint state
+            let fee_receipt = checkpoint_state.finalize_fees_and_refunds(&mut substates_to_persist)?;
+
+            let downed_utxos = checkpoint_state.take_downed_utxos();
+            let fee_withdrawals = checkpoint_state.take_validator_fee_withdrawals();
+
+            let mut diff =
+                checkpoint_state.generate_substate_diff(substates_to_persist, downed_utxos, fee_withdrawals)?;
+            let transaction_receipt = checkpoint_state.finalize_transaction_receipt(
+                FinalizeOutcome::FeeIntentCommit,
+                &diff,
+                fee_receipt.clone(),
+            )?;
+            diff.up(
+                SubstateId::TransactionReceipt(checkpoint_state.transaction_hash().into()),
+                Substate::new(0, transaction_receipt),
+            );
+
+            return Ok(FinalizeResult::new(
+                checkpoint_state.transaction_hash(),
+                checkpoint_state.take_logs(),
+                checkpoint_state.take_events(),
+                TransactionResult::AcceptFeeRejectRest(diff, reason),
+                fee_receipt,
+            ));
+        }
+
         // Finalise will always reset the state
         let mut state = self.take_working_state();
-        if state.call_frame_depth() > 0 {
-            return Err(RuntimeError::CallFrameRemainingOnStack {
-                remaining: state.call_frame_depth(),
-            });
-        }
         // Resolve the transfers to the fee pool resource and vault refunds
-        let transaction_receipt = state.finalize_fees(&mut substates_to_persist)?;
-
-        let fee_receipt = transaction_receipt.fee_receipt.clone();
-
+        let mut substates_to_persist = state.take_mutated_substates();
+        let fee_receipt = state.finalize_fees_and_refunds(&mut substates_to_persist)?;
+        let downed_utxos = state.take_downed_utxos();
         let fee_withdrawals = state.take_validator_fee_withdrawals();
-        let result =
-            state.generate_substate_diff(transaction_receipt, substates_to_persist, downed_utxos, fee_withdrawals);
-
-        let result = match result {
-            Ok(substate_diff) => TransactionResult::Accept(substate_diff),
-            Err(err) => TransactionResult::Reject(err.to_reject_reason()),
-        };
+        let mut diff = state.generate_substate_diff(substates_to_persist, downed_utxos, fee_withdrawals)?;
+        let transaction_receipt =
+            state.finalize_transaction_receipt(FinalizeOutcome::Commit, &diff, fee_receipt.clone())?;
+        diff.up(
+            SubstateId::TransactionReceipt(state.transaction_hash().into()),
+            Substate::new(0, transaction_receipt),
+        );
 
         let finalized = FinalizeResult::new(
             state.transaction_hash(),
             state.take_logs(),
             state.take_events(),
-            result,
+            TransactionResult::Accept(diff),
             fee_receipt,
         );
 
@@ -321,19 +331,15 @@ impl StateTracker {
         })
     }
 
-    pub fn reset_to_fee_checkpoint(&self) -> Result<(), RuntimeError> {
+    fn take_fee_checkpoint(&self) -> Option<WorkingState> {
         let mut checkpoint = self.fee_checkpoint.lock().unwrap();
-        if let Some(checkpoint) = checkpoint.take() {
-            self.write_with(|state| {
-                let fee_state = state.fee_state().clone();
-                *state = checkpoint;
-                // Preserve fee state across resets
-                *state.fee_state_mut() = fee_state;
-            });
-            Ok(())
-        } else {
-            Err(RuntimeError::NoFeeCheckpoint)
-        }
+        let mut fee_cp = checkpoint.take()?;
+        // Preserve fee state across resets so that we can charge for fees incurred during execution before the
+        // failure
+        self.read_with(|state| {
+            fee_cp.fee_state_mut().merge_charges(state.fee_state());
+        });
+        Some(fee_cp)
     }
 
     fn take_working_state(&self) -> WorkingState {
@@ -366,5 +372,10 @@ impl StateTracker {
 
     pub(super) fn write_with<R, F: FnOnce(&mut WorkingState) -> R>(&self, f: F) -> R {
         f(&mut self.working_state.write().unwrap())
+    }
+
+    pub(super) fn is_fee_intent_checkpointed(&self) -> bool {
+        let checkpoint = self.fee_checkpoint.lock().unwrap();
+        checkpoint.is_some()
     }
 }

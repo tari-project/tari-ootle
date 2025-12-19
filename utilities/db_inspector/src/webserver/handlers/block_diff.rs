@@ -23,7 +23,7 @@ pub async fn list(
     Path(db_name): Path<String>,
     Query(req): Query<TableRequest>,
 ) -> Result<Json<TableResponse>, WebError> {
-    const OPERATION: &str = "list_state_transitions";
+    const OPERATION: &str = "list_block_diff";
     let db = context.open_db(&db_name)?;
     let mut table = TableResponse::new([
         Column::new("block_id", "Block Id"),
@@ -35,16 +35,16 @@ pub async fn list(
     let tx = db.read_only_context();
 
     let cf = tx.cf(cfs::block_diff::BlockDiffCf)?;
-    let ordering = if req.asc {
-        Ordering::Ascending
-    } else {
+    let ordering = if req.desc {
         Ordering::Descending
+    } else {
+        Ordering::Ascending
     };
     type Key = <cfs::block_diff::BlockDiffCf as Cf>::Key;
     type Value = <cfs::block_diff::BlockDiffCf as Cf>::Value;
     let iter: Box<dyn Iterator<Item = Result<(Key, Value), RocksDbStorageError>>> =
         if let Some(prefix_hex) = req.query.as_ref() {
-            let key_prefix = decode_hex_prefix(prefix_hex)?;
+            let key_prefix = decode_hex_prefix::<cfs::block_diff::BlockDiffCf>(prefix_hex)?;
             Box::new(cf.prefix_range_iterator_raw_key(ordering, key_prefix))
         } else {
             Box::new(cf.iterator(ordering, OPERATION))

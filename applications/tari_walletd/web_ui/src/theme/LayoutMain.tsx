@@ -31,24 +31,25 @@ import List from "@mui/material/List";
 import IconButton from "@mui/material/IconButton";
 import MenuOpenOutlinedIcon from "@mui/icons-material/MenuOpenOutlined";
 import MenuOutlinedIcon from "@mui/icons-material/MenuOutlined";
-import MenuItems from "../Components/MenuItems";
+import MenuItems from "@components/MenuItems";
 import { Dialog, Stack, ThemeProvider } from "@mui/material";
 import { Link, Outlet } from "react-router-dom";
-import Logo from "../assets/Logo";
+import Logo from "@assets/Logo";
 import Container from "@mui/material/Container";
-import ConnectorLink from "../Components/ConnectorLink";
-import Breadcrumbs from "../Components/Breadcrumbs";
-import { breadcrumbRoutes } from "../App";
+import ConnectorLink from "@components/ConnectorLink";
+import Breadcrumbs from "@components/Breadcrumbs";
+import { breadcrumbRoutes } from "@/App";
 import Grid from "@mui/material/Grid";
-import useThemeStore from "../store/themeStore";
-import { componentSettings, dark, light } from "./tokens";
-import { lightAlpha } from "./colors";
-import WalletConnectLink from "../Components/WalletConnectLink";
+import useThemeStore from "@store/themeStore";
+import { componentSettings, dark, light } from "@theme/tokens";
+import { lightAlpha } from "@theme/colors";
+import WalletConnectLink from "@components/WalletConnectLink";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
-import useAccountStore from "../store/accountStore";
+import useAccountStore from "@store/accountStore";
 import { Check } from "@mui/icons-material";
-import useAuthStore from "../store/authStore";
+import useAuthStore from "@store/authStore";
+import "./theme.css";
 
 const drawerWidth = 300;
 
@@ -105,7 +106,8 @@ const Drawer = styled(MuiDrawer, {
 export default function Layout() {
   const [open, setOpen] = useState(false);
   const { themeMode } = useThemeStore();
-  const { popup, setPopup } = useAccountStore();
+  const popup = useAccountStore((state) => state.popup);
+  const setPopup = useAccountStore((state) => state.setPopup);
   const { authToken } = useAuthStore();
 
   const handleClose = () => {
@@ -126,7 +128,7 @@ export default function Layout() {
 
   return (
     <ThemeProvider theme={theme}>
-      <Dialog open={popup.visible || false} onClose={handleClose}>
+      <Dialog open={popup?.visible ?? false} onClose={handleClose}>
         <DialogTitle>
           {popup?.error ? (
             <h2 style={{ color: "red" }}>{popup?.title}</h2>

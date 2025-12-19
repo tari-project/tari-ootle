@@ -13,7 +13,7 @@ use crate::{
     traits::{CertificateStore, ConsensusSpec, ValidatorSignatureVerifierService},
 };
 
-const LOG_TARGET: &str = "tari::consensus::hotstuff::timeout_collector";
+const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::timeout_collector";
 
 #[derive(Clone)]
 pub struct TimeoutVoteCollector<TConsensusSpec: ConsensusSpec> {
@@ -64,7 +64,7 @@ where TConsensusSpec: ConsensusSpec
         let sender_leaf_hash = sender_vn.get_node_hash(self.network);
         let height = vote.height;
 
-        let Some((quorum_votes, _)) = self
+        let result = self
             .vote_collector
             .collect_vote(
                 current_epoch,
@@ -73,21 +73,31 @@ where TConsensusSpec: ConsensusSpec
                 vote,
                 epoch_state.local_committee(),
             )
-            .await
-        else {
-            return Ok(None);
-        };
+            .await;
 
-        let signatures = quorum_votes.into_iter().map(|vote| vote.signature).collect();
-        let new_tc = TimeoutCertificate::new(current_epoch, height, signatures);
-        let high_tc = self.store.with_write_tx(|tx| new_tc.update_highest(tx))?;
-        if new_tc.calculate_id() == *high_tc.id() {
-            info!(target: LOG_TARGET, "🕒️ New HIGH {}", new_tc);
-        } else {
-            info!(target: LOG_TARGET, "❓️ New TC from votes {} but it is not the highest TC {}", new_tc, high_tc);
+        match result {
+            Ok(Some((quorum_votes, _))) => {
+                let signatures = quorum_votes.into_iter().map(|vote| vote.signature).collect();
+                let new_tc = TimeoutCertificate::new(current_epoch, height, signatures);
+                let high_tc = self.store.with_write_tx(|tx| new_tc.update_highest(tx))?;
+                if new_tc.calculate_id() == *high_tc.id() {
+                    info!(target: LOG_TARGET, "🕒️ New HIGH {}", new_tc);
+                } else {
+                    info!(target: LOG_TARGET, "❓️ New TC from votes {} but it is not the highest TC {}", new_tc, high_tc);
+                }
+
+                Ok(Some((new_tc, high_tc)))
+            },
+            Ok(None) => {
+                debug!(target: LOG_TARGET, "🟡 No quorum reached yet for TimeoutVote at height {}", height);
+                Ok(None)
+            },
+            Err(err) => {
+                warn!(target: LOG_TARGET, "❌ {}", err);
+                // TODO: track equivocation and penalize nodes
+                Ok(None)
+            },
         }
-
-        Ok(Some((new_tc, high_tc)))
     }
 
     fn validate_vote(&self, current_epoch: Epoch, vote: &TimeoutVote) -> Result<(), HotStuffError> {

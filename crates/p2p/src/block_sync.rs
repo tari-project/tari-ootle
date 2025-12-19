@@ -5,7 +5,7 @@ use crate::{
     proto,
     proto::{
         consensus::{Block, QuorumCertificate},
-        rpc::{sync_blocks_response::SyncData, QuorumCertificates, SubstateCreatedProof, SubstateUpdate},
+        rpc::{sync_blocks_response::SyncData, QuorumCertificates, SubstateCreate, SubstateUpdate},
         transaction::Transaction,
     },
 };
@@ -60,7 +60,7 @@ impl proto::rpc::SyncBlocksResponse {
         }
     }
 
-    pub fn into_transaction_receipt(self) -> Option<SubstateCreatedProof> {
+    pub fn into_transaction_receipt(self) -> Option<SubstateCreate> {
         match self.sync_data {
             Some(SyncData::TransactionReceipt(receipt)) => Some(receipt),
             _ => None,

@@ -20,18 +20,27 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::{process, time::Duration};
+
+use anyhow::Context;
 use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_networking::NetworkingService;
 use tari_ootle_storage::{consensus_models::Block, StateStore};
 use tari_shutdown::Shutdown;
-use tari_template_manager::interface::TemplateExecutable;
 
 // use tokio::signal::unix::{signal, SignalKind};
 use crate::{Services, ValidatorNodeStateStore};
 
 const LOG_TARGET: &str = "tari::validator_node";
+lazy_static::lazy_static! {
+    static ref PANIC_NOTIFIER: tokio::sync::Notify = tokio::sync::Notify::new();
+}
+
+pub fn trigger_panic_notifier() {
+    PANIC_NOTIFIER.notify_waiters();
+}
 
 pub struct ValidatorNode {
     services: Services<ValidatorNodeStateStore>,
@@ -43,15 +52,8 @@ impl ValidatorNode {
     }
 
     pub async fn start(mut self, mut shutdown: Shutdown) -> Result<(), anyhow::Error> {
-        let mut hotstuff_events = self.services.consensus_handle.subscribe_to_hotstuff_events();
+        let mut hotstuff_events = self.services.consensus_handle.subscribe_to_hotstuff_events()?;
         let mut epoch_manager_events = self.services.epoch_manager.subscribe();
-
-        // if let Err(err) = self.dial_local_shard_peers().await {
-        //     error!(target: LOG_TARGET, "Failed to dial local shard peers: {}", err);
-        // }
-
-        // let sigint = tokio::signal::ctrl_c();
-        // let mut sigterm = signal(SignalKind::terminate())?;
 
         loop {
             let metrics = tokio::runtime::Handle::current().metrics();
@@ -64,9 +66,15 @@ impl ValidatorNode {
             );
 
             tokio::select! {
+                _ = PANIC_NOTIFIER.notified() => {
+                    error!(target: LOG_TARGET, "💤 Panic detected in another task. Shutting down...");
+                    shutdown.trigger();
+                    break;
+                },
                 _ = tokio::signal::ctrl_c() => {
                     info!(target: LOG_TARGET, "💤 Received SIGINT");
                     shutdown.trigger();
+                    break;
                 },
 
                 Ok(event) = hotstuff_events.recv() => if let Err(err) = self.handle_hotstuff_event(event).await {
@@ -80,11 +88,10 @@ impl ValidatorNode {
                 result = self.services.on_any_exit() => {
                     match result {
                         Ok(_) => {
-                            if shutdown.is_triggered() {
-                                info!(target: LOG_TARGET, "🏁 All services have exited cleanly");
-                            } else {
+                            if !shutdown.is_triggered() {
                                 warn!(target: LOG_TARGET, "❓️ A service has exited unexpectedly. Shutting down...");
                             }
+                            shutdown.trigger();
                             break;
                         },
                         Err(err) => {
@@ -93,7 +100,20 @@ impl ValidatorNode {
                         }
                     }
                 }
+            }
+        }
 
+        // Just exit ASAP on panic
+        info!(target: LOG_TARGET, "💤 Waiting for all services to shut down... ctrl+c to force shutdown");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                // Second SIGINT forces shutdown
+                warn!(target: LOG_TARGET, "💤 Shutdown NOW");
+                process::exit(1);
+            },
+            res = tokio::time::timeout(Duration::from_secs(20), self.services.join_all()) => {
+                res.context("Timeout waiting for all workers to end")??;
+                info!(target: LOG_TARGET, "🏁 All services have exited cleanly");
             }
         }
 
@@ -107,54 +127,6 @@ impl ValidatorNode {
             .networking
             .set_want_peers(all_vns.into_iter().map(|vn| vn.address.as_peer_id()))
             .await?;
-
-        Ok(())
-    }
-
-    /// Handles template publishes, adds all the committed templates to template manager
-    /// from the given block.
-    async fn handle_template_publishes(&self, block: &Block) -> Result<(), anyhow::Error> {
-        // add wasm templates to template manager if available in any of the new block's transactions
-        let transactions = self
-            .services
-            .state_store
-            .with_read_tx(|tx| block.get_committing_transactions(tx))?;
-
-        let epoch = self.services.consensus_handle.current_epoch();
-        // adding templates to template manager
-        let mut template_counter = 0;
-        for transaction in transactions {
-            let author_pk = transaction.transaction().seal_signature().public_key();
-            for (template_address, code) in transaction.transaction().all_published_templates_iter() {
-                info!(
-                    target: LOG_TARGET,
-                    "📰 Adding template {} from block {}",
-                    template_address,
-                    block
-                );
-                if let Err(err) = self
-                    .services
-                    .template_manager
-                    .add_template(
-                        *author_pk,
-                        template_address.as_hash(),
-                        TemplateExecutable::CompiledWasm(code.to_vec()),
-                        None,
-                        epoch,
-                    )
-                    .await
-                {
-                    error!(target: LOG_TARGET, "🚨Failed to add template: {}", err);
-                }
-                template_counter += 1;
-            }
-        }
-
-        if template_counter == 0 {
-            debug!(target: LOG_TARGET, "No new templates published in block {}", block);
-        } else {
-            info!(target: LOG_TARGET, "🏁 {} new template(s) have been persisted locally.", template_counter);
-        }
 
         Ok(())
     }
@@ -181,8 +153,6 @@ impl ValidatorNode {
             return Ok(());
         }
 
-        self.handle_template_publishes(&block).await?;
-
         info!(target: LOG_TARGET, "🏁 Removing {} finalized transaction(s) from mempool", committed_transactions.len());
         if let Err(err) = self.services.mempool.remove_transactions(committed_transactions).await {
             error!(target: LOG_TARGET, "Failed to remove transaction from mempool: {}", err);
@@ -190,45 +160,4 @@ impl ValidatorNode {
 
         Ok(())
     }
-
-    // async fn dial_local_shard_peers(&mut self) -> Result<(), anyhow::Error> {
-    //     let epoch = self.services.epoch_manager.current_epoch().await?;
-    //     let res = self
-    //         .services
-    //         .epoch_manager
-    //         .get_validator_node(epoch, &self.services.networking.local_peer_id().into())
-    //         .await;
-    //
-    //     let shard_id = match res {
-    //         Ok(vn) => vn.shard_key,
-    //         Err(EpochManagerError::ValidatorNodeNotRegistered { address, epoch }) => {
-    //             info!(target: LOG_TARGET, "Validator node {address} not registered for current epoch {epoch}");
-    //             return Ok(());
-    //         },
-    //         Err(EpochManagerError::BaseLayerConsensusConstantsNotSet) => {
-    //             info!(target: LOG_TARGET, "Epoch manager has not synced with base layer yet");
-    //             return Ok(());
-    //         },
-    //         Err(err) => {
-    //             return Err(err.into());
-    //         },
-    //     };
-    //
-    //     let local_shard_peers = self.services.epoch_manager.get_committee(epoch, shard_id).await?;
-    //     info!(
-    //         target: LOG_TARGET,
-    //         "Dialing {} local shard peers",
-    //         local_shard_peers.members.len()
-    //     );
-    //     let local_peer_id = *self.services.networking.local_peer_id();
-    //     let local_shard_peers = local_shard_peers.addresses().filter(|addr| **addr != local_peer_id);
-    //
-    //     for peer in local_shard_peers {
-    //         if let Err(err) = self.services.networking.dial_peer(peer.to_peer_id()).await {
-    //             debug!(target: LOG_TARGET, "Failed to dial peer: {}", err);
-    //         }
-    //     }
-    //
-    //     Ok(())
-    // }
 }

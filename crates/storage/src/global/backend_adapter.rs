@@ -20,9 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{de::DeserializeOwned, Serialize};
+use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{
     committee::Committee,
     hashing::ValidatorNodeBalancedMerkleTree,
@@ -34,7 +35,7 @@ use tari_ootle_common_types::{
 };
 use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 
-use super::{DbEpoch, TemplateStatus};
+use super::{BlockHeaderModel, EpochData, TemplateStatus};
 use crate::{
     atomic::AtomicDb,
     global::{
@@ -62,7 +63,7 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
     fn template_exists(
         &self,
         tx: &mut Self::DbTransaction<'_>,
-        key: &[u8],
+        key: &TemplateAddress,
         status: Option<TemplateStatus>,
     ) -> Result<bool, Self::Error>;
 
@@ -75,10 +76,10 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
 
     fn get_template(&self, tx: &mut Self::DbTransaction<'_>, key: &[u8]) -> Result<Option<DbTemplate>, Self::Error>;
     fn get_templates(&self, tx: &mut Self::DbTransaction<'_>, limit: usize) -> Result<Vec<DbTemplate>, Self::Error>;
-    fn get_templates_by_addresses(
+    fn get_templates_by_addresses<'a, I: IntoIterator<Item = &'a TemplateAddress>>(
         &self,
         tx: &mut Self::DbTransaction<'_>,
-        addresses: Vec<&[u8]>,
+        addresses: I,
     ) -> Result<Vec<DbTemplate>, Self::Error>;
     fn get_pending_templates(
         &self,
@@ -174,7 +175,7 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         tx: &mut Self::DbTransaction<'_>,
         epoch: Epoch,
         shard_group: Option<ShardGroup>,
-        excluding: Vec<Self::Addr>,
+        excluding: HashSet<Self::Addr>,
     ) -> Result<ValidatorNode<Self::Addr>, Self::Error>;
 
     fn validator_nodes_get_committees_for_epoch(
@@ -183,8 +184,13 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         epoch: Epoch,
     ) -> Result<HashMap<ShardGroup, Committee<Self::Addr>>, Self::Error>;
 
-    fn insert_epoch(&self, tx: &mut Self::DbTransaction<'_>, epoch: DbEpoch) -> Result<(), Self::Error>;
-    fn get_epoch(&self, tx: &mut Self::DbTransaction<'_>, epoch: u64) -> Result<Option<DbEpoch>, Self::Error>;
+    fn insert_epoch(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        epoch: Epoch,
+        epoch_hash: FixedHash,
+    ) -> Result<(), Self::Error>;
+    fn get_epoch(&self, tx: &mut Self::DbTransaction<'_>, epoch: Epoch) -> Result<Option<EpochData>, Self::Error>;
 
     fn insert_bmt(
         &self,
@@ -203,4 +209,22 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         tx: &mut Self::DbTransaction<'_>,
         data: DbLayer1Transaction<T>,
     ) -> Result<(), Self::Error>;
+
+    fn insert_block_header(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        header: BlockHeaderModel,
+    ) -> Result<(), Self::Error>;
+
+    fn get_block_header_by_hash(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        max_epoch: Epoch,
+        block_hash: &FixedHash,
+    ) -> Result<BlockHeaderModel, Self::Error>;
+    fn get_first_block_header_by_epoch(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        epoch: Epoch,
+    ) -> Result<BlockHeaderModel, Self::Error>;
 }

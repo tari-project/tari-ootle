@@ -24,6 +24,7 @@ import { ChevronRight } from "@mui/icons-material";
 import {
   Fade,
   IconButton,
+  Stack,
   Table,
   TableBody,
   TableCell,
@@ -35,27 +36,36 @@ import {
 import { useTheme } from "@mui/material/styles";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import FetchStatusCheck from "../../Components/FetchStatusCheck";
-import StatusChip from "../../Components/StatusChip";
-import { DataTableCell } from "../../Components/StyledComponents";
-import { useGetAllTransactions } from "../../api/hooks/useTransactions";
-import { emptyRows, handleChangePage, handleChangeRowsPerPage } from "../../utils/helpers";
-import { Account, substateIdToString, WalletTransaction } from "@tari-project/typescript-bindings";
+import FetchStatusCheck from "@components/FetchStatusCheck";
+import TransactionsStatusChip from "@components/TransactionsStatusChip";
+import { DataTableCell } from "@components/StyledComponents";
+import { useGetAllTransactions } from "@api/hooks/useTransactions";
+import { emptyRows, handleChangePage, handleChangeRowsPerPage, formatCurrency } from "@utils/helpers";
+import { Account, WalletTransaction } from "@tari-project/typescript-bindings";
+import TimeChip from "./TimeChip";
 
 export default function Transactions({ account }: { account: Account }) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-  const { data, isLoading, error, isError, refetch } = useGetAllTransactions(
-    null,
-    account ? substateIdToString(account.address) : null,
-  );
+  const { data, isLoading, error, isError, refetch, isRefetching } = useGetAllTransactions({
+    status: null,
+    // Some stealth transactions cannot be identified by component/public key in the wallet - so we fetch all transactions.
+    // If this feature is badly needed, we can "tag" transactions as involving a specific account when they are created.
+    component: null, //: account ? substateIdToString(account.address) : null,
+    // Stealth transaction are not able to be identified by signer public key, so for simplicity we fetch all transactions.
+    signer_public_key: null,
+  });
   useEffect(() => {
     refetch();
   }, [account]);
   const theme = useTheme();
 
   return (
-    <FetchStatusCheck isLoading={isLoading} isError={isError} errorMessage={error?.message || "Error fetching data"}>
+    <FetchStatusCheck
+      isLoading={isLoading && !isRefetching}
+      isError={isError}
+      errorMessage={error?.message || "Error fetching data"}
+    >
       <Fade in={!isLoading && !isError}>
         <TableContainer>
           <Table>
@@ -71,24 +81,30 @@ export default function Transactions({ account }: { account: Account }) {
               {data?.transactions
                 ?.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                 .map((transaction: WalletTransaction) => {
-                  const { transaction: _, finalize: result, status, id: hash } = transaction;
+                  const { finalize: result, status, id: hash } = transaction;
+                  const { fee_receipt } = result || {};
                   return (
                     <TableRow key={hash}>
                       <DataTableCell>
-                        <Link
-                          to={`/transactions/${hash}`}
-                          style={{
-                            textDecoration: "none",
-                            color: theme.palette.text.secondary,
-                          }}
-                        >
-                          {hash}
-                        </Link>
+                        <Stack direction="row" spacing={2} alignItems="center">
+                          <Link
+                            to={`/transactions/${hash}`}
+                            style={{
+                              textDecoration: "none",
+                              color: theme.palette.text.secondary,
+                            }}
+                          >
+                            {hash}
+                          </Link>
+                          <TimeChip timestamp={transaction.last_update_time} />
+                        </Stack>
                       </DataTableCell>
                       <DataTableCell>
-                        <StatusChip status={status} showTitle />
+                        <TransactionsStatusChip status={status} showTitle />
                       </DataTableCell>
-                      <DataTableCell>{result?.fee_receipt.total_fees_paid.toString() || "--"}</DataTableCell>
+                      <DataTableCell>
+                        {fee_receipt?.total_fees_paid ? formatCurrency(fee_receipt.total_fees_paid) : "--"}
+                      </DataTableCell>
                       <DataTableCell>
                         <IconButton
                           component={Link}

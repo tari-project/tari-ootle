@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { addPeer, getConnections } from "../../../utils/json_rpc";
+import { addPeer, getConnections } from "../../../utils/api";
 import { shortenString } from "./helpers";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
@@ -29,7 +29,10 @@ import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
-import { DataTableCell, BoxHeading2 } from "../../../Components/StyledComponents";
+import {
+  DataTableCell,
+  BoxHeading2,
+} from "../../../Components/StyledComponents";
 import AddIcon from "@mui/icons-material/Add";
 import Button from "@mui/material/Button";
 import { TextField } from "@mui/material";
@@ -38,7 +41,6 @@ import Fade from "@mui/material/Fade";
 import CopyToClipboard from "../../../Components/CopyToClipboard";
 import type { IndexerConnection } from "@tari-project/typescript-bindings";
 import { displayDuration } from "../../../utils/helpers";
-
 
 const useInterval = (fn: () => Promise<unknown>, ms: number) => {
   const timeout = useRef<number>();
@@ -110,7 +112,10 @@ function Connections() {
               <Button variant="contained" type="submit">
                 Add Peer
               </Button>
-              <Button variant="outlined" onClick={() => showAddPeerDialog(false)}>
+              <Button
+                variant="outlined"
+                onClick={() => showAddPeerDialog(false)}
+              >
                 Cancel
               </Button>
             </Form>
@@ -119,7 +124,11 @@ function Connections() {
         {!showPeerDialog && (
           <Fade in={!showPeerDialog}>
             <div className="flex-container">
-              <Button variant="outlined" startIcon={<AddIcon />} onClick={() => showAddPeerDialog()}>
+              <Button
+                variant="outlined"
+                startIcon={<AddIcon />}
+                onClick={() => showAddPeerDialog()}
+              >
                 Add Peer
               </Button>
             </div>
@@ -139,19 +148,33 @@ function Connections() {
         </TableHead>
         <TableBody>
           {connections &&
-            connections.map(({ connection_id, address, age, direction, peer_id, ping_latency, user_agent }) => (
-              <TableRow key={connection_id}>
-                <DataTableCell>
-                  {peer_id ? shortenString(peer_id) : "--"}
-                  <CopyToClipboard copy={peer_id} />
-                </DataTableCell>
-                <DataTableCell>{address}</DataTableCell>
-                <DataTableCell>{displayDuration(age)}</DataTableCell>
-                <DataTableCell>{direction}</DataTableCell>
-                <DataTableCell>{ping_latency ? displayDuration(ping_latency) : "--"}</DataTableCell>
-                <DataTableCell>{user_agent ? user_agent.replace(/^\/tari\//, "") : "--"}</DataTableCell>
-              </TableRow>
-            ))}
+            connections.map(
+              ({
+                 connection_id,
+                 address,
+                 age,
+                 direction,
+                 peer_id,
+                 ping_latency,
+                 user_agent,
+               }) => (
+                <TableRow key={connection_id}>
+                  <DataTableCell>
+                    {peer_id ? shortenString(peer_id) : "--"}
+                    <CopyToClipboard copy={peer_id} />
+                  </DataTableCell>
+                  <DataTableCell>{address}</DataTableCell>
+                  <DataTableCell>{displayDuration(age)}</DataTableCell>
+                  <DataTableCell>{direction}</DataTableCell>
+                  <DataTableCell>
+                    {ping_latency ? displayDuration(ping_latency) : "--"}
+                  </DataTableCell>
+                  <DataTableCell>
+                    {user_agent ? user_agent.replace(/^\/tari\//, "") : "--"}
+                  </DataTableCell>
+                </TableRow>
+              ),
+            )}
         </TableBody>
       </Table>
     </TableContainer>

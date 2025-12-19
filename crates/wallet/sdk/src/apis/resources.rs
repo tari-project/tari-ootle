@@ -4,8 +4,8 @@
 use std::collections::HashMap;
 
 use tari_engine_types::resource::Resource;
-use tari_ootle_common_types::optional::IsNotFoundError;
-use tari_template_lib::models::ResourceAddress;
+use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
+use tari_template_lib::{models::ResourceAddress, types::ResourceType};
 use thiserror::Error;
 
 use crate::storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter};
@@ -29,6 +29,20 @@ where TStore: WalletStore
     pub fn get(&self, address: &ResourceAddress) -> Result<Resource, ResourcesApiError> {
         let resource = self.store.with_read_tx(|tx| tx.resources_get(address))?;
         Ok(resource.into())
+    }
+
+    pub fn exists(&self, address: &ResourceAddress) -> Result<bool, ResourcesApiError> {
+        // TODO(perf): consider adding an exists method
+        let exists = self.store.with_read_tx(|tx| tx.resources_get(address)).optional()?;
+        Ok(exists.is_some())
+    }
+
+    pub fn get_addresses_by_type(
+        &self,
+        resource_type: ResourceType,
+    ) -> Result<Vec<ResourceAddress>, ResourcesApiError> {
+        let resources = self.store.with_read_tx(|tx| tx.resources_get_by_type(resource_type))?;
+        Ok(resources.into_iter().map(|model| model.address).collect())
     }
 
     pub fn get_many<'a, I: IntoIterator<Item = &'a ResourceAddress>>(

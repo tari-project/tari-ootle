@@ -1,8 +1,9 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_lib::{call_args, models::ComponentAddress};
+use tari_template_lib::models::ComponentAddress;
 use tari_template_test_tooling::{support::confidential::generate_confidential_output_statement, TemplateTest};
+use tari_transaction::call_args;
 
 #[test]
 fn fungible_join() {

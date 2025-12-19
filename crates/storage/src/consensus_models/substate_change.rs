@@ -14,6 +14,8 @@ use tari_ootle_common_types::{
 };
 use tari_state_tree::SubstateTreeChange;
 
+use crate::consensus_models::SubstateTransition;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SubstateChange {
     Up {
@@ -38,7 +40,7 @@ impl SubstateChange {
     pub fn versioned_substate_id(&self) -> VersionedSubstateIdRef<'_> {
         match self {
             SubstateChange::Up { id, substate, .. } => VersionedSubstateIdRef::new(id, substate.version()),
-            SubstateChange::Down { id, .. } => id.as_ref(),
+            SubstateChange::Down { id, .. } => id.as_versioned_ref(),
         }
     }
 
@@ -60,6 +62,7 @@ impl SubstateChange {
         }
     }
 
+    /// A cached shard value. This can be calculated from the substate address, but is cached here for performance.
     pub fn shard(&self) -> Shard {
         match self {
             SubstateChange::Up { shard, .. } => *shard,
@@ -93,6 +96,17 @@ impl SubstateChange {
         match self {
             SubstateChange::Up { .. } => "Up",
             SubstateChange::Down { .. } => "Down",
+        }
+    }
+
+    pub fn into_transition(self) -> SubstateTransition {
+        match self {
+            SubstateChange::Up { id, substate, .. } => SubstateTransition::Up {
+                id,
+                version: substate.version(),
+                substate_or_hash: substate.into_substate_value().into(),
+            },
+            SubstateChange::Down { id, .. } => SubstateTransition::Down { id },
         }
     }
 }

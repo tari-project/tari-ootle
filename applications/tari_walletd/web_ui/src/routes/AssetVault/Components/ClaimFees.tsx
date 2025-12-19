@@ -26,24 +26,24 @@ import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
 import Box from "@mui/material/Box";
-import { useAccountsList } from "../../../api/hooks/useAccounts";
+import { useAccountsList } from "@api/hooks/useAccounts";
 import { useTheme } from "@mui/material/styles";
-import useAccountStore from "../../../store/accountStore";
+import useAccountStore from "@store/accountStore";
 import { FormControl, InputLabel, MenuItem, Select, SelectChangeEvent } from "@mui/material";
-import { useKeysList } from "../../../api/hooks/useKeys";
-import { validatorsClaimFees, validatorsGetFees } from "../../../utils/json_rpc";
+import { useKeysList } from "@api/hooks/useKeys";
+import { validatorsClaimFees, validatorsGetFees } from "@utils/json_rpc";
 import {
   AccountInfo,
   getRejectReasonFromTransactionResult,
   GetValidatorFeesResponse,
+  KeyId,
+  matchesTypeEnum,
   rejectReasonToString,
   substateIdToString,
   TransactionResult,
 } from "@tari-project/typescript-bindings";
-import { FileContent } from "use-file-picker/types";
-import { toHexString } from "../../../utils/helpers";
+import PopupTitle from "@/components/PopupTitle";
 
 interface FormState {
   account: string | null;
@@ -73,7 +73,7 @@ export default function ClaimFees() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [validity, setValidity] = useState<{ [key: string]: boolean }>(INITIAL_VALIDITY);
   const { data: dataAccountsList } = useAccountsList(0, 10);
-  const { data: dataKeysList } = useKeysList();
+  const { data: dataKeysList } = useKeysList("account");
   const { setPopup } = useAccountStore();
 
   const theme = useTheme();
@@ -94,10 +94,12 @@ export default function ClaimFees() {
     if (keyIndex === formState.keyIndex) {
       return;
     }
-    const selected_account = dataAccountsList?.accounts.find(
-      (account: AccountInfo) => account.account.key_index === keyIndex,
+    const selected_account = dataAccountsList?.accounts.find((account: AccountInfo) =>
+      matchesTypeEnum(account.account.owner_key_id, { Derived: { key_branch: "account", index: BigInt(keyIndex) } }),
     );
-    const account = selected_account?.account.address ? substateIdToString(selected_account!.account.address) : null;
+    const account = selected_account?.account.component_address
+      ? substateIdToString(selected_account!.account.component_address)
+      : null;
     setScannedFees(null);
     setFormState({
       ...formState,
@@ -186,7 +188,7 @@ export default function ClaimFees() {
     setIsLoading(true);
     try {
       const fees = await validatorsGetFees({
-        account_or_key: { KeyIndex: formState.keyIndex },
+        account_or_key: { KeyId: { Derived: { key_branch: "account", index: BigInt(formState.keyIndex) } } },
         shard_group: null,
       });
       setScannedFees(fees);
@@ -198,11 +200,31 @@ export default function ClaimFees() {
     }
   };
 
-  const formatKey = ([index, publicKey, _isActive]: [number, string, boolean]) => {
-    let account = dataAccountsList?.accounts.find((account: AccountInfo) => account.account.key_index === +index);
+  function extractKeyIndex(keyId: KeyId): bigint | null {
+    if ("Derived" in keyId) {
+      return keyId.Derived.index;
+    }
+    return null;
+  }
+
+  const formatKey = ([keyId, publicKey, _isActive]: [KeyId, string, boolean]) => {
+    let account = dataAccountsList?.accounts.find((account: AccountInfo) =>
+      matchesTypeEnum(account.account.owner_key_id, keyId),
+    );
+
+    function displayKeyId(keyId: KeyId): string {
+      if ("Derived" in keyId) {
+        return `Derived:${keyId.Derived.index}`;
+      }
+      if ("Imported" in keyId) {
+        return `Imported:${keyId.Imported.local_key_id}`;
+      }
+      return JSON.stringify(keyId);
+    }
+
     return (
       <div>
-        <b>{index}</b> {publicKey}
+        <b>{displayKeyId(keyId)}</b> {publicKey}
         <br></br>Account <i>{account?.account.name || "<None>"}</i>
       </div>
     );
@@ -214,7 +236,7 @@ export default function ClaimFees() {
         Claim Fees
       </Button>
       <Dialog open={open} onClose={handleClose}>
-        <DialogTitle>Claim Fees</DialogTitle>
+        <PopupTitle onClose={handleClose} title="Claim Fees" />
         <DialogContent className="dialog-content">
           <Form onSubmit={onClaim} className="flex-container-vertical" style={{ paddingTop: theme.spacing(1) }}>
             <FormControl>
@@ -228,8 +250,8 @@ export default function ClaimFees() {
                 style={{ flexGrow: 1, minWidth: "200px" }}
                 disabled={disabled}
               >
-                {dataKeysList?.keys.map((account: [number, string, boolean]) => (
-                  <MenuItem key={account[0]} value={account[0]}>
+                {dataKeysList?.keys.map((account: [KeyId, string, boolean], i) => (
+                  <MenuItem key={i} value={extractKeyIndex(account[0])!.toString()}>
                     {formatKey(account)}
                   </MenuItem>
                 ))}

@@ -7,16 +7,12 @@ use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::{Substate, SubstateId, SubstateValue};
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum SubstateType {
     Component,
     Resource,
     Vault,
-    UnclaimedConfidentialOutput,
+    ClaimedOutputTombstone,
     NonFungible,
     TransactionReceipt,
     ValidatorFeePool,
@@ -30,7 +26,7 @@ impl SubstateType {
             SubstateType::Component => "component",
             SubstateType::Resource => "resource",
             SubstateType::Vault => "vault",
-            SubstateType::UnclaimedConfidentialOutput => "commitment",
+            SubstateType::ClaimedOutputTombstone => "commitment",
             SubstateType::NonFungible => "nft",
             SubstateType::TransactionReceipt => "txreceipt",
             SubstateType::ValidatorFeePool => "vnfp",
@@ -46,7 +42,7 @@ impl SubstateType {
             (SubstateType::Resource, SubstateId::Resource(_)) => true,
             (SubstateType::Vault, SubstateId::Vault(_)) => true,
             (SubstateType::NonFungible, SubstateId::NonFungible(_)) => true,
-            (SubstateType::UnclaimedConfidentialOutput, SubstateId::UnclaimedConfidentialOutput(_)) => true,
+            (SubstateType::ClaimedOutputTombstone, SubstateId::ClaimedOutputTombstone(_)) => true,
             (SubstateType::TransactionReceipt, SubstateId::TransactionReceipt(_)) => true,
             (SubstateType::ValidatorFeePool, SubstateId::ValidatorFeePool(_)) => true,
             (SubstateType::Template, SubstateId::Template(_)) => true,
@@ -62,7 +58,7 @@ impl From<&SubstateValue> for SubstateType {
             SubstateValue::Component(_) => SubstateType::Component,
             SubstateValue::Resource(_) => SubstateType::Resource,
             SubstateValue::Vault(_) => SubstateType::Vault,
-            SubstateValue::UnclaimedConfidentialOutput(_) => SubstateType::UnclaimedConfidentialOutput,
+            SubstateValue::ClaimedOutputTombstone(_) => SubstateType::ClaimedOutputTombstone,
             SubstateValue::NonFungible(_) => SubstateType::NonFungible,
             SubstateValue::TransactionReceipt(_) => SubstateType::TransactionReceipt,
             SubstateValue::Template(_) => SubstateType::Template,
@@ -78,7 +74,7 @@ impl From<&SubstateId> for SubstateType {
             SubstateId::Component(_) => SubstateType::Component,
             SubstateId::Resource(_) => SubstateType::Resource,
             SubstateId::Vault(_) => SubstateType::Vault,
-            SubstateId::UnclaimedConfidentialOutput(_) => SubstateType::UnclaimedConfidentialOutput,
+            SubstateId::ClaimedOutputTombstone(_) => SubstateType::ClaimedOutputTombstone,
             SubstateId::NonFungible(_) => SubstateType::NonFungible,
             SubstateId::TransactionReceipt(_) => SubstateType::TransactionReceipt,
             SubstateId::ValidatorFeePool(_) => SubstateType::ValidatorFeePool,
@@ -96,6 +92,6 @@ impl From<&Substate> for SubstateType {
 
 impl Display for SubstateType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_prefix_str())
+        write!(f, "{:?}", self)
     }
 }

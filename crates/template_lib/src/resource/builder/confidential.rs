@@ -7,8 +7,8 @@ use crate::{
     auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
     models::{Bucket, ComponentAddress, Metadata, ResourceAddress, ResourceAddressAllocation},
     prelude::ConfidentialOutputStatement,
-    resource::{ResourceManager, ResourceType, DEFAULT_DIVISIBILITY},
-    types::crypto::RistrettoPublicKeyBytes,
+    resource::{ResourceManager, DEFAULT_DIVISIBILITY},
+    types::{crypto::RistrettoPublicKeyBytes, ResourceType},
 };
 
 /// Implements the builder pattern for Confidential resources.
@@ -21,6 +21,7 @@ pub struct ConfidentialResourceBuilder {
     authorize_hook: Option<AuthHook>,
     address_allocation: Option<ResourceAddressAllocation>,
     divisibility: u8,
+    is_total_supply_tracking_enabled: bool,
 }
 
 impl ConfidentialResourceBuilder {
@@ -35,6 +36,7 @@ impl ConfidentialResourceBuilder {
             authorize_hook: None,
             address_allocation: None,
             divisibility: DEFAULT_DIVISIBILITY,
+            is_total_supply_tracking_enabled: true,
         }
     }
 
@@ -74,16 +76,46 @@ impl ConfidentialResourceBuilder {
     }
 
     /// Sets the already allocated address for the resource
-    pub fn with_address_allocation(mut self, address: ResourceAddressAllocation) -> Self {
-        self.address_allocation = Some(address);
+    pub fn with_address_allocation(self, address: ResourceAddressAllocation) -> Self {
+        self.with_address_allocation_opt(Some(address))
+    }
+
+    /// Sets the already allocated address for the resource, optionally
+    pub fn with_address_allocation_opt(mut self, address: Option<ResourceAddressAllocation>) -> Self {
+        self.address_allocation = address;
+        self
+    }
+
+    /// Disables the tracking of total supply for the resource.
+    ///
+    /// By default, total supply tracking is enabled. `.disable_total_supply_tracking()` can be used to disable it.
+    /// Use cases include privacy focused tokens or utility tokens where the total supply is not relevant.
+    ///
+    /// # Examples
+    /// ```rust, ignore
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::confidential()
+    ///     .disable_total_supply_tracking()
+    ///     .build();
+    /// ```
+    pub fn disable_total_supply_tracking(mut self) -> Self {
+        self.is_total_supply_tracking_enabled = false;
         self
     }
 
     /// Specify a view key for the confidential resource. This allows anyone with the secret key to uncover the balance
     /// of commitments generated for the resource.
     /// NOTE: it is not currently possible to change the view key after the resource is created.
-    pub fn with_view_key(mut self, view_key: RistrettoPublicKeyBytes) -> Self {
-        self.view_key = Some(view_key);
+    /// Equivalent to calling `with_view_key_opt(Some(view_key))`.
+    pub fn with_view_key(self, view_key: RistrettoPublicKeyBytes) -> Self {
+        self.with_view_key_opt(Some(view_key))
+    }
+
+    /// Optionally, specify a view key for the confidential resource. This allows anyone with the secret key to uncover
+    /// the balance of commitments generated for the resource.
+    /// NOTE: it is not currently possible to change the view key after the resource is created.
+    pub fn with_view_key_opt(mut self, view_key: Option<RistrettoPublicKeyBytes>) -> Self {
+        self.view_key = view_key;
         self
     }
 
@@ -224,7 +256,7 @@ impl ConfidentialResourceBuilder {
             self.authorize_hook,
             self.address_allocation,
             self.divisibility,
-            false,
+            self.is_total_supply_tracking_enabled,
         )
     }
 }

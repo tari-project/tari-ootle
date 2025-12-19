@@ -25,21 +25,26 @@ use tari_ootle_storage::consensus_models::LockConflict;
 use tari_transaction::TransactionId;
 
 use crate::{
-    codecs::{BlockIdCodec, DefaultCodec, TransactionIdCodec, TupleBytesCodec, UnitCodec},
+    codecs::{BlockIdCodec, DefaultCodec, KeyPrefix, TransactionIdCodec, UnitCodec},
+    column_families::cf_names,
+    prefixed,
     traits::{Cf, QueryCf},
 };
+
+prefixed!(LockConflictPrefix, KeyPrefix::LockConflicts);
 
 pub struct LockConflictCf;
 
 impl Cf for LockConflictCf {
     // (transaction id, Block, depends_on_tx_id)
     type Key = (TransactionId, BlockId, TransactionId);
-    type KeyCodec = TupleBytesCodec<Self::Key>;
+    type KeyCodec = (TransactionIdCodec, BlockIdCodec, TransactionIdCodec);
+    type Prefix = LockConflictPrefix;
     type Value = LockConflict;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "lockconflicts"
+        cf_names::CHAIN_METADATA
     }
 }
 
@@ -51,17 +56,20 @@ impl QueryCf for ByTransactionIdQuery {
     type KeyCodec = TransactionIdCodec;
 }
 
+prefixed!(LockConflictBlockIdIndexPrefix, KeyPrefix::LockConflictBlockIdIndex);
+
 pub struct LockConflictBlockIdIndex;
 
 impl Cf for LockConflictBlockIdIndex {
     // (block id, transaction id, depends_on_tx_id)
     type Key = (BlockId, TransactionId, TransactionId);
-    type KeyCodec = TupleBytesCodec<Self::Key>;
+    type KeyCodec = (BlockIdCodec, TransactionIdCodec, TransactionIdCodec);
+    type Prefix = LockConflictBlockIdIndexPrefix;
     type Value = ();
     type ValueCodec = UnitCodec;
 
     fn name() -> &'static str {
-        "lockconflicts"
+        cf_names::CHAIN_METADATA
     }
 }
 

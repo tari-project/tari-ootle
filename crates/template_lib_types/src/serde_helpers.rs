@@ -10,9 +10,46 @@ use ::serde::{
 use tari_template_abi::rust::{fmt, marker::PhantomData};
 
 // Cow is not available in no_std, so we define our own
-enum BytesCow<'a> {
+pub enum BytesCow<'a> {
     Borrowed(&'a [u8]),
-    Owned(Vec<u8>),
+    Owned(Box<[u8]>),
+}
+
+impl<'a> BytesCow<'a> {
+    pub const fn len(&self) -> usize {
+        match self {
+            BytesCow::Borrowed(v) => v.len(),
+            BytesCow::Owned(v) => v.len(),
+        }
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl BytesCow<'_> {
+    pub fn into_owned(self) -> Box<[u8]> {
+        match self {
+            BytesCow::Borrowed(v) => v.to_vec().into_boxed_slice(),
+            BytesCow::Owned(v) => v,
+        }
+    }
+}
+
+impl<'a> From<BytesCow<'a>> for Vec<u8> {
+    fn from(value: BytesCow<'a>) -> Self {
+        match value {
+            BytesCow::Borrowed(v) => v.to_vec(),
+            BytesCow::Owned(v) => v.into_vec(),
+        }
+    }
+}
+
+impl<'a> From<BytesCow<'a>> for Box<[u8]> {
+    fn from(value: BytesCow<'a>) -> Self {
+        value.into_owned()
+    }
 }
 
 impl<'a> AsRef<[u8]> for BytesCow<'a> {
@@ -25,13 +62,19 @@ impl<'a> AsRef<[u8]> for BytesCow<'a> {
 }
 
 #[derive(Default)]
-struct BytesVisitor<'a>(PhantomData<&'a ()>);
+pub struct BytesVisitor<'a>(PhantomData<&'a ()>);
+
+impl<'a> BytesVisitor<'a> {
+    pub const fn new() -> Self {
+        Self(PhantomData)
+    }
+}
 
 impl<'a> Visitor<'a> for BytesVisitor<'a> {
     type Value = BytesCow<'a>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("bytes")
+        formatter.write_str("bytes (in template_lib)")
     }
 
     fn visit_borrowed_bytes<E>(self, v: &'a [u8]) -> Result<Self::Value, E>
@@ -41,12 +84,12 @@ impl<'a> Visitor<'a> for BytesVisitor<'a> {
 
     fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
     where E: Error {
-        Ok(BytesCow::Owned(v))
+        Ok(BytesCow::Owned(v.into_boxed_slice()))
     }
 
     fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
     where E: Error {
-        Ok(BytesCow::Owned(v.to_vec()))
+        Ok(BytesCow::Owned(v.to_vec().into_boxed_slice()))
     }
 }
 
@@ -119,7 +162,7 @@ pub mod dynamic_hex {
         for<'a> T: TryFrom<&'a [u8]>,
     {
         if d.is_human_readable() {
-            let hex = String::deserialize(d)?;
+            let hex = Box::<str>::deserialize(d)?;
             let bytes = bytes_from_hex(&hex).map_err(Error::custom)?;
             return T::try_from(&bytes).map_err(|_| {
                 Error::custom(format!(
@@ -129,7 +172,7 @@ pub mod dynamic_hex {
             });
         }
 
-        let bytes = d.deserialize_bytes(BytesVisitor::default())?;
+        let bytes = d.deserialize_byte_buf(BytesVisitor::default())?;
         T::try_from(bytes.as_ref()).map_err(|_| {
             Error::custom(format!(
                 "Failed to convert bytes to type: {}",

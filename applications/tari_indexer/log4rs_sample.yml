@@ -36,7 +36,7 @@ appenders:
         count: 5
         pattern: "{{log_dir}}/log/indexer/network.{}.log"
     encoder:
-      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [Thread:{I}] {l:5} {m}// {f}:{L}{n}"
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m}// {f}:{L}{n}"
 
   # An appender named "ootle" that writes to a file with a custom pattern encoder
   ootle:
@@ -53,7 +53,7 @@ appenders:
         count: 5
         pattern: "{{log_dir}}/log/indexer/ootle.{}.log"
     encoder:
-      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [{X(node-public-key)},{X(node-id)}] {l:5} {m} // {f}:{L}{n}"
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
 
   # An appender named "ootle" that writes to a file with a custom pattern encoder
   json_rpc:
@@ -70,7 +70,7 @@ appenders:
         count: 5
         pattern: "{{log_dir}}/log/indexer/json_rpc.{}.log"
     encoder:
-      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [{X(node-public-key)},{X(node-id)}] {l:5} {m} // {f}:{L}{n}"
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
 
   # An appender named "libp2p" that writes to a file with a custom pattern encoder
   libp2p:
@@ -146,13 +146,6 @@ loggers:
     level: info
     appenders:
       - network
-
-  tari::indexer::json_rpc:
-    level: debug
-    appenders:
-      - json_rpc
-    additive: true
-
   hyper:
     level: info
     appenders:

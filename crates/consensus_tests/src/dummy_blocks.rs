@@ -7,6 +7,7 @@ use tari_consensus::hotstuff::{
     calculate_dummy_blocks_from_justify,
     calculate_last_dummy_block,
 };
+use tari_consensus_types::ShardGroupAccumulatedData;
 use tari_engine_types::ToByteType;
 use tari_ootle_common_types::{
     committee::{Committee, CommitteeMember},
@@ -25,17 +26,18 @@ use crate::support::{load_json_fixture, RoundRobinLeaderStrategy};
 
 #[test]
 fn dummy_blocks() {
+    let shard_group = ShardGroup::new(1, 127);
     let genesis = Block::genesis(
         Network::LocalNet,
         Epoch(1),
         FixedHash::zero(),
-        ShardGroup::new(0, 127),
+        shard_group,
         FixedHash::zero(),
         None,
     );
     let committee = (0u8..2)
-        .map(|i| create_key_pair_from_seed(i).1)
-        .map(|pk| CommitteeMember {
+        .map(create_key_pair_from_seed)
+        .map(|(_, pk)| CommitteeMember {
             address: PeerAddress::derive_from_public_key(&pk),
             public_key: pk.to_byte_type(),
             vote_power: VotePower::of(1),
@@ -47,7 +49,7 @@ fn dummy_blocks() {
         NodeHeight(30),
         Network::LocalNet,
         Epoch(1),
-        ShardGroup::new(0, 127),
+        shard_group,
         *genesis.id(),
         genesis.justify(),
         genesis.id(),
@@ -55,6 +57,7 @@ fn dummy_blocks() {
         &RoundRobinLeaderStrategy,
         &committee,
         genesis.timestamp(),
+        ShardGroupAccumulatedData::default(),
         FixedHash::zero(),
     );
     let last = calculate_last_dummy_block(
@@ -62,13 +65,14 @@ fn dummy_blocks() {
         NodeHeight(30),
         Network::LocalNet,
         Epoch(1),
-        ShardGroup::new(0, 127),
+        shard_group,
         *genesis.id(),
         genesis.justify(),
         FixedHash::zero(),
         &RoundRobinLeaderStrategy,
         &committee,
         genesis.timestamp(),
+        ShardGroupAccumulatedData::default(),
         FixedHash::zero(),
     )
     .expect("last dummy block");
@@ -111,6 +115,7 @@ fn last_matches_generated_using_real_data() {
         &RoundRobinLeaderStrategy,
         &committee,
         justify.timestamp(),
+        ShardGroupAccumulatedData::default(),
         *justify.epoch_hash(),
     )
     .expect("last dummy block");

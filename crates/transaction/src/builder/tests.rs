@@ -1,17 +1,21 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::{instruction::Instruction, ComponentCall};
-use tari_template_lib::{
-    args::{AllocatableAddressType, InstructionArg, WorkspaceOffsetId},
-    types::TemplateAddress,
-};
+use tari_template_lib::types::TemplateAddress;
 
-use crate::{args, builder::named_component_call::CallFromWorkspace, Transaction};
+use crate::{
+    args,
+    args::{InstructionArg, WorkspaceOffsetId},
+    builder::named_component_call::CallFromWorkspace,
+    AllocatableAddressType,
+    ComponentReference,
+    Instruction,
+    Transaction,
+};
 
 #[test]
 fn it_converts_workspace_names_to_ids() {
-    let transaction = Transaction::builder()
+    let transaction = Transaction::builder_localnet()
         .put_last_instruction_output_on_workspace("thing1")
         .allocate_resource_address("thing2")
         .allocate_component_address("thing3")
@@ -40,7 +44,7 @@ fn it_converts_workspace_names_to_ids() {
     });
     assert_eq!(transaction.instructions()[3], Instruction::CallFunction {
         address: TemplateAddress::default(),
-        function: "do_something".to_string(),
+        function: "do_something".try_into().unwrap(),
         args: vec![
             InstructionArg::Workspace(WorkspaceOffsetId::new(0)),
             InstructionArg::from_type(&"thing2").unwrap(),
@@ -49,8 +53,8 @@ fn it_converts_workspace_names_to_ids() {
         ]
     });
     assert_eq!(transaction.instructions()[4], Instruction::CallMethod {
-        call: ComponentCall::Workspace(2),
-        method: "do_something_else".to_string(),
+        call: ComponentReference::Workspace(2),
+        method: "do_something_else".try_into().unwrap(),
         args: vec![InstructionArg::Workspace(WorkspaceOffsetId::new(0))]
     });
 }

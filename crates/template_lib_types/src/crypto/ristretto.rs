@@ -12,11 +12,7 @@ use crate::{crypto::InvalidByteLengthError, hex::fixed_bytes_from_hex, serde_hel
 
 /// A Ristretto public key byte contents
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct RistrettoPublicKeyBytes(
     #[serde(with = "serde_helpers::fixed_hex")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
@@ -28,7 +24,7 @@ impl RistrettoPublicKeyBytes {
         32
     }
 
-    pub fn zero() -> Self {
+    pub const fn zero() -> Self {
         Self([0u8; Self::length()])
     }
 
@@ -50,15 +46,19 @@ impl RistrettoPublicKeyBytes {
         Ok(Self(bytes))
     }
 
-    pub fn as_bytes(&self) -> &[u8] {
+    pub const fn as_bytes(&self) -> &[u8] {
         &self.0
     }
 
-    pub fn into_array(self) -> [u8; Self::length()] {
+    pub fn is_zero(&self) -> bool {
+        self.0.iter().all(|&b| b == 0)
+    }
+
+    pub const fn into_array(self) -> [u8; Self::length()] {
         self.0
     }
 
-    pub fn as_hash(&self) -> Hash {
+    pub const fn as_hash(&self) -> Hash {
         Hash::from_array(self.0)
     }
 }

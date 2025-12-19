@@ -21,23 +21,27 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tari_ootle_common_types::shard::Shard;
-use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
+use tari_state_tree::{Node, NodeKey, StaleTreeNode, StateTreePayload, Version};
 
 use crate::{
-    codecs::{DefaultCodec, NodeKeyCodec, NumberCodec, ShardCodec},
+    codecs::{DefaultCodec, KeyPrefix, NodeKeyCodec, NumberCodec, ShardCodec},
+    column_families::cf_names,
+    prefixed,
     traits::{Cf, QueryCf},
 };
 
+prefixed!(StateTreePrefix, KeyPrefix::StateTree);
 pub struct StateTreeCf;
 
 impl Cf for StateTreeCf {
     type Key = (Shard, NodeKey);
     type KeyCodec = (ShardCodec, NodeKeyCodec);
-    type Value = Node<Version>;
+    type Prefix = StateTreePrefix;
+    type Value = Node<StateTreePayload>;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "statetree"
+        cf_names::STATE_TREE
     }
 }
 
@@ -48,7 +52,8 @@ pub struct StateTreeCfRef<'a> {
 impl<'a> Cf for StateTreeCfRef<'a> {
     type Key = (Shard, &'a NodeKey);
     type KeyCodec = (ShardCodec, NodeKeyCodec);
-    type Value = Node<Version>;
+    type Prefix = StateTreePrefix;
+    type Value = Node<StateTreePayload>;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
@@ -64,31 +69,35 @@ impl Default for StateTreeCfRef<'_> {
     }
 }
 
-pub struct ByShardQuery;
+pub struct ByShardStateVersionQuery;
 
-impl QueryCf for ByShardQuery {
+impl QueryCf for ByShardStateVersionQuery {
     type Cf = StateTreeCf;
-    type Key = Shard;
-    type KeyCodec = ShardCodec;
+    type Key = (Shard, Version);
+    // Depends on NodeKeyCodec first serializing the Shard, then the Version.
+    type KeyCodec = (ShardCodec, NumberCodec<Version>);
 }
 
-pub struct StateTreeStaleNodesModel;
+prefixed!(StateTreeStaleNodesPrefix, KeyPrefix::StateTreeStaleTreeNodesIndex);
 
-impl Cf for StateTreeStaleNodesModel {
+pub struct StateTreeStaleNodesCf;
+
+impl Cf for StateTreeStaleNodesCf {
     type Key = (Shard, Version);
     type KeyCodec = (ShardCodec, NumberCodec<Version>);
+    type Prefix = StateTreeStaleNodesPrefix;
     type Value = Vec<StaleTreeNode>;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "statetree_stale_nodes"
+        cf_names::STATE_TREE
     }
 }
 
 pub struct ByStateTreeStaleShardQuery;
 
 impl QueryCf for ByStateTreeStaleShardQuery {
-    type Cf = StateTreeStaleNodesModel;
+    type Cf = StateTreeStaleNodesCf;
     type Key = Shard;
     type KeyCodec = ShardCodec;
 }

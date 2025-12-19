@@ -22,11 +22,10 @@
 
 import PageHeading from "../../Components/PageHeading";
 import Grid from "@mui/material/Grid";
-import { StyledPaper } from "../../Components/StyledComponents";
+import { StyledPaper, DataTableCell } from "../../Components/StyledComponents";
 import {
   Box,
   Button,
-  IconButton,
   Stack,
   Table,
   TableBody,
@@ -34,112 +33,114 @@ import {
   TableHead,
   TableRow,
   TextField,
-  Typography,
   Select,
   MenuItem,
+  TableContainer,
+  TablePagination,
+  FormControl,
   InputLabel,
 } from "@mui/material";
-import React, { useEffect, useState } from "react";
-import { toHexString } from "../VN/Components/helpers";
-import { truncateText } from "../../utils/helpers";
-import ContentCopyIcon from "@mui/icons-material/ContentCopy";
-import KeyboardArrowLeftIcon from "@mui/icons-material/KeyboardArrowLeft";
-import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
+import React, { useEffect, useState, useMemo } from "react";
+import { truncateText, formatTimestamp } from "../../utils/helpers";
+import CopyToClipboard from "../../Components/CopyToClipboard";
 import saveAs from "file-saver";
 import JsonDialog from "../../Components/JsonDialog";
 import { ListSubstateItem, shortenSubstateId, substateIdToString } from "@tari-project/typescript-bindings";
-import { listSubstates, getSubstate } from "../../utils/json_rpc";
 import { Link } from "react-router-dom";
+import FetchStatusCheck from "../../Components/FetchStatusCheck";
+import { useListSubstates, useGetSubstate } from "../../api/hooks/useSubstates";
 
-const PAGE_SIZE = 10;
-const SUBSTATE_TYPES = ["Component", "Resource", "Vault", "UnclaimedConfidentialOutput", "NonFungible", "TransactionReceipt", "ValidatorFeePool", "Template"] as const;
+const SUBSTATE_TYPES = [
+  "Component",
+  "Resource",
+  "Vault",
+  "ClaimedOutputTombstone",
+  "NonFungible",
+  "TransactionReceipt",
+  "ValidatorFeePool",
+  "Template",
+  "Utxo",
+] as const;
+
+type ExtendedSubstateItem = ListSubstateItem & { id: string; show?: boolean };
 
 function SubstatesLayout() {
-  const [substates, setSubstates] = useState<ListSubstateItem []>([]);
+  const [filteredSubstates, setFilteredSubstates] = useState<ExtendedSubstateItem[]>([]);
   const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
   const [jsonDialogOpen, setJsonDialogOpen] = React.useState(false);
-  const [selectedContent, setSelectedContent] = useState({});
+  const [selectedSubstate, setSelectedSubstate] = useState<any>(null);
   const [filter, setFilter] = useState({
-    filter_by_template: null,
-    filter_by_type: null,
+    filter_by_template: "",
+    filter_by_type: "",
   });
 
+  const { data, isLoading, isError, error } = useListSubstates({
+    offset: 0,
+    limit: 50,
+    filter_by_template: filter.filter_by_template || null,
+    filter_by_type: filter.filter_by_type || null,
+  });
+
+  const substates = data?.substates || [];
+
+  const { data: substateData } = useGetSubstate({
+    address: selectedSubstate?.substate_id,
+    enabled: !!selectedSubstate,
+  });
+
+  const extendedSubstates = useMemo(
+    () => substates.map((substate) => ({ ...substate, id: substateIdToString(substate.substate_id) })),
+    [substates],
+  );
+
+  const visibleSubstates = filteredSubstates.filter((substate) => substate.show !== false);
+  const paginatedSubstates = visibleSubstates.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+
   useEffect(() => {
-    get_substates(page, PAGE_SIZE, filter);
-  }, []);
+    setFilteredSubstates(extendedSubstates);
+  }, [extendedSubstates]);
 
-  async function get_substates(offset: number, limit: number, filter: any) {
-    let params = {
-      limit,
-      offset,
-      filter_by_template: null,
-      filter_by_type: null,
-    };
-    if (filter.filter_by_template) {
-      params.filter_by_template = filter.filter_by_template;
-    }
-    if (filter.filter_by_type) {
-      params.filter_by_type = filter.filter_by_type;
-    }
-
-    // Ignoring eslint about BintInt to number conversion, as BigInts break serialization
-    // @ts-ignore
-    let resp = await listSubstates(params);
-
-
-    console.log(resp);
-    setSubstates(resp.substates);
-  }
-
-  async function handleCopyClick(text: string) {
-    if (text) {
-      navigator.clipboard.writeText(text);
-    }
-  };
-
-  async function handleChangePage(newPage: number) {
-    const offset = newPage * PAGE_SIZE;
-    await get_substates(offset, PAGE_SIZE, filter);
+  const handleChangePage = (_event: React.MouseEvent<HTMLButtonElement> | null, newPage: number) => {
     setPage(newPage);
   };
 
-  const handleContentDownload = async (substate: any) => {
-    const data = await getSubstate({
-      address: substate.substate_id,
-      version: null,
-      local_search_only: false,
-    });
-
-    const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
-    const filename = `substates-${substate.address}-${substate.version}.json`;
-    saveAs(blob, filename);
+  const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setPage(0);
   };
 
-  const handleContentView = async (substate: any) => {
-    const data = await getSubstate({
-      address: substate.substate_id,
-      version: null,
-      local_search_only: false,
-    });
-    setSelectedContent(data);
+  const handleContentDownload = (substate: any) => {
+    setSelectedSubstate(substate);
+  };
+
+  const handleContentView = (substate: any) => {
+    setSelectedSubstate(substate);
     setJsonDialogOpen(true);
   };
 
+  useEffect(() => {
+    if (substateData && selectedSubstate && !jsonDialogOpen) {
+      const json = JSON.stringify(substateData, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
+      const filename = `substates-${substateIdToString(selectedSubstate.substate_id)}-${selectedSubstate.version}.json`;
+      saveAs(blob, filename);
+      setSelectedSubstate(null);
+    }
+  }, [substateData, selectedSubstate, jsonDialogOpen]);
+
   const handleJsonDialogClose = () => {
     setJsonDialogOpen(false);
+    setSelectedSubstate(null);
   };
 
-  const onFilterChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onFilterChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newFilter = {
       ...filter,
       [e.target.name]: e.target.value,
     };
 
     setFilter(newFilter);
-
-    const offset = 0;
-    await get_substates(offset, PAGE_SIZE, newFilter);
     setPage(0);
   };
 
@@ -148,114 +149,115 @@ function SubstatesLayout() {
       <Grid item sm={12} md={12} xs={12}>
         <PageHeading>Substates</PageHeading>
       </Grid>
-      <Grid item>
-        <Box className="flex-container" sx={{ marginBottom: 4 }}>
-          <TextField
-            name="filter_by_template"
-            label="Template"
-            value={filter.filter_by_template}
-            onChange={async (e: any) => onFilterChange(e)}
-            style={{ flexGrow: 1 }} />
-          <Select
-            name="filter_by_type"
-            label="Type"
-            value={filter.filter_by_type}
-            displayEmpty
-            onChange={async (e: any) => onFilterChange(e)}
-            size="medium"
-            renderValue={(value) => {
-              if (!value) {
-                return <>All Types</>;
-              }
-
-              return value;
-            }}
-            style={{ flexGrow: 1, minWidth: "200px" }}>
-            <MenuItem key={"All Types"} value={undefined}>
-              {"All types"}
-            </MenuItem>
-            {SUBSTATE_TYPES.map((type) => (
-              <MenuItem key={type} value={type}>
-                {type}
-              </MenuItem>
-            ))}
-          </Select>
-        </Box>
-      </Grid>
       <Grid item sm={12} md={12} xs={12}>
         <StyledPaper>
-          <Table sx={{ minWidth: 650 }} aria-label="simple table">
-            <TableHead>
-              <TableRow>
-                <TableCell><Typography variant="h3">Address</Typography></TableCell>
-                <TableCell><Typography variant="h3">Version</Typography></TableCell>
-                <TableCell><Typography variant="h3">Template</Typography></TableCell>
-                <TableCell><Typography variant="h3">Timestamp</Typography></TableCell>
-                <TableCell><Typography variant="h3">Content</Typography></TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {substates.map((row) => (
-                <TableRow
-                  key={substateIdToString(row.substate_id)}
-                  sx={{ "&:last-child td, &:last-child th": { border: 0 } }}
-                >
-                  <TableCell>
-                    {substateIdToString(row.substate_id).startsWith("resource_") ?
-                      <Link
-                        to={`/resources/${substateIdToString(row.substate_id)}`}>{shortenSubstateId(row.substate_id)}</Link> :
-                      shortenSubstateId(row.substate_id)
-                    }
-                    <IconButton aria-label="copy" onClick={() => handleCopyClick(substateIdToString(row.substate_id))}>
-                      <ContentCopyIcon />
-                    </IconButton>
-                  </TableCell>
-
-                  <TableCell>{row.version}</TableCell>
-
-                  <TableCell>
-                    {row.template_address !== null &&
-                      <>
-                        {truncateText(row.template_address, 20)}
-                        <IconButton aria-label="copy" onClick={() => handleCopyClick(row.template_address!)}>
-                          <ContentCopyIcon />
-                        </IconButton>
-                      </>
-                    }
-                  </TableCell>
-
-                  <TableCell>{new Date(Number(row.timestamp) * 1000).toDateString()}</TableCell>
-
-                  <TableCell>
-                    <Stack direction="row" spacing={2} alignItems="left">
-                      <Button variant="outlined" onClick={() => handleContentView(row)}>
-                        View
-                      </Button>
-                      <Button variant="outlined" onClick={() => handleContentDownload(row)}>
-                        Download
-                      </Button>
-                    </Stack>
-
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          <Stack direction="row" justifyContent="right" spacing={2} alignItems="center">
-            <IconButton aria-label="copy" onClick={() => handleChangePage(Math.max(page - 1, 0))}>
-              <KeyboardArrowLeftIcon />
-            </IconButton>
-            <Typography sx={{}}>{page}</Typography>
-            <IconButton aria-label="copy" onClick={() => handleChangePage(page + 1)}>
-              <KeyboardArrowRightIcon />
-            </IconButton>
-          </Stack>
+          <FetchStatusCheck
+            isLoading={isLoading}
+            isError={isError}
+            errorMessage={error ? (error as Error).message : "Error fetching substates."}
+          >
+            <Stack spacing={1}>
+              <Box className="flex-container" sx={{ marginBottom: 2 }}>
+                <FormControl style={{ minWidth: "250px" }}>
+                  <InputLabel shrink>Type</InputLabel>
+                  <Select
+                    name="filter_by_type"
+                    label="Type"
+                    value={filter.filter_by_type}
+                    displayEmpty
+                    onChange={async (e: any) => onFilterChange(e)}
+                    size="medium"
+                    renderValue={(value) => {
+                      if (value === "") {
+                        return "All types";
+                      }
+                      return value;
+                    }}
+                  >
+                    <MenuItem key={"All Types"} value="">
+                      {"All types"}
+                    </MenuItem>
+                    {SUBSTATE_TYPES.map((type) => (
+                      <MenuItem key={type} value={type}>
+                        {type}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <TextField
+                  name="filter_by_template"
+                  label="Template"
+                  value={filter.filter_by_template}
+                  onChange={async (e: any) => onFilterChange(e)}
+                  style={{ flexGrow: 1 }}
+                />
+              </Box>
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Address</TableCell>
+                      <TableCell>Version</TableCell>
+                      <TableCell>Template</TableCell>
+                      <TableCell>Timestamp</TableCell>
+                      <TableCell>Content</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {paginatedSubstates.map((row) => (
+                      <TableRow
+                        key={substateIdToString(row.substate_id)}
+                        sx={{ "&:last-child td, &:last-child th": { border: 0 } }}
+                      >
+                        <DataTableCell>
+                          {substateIdToString(row.substate_id).startsWith("resource_") ? (
+                            <Link to={`/${substateIdToString(row.substate_id)}`}>
+                              {shortenSubstateId(row.substate_id)}
+                            </Link>
+                          ) : (
+                            shortenSubstateId(row.substate_id)
+                          )}
+                          <CopyToClipboard copy={substateIdToString(row.substate_id)} />
+                        </DataTableCell>
+                        <DataTableCell>{row.version}</DataTableCell>
+                        <DataTableCell>
+                          {row.template_address !== null && (
+                            <>
+                              {truncateText(row.template_address, 20)}
+                              <CopyToClipboard copy={row.template_address} />
+                            </>
+                          )}
+                        </DataTableCell>
+                        <DataTableCell>{formatTimestamp(row.timestamp)}</DataTableCell>
+                        <DataTableCell>
+                          <Stack direction="row" spacing={2} alignItems="left">
+                            <Button variant="outlined" onClick={() => handleContentView(row)}>
+                              View
+                            </Button>
+                            <Button variant="outlined" onClick={() => handleContentDownload(row)}>
+                              Download
+                            </Button>
+                          </Stack>
+                        </DataTableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+              <TablePagination
+                component="div"
+                count={visibleSubstates.length}
+                page={page}
+                onPageChange={handleChangePage}
+                rowsPerPage={rowsPerPage}
+                onRowsPerPageChange={handleChangeRowsPerPage}
+                rowsPerPageOptions={[5, 10, 25, 50]}
+              />
+            </Stack>
+          </FetchStatusCheck>
         </StyledPaper>
       </Grid>
-      <JsonDialog
-        open={jsonDialogOpen}
-        onClose={handleJsonDialogClose}
-        data={selectedContent} />
+      <JsonDialog open={jsonDialogOpen} onClose={handleJsonDialogClose} data={substateData || {}} />
     </>
   );
 }

@@ -4,7 +4,7 @@
 use std::{str::FromStr, sync::Arc};
 
 use axum::{
-    http::{HeaderValue, Response, Uri},
+    http::{header, HeaderValue, Response, StatusCode, Uri},
     response::IntoResponse,
     routing::get,
     Extension,
@@ -12,18 +12,18 @@ use axum::{
 };
 use include_dir::{include_dir, Dir};
 use log::*;
-use reqwest::{header, StatusCode};
-use tari_state_store_rocksdb::{column_families, traits::Cf};
+use tari_state_store_rocksdb::column_families;
 use tower_http::cors::CorsLayer;
 
-use crate::webserver::{context::HandlerContext, either_cf::EitherCf, handlers};
+use crate::webserver::{context::HandlerContext, handlers, handlers::slugify_type_name};
 
 const LOG_TARGET: &str = "tari::ootle::swarm::webserver";
 
 macro_rules! add_cf_route {
     ($api:expr, $cf:expr) => {
+        let slug = slugify_type_name($cf);
         $api = $api.route(
-            &format!("/databases/:db_name/column-families/{}", $cf.as_name()),
+            &format!("/databases/{{db_name}}/column-families/{slug}"),
             get(handlers::tables::list(|| $cf)),
         );
     };
@@ -40,28 +40,36 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
     let mut api = Router::new()
         .route("/databases", get(handlers::databases::list))
         .route(
-            "/databases/:db_name/column-families",
+            "/databases/{db_name}/column-families",
             get(handlers::column_families::list),
         )
         // Special cases
         .route(
-            "/databases/:db_name/column-families/blocks",
+            &format!("/databases/{{db_name}}/column-families/{}", slugify_type_name(column_families::block::BlockCf)),
             get(handlers::blocks::list),
         )
         .route(
-            "/databases/:db_name/column-families/state_transitions",
+            &format!("/databases/{{db_name}}/column-families/{}", slugify_type_name(column_families::state_transition::StateTransitionCf)),
             get(handlers::state_transitions::list),
         )
         .route(
-            "/databases/:db_name/column-families/block_diff",
+            &format!("/databases/{{db_name}}/column-families/{}", slugify_type_name(column_families::block_diff::BlockDiffCf)),
             get(handlers::block_diff::list),
         )
         .route(
-            "/databases/:db_name/column-families/bookkeeping",
+            &format!("/databases/{{db_name}}/column-families/{}", slugify_type_name(column_families::block_diff::SubstateIdIndex)),
+            get(handlers::block_diff_substate_id_index::list),
+        )
+        .route(
+            "/databases/{db_name}/column-families/bookkeeping",
             get(handlers::bookkeeping::list),
         )
         .route(
-            "/databases/:db_name/column-families/foreign_substate_pledges",
+            &format!("/databases/{{db_name}}/column-families/{}", slugify_type_name(column_families::state_tree::StateTreeCf)),
+            get(handlers::state_tree::list),
+        )
+        .route(
+            &format!("/databases/{{db_name}}/column-families/{}", slugify_type_name(column_families::foreign_substate_pledge::ForeignSubstatePledgeCf)),
             get(handlers::foreign_substate_pledges::list),
         );
 
@@ -76,7 +84,7 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         column_families::foreign_proposal::UnconfirmedIndex,
         column_families::block::EpochHeightIndex,
         // column_families::block_diff::BlockDiffModel,
-        column_families::block_diff::SubstateIdIndex,
+        // column_families::block_diff::SubstateIdIndex,
         column_families::certificates::proposal::ProposalCertificateCf,
         column_families::certificates::timeout::TimeoutCertificateCf,
         column_families::block_transaction_execution::BlockTransactionExecutionCf,
@@ -98,21 +106,17 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         column_families::substate::HeadIndex,
         column_families::substate::UnprunedDownedValuesIndex,
         // column_families::state_transition::StateTransitionModel,
-        column_families::state_transition::ShardSeqIndex,
         // column_families::foreign_substate_pledge::ForeignSubstatePledgeModel,
         column_families::pending_state_tree_diff::PendingStateTreeDiffCf,
-        column_families::state_tree::StateTreeCf,
-        column_families::state_tree::StateTreeStaleNodesModel,
+        // column_families::state_tree::StateTreeCf,
+        column_families::state_tree::StateTreeStaleNodesCf,
         column_families::state_tree_shard_versions::StateTreeShardVersionCf,
         column_families::epoch_checkpoint::EpochCheckpointCf,
-        column_families::burnt_utxo::BurntUtxoCf,
-        column_families::burnt_utxo::ProposedInBlockIndex,
-        EitherCf::<
-            column_families::lock_conflict::LockConflictCf,
-            column_families::lock_conflict::LockConflictBlockIdIndex,
-        >::new(),
+        column_families::lock_conflict::LockConflictCf,
+        column_families::lock_conflict::LockConflictBlockIdIndex,
         column_families::evicted_node::EvictedNodeCf,
-        column_families::validator_node_epoch_stats::ValidatorNodeEpochStatsCf
+        column_families::validator_node_epoch_stats::ValidatorNodeEpochStatsCf,
+        column_families::diagnostic_no_vote::DiagnosticsNoVoteCf
     );
 
     let api = api.fallback(handlers::not_found);
@@ -123,16 +127,18 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         .layer(CorsLayer::permissive())
         .layer(Extension(Arc::new(context)));
 
-    let server = axum::Server::try_bind(&bind_address).or_else(|_| {
-        warn!(
-            target: LOG_TARGET,
-            "🕸️ Failed to bind on preferred address {}. Trying OS-assigned", bind_address
-        );
-        axum::Server::try_bind(&"127.0.0.1:0".parse().unwrap())
-    })?;
-
-    let server = server.serve(router.into_make_service());
-    info!(target: LOG_TARGET, "🕸️ Webserver listening on http://{}", server.local_addr());
+    let listener = match tokio::net::TcpListener::bind(bind_address).await {
+        Ok(l) => l,
+        Err(e) => {
+            warn!(
+                target: LOG_TARGET,
+                "🕸️ Failed to bind on preferred address {} ({e}). Trying OS-assigned", bind_address
+            );
+            tokio::net::TcpListener::bind(("127.0.0.1", 0u16)).await?
+        },
+    };
+    let server = axum::serve(listener, router);
+    info!(target: LOG_TARGET, "🕸️ Webserver listening on http://{}", server.local_addr()?);
     server.await?;
 
     Ok(())
@@ -164,4 +170,51 @@ async fn fallback_handler(uri: Uri) -> impl IntoResponse {
         .status(StatusCode::NOT_FOUND)
         .body(String::new())
         .unwrap()
+}
+
+pub fn register_all_cfs(context: &mut HandlerContext) -> &mut HandlerContext {
+    context
+        .register_cf(column_families::block::BlockCf)
+        .register_cf(column_families::block::EpochHeightIndex)
+        .register_cf(column_families::block_diff::BlockDiffCf)
+        .register_cf(column_families::block_diff::SubstateIdIndex)
+        .register_cf(column_families::block_transaction_execution::BlockIndex)
+        .register_cf(column_families::block_transaction_execution::BlockTransactionExecutionCf)
+        .register_cf(column_families::certificates::proposal::ProposalCertificateCf)
+        .register_cf(column_families::certificates::timeout::TimeoutCertificateCf)
+        .register_cf(column_families::chain::CommittedParentChildChainIndex)
+        .register_cf(column_families::chain::PendingChainIndex)
+        .register_cf(column_families::chain::PendingParentChildIndex)
+        .register_cf(column_families::diagnostic_no_vote::DiagnosticsNoVoteCf)
+        .register_cf(column_families::epoch_checkpoint::EpochCheckpointCf)
+        .register_cf(column_families::evicted_node::EvictedNodeCf)
+        .register_cf(column_families::finalized_transaction::FinalizedTransactionLinkCf)
+        .register_cf(column_families::foreign_parked_blocks::ForeignParkedBlockCf)
+        .register_cf(column_families::foreign_parked_blocks::MissingTransactionsModel)
+        .register_cf(column_families::foreign_proposal::ForeignProposalCf)
+        .register_cf(column_families::foreign_proposal::EpochIndex)
+        .register_cf(column_families::foreign_proposal::ProposedInBlockIndex)
+        .register_cf(column_families::foreign_proposal::UnconfirmedIndex)
+        .register_cf(column_families::foreign_substate_pledge::ForeignSubstatePledgeCf)
+        .register_cf(column_families::lock_conflict::LockConflictBlockIdIndex)
+        .register_cf(column_families::lock_conflict::LockConflictCf)
+        .register_cf(column_families::missing_transactions::MissingTransactionCf)
+        .register_cf(column_families::parked_block::ParkedBlockCf)
+        .register_cf(column_families::pending_state_tree_diff::PendingStateTreeDiffCf)
+        .register_cf(column_families::state_transition::StateTransitionCf)
+        .register_cf(column_families::state_tree::StateTreeCf)
+        .register_cf(column_families::state_tree::StateTreeStaleNodesCf)
+        .register_cf(column_families::state_tree_shard_versions::StateTreeShardVersionCf)
+        .register_cf(column_families::substate::HeadIndex)
+        .register_cf(column_families::substate::SubstateCf)
+        .register_cf(column_families::substate::UnprunedDownedValuesIndex)
+        .register_cf(column_families::substate_locks::BlockIdIndex)
+        .register_cf(column_families::substate_locks::HeadIndex)
+        .register_cf(column_families::substate_locks::SubstateIdIndex)
+        .register_cf(column_families::substate_locks::SubstateLockModel)
+        .register_cf(column_families::transaction::TransactionCf)
+        .register_cf(column_families::transaction_pool::TransactionPoolCf)
+        .register_cf(column_families::transaction_pool_state_update::TransactionPoolStateUpdateCf)
+        .register_cf(column_families::transaction_pool_state_update::TransactionPoolStateUpdateDebugHistoryCf)
+        .register_cf(column_families::validator_node_epoch_stats::ValidatorNodeEpochStatsCf)
 }

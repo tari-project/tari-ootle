@@ -222,6 +222,7 @@ pub fn convert_block_to_sidechain_block_header(header: &BlockHeader) -> Result<S
         command_merkle_root: *header.command_merkle_root(),
         metadata_hash: header.calculate_metadata_hash(),
         signature,
+        accumulated_data: (*header.accumulated_data()).into(),
     })
 }
 
@@ -276,7 +277,7 @@ fn convert_validator_block_signature(
 #[cfg(test)]
 mod tests {
     use tari_common_types::types::FixedHash;
-    use tari_consensus_types::ProposalCertificate;
+    use tari_consensus_types::{ProposalCertificate, ShardGroupAccumulatedData};
     use tari_crypto::tari_utilities::epoch_time::EpochTime;
     use tari_ootle_common_types::{Epoch, ExtraData, Network, NodeHeight, NumPreshards, ShardGroup};
     use tari_sidechain::QuorumDecision;
@@ -291,12 +292,13 @@ mod tests {
     #[test]
     fn it_hashes_the_header_identically_to_sidechain_header() {
         let parent_id = seed_hash(1).into_array().into();
+        let shard_group = ShardGroup::all_shards(NumPreshards::P256);
         let qc1 = ProposalCertificate::new(
             seed_hash(2),
             parent_id,
             NodeHeight(1),
             Epoch(1),
-            ShardGroup::all_shards(NumPreshards::P256),
+            shard_group,
             vec![],
             QuorumDecision::Accept,
         );
@@ -309,7 +311,7 @@ mod tests {
             qc1_id,
             NodeHeight(2),
             Epoch(1),
-            ShardGroup::all_shards(NumPreshards::P256),
+            shard_group,
             Default::default(),
             Default::default(),
             &Default::default(),
@@ -317,6 +319,7 @@ mod tests {
             SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
             FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
             ExtraData::new(),
         )
         .unwrap();
@@ -339,6 +342,7 @@ mod tests {
                     .unwrap(),
                 RistrettoSecretKey::from_canonical_bytes(block.signature().unwrap().signature().as_bytes()).unwrap(),
             ),
+            accumulated_data: Default::default(),
             metadata_hash: block.calculate_metadata_hash(),
         };
 

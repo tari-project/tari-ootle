@@ -5,9 +5,13 @@ use std::time::Duration;
 
 use tari_consensus::hotstuff::HotStuffError;
 use tari_consensus_types::Decision;
-use tari_ootle_common_types::{Epoch, NodeHeight};
-use tari_ootle_storage::{consensus_models::StateTransitionId, StateStore, StateStoreReadTransaction};
-use tari_state_tree::{key_mapper::SpreadPrefixKeyMapper, memory_store::MemoryTreeStore};
+use tari_ootle_common_types::{optional::Optional, Epoch, NodeHeight};
+use tari_ootle_storage::{consensus_models::SubstateValueFilterFlags, StateStore, StateStoreReadTransaction};
+use tari_state_tree::{
+    key_mapper::SpreadPrefixKeyMapper,
+    memory_store::MemoryTreeStore,
+    SPARSE_MERKLE_PLACEHOLDER_HASH,
+};
 
 use crate::support::{logging::setup_logger, Test, TestAddress, TEST_NUM_PRESHARDS};
 
@@ -15,6 +19,10 @@ use crate::support::{logging::setup_logger, Test, TestAddress, TEST_NUM_PRESHARD
 async fn check_state_transitions() {
     setup_logger();
     let mut test = Test::builder()
+        .modify_config(|config_mut| {
+            // Epoch change ASAP
+            config_mut.epoch_end_grace_period = Duration::from_secs(0);
+        })
         .modify_consensus_constants(|config| {
             config.pacemaker_block_time = Duration::from_millis(500);
         })
@@ -24,6 +32,7 @@ async fn check_state_transitions() {
     let _ignore = test.send_transaction_to_all(Decision::Commit, 100, 1, 10).await;
     let _ignore = test.send_transaction_to_all(Decision::Commit, 200, 1, 1).await;
     let _ignore = test.send_transaction_to_all(Decision::Commit, 1, 1, 1).await;
+    let _ignore = test.send_transaction_to_all(Decision::Commit, 100, 1, 10).await;
     test.start_epoch(Epoch(1)).await;
 
     loop {
@@ -49,26 +58,65 @@ async fn check_state_transitions() {
         }
     }
 
+    test.stop();
+
     test.get_validator(&TestAddress::new("1"))
         .state_store
         .with_read_tx(|tx| {
-            let checkpoint = tx.epoch_checkpoint_get(Epoch(1)).unwrap();
+            let checkpoint = tx
+                .epoch_checkpoint_get_all_from_epoch(Epoch(1), 1)
+                .unwrap()
+                .pop()
+                .unwrap();
 
             for shard in TEST_NUM_PRESHARDS.all_shards_iter() {
-                let id = StateTransitionId::new(Epoch(0), shard, 0);
-                let transitions = tx.state_transitions_get_n_after(1000, id, Epoch(2)).unwrap();
+                let mut all_transitions = vec![];
+                let mut next_state_version = 1;
+                while let Some(transitions) = tx
+                    .state_transitions_get_starting_at(
+                        shard,
+                        next_state_version,
+                        SubstateValueFilterFlags::all_substates(),
+                    )
+                    .optional()
+                    .unwrap()
+                {
+                    if transitions.epoch > checkpoint.epoch() {
+                        break;
+                    }
+
+                    next_state_version = transitions.state_version + 1;
+                    all_transitions.push(transitions);
+                }
+                log::info!(
+                    "Shard {}: Found {} transitions until state version {}",
+                    shard,
+                    all_transitions.len(),
+                    next_state_version
+                );
 
                 let shard_root = checkpoint.get_shard_root(shard);
                 // No state changes
-                if shard_root.iter().all(|x| *x == 0) {
-                    assert_eq!(transitions.len(), 0, "Shard {} should have no state transitions", shard);
+                if shard_root == SPARSE_MERKLE_PLACEHOLDER_HASH {
+                    assert!(
+                        all_transitions.is_empty(),
+                        "Shard {} should have no state transitions",
+                        shard
+                    );
                 } else {
-                    assert!(!transitions.is_empty(), "Shard {} should have state transitions", shard);
+                    assert!(
+                        !all_transitions.is_empty(),
+                        "Shard {} should have state transitions",
+                        shard
+                    );
                 }
 
                 let mut store = MemoryTreeStore::new();
                 let mut tree = tari_state_tree::StateTree::<_, SpreadPrefixKeyMapper>::new(&mut store);
-                let values = transitions.iter().map(|transition| transition.to_tree_change());
+                let values = all_transitions
+                    .iter()
+                    .flat_map(|t| &t.updates)
+                    .map(|transition| transition.to_tree_change());
                 let root = tree.put_substate_changes(1, values).unwrap();
                 assert_eq!(root, shard_root, "Shard {} root hash mismatch", shard);
             }

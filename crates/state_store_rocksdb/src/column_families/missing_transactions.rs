@@ -24,20 +24,24 @@ use tari_consensus_types::BlockId;
 use tari_transaction::TransactionId;
 
 use crate::{
-    codecs::{BlockIdCodec, TransactionIdCodec, TupleBytesCodec, UnitCodec},
+    codecs::{BlockIdCodec, KeyPrefix, TransactionIdCodec, UnitCodec},
+    column_families::cf_names,
+    prefixed,
     traits::{Cf, QueryCf},
 };
 
+prefixed!(MissingTransactionPrefix, KeyPrefix::MissingTransactions);
 pub struct MissingTransactionCf;
 
 impl Cf for MissingTransactionCf {
     type Key = (TransactionId, BlockId);
-    type KeyCodec = TupleBytesCodec<Self::Key>;
+    type KeyCodec = (TransactionIdCodec, BlockIdCodec);
+    type Prefix = MissingTransactionPrefix;
     type Value = ();
     type ValueCodec = UnitCodec;
 
     fn name() -> &'static str {
-        "missing_transactions"
+        cf_names::TRANSACTIONS
     }
 }
 
@@ -49,19 +53,22 @@ impl QueryCf for ByTransactionIdQuery {
     type KeyCodec = TransactionIdCodec;
 }
 
+prefixed!(
+    MissingTransactionBlockIdIndexPrefix,
+    KeyPrefix::MissingTransactionBlockIdIndex
+);
+
 pub struct MissingTransactionBlockIdIndex;
 
 impl Cf for MissingTransactionBlockIdIndex {
     type Key = (BlockId, TransactionId);
-    type KeyCodec = TupleBytesCodec<Self::Key>;
+    type KeyCodec = (BlockIdCodec, TransactionIdCodec);
+    type Prefix = MissingTransactionBlockIdIndexPrefix;
     type Value = ();
     type ValueCodec = UnitCodec;
 
     fn name() -> &'static str {
-        // NOTE: we use the same name as the main CF.
-        // Collisions between BlockId and TransactionId are extremely unlikely if not impossible.
-        // If this is a concern, we can add append some hardcoded bytes to the key.
-        MissingTransactionCf::name()
+        cf_names::TRANSACTIONS
     }
 }
 

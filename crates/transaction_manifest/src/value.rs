@@ -7,6 +7,9 @@ use syn::{parse2, Lit};
 use tari_bor::{BorError, Serialize};
 use tari_engine_types::substate::SubstateId;
 use tari_template_lib::{models::NonFungibleId, to_value};
+use tari_transaction::{args::InstructionArg, call_arg};
+
+use crate::error::ManifestError;
 
 #[derive(Debug, Clone)]
 pub enum ManifestValue {
@@ -27,11 +30,69 @@ impl ManifestValue {
             _ => None,
         }
     }
+
+    pub fn to_arg(&self) -> Result<InstructionArg, ManifestError> {
+        match self {
+            ManifestValue::SubstateId(addr) => match addr {
+                SubstateId::Component(addr) => Ok(call_arg!(*addr)),
+                SubstateId::Resource(addr) => Ok(call_arg!(*addr)),
+                // TODO: should tx receipt addresses be allowed to be referenced?
+                SubstateId::TransactionReceipt(addr) => Ok(call_arg!(*addr)),
+                SubstateId::Vault(addr) => Ok(call_arg!(*addr)),
+                SubstateId::NonFungible(addr) => Ok(call_arg!(addr)),
+                SubstateId::ClaimedOutputTombstone(addr) => Ok(call_arg!(*addr)),
+                SubstateId::Template(addr) => Ok(call_arg!(*addr)),
+                SubstateId::ValidatorFeePool(addr) => Ok(call_arg!(*addr)),
+                SubstateId::Utxo(addr) => Ok(call_arg!(*addr)),
+            },
+            ManifestValue::Literal(lit) => lit_to_arg(lit),
+            ManifestValue::NonFungibleId(id) => Ok(call_arg!(id.clone())),
+            ManifestValue::Value(blob) => Ok(InstructionArg::literal(blob.clone()).unwrap()),
+        }
+    }
 }
 
 impl<T: Into<SubstateId>> From<T> for ManifestValue {
     fn from(addr: T) -> Self {
         ManifestValue::SubstateId(addr.into())
+    }
+}
+
+pub fn lit_to_arg(lit: &Lit) -> Result<InstructionArg, ManifestError> {
+    match lit {
+        Lit::Str(s) => Ok(call_arg!(s.value())),
+        Lit::Int(i) => match i.suffix() {
+            "u8" => Ok(call_arg!(i.base10_parse::<u8>()?)),
+            "u16" => Ok(call_arg!(i.base10_parse::<u16>()?)),
+            "u32" => Ok(call_arg!(i.base10_parse::<u32>()?)),
+            "u64" => Ok(call_arg!(i.base10_parse::<u64>()?)),
+            "u128" => Ok(call_arg!(i.base10_parse::<u128>()?)),
+            "i8" => Ok(call_arg!(i.base10_parse::<i8>()?)),
+            "i16" => Ok(call_arg!(i.base10_parse::<i16>()?)),
+            "i32" => Ok(call_arg!(i.base10_parse::<i32>()?)),
+            "i64" => Ok(call_arg!(i.base10_parse::<i64>()?)),
+            "" | "i128" => Ok(call_arg!(i.base10_parse::<i128>()?)),
+            _ => Err(ManifestError::UnsupportedExpr(format!(
+                r#"Unsupported integer suffix "{}""#,
+                i.suffix()
+            ))),
+        },
+        Lit::Bool(b) => Ok(call_arg!(b.value())),
+        Lit::ByteStr(v) => Ok(call_arg!(v.value())),
+        Lit::Byte(v) => Ok(call_arg!(v.value())),
+        Lit::Char(v) => Ok(call_arg!(v.value().to_string())),
+        Lit::Float(v) => Err(ManifestError::UnsupportedExpr(format!(
+            "Float literals not supported ({})",
+            v
+        ))),
+        Lit::Verbatim(v) => Err(ManifestError::UnsupportedExpr(format!(
+            "Raw token literals not supported ({})",
+            v
+        ))),
+        _ => Err(ManifestError::UnsupportedExpr(format!(
+            "Unsupported literal type ({:?})",
+            lit
+        ))),
     }
 }
 

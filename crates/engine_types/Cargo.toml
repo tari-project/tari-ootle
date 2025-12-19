@@ -8,7 +8,7 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-tari_bor = { workspace = true, features = ["json_encoding"] }
+tari_bor = { workspace = true, features = ["std", "json_encoding"] }
 tari_common_types = { workspace = true }
 tari_crypto = { workspace = true, features = ["borsh"] }
 tari_hashing = { workspace = true }
@@ -18,7 +18,8 @@ tari_template_lib = { workspace = true, features = ["borsh"] }
 # if we set this version in the workspace it would break other crates
 base64 = "0.21.0"
 blake2 = { workspace = true }
-borsh = { workspace = true }
+borsh = { workspace = true, features = ["indexmap"] }
+bounded-vec = { workspace = true, features = ["serde"] }
 rand = { workspace = true }
 digest = { workspace = true }
 hex = { workspace = true, features = ["serde"] }

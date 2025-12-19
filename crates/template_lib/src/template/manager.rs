@@ -22,9 +22,10 @@
 
 use serde::de::DeserializeOwned;
 use tari_template_abi::{call_engine, EngineOp};
+use tari_template_lib_types::bytes::Bytes;
 
 use crate::{
-    args::{CallAction, CallFunctionArg, CallInvokeArg, InstructionArg, InvokeResult},
+    args::{CallAction, CallFunctionArg, CallInvokeArg, InvokeResult},
     prelude::TemplateAddress,
 };
 
@@ -42,11 +43,11 @@ impl TemplateManager {
 
     /// Executes a function in the template.
     /// Template functions can be called from another template function or from component methods.
-    pub fn call<F: Into<String>, T: DeserializeOwned>(&self, function: F, args: Vec<InstructionArg>) -> T {
+    pub fn call<F: Into<String>, T: DeserializeOwned, B: Into<Bytes>>(&self, function: F, args: Vec<B>) -> T {
         self.call_internal(CallFunctionArg {
             template_address: self.template_address,
             function: function.into(),
-            args,
+            args: args.into_iter().map(Into::into).collect(),
         })
     }
 
@@ -63,7 +64,7 @@ impl TemplateManager {
 
     /// Calls a function in the template. The invoked function must return a unit type or a panic will occur.
     /// Equivalent to `call::<_, ()>(function, args)`.
-    pub fn invoke<F: Into<String>>(&self, function: F, args: Vec<InstructionArg>) {
+    pub fn invoke<F: Into<String>, B: Into<Bytes>>(&self, function: F, args: Vec<B>) {
         self.call(function, args)
     }
 }

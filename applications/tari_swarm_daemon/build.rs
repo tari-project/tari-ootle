@@ -3,12 +3,6 @@
 
 use std::{env, fs, process::Command};
 
-fn exit_on_ci() {
-    if option_env!("CI").is_some() {
-        std::process::exit(1);
-    }
-}
-
 const BUILD: &[(&str, &str)] = &[("./webui", "build")];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,20 +27,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (target, build_cmd) in BUILD {
         if let Err(error) = Command::new(npm).arg("ci").current_dir(target).status() {
             println!("cargo:warning='npm ci' error : {:?}", error);
-            exit_on_ci();
+            // We dont error for CI here if the webui build fails for swarm, since it is a dev tool
         }
         match Command::new(npm).args(["run", build_cmd]).current_dir(target).output() {
             Ok(output) if !output.status.success() => {
                 println!("cargo:warning='npm run build' exited with non-zero status code");
                 println!("cargo:warning=Output: {}", String::from_utf8_lossy(&output.stdout));
                 println!("cargo:warning=Error: {}", String::from_utf8_lossy(&output.stderr));
-                exit_on_ci();
                 break;
             },
             Err(error) => {
                 println!("cargo:warning='npm run build' error : {:?}", error);
                 println!("cargo:warning=The web ui will not be included!");
-                exit_on_ci();
                 break;
             },
             _ => {},

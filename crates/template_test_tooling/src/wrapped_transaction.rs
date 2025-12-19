@@ -40,6 +40,10 @@ impl Executable for WrappedTransaction {
         self.transaction.main_signer()
     }
 
+    fn signers_iter(&self) -> impl Iterator<Item = &tari_template_lib::prelude::RistrettoPublicKeyBytes> {
+        self.transaction.signers_iter()
+    }
+
     fn into_instructions(self) -> Instructions {
         self.transaction.into_instructions()
     }

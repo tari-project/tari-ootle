@@ -11,11 +11,8 @@ use crate::serde_helpers;
 /// The length of the range proof is limited to a maximum size (1024 bytes) to mitigate potential denial-of-service
 /// attacks.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct RangeProofBytes(
     #[serde(
         serialize_with = "serde_helpers::dynamic_hex::serialize",

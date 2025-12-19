@@ -6,7 +6,9 @@ use tari_ootle_storage::time::PrimitiveDateTime;
 use tari_transaction::TransactionId;
 
 use crate::{
-    codecs::{DefaultCodec, TransactionIdCodec},
+    codecs::{DefaultCodec, KeyPrefix, TransactionIdCodec},
+    column_families::cf_names,
+    prefixed,
     traits::Cf,
 };
 
@@ -15,15 +17,18 @@ pub struct FinalizedTransactionLinkData {
     pub finalized_at: PrimitiveDateTime,
 }
 
+prefixed!(FinalizedTransactionLinkPrefix, KeyPrefix::FinalizedTransactionLinks);
+
 pub struct FinalizedTransactionLinkCf;
 
 impl Cf for FinalizedTransactionLinkCf {
     type Key = TransactionId;
     type KeyCodec = TransactionIdCodec;
+    type Prefix = FinalizedTransactionLinkPrefix;
     type Value = FinalizedTransactionLinkData;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "transactions_finalized"
+        cf_names::TRANSACTIONS
     }
 }

@@ -4,19 +4,19 @@
 use std::collections::HashMap;
 
 use proc_macro2::Ident;
-use syn::Lit;
-use tari_engine_types::{instruction::Instruction, substate::SubstateId};
-use tari_template_lib::{
+use tari_engine_types::substate::SubstateId;
+use tari_template_lib::types::TemplateAddress;
+use tari_transaction::{
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
     call_arg,
-    models::NonFungibleId,
-    types::TemplateAddress,
+    Instruction,
 };
 
 use crate::{
     ast::ManifestAst,
     error::ManifestError,
-    parser::{InvokeIntent, ManifestIntent, ManifestLiteral, SpecialLiteral},
+    parser::{InvokeIntent, ManifestIntent, ManifestLiteral, OrVar, SpecialLiteral},
+    value::lit_to_arg,
     ManifestInstructions,
     ManifestValue,
 };
@@ -90,7 +90,12 @@ impl ManifestInstructionGenerator {
                     .expect("AST parse should have failed: no template ident for TemplateInvoke statement");
                 let mut instructions = vec![Instruction::CallFunction {
                     address: self.get_imported_template(template_ident)?,
-                    function: function_name.to_string(),
+                    function: function_name
+                        .to_string()
+                        .try_into()
+                        .map_err(|e| ManifestError::InvalidInstruction {
+                            reason: format!("Function name is too long: {}", e),
+                        })?,
                     args: self.process_args(arguments)?,
                 }];
                 if let Some(var_name) = output_variable {
@@ -122,7 +127,12 @@ impl ManifestInstructionGenerator {
                     })?;
                 let mut instructions = vec![Instruction::CallMethod {
                     call: component_address.into(),
-                    method: function_name.to_string(),
+                    method: function_name
+                        .to_string()
+                        .try_into()
+                        .map_err(|e| ManifestError::InvalidInstruction {
+                            reason: format!("Method name is too long: {}", e),
+                        })?,
                     args: self.process_args(arguments)?,
                 }];
                 if let Some(var_name) = output_variable {
@@ -140,8 +150,11 @@ impl ManifestInstructionGenerator {
             },
             ManifestIntent::Log(log) => Ok(vec![Instruction::EmitLog {
                 level: log.level,
-                message: log.message,
+                message: log.message.try_into().map_err(|e| ManifestError::InvalidInstruction {
+                    reason: format!("Log message is too long: {}", e),
+                })?,
             }]),
+            ManifestIntent::DropAllProofs => Ok(vec![Instruction::DropAllProofsInWorkspace]),
         }
     }
 
@@ -156,46 +169,30 @@ impl ManifestInstructionGenerator {
         args.into_iter()
             .map(|arg| match arg {
                 ManifestLiteral::Lit(lit) => lit_to_arg(&lit),
-                ManifestLiteral::Workspace(ident) => {
-                    // Is it a global?
-                    self.globals
-                        .get(&ident.to_string())
-                        .or_else(|| self.global_aliases.get(&ident.to_string()))
-                        .map(|v| match v {
-                            ManifestValue::SubstateId(addr) => match addr {
-                                SubstateId::Component(addr) => Ok(call_arg!(*addr)),
-                                SubstateId::Resource(addr) => Ok(call_arg!(*addr)),
-                                // TODO: should tx receipt addresses be allowed to be referenced?
-                                SubstateId::TransactionReceipt(addr) => Ok(call_arg!(*addr)),
-                                SubstateId::Vault(addr) => Ok(call_arg!(*addr)),
-                                SubstateId::NonFungible(addr) => Ok(call_arg!(addr)),
-                                SubstateId::UnclaimedConfidentialOutput(addr) => Ok(call_arg!(*addr)),
-                                SubstateId::Template(addr) => Ok(call_arg!(*addr)),
-                                SubstateId::ValidatorFeePool(addr) => Ok(call_arg!(*addr)),
-                                SubstateId::Utxo(addr) => Ok(call_arg!(*addr)),
-                            },
-                            ManifestValue::Literal(lit) => lit_to_arg(lit),
-                            ManifestValue::NonFungibleId(id) => Ok(call_arg!(id.clone())),
-                            ManifestValue::Value(blob) => Ok(InstructionArg::literal(blob.clone()).unwrap()),
-                        })
-                        .or_else(|| {
-                            // Or is it a variable on the worktop?
-                            self.workspace_ids
-                                .get(&ident.to_string())
-                                // TODO: support offsets
-                                .map(|id| Ok(InstructionArg::Workspace(WorkspaceOffsetId::new(*id))))
-                        })
-                        .ok_or_else(|| {
-                            // Or undefined
-                            ManifestError::UndefinedVariable {
-                                name: ident.to_string(),
-                            }
-                        })?
-                },
+                ManifestLiteral::Workspace(ident) => self.get_ident(&ident.to_string()),
                 ManifestLiteral::Special(SpecialLiteral::Amount(amount)) => Ok(call_arg!(amount)),
-                ManifestLiteral::Special(SpecialLiteral::NonFungibleId(lit)) => {
-                    let id = lit_to_nonfungible_id(&lit)?;
-                    Ok(call_arg!(id))
+                ManifestLiteral::Special(SpecialLiteral::NonFungibleId(id)) => Ok(call_arg!(id)),
+                ManifestLiteral::Special(SpecialLiteral::Cbor(value)) => {
+                    Ok(InstructionArg::literal(value).expect("CBOR literal serialization should not fail"))
+                },
+                ManifestLiteral::Special(SpecialLiteral::Metadata(metadata)) => Ok(call_arg!(metadata)),
+                ManifestLiteral::Special(SpecialLiteral::SubstateId(id_or_var)) => match id_or_var {
+                    OrVar::Var(ident) => self.get_ident(&ident.to_string()),
+                    OrVar::Value(id) => Ok(call_arg!(id)),
+                },
+                ManifestLiteral::Special(SpecialLiteral::Address(var_or_id)) => match var_or_id {
+                    OrVar::Var(ident) => self.get_ident(&ident.to_string()),
+                    OrVar::Value(id) => match id {
+                        SubstateId::Component(addr) => Ok(call_arg!(addr)),
+                        SubstateId::Resource(addr) => Ok(call_arg!(addr)),
+                        SubstateId::Vault(addr) => Ok(call_arg!(addr)),
+                        SubstateId::ClaimedOutputTombstone(addr) => Ok(call_arg!(addr)),
+                        SubstateId::NonFungible(addr) => Ok(call_arg!(addr)),
+                        SubstateId::TransactionReceipt(addr) => Ok(call_arg!(addr)),
+                        SubstateId::Template(addr) => Ok(call_arg!(addr)),
+                        SubstateId::ValidatorFeePool(addr) => Ok(call_arg!(addr)),
+                        SubstateId::Utxo(addr) => Ok(call_arg!(addr)),
+                    },
                 },
             })
             .collect()
@@ -219,81 +216,22 @@ impl ManifestInstructionGenerator {
             .get(name)
             .ok_or_else(|| ManifestError::UndefinedGlobal { name: name.to_string() })
     }
-}
 
-fn lit_to_arg(lit: &Lit) -> Result<InstructionArg, ManifestError> {
-    match lit {
-        Lit::Str(s) => Ok(call_arg!(s.value())),
-        Lit::Int(i) => match i.suffix() {
-            "u8" => Ok(call_arg!(i.base10_parse::<u8>()?)),
-            "u16" => Ok(call_arg!(i.base10_parse::<u16>()?)),
-            "u32" => Ok(call_arg!(i.base10_parse::<u32>()?)),
-            "u64" => Ok(call_arg!(i.base10_parse::<u64>()?)),
-            "u128" => Ok(call_arg!(i.base10_parse::<u128>()?)),
-            "i8" => Ok(call_arg!(i.base10_parse::<i8>()?)),
-            "i16" => Ok(call_arg!(i.base10_parse::<i16>()?)),
-            "" | "i32" => Ok(call_arg!(i.base10_parse::<i32>()?)),
-            "i64" => Ok(call_arg!(i.base10_parse::<i64>()?)),
-            "i128" => Ok(call_arg!(i.base10_parse::<i128>()?)),
-            _ => Err(ManifestError::UnsupportedExpr(format!(
-                r#"Unsupported integer suffix "{}""#,
-                i.suffix()
-            ))),
-        },
-        Lit::Bool(b) => Ok(call_arg!(b.value())),
-        Lit::ByteStr(v) => Ok(call_arg!(v.value())),
-        Lit::Byte(v) => Ok(call_arg!(v.value())),
-        Lit::Char(v) => Ok(call_arg!(v.value().to_string())),
-        Lit::Float(v) => Err(ManifestError::UnsupportedExpr(format!(
-            "Float literals not supported ({})",
-            v
-        ))),
-        Lit::Verbatim(v) => Err(ManifestError::UnsupportedExpr(format!(
-            "Raw token literals not supported ({})",
-            v
-        ))),
-        _ => Err(ManifestError::UnsupportedExpr(format!(
-            "Unsupported literal type ({:?})",
-            lit
-        ))),
-    }
-}
-
-fn lit_to_nonfungible_id(lit: &Lit) -> Result<NonFungibleId, ManifestError> {
-    match lit {
-        Lit::Str(s) => Ok(NonFungibleId::try_from_string(s.value()).map_err(|e| {
-            ManifestError::UnsupportedExpr(format!(
-                "Invalid non-fungible ID string literal ({:?}) ({})",
-                e,
-                s.value()
-            ))
-        })?),
-        Lit::ByteStr(v) => {
-            let bytes = v.value();
-            if bytes.len() != 32 {
-                return Err(ManifestError::UnsupportedExpr(
-                    "Non-fungible ID byte string literal length must be less than 32 bytes".to_string(),
-                ));
-            }
-
-            let mut id = [0u8; 32];
-            id.copy_from_slice(&bytes);
-            Ok(NonFungibleId::from_u256(id))
-        },
-        Lit::Int(v) => match v.suffix() {
-            "u8" | "u16" | "u32" => Ok(NonFungibleId::from_u32(v.base10_parse()?)),
-            "u64" => Ok(NonFungibleId::from_u64(v.base10_parse()?)),
-            "" => Err(ManifestError::UnsupportedExpr(
-                "Non-fungible ID integer literal must have a type suffix specified (1u32, 2u64 etc)".to_string(),
-            )),
-            _ => Err(ManifestError::UnsupportedExpr(format!(
-                "Invalid non-fungible ID integer literal suffix ({})",
-                v.suffix()
-            ))),
-        },
-        _ => Err(ManifestError::UnsupportedExpr(format!(
-            "Unsupported non-fungible ID literal ({:?})",
-            lit
-        ))),
+    fn get_ident(&self, name: &str) -> Result<InstructionArg, ManifestError> {
+        self.globals
+            .get(name)
+            .or_else(|| self.global_aliases.get(name))
+            .map(|v| v.to_arg())
+            .or_else(|| {
+                // Or is it a variable on the worktop?
+                self.workspace_ids
+                    .get(name)
+                    // TODO: support offsets
+                    .map(|id| Ok(InstructionArg::Workspace(WorkspaceOffsetId::new(*id))))
+            })
+            .ok_or_else(|| {
+                // Or undefined
+                ManifestError::UndefinedVariable { name: name.to_string() }
+            })?
     }
 }

@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_common_types::types::FixedHash;
+use tari_consensus_types::ShardGroupAccumulatedData;
 use tari_ootle_common_types::{Epoch, ExtraData, Network, NodeHeight, NumPreshards, ShardGroup};
 use tari_ootle_storage::{
     consensus_models::{Block, BookkeepingModel, Command, ForeignProposalStatus},
@@ -15,13 +16,9 @@ use tari_utilities::epoch_time::EpochTime;
 use crate::helpers::{assert_eq_debug, create_foreign_proposal, create_random_block_id, create_rocksdb};
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn foreign_proposals_rocksdb() {
     let (db, _tmp) = create_rocksdb();
-    foreign_proposals_operations(db);
-}
-
-#[allow(clippy::too_many_lines)]
-fn foreign_proposals_operations(db: impl StateStore) {
     let mut tx = db.create_write_tx().unwrap();
 
     let network = Network::LocalNet;
@@ -33,6 +30,8 @@ fn foreign_proposals_operations(db: impl StateStore) {
     let proposal1 = create_foreign_proposal(*zero_block.id(), EPOCH);
     tx.foreign_proposals_save(&proposal1).unwrap();
 
+    let shard_group = ShardGroup::all_shards(NumPreshards::P64);
+
     let block1 = Block::create(
         network,
         *zero_block.id(),
@@ -40,7 +39,7 @@ fn foreign_proposals_operations(db: impl StateStore) {
         None,
         NodeHeight(2),
         EPOCH,
-        ShardGroup::all_shards(NumPreshards::P64),
+        shard_group,
         Default::default(),
         [Command::ForeignProposal(proposal1.to_atom())]
             .iter()
@@ -51,6 +50,7 @@ fn foreign_proposals_operations(db: impl StateStore) {
         SchnorrSignatureBytes::zero(),
         EpochTime::now().as_u64(),
         FixedHash::zero(),
+        ShardGroupAccumulatedData::default(),
         ExtraData::new(),
     )
     .unwrap();
@@ -65,7 +65,7 @@ fn foreign_proposals_operations(db: impl StateStore) {
         None,
         NodeHeight(2),
         EPOCH,
-        ShardGroup::all_shards(NumPreshards::P64),
+        shard_group,
         Default::default(),
         Default::default(),
         Default::default(),
@@ -73,6 +73,7 @@ fn foreign_proposals_operations(db: impl StateStore) {
         SchnorrSignatureBytes::zero(),
         EpochTime::now().as_u64(),
         FixedHash::zero(),
+        ShardGroupAccumulatedData::default(),
         ExtraData::new(),
     )
     .unwrap();

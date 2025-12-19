@@ -5,8 +5,7 @@ use tari_ootle_p2p::proto::rpc as proto;
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
 use tari_rpc_macros::tari_rpc;
 
-#[tari_rpc(protocol_name = "/tari/validator/1.0.0", server_struct = ValidatorNodeRpcServer, client_struct = ValidatorNodeRpcClient
-)]
+#[tari_rpc(protocol_name = "/tari/validator/1.0.0", server_struct = ValidatorNodeRpcServer, client_struct = ValidatorNodeRpcClient)]
 pub trait ValidatorNodeRpcService: Send + Sync + 'static {
     #[rpc(method = 1)]
     async fn submit_transaction(
@@ -33,20 +32,14 @@ pub trait ValidatorNodeRpcService: Send + Sync + 'static {
     ) -> Result<Streaming<proto::SyncBlocksResponse>, RpcStatus>;
 
     #[rpc(method = 5)]
-    async fn get_checkpoint(
+    async fn get_checkpoints(
         &self,
-        request: Request<proto::GetCheckpointRequest>,
-    ) -> Result<Response<proto::GetCheckpointResponse>, RpcStatus>;
+        request: Request<proto::GetCheckpointsRequest>,
+    ) -> Result<Response<proto::GetCheckpointsResponse>, RpcStatus>;
 
     #[rpc(method = 6)]
     async fn sync_state(
         &self,
         request: Request<proto::SyncStateRequest>,
     ) -> Result<Streaming<proto::SyncStateResponse>, RpcStatus>;
-
-    #[rpc(method = 7)]
-    async fn sync_templates(
-        &self,
-        request: Request<proto::SyncTemplatesRequest>,
-    ) -> Result<Streaming<proto::SyncTemplatesResponse>, RpcStatus>;
 }

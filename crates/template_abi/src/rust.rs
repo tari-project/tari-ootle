@@ -48,7 +48,6 @@ mod rust_std {
         cmp,
         fmt,
         format,
-        io,
         iter,
         marker,
         mem,

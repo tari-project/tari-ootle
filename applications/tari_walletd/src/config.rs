@@ -43,6 +43,10 @@ impl ApplicationConfig {
         };
         Ok(config)
     }
+
+    pub fn to_data_dir(&self) -> PathBuf {
+        self.common.base_path.join("data")
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -59,8 +63,8 @@ pub struct WalletDaemonConfig {
     pub web_ui_public_json_rpc_url: Option<String>,
     /// The signaling server address for the webrtc
     pub signaling_server_address: Option<SocketAddr>,
-    /// The indexer JSON-RPC url
-    pub indexer_json_rpc_url: Url,
+    /// The indexer API url
+    pub indexer_api_url: Url,
     /// Expiration duration of the JWT token
     #[serde(with = "humantime_serde")]
     #[serde(default = "return_default_jwt_expiry")]
@@ -79,6 +83,7 @@ pub struct WalletDaemonConfig {
     /// The number of contiguous failures to find an account derived from a public key before abandoning recovery and
     /// assuming that there are no further accounts.
     pub recovery_abandon_count: usize,
+    pub override_keyring_password: Option<SafePassword>,
 }
 
 fn return_default_jwt_expiry() -> Duration {
@@ -95,14 +100,15 @@ impl Default for WalletDaemonConfig {
             json_rpc_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9000))),
             web_ui_public_json_rpc_url: None,
             signaling_server_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9100))),
-            indexer_json_rpc_url: "http://127.0.0.1:18300/json_rpc"
+            indexer_api_url: "http://127.0.0.1:18300"
                 .parse()
-                .expect("failed to parse default indexer_json_rpc_url"),
+                .expect("failed to parse default indexer_api_url"),
             jwt_expiry: return_default_jwt_expiry(),
             jwt_secret_key: create_secret_password(),
             web_ui_address: Some("127.0.0.1:5100".parse().unwrap()),
             value_lookup_table_file: None,
             recovery_abandon_count: 10,
+            override_keyring_password: None,
         }
     }
 }

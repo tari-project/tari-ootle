@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_crypto::{ristretto::RistrettoSecretKey, tari_utilities::ByteArray};
-use tari_engine_types::{crypto::commit_amount_checked, ToByteType};
+use tari_engine_types::{crypto::commit_u64_amount, ToByteType};
 use tari_template_lib::{
     models::{ConfidentialOutputStatement, ConfidentialWithdrawProof, UnspentOutput},
     types::{crypto::RistrettoPublicKeyBytes, Amount},
@@ -14,16 +14,16 @@ use crate::{
     error::ConfidentialProofError,
     viewable_balance_proof::create_viewable_balance_proof,
     MaskAndValue,
-    UnblindedOutputStatement,
+    OutputWitness,
     WalletCryptoError,
 };
 
 pub fn create_withdraw_proof(
     inputs: &[MaskAndValue],
     input_revealed_amount: Amount,
-    output_statement: Option<&UnblindedOutputStatement>,
+    output_statement: Option<&OutputWitness>,
     output_revealed_amount: Amount,
-    change_statement: Option<&UnblindedOutputStatement>,
+    change_statement: Option<&OutputWitness>,
     change_revealed_amount: Amount,
 ) -> Result<ConfidentialWithdrawProof, WalletCryptoError> {
     let output_proof = create_output_statement(
@@ -35,11 +35,7 @@ pub fn create_withdraw_proof(
     let (input_commitments, agg_input_mask) = inputs.iter().try_fold(
         (Vec::with_capacity(inputs.len()), RistrettoSecretKey::default()),
         |(mut commitments, agg_input), input| {
-            let commitment =
-                commit_amount_checked(&input.mask, input.value).ok_or_else(|| WalletCryptoError::InvalidArgument {
-                    name: "input value",
-                    details: format!("Input value {} must be non-negative", input.value),
-                })?;
+            let commitment = commit_u64_amount(&input.mask, input.value);
             commitments.push(commitment.to_byte_type());
             Ok::<_, WalletCryptoError>((commitments, agg_input + &input.mask))
         },
@@ -72,15 +68,15 @@ pub fn create_withdraw_proof(
 }
 
 pub fn create_output_statement(
-    output_statement: Option<&UnblindedOutputStatement>,
+    output_statement: Option<&OutputWitness>,
     output_revealed_amount: Amount,
-    change_statement: Option<&UnblindedOutputStatement>,
+    change_statement: Option<&OutputWitness>,
     change_revealed_amount: Amount,
 ) -> Result<ConfidentialOutputStatement, ConfidentialProofError> {
     let proof_change_statement = change_statement
         .as_ref()
         .map(|stmt| -> Result<_, ConfidentialProofError> {
-            let change_commitment = stmt.to_commitment().ok_or(ConfidentialProofError::NegativeAmount)?;
+            let change_commitment = stmt.to_commitment();
             Ok(UnspentOutput {
                 commitment: change_commitment.to_byte_type(),
                 sender_public_nonce: RistrettoPublicKeyBytes::from_bytes(stmt.sender_public_nonce.as_bytes())
@@ -97,17 +93,12 @@ pub fn create_output_statement(
             })
         })
         .transpose()?;
-    let confidential_output_value = output_statement
-        .as_ref()
-        .map(|o| o.amount)
-        .unwrap_or_default()
-        .non_negative_checked()
-        .ok_or(ConfidentialProofError::NegativeAmount)?;
+    let confidential_output_value = output_statement.as_ref().map(|o| o.amount).unwrap_or_default();
 
     let proof_output_statement = output_statement
         .as_ref()
         .map(|stmt| {
-            let commitment = stmt.to_commitment().ok_or(ConfidentialProofError::NegativeAmount)?;
+            let commitment = stmt.to_commitment();
             Ok::<_, ConfidentialProofError>(UnspentOutput {
                 commitment: commitment.to_byte_type(),
                 sender_public_nonce: stmt.sender_public_nonce.to_byte_type(),
@@ -140,14 +131,14 @@ mod tests {
     use rand::rngs::OsRng;
     use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
     use tari_engine_types::confidential::validate_confidential_statement;
-    use tari_template_lib::{models::EncryptedData, types::Amount};
+    use tari_template_lib::types::EncryptedData;
 
     use super::*;
 
-    fn create_valid_proof(amount: Amount, minimum_value_promise: u64) -> ConfidentialOutputStatement {
+    fn create_valid_proof(amount: u64, minimum_value_promise: u64) -> ConfidentialOutputStatement {
         let mask = RistrettoSecretKey::random(&mut OsRng);
         create_output_statement(
-            Some(&UnblindedOutputStatement {
+            Some(&OutputWitness {
                 amount,
                 minimum_value_promise,
                 mask,
@@ -164,13 +155,13 @@ mod tests {
 
     #[test]
     fn it_is_valid_if_proof_is_valid() {
-        let proof = create_valid_proof(100.into(), 0);
+        let proof = create_valid_proof(100, 0);
         validate_confidential_statement(&proof, None).unwrap();
     }
 
     #[test]
     fn it_is_invalid_if_minimum_value_changed() {
-        let mut proof = create_valid_proof(100.into(), 100);
+        let mut proof = create_valid_proof(100, 100);
         proof.output.as_mut().unwrap().minimum_value_promise = 99;
         validate_confidential_statement(&proof, None).unwrap_err();
         proof.output.as_mut().unwrap().minimum_value_promise = 1000;

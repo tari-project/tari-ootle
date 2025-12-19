@@ -15,7 +15,7 @@ use tari_consensus::{
     consensus_constants::ConsensusConstants,
     hotstuff::{HotstuffConfig, HotstuffEvent},
 };
-use tari_consensus_types::{BlockId, Decision, QcId};
+use tari_consensus_types::{BlockId, Decision};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::{substate::SubstateId, ToByteType};
 use tari_epoch_manager::EpochManagerReader;
@@ -34,7 +34,7 @@ use tari_ootle_common_types::{
     VotePower,
 };
 use tari_ootle_storage::{
-    consensus_models::{SubstateRecord, TransactionExecution, TransactionRecord},
+    consensus_models::{SubstateCreated, SubstateRecord, SubstateUpdateBatch, TransactionExecution, TransactionRecord},
     StateStore,
     StateStoreReadTransaction,
     StorageError,
@@ -179,30 +179,28 @@ impl Test {
             .iter()
             .map(|id| {
                 let value = make_test_component(id.substate_id().as_component_address().unwrap().entity_id());
-                SubstateRecord::new(
-                    id.substate_id().clone(),
-                    id.version(),
-                    value,
-                    Shard::first(),
-                    Epoch(0),
-                    BlockId::zero(),
-                    QcId::zero(),
-                )
+                let shard = id.to_shard(TEST_NUM_PRESHARDS);
+                SubstateRecord::new(id.substate_id().clone(), id.version(), value, SubstateCreated {
+                    at_epoch: Epoch::zero(),
+                    in_shard: shard,
+                    at_state_version: 0,
+                })
             })
             .collect::<Vec<_>>();
 
         self.validators.values().filter(|vn| dest.is_for_vn(vn)).for_each(|v| {
+            let mut batch = SubstateUpdateBatch::new(Epoch::zero());
+            for substate in &substates {
+                let shard = substate.to_versioned_substate_id().to_shard(TEST_NUM_PRESHARDS);
+                if v.shard_group.contains(&shard) {
+                    batch
+                        .with_transition(shard, substate.created().at_state_version)
+                        .push(substate.clone().into_transition());
+                }
+            }
+
             v.state_store
-                .with_write_tx(|tx| {
-                    for substate in &substates {
-                        if v.shard_group
-                            .contains(&substate.to_substate_address().to_shard(TEST_NUM_PRESHARDS))
-                        {
-                            substate.create(tx).unwrap();
-                        }
-                    }
-                    Ok::<_, StorageError>(())
-                })
+                .with_write_tx(|tx| SubstateRecord::commit_batch(tx, batch))
                 .unwrap();
         });
 
@@ -227,6 +225,7 @@ impl Test {
         TEST_NUM_PRESHARDS
     }
 
+    #[allow(dead_code)]
     pub fn num_committees(&self) -> u32 {
         self.num_committees
     }
@@ -262,7 +261,7 @@ impl Test {
             } else {
                 self.on_hotstuff_event().await
             };
-            if self.network.is_offline(&address, self.num_committees).await {
+            if self.network.is_offline(&address).await {
                 info!("[{}] Ignoring event for offline node: {:?}", address, event);
                 continue;
             }
@@ -284,7 +283,10 @@ impl Test {
 
     pub fn dump_pool_info(&self) {
         for v in self.validators.values().sorted_unstable_by_key(|a| &a.address) {
-            let pool = v.state_store.with_read_tx(|tx| tx.transaction_pool_get_all()).unwrap();
+            let pool = v
+                .state_store
+                .with_read_tx(|tx| tx.transaction_pool_get_all(1000))
+                .unwrap();
             println!("Validator {}", v.address);
             let mut table = Table::new();
             table
@@ -303,7 +305,7 @@ impl Test {
                     v.address,
                     tx.current_stage(),
                     tx.pending_stage().display(),
-                    tx.transaction_id(),
+                    tx.id(),
                     tx.current_decision(),
                     tx.is_ready(),
                     format!(
@@ -649,11 +651,11 @@ impl TestBuilder {
                     missed_proposal_recovery_threshold: 5,
                     max_number_commands_in_block: 500,
                     fee_exhaust_divisor: 20,
-                    epochs_per_era: Epoch(10),
-                    template_binary_max_size_bytes: 1000 * 1000 * 5,
                 },
-                state_tree_cleanup_interval: Duration::from_secs(60),
-                epoch_gc_interval: Duration::from_secs(60),
+                state_tree_cleanup_interval: Duration::from_secs(1000),
+                epoch_gc_interval: Duration::from_secs(1000),
+                enable_eviction_proposal: true,
+                epoch_end_grace_period: Duration::from_secs(1),
             },
         }
     }
@@ -661,6 +663,11 @@ impl TestBuilder {
     #[allow(dead_code)]
     pub fn disable_timeout(mut self) -> Self {
         self.timeout = None;
+        self
+    }
+
+    pub fn modify_config<F: FnOnce(&mut HotstuffConfig)>(mut self, f: F) -> Self {
+        f(&mut self.config);
         self
     }
 

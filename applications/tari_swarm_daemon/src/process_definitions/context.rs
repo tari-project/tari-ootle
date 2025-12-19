@@ -13,7 +13,6 @@ use crate::process_manager::{
     InstanceManager,
     MinoTariNodeProcess,
     MinoTariWalletProcess,
-    SignalingServerProcess,
     ValidatorNodeProcess,
 };
 
@@ -106,6 +105,29 @@ impl<'a> ProcessContext<'a> {
         }
     }
 
+    pub fn get_public_api_url(&self) -> Url {
+        match self.settings.get("public_api_url") {
+            Some(url) => url.parse().expect("Invalid API URL"),
+            None => {
+                let public_ip = self
+                    .settings
+                    .get("public_ip")
+                    .map(|s| {
+                        if s == "127.0.0.1" {
+                            return "localhost";
+                        }
+                        s.as_str()
+                    })
+                    .unwrap_or("localhost");
+                let port = self
+                    .port_allocator
+                    .get("api")
+                    .expect("API port must be allocated before calling get_public_api_url");
+                format!("http://{public_ip}:{port}").parse().expect("Invalid API URL")
+            },
+        }
+    }
+
     pub fn get_public_graphql_url(&self) -> Url {
         match self.settings.get("public_graphql_url") {
             Some(url) => url.parse().expect("Invalid GraphQL URL"),
@@ -152,9 +174,5 @@ impl<'a> ProcessContext<'a> {
 
     pub fn indexers(&self) -> impl Iterator<Item = &IndexerProcess> {
         self.instances.indexers()
-    }
-
-    pub fn signaling_servers(&self) -> impl Iterator<Item = &SignalingServerProcess> {
-        self.instances.signaling_servers()
     }
 }

@@ -158,10 +158,10 @@ where TConsensusSpec: ConsensusSpec
 
         rec.save(tx)?;
 
-        let has_some_local_inputs_or_all_foreign_inputs = rec.is_involved_in_inputs(local_committee_info) ||
+        let is_involved_in_inputs_or_all_foreign_inputs = rec.is_involved_in_inputs(local_committee_info) ||
             rec.has_all_foreign_input_pledges(&**tx, local_committee_info)?;
 
-        if !has_some_local_inputs_or_all_foreign_inputs {
+        if !is_involved_in_inputs_or_all_foreign_inputs {
             debug!(
                 target: LOG_TARGET,
                 "Transaction {} has no local inputs or all foreign inputs. Will sequence once we have received the LocalAccept foreign proposal.",
@@ -174,7 +174,7 @@ where TConsensusSpec: ConsensusSpec
             decision: Decision::Commit,
             // If we dont have the required data, dont add to pool yet. We will add it once we have processed the
             // LocalAccept foreign proposal
-            must_sequence: has_some_local_inputs_or_all_foreign_inputs,
+            must_sequence: is_involved_in_inputs_or_all_foreign_inputs,
         }))
     }
 

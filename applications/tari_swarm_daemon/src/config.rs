@@ -32,17 +32,11 @@ pub struct Config {
     pub processes: ProcessesConfig,
     #[serde(default)]
     pub skip_registration: bool,
-    #[serde(default = "default_as_true")]
-    pub auto_register_previous_templates: bool,
     #[serde(default, skip_serializing_if = "Clone::clone")]
     pub enable_manual_validator_connect: bool,
     pub public_ip: Option<IpAddr>,
     #[serde(default)]
     pub log_to_file: bool,
-}
-
-fn default_as_true() -> bool {
-    true
 }
 
 impl Config {
@@ -195,7 +189,6 @@ pub enum InstanceType {
     TariValidatorNode,
     TariIndexer,
     TariWalletDaemon,
-    TariSignalingServer,
     TariWalletDaemonCreateKey,
 }
 

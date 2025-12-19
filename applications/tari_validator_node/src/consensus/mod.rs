@@ -13,7 +13,6 @@ use tari_ootle_common_types::{Network, PeerAddress};
 use tari_ootle_storage::consensus_models::TransactionPool;
 use tari_rpc_state_sync::RpcStateSyncClientProtocol;
 use tari_shutdown::ShutdownSignal;
-use tari_template_manager::implementation::TemplateManager;
 use tari_transaction::Transaction;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 use tokio::{
@@ -42,14 +41,19 @@ pub use handle::*;
 pub use signer_service::*;
 use tari_consensus::{consensus_constants::ConsensusConstants, hotstuff::HotstuffEvent};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
-use tari_template_manager::interface::TemplateManagerHandle;
 
-use crate::{consensus::spec::ValidatorNodeStateStore, p2p::NopLogger};
+use crate::{
+    config::ConsensusConfig,
+    consensus::spec::ValidatorNodeStateStore,
+    p2p::NopLogger,
+    state_store_template_provider::StateStoreTemplateProvider,
+};
 
 pub type ConsensusTransactionValidator = BoxedValidator<ValidationContext, Transaction, TransactionValidationError>;
 
 pub async fn spawn(
     network: Network,
+    consensus_config: &ConsensusConfig,
     sidechain_id: Option<RistrettoPublicKeyBytes>,
     store: ValidatorNodeStateStore,
     local_addr: PeerAddress,
@@ -61,12 +65,11 @@ pub async fn spawn(
     hooks: <TariConsensusSpec as ConsensusSpec>::Hooks,
     shutdown_signal: ShutdownSignal,
     transaction_executor: TarBlockTransactionExecutor<
-        TariTransactionProcessor<TemplateManager<PeerAddress>>,
+        TariTransactionProcessor<StateStoreTemplateProvider<ValidatorNodeStateStore>>,
         ConsensusTransactionValidator,
     >,
     tx_hotstuff_events: broadcast::Sender<HotstuffEvent>,
     consensus_constants: ConsensusConstants,
-    template_manager: TemplateManagerHandle,
 ) -> (JoinHandle<Result<(), anyhow::Error>>, ConsensusHandle) {
     let (tx_new_transaction, rx_new_transactions) = mpsc::channel(10);
 
@@ -80,6 +83,10 @@ pub async fn spawn(
         // TODO: make these configurable (defaults should probably be longer than 1 hour)
         state_tree_cleanup_interval: Duration::from_secs(60 * 60),
         epoch_gc_interval: Duration::from_secs(60 * 60),
+        enable_eviction_proposal: consensus_config.enable_eviction_proposal,
+        // NOTE: This value should be greater than the epoch oracle's scanning interval to avoid leader failure by race
+        // condition.
+        epoch_end_grace_period: Duration::from_secs(10),
     };
 
     let hotstuff_worker = HotstuffWorker::<TariConsensusSpec>::new(
@@ -104,7 +111,7 @@ pub async fn spawn(
     let context = ConsensusWorkerContext {
         epoch_manager: epoch_manager.clone(),
         hotstuff: hotstuff_worker,
-        state_sync: RpcStateSyncClientProtocol::new(epoch_manager, store, client_factory, template_manager),
+        state_sync: RpcStateSyncClientProtocol::new(epoch_manager, store, client_factory),
         tx_current_state,
     };
 
@@ -112,7 +119,7 @@ pub async fn spawn(
 
     let consensus_handle = ConsensusHandle::new(
         rx_current_state,
-        EventSubscription::new(tx_hotstuff_events),
+        EventSubscription::new(tx_hotstuff_events.downgrade()),
         current_view,
         tx_new_transaction,
     );

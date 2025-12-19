@@ -24,14 +24,12 @@ use tari_template_lib_types::crypto::{PedersenCommitmentBytes, RistrettoPublicKe
 ///
 /// The proof size is static (256 bytes).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct ViewableBalanceProof {
     /// The encrypted value that takes the form: E = v.G + r.P
-    /// where v is the value, G is the generator, r is the secret_nonce and P is the view key
+    /// where v is the value, G is the generator, r is the secret_nonce and P is the view key.
+    /// The value is decrypted by brute forcing E - R.p = v.G
     pub elgamal_encrypted: RistrettoPublicKeyBytes,
     /// The public nonce used in the ElGamal encryption R = r.G
     pub elgamal_public_nonce: RistrettoPublicKeyBytes,
@@ -61,7 +59,8 @@ impl ViewableBalanceProof {
     }
 }
 
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct ViewableBalanceProofChallengeFields<'a> {
     pub elgamal_encrypted: &'a RistrettoPublicKeyBytes,
     pub elgamal_public_nonce: &'a RistrettoPublicKeyBytes,

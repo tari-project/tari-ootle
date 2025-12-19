@@ -19,6 +19,7 @@ use tari_state_tree::{
     StagedTreeStore,
     StateHashTreeDiff,
     StateTreeError,
+    StateTreePayload,
     SubstateTreeChange,
     TreeHash,
     Version,
@@ -121,6 +122,15 @@ impl<TTx: StateStoreReadTransaction> ShardedStateTree<&TTx> {
         Ok(root_hash)
     }
 
+    pub fn calculate_state_root(&self, shard_group: ShardGroup) -> Result<TreeHash, StateTreeError> {
+        let mut shard_state_roots = HashMap::new();
+        for shard in shard_group.shard_iter_with_global() {
+            let root = self.get_state_root_for_shard(shard)?;
+            shard_state_roots.insert(shard, root);
+        }
+        self.get_shard_group_root(shard_group, shard_state_roots)
+    }
+
     fn get_shard_group_root(
         &self,
         shard_group: ShardGroup,
@@ -171,7 +181,7 @@ impl<TTx: StateStoreWriteTransaction> ShardedStateTree<&mut TTx> {
     pub fn commit_diffs(
         &mut self,
         diffs: IndexMap<Shard, Vec<PendingShardStateTreeDiff>>,
-    ) -> Result<(), StateTreeError> {
+    ) -> Result<HashMap<Shard, Version>, StateTreeError> {
         debug!(
             target: LOG_TARGET,
             "Committing {} pending diff(s) for {} shard(s)",
@@ -179,20 +189,22 @@ impl<TTx: StateStoreWriteTransaction> ShardedStateTree<&mut TTx> {
             diffs.len()
         );
 
+        let mut state_versions = HashMap::with_capacity(diffs.len());
         for (shard, pending_diffs) in diffs {
             for pending_diff in pending_diffs {
+                state_versions.insert(shard, pending_diff.version);
                 self.commit_diff(shard, pending_diff.version, pending_diff.diff)?;
             }
         }
 
-        Ok(())
+        Ok(state_versions)
     }
 
     pub fn commit_diff(
         &mut self,
         shard: Shard,
         version: Version,
-        diff: StateHashTreeDiff<Version>,
+        diff: StateHashTreeDiff<StateTreePayload>,
     ) -> Result<(), StateTreeError> {
         let mut store = ShardScopedTreeStoreWriter::new(self.tx, shard);
 
@@ -204,7 +216,7 @@ impl<TTx: StateStoreWriteTransaction> ShardedStateTree<&mut TTx> {
         );
         store.record_stale_tree_nodes(version, diff.stale_tree_nodes)?;
         store.insert_nodes(diff.new_nodes)?;
-        store.set_version(version)?;
+        store.set_state_version(version)?;
         Ok(())
     }
 }

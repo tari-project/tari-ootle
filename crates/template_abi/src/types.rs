@@ -22,14 +22,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::rust::{boxed::Box, string::String, vec::Vec};
+use crate::rust::{boxed::Box, ops, string::String, vec::Vec};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum TemplateDef {
     V1(TemplateDefV1),
 }
@@ -61,11 +57,7 @@ impl TemplateDef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TemplateDefV1 {
     pub template_name: String,
     pub tari_version: String,
@@ -79,35 +71,25 @@ impl TemplateDefV1 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct FunctionDef {
     pub name: String,
     pub arguments: Vec<ArgDef>,
     pub output: Type,
     pub is_mut: bool,
+    #[serde(default, skip_serializing_if = "ops::Not::not")]
+    pub is_migration: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ArgDef {
     pub name: String,
     pub arg_type: Type,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Type {
     #[default]
     Unit,

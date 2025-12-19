@@ -22,15 +22,15 @@
 
 const LOG_TARGET: &str = "tari::validator_node::json_rpc::handlers";
 
-use std::fmt::Display;
+use std::{env, fmt::Display};
 
 use axum_jrpc::{
     error::{JsonRpcError, JsonRpcErrorReason},
     JsonRpcResponse,
 };
 
-// pub fn invalid_params<T: Display, S: Display>(answer_id: i64, details: S) -> impl Fn(T) -> JsonRpcResponse {
-//     move |err| {
+// pub fn invalid_params<T: Display, S: Display>(answer_id: axum_jrpc::Id, details: S) -> impl Fn(T) -> JsonRpcResponse
+// {     move |err| {
 //         log::error!(target: LOG_TARGET, "⚠️ Request has invalid params: {details}. Error: {}", err);
 //         JsonRpcResponse::error(
 //             answer_id,
@@ -44,13 +44,16 @@ use axum_jrpc::{
 // }
 
 /// Creates a handler for internal errors. This will log the error and return a generic message to the user.
-pub fn internal_error<T: Display>(answer_id: i64) -> impl Fn(T) -> JsonRpcResponse {
+pub fn internal_error<T: Display>(answer_id: axum_jrpc::Id) -> impl FnOnce(T) -> JsonRpcResponse {
     move |err| {
-        let msg = if cfg!(debug_assertions) || option_env!("CI").is_some() {
-            err.to_string()
+        log::error!(target: LOG_TARGET, "🚨 Internal error: {}", err);
+        let msg = if cfg!(debug_assertions) ||
+            env::var("CI").is_ok() ||
+            env::var("DEBUG_MODE").ok().as_deref() == Some("1")
+        {
+            format!("An internal error occurred: {}", err)
         } else {
-            log::error!(target: LOG_TARGET, "🚨 Internal error: {}", err);
-            "Something went wrong".to_string()
+            "An internal error occurred".to_string()
         };
         JsonRpcResponse::error(
             answer_id,
@@ -59,7 +62,7 @@ pub fn internal_error<T: Display>(answer_id: i64) -> impl Fn(T) -> JsonRpcRespon
     }
 }
 
-pub fn not_found<T: Into<String>>(answer_id: i64, details: T) -> JsonRpcResponse {
+pub fn not_found<T: Into<String>>(answer_id: axum_jrpc::Id, details: T) -> JsonRpcResponse {
     JsonRpcResponse::error(
         answer_id,
         JsonRpcError::new(
@@ -71,7 +74,7 @@ pub fn not_found<T: Into<String>>(answer_id: i64, details: T) -> JsonRpcResponse
 }
 
 /// Creates a handler for general errors. The error will be sent to the client as a JSON-RPC error response.
-pub fn general_error<T: Into<String>>(answer_id: i64, details: T) -> JsonRpcResponse {
+pub fn general_error<T: Into<String>>(answer_id: axum_jrpc::Id, details: T) -> JsonRpcResponse {
     JsonRpcResponse::error(
         answer_id,
         JsonRpcError::new(
@@ -82,7 +85,7 @@ pub fn general_error<T: Into<String>>(answer_id: i64, details: T) -> JsonRpcResp
     )
 }
 
-pub fn invalid_operation<T: Into<String>>(answer_id: i64, details: T) -> JsonRpcResponse {
+pub fn invalid_operation<T: Into<String>>(answer_id: axum_jrpc::Id, details: T) -> JsonRpcResponse {
     JsonRpcResponse::error(
         answer_id,
         JsonRpcError::new(

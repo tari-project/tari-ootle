@@ -7,7 +7,6 @@ use ciborium::tag::Required;
 use serde::{de, ser, Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-
 pub struct BorTag<T, const TAG: u64>(Required<T, TAG>);
 
 impl<T, const TAG: u64> BorTag<T, TAG> {
@@ -69,6 +68,33 @@ impl<T, const TAG: u64> DerefMut for BorTag<T, TAG> {
 impl<T: AsRef<[u8]>, const TAG: u64> AsRef<[u8]> for BorTag<T, TAG> {
     fn as_ref(&self) -> &[u8] {
         self.inner().as_ref()
+    }
+}
+
+#[cfg(feature = "borsh")]
+mod borsh_impl {
+    use super::*;
+
+    impl<T: borsh::BorshSerialize, const TAG: u64> borsh::BorshSerialize for BorTag<T, TAG> {
+        fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
+            borsh::BorshSerialize::serialize(&TAG, writer)?;
+            borsh::BorshSerialize::serialize(self.inner(), writer)
+        }
+    }
+
+    impl<T: borsh::BorshDeserialize, const TAG: u64> borsh::BorshDeserialize for BorTag<T, TAG> {
+        fn deserialize_reader<R>(reader: &mut R) -> Result<Self, borsh::io::Error>
+        where R: borsh::io::Read {
+            let tag = u64::deserialize_reader(reader)?;
+            if tag != TAG {
+                return Err(borsh::io::Error::new(
+                    borsh::io::ErrorKind::InvalidInput,
+                    format!("Invalid tag: expected {}, got {}", TAG, tag),
+                ));
+            }
+            let value = borsh::BorshDeserialize::deserialize_reader(reader)?;
+            Ok(BorTag::new(value))
+        }
     }
 }
 

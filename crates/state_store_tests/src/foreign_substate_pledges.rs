@@ -14,10 +14,7 @@ use crate::helpers::{build_substate_value, create_random_substate_id, create_roc
 #[test]
 fn foreign_substate_pledges_rocksdb() {
     let (db, _tmp) = create_rocksdb();
-    foreign_substate_pledges_operations(db);
-}
 
-fn foreign_substate_pledges_operations(db: impl StateStore) {
     let mut tx = db.create_write_tx().unwrap();
 
     let transaction_id = transaction_id_from_seed(1);

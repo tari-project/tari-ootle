@@ -5,23 +5,30 @@ use std::collections::HashSet;
 
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
-use tari_engine_types::{indexed_value::IndexedValueError, instruction::Instruction, substate::SubstateId};
-use tari_ootle_common_types::{Epoch, SubstateRequirement};
-use tari_template_lib::models::ComponentAddress;
+use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey};
+use tari_engine_types::{indexed_value::IndexedValueError, substate::SubstateId, ToByteType};
+use tari_ootle_common_types::{Epoch, IntoSigned, Signable, SubstateRequirement};
+use tari_template_lib::{models::ComponentAddress, prelude::RistrettoPublicKeyBytes};
 
-use crate::{TransactionSignature, UnsealedTransactionV1, UnsignedTransactionV1};
+use crate::{Instruction, TransactionSignature, UnsealedTransactionV1, UnsignedTransactionV1};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum UnsignedTransaction {
     V1(UnsignedTransactionV1),
 }
 
 impl UnsignedTransaction {
+    pub fn new<N: Into<u8>>(network: N) -> Self {
+        Self::V1(UnsignedTransactionV1::new_default(network))
+    }
+
+    pub fn schema_version(&self) -> u16 {
+        match self {
+            Self::V1(_) => 1,
+        }
+    }
+
     pub fn set_network<N: Into<u8>>(&mut self, network: N) -> &mut Self {
         match self {
             Self::V1(tx) => tx.set_network(network),
@@ -29,16 +36,22 @@ impl UnsignedTransaction {
         self
     }
 
-    pub fn set_dry_run(&mut self, dry_run: bool) -> &mut Self {
+    pub fn network(&self) -> u8 {
+        match self {
+            Self::V1(tx) => tx.network,
+        }
+    }
+
+    pub(crate) fn set_dry_run(&mut self, dry_run: bool) -> &mut Self {
         match self {
             Self::V1(tx) => tx.set_dry_run(dry_run),
         };
         self
     }
 
-    pub fn authorized_sealed_signer(mut self) -> Self {
+    pub fn disabled_authorized_sealed_signer(mut self) -> Self {
         match self {
-            Self::V1(ref mut tx) => tx.is_seal_signer_authorized = true,
+            Self::V1(ref mut tx) => tx.is_seal_signer_authorized = false,
         }
         self
     }
@@ -127,11 +140,31 @@ impl UnsignedTransaction {
         self
     }
 
-    pub fn build(self, signatures: Vec<TransactionSignature>) -> UnsealedTransactionV1 {
+    pub fn add_signer(
+        mut self,
+        seal_signer: &RistrettoPublicKeyBytes,
+        key: &RistrettoSecretKey,
+    ) -> UnsealedTransactionV1 {
+        match &mut self {
+            Self::V1(tx) => UnsealedTransactionV1::new(tx.clone(), vec![]).add_signer(seal_signer, key),
+        }
+    }
+
+    pub fn add_signature(mut self, signature: TransactionSignature) -> UnsealedTransactionV1 {
+        match &mut self {
+            Self::V1(tx) => UnsealedTransactionV1::new(tx.clone(), vec![signature]),
+        }
+    }
+
+    pub fn with_signatures(self, signatures: Vec<TransactionSignature>) -> UnsealedTransactionV1 {
         // Obviously this will not work if we have more than one version - dealing with that is left for another time
         match self {
             UnsignedTransaction::V1(tx) => UnsealedTransactionV1::new(tx, signatures),
         }
+    }
+
+    pub fn finish(self) -> UnsealedTransactionV1 {
+        self.with_signatures(vec![])
     }
 
     pub(crate) fn inputs_mut(&mut self) -> &mut IndexSet<SubstateRequirement> {
@@ -147,8 +180,23 @@ impl From<UnsignedTransactionV1> for UnsignedTransaction {
     }
 }
 
-impl Default for UnsignedTransaction {
-    fn default() -> Self {
-        Self::V1(UnsignedTransactionV1::default())
+impl Signable<&RistrettoPublicKeyBytes> for UnsignedTransaction {
+    type MessageOutput = [u8; 64];
+
+    fn to_signing_message(&self, sealed_signer: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
+        match &self {
+            Self::V1(tx) => tx.to_signing_message(sealed_signer),
+        }
+    }
+}
+
+impl IntoSigned<&RistrettoPublicKeyBytes> for UnsignedTransaction {
+    type SignedOutput = UnsealedTransactionV1;
+
+    fn into_signed(self, public_key: RistrettoPublicKey, signature: RistrettoSchnorr) -> Self::SignedOutput {
+        self.add_signature(TransactionSignature::new(
+            public_key.to_byte_type(),
+            signature.to_byte_type(),
+        ))
     }
 }

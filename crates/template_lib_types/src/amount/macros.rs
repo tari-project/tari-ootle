@@ -7,7 +7,7 @@ macro_rules! impl_from {
     ($ty:ty, $int:ty) => {
         impl From<$int> for $ty {
             fn from(value: $int) -> Self {
-                Self::new(value.into())
+                Self::new(value)
             }
         }
     };

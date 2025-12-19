@@ -3,8 +3,8 @@
 
 use tari_engine_types::commit_result::ExecuteResult;
 use tari_template_lib::{
-    constants::NFT_FAUCET_COMPONENT_ADDRESS,
-    models::{ComponentAddress, NonFungibleAddress, NonFungibleId},
+    constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS},
+    models::{ComponentAddress, NonFungibleAddress},
     prelude::Metadata,
     resource::TOKEN_SYMBOL,
 };
@@ -25,12 +25,16 @@ fn basic_nft_mint() {
     metadata.insert("name", "my_custom_nft");
     metadata.insert("brightness", "100");
 
-    let result = mint_faucet_nft(&mut test, owner_component_address, owner_token.clone(), metadata);
-    assert!(result.finalize.result.is_accept());
+    mint_faucet_nft(&mut test, owner_component_address, owner_token.clone(), metadata).expect_success();
 
-    let bucket_nfts = result.finalize.execution_results[2]
-        .decode::<Vec<NonFungibleId>>()
+    let vault = test
+        .read_only_state_store()
+        .get_vaults_for_account(owner_component_address)
+        .unwrap()
+        .get(&NFT_FAUCET_RESOURCE_ADDRESS)
+        .cloned()
         .unwrap();
+    let bucket_nfts = vault.get_non_fungible_ids();
     assert_eq!(bucket_nfts.len(), 1);
 }
 
@@ -68,14 +72,9 @@ fn mint_faucet_nft(
     metadata: Metadata,
 ) -> ExecuteResult {
     test.build_and_execute(
-        Transaction::builder()
-            .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![Amount(1), metadata])
+        Transaction::builder_localnet()
+            .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![1, metadata])
             .put_last_instruction_output_on_workspace("my_nft")
-            .call_function(
-                test.get_template_address("Account"),
-                "get_non_fungible_ids_for_bucket",
-                args![Workspace("my_nft")],
-            )
             .call_method(account, "deposit", args![Workspace("my_nft")]),
         vec![owner_token],
     )

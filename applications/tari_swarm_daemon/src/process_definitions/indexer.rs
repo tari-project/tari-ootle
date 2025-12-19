@@ -22,14 +22,14 @@ impl Indexer {
 impl ProcessDefinition for Indexer {
     async fn get_command(&self, mut context: ProcessContext<'_>) -> anyhow::Result<Command> {
         let mut command = Command::new(context.bin());
-        let jrpc_port = context.get_free_port("jrpc").await?;
+        let api_port = context.get_free_port("api").await?;
         let graphql_port = context.get_free_port("graphql").await?;
         let web_ui_port = context.get_free_port("web").await?;
         let listen_ip = context.listen_ip();
 
-        let json_rpc_public_url = context.get_public_json_rpc_url();
+        let api_public_url = context.get_public_api_url();
         let graphql_public_url = context.get_public_graphql_url();
-        let json_rpc_listener_address = format!("{listen_ip}:{jrpc_port}");
+        let api_listener_address = format!("{listen_ip}:{api_port}");
         let graphql_listener_address = format!("{listen_ip}:{graphql_port}");
         let web_ui_listener_address = format!("{listen_ip}:{web_ui_port}");
 
@@ -54,12 +54,13 @@ impl ProcessDefinition for Indexer {
             .arg(format!(
                 "-pepoch_oracle.base_layer.base_node_grpc_url={base_node_grpc_url}"
             ))
-            .arg(format!("-pindexer.json_rpc_address={json_rpc_listener_address}"))
+            .arg(format!("-pindexer.api_listen_address={api_listener_address}"))
             .arg(format!("-pindexer.graphql_address={graphql_listener_address}"))
             .arg(format!("-pindexer.web_ui_address={web_ui_listener_address}"))
-            .arg(format!("-pindexer.web_ui_public_json_rpc_url={json_rpc_public_url}"))
+            .arg(format!("-pindexer.web_ui_public_api_url={api_public_url}"))
             .arg(format!("-pindexer.web_ui_public_graphql_url={graphql_public_url}"))
-            .arg("-pepoch_oracle.base_layer.scanning_interval=1");
+            .arg("-pepoch_oracle.base_layer.scanning_interval=1")
+            .env("API_DEBUG", "1"); // Enable detailed API error messages
 
         // mDNS is not guaranteed to work, so we'll explicitly set the seed peers for the indexer.
         let seed_peers = context.validator_nodes().filter_map(|vn| {

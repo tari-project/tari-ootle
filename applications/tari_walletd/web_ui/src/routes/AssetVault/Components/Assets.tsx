@@ -20,99 +20,19 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Box from "@mui/material/Box";
-import Tab from "@mui/material/Tab";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
-import Tabs from "@mui/material/Tabs";
-import Typography from "@mui/material/Typography";
-import { useState } from "react";
-import FetchStatusCheck from "../../../Components/FetchStatusCheck";
-import { DataTableCell } from "../../../Components/StyledComponents";
-import { useAccountNFTsList, useAccountsGetBalances } from "../../../api/hooks/useAccounts";
-import useAccountStore from "../../../store/accountStore";
-import { bigintToDecimalString, shortenSubstateId, substateIdToString } from "../../../utils/helpers";
-import NFTList from "../../../Components/NFTList";
-import { Button } from "@mui/material";
-import { SendMoneyDialog } from "./SendMoney";
-import {
-  ResourceAddress,
-  ResourceType,
-  VaultId,
-  BalanceEntry,
-  Account,
-  Amount,
-} from "@tari-project/typescript-bindings";
-import CopyAddress from "../../../Components/CopyAddress";
+import { Box, Tab, Tabs, Typography } from "@mui/material";
+import React, { useState, useEffect } from "react";
+import { ApiError } from "@api/helpers/types";
+import { useNFTsList } from "@api/hooks/useNfts";
+import { substateIdToString, handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
+import NFTList from "@routes/AssetVault/NFTs/NFTList";
+import { Account } from "@tari-project/typescript-bindings";
+import Tokens from "@routes/AssetVault/Tokens/Tokens";
 
 interface TabPanelProps {
   children?: React.ReactNode;
   index: number;
   value: number;
-}
-
-interface BalanceRowProps {
-  token_symbol: string;
-  resource_address: ResourceAddress;
-  resource_type: ResourceType;
-  vault_address?: VaultId;
-  balance: Amount;
-  confidential_balance: Amount;
-  divisibility: number;
-  onSendClicked?: (resource_address: ResourceAddress, resource_type: ResourceType) => void;
-}
-
-function BalanceRow(props: BalanceRowProps) {
-  const {
-    token_symbol,
-    resource_address,
-    resource_type,
-    balance,
-    confidential_balance,
-    vault_address,
-    divisibility,
-    onSendClicked,
-  } = props;
-  const { showBalance } = useAccountStore();
-  return (
-    <TableRow key={token_symbol || resource_address}>
-      <DataTableCell>{vault_address ? <CopyAddress address={vault_address} /> : "--"}</DataTableCell>
-      <DataTableCell>
-        <CopyAddress
-          address={resource_address}
-          display={`${token_symbol || shortenSubstateId(resource_address)} ${resource_type}`}
-        />
-      </DataTableCell>
-      <DataTableCell>{showBalance ? bigintToDecimalString(balance, divisibility) : "*************"}</DataTableCell>
-      <DataTableCell>
-        <ConfidentialBalance
-          show={showBalance}
-          resourceType={resource_type}
-          balance={confidential_balance}
-          divisibility={divisibility}
-        />
-      </DataTableCell>
-      <DataTableCell>
-        <Button variant="outlined" onClick={() => onSendClicked?.(resource_address, resource_type)}>
-          Send
-        </Button>
-      </DataTableCell>
-    </TableRow>
-  );
-}
-
-function ConfidentialBalance(props: { show: boolean; balance: Amount; resourceType: string; divisibility: number }) {
-  switch (props.resourceType) {
-    case "Confidential":
-    case "Stealth":
-      return <>{props.show ? bigintToDecimalString(props.balance, props.divisibility) : "**************"}</>;
-    default:
-      return <>--</>;
-  }
 }
 
 function TabPanel(props: TabPanelProps) {
@@ -143,104 +63,70 @@ function tabProps(index: number) {
 }
 
 function Assets({ account }: { account: Account }) {
-  const [resourceToSend, setResourceToSend] = useState<{
-    address: ResourceAddress;
-    resource_type: ResourceType;
-  } | null>(null);
-  const [value, setValue] = useState(0);
+  const [assetTab, setAssetTab] = useState(0);
+  const [nftPage, setNftPage] = useState(0);
+  const [nftRowsPerPage, setNftRowsPerPage] = useState(12);
+
+  // Reset pagination and tab when account changes
+  React.useEffect(() => {
+    setNftPage(0);
+    setAssetTab(0);
+  }, [account]);
 
   const {
-    data: balancesData,
-    isError: balancesIsError,
-    error: balancesError,
-    isFetching: balancesIsFetching,
-  } = useAccountsGetBalances(substateIdToString(account.address));
-
-  const {
-    data: nftsListData,
+    data: allNfts,
     isError: nftsListIsError,
     error: nftsListError,
-    isFetching: nftsListIsFetching,
-  } = useAccountNFTsList(substateIdToString(account.address), 0, 10);
+    isLoading: nftsListIsFetching,
+    refetch: refetchNfts,
+  } = useNFTsList(substateIdToString(account.component_address), 0, 1000);
 
-  const handleChange = (_event: React.SyntheticEvent, newValue: number) => {
-    setValue(newValue);
+  const totalCount = allNfts?.nfts?.length || 0;
+
+  // Auto-adjust page if current page is empty due to NFT transfers
+  useEffect(() => {
+    if (totalCount > 0 && nftPage > 0) {
+      const maxPage = Math.ceil(totalCount / nftRowsPerPage) - 1;
+      if (nftPage > maxPage) {
+        setNftPage(maxPage);
+      }
+    }
+  }, [totalCount, nftPage, nftRowsPerPage, setNftPage]);
+
+  const startIndex = nftPage * nftRowsPerPage;
+  const endIndex = startIndex + nftRowsPerPage;
+  const nftsListData = {
+    ...allNfts,
+    nfts: allNfts?.nfts?.slice(startIndex, endIndex) || [],
   };
 
-  const handleSendResourceClicked = (address: ResourceAddress, resource_type: ResourceType) => {
-    setResourceToSend({ address, resource_type });
+  const handleChange = (_event: React.SyntheticEvent, newValue: number) => {
+    setAssetTab(newValue);
   };
 
   return (
     <Box sx={{ width: "100%" }}>
-      <SendMoneyDialog
-        open={resourceToSend !== null}
-        handleClose={() => setResourceToSend(null)}
-        onSendComplete={() => setResourceToSend(null)}
-        resource_address={resourceToSend?.address}
-        resource_type={resourceToSend?.resource_type!}
-      />
       <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
-        <Tabs value={value} onChange={handleChange} aria-label="account assets" variant="standard">
+        <Tabs value={assetTab} onChange={handleChange} aria-label="account assets" variant="standard">
           <Tab label="Tokens" {...tabProps(0)} style={{ width: 150 }} />
           <Tab label="NFTs" {...tabProps(1)} style={{ width: 150 }} />
         </Tabs>
       </Box>
-      <TabPanel value={value} index={0}>
-        <FetchStatusCheck
-          isError={balancesIsError}
-          errorMessage={balancesError?.message || "Error fetching data"}
-          isLoading={balancesIsFetching && !balancesData?.balances.length}
-        >
-          <TableContainer>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Vault</TableCell>
-                  <TableCell>Resource</TableCell>
-                  <TableCell>Revealed Balance</TableCell>
-                  <TableCell>Confidential Balance</TableCell>
-                  <TableCell></TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {balancesData?.balances.map(
-                  (
-                    {
-                      resource_address,
-                      balance,
-                      resource_type,
-                      confidential_balance,
-                      token_symbol,
-                      vault_address,
-                      divisibility,
-                    }: BalanceEntry,
-                    i: number,
-                  ) => (
-                    <BalanceRow
-                      key={i}
-                      token_symbol={token_symbol || ""}
-                      resource_address={resource_address}
-                      resource_type={resource_type}
-                      balance={balance}
-                      confidential_balance={confidential_balance}
-                      vault_address={vault_address ?? undefined} // convert null to undefined
-                      divisibility={divisibility}
-                      onSendClicked={handleSendResourceClicked}
-                    />
-                  ),
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </FetchStatusCheck>
+      <TabPanel value={assetTab} index={0}>
+        <Tokens account={account} />
       </TabPanel>
-      <TabPanel value={value} index={1}>
+      <TabPanel value={assetTab} index={1}>
         <NFTList
           nftsListIsError={nftsListIsError}
           nftsListIsFetching={nftsListIsFetching}
-          nftsListError={nftsListError}
+          nftsListError={nftsListError as ApiError | null}
           nftsListData={nftsListData}
+          totalCount={totalCount}
+          page={nftPage}
+          rowsPerPage={nftRowsPerPage}
+          onPageChange={(event, newPage) => handleChangePage(event, newPage, setNftPage)}
+          onRowsPerPageChange={(event) => handleChangeRowsPerPage(event, setNftRowsPerPage, setNftPage)}
+          onManualRefresh={() => refetchNfts()}
         />
       </TabPanel>
     </Box>

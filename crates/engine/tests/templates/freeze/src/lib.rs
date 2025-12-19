@@ -36,11 +36,11 @@ mod template {
         }
 
         pub fn freeze(&mut self, vault_id: VaultId) {
-            ResourceManager::get(self.vault.resource_address()).freeze(vault_id);
+            ResourceManager::get(self.vault.resource_address()).freeze_vault(vault_id);
         }
 
         pub fn unfreeze(&mut self, vault_id: VaultId) {
-            ResourceManager::get(self.vault.resource_address()).unfreeze(vault_id);
+            ResourceManager::get(self.vault.resource_address()).unfreeze_vault(vault_id);
         }
     }
 }

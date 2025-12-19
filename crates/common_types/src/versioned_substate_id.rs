@@ -9,12 +9,8 @@ use tari_engine_types::{substate::SubstateId, transaction_receipt::TransactionRe
 
 use crate::{displayable::Displayable, shard::Shard, NumPreshards, ShardGroup, SubstateAddress, ToSubstateAddress};
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[derive(Debug, Clone, Deserialize, Serialize, borsh::BorshSerialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SubstateRequirement {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub substate_id: SubstateId,
@@ -22,7 +18,7 @@ pub struct SubstateRequirement {
 }
 
 impl SubstateRequirement {
-    pub fn new(address: SubstateId, version: Option<u32>) -> Self {
+    pub const fn new(address: SubstateId, version: Option<u32>) -> Self {
         Self {
             substate_id: address,
             version,
@@ -72,10 +68,14 @@ impl SubstateRequirement {
         SubstateAddress::from_substate_id(self.substate_id(), 0)
     }
 
-    /// Calculates and returns the shard number that this SubstateAddress belongs.
+    /// Calculates and returns the shard number that this SubstateAddress belongs to.
     /// A shard is a fixed division of the 256-bit shard space.
-    /// If the substate version is not known, None is returned.
+    /// If the substate is global, returns `Some(Shard::global())` regardless of version.
+    /// For non-global substates, returns `None` if the version is not known.
     pub fn to_shard(&self, num_shards: NumPreshards) -> Option<Shard> {
+        if self.substate_id.is_global() {
+            return Some(Shard::global());
+        }
         self.to_substate_address().map(|a| a.to_shard(num_shards))
     }
 
@@ -296,11 +296,7 @@ impl Display for SubstateRequirementRef<'_> {
 pub struct SubstateRequirementParseError(String);
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize, BorshSerialize, BorshDeserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct VersionedSubstateId {
     substate_id: SubstateId,
     version: u32,
@@ -351,7 +347,7 @@ impl VersionedSubstateId {
         Self::new(self.substate_id, self.version + 1)
     }
 
-    pub fn as_ref(&self) -> VersionedSubstateIdRef<'_> {
+    pub fn as_versioned_ref(&self) -> VersionedSubstateIdRef<'_> {
         VersionedSubstateIdRef {
             substate_id: &self.substate_id,
             version: self.version,
@@ -419,6 +415,12 @@ impl Borrow<SubstateId> for VersionedSubstateId {
     }
 }
 
+impl AsRef<SubstateId> for VersionedSubstateId {
+    fn as_ref(&self) -> &SubstateId {
+        &self.substate_id
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct VersionedSubstateIdRef<'a> {
     pub substate_id: &'a SubstateId,
@@ -428,6 +430,13 @@ pub struct VersionedSubstateIdRef<'a> {
 impl<'a> VersionedSubstateIdRef<'a> {
     pub fn new(substate_id: &'a SubstateId, version: u32) -> Self {
         Self { substate_id, version }
+    }
+
+    pub fn to_shard(&self, num_preshards: NumPreshards) -> Shard {
+        if self.substate_id.is_global() {
+            return Shard::global();
+        }
+        self.to_substate_address().to_shard(num_preshards)
     }
 
     pub fn substate_id(&self) -> &SubstateId {

@@ -3,13 +3,14 @@
 
 use serde::Serialize;
 use tari_bor::to_value;
+use tari_template_lib_types::ResourceType;
 
 use super::{IMAGE_URL, TOKEN_SYMBOL};
 use crate::{
     args::MintArg,
     auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
     models::{Bucket, ComponentAddress, Metadata, NonFungibleId, ResourceAddress, ResourceAddressAllocation},
-    resource::{ResourceManager, ResourceType},
+    resource::ResourceManager,
 };
 
 /// Utility for building non-fungible resources inside templates
@@ -73,8 +74,13 @@ impl NonFungibleResourceBuilder {
     }
 
     /// Sets the already allocated address for the resource
-    pub fn with_address_allocation(mut self, address: ResourceAddressAllocation) -> Self {
-        self.address_allocation = Some(address);
+    pub fn with_address_allocation(self, address: ResourceAddressAllocation) -> Self {
+        self.with_address_allocation_opt(Some(address))
+    }
+
+    /// Sets the already allocated address for the resource, optionally
+    pub fn with_address_allocation_opt(mut self, address: Option<ResourceAddressAllocation>) -> Self {
+        self.address_allocation = address;
         self
     }
 

@@ -30,7 +30,6 @@ import Connections from "./routes/Connections/Connections";
 import Fees from "./routes/Fees/Fees";
 import Mempool from "./routes/Mempool/Mempool";
 import Blocks from "./routes/Blocks/Blocks";
-import Templates from "./routes/Templates/Templates";
 import ValidatorNodes from "./routes/ValidatorNodes/ValidatorNodes";
 import ErrorPage from "./routes/ErrorPage";
 import TemplateFunctions from "./routes/VN/Components/TemplateFunctions";
@@ -59,10 +58,6 @@ const router = createBrowserRouter([
       {
         path: "blocks/:blockId",
         element: <BlockDetails />,
-      },
-      {
-        path: "templates",
-        element: <Templates />,
       },
       {
         path: "vns",

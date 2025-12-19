@@ -6,7 +6,6 @@
 use tari_template_lib_types::ObjectKey;
 
 use crate::models::{ComponentAddress, ResourceAddress, VaultId};
-
 // TODO: This is set pretty arbitrarily.
 
 /// Resource address for all public identity-based non-fungible tokens.
@@ -18,11 +17,11 @@ pub const PUBLIC_IDENTITY_RESOURCE_ADDRESS: ResourceAddress = ResourceAddress::n
 
 /// The Tari network native resource address, used for paying network fees
 /// resource_0101010101010101010101010101010101010101010101010101010101010101
-pub const CONFIDENTIAL_TARI_RESOURCE_ADDRESS: ResourceAddress =
+pub const STEALTH_TARI_RESOURCE_ADDRESS: ResourceAddress =
     ResourceAddress::new(ObjectKey::from_array([1u8; ObjectKey::LENGTH]));
 
-/// Shorthand version of the `CONFIDENTIAL_TARI_RESOURCE_ADDRESS` constant
-pub const XTR: ResourceAddress = CONFIDENTIAL_TARI_RESOURCE_ADDRESS;
+/// Shorthand version of the `STEALTH_TARI_RESOURCE_ADDRESS` constant
+pub const XTR: ResourceAddress = STEALTH_TARI_RESOURCE_ADDRESS;
 
 /// Address of testnet faucet component
 pub const XTR_FAUCET_COMPONENT_ADDRESS: ComponentAddress = ComponentAddress::new(ObjectKey::from_array([

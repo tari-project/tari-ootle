@@ -27,35 +27,29 @@ use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArrayError}
 use tari_template_lib::{
     auth::{AuthHook, OwnerRule, Ownership, ResourceAccessRules},
     models::Metadata,
-    resource::{ResourceType, TOKEN_SYMBOL},
-    types::{crypto::RistrettoPublicKeyBytes, Amount},
+    resource::TOKEN_SYMBOL,
+    types::{crypto::RistrettoPublicKeyBytes, Amount, ResourceType},
 };
 
-use crate::FromByteType;
+use crate::ConvertFromByteType;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Resource {
     resource_type: ResourceType,
     owner_rule: OwnerRule,
-    #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
     owner_key: Option<RistrettoPublicKeyBytes>,
     access_rules: ResourceAccessRules,
     metadata: Metadata,
     /// The total supply of the resource. None means total_supply tracking is disabled.
     total_supply: Option<Amount>,
-    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     view_key: Option<RistrettoPublicKeyBytes>,
     auth_hook: Option<AuthHook>,
     divisibility: u8,
 }
 
 impl Resource {
-    pub fn new(
+    pub const fn new(
         resource_type: ResourceType,
         owner_key: Option<RistrettoPublicKeyBytes>,
         owner_rule: OwnerRule,
@@ -77,7 +71,11 @@ impl Resource {
             owner_key,
             access_rules,
             metadata,
-            total_supply: Some(0.into()).filter(|_| is_total_supply_tracking_enabled),
+            total_supply: if is_total_supply_tracking_enabled {
+                Some(Amount::zero())
+            } else {
+                None
+            },
             divisibility,
             view_key,
             auth_hook,
@@ -135,7 +133,7 @@ impl Resource {
     /// or returning an error if the view key is not a canonical compressed representation of a Ristretto public key.
     pub fn to_view_key_public_key(&self) -> Result<Option<RistrettoPublicKey>, ByteArrayError> {
         match self.view_key.as_ref() {
-            Some(view_key) => RistrettoPublicKey::try_from_byte_type(view_key).map(Some),
+            Some(view_key) => RistrettoPublicKey::convert_from_byte_type(view_key).map(Some),
             None => Ok(None),
         }
     }
@@ -209,7 +207,7 @@ impl Resource {
     }
 
     pub fn token_symbol(&self) -> Option<&str> {
-        self.metadata.get(TOKEN_SYMBOL).map(|s| s.as_str())
+        self.metadata.get(TOKEN_SYMBOL)
     }
 
     pub fn divisibility(&self) -> u8 {

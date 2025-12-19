@@ -6,7 +6,7 @@ use std::{collections::HashMap, iter, ops::ControlFlow};
 use indexmap::IndexMap;
 use log::*;
 use tari_common_types::types::FixedHash;
-use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock, ProposalCertificate, QcId};
+use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock, PcId, ProposalCertificate, ShardGroupAccumulatedData};
 use tari_engine_types::{substate::SubstateDiff, ValidatorFeePool};
 use tari_ootle_common_types::{
     committee::{Committee, CommitteeInfo},
@@ -29,6 +29,7 @@ use tari_ootle_storage::{
         EpochCheckpoint,
         PendingShardStateTreeDiff,
         SubstateChange,
+        TreeRootSummary,
         ValidatorConsensusStats,
     },
     StateStore,
@@ -64,6 +65,7 @@ pub fn calculate_last_dummy_block<TAddr: NodeAddressable, TLeaderStrategy: Leade
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
     parent_timestamp: u64,
+    parent_accumulated_data: ShardGroupAccumulatedData,
     parent_epoch_hash: FixedHash,
 ) -> Option<LeafBlock> {
     let mut dummy = None;
@@ -79,6 +81,7 @@ pub fn calculate_last_dummy_block<TAddr: NodeAddressable, TLeaderStrategy: Leade
         leader_strategy,
         local_committee,
         parent_timestamp,
+        parent_accumulated_data,
         parent_epoch_hash,
         |dummy_block| {
             dummy = Some(dummy_block.as_leaf());
@@ -102,6 +105,7 @@ pub fn calculate_dummy_blocks<TAddr: NodeAddressable, TLeaderStrategy: LeaderStr
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
     parent_timestamp: u64,
+    parent_accumulated_data: ShardGroupAccumulatedData,
     parent_epoch_hash: FixedHash,
 ) -> Vec<Block> {
     let mut dummies = Vec::with_capacity(new_height.saturating_sub(from_height).as_u64() as usize);
@@ -117,6 +121,7 @@ pub fn calculate_dummy_blocks<TAddr: NodeAddressable, TLeaderStrategy: LeaderStr
         leader_strategy,
         local_committee,
         parent_timestamp,
+        parent_accumulated_data,
         parent_epoch_hash,
         |dummy_block| {
             if dummy_block.id() == expected_parent_block_id {
@@ -152,6 +157,7 @@ pub fn calculate_dummy_blocks_from_justify<TAddr: NodeAddressable, TLeaderStrate
         leader_strategy,
         local_committee,
         justify_block.timestamp(),
+        *justify_block.header().accumulated_data(),
         *justify_block.epoch_hash(),
     )
 }
@@ -168,6 +174,7 @@ fn with_dummy_blocks<TAddr, TLeaderStrategy, F>(
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
     parent_timestamp: u64,
+    parent_accumulated_data: ShardGroupAccumulatedData,
     parent_epoch_hash: FixedHash,
     mut callback: F,
 ) where
@@ -212,6 +219,7 @@ fn with_dummy_blocks<TAddr, TLeaderStrategy, F>(
             parent_merkle_root,
             parent_timestamp,
             parent_epoch_hash,
+            parent_accumulated_data,
         );
         let dummy_block = Block::new(dummy_header, qc.clone(), Default::default(), None);
         debug!(
@@ -260,7 +268,7 @@ where
     let shard_group = eoe_block.shard_group();
 
     // Fetch the state roots of the shards in the shard group
-    let mut shard_roots = IndexMap::with_capacity(shard_group.len() + 1);
+    let mut shard_tree_summary = IndexMap::with_capacity(shard_group.len() + 1);
 
     // adding global shard first
     if let Some(version) = tx.state_tree_versions_get_latest(Shard::global())? {
@@ -270,15 +278,24 @@ where
             .get_root_hash(version)
             .map_err(|e| HotStuffError::StateTreeError(e.into()))?;
 
-        shard_roots.insert(Shard::global(), root_hash);
+        shard_tree_summary.insert(Shard::global(), TreeRootSummary {
+            root_hash,
+            state_version: version,
+        });
     } else {
-        shard_roots.insert(Shard::global(), SPARSE_MERKLE_PLACEHOLDER_HASH);
+        shard_tree_summary.insert(Shard::global(), TreeRootSummary {
+            root_hash: SPARSE_MERKLE_PLACEHOLDER_HASH,
+            state_version: 0,
+        });
     }
 
     for shard in shard_group.shard_iter() {
         let Some(version) = tx.state_tree_versions_get_latest(shard)? else {
             // At v0 there have been no state changes
-            shard_roots.insert(shard, SPARSE_MERKLE_PLACEHOLDER_HASH);
+            shard_tree_summary.insert(shard, TreeRootSummary {
+                root_hash: SPARSE_MERKLE_PLACEHOLDER_HASH,
+                state_version: 0,
+            });
             continue;
         };
 
@@ -288,10 +305,13 @@ where
             .get_root_hash(version)
             .map_err(|e| HotStuffError::StateTreeError(e.into()))?;
 
-        shard_roots.insert(shard, root_hash);
+        shard_tree_summary.insert(shard, TreeRootSummary {
+            root_hash,
+            state_version: version,
+        });
     }
 
-    let checkpoint = EpochCheckpoint::new(commit_proof, shard_roots);
+    let checkpoint = EpochCheckpoint::new(commit_proof, shard_tree_summary);
     Ok(checkpoint)
 }
 
@@ -404,7 +424,7 @@ pub(crate) fn get_highest_seen_justified_view<TTx: StateStoreReadTransaction>(
 ) -> Result<NodeHeight, HotStuffError> {
     let high_pc = HighPc::get(tx, epoch)
         .optional()?
-        .map(|high_pc| high_pc.block_height())
+        .map(|high_pc| high_pc.height())
         .unwrap_or_default();
     let high_tc = HighTc::get(tx, epoch)
         .optional()?
@@ -417,7 +437,7 @@ pub(crate) fn get_highest_seen_justified_view<TTx: StateStoreReadTransaction>(
 pub fn process_newly_justified_block<TStore: StateStore>(
     tx: &<TStore as StateStore>::ReadTransaction<'_>,
     new_leaf_block: &Block,
-    justify_id: QcId,
+    justify_id: PcId,
     local_committee_info: &CommitteeInfo,
     change_set: &mut ProposedBlockChangeSet,
 ) -> Result<Vec<Block>, HotStuffError> {
@@ -426,7 +446,7 @@ pub fn process_newly_justified_block<TStore: StateStore>(
         tx: &<TStore as StateStore>::ReadTransaction<'_>,
         block: &Block,
         new_leaf_block: &LeafBlock,
-        justify_id: QcId,
+        justify_id: PcId,
         local_committee_info: &CommitteeInfo,
         change_set: &mut ProposedBlockChangeSet,
     ) -> Result<(), HotStuffError> {

@@ -12,8 +12,8 @@ use integration_tests::{
     base_node::get_base_node_client,
     template,
     template::{send_template_registration, RegisteredTemplate},
-    validator_node::spawn_validator_node,
-    validator_node_cli::create_key,
+    util::cucumber_log,
+    validator_node::{spawn_validator_node, ValidatorNodeProcess},
     TariWorld,
 };
 use libp2p::Multiaddr;
@@ -21,11 +21,16 @@ use log::warn;
 use minotari_app_grpc::tari_rpc::{RegisterValidatorNodeRequest, Signature};
 use notify::Watcher;
 use tari_base_node_client::{grpc::GrpcBaseNodeClient, BaseNodeClient};
-use tari_core::transactions::transaction_components::payment_id::{PaymentId, TxType};
 use tari_crypto::tari_utilities::ByteArray;
-use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::{layer_one_transaction::LayerOneTransactionDef, Epoch, SubstateAddress};
+use tari_ootle_common_types::{
+    layer_one_transaction::LayerOneTransactionDef,
+    optional::Optional,
+    Epoch,
+    SubstateAddress,
+};
+use tari_ootle_storage::Ordering;
 use tari_sidechain::EvictionProof;
+use tari_transaction_components::transaction_components::{memo_field::TxType, MemoField};
 use tari_validator_node_client::types::{
     AddPeerRequest,
     GetBlocksRequest,
@@ -34,56 +39,15 @@ use tari_validator_node_client::types::{
     ListBlocksRequest,
 };
 use tokio::{sync::mpsc, time::timeout};
+use tonic::codegen::tokio_stream::StreamExt;
 
-#[given(expr = "a validator node {word} connected to base node {word} and wallet daemon {word}")]
-async fn start_validator_node(world: &mut TariWorld, vn_name: String, bn_name: String, wallet_daemon_name: String) {
-    let vn = spawn_validator_node(
-        world,
-        vn_name.clone(),
-        bn_name,
-        wallet_daemon_name,
-        format!("{}_claim_fee", vn_name),
-    )
-    .await;
-    world.validator_nodes.insert(vn_name, vn);
-}
-
-#[given(expr = "a seed validator node {word} connected to base node {word} and wallet daemon {word}")]
-async fn start_seed_vn_without_claim_fee(
+async fn spawn_seed_node(
     world: &mut TariWorld,
     seed_vn_name: String,
     bn_name: String,
-    wallet_daemon_name: String,
-) {
-    start_seed_validator_node(
-        world,
-        seed_vn_name.clone(),
-        bn_name,
-        wallet_daemon_name,
-        format!("{}_claim_fee", &seed_vn_name),
-    )
-    .await;
-}
-
-#[given(
-    expr = "a seed validator node {word} connected to base node {word} and wallet daemon {word} using claim fee key \
-            {word}"
-)]
-async fn start_seed_validator_node(
-    world: &mut TariWorld,
-    seed_vn_name: String,
-    bn_name: String,
-    wallet_daemon_name: String,
-    claim_fee_key_name: String,
-) {
-    let validator = spawn_validator_node(
-        world,
-        seed_vn_name.clone(),
-        bn_name,
-        wallet_daemon_name,
-        claim_fee_key_name,
-    )
-    .await;
+    claim_fee_account: Option<&str>,
+) -> ValidatorNodeProcess {
+    let validator = spawn_validator_node(world, seed_vn_name.clone(), bn_name, claim_fee_account).await;
     // Ensure any existing nodes know about the new seed node
     let mut client = validator.get_client();
     let ident = client.get_identity().await.unwrap();
@@ -99,7 +63,7 @@ async fn start_seed_validator_node(
             .unwrap();
     }
     for indexer in world.indexers.values() {
-        let mut client = indexer.get_jrpc_indexer_client();
+        let mut client = indexer.get_indexer_client();
         client
             .add_peer(tari_indexer_client::types::AddPeerRequest {
                 public_key: ident.public_key,
@@ -110,23 +74,30 @@ async fn start_seed_validator_node(
             .unwrap();
     }
 
+    validator
+}
+
+#[given(expr = "a validator node {word} connected to base node {word}")]
+async fn start_vn_without_claim_fee(world: &mut TariWorld, seed_vn_name: String, bn_name: String) {
+    let validator = spawn_validator_node(world, seed_vn_name.clone(), bn_name, None).await;
+    world.validator_nodes.insert(seed_vn_name, validator);
+}
+
+#[given(expr = "a seed validator node {word} connected to base node {word}")]
+async fn start_seed_vn_without_claim_fee(world: &mut TariWorld, seed_vn_name: String, bn_name: String) {
+    let validator = spawn_seed_node(world, seed_vn_name.clone(), bn_name, None).await;
     world.vn_seeds.insert(seed_vn_name, validator);
 }
 
-#[given(expr = "{int} validator nodes connected to base node {word} and wallet daemon {word}")]
-async fn start_multiple_validator_nodes(world: &mut TariWorld, num_nodes: u64, bn_name: String, wallet_name: String) {
-    for i in 1..=num_nodes {
-        let vn_name = format!("VAL_{i}");
-        let vn = spawn_validator_node(
-            world,
-            vn_name.clone(),
-            bn_name.clone(),
-            wallet_name.clone(),
-            format!("{}_claim_fee", vn_name),
-        )
-        .await;
-        world.validator_nodes.insert(vn_name, vn);
-    }
+#[given(expr = "a seed validator node {word} connected to base node {word} using claim fee account {word}")]
+async fn start_seed_validator_node(
+    world: &mut TariWorld,
+    seed_vn_name: String,
+    bn_name: String,
+    claim_fee_account: String,
+) {
+    let validator = spawn_seed_node(world, seed_vn_name.clone(), bn_name, Some(&claim_fee_account)).await;
+    world.vn_seeds.insert(seed_vn_name, validator);
 }
 
 #[given(expr = "validator {word} nodes connect to all other validators")]
@@ -137,7 +108,7 @@ async fn given_validator_connects_to_other_vns(world: &mut TariWorld, name: Stri
         .map(|vn| {
             (
                 vn.public_key,
-                Multiaddr::from_str(&format!("/ip4/127.0.0.1/tcp/{}", vn.port)).unwrap(),
+                Multiaddr::from_str(&format!("/ip4/127.0.0.1/tcp/{}", vn.p2p_port)).unwrap(),
             )
         })
         .collect::<Vec<_>>();
@@ -161,7 +132,7 @@ async fn given_validator_connects_to_other_vns(world: &mut TariWorld, name: Stri
 }
 
 #[when(expr = "validator node {word} sends a registration transaction to base wallet {word}")]
-pub async fn send_vn_registration_with_claim_wallet(world: &mut TariWorld, vn_name: String, base_wallet_name: String) {
+pub async fn send_vn_registration(world: &mut TariWorld, vn_name: String, base_wallet_name: String) {
     let vn = world.get_validator_node(&vn_name);
 
     let mut base_layer_wallet = world.get_wallet(&base_wallet_name).create_client().await;
@@ -183,11 +154,9 @@ pub async fn send_vn_registration_with_claim_wallet(world: &mut TariWorld, vn_na
                 .map(|key| key.to_vec())
                 .unwrap_or_default(),
             fee_per_gram: 1,
-            payment_id: PaymentId::Open {
-                user_data: "Register by cucumber".as_bytes().to_vec(),
-                tx_type: TxType::ValidatorNodeRegistration,
-            }
-            .to_bytes(),
+            payment_id: MemoField::new_open_from_string("Register by cucumber", TxType::ValidatorNodeRegistration)
+                .unwrap()
+                .to_bytes(),
         })
         .await
         .unwrap()
@@ -197,6 +166,10 @@ pub async fn send_vn_registration_with_claim_wallet(world: &mut TariWorld, vn_na
         "Failed to register validator node {}",
         response.failure_message
     );
+    cucumber_log(format!(
+        "Validator node registration tx id: {}",
+        response.transaction_id
+    ));
     world.mark_point_in_logs("after register_validator_node");
 }
 
@@ -262,7 +235,13 @@ async fn assert_all_vns_are_registered(world: &mut TariWorld) {
 
         // get the list of registered vns from the base node
         let height = base_node_client.get_tip_info().await.unwrap().height_of_longest_chain;
-        let vns = base_node_client.get_validator_nodes(height).await.unwrap();
+        let vns = base_node_client
+            .get_validator_nodes(height)
+            .await
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .await
+            .unwrap();
         assert!(!vns.is_empty());
 
         // retrieve the VN's public key
@@ -282,8 +261,14 @@ pub async fn assert_vn_is_registered(world: &mut TariWorld, vn_name: String) {
 
     // get the list of registered vns from the base node
     let height = base_node_client.get_tip_info().await.unwrap().height_of_longest_chain;
-    let vns = base_node_client.get_validator_nodes(height).await.unwrap();
-    assert!(!vns.is_empty());
+    let vns = base_node_client
+        .get_validator_nodes(height)
+        .await
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .await
+        .unwrap();
+    assert!(!vns.is_empty(), "vns are empty at height {}", height);
 
     // retrieve the VN's public key
     let mut client = vn.get_client();
@@ -300,7 +285,10 @@ pub async fn assert_vn_is_registered(world: &mut TariWorld, vn_name: String) {
             break;
         }
         if count > 20 {
-            panic!("Timed out waiting for validator node to pick up registration");
+            panic!(
+                "Timed out waiting for validator node to pick up registration (current block height: {})",
+                stats.current_block_height
+            );
         }
         count += 1;
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -333,7 +321,7 @@ async fn assert_template_is_registered(world: &mut TariWorld, template_name: Str
         }
 
         // check that the template is indeed in the response
-        assert_eq!(resp.unwrap().registration_metadata.address, template_address);
+        assert_eq!(resp.unwrap().metadata.address, template_address);
         break;
     }
 }
@@ -364,7 +352,7 @@ async fn assert_template_is_registered_by_all(world: &mut TariWorld, template_na
             }
             let resp = resp.unwrap();
             // check that the template is indeed in the response
-            assert_eq!(resp.registration_metadata.address, template_address);
+            assert_eq!(resp.metadata.address, template_address);
         }
         break;
     }
@@ -378,13 +366,13 @@ async fn then_validator_node_has_state_at(
     timeout_secs: u64,
 ) {
     let state_address = world
-        .addresses
+        .substate_ids
         .get(&state_address_name)
         .unwrap_or_else(|| panic!("Address {} not found", state_address_name));
+    cucumber_log(format!("Waiting for state at address {}", state_address));
     let vn = world.get_validator_node(&vn_name);
     let mut client = vn.create_client();
-    let substate_address =
-        SubstateAddress::from_substate_id(&SubstateId::from_str(state_address).expect("Invalid state address"), 0);
+    let substate_address = SubstateAddress::from_substate_id(state_address, 0);
     let mut attempts = 0;
     loop {
         match client
@@ -392,18 +380,41 @@ async fn then_validator_node_has_state_at(
                 address: substate_address,
             })
             .await
+            .optional()
+            .unwrap()
         {
-            Ok(_) => return,
-            Err(e) => {
+            Some(_) => return,
+            None => {
                 attempts += 1;
                 if attempts == timeout_secs {
-                    println!("Failed to get state: {}", e);
-                    panic!("Failed to get state: {}", e);
+                    panic!("State at address {} not found", state_address);
                 }
             },
         }
 
         tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+#[then(expr = "I wait for {word} to have at least {int} blocks for the current epoch")]
+async fn vn_has_blocks_for_current_epoch(world: &mut TariWorld, vn_name: String, num_blocks: u64) {
+    let vn = world.get_validator_node(&vn_name);
+    let mut client = vn.create_client();
+    for _ in 0..10 {
+        let status = client.get_consensus_status().await.unwrap();
+        if status.state != "Running" {
+            warn!("Validator node {} is not running yet", vn_name);
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            continue;
+        }
+        if status.height.as_u64() >= num_blocks {
+            return;
+        }
+        cucumber_log(format!(
+            "Validator node {} has height {} ({}), waiting for at least {}",
+            vn_name, status.height, status.state, num_blocks
+        ));
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 }
 
@@ -424,7 +435,7 @@ async fn vn_has_scanned_to_epoch(world: &mut TariWorld, vn_name: String, epoch: 
     assert_eq!(stats.current_epoch, epoch);
 }
 
-#[then(expr = "{word} has scanned to height {int}")]
+#[then(expr = "{word} has scanned to at least height {int}")]
 async fn vn_has_scanned_to_height(world: &mut TariWorld, vn_name: String, block_height: u64) {
     let vn = world.get_validator_node(&vn_name);
     let mut client = vn.create_client();
@@ -432,16 +443,9 @@ async fn vn_has_scanned_to_height(world: &mut TariWorld, vn_name: String, block_
     let mut remaining = 10;
     loop {
         let stats = client.get_epoch_manager_stats().await.expect("Failed to get stats");
-        if stats.current_block_height == block_height {
+        if stats.current_block_height >= block_height {
             return;
         }
-        assert!(
-            stats.current_block_height <= block_height,
-            "Validator {} has scanned past the target height {}. Current height: {}",
-            vn_name,
-            block_height,
-            stats.current_block_height
-        );
 
         if stats.current_block_height != last_block_height {
             last_block_height = stats.current_block_height;
@@ -473,32 +477,30 @@ async fn all_vns_have_scanned_to_height(world: &mut TariWorld, block_height: u64
     }
 }
 
-#[when(expr = "I create a new key pair {word}")]
-async fn when_i_create_new_key_pair(world: &mut TariWorld, key_name: String) {
-    create_key(world, key_name);
-}
-
 #[when(expr = "I wait for validator {word} has leaf block height of at least {int} at epoch {int}")]
 async fn when_i_wait_for_validator_leaf_block_at_least(world: &mut TariWorld, name: String, height: u64, epoch: u64) {
     let vn = world.get_validator_node(&name);
     let mut client = vn.create_client();
+    let epoch_stats = client.get_epoch_manager_stats().await.unwrap();
     for _ in 0..40 {
         let resp = client
             .list_blocks_paginated(GetBlocksRequest {
                 limit: 1,
                 offset: 0,
-                ordering_index: None,
-                ordering: None,
-                filter_index: None,
-                filter: None,
+                ordering_index: Some(2),
+                ordering: Some(Ordering::Descending),
+                filter_index: Some(1),
+                filter: Some(epoch_stats.current_epoch.as_u64().to_string()),
             })
             .await
             .unwrap();
 
-        // for b in resp.blocks.iter() {
-        //     eprintln!("----------> {b}");
-        // }
-        // eprintln!("-----------");
+        cucumber_log(format!(
+            "Validator {name} leaf block height at epoch {} is {} (current epoch is {})",
+            epoch,
+            resp.blocks.first().map(|b| b.height().as_u64()).unwrap_or(0),
+            epoch_stats.current_epoch.as_u64()
+        ));
 
         if let Some(block) = resp.blocks.first() {
             assert!(block.epoch().as_u64() <= epoch);
@@ -516,10 +518,10 @@ async fn when_i_wait_for_validator_leaf_block_at_least(world: &mut TariWorld, na
         .list_blocks_paginated(GetBlocksRequest {
             limit: 1,
             offset: 0,
-            ordering_index: None,
-            ordering: None,
-            filter_index: None,
-            filter: None,
+            ordering_index: Some(2),
+            ordering: Some(Ordering::Descending),
+            filter_index: Some(1),
+            filter: Some(epoch_stats.current_epoch.as_u64().to_string()),
         })
         .await
         .unwrap();
@@ -689,8 +691,8 @@ async fn validator_not_member_of_network(world: &mut TariWorld, validator: Strin
     let vn = world.get_validator_node(&validator);
     let mut client = bn.create_client();
     let tip = client.get_tip_info().await.unwrap();
-    let vns = client.get_validator_nodes(tip.height_of_longest_chain).await.unwrap();
-    let has_vn = vns.iter().any(|v| v.public_key == vn.public_key);
+    let mut vns = client.get_validator_nodes(tip.height_of_longest_chain).await.unwrap();
+    let has_vn = vns.any(|v| v.unwrap().public_key == vn.public_key).await;
     if has_vn {
         // TODO: investigate why this is flaky
         warn!(

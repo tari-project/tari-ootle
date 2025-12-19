@@ -5,6 +5,8 @@ use tari_template_lib::prelude::*;
 
 #[template]
 mod template {
+    use tari_template_lib::prelude::crypto::StealthValueProof;
+
     use super::*;
 
     pub struct StealthFaucet {
@@ -18,15 +20,11 @@ mod template {
             mint: StealthTransferStatement,
             view_key: Option<RistrettoPublicKeyBytes>,
         ) -> Component<Self> {
+            let signer = NonFungibleAddress::from_public_key(CallerContext::transaction_signer_public_key());
             let bucket = ResourceBuilder::stealth()
                 .mintable(rule!(allow_all))
-                .then(|builder| {
-                    if let Some(key) = view_key {
-                        builder.with_view_key(key)
-                    } else {
-                        builder
-                    }
-                })
+                .freezable(rule!(non_fungible(signer)))
+                .with_view_key_opt(view_key)
                 .initial_supply(initial_supply);
 
             let resource_address = bucket.resource_address();
@@ -70,9 +68,28 @@ mod template {
             self.supply_vault.deposit(bucket);
         }
 
+        pub fn static_programmatic_transfer(resource: ResourceAddress, transfer: StealthTransferStatement) {
+            let manager = ResourceManager::get(resource);
+            manager.stealth_transfer(transfer);
+        }
+
         pub fn mint(&self, amount: Amount) {
             let bucket = self.manager.mint_stealth(amount);
             self.supply_vault.deposit(bucket);
+        }
+
+        pub fn freeze_utxos(&self, utxos: Vec<UtxoId>) {
+            self.manager.freeze_utxos(utxos);
+        }
+
+        pub fn unfreeze_utxos(&self, utxos: Vec<UtxoId>) {
+            self.manager.unfreeze_utxos(utxos);
+        }
+
+        pub fn burn_utxos(&self, utxos: Vec<(UtxoId, StealthValueProof)>) {
+            for (utxo, proof) in utxos {
+                self.manager.burn_utxo(utxo, Some(proof));
+            }
         }
     }
 }

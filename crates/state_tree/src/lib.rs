@@ -22,4 +22,7 @@ mod tree;
 pub use jmt::{storage, KeyHash, OwnedValue, RootHash, Version};
 pub use tree::*;
 
+/// The payload type used in the state tree. This is a reference to a particular substate (i.e. SubstateAddress).
+pub type StateTreePayload = tari_ootle_common_types::SubstateAddress;
+
 pub type SparseMerkleProof = jmt::proof::SparseMerkleProof<SidechainJmtHasher>;

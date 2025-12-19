@@ -7,16 +7,15 @@ use anyhow::{anyhow, Context};
 use tari_common_types::types::FixedHash;
 use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_jellyfish::TreeHash;
-use tari_ootle_common_types::{shard::Shard, Epoch};
+use tari_ootle_common_types::shard::Shard;
 use tari_ootle_storage::consensus_models::{
     EpochCheckpoint,
-    StateTransition,
-    StateTransitionId,
-    SubstateCreatedProof,
+    SubstateCreate,
     SubstateData,
-    SubstateDestroyedProof,
-    SubstateUpdate,
+    SubstateDestroy,
+    SubstateUpdateProof,
     SubstateValueOrHash,
+    TreeRootSummary,
 };
 
 use crate::{
@@ -24,61 +23,49 @@ use crate::{
     proto,
 };
 
-impl TryFrom<proto::rpc::SubstateCreatedProof> for SubstateCreatedProof {
+impl TryFrom<proto::rpc::SubstateCreate> for SubstateCreate {
     type Error = anyhow::Error;
 
-    fn try_from(value: proto::rpc::SubstateCreatedProof) -> Result<Self, Self::Error> {
+    fn try_from(value: proto::rpc::SubstateCreate) -> Result<Self, Self::Error> {
         Ok(Self {
             substate: value
                 .substate
                 .map(TryInto::try_into)
                 .transpose()?
                 .ok_or_else(|| anyhow!("substate not provided"))?,
-            // created_qc: value
-            //     .created_justify
-            //     .map(TryInto::try_into)
-            //     .transpose()?
-            //     .ok_or_else(|| anyhow!("created_justify not provided"))?,
         })
     }
 }
 
-impl From<SubstateCreatedProof> for proto::rpc::SubstateCreatedProof {
-    fn from(value: SubstateCreatedProof) -> Self {
+impl From<SubstateCreate> for proto::rpc::SubstateCreate {
+    fn from(value: SubstateCreate) -> Self {
         Self {
             substate: Some(value.substate.into()),
-            // created_justify: Some((&value.created_qc).into()),
         }
     }
 }
 
-impl TryFrom<proto::rpc::SubstateDestroyedProof> for SubstateDestroyedProof {
+impl TryFrom<proto::rpc::SubstateDestroy> for SubstateDestroy {
     type Error = anyhow::Error;
 
-    fn try_from(value: proto::rpc::SubstateDestroyedProof) -> Result<Self, Self::Error> {
+    fn try_from(value: proto::rpc::SubstateDestroy) -> Result<Self, Self::Error> {
         Ok(Self {
             substate_id: SubstateId::from_bytes(&value.substate_id)?,
             version: value.version,
-            // justify: value
-            //     .destroyed_justify
-            //     .map(TryInto::try_into)
-            //     .transpose()?
-            //     .ok_or_else(|| anyhow!("destroyed_justify not provided"))?,
         })
     }
 }
 
-impl From<SubstateDestroyedProof> for proto::rpc::SubstateDestroyedProof {
-    fn from(value: SubstateDestroyedProof) -> Self {
+impl From<SubstateDestroy> for proto::rpc::SubstateDestroy {
+    fn from(value: SubstateDestroy) -> Self {
         Self {
             substate_id: value.substate_id.to_bytes(),
             version: value.version,
-            // destroyed_justify: Some((&value.justify).into()),
         }
     }
 }
 
-impl TryFrom<proto::rpc::SubstateUpdate> for SubstateUpdate {
+impl TryFrom<proto::rpc::SubstateUpdate> for SubstateUpdateProof {
     type Error = anyhow::Error;
 
     fn try_from(value: proto::rpc::SubstateUpdate) -> Result<Self, Self::Error> {
@@ -90,11 +77,11 @@ impl TryFrom<proto::rpc::SubstateUpdate> for SubstateUpdate {
     }
 }
 
-impl From<SubstateUpdate> for proto::rpc::SubstateUpdate {
-    fn from(value: SubstateUpdate) -> Self {
+impl From<SubstateUpdateProof> for proto::rpc::SubstateUpdate {
+    fn from(value: SubstateUpdateProof) -> Self {
         let update = match value {
-            SubstateUpdate::Create(proof) => proto::rpc::substate_update::Update::Create(proof.into()),
-            SubstateUpdate::Destroy(proof) => proto::rpc::substate_update::Update::Destroy(proof.into()),
+            SubstateUpdateProof::Create(proof) => proto::rpc::substate_update::Update::Create(proof.into()),
+            SubstateUpdateProof::Destroy(proof) => proto::rpc::substate_update::Update::Destroy(proof.into()),
         };
 
         Self { update: Some(update) }
@@ -152,59 +139,6 @@ impl TryFrom<proto::rpc::substate_data::SubstateValueOrHash> for SubstateValueOr
     }
 }
 
-//---------------------------------- StateTransition --------------------------------------------//
-
-impl TryFrom<proto::rpc::StateTransition> for StateTransition {
-    type Error = anyhow::Error;
-
-    fn try_from(value: proto::rpc::StateTransition) -> Result<Self, Self::Error> {
-        let id = value
-            .id
-            .map(StateTransitionId::try_from)
-            .transpose()?
-            .ok_or_else(|| anyhow::anyhow!("StateTransitionId is missing"))?;
-        let update = value
-            .update
-            .ok_or_else(|| anyhow::anyhow!("Missing state transition update"))?;
-        let update = SubstateUpdate::try_from(update)?;
-        Ok(Self {
-            id,
-            state_version: value.state_version,
-            update,
-        })
-    }
-}
-
-impl From<StateTransition> for proto::rpc::StateTransition {
-    fn from(value: StateTransition) -> Self {
-        Self {
-            id: Some(value.id.into()),
-            update: Some(value.update.into()),
-            state_version: value.state_version,
-        }
-    }
-}
-
-//---------------------------------- StateTransitionId --------------------------------------------//
-
-impl TryFrom<proto::rpc::StateTransitionId> for StateTransitionId {
-    type Error = anyhow::Error;
-
-    fn try_from(value: proto::rpc::StateTransitionId) -> Result<Self, Self::Error> {
-        Ok(Self::new(Epoch(value.epoch), Shard::from(value.shard), value.seq))
-    }
-}
-
-impl From<StateTransitionId> for proto::rpc::StateTransitionId {
-    fn from(value: StateTransitionId) -> Self {
-        Self {
-            epoch: value.epoch().as_u64(),
-            shard: value.shard().as_u32(),
-            seq: value.seq(),
-        }
-    }
-}
-
 //---------------------------------- EpochCheckpoint --------------------------------------------//
 
 impl TryFrom<proto::rpc::EpochCheckpoint> for EpochCheckpoint {
@@ -212,17 +146,17 @@ impl TryFrom<proto::rpc::EpochCheckpoint> for EpochCheckpoint {
 
     fn try_from(value: proto::rpc::EpochCheckpoint) -> Result<Self, Self::Error> {
         // Defensive check to mitigate DoS attacks
-        if value.shard_roots.len() > 100_000 {
-            return Err(anyhow!("too many shard roots (num={})", value.shard_roots.len()));
+        if value.shard_tree_summary.len() > 100_000 {
+            return Err(anyhow!("too many shard roots (num={})", value.shard_tree_summary.len()));
         }
 
-        let shard_roots = value
-            .shard_roots
+        let shard_tree_summary = value
+            .shard_tree_summary
             .into_iter()
-            .map(|(k, v)| TreeHash::try_from_bytes(&v).map(|h| (Shard::from(k), h)))
+            .map(|(k, v)| v.try_into().map(|s| (Shard::from(k), s)))
             .collect::<Result<_, _>>()?;
 
-        Ok(Self::new(decode_from_slice(&value.proof)?, shard_roots))
+        Ok(Self::new(decode_from_slice(&value.proof)?, shard_tree_summary))
     }
 }
 
@@ -230,11 +164,32 @@ impl From<EpochCheckpoint> for proto::rpc::EpochCheckpoint {
     fn from(value: EpochCheckpoint) -> Self {
         Self {
             proof: encode_to_vec(value.proof()).unwrap(),
-            shard_roots: value
-                .shard_roots()
+            shard_tree_summary: value
+                .shard_tree_summary()
                 .iter()
-                .map(|(k, v)| (k.as_u32(), v.to_vec()))
+                .map(|(k, v)| (k.as_u32(), v.into()))
                 .collect(),
+        }
+    }
+}
+
+// -------------------------------- TreeRootSummary -------------------------------- //
+impl TryFrom<proto::rpc::TreeRootSummary> for TreeRootSummary {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::rpc::TreeRootSummary) -> Result<Self, Self::Error> {
+        Ok(Self {
+            root_hash: TreeHash::try_from_bytes(&value.root_hash).context("TreeRootSummary::root_hash")?,
+            state_version: value.state_version,
+        })
+    }
+}
+
+impl From<&TreeRootSummary> for proto::rpc::TreeRootSummary {
+    fn from(value: &TreeRootSummary) -> Self {
+        Self {
+            root_hash: value.root_hash.as_slice().to_vec(),
+            state_version: value.state_version,
         }
     }
 }

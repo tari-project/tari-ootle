@@ -13,9 +13,10 @@ use tari_ootle_common_types::displayable::Displayable;
 use tari_ootle_storage::Ordering;
 
 use crate::{
-    codecs::{DbCodec, EncodeVec, UnitCodec},
+    codecs::{DbCodec, EncodeVec, PrefixCodec, UnitCodec},
     error::RocksDbStorageError,
-    traits::{Cf, QueryCf, RocksReader, RocksWriter},
+    range::QueryRange,
+    traits::{Cf, PrefixedCodec, QueryCf, RocksReader, RocksWriter},
 };
 
 pub struct DbContext<'db, TX> {
@@ -43,7 +44,7 @@ impl<'db, TX> DbContext<'db, TX> {
 pub struct CfContext<'db, DB, CF: Cf> {
     db: &'db DB,
     handle: &'db ColumnFamily,
-    key_codec: CF::KeyCodec,
+    key_codec: PrefixCodec<CF::Prefix, CF::KeyCodec>,
     value_codec: CF::ValueCodec,
 }
 
@@ -99,8 +100,17 @@ impl<CF: Cf, DB: RocksReader> CfContext<'_, DB, CF> {
         Ok(value)
     }
 
+    /// Counts the number of entries in the column family.
+    /// WARNING: This operation is O(n) and can be slow for large column families/prefixed tables.
     pub fn count(&self, operation: &'static str) -> Result<usize, RocksDbStorageError> {
-        let iter = self.db.iterator_cf(self.handle, IteratorMode::Start);
+        let key_prefix = CF::key_prefix().map(|b| [b]);
+        let prefix_bytes = match key_prefix {
+            Some(ref b) => b.as_slice(),
+            None => &[],
+        };
+        let mut opts = rocksdb::ReadOptions::default();
+        opts.set_iterate_range(rocksdb::PrefixRange(prefix_bytes));
+        let iter = self.db.iterator_cf_opt(self.handle, opts, IteratorMode::Start);
         let mut count = 0;
         for result in iter {
             let _unused = result.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
@@ -139,6 +149,8 @@ impl<CF: Cf, DB: RocksReader> CfContext<'_, DB, CF> {
         self.any_exists_within_range(rocksdb::PrefixRange(self.encode_key(prefix)))
     }
 
+    /// Returns true if any key exists within the given range, otherwise false.
+    /// WARNING: the bounds must encode the prefix correctly according to the column family's key codec.
     pub fn any_exists_within_range(&self, range: impl IterateBounds) -> Result<bool, RocksDbStorageError> {
         let mut opts = rocksdb::ReadOptions::default();
         opts.set_iterate_range(range);
@@ -162,7 +174,7 @@ impl<CF: Cf, DB: RocksReader> CfContext<'_, DB, CF> {
         }
 
         let keys = keys.map(|k| {
-            // We don't support key encoding failing here for mem allocation reasons. Generally key encoding is
+            // We don't support key encoding failing here for mem allocation reasons. Generally, key encoding is
             // infallible so we should evaluate whether to change the codec to be infallible. If key encoding on the
             // database level ever fails a crash is reasonable.
             let key = self.key_codec.encode(k.borrow()).expect("Failed to encode key");
@@ -190,7 +202,14 @@ impl<CF: Cf, DB: RocksReader> CfContext<'_, DB, CF> {
         operation: &'static str,
     ) -> impl Iterator<Item = Result<(CF::Key, CF::Value), RocksDbStorageError>> + '_ {
         let mode = ordering_to_mode(ordering);
-        self.db.iterator_cf(self.handle, mode).map(move |res| {
+        let key_prefix = CF::key_prefix().map(|b| [b]);
+        let prefix_bytes = match key_prefix {
+            Some(ref b) => b.as_slice(),
+            None => &[],
+        };
+        let mut opts = rocksdb::ReadOptions::default();
+        opts.set_iterate_range(rocksdb::PrefixRange(prefix_bytes));
+        self.db.iterator_cf_opt(self.handle, opts, mode).map(move |res| {
             res.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })
                 .and_then(|(k, v)| Ok((self.key_codec.decode(&k)?, self.value_codec.decode(&v)?)))
         })
@@ -202,7 +221,14 @@ impl<CF: Cf, DB: RocksReader> CfContext<'_, DB, CF> {
         operation: &'static str,
     ) -> impl Iterator<Item = Result<CF::Key, RocksDbStorageError>> + '_ {
         let mode = ordering_to_mode(ordering);
-        self.db.iterator_cf(self.handle, mode).map(move |res| {
+        let key_prefix = CF::key_prefix().map(|b| [b]);
+        let prefix_bytes = match key_prefix {
+            Some(ref b) => b.as_slice(),
+            None => &[],
+        };
+        let mut opts = rocksdb::ReadOptions::default();
+        opts.set_iterate_range(rocksdb::PrefixRange(prefix_bytes));
+        self.db.iterator_cf_opt(self.handle, opts, mode).map(move |res| {
             res.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })
                 .and_then(|(k, _)| self.key_codec.decode(&k))
         })
@@ -214,7 +240,14 @@ impl<CF: Cf, DB: RocksReader> CfContext<'_, DB, CF> {
         operation: &'static str,
     ) -> impl Iterator<Item = Result<CF::Value, RocksDbStorageError>> + '_ {
         let mode = ordering_to_mode(ordering);
-        self.db.iterator_cf(self.handle, mode).map(move |res| {
+        let key_prefix = CF::key_prefix().map(|b| [b]);
+        let prefix_bytes = match key_prefix {
+            Some(ref b) => b.as_slice(),
+            None => &[],
+        };
+        let mut opts = rocksdb::ReadOptions::default();
+        opts.set_iterate_range(rocksdb::PrefixRange(prefix_bytes));
+        self.db.iterator_cf_opt(self.handle, opts, mode).map(move |res| {
             res.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })
                 .and_then(|(_, v)| self.value_codec.decode(&v))
         })
@@ -301,8 +334,10 @@ impl<CF: Cf, DB: RocksReader> CfContext<'_, DB, CF> {
         key: &CF::Key,
     ) -> impl Iterator<Item = Result<CF::Key, RocksDbStorageError>> + '_ {
         let key = self.encode_key(key);
-        let iter = self
-            .range_iterator_with_codecs::<CF::KeyCodec, UnitCodec, CF::Key, ()>(ordering, rocksdb::PrefixRange(key));
+        let iter = self.range_iterator_with_codecs::<PrefixedCodec<CF>, UnitCodec, CF::Key, ()>(
+            ordering,
+            rocksdb::PrefixRange(key),
+        );
         iter.map(|res| {
             let (k, _) = res?;
             Ok::<_, RocksDbStorageError>(k)
@@ -399,7 +434,7 @@ impl<TQuery: QueryCf, DB: RocksReader> CfContext<'_, DB, TQuery> {
         key: &TQuery::Key,
     ) -> impl Iterator<Item = Result<<TQuery::Cf as Cf>::Key, RocksDbStorageError>> + 'a {
         let key = self.encode_key(key);
-        self.range_key_iterator_custom_codec::<<<TQuery as QueryCf>::Cf as Cf>::KeyCodec, <<TQuery as QueryCf>::Cf as Cf>::Key>(
+        self.range_key_iterator_custom_codec::<PrefixedCodec<<TQuery as QueryCf>::Cf>, <<TQuery as QueryCf>::Cf as Cf>::Key>(
             ordering,
             rocksdb::PrefixRange(key),
         )
@@ -412,7 +447,7 @@ impl<TQuery: QueryCf, DB: RocksReader> CfContext<'_, DB, TQuery> {
     ) -> impl Iterator<Item = Result<QueryCfKv<TQuery>, RocksDbStorageError>> + 'a {
         let key = self.encode_key(prefix);
         self.range_iterator_with_codecs::<
-            <<TQuery as QueryCf>::Cf as Cf>::KeyCodec,
+            PrefixedCodec<<TQuery as QueryCf>::Cf>,
             <<TQuery as QueryCf>::Cf as Cf>::ValueCodec,
             <<TQuery as QueryCf>::Cf as Cf>::Key,
             <<TQuery as QueryCf>::Cf as Cf>::Value,
@@ -428,7 +463,7 @@ impl<TQuery: QueryCf, DB: RocksReader> CfContext<'_, DB, TQuery> {
         prefix: &TQuery::Key,
     ) -> impl Iterator<Item = Result<<<TQuery as QueryCf>::Cf as Cf>::Value, RocksDbStorageError>> + 'a {
         let key = self.encode_key(prefix);
-        let iter = self.range_iterator_with_codecs::<UnitCodec, <<TQuery as QueryCf>::Cf as Cf>::ValueCodec, (), <<TQuery as QueryCf>::Cf as Cf>::Value, >( ordering, rocksdb::PrefixRange(key) );
+        let iter = self.range_iterator_with_codecs::<UnitCodec, <<TQuery as QueryCf>::Cf as Cf>::ValueCodec, (), <<TQuery as QueryCf>::Cf as Cf>::Value, >(ordering, rocksdb::PrefixRange(key));
         iter.map(|res| {
             let (_, v) = res?;
             Ok::<_, RocksDbStorageError>(v)
@@ -442,7 +477,7 @@ impl<TQuery: QueryCf, DB: RocksReader> CfContext<'_, DB, TQuery> {
     ) -> impl Iterator<Item = Result<<TQuery::Cf as Cf>::Key, RocksDbStorageError>> + '_ {
         let key = self.encode_key(start_key);
         let iter = self
-            .range_iterator_with_codecs::<<TQuery::Cf as Cf>::KeyCodec, UnitCodec, <TQuery::Cf as Cf>::Key, ()>(
+            .range_iterator_with_codecs::<PrefixedCodec<TQuery::Cf>, UnitCodec, <TQuery::Cf as Cf>::Key, ()>(
                 ordering,
                 key..,
             );
@@ -450,6 +485,46 @@ impl<TQuery: QueryCf, DB: RocksReader> CfContext<'_, DB, TQuery> {
             let (k, _) = res?;
             Ok::<_, RocksDbStorageError>(k)
         })
+    }
+
+    /// Returns a decoded key value iterator over the range of keys (exclusive).
+    pub fn query_range_iterator<B: Borrow<TQuery::Key>, R: Into<QueryRange<B>>>(
+        &self,
+        ordering: Ordering,
+        range: R,
+    ) -> impl Iterator<Item = Result<QueryCfKv<TQuery>, RocksDbStorageError>> + '_ {
+        let iter: Box<dyn Iterator<Item = _>> = match range.into() {
+            QueryRange::Exclusive { start, end } => {
+                let start = self.encode_key(start.borrow());
+                let end = self.encode_key(end.borrow());
+                Box::new(self.range_iterator_with_codecs::<
+                    PrefixedCodec<TQuery::Cf>,
+                    <TQuery::Cf as Cf>::ValueCodec,
+                    <TQuery::Cf as Cf>::Key,
+                    <TQuery::Cf as Cf>::Value
+                >(ordering, start..end))
+            },
+            QueryRange::From { start } => {
+                let start = self.encode_key(start.borrow());
+                Box::new(self.range_iterator_with_codecs::<
+                    PrefixedCodec<TQuery::Cf>,
+                    <TQuery::Cf as Cf>::ValueCodec,
+                    <TQuery::Cf as Cf>::Key,
+                    <TQuery::Cf as Cf>::Value
+                >(ordering, start..))
+            },
+            QueryRange::To { end } => {
+                let end = self.encode_key(end.borrow());
+                Box::new(self.range_iterator_with_codecs::<
+                    PrefixedCodec<TQuery::Cf>,
+                    <TQuery::Cf as Cf>::ValueCodec,
+                    <TQuery::Cf as Cf>::Key,
+                    <TQuery::Cf as Cf>::Value
+                >(ordering, ..end))
+            },
+        };
+
+        iter
     }
 
     /// Returns an iterator over the range of keys (exclusive).
@@ -461,7 +536,7 @@ impl<TQuery: QueryCf, DB: RocksReader> CfContext<'_, DB, TQuery> {
         let start = self.encode_key(range.start.borrow());
         let end = self.encode_key(range.end.borrow());
         let iter = self
-            .range_iterator_with_codecs::<<TQuery::Cf as Cf>::KeyCodec, UnitCodec, <TQuery::Cf as Cf>::Key, ()>(
+            .range_iterator_with_codecs::<PrefixedCodec<TQuery::Cf>, UnitCodec, <TQuery::Cf as Cf>::Key, ()>(
                 ordering,
                 start..end,
             );
@@ -478,10 +553,13 @@ impl<TQuery: QueryCf, DB: RocksReader> CfContext<'_, DB, TQuery> {
         end_key: &TQuery::Key,
     ) -> impl Iterator<Item = Result<<TQuery::Cf as Cf>::Key, RocksDbStorageError>> + '_ {
         let key = self.encode_key(end_key);
+        let start = TQuery::Cf::key_prefix()
+            .map(|b| EncodeVec::new_from_array([b]))
+            .unwrap_or_else(EncodeVec::empty);
         let iter = self
-            .range_iterator_with_codecs::<<TQuery::Cf as Cf>::KeyCodec, UnitCodec, <TQuery::Cf as Cf>::Key, ()>(
+            .range_iterator_with_codecs::<PrefixedCodec<TQuery::Cf>, UnitCodec, <TQuery::Cf as Cf>::Key, ()>(
                 ordering,
-                ..key,
+                start..key,
             );
         iter.map(|res| {
             let (k, _) = res?;
@@ -497,7 +575,9 @@ impl<TQuery: QueryCf, DB: RocksReader> CfContext<'_, DB, TQuery> {
     ) -> impl Iterator<Item = Result<QueryCfKv<TQuery>, RocksDbStorageError>> + '_ {
         let key = self.encode_key(end_key);
         self
-            .range_iterator_with_codecs::<<TQuery::Cf as Cf>::KeyCodec, <TQuery::Cf as Cf>::ValueCodec, <TQuery::Cf as Cf>::Key, <TQuery::Cf as Cf>::Value>(
+            .range_iterator_with_codecs::<
+                PrefixedCodec<TQuery::Cf>,
+                <TQuery::Cf as Cf>::ValueCodec, <TQuery::Cf as Cf>::Key, <TQuery::Cf as Cf>::Value>(
                 ordering,
                 ..key,
             )

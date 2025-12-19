@@ -25,23 +25,21 @@ pub struct CallScope {
     referenced: IndexSet<SubstateId>,
     component_lock: Option<LockedSubstate>,
     lock_scope: IndexSet<LockId>,
-    proof_scope: IndexSet<ProofId>,
     bucket_scope: IndexSet<BucketId>,
     auth_scope: AuthorizationScope,
 }
 
 impl CallScope {
     pub fn new() -> Self {
-        // Encountered non-determinism bug when using HashSet.
+        // NOTE: HashSet is not appropriate due to non-determinism
         Self {
             orphans: IndexSet::new(),
             owned: IndexSet::new(),
             referenced: IndexSet::new(),
             component_lock: None,
             lock_scope: IndexSet::new(),
-            proof_scope: IndexSet::new(),
             bucket_scope: IndexSet::new(),
-            auth_scope: AuthorizationScope::new(vec![]),
+            auth_scope: AuthorizationScope::empty(),
         }
     }
 
@@ -63,16 +61,8 @@ impl CallScope {
         &self.lock_scope
     }
 
-    pub fn is_proof_in_scope(&self, proof_id: ProofId) -> bool {
-        self.proof_scope.contains(&proof_id)
-    }
-
-    pub fn proof_scope(&self) -> &IndexSet<ProofId> {
-        &self.proof_scope
-    }
-
-    pub fn bucket_scope(&self) -> &IndexSet<BucketId> {
-        &self.bucket_scope
+    pub fn is_proof_in_scope(&self, proof_id: &ProofId) -> bool {
+        self.auth_scope.contains_proof(proof_id)
     }
 
     pub fn is_bucket_in_scope(&self, bucket_id: BucketId) -> bool {
@@ -111,7 +101,6 @@ impl CallScope {
     }
 
     pub fn add_proof_to_scope(&mut self, proof_id: ProofId) {
-        self.proof_scope.insert(proof_id);
         self.auth_scope_mut().add_proof(proof_id);
     }
 
@@ -124,6 +113,10 @@ impl CallScope {
 
     pub fn get_current_component_lock(&self) -> Option<&LockedSubstate> {
         self.component_lock.as_ref()
+    }
+
+    pub fn take_current_component_lock(&mut self) -> Option<LockedSubstate> {
+        self.component_lock.take()
     }
 
     pub fn owned_nodes(&self) -> &IndexSet<SubstateId> {
@@ -198,7 +191,6 @@ impl CallScope {
         for owned in &child.owned {
             self.orphans.swap_remove(owned);
         }
-        self.proof_scope.extend(child.proof_scope);
         self.bucket_scope.extend(child.bucket_scope);
         self.auth_scope.update_from_child(child.auth_scope);
     }
@@ -265,9 +257,9 @@ impl Display for CallScope {
             }
         }
 
-        if !self.proof_scope.is_empty() {
+        if !self.auth_scope.proofs().is_empty() {
             writeln!(f, "Proofs:")?;
-            for proof in &self.proof_scope {
+            for proof in self.auth_scope.proofs() {
                 writeln!(f, "  {}", proof)?;
             }
         }
@@ -288,6 +280,8 @@ pub struct CallFrame {
     current_template: TemplateAddress,
     current_module: String,
     entity_id: EntityId,
+    allow_cross_template_calls: bool,
+    allow_migration_calls: bool,
 }
 
 impl CallFrame {
@@ -297,6 +291,8 @@ impl CallFrame {
             current_template,
             current_module,
             entity_id,
+            allow_cross_template_calls: true,
+            allow_migration_calls: false,
         }
     }
 
@@ -311,6 +307,24 @@ impl CallFrame {
             current_template,
             current_module,
             entity_id,
+            allow_cross_template_calls: true,
+            allow_migration_calls: false,
+        }
+    }
+
+    pub fn migration_context(
+        current_template: TemplateAddress,
+        current_module: String,
+        component_lock: LockedSubstate,
+        entity_id: EntityId,
+    ) -> Self {
+        Self {
+            scope: CallScope::for_component(component_lock),
+            current_template,
+            current_module,
+            entity_id,
+            allow_cross_template_calls: false,
+            allow_migration_calls: true,
         }
     }
 
@@ -337,11 +351,27 @@ impl CallFrame {
     pub fn current_template(&self) -> (&TemplateAddress, &str) {
         (&self.current_template, &self.current_module)
     }
+
+    pub fn is_cross_template_calls_allowed(&self) -> bool {
+        self.allow_cross_template_calls
+    }
+
+    pub fn are_migration_calls_allowed(&self) -> bool {
+        self.allow_migration_calls
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum PushCallFrame {
     ForComponent {
+        template_address: TemplateAddress,
+        module_name: String,
+        component_scope: IndexedWellKnownTypes,
+        component_lock: LockedSubstate,
+        arg_scope: Box<IndexedWellKnownTypes>,
+        entity_id: EntityId,
+    },
+    MigrationContext {
         template_address: TemplateAddress,
         module_name: String,
         component_scope: IndexedWellKnownTypes,
@@ -361,6 +391,7 @@ impl PushCallFrame {
     pub fn component_lock(&self) -> Option<&LockedSubstate> {
         match self {
             Self::ForComponent { component_lock, .. } => Some(component_lock),
+            Self::MigrationContext { component_lock, .. } => Some(component_lock),
             Self::Static { .. } => None,
         }
     }
@@ -368,6 +399,7 @@ impl PushCallFrame {
     pub fn arg_scope(&self) -> &IndexedWellKnownTypes {
         match self {
             Self::ForComponent { arg_scope, .. } => arg_scope,
+            Self::MigrationContext { arg_scope, .. } => arg_scope,
             Self::Static { arg_scope, .. } => arg_scope,
         }
     }
@@ -383,6 +415,19 @@ impl PushCallFrame {
                 entity_id,
             } => {
                 let mut frame = CallFrame::for_component(template_address, module_name, component_lock, entity_id);
+                frame.scope_mut().include_owned_in_scope(&component_scope);
+                frame.scope_mut().include_refs_in_scope(&arg_scope);
+                frame
+            },
+            Self::MigrationContext {
+                template_address,
+                module_name,
+                component_scope,
+                component_lock,
+                arg_scope,
+                entity_id,
+            } => {
+                let mut frame = CallFrame::migration_context(template_address, module_name, component_lock, entity_id);
                 frame.scope_mut().include_owned_in_scope(&component_scope);
                 frame.scope_mut().include_refs_in_scope(&arg_scope);
                 frame
@@ -403,6 +448,7 @@ impl PushCallFrame {
     pub fn entity_id(&self) -> Option<EntityId> {
         match self {
             Self::ForComponent { entity_id, .. } => Some(*entity_id),
+            Self::MigrationContext { entity_id, .. } => Some(*entity_id),
             Self::Static { .. } => None,
         }
     }

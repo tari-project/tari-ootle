@@ -9,17 +9,15 @@ use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
     component::{ComponentBody, ComponentHeader},
     fees::{FeeBreakdown, FeeReceipt},
-    hashing::hash_template_code,
     published_template::PublishedTemplate,
     substate::{Substate, SubstateDiff, SubstateId},
-    transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
+    transaction_receipt::{FinalizeOutcome, TransactionReceipt, TransactionReceiptAddress},
     ValidatorFeePool,
     ValidatorFeeWithdrawal,
 };
 use tari_ootle_common_types::{LockIntent, SubstateRequirement};
 use tari_ootle_storage::consensus_models::{TransactionRecord, VersionedSubstateIdLockIntent};
-use tari_template_lib::call_args;
-use tari_transaction::Transaction;
+use tari_transaction::{args, Transaction};
 
 use crate::support::{committee_number_to_shard_group, helpers::random_substate_in_shard_group, TEST_NUM_PRESHARDS};
 
@@ -27,6 +25,7 @@ pub fn build_transaction_from(tx: Transaction) -> TransactionRecord {
     TransactionRecord::new(tx)
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn create_execution_result_for_transaction(
     transaction: &Transaction,
     decision: Decision,
@@ -80,7 +79,8 @@ pub fn create_execution_result_for_transaction(
                         output.versioned_substate_id().substate_id().clone(),
                         Substate::new(output.versioned_substate_id().version(), PublishedTemplate {
                             author: *transaction.seal_signature().public_key(),
-                            binary_hash: hash_template_code(binary),
+                            binary: binary.to_vec().try_into().expect("Template binary too large"),
+                            at_epoch: 0,
                         }),
                     );
                 },
@@ -106,12 +106,15 @@ pub fn create_execution_result_for_transaction(
         diff.up(
             SubstateId::TransactionReceipt(TransactionReceiptAddress::from(transaction.calculate_id())),
             Substate::new(0, TransactionReceipt {
-                transaction_hash: transaction.calculate_id().into_array().into(),
-                events: vec![],
-                logs: vec![],
+                outcome: FinalizeOutcome::Commit,
+                diff_summary: Default::default(),
+                fee_withdrawals: Default::default(),
+                events: Default::default(),
+                logs: Default::default(),
                 fee_receipt: FeeReceipt {
                     total_fee_payment: fee,
                     total_fees_paid: fee,
+                    total_fee_overcharge: 0,
                     cost_breakdown: FeeBreakdown::default(),
                 },
             }),
@@ -135,6 +138,7 @@ pub fn create_execution_result_for_transaction(
             FeeReceipt {
                 total_fee_payment: fee,
                 total_fees_paid: fee,
+                total_fee_overcharge: 0,
                 cost_breakdown: FeeBreakdown::default(),
             },
         ),
@@ -162,8 +166,8 @@ pub fn random_substates_ids_for_committee_generator(
 
 pub fn build_transaction(inputs: Vec<SubstateRequirement>) -> TransactionRecord {
     let k = PrivateKey::default();
-    let tx = Transaction::builder()
-        .call_function(Default::default(), "foo", call_args![])
+    let tx = Transaction::builder_localnet()
+        .call_function(Default::default(), "foo", args![])
         .with_inputs(inputs)
         .build_and_seal(&k);
     TransactionRecord::new(tx)

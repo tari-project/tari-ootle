@@ -18,12 +18,12 @@ mod template {
 
     impl Shenanigans {
         pub fn dangling_vault() -> Self {
-            let _vault = Vault::new_empty(CONFIDENTIAL_TARI_RESOURCE_ADDRESS);
+            let _vault = Vault::new_empty(STEALTH_TARI_RESOURCE_ADDRESS);
             Self::default()
         }
 
         pub fn return_vault() -> Vault {
-            Vault::new_empty(CONFIDENTIAL_TARI_RESOURCE_ADDRESS)
+            Vault::new_empty(STEALTH_TARI_RESOURCE_ADDRESS)
         }
 
         pub fn new() -> Self {
@@ -31,7 +31,7 @@ mod template {
         }
 
         pub fn with_vault() -> Self {
-            let vault = Vault::new_empty(CONFIDENTIAL_TARI_RESOURCE_ADDRESS);
+            let vault = Vault::new_empty(STEALTH_TARI_RESOURCE_ADDRESS);
             Self {
                 vault: Some(vault),
                 ..Default::default()
@@ -68,11 +68,11 @@ mod template {
             } else {
                 vault.withdraw_all()
             };
-            ComponentManager::get(dest_component).call("deposit", call_args![stolen])
+            ComponentManager::get(dest_component).call("deposit", args![stolen])
         }
 
         pub fn with_vault_copy() -> Self {
-            let vault = Vault::new_empty(CONFIDENTIAL_TARI_RESOURCE_ADDRESS);
+            let vault = Vault::new_empty(STEALTH_TARI_RESOURCE_ADDRESS);
             let vault_copy = Vault::for_test(vault.vault_id());
             Self {
                 vault: Some(vault),

@@ -24,26 +24,17 @@ pub(crate) mod error;
 
 use tari_epoch_manager::EpochManagerReader;
 use tari_indexer_client::types::TransactionEntry;
-use tari_ootle_common_types::{
-    optional::{IsNotFoundError, Optional},
-    NodeAddressable,
-    SubstateRequirement,
-    ToSubstateAddress,
-};
+use tari_ootle_common_types::{optional::Optional, NodeAddressable, ToSubstateAddress};
 use tari_transaction::{Transaction, TransactionId};
-use tari_validator_node_rpc::client::{
-    SubstateResult,
-    TransactionResultStatus,
-    ValidatorNodeClientFactory,
-    ValidatorNodeRpcClient,
-};
+use tari_validator_node_rpc::client::{TransactionResultStatus, ValidatorNodeClientFactory, ValidatorNodeRpcClient};
 
 use crate::{
     network_client::TariNetworkClient,
-    storage_sqlite::store_factory::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreWriteTransaction},
+    store::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreWriteTransaction},
     transaction_manager::error::TransactionManagerError,
 };
 
+#[derive(Debug, Clone)]
 pub struct TransactionManager<TEpochManager, TClientFactory, TStore> {
     network_client: TariNetworkClient<TEpochManager, TClientFactory>,
     store: TStore,
@@ -54,7 +45,6 @@ where
     TAddr: NodeAddressable + 'static,
     TEpochManager: EpochManagerReader<Addr = TAddr> + 'static,
     TClientFactory: ValidatorNodeClientFactory<TAddr> + 'static,
-    <TClientFactory::Client as ValidatorNodeRpcClient<TAddr>>::Error: IsNotFoundError + 'static,
     TStore: IndexerStore,
 {
     pub fn new(network_client: TariNetworkClient<TEpochManager, TClientFactory>, store: TStore) -> Self {
@@ -62,6 +52,14 @@ where
     }
 
     pub async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, TransactionManagerError> {
+        if !transaction.verify_all_signatures() {
+            // DEV note: If signatures are invalid here, this is probably an issue
+            // with the JSON decoding (crates/engine_types/src/argument_parser.rs)
+            return Err(TransactionManagerError::InvalidTransaction {
+                transaction_id: transaction.calculate_id(),
+                details: "Transaction has one or more invalid signature(s)".to_string(),
+            });
+        }
         self.store
             .with_write_tx(|tx| tx.insert_or_ignore_transaction(&transaction))?;
         let id = self.network_client.submit_transaction(transaction).await?;
@@ -82,20 +80,6 @@ where
                 entity: "Transaction result",
                 key: transaction_id.to_string(),
             })
-    }
-
-    pub async fn get_substate(
-        &self,
-        substate_requirement: &SubstateRequirement,
-    ) -> Result<SubstateResult, TransactionManagerError> {
-        let address = substate_requirement.to_substate_address_zero_version();
-        let result = self
-            .network_client
-            .try_single_with_committee(address, |mut client| async move {
-                client.get_substate(substate_requirement.as_ref()).await
-            })
-            .await?;
-        Ok(result)
     }
 
     pub fn list_recent_transactions(

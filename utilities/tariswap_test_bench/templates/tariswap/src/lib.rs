@@ -55,7 +55,7 @@ mod tariswap {
 
             // create the lp resource
             // TODO: add lp resource minting/burning security, only this component should be allowed
-            let lp_resource = ResourceBuilder::fungible().with_token_symbol("LP").build();
+            let lp_resource = ResourceBuilder::public_fungible().with_token_symbol("LP").build();
 
             Component::new(Self {
                 pools,
@@ -226,8 +226,11 @@ mod tariswap {
         fn check_resource_is_fungible(resource: ResourceAddress) {
             let resource_type = ResourceManager::get(resource).resource_type();
             assert!(
-                matches!(resource_type, ResourceType::Fungible | ResourceType::Confidential),
-                "Resource {} is not fungible nor confidential",
+                matches!(
+                    resource_type,
+                    ResourceType::Fungible | ResourceType::Confidential | ResourceType::Stealth
+                ),
+                "Resource {} is not fungible (fungible, stealth, confidential)",
                 resource
             );
         }

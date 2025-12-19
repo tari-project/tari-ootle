@@ -7,4 +7,5 @@ export type AbortReason =
   | "LockInputsOutputsFailed"
   | "ExecutionFailure"
   | "OneOrMoreInputsNotFound"
-  | "InsufficientFeesPaid";
+  | "InsufficientFeesPaid"
+  | "FeePaymentInMainIntent";

@@ -19,7 +19,7 @@ use tari_wallet_daemon_client::{
     ComponentAddressOrName,
 };
 
-use crate::{wallet_daemon_cli::get_auth_wallet_daemon_client, TariWorld};
+use crate::{wallet_daemon_client::get_auth_wallet_daemon_client, TariWorld};
 
 #[derive(Debug)]
 pub struct RegisteredTemplate {
@@ -76,7 +76,7 @@ pub async fn publish_template(
     // look for the new UP template substate
     let template_id = finalize_result
         .result
-        .accept()
+        .any_accept()
         .and_then(|result| result.up_iter().find_map(|(substate_id, _)| substate_id.as_template()))
         .map(|id| id.as_hash())
         .ok_or_else(|| anyhow!("Transaction result did not contain a published template!"))?;

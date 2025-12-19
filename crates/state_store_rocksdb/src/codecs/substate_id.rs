@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::io;
+use std::io::{Read, Write};
 
 use borsh::BorshDeserialize;
 use tari_engine_types::substate::SubstateId;
@@ -16,57 +16,73 @@ use crate::{
 pub struct SubstateIdCodec;
 
 impl SubstateIdCodec {
-    fn encode_substate_id(self, value: &SubstateId) -> Result<EncodeVec, RocksDbStorageError> {
+    fn get_substate_id_encoded_len(self, value: &SubstateId) -> Result<usize, RocksDbStorageError> {
         let len = borsh::object_length(value).map_err(|e| RocksDbStorageError::EncodeError { source: e.into() })?;
-        if len < EncodeVec::FIXED_SIZE {
-            let mut buf = EncodeVec::make_stack_buf();
-            borsh::to_writer(buf.as_mut_slice(), value)
-                .map_err(|e| RocksDbStorageError::EncodeError { source: e.into() })?;
-            return Ok(EncodeVec::new_stack(buf, len));
-        }
-        let buf = borsh::to_vec(value).map_err(|e| RocksDbStorageError::EncodeError { source: e.into() })?;
-        Ok(EncodeVec::new_heap(buf))
+        Ok(len)
     }
 
-    pub fn decode_reader<R: io::Read>(self, reader: &mut R) -> Result<SubstateId, RocksDbStorageError> {
+    fn encode_substate_id_into<W: Write>(self, value: &SubstateId, writer: &mut W) -> Result<(), RocksDbStorageError> {
+        borsh::to_writer(writer, value).map_err(|e| RocksDbStorageError::EncodeError { source: e.into() })?;
+        Ok(())
+    }
+}
+
+impl DbCodec<SubstateId> for SubstateIdCodec {
+    fn encode_len(&self, value: &SubstateId) -> Result<usize, RocksDbStorageError> {
+        self.get_substate_id_encoded_len(value)
+    }
+
+    fn encode_into<W: Write>(&self, value: &SubstateId, writer: &mut W) -> Result<(), RocksDbStorageError> {
+        self.encode_substate_id_into(value, writer)
+    }
+
+    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<SubstateId, RocksDbStorageError> {
         // We use the deserialize_reader here so that no error is returned if there are extra bytes in the buffer
         // in order to use SubstateId as a prefix
         SubstateId::deserialize_reader(reader).map_err(|e| RocksDbStorageError::DecodeError { source: e.into() })
     }
 }
 
-impl DbCodec<SubstateId> for SubstateIdCodec {
-    fn encode(&self, value: &SubstateId) -> Result<EncodeVec, RocksDbStorageError> {
-        self.encode_substate_id(value)
-    }
-
-    fn decode(&self, mut bytes: &[u8]) -> Result<SubstateId, RocksDbStorageError> {
-        self.decode_reader(&mut bytes)
-    }
-}
-
 impl<'a> DbCodec<&'a SubstateId> for SubstateIdCodec {
+    fn encode_len(&self, value: &&'a SubstateId) -> Result<usize, RocksDbStorageError> {
+        self.get_substate_id_encoded_len(value)
+    }
+
+    fn encode_into<W: Write>(&self, value: &&'a SubstateId, writer: &mut W) -> Result<(), RocksDbStorageError> {
+        self.encode_substate_id_into(value, writer)
+    }
+
     fn encode(&self, value: &&'a SubstateId) -> Result<EncodeVec, RocksDbStorageError> {
         SubstateIdCodec.encode(*value)
     }
 
-    fn decode(&self, _bytes: &[u8]) -> Result<&'a SubstateId, RocksDbStorageError> {
-        panic!("Attempt to decode a reference to a SubstateId which is not possible.")
+    fn decode_reader<R: Read>(&self, _reader: &mut R) -> Result<&'a SubstateId, RocksDbStorageError> {
+        unimplemented!("Decoding a reference to a SubstateId is not supported. Use decode_reader for owned values.");
     }
 }
 
 impl<'a> DbCodec<VersionedSubstateIdRef<'a>> for SubstateIdCodec {
-    fn encode(&self, value: &VersionedSubstateIdRef<'a>) -> Result<EncodeVec, RocksDbStorageError> {
-        let enc_substate_id = self.encode_substate_id(value.substate_id())?;
-        let version = value.version().to_be_bytes();
-        Ok(EncodeVec::from_slices(&[
-            enc_substate_id.as_slice(),
-            version.as_slice(),
-        ]))
+    fn encode_len(&self, value: &VersionedSubstateIdRef<'a>) -> Result<usize, RocksDbStorageError> {
+        self.get_substate_id_encoded_len(value.substate_id())
+            .map(|len| len + size_of::<u32>())
     }
 
-    fn decode(&self, _bytes: &[u8]) -> Result<VersionedSubstateIdRef<'a>, RocksDbStorageError> {
-        panic!("Attempt to decode a reference to a VersionedSubstateIdRef which is not possible.")
+    fn encode_into<W: Write>(
+        &self,
+        value: &VersionedSubstateIdRef<'a>,
+        writer: &mut W,
+    ) -> Result<(), RocksDbStorageError> {
+        self.encode_substate_id_into(value.substate_id(), writer)?;
+        writer
+            .write_all(&value.version().to_be_bytes())
+            .map_err(|e| RocksDbStorageError::EncodeError {
+                source: anyhow::anyhow!("VersionedSubstateIdRefCodec: Failed to write version: {}", e),
+            })?;
+        Ok(())
+    }
+
+    fn decode_reader<R: Read>(&self, _reader: &mut R) -> Result<VersionedSubstateIdRef<'a>, RocksDbStorageError> {
+        unreachable!("Decoding a VersionedSubstateIdRef is not supported. Use decode_reader for owned values.");
     }
 }
 

@@ -1,11 +1,13 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
-    event_payloads (id) {
+    epoch_checkpoints (id) {
         id -> Integer,
-        payload_key -> Text,
-        payload_value -> Text,
-        event_id -> Integer,
+        epoch -> BigInt,
+        shard_group -> Text,
+        json_data -> Text,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
     }
 }
 
@@ -16,27 +18,33 @@ diesel::table! {
         tx_hash -> Text,
         topic -> Text,
         payload -> Text,
-        version -> Integer,
         substate_id -> Nullable<Text>,
-        timestamp -> BigInt,
+        created_at -> Timestamp,
     }
 }
 
 diesel::table! {
-    non_fungible_indexes (id) {
+    key_values (id) {
         id -> Integer,
-        resource_address -> Text,
-        idx -> Integer,
-        non_fungible_address -> Text,
+        key -> Text,
+        value -> Text,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
     }
 }
 
 diesel::table! {
-    scanned_block_ids (id) {
+    substate_transitions (id) {
         id -> Integer,
+        shard -> Integer,
+        state_version -> BigInt,
         epoch -> BigInt,
-        shard_group -> Integer,
-        last_block_id -> Binary,
+        substate_id -> Text,
+        version -> Integer,
+        substate_type -> Text,
+        is_up -> Bool,
+        value_hash -> Nullable<Text>,
+        created_at -> Timestamp,
     }
 }
 
@@ -46,10 +54,19 @@ diesel::table! {
         address -> Text,
         version -> Integer,
         data -> Text,
-        tx_hash -> Text,
         template_address -> Nullable<Text>,
         module_name -> Nullable<Text>,
-        timestamp -> BigInt,
+        updated_at -> Timestamp,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    transaction_receipts (id) {
+        id -> Integer,
+        address -> Text,
+        data -> Text,
+        created_at -> Timestamp,
     }
 }
 
@@ -62,13 +79,32 @@ diesel::table! {
     }
 }
 
-diesel::joinable!(event_payloads -> events (event_id));
+diesel::table! {
+    utxos (id) {
+        id -> Integer,
+        commitment -> Text,
+        public_nonce -> Text,
+        version -> Integer,
+        resource_address -> Text,
+        shard -> Integer,
+        state_version -> BigInt,
+        output -> Nullable<Binary>,
+        utxo_tag -> Integer,
+        epoch -> BigInt,
+        is_spent -> Bool,
+        is_burnt -> Bool,
+        is_frozen -> Bool,
+        created_at -> Timestamp,
+    }
+}
 
 diesel::allow_tables_to_appear_in_same_query!(
-    event_payloads,
+    epoch_checkpoints,
     events,
-    non_fungible_indexes,
-    scanned_block_ids,
+    key_values,
+    substate_transitions,
     substates,
+    transaction_receipts,
     transactions,
+    utxos,
 );

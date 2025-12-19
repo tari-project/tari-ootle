@@ -20,10 +20,12 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashMap, future::Future};
+use std::{
+    collections::{HashMap, HashSet},
+    future::Future,
+};
 
 use tari_common_types::types::FixedHash;
-use tari_engine_types::confidential::UnclaimedConfidentialOutput;
 use tari_ootle_common_types::{
     committee::{Committee, CommitteeInfo},
     layer_one_transaction::LayerOneTransactionDef,
@@ -36,18 +38,15 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::global::models::ValidatorNode;
 use tari_sidechain::EvictionProof;
-use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::broadcast;
-use url::Url;
 
 use crate::{epoch_event_oracle::EpochEventOracle, EpochManagerError, EpochManagerEvent};
 
 pub trait EpochManagerSpec: Send + 'static {
     type Addr: NodeAddressable + DerivableFromPublicKey + 'static;
     type EpochEventOracle: EpochEventOracle + Send + 'static;
-    type UtxoStore: EpochUtxoStore + Send + 'static;
     type LayerOneSubmitter: LayerOneTransactionSubmitter + Send + Sync + 'static;
-    type TemplateDownloader: TemplateDownloader + Send + 'static;
 }
 
 pub trait EpochManagerWriter: Send + Sync {
@@ -64,12 +63,6 @@ pub trait EpochManagerWriter: Send + Sync {
         &mut self,
         public_key: RistrettoPublicKeyBytes,
         deactivation_epoch: Epoch,
-    ) -> impl Future<Output = Result<(), EpochManagerError>> + Send;
-
-    fn activate_epoch(
-        &mut self,
-        epoch: Epoch,
-        epoch_hash: FixedHash,
     ) -> impl Future<Output = Result<(), EpochManagerError>> + Send;
 }
 
@@ -116,6 +109,12 @@ pub trait EpochManagerReader: Send + Sync {
         epoch: Epoch,
     ) -> impl Future<Output = Result<CommitteeInfo, EpochManagerError>> + Send;
 
+    fn get_committee_info(
+        &self,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> impl Future<Output = Result<CommitteeInfo, EpochManagerError>> + Send;
+
     fn get_committee_info_for_substate(
         &self,
         epoch: Epoch,
@@ -135,6 +134,7 @@ pub trait EpochManagerReader: Send + Sync {
 
     fn current_epoch(&self) -> impl Future<Output = Result<Epoch, EpochManagerError>> + Send;
     fn get_current_epoch_hash(&self) -> impl Future<Output = Result<FixedHash, EpochManagerError>> + Send;
+    fn get_epoch_hash(&self, epoch: Epoch) -> impl Future<Output = Result<FixedHash, EpochManagerError>> + Send;
 
     fn get_num_committees(&self, epoch: Epoch) -> impl Future<Output = Result<u32, EpochManagerError>> + Send;
 
@@ -143,6 +143,7 @@ pub trait EpochManagerReader: Send + Sync {
         epoch: Epoch,
         shards: ShardGroup,
         limit: Option<usize>,
+        shuffled: bool,
     ) -> impl Future<Output = Result<Committee<Self::Addr>, EpochManagerError>> + Send;
     fn get_committees_overlapping_shard_group(
         &self,
@@ -226,13 +227,8 @@ pub trait EpochManagerReader: Send + Sync {
         &self,
         epoch: Epoch,
         shard_group: Option<ShardGroup>,
-        excluding: Vec<Self::Addr>,
+        excluding: HashSet<Self::Addr>,
     ) -> impl Future<Output = Result<ValidatorNode<Self::Addr>, EpochManagerError>> + Send;
-}
-
-pub trait EpochUtxoStore: Send + Sync {
-    type Error: std::error::Error + Send + Sync + 'static;
-    fn add_unclaimed_utxo(&mut self, epoch: Epoch, substate: UnclaimedConfidentialOutput) -> Result<(), Self::Error>;
 }
 
 pub trait LayerOneTransactionSubmitter {
@@ -242,20 +238,4 @@ pub trait LayerOneTransactionSubmitter {
         &self,
         transaction: LayerOneTransactionDef<T>,
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send;
-}
-
-pub trait TemplateDownloader {
-    type Error: std::error::Error + Send + Sync + 'static;
-
-    /// Enqueues the template for download. An implementation should not wait for the download to complete before
-    /// resolving the returned future.
-    fn enqueue_download(
-        &mut self,
-        epoch: Epoch,
-        name: String,
-        address: TemplateAddress,
-        author_public_key: RistrettoPublicKeyBytes,
-        url: Url,
-        binary_hash: FixedHash,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }

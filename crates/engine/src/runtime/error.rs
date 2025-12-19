@@ -20,9 +20,6 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::fmt::Display;
-
-use anyhow::anyhow;
 use tari_bor::BorError;
 use tari_engine_types::{
     commit_result::RejectReason,
@@ -37,19 +34,20 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{displayable::Displayable, optional::IsNotFoundError};
 use tari_template_lib::{
-    args::{VaultFreezeFlag, WorkspaceId, WorkspaceOffsetId},
+    args::{CallAction, VaultFreezeFlag},
     models::{
         AddressAllocationId,
         BucketId,
+        ClaimedOutputTombstoneAddress,
         ComponentAddress,
         NonFungibleId,
         ProofId,
         ResourceAddress,
-        UnclaimedConfidentialOutputAddress,
         VaultId,
     },
     types::{Amount, TemplateAddress},
 };
+use tari_transaction::args::{WorkspaceId, WorkspaceOffsetId};
 
 use super::workspace::WorkspaceError;
 use crate::{
@@ -63,9 +61,6 @@ pub enum RuntimeError {
     EncodingError(#[from] BorError),
     #[error("Indexed value error: {0}")]
     IndexedValueError(#[from] IndexedValueError),
-    // TODO: proper error
-    #[error("State DB error: {0}")]
-    StateDbError(#[from] anyhow::Error),
     #[error("State storage error: {0}")]
     StateStoreError(#[from] StateStoreError),
     #[error("Workspace error: {0}")]
@@ -86,11 +81,11 @@ pub enum RuntimeError {
         // To reduce the size of this variant, we box one of the fields
         requested_owner: Box<SubstateId>,
     },
-    #[error("Expected lock {lock_id} to lock {expected_type} but it locks {address}")]
+    #[error("Expected lock {lock_id} to lock {expected_type} but it locks {id}")]
     LockSubstateMismatch {
         lock_id: LockId,
         expected_type: &'static str,
-        address: SubstateId,
+        id: SubstateId,
     },
     #[error("Component {component} referenced an unknown substate {id}")]
     ComponentReferencedUnknownSubstate {
@@ -106,9 +101,7 @@ pub enum RuntimeError {
     #[error("Component not found with address '{address}'")]
     ComponentNotFound { address: ComponentAddress },
     #[error("Layer one commitment not found with address '{address}'")]
-    LayerOneCommitmentNotFound {
-        address: UnclaimedConfidentialOutputAddress,
-    },
+    LayerOneCommitmentNotFound { address: ClaimedOutputTombstoneAddress },
     #[error("Invalid argument {argument}: {reason}")]
     InvalidArgument { argument: &'static str, reason: String },
     #[error("Invalid number of arguments: expected {expected}, but got {len}")]
@@ -184,20 +177,16 @@ pub enum RuntimeError {
     InvalidMethodAccessRule { template_name: String, details: String },
     #[error("Runtime module error: {0}")]
     ModuleError(#[from] RuntimeModuleError),
-    #[error("Invalid claiming signature: {details}")]
-    InvalidClaimingSignature { details: String },
-    #[error("Invalid range proof")]
-    InvalidRangeProof,
-    #[error("Invalid substate type")]
-    InvalidSubstateType,
+    #[error("Invalid burn claim proof: {details}")]
+    InvalidClaimProof { details: String },
     #[error("Layer one commitment already claimed with address '{address}'")]
-    ConfidentialOutputAlreadyClaimed {
-        address: UnclaimedConfidentialOutputAddress,
-    },
+    ConfidentialOutputAlreadyClaimed { address: ClaimedOutputTombstoneAddress },
     #[error("Template {template_address} not found")]
     TemplateNotFound { template_address: TemplateAddress },
     #[error("Insufficient fees paid: required {required_fee}, paid {fees_paid}")]
     InsufficientFeesPaid { required_fee: u64, fees_paid: u64 },
+    #[error("No fees paid from stealth transfer: {details}")]
+    NoFeesPaid { details: String },
     #[error("No fee checkpoint")]
     NoFeeCheckpoint,
     #[error("Component address must be sequential. Index before {index} was not found")]
@@ -232,8 +221,8 @@ pub enum RuntimeError {
     InvalidOpDepositLockedBucket { bucket_id: BucketId, locked_amount: Amount },
     #[error("Duplicate substate {address}")]
     DuplicateSubstate { address: SubstateId },
-    #[error("Substate {address} is orphaned")]
-    OrphanedSubstate { address: SubstateId },
+    #[error("Substate {id} is orphaned")]
+    OrphanedSubstate { id: SubstateId },
     #[error("{} orphaned substate(s) detected: {}", .substates.len(), .substates.join(", "))]
     OrphanedSubstates { substates: Vec<String> },
     #[error("Attempted to finalise state but {remaining} call frame(s) remain on the stack")]
@@ -242,6 +231,8 @@ pub enum RuntimeError {
     DuplicateReference { address: SubstateId },
     #[error("Invalid argument: {0}")]
     ArgumentValidationError(#[from] ArgumentValidationError),
+    #[error("Fee payment found in main intent, which is not allowed")]
+    FeePaymentInMainIntent,
 
     #[error("BUG: [{function}] Invariant error {details}")]
     InvariantError { function: &'static str, details: String },
@@ -282,28 +273,31 @@ pub enum RuntimeError {
 
     #[error("Assert error: {0}")]
     AssertError(#[from] AssertError),
+
+    #[error("Limit error: {details}")]
+    LimitError { details: String },
+
+    #[error("Cross-template calls are not allowed in this context: {action:?}")]
+    CrossTemplateCallNotAllowed { action: CallAction },
 }
 
 impl RuntimeError {
-    pub fn state_db_error<T: Display>(err: T) -> Self {
-        RuntimeError::StateDbError(anyhow!("{}", err))
-    }
-
     pub fn to_reject_reason(&self) -> RejectReason {
         match self {
-            Self::SubstateNotFound { id } => RejectReason::OneOrMoreInputsNotFound(format!("Substate {id} not found",)),
-            Self::RootSubstateNotFound { id } => RejectReason::OneOrMoreInputsNotFound(format!(
-                "Template referenced root substate but it was not found: {id}"
-            )),
-            Self::ReferencedSubstateNotFound { id } => RejectReason::OneOrMoreInputsNotFound(format!(
-                "Template referenced substate but it was not found: {id}"
-            )),
+            Self::SubstateNotFound { id } => RejectReason::SubstateNotFound(format!("{id} not found",)),
+            Self::RootSubstateNotFound { id } => {
+                RejectReason::SubstateNotFound(format!("Template referenced root substate but it was not found: {id}"))
+            },
+            Self::ReferencedSubstateNotFound { id } => {
+                RejectReason::SubstateNotFound(format!("Template referenced substate but it was not found: {id}"))
+            },
             Self::InsufficientFeesPaid {
                 fees_paid,
                 required_fee,
             } => RejectReason::InsufficientFeesPaid(format!(
                 "Insufficient fees paid: {fees_paid}, required fees: {required_fee}"
             )),
+            Self::FeePaymentInMainIntent => RejectReason::FeePaymentInMainIntent,
             err => RejectReason::ExecutionFailure(err.to_string()),
         }
     }
@@ -347,8 +341,6 @@ pub enum TransactionCommitError {
     DanglingLockedValueInVault { vault_id: VaultId, locked_amount: Amount },
     #[error("{count} dangling address allocations remain after transaction execution")]
     DanglingAddressAllocations { count: usize },
-    #[error("{} orphaned substate(s) detected: {}", .substates.len(), .substates.join(", "))]
-    OrphanedSubstates { substates: Vec<String> },
     #[error("{count} dangling items in workspace after transaction execution")]
     WorkspaceNotEmpty { count: usize },
     #[error(transparent)]

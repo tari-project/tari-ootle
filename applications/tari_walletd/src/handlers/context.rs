@@ -1,8 +1,13 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use axum::headers::authorization::Bearer;
-use tari_ootle_wallet_sdk::WalletSdk;
+use axum_extra::headers::authorization::Bearer;
+use tari_ootle_wallet_sdk::models::WalletEvent;
+use tari_ootle_wallet_sdk_services::{
+    account_monitor::AccountMonitorHandle,
+    notify::Notify,
+    transaction_service::TransactionServiceHandle,
+};
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_shutdown::ShutdownSignal;
 use tari_transaction::{Transaction, TransactionBuilder};
@@ -15,14 +20,13 @@ use crate::{
         jwt::{JwtApi, JwtApiError},
         WalletAuthenticator,
     },
-    indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
-    notify::Notify,
-    services::{AccountMonitorHandle, TransactionServiceHandle, WalletEvent, WebauthnService},
+    services::WebauthnService,
+    WalletSdk,
 };
 
 #[derive(Debug, Clone)]
 pub struct HandlerContext {
-    wallet_sdk: WalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>,
+    wallet_sdk: WalletSdk,
     notifier: Notify<WalletEvent>,
     transaction_service: TransactionServiceHandle,
     account_monitor: AccountMonitorHandle,
@@ -33,7 +37,7 @@ pub struct HandlerContext {
 
 impl HandlerContext {
     pub fn new(
-        wallet_sdk: WalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>,
+        wallet_sdk: WalletSdk,
         notifier: Notify<WalletEvent>,
         transaction_service: TransactionServiceHandle,
         account_monitor: AccountMonitorHandle,
@@ -56,7 +60,7 @@ impl HandlerContext {
         &self.notifier
     }
 
-    pub fn wallet_sdk(&self) -> &WalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface> {
+    pub fn wallet_sdk(&self) -> &WalletSdk {
         &self.wallet_sdk
     }
 
@@ -104,6 +108,6 @@ impl HandlerContext {
 
     /// Returns a TransactionBuilder with the current network configured.
     pub fn transaction_builder(&self) -> TransactionBuilder {
-        Transaction::builder().for_network(self.config().network.as_byte())
+        Transaction::builder_localnet().for_network(self.config().network.as_byte())
     }
 }

@@ -5,6 +5,7 @@ use std::collections::{BTreeSet, HashSet};
 
 use jmt::Version;
 use tari_crypto::tari_utilities::ByteArray;
+use tari_ootle_common_types::ToSubstateAddress;
 use tari_state_tree::{memory_store::MemoryTreeStore, SPARSE_MERKLE_PLACEHOLDER_HASH};
 
 use crate::support::{change, hash_value_from_seed, make_value, HashTreeTester};

@@ -25,35 +25,36 @@ use std::{sync::Arc, time::Instant};
 use log::*;
 use tari_bor::to_value;
 use tari_engine_types::{
-    commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
+    commit_result::{ExecuteResult, FinalizeResult},
     component::derive_component_address_from_public_key,
     entity_id_provider::EntityIdProvider,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
-    instruction::Instruction,
     instruction_result::InstructionResult,
+    limits,
     lock::LockFlag,
+    published_template::TemplateBlob,
     virtual_substate::VirtualSubstates,
-    ComponentCall,
-    ResourceAddressRef,
 };
 use tari_ootle_common_types::services::template_provider::TemplateProvider;
 use tari_template_abi::{FunctionDef, Type};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    args::{
-        AllocatableAddressType,
-        AllocateAddressResult,
-        InstructionArg,
-        WorkspaceAction,
-        WorkspaceId,
-        WorkspaceOffsetId,
-    },
+    args::{AllocateAddressResult, BucketAction, BucketGetAmountArg, BucketRef, WorkspaceAction},
     auth::{ComponentAccessRules, OwnerRule},
-    call_arg,
-    call_args,
     invoke_args,
     models::{Bucket, NonFungibleAddress, StealthTransferStatement},
-    types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
+    prelude::STEALTH_TARI_RESOURCE_ADDRESS,
+    types::{crypto::RistrettoPublicKeyBytes, Amount, TemplateAddress},
+};
+use tari_transaction::{
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
+    call_arg,
+    call_args,
+    AllocatableAddressType,
+    ComponentReference,
+    Instruction,
+    MigrateFunction,
+    ResourceAddressRef,
 };
 
 use crate::{
@@ -62,6 +63,7 @@ use crate::{
         scope::{CallScope, PushCallFrame},
         AuthParams,
         AuthorizationScope,
+        NativeAction,
         Runtime,
         RuntimeError,
         RuntimeInterfaceImpl,
@@ -70,8 +72,8 @@ use crate::{
     },
     state_store::memory::ReadOnlyMemoryStateStore,
     template::LoadedTemplate,
-    traits::Invokable,
-    transaction::{TransactionError, TransactionProcessorConfig},
+    traits::{ClaimProofVerifier, Invokable},
+    transaction::TransactionError,
     wasm::{WasmModule, WasmProcess},
 };
 
@@ -80,30 +82,30 @@ pub const MAX_CALL_DEPTH: usize = 10;
 const ACCOUNT_CONSTRUCTOR_FUNCTION: &str = "create";
 
 pub struct TransactionProcessor<TTemplateProvider> {
-    config: TransactionProcessorConfig,
     template_provider: Arc<TTemplateProvider>,
     state_db: ReadOnlyMemoryStateStore,
     auth_params: AuthParams,
     virtual_substates: VirtualSubstates,
     modules: Vec<Arc<dyn RuntimeModule>>,
+    claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
 }
 
-impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> TransactionProcessor<TTemplateProvider> {
+impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> TransactionProcessor<TTemplateProvider> {
     pub fn new(
-        config: TransactionProcessorConfig,
         template_provider: Arc<TTemplateProvider>,
         state_db: ReadOnlyMemoryStateStore,
         auth_params: AuthParams,
         virtual_substates: VirtualSubstates,
         modules: Vec<Arc<dyn RuntimeModule>>,
+        claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
     ) -> Self {
         Self {
-            config,
             template_provider,
             state_db,
             auth_params,
             virtual_substates,
             modules,
+            claim_burn_proof_verifier,
         }
     }
 
@@ -113,17 +115,20 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         let timer = Instant::now();
         let entity_id_provider = EntityIdProvider::new(id.as_hash(), 1000);
         let Self {
-            config,
             template_provider,
             state_db,
             auth_params,
             virtual_substates,
             modules,
+            claim_burn_proof_verifier,
         } = self;
 
         let initial_auth_scope = AuthorizationScope::new(auth_params.initial_ownership_proofs);
         let mut initial_call_scope = CallScope::new();
         initial_call_scope.set_auth_scope(initial_auth_scope);
+        // Because XTR resource is immutable, we can make it available to every shard group (genesis state) and
+        // transaction (payment of fees)
+        initial_call_scope.add_substate_to_owned(STEALTH_TARI_RESOURCE_ADDRESS.into());
         for input in executable.all_inputs_iter() {
             debug!(
                 target: LOG_TARGET,
@@ -156,7 +161,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             entity_id_provider,
             modules,
             MAX_CALL_DEPTH,
-            config.network,
+            claim_burn_proof_verifier,
         )?;
 
         let runtime = Runtime::new(Arc::new(runtime_interface));
@@ -164,13 +169,13 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
 
         let instructions = executable.into_instructions();
 
-        let fee_exec_results = Self::process_instructions(&config, &template_provider, &runtime, instructions.fee);
+        let fee_exec_results = Self::process_instructions(&template_provider, &runtime, instructions.fee);
 
         let fee_exec_result = match fee_exec_results {
             Ok(execution_results) => {
                 // Checkpoint the tracker state after the fee instructions have been executed in case of transaction
                 // failure.
-                if let Err(err) = runtime.interface().set_fee_checkpoint() {
+                if let Err(err) = runtime.interface().checkpoint_fee_intent() {
                     let mut finalize = FinalizeResult::new_rejected(transaction_hash, err.to_reject_reason());
                     finalize.execution_results = execution_results;
                     return Ok(ExecuteResult {
@@ -181,26 +186,30 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 execution_results
             },
             Err(err) => {
+                warn!(
+                    target: LOG_TARGET,
+                    "Fee payment failed for transaction {}: {}",
+                    transaction_hash,
+                    err
+                );
                 return Ok(ExecuteResult {
-                    finalize: FinalizeResult::new_rejected(
-                        transaction_hash,
-                        RejectReason::ExecutionFailure(err.to_string()),
-                    ),
+                    finalize: FinalizeResult::new_rejected(transaction_hash, err.to_reject_reason()),
                     execution_time: timer.elapsed(),
                 });
             },
         };
 
-        let instruction_result = Self::process_instructions(&config, &*template_provider, &runtime, instructions.main);
+        // Clear the workspace before executing the main instructions
+        runtime
+            .interface()
+            .workspace_invoke(WorkspaceAction::DropAll, invoke_args![].into())?;
+
+        let instruction_result = Self::process_instructions(&template_provider, &runtime, instructions.main);
 
         match instruction_result {
             Ok(execution_results) => {
                 let mut finalize = runtime.interface().finalize()?;
-                if finalize.fee_receipt.is_paid_in_full() {
-                    finalize.execution_results = execution_results;
-                } else {
-                    finalize.execution_results = fee_exec_result;
-                }
+                finalize.execution_results = execution_results;
                 Ok(ExecuteResult {
                     finalize,
                     execution_time: timer.elapsed(),
@@ -210,18 +219,9 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             Err(err) => {
                 // Reset the state to when the state at the end of the fee instructions. The fee charges for the
                 // successful instructions are still charged even though the transaction failed.
-                runtime.interface().reset_to_fee_checkpoint()?;
                 // Finalize will now contain the fee payments and vault refunds only
-                let mut finalize = runtime.interface().finalize()?;
+                let mut finalize = runtime.interface().finalize_failure(err.to_reject_reason())?;
                 finalize.execution_results = fee_exec_result;
-                finalize.result = TransactionResult::AcceptFeeRejectRest(
-                    finalize
-                        .result
-                        .accept()
-                        .cloned()
-                        .expect("The fee transaction should be there"),
-                    RejectReason::ExecutionFailure(err.to_string()),
-                );
                 Ok(ExecuteResult {
                     finalize,
                     execution_time: timer.elapsed(),
@@ -231,14 +231,13 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
     }
 
     fn process_instructions(
-        config: &TransactionProcessorConfig,
         template_provider: &TTemplateProvider,
         runtime: &Runtime,
         instructions: Vec<Instruction>,
     ) -> Result<Vec<InstructionResult>, TransactionError> {
         let result: Result<_, _> = instructions
             .into_iter()
-            .map(|instruction| Self::process_instruction(config, template_provider, runtime, instruction))
+            .map(|instruction| Self::process_instruction(template_provider, runtime, instruction))
             .collect();
 
         // check that the finalized state is valid
@@ -249,8 +248,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         result
     }
 
+    #[allow(clippy::too_many_lines)]
     fn process_instruction(
-        config: &TransactionProcessorConfig,
         template_provider: &TTemplateProvider,
         runtime: &Runtime,
         instruction: Instruction,
@@ -258,7 +257,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         debug!(target: LOG_TARGET, "instruction = {:?}", instruction);
         match instruction {
             Instruction::CreateAccount {
-                public_key_address,
+                owner_public_key: public_key_address,
                 owner_rule,
                 access_rules,
                 workspace_id,
@@ -289,12 +288,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 Ok(InstructionResult::empty())
             },
             Instruction::EmitLog { level, message } => {
-                runtime.interface().emit_log(level, message)?;
+                runtime.interface().emit_log(level, message.into_string())?;
                 Ok(InstructionResult::empty())
             },
-            Instruction::ClaimBurn { claim } => {
-                // Need to call it on the runtime so that a bucket is created.
-                runtime.interface().claim_burn(*claim)?;
+            Instruction::ClaimBurn { claim, output_data } => {
+                runtime.interface().claim_burn(*claim, output_data)?;
                 Ok(InstructionResult::empty())
             },
             Instruction::ClaimValidatorFees { address } => {
@@ -312,7 +310,41 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 )?;
                 Ok(InstructionResult::empty())
             },
-            Instruction::PublishTemplate { binary } => Self::publish_template(config, runtime, binary),
+            Instruction::TakeFromBucket {
+                input_bucket,
+                amount,
+                output_bucket,
+            } => {
+                let item = runtime
+                    .interface()
+                    .workspace_invoke(WorkspaceAction::Get, invoke_args![input_bucket].into())?;
+
+                let bucket_ref = BucketRef::Ref(item.decode()?);
+                let bucket =
+                    runtime
+                        .interface()
+                        .bucket_invoke(bucket_ref, BucketAction::Take, invoke_args![amount].into())?;
+                let prev_bucket_val = runtime
+                    .interface()
+                    .bucket_invoke(
+                        bucket_ref,
+                        BucketAction::GetAmount,
+                        invoke_args![BucketGetAmountArg::Everything].into(),
+                    )?
+                    .decode::<Amount>()?;
+                if prev_bucket_val.is_zero() {
+                    // Drop the bucket to prevent a dangling (empty) bucket
+                    runtime
+                        .interface()
+                        .bucket_invoke(bucket_ref, BucketAction::DropEmpty, invoke_args![].into())?;
+                }
+
+                runtime
+                    .interface()
+                    .put_on_workspace(output_bucket, IndexedValue::from_value(bucket.into_value()?)?)?;
+                Ok(InstructionResult::empty())
+            },
+            Instruction::PublishTemplate { binary } => Self::publish_template(runtime, binary),
             Instruction::AllocateAddress {
                 allocatable_type: substate_type,
                 workspace_id,
@@ -322,10 +354,125 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 statement,
                 revealed_input_bucket,
             } => Self::stealth_transfer(runtime, resource_address, statement, revealed_input_bucket),
+            Instruction::PayFee {
+                statement,
+                revealed_input_bucket,
+            } => Self::pay_fee(runtime, statement, revealed_input_bucket),
+            Instruction::UpdateComponentTemplate {
+                component,
+                migrate,
+                new_template,
+            } => Self::update_component_template(template_provider, runtime, component, new_template, migrate),
         }
     }
 
-    pub fn stealth_transfer(
+    fn update_component_template(
+        template_provider: &TTemplateProvider,
+        runtime: &Runtime,
+        component: ComponentReference,
+        new_template: TemplateAddress,
+        migrate: Option<MigrateFunction>,
+    ) -> Result<InstructionResult, TransactionError> {
+        let (component_address, component) = runtime.interface().load_component(component)?;
+        // let template_address = component.template_address;
+
+        let template = template_provider
+            .get_template(&new_template)
+            .map_err(|e| TransactionError::FailedToLoadTemplate {
+                address: new_template,
+                details: e.to_string(),
+            })?
+            .ok_or(TransactionError::TemplateNotFound { address: new_template })?;
+
+        runtime
+            .interface()
+            .track_template_loaded(&new_template, template.code_size())?;
+
+        let component_lock = runtime.interface().lock_component(component_address, LockFlag::Write)?;
+
+        let resolved_args = migrate
+            .as_ref()
+            .map(|f| runtime.resolve_args(&f.args))
+            .transpose()?
+            .unwrap_or_default();
+        let arg_scope = resolved_args
+            .iter()
+            .map(IndexedWellKnownTypes::from_value)
+            .collect::<Result<_, _>>()?;
+
+        let function_def = migrate
+            .as_ref()
+            .map(|f| {
+                template
+                    .template_def()
+                    .get_function(&f.name)
+                    .cloned()
+                    .ok_or_else(|| TransactionError::FunctionNotFound {
+                        name: f.name.to_string(),
+                    })
+                    .and_then(|f| {
+                        if f.is_migration {
+                            Ok(f)
+                        } else {
+                            Err(TransactionError::NotAMigrationFunction { name: f.name })
+                        }
+                    })
+            })
+            .transpose()?;
+
+        let component_scope = IndexedWellKnownTypes::from_value(component.state())?;
+
+        runtime.interface().push_call_frame(PushCallFrame::MigrationContext {
+            template_address: new_template,
+            module_name: template.template_name().to_string(),
+            component_scope,
+            component_lock,
+            arg_scope: Box::new(arg_scope),
+            entity_id: component.entity_id,
+        })?;
+
+        // This must come after the call frame as that defines the authorization scope
+        runtime
+            .interface()
+            .check_component_ownership(NativeAction::UpdateComponentTemplate.into())?;
+
+        runtime.interface().update_component_template(new_template)?;
+
+        if let Some(function_def) = function_def {
+            // Migrate function is defined, so we need to call it
+            let mut final_args = Vec::with_capacity(resolved_args.len() + 1);
+            final_args.push(to_value(&component_address)?);
+            final_args.extend(resolved_args);
+
+            let result = Self::invoke_template(template, runtime.clone(), function_def, final_args)?;
+
+            runtime.interface().validate_return_value(&result.indexed)?;
+        }
+        runtime.interface().pop_call_frame()?;
+
+        Ok(InstructionResult::empty())
+    }
+
+    fn pay_fee(
+        runtime: &Runtime,
+        statement: StealthTransferStatement,
+        revealed_funds_bucket: Option<WorkspaceOffsetId>,
+    ) -> Result<InstructionResult, TransactionError> {
+        let revealed_funds_bucket = revealed_funds_bucket
+            .map(|id| {
+                runtime.resolve_workspace_id(&id).and_then(|r| {
+                    r.decode().map_err(|e| RuntimeError::InvalidArgument {
+                        argument: "revealed_funds_bucket",
+                        reason: format!("Expected workspace id {id} to be a BucketId: {e}"),
+                    })
+                })
+            })
+            .transpose()?;
+        runtime.interface().pay_fee(statement, revealed_funds_bucket)?;
+        Ok(InstructionResult::empty())
+    }
+
+    fn stealth_transfer(
         runtime: &Runtime,
         resource_address: ResourceAddressRef,
         statement: StealthTransferStatement,
@@ -350,14 +497,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         Ok(InstructionResult::empty())
     }
 
-    pub fn put_output_on_workspace_with_name(runtime: &Runtime, key: WorkspaceId) -> Result<(), TransactionError> {
+    fn put_output_on_workspace_with_name(runtime: &Runtime, key: WorkspaceId) -> Result<(), TransactionError> {
         runtime
             .interface()
             .workspace_invoke(WorkspaceAction::PutLastInstructionOutput, invoke_args![key].into())?;
         Ok(())
     }
 
-    pub fn drop_all_proofs_in_workspace(runtime: &Runtime) -> Result<(), TransactionError> {
+    fn drop_all_proofs_in_workspace(runtime: &Runtime) -> Result<(), TransactionError> {
         runtime
             .interface()
             .workspace_invoke(WorkspaceAction::DropAllProofs, invoke_args![].into())?;
@@ -365,7 +512,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
     }
 
     /// Allocating a new address for the given [`AllocatableAddressType`].
-    pub fn allocate_address(
+    fn allocate_address(
         runtime: &Runtime,
         substate_type: AllocatableAddressType,
         workspace_id: WorkspaceId,
@@ -392,16 +539,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
     }
 
     /// Load, validate template binary and adds it to TemplateProvider.
-    pub fn publish_template(
-        config: &TransactionProcessorConfig,
-        runtime: &Runtime,
-        binary: Vec<u8>,
-    ) -> Result<InstructionResult, TransactionError> {
-        if binary.len() > config.template_binary_max_size_bytes {
-            return Err(TransactionError::WasmBinaryTooBig(
-                binary.len(),
-                config.template_binary_max_size_bytes,
-            ));
+    fn publish_template(runtime: &Runtime, binary: TemplateBlob) -> Result<InstructionResult, TransactionError> {
+        if binary.len() > limits::ENGINE_LIMITS.max_template_binary_size_bytes {
+            // Technically, not possible, but this check is kept in to make a test pass, and potentially for additional
+            // safety.
+            return Err(TransactionError::WasmBinaryTooBig {
+                size: binary.len(),
+                max: limits::ENGINE_LIMITS.max_template_binary_size_bytes,
+            });
         }
 
         // validate binary
@@ -412,7 +557,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         Ok(InstructionResult::empty())
     }
 
-    pub fn create_account(
+    fn create_account(
         template_provider: &TTemplateProvider,
         runtime: &Runtime,
         public_key_address: &RistrettoPublicKeyBytes,
@@ -421,7 +566,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         workspace_id: Option<WorkspaceOffsetId>,
     ) -> Result<InstructionResult, TransactionError> {
         let template = template_provider
-            .get_template_module(&ACCOUNT_TEMPLATE_ADDRESS)
+            .get_template(&ACCOUNT_TEMPLATE_ADDRESS)
             .map_err(|e| TransactionError::FailedToLoadTemplate {
                 address: ACCOUNT_TEMPLATE_ADDRESS,
                 details: e.to_string(),
@@ -477,7 +622,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         Ok(result)
     }
 
-    pub fn call_function(
+    pub(crate) fn call_function(
         template_provider: &TTemplateProvider,
         runtime: &Runtime,
         template_address: &TemplateAddress,
@@ -485,20 +630,30 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         args: Vec<InstructionArg>,
     ) -> Result<InstructionResult, TransactionError> {
         let template = template_provider
-            .get_template_module(template_address)
+            .get_template(template_address)
             .map_err(|e| TransactionError::FailedToLoadTemplate {
                 address: *template_address,
                 details: e.to_string(),
             })?
-            .ok_or(TransactionError::TemplateNotFound {
+            .ok_or_else(|| TransactionError::TemplateNotFound {
                 address: *template_address,
             })?;
+
+        runtime
+            .interface()
+            .track_template_loaded(template_address, template.code_size())?;
 
         let function_def = template.template_def().get_function(function).cloned().ok_or_else(|| {
             TransactionError::FunctionNotFound {
                 name: function.to_string(),
             }
         })?;
+
+        if function_def.is_migration {
+            return Err(TransactionError::CannotCallMigrationFunctionDirectly {
+                name: function_def.name,
+            });
+        }
 
         let resolved_args = runtime.resolve_args(&args)?;
         let arg_scope = resolved_args
@@ -522,10 +677,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         Ok(result)
     }
 
-    pub fn call_method(
+    pub(crate) fn call_method(
         template_provider: &TTemplateProvider,
         runtime: &Runtime,
-        call: ComponentCall,
+        call: ComponentReference,
         method: &str,
         args: Vec<InstructionArg>,
     ) -> Result<InstructionResult, TransactionError> {
@@ -533,7 +688,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         let template_address = component.template_address;
 
         let template = template_provider
-            .get_template_module(&template_address)
+            .get_template(&template_address)
             .map_err(|e| TransactionError::FailedToLoadTemplate {
                 address: template_address,
                 details: e.to_string(),
@@ -542,11 +697,21 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 address: template_address,
             })?;
 
+        runtime
+            .interface()
+            .track_template_loaded(&template_address, template.code_size())?;
+
         let function_def = template.template_def().get_function(method).cloned().ok_or_else(|| {
             TransactionError::FunctionNotFound {
                 name: method.to_string(),
             }
         })?;
+
+        if function_def.is_migration {
+            return Err(TransactionError::CannotCallMigrationFunctionDirectly {
+                name: function_def.name,
+            });
+        }
 
         let lock_flag = if function_def.is_mut {
             LockFlag::Write
@@ -568,15 +733,13 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             template_address,
             module_name: template.template_name().to_string(),
             component_scope,
-            component_lock: component_lock.clone(),
+            component_lock,
             arg_scope: Box::new(arg_scope),
             entity_id: component.entity_id,
         })?;
 
         // This must come after the call frame as that defines the authorization scope
-        runtime
-            .interface()
-            .check_component_access_rules(method, &component_lock)?;
+        runtime.interface().check_component_access_rules(method)?;
 
         let mut final_args = Vec::with_capacity(resolved_args.len() + 1);
         final_args.push(to_value(&component_address)?);

@@ -25,8 +25,6 @@ import { Form, Link } from "react-router-dom";
 import AddIcon from "@mui/icons-material/Add";
 import Button from "@mui/material/Button/Button";
 import Fade from "@mui/material/Fade";
-import MenuItem from "@mui/material/MenuItem";
-import Select, { SelectChangeEvent } from "@mui/material/Select/Select";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
@@ -34,45 +32,46 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField/TextField";
-import FormControl from "@mui/material/FormControl";
-import InputLabel from "@mui/material/InputLabel";
 import { ChevronRight } from "@mui/icons-material";
 import IconButton from "@mui/material/IconButton";
-import { BoxHeading2, DataTableCell } from "../../../Components/StyledComponents";
-import {
-  useAccountsCreate,
-  useAccountsCreateFreeTestCoins,
-  useAccountsClaimBurn,
-  useAccountsList,
-} from "../../../api/hooks/useAccounts";
-import FetchStatusCheck from "../../../Components/FetchStatusCheck";
-import queryClient from "../../../api/queryClient";
+import { BoxHeading2, DataTableCell } from "@components/StyledComponents";
+import { useAccountsCreate, useAccountsList } from "@api/hooks/useAccounts";
+import FetchStatusCheck from "@components/FetchStatusCheck";
+import queryClient from "@api/queryClient";
 import { AccountInfo, substateIdToString, shortenSubstateId } from "@tari-project/typescript-bindings";
-import CopyAddress from "../../../Components/CopyAddress";
+import CopyAddress from "@components/CopyAddress";
 
-function Account(account: AccountInfo, index: number) {
+function Account({ account }: { account: AccountInfo }) {
+  const {
+    account: { name, component_address },
+    address,
+  } = account;
   return (
-    <TableRow key={index}>
+    <TableRow>
       <DataTableCell>
         <Link
-          to={`/accounts/${substateIdToString(account.account.address)}`}
+          to={`/accounts/${substateIdToString(component_address)}`}
           style={{
             textDecoration: "none",
             color: "inherit",
           }}
         >
-          {account.account.name || shortenSubstateId(account.account.address)}
+          {name || shortenSubstateId(component_address)}
         </Link>
       </DataTableCell>
       <DataTableCell>
-        <CopyAddress address={substateIdToString(account.account.address)} />
-      </DataTableCell>
-      <DataTableCell>{account.account.key_index}</DataTableCell>
-      <DataTableCell>
-        <CopyAddress address={account.public_key} />
+        <CopyAddress address={substateIdToString(component_address)} />
       </DataTableCell>
       <DataTableCell>
-        <IconButton component={Link} to={`/accounts/${substateIdToString(account.account.address)}`}>
+        {account.account.owner_key_id && "Derived" in account.account.owner_key_id
+          ? account.account.owner_key_id.Derived.index.toString()
+          : "imported"}
+      </DataTableCell>
+      <DataTableCell>
+        <CopyAddress address={address} />
+      </DataTableCell>
+      <DataTableCell>
+        <IconButton component={Link} to={`/accounts/${substateIdToString(component_address)}`}>
           <ChevronRight />
         </IconButton>
       </DataTableCell>
@@ -82,15 +81,9 @@ function Account(account: AccountInfo, index: number) {
 
 function Accounts() {
   const [showAccountDialog, setShowAddAccountDialog] = useState(false);
-  const [showClaimDialog, setShowClaimBurnDialog] = useState(false);
   const [accountFormState, setAccountFormState] = useState({
     accountName: "",
     signingKeyIndex: "",
-    fee: "",
-  });
-  const [claimBurnFormState, setClaimBurnFormState] = useState({
-    account: "",
-    claimProof: "",
     fee: "",
   });
   const {
@@ -99,15 +92,8 @@ function Accounts() {
     isError: isErrorAccountsList,
     error: errorAccountsList,
   } = useAccountsList(0, 10);
-  const { mutateAsync: mutateCreateFeeTestCoins } = useAccountsCreateFreeTestCoins();
 
   const { mutateAsync: mutateAddAccount } = useAccountsCreate();
-
-  const { mutateAsync: mutateClaimBurn } = useAccountsClaimBurn(
-    claimBurnFormState.account,
-    JSON.parse(claimBurnFormState.claimProof),
-    +claimBurnFormState.fee,
-  );
 
   const showAddAccountDialog = (setElseToggle: boolean = !showAccountDialog) => {
     setShowAddAccountDialog(setElseToggle);
@@ -118,17 +104,8 @@ function Accounts() {
     });
   };
 
-  const showClaimBurnDialog = (setElseToggle: boolean = !showClaimDialog) => {
-    setShowClaimBurnDialog(setElseToggle);
-    setClaimBurnFormState({
-      account: "",
-      claimProof: "",
-      fee: "",
-    });
-  };
-
-  const onSubmitAddAccount = () => {
-    mutateAddAccount(
+  const onSubmitAddAccount = async () => {
+    await mutateAddAccount(
       {
         accountName: accountFormState.accountName,
       },
@@ -140,7 +117,7 @@ function Accounts() {
             fee: "",
           });
           setShowAddAccountDialog(false);
-          queryClient.invalidateQueries(["accounts"]);
+          queryClient.invalidateQueries({ queryKey: ["accounts"] });
         },
       },
     );
@@ -154,37 +131,6 @@ function Accounts() {
     });
   };
 
-  const onClaimFreeCoins = async () => {
-    await mutateCreateFeeTestCoins({
-      account: { Name: "NewAccount" },
-      amount: 1_000_000_000,
-      fee: 1000,
-    });
-  };
-
-  const onClaimBurn = () => {
-    mutateClaimBurn(undefined, {
-      onSettled: () => {
-        setClaimBurnFormState({ account: "", claimProof: "", fee: "" });
-        setShowClaimBurnDialog(false);
-      },
-    });
-  };
-
-  const onClaimBurnChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setClaimBurnFormState({
-      ...claimBurnFormState,
-      [e.target.name]: e.target.value,
-    });
-  };
-
-  const onClaimBurnAccountChange = (e: SelectChangeEvent<string>) => {
-    setClaimBurnFormState({
-      ...claimBurnFormState,
-      [e.target.name]: e.target.value,
-    });
-  };
-
   return (
     <>
       <BoxHeading2
@@ -194,11 +140,6 @@ function Accounts() {
           gap: "0.5rem",
         }}
       >
-        <div className="flex-container">
-          <Button variant="outlined" startIcon={<AddIcon />} onClick={() => onClaimFreeCoins()}>
-            Claim Testnet Coins
-          </Button>
-        </div>
         {showAccountDialog && (
           <Fade in={showAccountDialog}>
             <Form onSubmit={onSubmitAddAccount} className="flex-container">
@@ -227,60 +168,6 @@ function Accounts() {
             </div>
           </Fade>
         )}
-        {showClaimDialog && (
-          <Fade in={showClaimDialog}>
-            <Form onSubmit={onClaimBurn} className="flex-container">
-              <FormControl>
-                <InputLabel id="account">Account</InputLabel>
-                <Select
-                  labelId="account"
-                  name="account"
-                  label="Account"
-                  value={claimBurnFormState.account}
-                  onChange={onClaimBurnAccountChange}
-                  style={{ flexGrow: 1, minWidth: "200px" }}
-                >
-                  {dataAccountsList?.accounts.map((account: AccountInfo, index: number) => {
-                    return (
-                      <MenuItem key={index} value={substateIdToString(account.account.address)}>
-                        {account.account.name}
-                      </MenuItem>
-                    );
-                  })}
-                </Select>
-              </FormControl>
-              <TextField
-                name="claimProof"
-                label="Claim Proof"
-                value={claimBurnFormState.claimProof}
-                onChange={onClaimBurnChange}
-                style={{ flexGrow: 1 }}
-              />
-              <TextField
-                name="fee"
-                label="Fee"
-                value={claimBurnFormState.fee}
-                onChange={onClaimBurnChange}
-                style={{ flexGrow: 1 }}
-              />
-              <Button variant="contained" type="submit">
-                Claim Burn
-              </Button>
-              <Button variant="outlined" onClick={() => showClaimBurnDialog(false)}>
-                Cancel
-              </Button>
-            </Form>
-          </Fade>
-        )}
-        {!showClaimDialog && (
-          <Fade in={!showClaimDialog}>
-            <div className="flex-container">
-              <Button variant="outlined" startIcon={<AddIcon />} onClick={() => showClaimBurnDialog()}>
-                Claim Burn
-              </Button>
-            </div>
-          </Fade>
-        )}
       </BoxHeading2>
       <FetchStatusCheck
         isLoading={isLoadingAccountsList}
@@ -293,15 +180,17 @@ function Accounts() {
               <TableHead>
                 <TableRow>
                   <TableCell>Name</TableCell>
-                  <TableCell>Address</TableCell>
+                  <TableCell>Component</TableCell>
                   <TableCell>Key index</TableCell>
-                  <TableCell>Public key</TableCell>
+                  <TableCell>Address</TableCell>
                   <TableCell>Details</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {dataAccountsList &&
-                  dataAccountsList.accounts.map((account: AccountInfo, index: number) => Account(account, index))}
+                  dataAccountsList.accounts.map((account: AccountInfo, index) => (
+                    <Account account={account} key={index} />
+                  ))}
               </TableBody>
             </Table>
           </TableContainer>

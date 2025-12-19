@@ -8,7 +8,6 @@ use tari_epoch_manager::service::EpochManagerHandle;
 use tari_ootle_app_utilities::transaction_executor::TariTransactionProcessor;
 use tari_ootle_common_types::PeerAddress;
 use tari_rpc_state_sync::RpcStateSyncClientProtocol;
-use tari_template_manager::implementation::TemplateManager;
 
 #[cfg(feature = "metrics")]
 use crate::consensus::metrics::PrometheusConsensusMetrics;
@@ -23,9 +22,11 @@ use crate::{
         services::messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
         NopLogger,
     },
+    state_store_template_provider::StateStoreTemplateProvider,
 };
 
 pub type ValidatorNodeStateStore = tari_state_store_rocksdb::RocksDbStateStore<PeerAddress>;
+pub type ValidatorTransactionProcessor = TariTransactionProcessor<StateStoreTemplateProvider<ValidatorNodeStateStore>>;
 #[derive(Clone)]
 pub struct TariConsensusSpec;
 
@@ -42,8 +43,6 @@ impl ConsensusSpec for TariConsensusSpec {
     type SignerService = TariSignatureService;
     type StateStore = ValidatorNodeStateStore;
     type SyncManager = RpcStateSyncClientProtocol<Self>;
-    type TransactionExecutor = TarBlockTransactionExecutor<
-        TariTransactionProcessor<TemplateManager<PeerAddress>>,
-        ConsensusTransactionValidator,
-    >;
+    type TransactionExecutor =
+        TarBlockTransactionExecutor<ValidatorTransactionProcessor, ConsensusTransactionValidator>;
 }

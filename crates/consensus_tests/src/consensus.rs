@@ -30,9 +30,10 @@ use tari_ootle_common_types::{
     shard::Shard,
     Epoch,
     NodeHeight,
-    SubstateAddress,
     SubstateLockType,
     SubstateRequirement,
+    ToSubstateAddress,
+    VersionedSubstateId,
 };
 use tari_ootle_storage::{
     consensus_models::{Block, Command, SubstateRecord, TransactionRecord},
@@ -49,7 +50,6 @@ use crate::support::{
     Test,
     TestAddress,
     TestVnDestination,
-    TEST_NUM_PRESHARDS,
 };
 
 // Although these tests will pass with a single thread, we enable multi-threaded mode so that any unhandled race
@@ -480,7 +480,7 @@ async fn multishard_local_inputs_foreign_outputs() {
     let outputs_2 = test.build_outputs_for_committee(2, 1);
 
     let tx1 = build_transaction_from(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .with_inputs(inputs.iter().cloned().map(|i| i.into()))
             .build_and_seal(&PrivateKey::default()),
     );
@@ -537,7 +537,7 @@ async fn multishard_local_inputs_foreign_outputs_abort() {
 
     let inputs = test.create_substates_on_vns(TestVnDestination::Committee(0), 2);
     let outputs = test.build_outputs_for_committee(1, 1);
-    let transaction = Transaction::builder()
+    let transaction = Transaction::builder_localnet()
         .with_inputs(inputs.iter().cloned().map(|i| i.into()))
         .build_and_seal(&PrivateKey::default());
 
@@ -616,7 +616,7 @@ async fn multishard_local_inputs_and_outputs_foreign_outputs() {
     let outputs_2 = test.build_outputs_for_committee(2, 5);
 
     let tx1 = build_transaction_from(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .with_inputs(inputs_0.iter().chain(&inputs_1).cloned().map(|i| i.into()))
             .build_and_seal(&PrivateKey::from_canonical_bytes(&[1; 32]).unwrap()),
     );
@@ -693,7 +693,7 @@ async fn multishard_output_conflict_abort() {
         .await;
 
     let inputs = test.create_substates_on_vns(TestVnDestination::All, 1);
-    let tx = Transaction::builder()
+    let tx = Transaction::builder_localnet()
         .with_inputs(inputs.iter().cloned().map(|i| i.into()))
         .build_and_seal(&Default::default());
     let tx2 = build_transaction_from(tx);
@@ -780,7 +780,7 @@ async fn single_shard_inputs_from_previous_outputs() {
         .map(|output| SubstateRequirement::versioned(output.clone(), 0))
         .collect::<Vec<_>>();
 
-    let tx2 = Transaction::builder()
+    let tx2 = Transaction::builder_localnet()
         .with_inputs(prev_outputs.clone())
         .build_and_seal(&Default::default());
     let tx2 = build_transaction_from(tx2.clone());
@@ -844,7 +844,7 @@ async fn multishard_inputs_from_previous_outputs() {
         .map(|output| SubstateRequirement::versioned(output.clone(), 0))
         .collect::<Vec<_>>();
 
-    let tx2 = Transaction::builder()
+    let tx2 = Transaction::builder_localnet()
         .with_inputs(prev_outputs.clone())
         .build_and_seal(&Default::default());
     let tx2 = build_transaction_from(tx2.clone());
@@ -901,12 +901,12 @@ async fn single_shard_input_conflict() {
     let substate_id = test.create_substates_on_vns(TestVnDestination::All, 1).pop().unwrap();
     let secret = PrivateKey::from_canonical_bytes(&[1u8; 32]).unwrap();
 
-    let tx1 = Transaction::builder()
+    let tx1 = Transaction::builder_localnet()
         .add_input(substate_id.clone())
         .build_and_seal(&secret);
     let tx1 = TransactionRecord::new(tx1);
 
-    let tx2 = Transaction::builder()
+    let tx2 = Transaction::builder_localnet()
         .add_input(substate_id.clone())
         .build_and_seal(&secret);
     let tx2 = TransactionRecord::new(tx2);
@@ -973,7 +973,13 @@ async fn single_shard_input_conflict() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn epoch_change() {
     setup_logger();
-    let mut test = Test::builder().add_committee(0, vec!["1", "2"]).start().await;
+    let mut test = Test::builder()
+        .modify_config(|config_mut| {
+            config_mut.epoch_end_grace_period = Duration::from_millis(10);
+        })
+        .add_committee(0, vec!["1", "2"])
+        .start()
+        .await;
 
     test.start_epoch(Epoch(1)).await;
     let mut remaining_txs = 10;
@@ -1086,7 +1092,7 @@ async fn single_shard_unversioned_inputs() {
     let unversioned_inputs = inputs
         .iter()
         .map(|i| SubstateRequirement::new(i.substate_id().clone(), None));
-    let tx = Transaction::builder()
+    let tx = Transaction::builder_localnet()
         .with_inputs(unversioned_inputs)
         .build_and_seal(&PrivateKey::default());
     let tx = TransactionRecord::new(tx);
@@ -1166,13 +1172,13 @@ async fn multishard_unversioned_input_conflict() {
         .pop()
         .unwrap();
 
-    let tx1 = Transaction::builder()
+    let tx1 = Transaction::builder_localnet()
         .add_input(SubstateRequirement::unversioned(id0.substate_id().clone()))
         .add_input(SubstateRequirement::unversioned(id1.substate_id().clone()))
         .build_and_seal(&Default::default());
     let tx1 = TransactionRecord::new(tx1);
 
-    let tx2 = Transaction::builder()
+    let tx2 = Transaction::builder_localnet()
         .add_input(SubstateRequirement::unversioned(id0.substate_id().clone()))
         .add_input(SubstateRequirement::unversioned(id1.substate_id().clone()))
         .build_and_seal(&Default::default());
@@ -1270,13 +1276,13 @@ async fn multishard_unversioned_input_conflict_delay_prepare() {
         .pop()
         .unwrap();
 
-    let tx1 = Transaction::builder()
+    let tx1 = Transaction::builder_localnet()
         .add_input(SubstateRequirement::unversioned(id0.substate_id().clone()))
         .add_input(SubstateRequirement::unversioned(id1.substate_id().clone()))
         .build_and_seal(&Default::default());
     let tx1 = TransactionRecord::new(tx1);
 
-    let tx2 = Transaction::builder()
+    let tx2 = Transaction::builder_localnet()
         .add_input(SubstateRequirement::unversioned(id0.substate_id().clone()))
         .add_input(SubstateRequirement::unversioned(id2.substate_id().clone()))
         .build_and_seal(&Default::default());
@@ -1359,8 +1365,9 @@ async fn multishard_publish_template() {
     let inputs = test.create_substates_on_vns(TestVnDestination::All, 1);
     let (sk, pk) = create_key_pair();
     let wasm = load_binary_fixture("state.wasm");
-    let tx = Transaction::builder()
-        .publish_template(wasm.clone())
+    let expected_binary_hash = hash_template_code(&wasm);
+    let tx = Transaction::builder_localnet()
+        .publish_template(wasm.try_into().unwrap())
         .with_inputs(inputs.iter().cloned().map(Into::into))
         .build_and_seal(&sk);
     let tx = TransactionRecord::new(tx);
@@ -1368,8 +1375,7 @@ async fn multishard_publish_template() {
     test.send_transaction_to_destination(TestVnDestination::All, tx.clone())
         .await;
 
-    let binary_hash = hash_template_code(&wasm);
-    let template_id = PublishedTemplateAddress::from_author_and_binary_hash(&pk.to_byte_type(), &binary_hash);
+    let template_id = PublishedTemplateAddress::from_author_and_binary_hash(&pk.to_byte_type(), &expected_binary_hash);
     test.add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
         transaction: tx.transaction().clone(),
         decision: Decision::Commit,
@@ -1400,34 +1406,20 @@ async fn multishard_publish_template() {
     test.assert_all_validators_committed(tx.id());
 
     // Assert all have the template
-    let address = SubstateAddress::from_substate_id(&template_id.into(), 0);
-    // Figure out which VN is responsible for the template substate
-    let shard = address.to_shard(TEST_NUM_PRESHARDS);
-    let vn_addr = test
-        .num_preshards()
-        .all_shard_groups_iter(test.num_committees())
-        .enumerate()
-        .find_map(|(i, sg)| {
-            if sg.contains(&shard) {
-                Some(TestAddress::new(((i + 1) * 2).to_string()))
-            } else {
-                None
-            }
-        })
-        .unwrap();
-
-    let template_substate = test
-        .get_validator(&vn_addr)
-        .state_store
-        .with_read_tx(|tx| SubstateRecord::get(tx, &address))
-        .unwrap_or_else(|e| panic!("Failed to get template substate from {vn_addr}: {e}"));
-    let binary_hash = template_substate
-        .substate_value
-        .unwrap()
-        .into_template()
-        .expect("Expected template substate")
-        .binary_hash;
-    assert_eq!(binary_hash, hash_template_code(&wasm), "Template binary does not match");
+    for (addr, vn) in test.validators() {
+        let substate_addr = VersionedSubstateId::new(template_id, 0).to_substate_address();
+        let template_substate = vn
+            .state_store
+            .with_read_tx(|tx| SubstateRecord::get(tx, &substate_addr))
+            .unwrap_or_else(|e| panic!("Failed to get template substate from {addr}: {e}"));
+        let binary_hash = template_substate
+            .substate_value
+            .unwrap()
+            .into_template()
+            .expect("Expected template substate")
+            .to_binary_hash();
+        assert_eq!(binary_hash, expected_binary_hash, "Template binary does not match");
+    }
 
     test.assert_clean_shutdown().await;
 }
@@ -1445,7 +1437,7 @@ async fn multishard_validator_fee_claim() {
         .await;
     // Create and send publish template transaction
     let address = derive_fee_pool_address(&claim_bytes, test.num_preshards(), Shard::first());
-    let claim_tx = Transaction::builder()
+    let claim_tx = Transaction::builder_localnet()
         .claim_validator_fees(address)
         .add_input(address)
         .build_and_seal(&claim_sk);

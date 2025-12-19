@@ -23,6 +23,7 @@
 use std::borrow::Cow;
 
 use serde::{Deserialize, Deserializer, Serializer};
+use tari_template_lib::types::serde_helpers::BytesVisitor;
 
 pub fn serialize<S: Serializer, T: AsRef<[u8]>>(v: &T, s: S) -> Result<S::Ok, S::Error> {
     if s.is_human_readable() {
@@ -33,65 +34,61 @@ pub fn serialize<S: Serializer, T: AsRef<[u8]>>(v: &T, s: S) -> Result<S::Ok, S:
     }
 }
 
-/// Use a serde deserializer to serialize the hex string of the given object.
 pub fn deserialize<'de, D, T>(d: D) -> Result<T, D::Error>
 where
     D: Deserializer<'de>,
     T: for<'a> TryFrom<&'a [u8]>,
+    for<'a> <T as TryFrom<&'a [u8]>>::Error: std::fmt::Display,
 {
     let value = if d.is_human_readable() {
         let hex = <Cow<'_, str> as Deserialize>::deserialize(d)?;
         let bytes = hex::decode(&*hex).map_err(serde::de::Error::custom)?;
-        T::try_from(&bytes).map_err(|_| serde::de::Error::custom("Failed to convert bytes to T"))?
+        T::try_from(&bytes).map_err(|e| {
+            serde::de::Error::custom(format!(
+                "Failed to convert bytes to {}: {e}",
+                std::any::type_name::<T>()
+            ))
+        })?
     } else {
-        let bytes = <Cow<'_, [u8]> as Deserialize>::deserialize(d)?;
-        T::try_from(&bytes).map_err(|_| serde::de::Error::custom("Failed to convert bytes to T"))?
+        let bytes = d.deserialize_byte_buf(BytesVisitor::new())?;
+        T::try_from(bytes.as_ref()).map_err(|e| {
+            serde::de::Error::custom(format!(
+                "Failed to convert bytes to {}: {e}",
+                std::any::type_name::<T>()
+            ))
+        })?
     };
 
     Ok(value)
 }
 
-pub mod vec {
-    use serde::ser::SerializeSeq;
+/// Use this if T owns the bytes
+pub fn deserialize_from_vec<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: TryFrom<Vec<u8>>,
+    T::Error: std::fmt::Display,
+{
+    let value = if d.is_human_readable() {
+        let hex = <Cow<'_, str> as Deserialize>::deserialize(d)?;
+        let bytes = hex::decode(&*hex).map_err(serde::de::Error::custom)?;
+        T::try_from(bytes).map_err(|e| {
+            serde::de::Error::custom(format!(
+                "Failed to convert bytes to {}: {e}",
+                std::any::type_name::<T>()
+            ))
+        })?
+    } else {
+        let bytes = d.deserialize_byte_buf(BytesVisitor::new())?;
+        T::try_from(bytes.into()).map_err(|e| {
+            serde::de::Error::custom(format!(
+                "Failed to convert bytes to {}: {e}",
+                std::any::type_name::<T>()
+            ))
+        })?
+    };
 
-    use super::*;
-
-    pub fn serialize<S: Serializer, T: AsRef<[u8]>>(v: &[T], s: S) -> Result<S::Ok, S::Error> {
-        if s.is_human_readable() {
-            let mut seq = s.serialize_seq(Some(v.len()))?;
-            for item in v {
-                seq.serialize_element(&hex::encode(item.as_ref()))?;
-            }
-            seq.end()
-        } else {
-            let mut seq = s.serialize_seq(Some(v.len()))?;
-            for item in v {
-                seq.serialize_element(&item.as_ref())?;
-            }
-            seq.end()
-        }
-    }
-
-    pub fn deserialize<'de, D, T>(d: D) -> Result<Vec<T>, D::Error>
-    where
-        D: Deserializer<'de>,
-        T: for<'a> TryFrom<&'a [u8]>,
-    {
-        let vec = if d.is_human_readable() {
-            let strs = <Vec<String> as Deserialize>::deserialize(d)?;
-            strs.iter()
-                .map(|s| hex::decode(s).map_err(serde::de::Error::custom))
-                .collect::<Result<Vec<_>, _>>()?
-        } else {
-            <Vec<Vec<u8>> as Deserialize>::deserialize(d)?
-        };
-
-        let values = vec
-            .into_iter()
-            .map(|v| T::try_from(v.as_slice()).map_err(|_| serde::de::Error::custom("Failed to convert bytes to T")))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(values)
-    }
+    Ok(value)
 }
 
 pub mod option {
@@ -118,6 +115,7 @@ pub mod option {
     where
         D: Deserializer<'de>,
         T: for<'a> TryFrom<&'a [u8]>,
+        for<'a> <T as TryFrom<&'a [u8]>>::Error: std::fmt::Display,
     {
         let bytes = if d.is_human_readable() {
             let hex = <Option<String> as Deserialize>::deserialize(d)?;
@@ -133,7 +131,12 @@ pub mod option {
             .as_ref()
             .map(|b| T::try_from(b.as_slice()))
             .transpose()
-            .map_err(|_| serde::de::Error::custom("Failed to convert bytes to T"))?;
+            .map_err(|e| {
+                serde::de::Error::custom(format!(
+                    "Failed to convert bytes to {}: {e}",
+                    std::any::type_name::<T>()
+                ))
+            })?;
         Ok(value)
     }
 }
@@ -147,15 +150,21 @@ mod tests {
     #[derive(Serialize, Deserialize)]
     struct TestCase {
         #[serde(with = "super")]
-        bytes: [u8; 32],
+        fixed: [u8; 32],
+        #[serde(with = "super")]
+        vec: Vec<u8>,
     }
 
     // Test it
     #[test]
     fn test_serialize() {
-        let data = TestCase { bytes: [1; 32] };
+        let data = TestCase {
+            fixed: [1; 32],
+            vec: vec![5; 100],
+        };
         let serialized = serde_json::to_vec(&data).unwrap();
         let deserialized: TestCase = serde_json::from_slice(&serialized).unwrap();
-        assert_eq!(data.bytes, deserialized.bytes);
+        assert_eq!(data.fixed, deserialized.fixed);
+        assert_eq!(data.vec, deserialized.vec);
     }
 }

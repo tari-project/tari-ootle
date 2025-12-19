@@ -23,15 +23,24 @@
 //! The prelude contains all the commonly used types and functions that are used. To use it, add the import `use
 //! tari_template_lib::prelude::*;`
 
-pub use tari_bor::Value;
+pub use tari_bor;
 pub use tari_template_lib_types::{
+    bytes::Bytes,
     crypto::{
         BalanceProofSignature,
         PedersenCommitmentBytes,
+        PublicKey,
         RistrettoPublicKeyBytes,
         Scalar32Bytes,
         SchnorrSignatureBytes,
+        Signature,
+        SignatureDomain,
+        SignaturePayload,
     },
+    custom_signature_domain,
+    MaxBytes,
+    MaxString,
+    ResourceType,
     TemplateAddress,
 };
 #[cfg(all(feature = "macro", target_arch = "wasm32"))]
@@ -42,17 +51,13 @@ pub use tari_template_macros::template_non_wasm as template;
 pub use crate::{
     args::{VaultFreezeFlag, VaultFreezeFlags},
     auth::{ComponentAccessRules as AccessRules, RestrictedAccessRule::*, *},
-    call_args,
     caller_context::CallerContext,
     component::{Component, ComponentManager},
     consensus::Consensus,
-    constants::{CONFIDENTIAL_TARI_RESOURCE_ADDRESS, PUBLIC_IDENTITY_RESOURCE_ADDRESS, XTR},
-    debug,
-    error,
+    constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS, XTR},
     events::emit_event,
-    info,
-    invoke_args,
-    log,
+    invoke_args as args,
+    metadata,
     models::{
         Account,
         Bucket,
@@ -69,15 +74,22 @@ pub use crate::{
         ProofId,
         ResourceAddress,
         ResourceAddressAllocation,
+        SignatureVerifier,
+        StealthInputsStatement,
         StealthOutputsStatement,
         StealthTransferStatement,
+        UtxoAddress,
+        UtxoId,
         Vault,
         VaultId,
+        Verifiable,
     },
     rand,
-    resource::{ResourceBuilder, ResourceManager, ResourceType},
+    resource::{ResourceBuilder, ResourceManager},
     rule,
     template::{BuiltinTemplate, TemplateManager},
-    types::*,
-    warn,
+    types,
+    types::{amount, crypto, Amount},
 };
+#[cfg(target_arch = "wasm32")]
+pub use crate::{debug, error, info, log, warn};

@@ -2,11 +2,16 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_common_types::types::FixedHash;
-use tari_consensus_types::{BlockId, LeafBlock, QcId};
+use tari_consensus_types::{BlockId, LeafBlock, PcId, QcId};
 use tari_epoch_manager::EpochManagerError;
 use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, VersionedSubstateIdError, VotePower};
 use tari_ootle_storage::{
-    consensus_models::{BlockError, ForeignProposalCommitProofError, TransactionPoolError},
+    consensus_models::{
+        BlockError,
+        EpochCheckpointValidationError,
+        ForeignProposalCommitProofError,
+        TransactionPoolError,
+    },
     StorageError,
 };
 use tari_state_tree::StateTreeError;
@@ -87,6 +92,8 @@ pub enum HotStuffError {
     InvariantError(String),
     #[error("Sync error: {0}")]
     SyncError(anyhow::Error),
+    #[error("This node needs to sync with the network: {reason}")]
+    NeedsSync { reason: String },
     #[error("Fallen behind: local={local_epoch}/{local_height}, qc={qc_epoch}/{qc_height}")]
     FallenBehind {
         local_epoch: Epoch,
@@ -113,6 +120,8 @@ pub enum HotStuffError {
     },
     #[error("Block building error: {0}")]
     BlockBuildingError(#[from] BlockError),
+    #[error("Epoch checkpoint validation error: {0}")]
+    EpochCheckpointValidationError(#[from] EpochCheckpointValidationError),
 }
 
 impl HotStuffError {
@@ -157,6 +166,12 @@ pub enum ProposalValidationError {
         proposed_by: String,
         block_id: BlockId,
         details: String,
+    },
+    #[error("Justified block {justify_block} for proposed block {block_description} by {proposed_by} is parked")]
+    JustifyBlockParked {
+        proposed_by: String,
+        block_description: String,
+        justify_block: LeafBlock,
     },
     #[error("Candidate block {candidate_block_height} is not higher than justify {justify_block_height}")]
     CandidateBlockNotHigherThanJustify {
@@ -277,7 +292,7 @@ pub enum ProposalValidationError {
     #[error("Invalid epoch in QC {qc_id} in {block_id}. Expected: {current_epoch}, given: {qc_epoch}")]
     InvalidEpochInQc {
         block_id: BlockId,
-        qc_id: QcId,
+        qc_id: PcId,
         qc_epoch: Epoch,
         current_epoch: Epoch,
     },

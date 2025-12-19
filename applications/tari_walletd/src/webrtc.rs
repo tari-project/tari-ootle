@@ -45,8 +45,7 @@ async fn make_request<T: Serialize>(
     let url = format!("http://{}", address);
     let client = reqwest::Client::new();
     let body = JsonRpcRequest {
-        id: 0,
-        jsonrpc: "2.0".to_string(),
+        id: axum_jrpc::Id::Num(0),
         method,
         params: serde_json::to_value(params)?,
     };

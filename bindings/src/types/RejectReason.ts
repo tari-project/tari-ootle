@@ -3,10 +3,11 @@ import type { AbortReason } from "./AbortReason";
 
 export type RejectReason =
   | { ExecutionFailure: string }
-  | { OneOrMoreInputsNotFound: string }
+  | { SubstateNotFound: string }
   | { FailedToLockInputs: string }
   | { FailedToLockOutputs: string }
   | "ForeignPledgeInputConflict"
   | { ForeignShardGroupDecidedToAbort: { start_shard: number; end_shard: number; abort_reason: AbortReason } }
   | { InsufficientFeesPaid: string }
+  | "FeePaymentInMainIntent"
   | { Abort: { reason: AbortReason } };

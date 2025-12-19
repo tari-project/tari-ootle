@@ -4,6 +4,7 @@
 use std::{fmt, fmt::Display, ops::Deref};
 
 use smallvec::SmallVec;
+use tari_template_lib_types::hex::write_hex_fmt;
 
 /// A **immutable** byte buffer that can be stack-allocated if the buffer is smaller than L or heap-allocated if it is
 /// larger.
@@ -45,12 +46,12 @@ impl<const L: usize> SmallBytes<L> {
         [0; L]
     }
 
-    pub fn new_stack(buf: [u8; L], length: usize) -> Self {
+    pub fn from_buf_and_len(buf: [u8; L], length: usize) -> Self {
         let inner = SmallVec::from_buf_and_len(buf, length);
         Self { inner }
     }
 
-    pub fn new_heap(v: Vec<u8>) -> Self {
+    pub fn from_vec(v: Vec<u8>) -> Self {
         let inner = SmallVec::from_vec(v);
         Self { inner }
     }
@@ -102,7 +103,7 @@ impl<const L: usize> From<[u8; L]> for SmallBytes<L> {
 
 impl<const L: usize> From<Vec<u8>> for SmallBytes<L> {
     fn from(b: Vec<u8>) -> Self {
-        SmallBytes::new_heap(b)
+        SmallBytes::from_vec(b)
     }
 }
 impl<const L: usize> From<SmallBytes<L>> for Vec<u8> {
@@ -115,9 +116,7 @@ impl<const L: usize> Display for SmallBytes<L> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if f.alternate() {
             // Hex
-            for b in self.as_slice() {
-                write!(f, "{:02x}", b)?;
-            }
+            write_hex_fmt(f, self.as_slice())?;
         } else {
             // Try to print as UTF-8
             write!(f, "{}", String::from_utf8_lossy(self.as_slice()))?;

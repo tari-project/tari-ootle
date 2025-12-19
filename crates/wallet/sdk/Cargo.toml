@@ -13,31 +13,45 @@ tari_common_types = { workspace = true }
 tari_crypto = { workspace = true, features = ["borsh"] }
 tari_engine_types = { workspace = true }
 tari_ootle_common_types = { workspace = true }
-tari_ootle_wallet_crypto = { workspace = true }
+tari_ootle_wallet_crypto = { workspace = true, features = ["serde"] }
 tari_template_builtin = { workspace = true }
 tari_consensus_types = { workspace = true }
-tari_key_manager = { workspace = true }
 tari_transaction = { workspace = true }
 tari_template_lib = { workspace = true }
 tari_template_abi = { workspace = true }
+tari_ootle_address = { workspace = true, features = ["serde"] }
+tari_hashing = { workspace = true }
 
 anyhow = { workspace = true }
-async-trait = { workspace = true }
 blake2 = { workspace = true }
 digest = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true, default-features = true }
+futures = { workspace = true }
 time = { workspace = true, features = ["serde", "serde-human-readable"] }
 thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 webauthn-rs = { workspace = true }
 keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+rand = { workspace = true }
 passwords = "3.1.16"
-zeroize = { workspace = true }
+zeroize = { workspace = true, features = ["serde", "simd"] }
+tokio = { workspace = true, default-features = false, features = ["sync", "rt-multi-thread"] }
 
 [dev-dependencies]
+tari_transaction_components = { workspace = true }
 tari_ootle_wallet_storage_sqlite = { workspace = true }
 tempfile = { workspace = true }
 
 [features]
-ts = ["ts-rs"]
+ts = [
+    "ts-rs",
+    "tari_ootle_address/ts",
+    "tari_bor/ts",
+    "tari_engine_types/ts",
+    "tari_template_abi/ts",
+    "tari_template_lib/ts",
+    "tari_transaction/ts",
+    "tari_ootle_wallet_crypto/ts",
+    "tari_consensus_types/ts"
+]

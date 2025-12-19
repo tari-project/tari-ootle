@@ -35,7 +35,7 @@ pub fn serialize<S: Serializer, T: AsRef<[u8]>>(v: &T, s: S) -> Result<S::Ok, S:
 pub fn deserialize<'de, D, T>(d: D) -> Result<T, D::Error>
 where
     D: Deserializer<'de>,
-    for<'a> T: TryFrom<&'a [u8]>,
+    for<'a> T: TryFrom<Vec<u8>>,
 {
     let bytes = if d.is_human_readable() {
         let s = String::deserialize(d)?;
@@ -44,5 +44,6 @@ where
         Vec::<u8>::deserialize(d)?
     };
 
-    T::try_from(&bytes).map_err(|_| serde::de::Error::custom("Failed to convert bytes to T"))
+    T::try_from(bytes)
+        .map_err(|_| serde::de::Error::custom(format!("Failed to convert bytes to {}", std::any::type_name::<T>())))
 }

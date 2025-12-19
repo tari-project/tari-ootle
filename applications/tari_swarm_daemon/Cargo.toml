@@ -9,7 +9,7 @@ license.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tari_core = { workspace = true } # Used for VN registration signature
+tari_transaction_components = { workspace = true } # Used for VN registration signature
 tari_common_types = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_crypto = { workspace = true }
@@ -20,13 +20,14 @@ minotari_node_grpc_client = { workspace = true }
 minotari_wallet_grpc_client = { workspace = true }
 tari_validator_node_client = { workspace = true }
 tari_wallet_daemon_client = { workspace = true }
-tari_engine = { workspace = true }
 tari_template_lib_types = { workspace = true }
 tari_ootle_app_utilities = { workspace = true }
+tari_ootle_wallet_sdk = { workspace = true }
 
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-axum = { workspace = true, features = ["multipart", "headers"] }
+axum = { workspace = true }
+axum-extra = { workspace = true, features = ["typed-header"] }
 axum-jrpc = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 fern = { workspace = true, features = ["colored", "date-based"] }
@@ -39,7 +40,6 @@ indexmap = { workspace = true }
 slug = "0.1.6"
 log = { workspace = true }
 mime_guess = { workspace = true }
-reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

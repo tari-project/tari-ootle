@@ -15,13 +15,7 @@ use tari_template_lib::{
     models::NonFungibleAddress,
 };
 
-use crate::runtime::{
-    locking::LockedSubstate,
-    working_state::WorkingState,
-    ActionIdent,
-    AuthorizationScope,
-    RuntimeError,
-};
+use crate::runtime::{working_state::WorkingState, ActionIdent, AuthorizationScope, RuntimeError};
 
 pub struct Authorization<'a> {
     state: &'a WorkingState,
@@ -32,7 +26,15 @@ impl<'a> Authorization<'a> {
         Self { state }
     }
 
-    pub fn check_component_access_rules(&self, method: &str, locked: &LockedSubstate) -> Result<(), RuntimeError> {
+    pub fn check_current_component_access_rules(&self, method: &str) -> Result<(), RuntimeError> {
+        let locked = self
+            .state
+            .current_call_scope()?
+            .get_current_component_lock()
+            .ok_or_else(|| RuntimeError::InvariantError {
+                function: "check_component_access_rules",
+                details: "No current component lock in call scope".to_string(),
+            })?;
         let component = self.state.get_component(locked)?;
         let scope = self.state.current_call_scope()?.auth_scope();
         if check_ownership(self.state, scope, component.as_ownership())? {
@@ -50,27 +52,16 @@ impl<'a> Authorization<'a> {
                 })?;
 
         // Check access rules
-        match component.access_rules().get_method_access_rule(method) {
-            AccessRule::AllowAll => Ok(()),
-            AccessRule::DenyAll => Err(RuntimeError::AccessDenied {
+        let access_rule = component.access_rules().get_method_access_rule(method);
+        if !self.check_access_rule(access_rule)? {
+            return Err(RuntimeError::AccessDenied {
                 action_ident: ActionIdent::ComponentCallMethod {
                     component_address,
                     method: method.to_string(),
                 },
-            }),
-            AccessRule::Restricted(rule) => {
-                if !check_restricted_access_rule(self.state, scope, rule)? {
-                    return Err(RuntimeError::AccessDenied {
-                        action_ident: ActionIdent::ComponentCallMethod {
-                            component_address,
-                            method: method.to_string(),
-                        },
-                    });
-                }
-
-                Ok(())
-            },
+            });
         }
+        Ok(())
     }
 
     pub fn check_resource_access_rules(
@@ -98,6 +89,11 @@ impl<'a> Authorization<'a> {
         Ok(())
     }
 
+    pub fn check_access_rule(&self, rule: &AccessRule) -> Result<bool, RuntimeError> {
+        let scope = self.state.current_call_scope()?.auth_scope();
+        check_access_rule(self.state, scope, rule)
+    }
+
     pub fn require_ownership<A: Into<ActionIdent>>(
         &self,
         action: A,
@@ -121,7 +117,7 @@ fn check_ownership(
                 return Ok(false);
             };
             let owner_proof = NonFungibleAddress::from_public_key(*owner_key);
-            Ok(scope.virtual_proofs().contains(&owner_proof))
+            Ok(scope.contains_badge(&owner_proof))
         },
         OwnerRule::None => Ok(false),
         OwnerRule::ByAccessRule(rule) => check_access_rule(state, scope, rule),
@@ -135,7 +131,7 @@ fn check_ownership(
             }
 
             let owner_proof = NonFungibleAddress::from_public_key(*key);
-            Ok(scope.virtual_proofs().contains(&owner_proof))
+            Ok(scope.contains_badge(&owner_proof))
         },
     }
 }
@@ -203,6 +199,19 @@ fn check_require_rule(
 
             Ok(true)
         },
+        RequireRule::MOfN(n, requirements) => {
+            let mut satisfied = 0;
+            for requirement in requirements {
+                if check_requirement(state, scope, requirement)? {
+                    satisfied += 1;
+                    if satisfied == *n {
+                        return Ok(true);
+                    }
+                }
+            }
+
+            Ok(false)
+        },
     }
 }
 
@@ -213,11 +222,7 @@ fn check_requirement(
 ) -> Result<bool, RuntimeError> {
     match requirement {
         RuleRequirement::Resource(resx) => {
-            if scope
-                .virtual_proofs()
-                .iter()
-                .any(|addr| addr.resource_address() == resx)
-            {
+            if scope.contains_badge_of_resource(resx) {
                 return Ok(true);
             }
 
@@ -231,7 +236,7 @@ fn check_requirement(
             Ok(false)
         },
         RuleRequirement::NonFungibleAddress(addr) => {
-            if scope.virtual_proofs().contains(addr) {
+            if scope.contains_badge(addr) {
                 return Ok(true);
             }
 

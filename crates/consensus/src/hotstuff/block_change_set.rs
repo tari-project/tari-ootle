@@ -10,14 +10,13 @@ use std::{
 use indexmap::IndexMap;
 use log::*;
 use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock};
-use tari_engine_types::{substate::SubstateId, template_lib_models::UnclaimedConfidentialOutputAddress};
+use tari_engine_types::{substate::SubstateId, template_lib_models::ClaimedOutputTombstoneAddress};
 use tari_ootle_common_types::{displayable::Displayable, optional::Optional, shard::Shard, NodeHeight, ShardGroup};
 use tari_ootle_storage::{
     consensus_models::{
         Block,
         BlockDiff,
         BlockTransactionExecution,
-        BurntUtxo,
         Evidence,
         ForeignProposalRecord,
         ForeignProposalStatus,
@@ -56,7 +55,7 @@ const MEM_MAX_PROPOSED_UTXO_MINTS_SIZE: usize = 1000;
 
 #[derive(Debug, Clone)]
 pub struct BlockDecision {
-    pub quorum_decision: Option<QuorumDecision>,
+    pub local_decision: Option<QuorumDecision>,
     /// Contains newly-committed non-dummy blocks
     pub commit_blocks: Vec<Block>,
     pub finalized_transactions: Vec<Vec<TransactionPoolRecord>>,
@@ -67,7 +66,7 @@ pub struct BlockDecision {
 
 impl BlockDecision {
     pub fn is_accept(&self) -> bool {
-        matches!(self.quorum_decision, Some(QuorumDecision::Accept))
+        matches!(self.local_decision, Some(QuorumDecision::Accept))
     }
 
     pub fn is_committed_epoch_end(&self) -> bool {
@@ -91,7 +90,7 @@ impl BlockDecision {
 
     pub fn highest_qc_view(&self) -> NodeHeight {
         self.high_pc
-            .block_height()
+            .height()
             .max(self.new_high_tc.as_ref().map_or(NodeHeight(0), |tc| tc.height()))
     }
 }
@@ -100,13 +99,13 @@ impl BlockDecision {
 pub struct ProposedBlockChangeSet {
     block: LeafBlock,
     quorum_decision: Option<QuorumDecision>,
-    substate_changes: Vec<SubstateChange>,
+    local_substate_changes: Vec<SubstateChange>,
     state_tree_diffs: IndexMap<Shard, PendingShardStateTreeDiff>,
     substate_locks: IndexMap<SubstateId, Vec<SubstateLock>>,
     transaction_changes: IndexMap<TransactionId, TransactionChangeSet>,
     new_transactions_to_sequence: Vec<TransactionPoolRecord>,
     proposed_foreign_proposals: Vec<BlockId>,
-    proposed_utxo_mints: Vec<UnclaimedConfidentialOutputAddress>,
+    proposed_utxo_mints: Vec<ClaimedOutputTombstoneAddress>,
     no_vote_reason: Option<NoVoteReason>,
     evict_nodes: Vec<RistrettoPublicKeyBytes>,
 }
@@ -116,7 +115,7 @@ impl ProposedBlockChangeSet {
         Self {
             block,
             quorum_decision: None,
-            substate_changes: Vec::new(),
+            local_substate_changes: Vec::new(),
             substate_locks: IndexMap::new(),
             transaction_changes: IndexMap::new(),
             new_transactions_to_sequence: Vec::new(),
@@ -145,15 +144,15 @@ impl ProposedBlockChangeSet {
     pub fn clear(&mut self) {
         self.quorum_decision = None;
 
-        self.substate_changes.clear();
-        if self.substate_changes.capacity() > MEM_MAX_BLOCK_DIFF_CHANGES {
+        self.local_substate_changes.clear();
+        if self.local_substate_changes.capacity() > MEM_MAX_BLOCK_DIFF_CHANGES {
             debug!(
                 target: LOG_TARGET,
                 "Shrinking block_diff from {} to {}",
-                self.substate_changes.capacity(),
+                self.local_substate_changes.capacity(),
                 MEM_MAX_BLOCK_DIFF_CHANGES
             );
-            self.substate_changes.shrink_to(MEM_MAX_BLOCK_DIFF_CHANGES);
+            self.local_substate_changes.shrink_to(MEM_MAX_BLOCK_DIFF_CHANGES);
         }
         self.transaction_changes.clear();
         if self.transaction_changes.capacity() > MEM_MAX_TRANSACTION_CHANGE_SIZE {
@@ -232,8 +231,8 @@ impl ProposedBlockChangeSet {
         self
     }
 
-    pub fn set_substate_changes(&mut self, diff: Vec<SubstateChange>) -> &mut Self {
-        self.substate_changes = diff;
+    pub fn set_block_diff_to_commit(&mut self, diff: BlockDiff) -> &mut Self {
+        self.local_substate_changes = diff.into_changes();
         self
     }
 
@@ -251,13 +250,13 @@ impl ProposedBlockChangeSet {
         &self.proposed_foreign_proposals
     }
 
-    pub fn set_utxo_mint_proposed_in(&mut self, mint: UnclaimedConfidentialOutputAddress) -> &mut Self {
+    pub fn set_utxo_mint_proposed_in(&mut self, mint: ClaimedOutputTombstoneAddress) -> &mut Self {
         self.proposed_utxo_mints.push(mint);
         self
     }
 
     pub fn apply_transaction_update(&self, tx_rec_mut: &mut TransactionPoolRecord) {
-        if let Some(update) = self.transaction_changes.get(tx_rec_mut.transaction_id()) {
+        if let Some(update) = self.transaction_changes.get(tx_rec_mut.id()) {
             update.apply_update(tx_rec_mut);
         }
     }
@@ -403,10 +402,7 @@ impl ProposedBlockChangeSet {
         &mut self,
         transaction: TransactionPoolRecord,
     ) -> Result<&mut Self, TransactionPoolError> {
-        let change_mut = self
-            .transaction_changes
-            .entry(*transaction.transaction_id())
-            .or_default();
+        let change_mut = self.transaction_changes.entry(*transaction.id()).or_default();
 
         debug!(
             target: LOG_TARGET,
@@ -418,7 +414,7 @@ impl ProposedBlockChangeSet {
         debug!(
             target: LOG_TARGET,
             "📝 next transaction update ({} {} {} is_ready_now={}, {:#}) in block {}",
-            next_update.transaction().transaction_id(),
+            next_update.transaction().id(),
             next_update.transaction().current_stage(),
             next_update.decision(),
             next_update.is_ready_now(),
@@ -447,7 +443,7 @@ impl ProposedBlockChangeSet {
 
         let _timer = TraceTimer::debug(LOG_TARGET, "ProposedBlockChangeSet::save");
         // Store the block diff
-        BlockDiff::insert(tx, &self.block.block_id, &self.substate_changes)?;
+        BlockDiff::insert(tx, &self.block.block_id, &self.local_substate_changes)?;
 
         // Store the tree diffs for each affected shard
         for (shard, diff) in &self.state_tree_diffs {
@@ -462,14 +458,14 @@ impl ProposedBlockChangeSet {
             debug!(
                 target: LOG_TARGET,
                 "📝 Sequencing new transaction {} {} {} is_ready_now={}",
-                pool_rec.transaction_id(),
+                pool_rec.id(),
                 pool_rec.current_stage(),
                 pool_rec.current_local_decision(),
                 pool_rec.is_ready()
             );
             // TODO: TransactionPool abstraction is not great, so calling the store method directly
             tx.transaction_pool_insert_new(
-                *pool_rec.transaction_id(),
+                *pool_rec.id(),
                 pool_rec.current_local_decision(),
                 pool_rec.evidence(),
                 pool_rec.is_ready(),
@@ -522,10 +518,6 @@ impl ProposedBlockChangeSet {
             )?;
         }
 
-        for mint in &self.proposed_utxo_mints {
-            BurntUtxo::set_proposed_in_block(tx, mint, &self.block.block_id)?;
-        }
-
         for node in &self.evict_nodes {
             ValidatorConsensusStats::evict_node(tx, node, self.block.block_id)?;
         }
@@ -542,7 +534,7 @@ impl ProposedBlockChangeSet {
         let _timer = TraceTimer::debug(LOG_TARGET, "ProposedBlockChangeSet::save_for_debug");
         // TODO: consider persisting this data somewhere
 
-        for change in &self.substate_changes {
+        for change in &self.local_substate_changes {
             debug!(target: LOG_TARGET, "[drop] SubstateChange: {}", change);
         }
 
@@ -559,7 +551,7 @@ impl ProposedBlockChangeSet {
         }
 
         for transaction in &self.new_transactions_to_sequence {
-            debug!(target: LOG_TARGET, "[drop] Sequence new transaction: {}", transaction.transaction_id());
+            debug!(target: LOG_TARGET, "[drop] Sequence new transaction: {}", transaction.id());
         }
 
         for (transaction_id, change) in &self.transaction_changes {
@@ -599,8 +591,8 @@ impl Display for ProposedBlockChangeSet {
             Some(decision) => write!(f, " Decision: {},", decision)?,
             None => write!(f, " Decision: NO VOTE, ")?,
         }
-        if !self.substate_changes.is_empty() {
-            write!(f, " BlockDiff: {} change(s), ", self.substate_changes.len())?;
+        if !self.local_substate_changes.is_empty() {
+            write!(f, " BlockDiff: {} change(s), ", self.local_substate_changes.len())?;
         }
         if !self.state_tree_diffs.is_empty() {
             write!(f, " StateTreeDiff: {} change(s), ", self.state_tree_diffs.len())?;
@@ -654,17 +646,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn check_max_stack_mem_usage() {
+    fn check_max_mem_usage() {
         let sz = size_of::<ProposedBlockChangeSet>();
         eprintln!("ProposedBlockChangeSet: {}", sz);
-        const TARGET_MAX_MEM_USAGE: usize = 13_232_000;
+        const TARGET_MAX_MEM_USAGE: usize = 13_336_000;
         let mem_block_diff = size_of::<SubstateChange>() * MEM_MAX_BLOCK_DIFF_CHANGES;
         eprintln!("mem_block_diff: {}KiB", mem_block_diff / 1024);
         let mem_state_tree_diffs =
             size_of::<Shard>() * size_of::<PendingShardStateTreeDiff>() * MEM_MAX_STATE_TREE_DIFF_SIZE;
         eprintln!("mem_state_tree_diffs: {}", mem_state_tree_diffs);
         let mem_substate_locks = (size_of::<SubstateId>() + size_of::<SubstateLock>()) * MEM_MAX_SUBSTATE_LOCK_SIZE;
-        eprintln!("mem_substate_locks: {}", mem_substate_locks);
+        eprintln!("mem_substate_locks: {}MiB", mem_substate_locks / 1024 / 1024);
         let mem_transaction_changes =
             (size_of::<TransactionId>() + size_of::<TransactionChangeSet>()) * MEM_MAX_TRANSACTION_CHANGE_SIZE;
         eprintln!("mem_transaction_changes: {}", mem_transaction_changes);

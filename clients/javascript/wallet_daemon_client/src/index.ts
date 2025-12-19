@@ -3,10 +3,13 @@
  * //  SPDX-License-Identifier: BSD-3-Clause
  */
 
+import "./serialize";
 import type {
   AccountGetDefaultRequest,
   AccountGetRequest,
   AccountGetResponse,
+  AccountsAssociateStealthResourceRequest,
+  AccountsAssociateStealthResourceResponse,
   AccountsCreateFreeTestCoinsRequest,
   AccountsCreateFreeTestCoinsResponse,
   AccountsCreateRequest,
@@ -17,6 +20,8 @@ import type {
   AccountsGetBalancesResponse,
   AccountsListRequest,
   AccountsListResponse,
+  AccountsRenameRequest,
+  AccountsRenameResponse,
   AccountsTransferRequest,
   AccountsTransferResponse,
   AuthGetAllJwtRequest,
@@ -48,11 +53,14 @@ import type {
   PublishTemplateRequest,
   PublishTemplateResponse,
   rejectReasonToString,
-  RevealFundsRequest,
-  RevealFundsResponse,
   SettingsGetResponse,
   SettingsSetRequest,
-  SettingsSetResponse, StealthTransferRequest, StealthTransferResponse,
+  SettingsSetResponse,
+  StealthTransferRequest,
+  StealthTransferResponse,
+  StealthUtxosDecryptValueRequest, StealthUtxosDecryptValueResponse,
+  StealthUtxosListRequest,
+  StealthUtxosListResponse,
   stringToSubstateId,
   substateIdToString,
   SubstatesGetRequest,
@@ -69,7 +77,6 @@ import type {
   TransactionGetResponse,
   TransactionGetResultRequest,
   TransactionGetResultResponse,
-  TransactionSubmitDryRunRequest,
   TransactionSubmitDryRunResponse,
   TransactionSubmitManifestRequest,
   TransactionSubmitManifestResponse,
@@ -170,12 +177,16 @@ export class WalletDaemonClient {
     return this.__invokeRpc("accounts.create", params);
   }
 
+  public accountsRename(params: AccountsRenameRequest): Promise<AccountsRenameResponse> {
+    return this.__invokeRpc("accounts.rename", params);
+  }
+
   public accountsClaimBurn(params: ClaimBurnRequest): Promise<ClaimBurnResponse> {
     return this.__invokeRpc("accounts.claim_burn", params);
   }
 
-  public accountsRevealFunds(params: RevealFundsRequest): Promise<RevealFundsResponse> {
-    return this.__invokeRpc("accounts.reveal_funds", params);
+  public accountsAssociateStealthResource(params: AccountsAssociateStealthResourceRequest): Promise<AccountsAssociateStealthResourceResponse> {
+    return this.__invokeRpc("accounts.associate_stealth_resource", params);
   }
 
   public accountsGetBalances(params: AccountsGetBalancesRequest): Promise<AccountsGetBalancesResponse> {
@@ -214,7 +225,7 @@ export class WalletDaemonClient {
     return this.__invokeRpc("transactions.submit", params);
   }
 
-  public submitTransactionDryRun(params: TransactionSubmitDryRunRequest): Promise<TransactionSubmitDryRunResponse> {
+  public submitTransactionDryRun(params: TransactionSubmitRequest): Promise<TransactionSubmitDryRunResponse> {
     return this.__invokeRpc("transactions.submit_dry_run", params);
   }
 
@@ -332,6 +343,15 @@ export class WalletDaemonClient {
 
   public webauthnAuthStart(params: WebauthnStartAuthRequest): Promise<WebauthnStartAuthResponse> {
     return this.__invokeRpc("webauthn.auth_start", params);
+  }
+
+  public stealthUtxosList(params: StealthUtxosListRequest): Promise<StealthUtxosListResponse> {
+    return this.__invokeRpc("stealth_utxos.list", params);
+  }
+
+
+  public stealthUtxosDecryptValue(params: StealthUtxosDecryptValueRequest): Promise<StealthUtxosDecryptValueResponse> {
+    return this.__invokeRpc("stealth_utxos.decrypt_value", params);
   }
 
   async __invokeRpc(method: string, params: object = null) {

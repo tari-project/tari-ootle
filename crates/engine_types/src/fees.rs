@@ -4,17 +4,16 @@
 use indexmap::{map::Entry, IndexMap};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, borsh::BorshSerialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct FeeReceipt {
     /// The total amount of the fee payment(s)
     pub total_fee_payment: u64,
     /// Total fees paid after refunds
     pub total_fees_paid: u64,
+    /// The amount of non-refundable fees which the user overpaid. Fees cannot be refunded when paying purely with a
+    /// stealth reveal (since we do not know the account/vault to refund).
+    pub total_fee_overcharge: u64,
     /// Breakdown of fee costs
     pub cost_breakdown: FeeBreakdown,
 }
@@ -55,18 +54,14 @@ impl FeeReceipt {
             .unwrap_or_default()
     }
 
-    /// Returns true if the total fees charged is equal to the total fees paid, otherwise false
+    /// Returns true if the total fees charged is less than or equal to the total fees paid, otherwise false
     pub fn is_paid_in_full(&self) -> bool {
         self.unpaid_debt() == 0
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Hash, Eq, PartialEq, PartialOrd, Ord)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Hash, Eq, PartialEq, PartialOrd, Ord, borsh::BorshSerialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum FeeSource {
     Initial,
     RuntimeCall,
@@ -74,20 +69,18 @@ pub enum FeeSource {
     Events,
     Logs,
     TransactionWeight,
+    SignatureVerification,
+    TemplateLoad,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, borsh::BorshSerialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct FeeBreakdown {
     breakdown: IndexMap<FeeSource, u64>,
 }
 
 impl FeeBreakdown {
-    pub fn insert(&mut self, source: FeeSource, amount: u64) {
+    pub fn add(&mut self, source: FeeSource, amount: u64) {
         match self.breakdown.entry(source) {
             Entry::Occupied(entry) => {
                 *entry.into_mut() += amount;
@@ -110,11 +103,7 @@ impl FeeBreakdown {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct FeeCostBreakdown {
     pub total_fees_charged: u64,
     pub breakdown: FeeBreakdown,

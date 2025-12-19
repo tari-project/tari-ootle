@@ -20,29 +20,23 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{io, io::Write};
-
 use blake2::{
     digest::consts::{U32, U64},
     Blake2b,
 };
-use digest::Digest;
-use serde::Serialize;
-use tari_bor::encode_into_std_writer;
+use borsh::BorshSerialize;
 use tari_crypto::{
-    hashing::DomainSeparation,
+    hash_domain,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     signatures::SchnorrSignature,
 };
-use tari_hashing::TariEngineHashDomain;
+use tari_hashing::DomainSeparatedBorshHasher;
 use tari_template_lib::types::Hash;
 
-pub fn engine_hasher64(label: EngineHashDomainLabel) -> TariHasher64 {
-    TariHasher64::new_with_label::<TariEngineHashDomain>(label.as_label())
-}
+hash_domain!(TariEngineHashDomain, "com.tari.ootle.engine", 0);
 
-pub fn template_hasher64() -> TariHasher64 {
-    engine_hasher64(EngineHashDomainLabel::Template)
+pub fn engine_hasher64(label: EngineHashDomainLabel) -> TariEngineHasher64 {
+    TariEngineHasher64::new_with_label(label.as_label())
 }
 
 pub fn substate_value_hasher32() -> TariHasher32 {
@@ -50,7 +44,7 @@ pub fn substate_value_hasher32() -> TariHasher32 {
 }
 
 pub fn hasher32(label: EngineHashDomainLabel) -> TariHasher32 {
-    TariHasher32::new_with_label::<TariEngineHashDomain>(label.as_label())
+    TariHasher32::new_with_label(label.as_label())
 }
 
 pub fn template_hasher32() -> TariHasher32 {
@@ -63,113 +57,50 @@ pub fn hash_template_code(code: &[u8]) -> Hash {
 
 pub type EngineSchnorrSignature = SchnorrSignature<RistrettoPublicKey, RistrettoSecretKey, TariEngineHashDomain>;
 
-#[derive(Debug, Clone)]
 pub struct TariHasher32 {
-    hasher: Blake2b<U32>,
+    hasher: DomainSeparatedBorshHasher<TariEngineHashDomain, Blake2b<U32>>,
 }
 impl TariHasher32 {
-    pub fn new_with_label<TDomain: DomainSeparation>(label: &'static str) -> Self {
-        let mut hasher = Blake2b::<U32>::new();
-        TDomain::add_domain_separation_tag(&mut hasher, label);
+    pub fn new_with_label(label: &'static str) -> Self {
+        let hasher = DomainSeparatedBorshHasher::new_with_label(label);
         Self { hasher }
     }
 
-    pub fn from_digest(digest: Blake2b<U32>) -> Self {
-        Self { hasher: digest }
+    pub fn update<T: BorshSerialize + ?Sized>(&mut self, data: &T) {
+        self.hasher.update_consensus_encode(data)
     }
 
-    pub fn update<T: Serialize + ?Sized>(&mut self, data: &T) {
-        // CBOR encoding does not make any contract to say that if the writer is infallible (as it is here) then
-        // encoding in infallible. However this should be the case. Since it is very unergonomic to return an
-        // error in hash chain functions, and therefore all usages of the hasher, we assume all types implement
-        // infallible encoding.
-        encode_into_std_writer(data, &mut self.hash_writer()).expect("encoding failed")
-    }
-
-    pub fn chain<T: Serialize + ?Sized>(mut self, data: &T) -> Self {
+    pub fn chain<T: BorshSerialize + ?Sized>(mut self, data: &T) -> Self {
         self.update(data);
         self
-    }
-
-    pub fn digest<T: Serialize + ?Sized>(self, data: &T) -> Hash {
-        self.chain(data).result()
     }
 
     pub fn result(self) -> Hash {
-        let hash: [u8; 32] = self.hasher.finalize().into();
-        hash.into()
-    }
-
-    pub fn finalize_into(self, output: &mut digest::Output<Blake2b<U32>>) {
-        digest::FixedOutput::finalize_into(self.hasher, output)
-    }
-
-    fn hash_writer(&mut self) -> impl Write + '_ {
-        struct HashWriter<'a>(&'a mut Blake2b<U32>);
-        impl Write for HashWriter<'_> {
-            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-                self.0.update(buf);
-                Ok(buf.len())
-            }
-
-            fn flush(&mut self) -> io::Result<()> {
-                Ok(())
-            }
-        }
-        HashWriter(&mut self.hasher)
+        self.hasher.finalize_into_array().into()
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct TariHasher64 {
-    hasher: Blake2b<U64>,
+pub struct TariEngineHasher64 {
+    hasher: DomainSeparatedBorshHasher<TariEngineHashDomain, Blake2b<U64>>,
 }
 
-impl TariHasher64 {
-    pub fn new_with_label<TDomain: DomainSeparation>(label: &'static str) -> Self {
-        let mut hasher = Blake2b::<U64>::new();
-        TDomain::add_domain_separation_tag(&mut hasher, label);
+impl TariEngineHasher64 {
+    pub fn new_with_label(label: &'static str) -> Self {
+        let hasher = DomainSeparatedBorshHasher::new_with_label(label);
         Self { hasher }
     }
 
-    pub fn update<T: Serialize + ?Sized>(&mut self, data: &T) {
-        // CBOR encoding does not make any contract to say that if the writer is infallible (as it is here) then
-        // encoding in infallible. However this should be the case. Since it is very unergonomic to return an
-        // error in hash chain functions, and therefore all usages of the hasher, we assume all types implement
-        // infallible encoding.
-        encode_into_std_writer(data, &mut self.hash_writer()).expect("encoding failed")
+    pub fn update<T: BorshSerialize + ?Sized>(&mut self, data: &T) {
+        self.hasher.update_consensus_encode(data)
     }
 
-    pub fn chain<T: Serialize + ?Sized>(mut self, data: &T) -> Self {
+    pub fn chain<T: BorshSerialize + ?Sized>(mut self, data: &T) -> Self {
         self.update(data);
         self
-    }
-
-    pub fn digest<T: Serialize + ?Sized>(self, data: &T) -> [u8; 64] {
-        self.chain(data).result()
     }
 
     pub fn result(self) -> [u8; 64] {
         self.hasher.finalize().into()
-    }
-
-    pub fn finalize_into(self, output: &mut digest::Output<Blake2b<U64>>) {
-        digest::FixedOutput::finalize_into(self.hasher, output)
-    }
-
-    fn hash_writer(&mut self) -> impl Write + '_ {
-        struct HashWriter<'a>(&'a mut Blake2b<U64>);
-        impl Write for HashWriter<'_> {
-            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-                self.0.update(buf);
-                Ok(buf.len())
-            }
-
-            fn flush(&mut self) -> io::Result<()> {
-                Ok(())
-            }
-        }
-        HashWriter(&mut self.hasher)
     }
 }
 
@@ -184,18 +115,16 @@ pub enum EngineHashDomainLabel {
     UuidOutput,
     Output,
     EntityId,
-    TransactionSignature,
     ResourceAddress,
     ComponentAddress,
     TransactionReceipt,
     FeeClaimAddress,
-    TemplateAddress,
     QuorumCertificate,
     SubstateValue,
     ViewableBalanceProof,
     UtxoAddress,
-    StealthTransfer,
-    StealthOwnership,
+    StealthBalanceProof,
+    ValueProof,
 }
 
 impl EngineHashDomainLabel {
@@ -210,7 +139,6 @@ impl EngineHashDomainLabel {
             Self::UuidOutput => "UuidOutput",
             Self::Output => "Output",
             Self::EntityId => "EntityId",
-            Self::TransactionSignature => "TransactionSignature",
             Self::ResourceAddress => "ResourceAddress",
             Self::ComponentAddress => "ComponentAddress",
             Self::TransactionReceipt => "TransactionReceipt",
@@ -218,10 +146,9 @@ impl EngineHashDomainLabel {
             Self::QuorumCertificate => "QuorumCertificate",
             Self::SubstateValue => "SubstateValue",
             Self::ViewableBalanceProof => "ViewableBalanceProof",
-            Self::TemplateAddress => "TemplateAddress",
             Self::UtxoAddress => "UtxoAddress",
-            Self::StealthTransfer => "StealthTransfer",
-            Self::StealthOwnership => "StealthOwnership",
+            Self::StealthBalanceProof => "StealthBalanceProof",
+            Self::ValueProof => "ValueProof",
         }
     }
 }

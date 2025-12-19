@@ -14,12 +14,12 @@ use crate::{
 };
 
 #[derive(Copy, Clone, Debug)]
-pub struct Transaction {
+pub struct TransactionRefInBlock {
     id: u64,
     block: u64,
 }
 
-impl Transaction {
+impl TransactionRefInBlock {
     pub fn new(id: u64, block: u64) -> Self {
         Self { id, block }
     }
@@ -31,7 +31,7 @@ pub enum ProcessStatus {
     Exited(i32), // status code
     Crashed,
     InternalError(String),
-    Submitted(Transaction),
+    Submitted(TransactionRefInBlock),
 }
 
 pub async fn monitor_child(

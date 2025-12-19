@@ -4,11 +4,8 @@
 use std::fmt::Display;
 
 use tari_common_types::types::FixedHash;
-use tari_engine_types::confidential::UnclaimedConfidentialOutput;
 use tari_ootle_common_types::{displayable::Displayable, Epoch, SubstateAddress};
-use tari_sidechain::EvictionProof;
-use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
-use url::Url;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 #[derive(Debug)]
 pub enum EpochEvent {
@@ -25,22 +22,6 @@ pub enum EpochEvent {
     NewValidatorNodeExit {
         epoch: Epoch,
         validator_node_public_key: RistrettoPublicKeyBytes,
-    },
-    NewCodeTemplateDownload {
-        epoch: Epoch,
-        name: String,
-        address: TemplateAddress,
-        author_public_key: RistrettoPublicKeyBytes,
-        url: Url,
-        binary_hash: FixedHash,
-    },
-    NewConfidentialOutput {
-        epoch: Epoch,
-        substate: UnclaimedConfidentialOutput,
-    },
-    NewEvictionProof {
-        epoch: Epoch,
-        eviction_proof: Box<EvictionProof>,
     },
     EpochChanged {
         epoch: Epoch,
@@ -91,36 +72,6 @@ impl Display for EpochEvent {
                     epoch, validator_node_public_key
                 )
             },
-            EpochEvent::NewCodeTemplateDownload {
-                epoch,
-                name,
-                address,
-                author_public_key,
-                url,
-                binary_hash,
-            } => {
-                write!(
-                    f,
-                    "NewCodeTemplateDownload {{ epoch: {}, name: {}, address: {}, author_public_key: {}, url: {}, \
-                     binary_hash: {} }}",
-                    epoch, name, address, author_public_key, url, binary_hash
-                )
-            },
-            EpochEvent::NewConfidentialOutput { epoch, substate } => {
-                write!(
-                    f,
-                    "NewConfidentialOutput {{ epoch: {}, commitment: {} }}",
-                    epoch, substate.commitment
-                )
-            },
-            EpochEvent::NewEvictionProof { epoch, eviction_proof } => {
-                write!(
-                    f,
-                    "NewEvictionProof {{ epoch: {}, evict_node: {} }}",
-                    epoch,
-                    eviction_proof.node_to_evict()
-                )
-            },
             EpochEvent::EpochChanged { epoch, epoch_hash } => {
                 write!(f, "EpochChanged {{ epoch: {}, epoch_hash: {} }}", epoch, epoch_hash)
             },
@@ -139,11 +90,49 @@ pub enum ValidatorNodeChange {
         validator_node_public_key: RistrettoPublicKeyBytes,
         activation_epoch: Epoch,
         minimum_value_promise: u64,
+        // TODO: replace with ValidatorShardKey type
         shard_key: SubstateAddress,
     },
     Remove {
         public_key: RistrettoPublicKeyBytes,
     },
+}
+
+#[cfg(feature = "service")]
+impl TryFrom<minotari_app_grpc::tari_rpc::ValidatorNodeChange> for ValidatorNodeChange {
+    type Error = anyhow::Error;
+
+    fn try_from(value: minotari_app_grpc::tari_rpc::ValidatorNodeChange) -> Result<Self, Self::Error> {
+        use anyhow::Context;
+        match value.change {
+            Some(minotari_app_grpc::tari_rpc::validator_node_change::Change::Add(add)) => {
+                let registration = add
+                    .registration
+                    .ok_or_else(|| anyhow::anyhow!("ValidatorNodeChange Add missing registration field"))?;
+                let claim_public_key = RistrettoPublicKeyBytes::from_bytes(&registration.claim_public_key)
+                    .context("Invalid claim_public_key")?;
+                let validator_node_public_key = RistrettoPublicKeyBytes::from_bytes(&registration.public_key)
+                    .context("Invalid validator_node_public_key")?;
+                Ok(ValidatorNodeChange::Add {
+                    claim_public_key,
+                    validator_node_public_key,
+                    activation_epoch: Epoch(add.activation_epoch),
+                    minimum_value_promise: add.minimum_value_promise,
+                    shard_key: {
+                        let hash = FixedHash::try_from(add.shard_key.as_slice()).context("Invalid shard key hash")?;
+                        SubstateAddress::from_hash_and_version(hash, 0)
+                    },
+                })
+            },
+            Some(minotari_app_grpc::tari_rpc::validator_node_change::Change::Remove(remove)) => {
+                Ok(ValidatorNodeChange::Remove {
+                    public_key: RistrettoPublicKeyBytes::from_bytes(&remove.public_key)
+                        .context("invalid public key in ValidatorNodeChange::Remove")?,
+                })
+            },
+            None => Err(anyhow::anyhow!("ValidatorNodeChange missing change field")),
+        }
+    }
 }
 
 impl Display for ValidatorNodeChange {

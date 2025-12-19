@@ -24,6 +24,7 @@ export default function ListColumnFamilies() {
   }
 
   const cfs = data?.cfs;
+  const cfNames = data?.cf_names;
   const dirSize = data?.dir_size;
   const totalBytes = cfs.reduce((acc, cf: any) => acc + cf.total_entries_bytes, 0);
 
@@ -84,27 +85,39 @@ export default function ListColumnFamilies() {
         </Box>
         <Divider />
       </Grid>
+      <Grid size={{ xs: 12, md: 12, lg: 12 }}>
+          <DataGrid
+            rows={cfNames.map((name) => ({ name }))}
+            columns={[{
+                field: "name",
+                headerName: "Name",
+                width: 400,
+              }]}
+            getRowId={(row) => row.name}
+            initialState={{
+              pagination: {
+                paginationModel: {
+                  pageSize: 20,
+                },
+              },
+            }}
+            sortModel={sortModel}
+            onSortModelChange={setSortModel}
+            sortingOrder={["desc", "asc", null]}
+            disableMultipleRowSelection
+            onRowSelectionModelChange={(selections) => {
+              onSelectedRowChange(selections[0]);
+            }}
+            checkboxSelection
+          />
+      </Grid>
 
-      <Grid container spacing={3}>
+      <Grid size={{ xs: 12, md: 12, lg: 12 }}>
         <DataGrid
           rows={cfs}
           columns={cols}
           getRowId={(row) => row.name}
-          initialState={{
-            pagination: {
-              paginationModel: {
-                pageSize: 20,
-              },
-            },
-          }}
-          sortModel={sortModel}
-          onSortModelChange={setSortModel}
-          sortingOrder={["desc", "asc", null]}
-          disableMultipleRowSelection
-          onRowSelectionModelChange={(selections) => {
-            onSelectedRowChange(selections[0]);
-          }}
-          checkboxSelection
+          disableRowSelectionOnClick
         />
       </Grid>
       <Grid container spacing={3}>

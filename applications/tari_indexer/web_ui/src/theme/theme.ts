@@ -20,52 +20,143 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { createTheme } from "@mui/material/styles";
+// import { createTheme } from "@mui/material/styles";
 
-const theme = createTheme({
-  palette: {
-    primary: {
-      main: "#9330FF",
-    },
-    secondary: {
-      main: "#40388A",
-    },
-  },
+// const theme = createTheme({
+//   palette: {
+//     primary: {
+//       main: "#9330FF",
+//     },
+//     secondary: {
+//       main: "#40388A",
+//     },
+//   },
+//   shape: {
+//     borderRadius: 10,
+//   },
+//   typography: {
+//     fontFamily: '"AvenirMedium", sans-serif',
+//     body1: {
+//       color: "#000000",
+//     },
+//     body2: {
+//       color: "#000000",
+//       lineHeight: "1.5rem",
+//     },
+//     h1: {
+//       fontSize: "2.2rem",
+//       lineHeight: "3.2rem",
+//     },
+//     h2: {
+//       fontSize: "1.9rem",
+//       lineHeight: "2.9rem",
+//     },
+//     h3: {
+//       fontSize: "1.6rem",
+//       lineHeight: "2.6rem",
+//     },
+//     h4: {
+//       fontSize: "1.3rem",
+//       lineHeight: "2.3rem",
+//     },
+//     h5: {
+//       fontSize: "1rem",
+//       lineHeight: "2em",
+//     },
+//     h6: {
+//       fontSize: "0.875rem",
+//       lineHeight: "1.8rem",
+//     },
+//   },
+//   transitions: {
+//     duration: {
+//       enteringScreen: 500,
+//       leavingScreen: 500,
+//     },
+//   },
+//   components: {
+//     MuiButton: {
+//       defaultProps: {
+//         disableRipple: true,
+//         sx: {
+//           minHeight: "55px",
+//           boxShadow: "none",
+//           textTransform: "none",
+//           fontSize: "1rem",
+//           fontWeight: 500,
+//           fontFamily: '"AvenirMedium", sans-serif',
+//           letterSpacing: "0.5px",
+//         },
+//       },
+//     },
+//     MuiTableCell: {
+//       defaultProps: {
+//         sx: {
+//           borderBottom: "1px solid #f5f5f5",
+//         },
+//       },
+//     },
+//   },
+// });
+
+// export default theme;
+
+import { ThemeOptions } from "@mui/material/styles";
+import { tariPurple, blue, red, green, orange, grey, teal, gothic } from "./colors";
+
+export const componentSettings: ThemeOptions = {
   shape: {
-    borderRadius: 10,
+    borderRadius: 8,
   },
+  spacing: 8,
   typography: {
-    fontFamily: '"AvenirMedium", sans-serif',
+    fontFamily: '"Poppins", sans-serif',
+    fontSize: 12,
     body1: {
-      color: "#000000",
+      letterSpacing: "0.5px",
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 500,
     },
     body2: {
-      color: "#000000",
       lineHeight: "1.5rem",
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 500,
     },
     h1: {
       fontSize: "2.2rem",
       lineHeight: "3.2rem",
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 700,
     },
     h2: {
       fontSize: "1.9rem",
       lineHeight: "2.9rem",
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 700,
     },
     h3: {
       fontSize: "1.6rem",
       lineHeight: "2.6rem",
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 700,
     },
     h4: {
       fontSize: "1.3rem",
       lineHeight: "2.3rem",
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 600,
     },
     h5: {
-      fontSize: "1rem",
-      lineHeight: "2em",
+      fontSize: "14px",
+      fontFamily: '"Poppins", sans-serif',
+      lineHeight: "1.4rem",
+      fontWeight: 600,
     },
     h6: {
-      fontSize: "0.875rem",
+      fontSize: "0.75rem",
       lineHeight: "1.8rem",
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 600,
     },
   },
   transitions: {
@@ -77,26 +168,151 @@ const theme = createTheme({
   components: {
     MuiButton: {
       defaultProps: {
-        disableRipple: true,
+        size: "large",
         sx: {
-          minHeight: "55px",
-          boxShadow: "none",
           textTransform: "none",
-          fontSize: "1rem",
-          fontWeight: 500,
-          fontFamily: '"AvenirMedium", sans-serif',
-          letterSpacing: "0.5px",
+        },
+      },
+    },
+    MuiPaper: {
+      defaultProps: {
+        sx: {
+          background: (theme) => theme.palette.background.paper,
         },
       },
     },
     MuiTableCell: {
       defaultProps: {
         sx: {
-          borderBottom: "1px solid #f5f5f5",
+          borderBottom: (theme) => `1px solid ${theme.palette.divider}`,
+        },
+      },
+    },
+    MuiDivider: {
+      defaultProps: {
+        sx: {
+          borderBottom: (theme) => `1px solid ${theme.palette.divider}`,
+        },
+      },
+    },
+    MuiFormControlLabel: {
+      defaultProps: {
+        sx: {
+          "& .MuiTypography-root": {
+            fontSize: "0.875rem",
+            lineHeight: "1.8rem",
+            color: (theme) => theme.palette.text.disabled,
+          },
+        },
+      },
+    },
+    MuiCircularProgress: {
+      defaultProps: {
+        thickness: 4,
+        sx: {
+          color: (theme) => theme.palette.primary.main,
         },
       },
     },
   },
-});
+};
 
-export default theme;
+export const light: ThemeOptions = {
+  palette: {
+    mode: "light",
+    primary: {
+      main: tariPurple[600],
+      dark: tariPurple[700],
+      light: tariPurple[500],
+    },
+    secondary: {
+      main: gothic[400],
+      dark: gothic[500],
+      light: teal[400],
+    },
+    divider: "rgba(0,0,0,0.08)",
+    text: {
+      primary: grey[950],
+      secondary: grey[600],
+      disabled: grey[400],
+    },
+    background: {
+      default: grey[50],
+      paper: "#fff",
+    },
+    success: {
+      main: green[500],
+      dark: green[600],
+      light: green[400],
+      contrastText: "#ffffff",
+    },
+    warning: {
+      main: orange[300],
+      dark: orange[400],
+      light: orange[200],
+      contrastText: "#ffffff",
+    },
+    error: {
+      main: red[500],
+      dark: red[600],
+      light: red[400],
+      contrastText: "#ffffff",
+    },
+    info: {
+      main: blue[500],
+      dark: blue[700],
+      light: blue[400],
+      contrastText: "#ffffff",
+    },
+  },
+};
+
+export const dark: ThemeOptions = {
+  palette: {
+    mode: "dark",
+    primary: {
+      main: tariPurple[500],
+      dark: tariPurple[400],
+      light: tariPurple[50],
+    },
+    secondary: {
+      main: teal[400],
+      dark: teal[300],
+      light: gothic[400],
+    },
+    divider: "rgba(255,255,255,0.04)",
+    text: {
+      primary: "#FFFFFF",
+      secondary: grey[300],
+      disabled: "rgba(255,255,255,0.4)",
+    },
+    background: {
+      default: grey[950],
+      paper: grey[900],
+    },
+    success: {
+      main: green[500],
+      dark: green[400],
+      light: green[600],
+      contrastText: "#ffffff",
+    },
+    warning: {
+      main: orange[300],
+      dark: orange[200],
+      light: orange[400],
+      contrastText: "#ffffff",
+    },
+    error: {
+      main: red[500],
+      dark: red[600],
+      light: red[500],
+      contrastText: "#ffffff",
+    },
+    info: {
+      main: blue[500],
+      dark: blue[700],
+      light: blue[400],
+      contrastText: "#ffffff",
+    },
+  },
+};

@@ -5,7 +5,7 @@ use rand::rngs::OsRng;
 use tari_consensus::traits::{ValidatorSignatureVerifierService, ValidatorSignerService};
 use tari_consensus_types::{SignedMessage, ToSignatureMessage, ValidatorSchnorrSignature};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::FromByteType;
+use tari_engine_types::ConvertFromByteType;
 use tari_ootle_app_utilities::keypair::RistrettoKeypair;
 
 #[derive(Debug, Clone)]
@@ -31,10 +31,10 @@ impl ValidatorSignerService for TariSignatureService {
 
 impl ValidatorSignatureVerifierService for TariSignatureService {
     fn verify<M: SignedMessage>(&self, message: &M) -> bool {
-        let Ok(public_key) = RistrettoPublicKey::try_from_byte_type(message.public_key()) else {
+        let Ok(public_key) = RistrettoPublicKey::convert_from_byte_type(message.public_key()) else {
             return false;
         };
-        let Ok(signature) = ValidatorSchnorrSignature::try_from_byte_type(message.signature()) else {
+        let Ok(signature) = ValidatorSchnorrSignature::convert_from_byte_type(message.signature()) else {
             return false;
         };
         let message = message.to_signature_message();

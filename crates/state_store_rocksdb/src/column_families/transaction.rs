@@ -24,20 +24,24 @@ use tari_ootle_storage::consensus_models::TransactionRecord;
 use tari_transaction::TransactionId;
 
 use crate::{
-    codecs::{DefaultVersionedCodec, TransactionIdCodec},
+    codecs::{DefaultVersionedCodec, KeyPrefix, TransactionIdCodec},
+    column_families::cf_names,
+    prefixed,
     traits::Cf,
     versioned_types::VersionedTransactionRecord,
 };
 
+prefixed!(TransactionPrefix, KeyPrefix::Transactions);
 pub struct TransactionCf;
 
 impl Cf for TransactionCf {
     type Key = TransactionId;
     type KeyCodec = TransactionIdCodec;
+    type Prefix = TransactionPrefix;
     type Value = TransactionRecord;
     type ValueCodec = DefaultVersionedCodec<VersionedTransactionRecord>;
 
     fn name() -> &'static str {
-        "transactions"
+        cf_names::TRANSACTIONS
     }
 }

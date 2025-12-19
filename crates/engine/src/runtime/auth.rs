@@ -3,48 +3,67 @@
 
 use std::{fmt::Display, sync::Arc};
 
-use tari_template_lib::models::{NonFungibleAddress, ProofId};
+use indexmap::IndexSet;
+use tari_template_lib::models::{NonFungibleAddress, ProofId, ResourceAddress};
 
 #[derive(Debug, Clone)]
 pub struct AuthParams {
-    pub initial_ownership_proofs: Vec<NonFungibleAddress>,
+    pub initial_ownership_proofs: Arc<IndexSet<NonFungibleAddress>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct AuthorizationScope {
     /// Virtual proofs are system-issued non-fungibles that exist for no longer than the execution e.g. derived from
     /// the transaction signer public key
-    virtual_proofs: Arc<Vec<NonFungibleAddress>>,
+    virtual_proofs: Arc<IndexSet<NonFungibleAddress>>,
 
     /// Resource-based proofs
-    proofs: Vec<ProofId>,
+    proofs: IndexSet<ProofId>,
 }
 
 impl AuthorizationScope {
-    pub fn new(virtual_proofs: Vec<NonFungibleAddress>) -> Self {
+    pub fn new(virtual_proofs: Arc<IndexSet<NonFungibleAddress>>) -> Self {
         Self {
-            virtual_proofs: Arc::new(virtual_proofs),
-            proofs: vec![],
+            virtual_proofs,
+            proofs: IndexSet::new(),
         }
     }
 
-    pub fn virtual_proofs(&self) -> &[NonFungibleAddress] {
+    pub fn empty() -> Self {
+        Self {
+            virtual_proofs: Arc::new(IndexSet::new()),
+            proofs: IndexSet::new(),
+        }
+    }
+
+    pub fn virtual_proofs(&self) -> &IndexSet<NonFungibleAddress> {
         &self.virtual_proofs
     }
 
-    pub fn proofs(&self) -> &[ProofId] {
+    pub fn contains_badge(&self, nf_address: &NonFungibleAddress) -> bool {
+        self.virtual_proofs.contains(nf_address)
+    }
+
+    pub fn contains_badge_of_resource(&self, resource_address: &ResourceAddress) -> bool {
+        self.virtual_proofs
+            .iter()
+            .any(|badge| badge.resource_address() == resource_address)
+    }
+
+    pub fn proofs(&self) -> &IndexSet<ProofId> {
         &self.proofs
     }
 
     pub fn add_proof(&mut self, proof_id: ProofId) {
-        self.proofs.push(proof_id);
+        self.proofs.insert(proof_id);
     }
 
-    pub fn remove_proof(&mut self, proof_id: &ProofId) -> Option<ProofId> {
-        self.proofs
-            .iter()
-            .position(|p| p == proof_id)
-            .map(|i| self.proofs.remove(i))
+    pub fn remove_proof(&mut self, proof_id: &ProofId) -> bool {
+        self.proofs.swap_remove(proof_id)
+    }
+
+    pub fn contains_proof(&self, proof_id: &ProofId) -> bool {
+        self.proofs.contains(proof_id)
     }
 
     pub(super) fn update_from_child(&mut self, child: AuthorizationScope) {

@@ -21,48 +21,36 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 
-use std::{convert::TryFrom, str::FromStr};
+use std::convert::TryFrom;
 
-use diesel::sql_types::{Integer, Nullable, Text};
+use diesel::sql_types::{Nullable, Text};
 use serde::{Deserialize, Serialize};
-use tari_engine_types::substate::SubstateId;
+use tari_ootle_storage::time::PrimitiveDateTime;
 use tari_template_lib::types::Hash;
 
 use crate::storage_sqlite::schema::*;
 
 #[derive(Debug, Identifiable, Queryable)]
 #[diesel(table_name = events)]
-pub struct Event {
+pub struct EventRecord {
     pub id: i32,
     pub template_address: String,
     pub tx_hash: String,
     pub topic: String,
     pub payload: String,
-    pub version: i32,
     pub substate_id: Option<String>,
-    pub timestamp: i64,
+    pub created_at: PrimitiveDateTime,
 }
 
-#[derive(Debug, Clone, Insertable, AsChangeset)]
+#[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = events)]
 #[diesel(treat_none_as_null = true)]
-pub struct NewEvent {
+pub struct NewEvent<'a> {
     pub template_address: String,
-    pub tx_hash: String,
-    pub topic: String,
+    pub tx_hash: &'a str,
+    pub topic: &'a str,
     pub payload: String,
-    pub version: i32,
     pub substate_id: Option<String>,
-    pub timestamp: i64,
-}
-
-#[derive(Debug, Clone, Insertable, AsChangeset)]
-#[diesel(table_name = event_payloads)]
-#[diesel(treat_none_as_null = true)]
-pub struct NewEventPayloadField {
-    pub payload_key: String,
-    pub payload_value: String,
-    pub event_id: i32,
 }
 
 #[derive(Clone, Debug, QueryableByName, Deserialize, Serialize)]
@@ -75,8 +63,6 @@ pub struct EventData {
     pub topic: String,
     #[diesel(sql_type = Text)]
     pub payload: String,
-    #[diesel(sql_type = Integer)]
-    pub version: i32,
     #[diesel(sql_type = Nullable<Text>)]
     pub substate_id: Option<String>,
 }
@@ -101,46 +87,4 @@ impl TryFrom<EventData> for crate::graphql::model::events::Event {
             topic: event_data.topic,
         })
     }
-}
-
-impl TryFrom<EventData> for tari_engine_types::events::Event {
-    type Error = anyhow::Error;
-
-    fn try_from(event_data: EventData) -> Result<Self, Self::Error> {
-        let substate_id = event_data
-            .substate_id
-            .clone()
-            .map(|sub_id| SubstateId::from_str(&sub_id))
-            .transpose()?;
-        let template_address = Hash::from_hex(&event_data.template_address)?;
-        let tx_hash = Hash::from_hex(&event_data.tx_hash)?;
-        let payload = serde_json::from_str(event_data.payload.as_str())?;
-
-        Ok(Self::new(
-            substate_id,
-            template_address,
-            tx_hash,
-            event_data.topic,
-            payload,
-        ))
-    }
-}
-
-// To keep track of the latest blocks that we scanned for events
-
-#[derive(Debug, Identifiable, Queryable)]
-#[diesel(table_name = scanned_block_ids)]
-pub struct ScannedBlockId {
-    pub id: i32,
-    pub epoch: i64,
-    pub shard_group: i32,
-    pub last_block_id: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Insertable, AsChangeset)]
-#[diesel(table_name = scanned_block_ids)]
-pub struct NewScannedBlockId {
-    pub epoch: i64,
-    pub shard_group: i32,
-    pub last_block_id: Vec<u8>,
 }

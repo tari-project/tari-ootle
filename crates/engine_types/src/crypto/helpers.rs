@@ -2,26 +2,23 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use lazy_static::lazy_static;
-use tari_common_types::types::{CommitmentFactory, PrivateKey};
+use tari_common_types::types::CommitmentFactory;
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
-    ristretto::{
-        bulletproofs_plus::BulletproofsPlusService,
-        pedersen::PedersenCommitment,
-        RistrettoPublicKey,
-        RistrettoSecretKey,
-    },
+    ristretto::{bulletproofs_plus::BulletproofsPlusService, pedersen::PedersenCommitment, RistrettoSecretKey},
     tari_utilities::ByteArray,
 };
 use tari_template_lib::{prelude::SchnorrSignatureBytes, types::Amount};
 
-use crate::{hashing::EngineSchnorrSignature, FromByteType, ReadOnly};
+use crate::{hashing::EngineSchnorrSignature, FromByteType};
 
 // TODO RistrettoSecretKey should provide a constant ZERO
 pub const ZERO_SECRET_KEY: RistrettoSecretKey = unsafe { std::mem::transmute([0u8; 32]) };
 
 // Note that the BP-plus implementation currently does not support bit lengths over 64
 const BP_BIT_LENGTH: usize = u64::BITS as usize;
+
+pub const MAX_LAZY_BP_AGG_FACTORS: usize = 8;
 
 lazy_static! {
     /// Static reference to the default commitment factory. Each instance of CommitmentFactory requires a number of heap allocations.
@@ -38,27 +35,14 @@ lazy_static! {
 }
 
 pub fn get_static_range_proof_service(aggregation_factor: usize) -> &'static BulletproofsPlusService {
-    match aggregation_factor {
+    match aggregation_factor.next_power_of_two() {
         1 => &RANGE_PROOF_AGG_1_SERVICE,
         2 => &RANGE_PROOF_AGG_2_SERVICE,
         4 => &RANGE_PROOF_AGG_4_SERVICE,
         8 => &RANGE_PROOF_AGG_8_SERVICE,
         _ => panic!(
-            "Unsupported BP aggregation factor {}. Expected 1/2/4",
+            "Unsupported BP aggregation factor {}. Expected 1/2/4 or 8",
             aggregation_factor
-        ),
-    }
-}
-
-pub fn bullet_proof_service_factory(aggregation_factor: usize) -> ReadOnly<'static, BulletproofsPlusService> {
-    match aggregation_factor.next_power_of_two() {
-        1 => ReadOnly::Borrowed(&RANGE_PROOF_AGG_1_SERVICE),
-        2 => ReadOnly::Borrowed(&RANGE_PROOF_AGG_2_SERVICE),
-        4 => ReadOnly::Borrowed(&RANGE_PROOF_AGG_4_SERVICE),
-        8 => ReadOnly::Borrowed(&RANGE_PROOF_AGG_8_SERVICE),
-        n => ReadOnly::Owned(
-            BulletproofsPlusService::init(BP_BIT_LENGTH, n, CommitmentFactory::default())
-                .expect("Failed to initialize BulletproofsPlusService"),
         ),
     }
 }
@@ -70,6 +54,7 @@ pub fn get_commitment_factory() -> &'static CommitmentFactory {
 /// Creates a Pedersen commitment to the given amount using the provided mask.
 ///
 /// # Panics
+///
 /// Panics if the amount is not positive.
 pub fn commit_amount(mask: &RistrettoSecretKey, amount: Amount) -> PedersenCommitment {
     commit_amount_checked(mask, amount).expect("commitment amount is negative")
@@ -78,14 +63,22 @@ pub fn commit_amount(mask: &RistrettoSecretKey, amount: Amount) -> PedersenCommi
 /// Creates a Pedersen commitment to the given amount using the provided mask.
 ///
 /// # Returns
+///
 /// Returns `None` if the amount is negative, otherwise returns a `PedersenCommitment`.
 pub fn commit_amount_checked(mask: &RistrettoSecretKey, amount: Amount) -> Option<PedersenCommitment> {
     let v = convert_amount_to_secret(&amount)?;
     Some(get_commitment_factory().commit(mask, &v))
 }
 
+/// Creates a Pedersen commitment to the given u64 amount using the provided mask.
+pub fn commit_u64_amount(mask: &RistrettoSecretKey, amount: u64) -> PedersenCommitment {
+    get_commitment_factory().commit_value(mask, amount)
+}
+
 /// Converts a `Amount` to a `RistrettoSecretKey`.
+///
 /// # Returns
+///
 /// Returns `None` if the amount is negative, otherwise returns a `RistrettoSecretKey`.
 pub fn convert_amount_to_secret(amount: &Amount) -> Option<RistrettoSecretKey> {
     if amount.is_negative() {
@@ -96,14 +89,12 @@ pub fn convert_amount_to_secret(amount: &Amount) -> Option<RistrettoSecretKey> {
     val_bytes[..Amount::BYTE_SIZE].copy_from_slice(&amount.to_le_bytes());
     Some(
         RistrettoSecretKey::from_canonical_bytes(&val_bytes)
-            .expect("MSB in 256 bit integer is always zero and < ell (Ristretto base point) therefore canonical"),
+            .expect("MSB in 256-bit integer is always zero and < ell (Ristretto base point) therefore canonical"),
     )
 }
 
 pub fn try_decode_to_signature(signature: &SchnorrSignatureBytes) -> Option<EngineSchnorrSignature> {
-    let public_nonce = RistrettoPublicKey::try_from_byte_type(signature.public_nonce()).ok()?;
-    let signature = PrivateKey::from_canonical_bytes(signature.signature().as_bytes()).ok()?;
-    Some(EngineSchnorrSignature::new(public_nonce, signature))
+    signature.try_from_byte_type().ok()
 }
 
 #[cfg(test)]

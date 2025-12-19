@@ -23,32 +23,42 @@
 
 use std::convert::TryFrom;
 
+use tari_ootle_storage::{time::PrimitiveDateTime, StorageError};
+
 use crate::{
-    storage_sqlite::{models::substate::Substate as SubstateRow, schema::*},
+    storage_sqlite::{
+        models::substate::SubstateRecord as SubstateRow,
+        schema::substates,
+        serialization::deserialize_json,
+    },
     substate_manager::SubstateResponse,
 };
 
 #[derive(Debug, Identifiable, Queryable)]
-pub struct Substate {
+#[diesel(table_name = substates)]
+pub struct SubstateRecord {
     pub id: i32,
     pub address: String,
     pub version: i32,
     pub data: String,
-    // TODO: unused
-    pub tx_hash: String,
     pub template_address: Option<String>,
     pub module_name: Option<String>,
-    pub timestamp: i64,
+    pub updated_at: PrimitiveDateTime,
+    pub created_at: PrimitiveDateTime,
 }
 
-impl TryFrom<Substate> for SubstateResponse {
-    type Error = anyhow::Error;
+impl TryFrom<SubstateRecord> for SubstateResponse {
+    type Error = StorageError;
 
     fn try_from(row: SubstateRow) -> Result<Self, Self::Error> {
         Ok(SubstateResponse {
-            address: row.address.parse()?,
+            id: row.address.parse().map_err(|e| StorageError::DecodingError {
+                operation: "TryFrom<SubstateRecord> for SubstateResponse",
+                item: "Substate",
+                details: format!("Invalid substate address {}: {}", row.address, e),
+            })?,
             version: row.version as u32,
-            substate: serde_json::from_str(&row.data)?,
+            substate: deserialize_json(&row.data)?,
         })
     }
 }
@@ -59,9 +69,6 @@ pub struct NewSubstate {
     pub address: String,
     pub version: i32,
     pub data: String,
-    // TODO: unused
-    pub tx_hash: String,
     pub template_address: Option<String>,
     pub module_name: Option<String>,
-    pub timestamp: i64,
 }

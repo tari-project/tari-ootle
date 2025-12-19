@@ -2,17 +2,13 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine::{runtime::ActionIdent, transaction::MAX_CALL_DEPTH};
-use tari_engine_types::{
-    commit_result::{ExecuteResult, RejectReason},
-    instruction::Instruction,
-};
+use tari_engine_types::commit_result::{ExecuteResult, RejectReason};
 use tari_template_lib::{
-    call_args,
     models::{ComponentAddress, ResourceAddress},
     types::{Amount, TemplateAddress},
 };
 use tari_template_test_tooling::{support::assert_error::assert_access_denied_for_action, TemplateTest};
-use tari_transaction::{args, Transaction};
+use tari_transaction::{args, call_args, Instruction, Transaction};
 
 struct ComposabilityTest {
     template_test: TemplateTest,
@@ -45,7 +41,7 @@ fn initialize_composability(test: &mut ComposabilityTest) -> ComposabilityCompon
         .execute_and_commit(
             vec![Instruction::CallFunction {
                 address: test.composability_template,
-                function: "new".to_string(),
+                function: "new".try_into().unwrap(),
                 args: call_args![test.state_template],
             }],
             vec![],
@@ -81,7 +77,7 @@ fn create_resource_and_fund_account(test: &mut TemplateTest, account: ComponentA
         .execute_and_commit(
             vec![Instruction::CallFunction {
                 address: faucet_template,
-                function: "mint".to_string(),
+                function: "mint".try_into().unwrap(),
                 args: call_args![initial_supply],
             }],
             vec![],
@@ -99,7 +95,7 @@ fn create_resource_and_fund_account(test: &mut TemplateTest, account: ComponentA
     // take free coins into the account
     let _result = test
         .build_and_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(faucet_component, "take_free_coins", args![])
                 .put_last_instruction_output_on_workspace("free_coins")
                 .call_method(account, "deposit", args![Workspace("free_coins")]),
@@ -143,7 +139,7 @@ fn it_allows_function_to_method_calls() {
         .execute_and_commit(
             vec![Instruction::CallFunction {
                 address: test.composability_template,
-                function: "new_from_component".to_string(),
+                function: "new_from_component".try_into().unwrap(),
                 args: call_args![composability_component_0],
             }],
             vec![],
@@ -231,13 +227,13 @@ fn it_allows_method_to_function_calls() {
 fn it_fails_on_invalid_calls() {
     let mut test = setup();
     let components = initialize_composability(&mut test);
-    let (_, _, private_key) = test.template_test.create_funded_account();
+    let (_, _, private_key) = test.template_test.create_empty_account();
 
     // the "invalid_state_call" method tries to call a non-existent method in the inner state component
     let result = test
         .template_test
         .try_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(components.composability_component, "invalid_state_call", args![])
                 .build_and_seal(&private_key),
             vec![],
@@ -268,7 +264,7 @@ fn it_does_not_propagate_permissions() {
     let result = test
         .template_test
         .try_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(components.composability_component, "malicious_withdraw", args![
                     victim_account,
                     fungible_resource,
@@ -319,7 +315,7 @@ fn it_allows_multiple_recursion_levels() {
 #[test]
 fn it_fails_when_surpassing_recursion_limit() {
     let mut test = setup();
-    let (_, _, private_key) = test.template_test.create_funded_account();
+    let (_, _, private_key) = test.template_test.create_empty_account();
     let max_call_depth = MAX_CALL_DEPTH;
 
     // innermost composability component
@@ -342,7 +338,7 @@ fn it_fails_when_surpassing_recursion_limit() {
     let result = test
         .template_test
         .try_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(last_composability_component, "get_nested_value", args![])
                 .build_and_seal(&private_key),
             vec![],

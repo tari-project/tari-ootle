@@ -21,22 +21,24 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { NavLink } from "react-router-dom";
+import Fade from "@mui/material/Fade";
 import ListItemButton from "@mui/material/ListItemButton";
 import ListItemIcon from "@mui/material/ListItemIcon";
-import ListItemText from "@mui/material/ListItemText";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+import Tooltip from "@mui/material/Tooltip";
+import { PiPuzzlePiece } from "react-icons/pi";
 import {
-  IoHomeOutline,
-  IoHome,
-  IoBarChartOutline,
   IoBarChart,
-  IoGitNetworkOutline,
+  IoBarChartOutline,
   IoGitNetwork,
+  IoGitNetworkOutline,
+  IoHome,
+  IoHomeOutline,
 } from "react-icons/io5";
 import { TbTimelineEventText } from "react-icons/tb";
-import { PiPuzzlePiece } from "react-icons/pi";
-import Tooltip from "@mui/material/Tooltip";
-import Fade from "@mui/material/Fade";
-import theme from "../theme/theme";
+
+import ThemeSwitcher from "./ThemeSwitcher";
 
 const iconStyle = {
   height: 22,
@@ -46,7 +48,7 @@ const iconStyle = {
 const activeIconStyle = {
   height: 22,
   width: 22,
-  color: theme.palette.primary.main,
+  color: "#9330FF",
 };
 
 const mainItems = [
@@ -82,31 +84,48 @@ const mainItems = [
   },
 ];
 
-const MainMenu = mainItems.map(({ title, icon, activeIcon, link }) => {
-  return (
-    <NavLink to={link} key={title} style={{ textDecoration: "none" }}>
-      {({ isActive }) => (
-        <ListItemButton
-          sx={{
-            paddingLeft: "22px",
-            paddingRight: "22px",
-          }}
-          disableRipple
+const MainMenu = mainItems.map(({ title, icon, activeIcon, link }) => (
+  <NavLink to={link} key={title} style={{ textDecoration: "none" }}>
+    {({ isActive }) => (
+      <ListItemButton
+        sx={{
+          paddingLeft: "22px",
+          paddingRight: "22px",
+          paddingTop: "16px",
+          paddingBottom: "16px",
+        }}
+        disableRipple
+      >
+        <Tooltip
+          TransitionComponent={Fade}
+          TransitionProps={{ timeout: 300 }}
+          title={title}
+          placement="right"
+          arrow
         >
-          <Tooltip
-            TransitionComponent={Fade}
-            TransitionProps={{ timeout: 300 }}
-            title={title}
-            followCursor={true}
-            placement="right"
-          >
-            <ListItemIcon>{isActive ? activeIcon : icon}</ListItemIcon>
-          </Tooltip>
-          <ListItemText primary={title} />
-        </ListItemButton>
-      )}
-    </NavLink>
-  );
-});
+          <ListItemIcon>{isActive ? activeIcon : icon}</ListItemIcon>
+        </Tooltip>
+        <Typography
+          variant="body1"
+          color={isActive ? "primary" : "textSecondary"}
+        >
+          {title}
+        </Typography>
+      </ListItemButton>
+    )}
+  </NavLink>
+));
 
-export const mainListItems = <>{MainMenu}</>;
+export const mainListItems = (
+  <Stack
+    direction="column"
+    justifyContent="space-between"
+    spacing={1}
+    height={"100%"}
+  >
+    <Stack direction="column" justifyContent="flex-start">
+      {MainMenu}
+    </Stack>
+    <ThemeSwitcher />
+  </Stack>
+);

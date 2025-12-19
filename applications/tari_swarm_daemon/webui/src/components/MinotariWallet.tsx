@@ -76,7 +76,7 @@ function Wallet(props: any) {
 }
 
 function BurnFunds(props: any) {
-  const [amount, setAmount] = React.useState(1000);
+  const [amount, setAmount] = React.useState(1000 * 1000_000);
   const [accountName, setAccountName] = React.useState<null | string>(null);
   const [claimUrl, setClaimUrl] = React.useState<null | string>(null);
 

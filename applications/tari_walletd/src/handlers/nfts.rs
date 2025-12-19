@@ -4,7 +4,7 @@
 use std::{collections::HashSet, slice};
 
 use anyhow::anyhow;
-use axum::headers::authorization::Bearer;
+use axum_extra::headers::authorization::Bearer;
 use log::{info, warn};
 use tari_engine_types::{
     component::derive_component_address_from_public_key,
@@ -19,7 +19,7 @@ use tari_template_lib::{
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS},
     models::{ComponentAddress, ResourceAddress},
 };
-use tari_transaction::{args, TransactionId};
+use tari_transaction::args;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{
@@ -33,13 +33,11 @@ use tari_wallet_daemon_client::{
         TransferNftResponse,
     },
 };
-use tokio::sync::broadcast;
 
 use super::{context::HandlerContext, helpers::get_account_or_default};
 use crate::{
-    handlers::helpers::{application_error, get_account, get_account_with_inputs, invalid_params},
+    handlers::helpers::{application_error, get_account, get_account_with_inputs, invalid_params, wait_for_result},
     jrpc_server::ApplicationErrorCode,
-    services::{TransactionFinalizedEvent, WalletEvent},
     DEFAULT_FEE,
 };
 
@@ -76,7 +74,7 @@ pub async fn handle_list(
     let non_fungible_api = sdk.non_fungible_api();
 
     let non_fungibles = non_fungible_api
-        .get_all(account.address, limit, offset)
+        .get_all(account.component_address, limit, offset)
         .map_err(|e| anyhow!("Failed to list all non fungibles, with error: {}", e))?;
     Ok(ListNftsResponse { nfts: non_fungibles })
 }
@@ -87,13 +85,14 @@ pub async fn handle_mint_faucet(
     req: MintFaucetNftRequest,
 ) -> Result<MintFaucetNftResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    let key_manager_api = sdk.key_manager_api();
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
     let account = get_account(&req.account, &sdk.accounts_api())?;
     let account = account.account;
 
-    let signing_key = key_manager_api.derive_account_key(account.key_index)?;
+    let account_owner_key_id = account
+        .owner_key_id
+        .ok_or_else(|| invalid_params("account", Some("The account does not have an owner key ID")))?;
 
     info!(target: LOG_TARGET, "🎮 Minting new NFT with metadata {}", req.mutable_data);
 
@@ -105,22 +104,24 @@ pub async fn handle_mint_faucet(
 
     let inputs = sdk
         .substate_api()
-        .locate_dependent_substates(slice::from_ref(&account.address.into()), true)
+        .locate_dependent_substates(slice::from_ref(&account.component_address.into()), true)
         .await?;
     let fee = req.max_fee.unwrap_or(DEFAULT_FEE);
     let transaction = context
         .transaction_builder()
-        .fee_transaction_pay_from_component(account.address, fee)
+        .pay_fee_from_component(account.component_address, fee)
         .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![
             Amount(req.number_to_mint),
             mutable_data
         ])
         .put_last_instruction_output_on_workspace("tokens")
-        .call_method(account.address, "deposit", args![Workspace("tokens")])
+        .call_method(account.component_address, "deposit", args![Workspace("tokens")])
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .add_input(NFT_FAUCET_COMPONENT_ADDRESS)
         .add_input(NFT_FAUCET_RESOURCE_ADDRESS)
-        .build_and_seal(&signing_key.key);
+        .finish();
+
+    let transaction = sdk.signer_api().sign(account_owner_key_id, transaction)?;
 
     let mut events = context.notifier().subscribe();
     let tx_id = context.transaction_service().submit_transaction(transaction).await?;
@@ -153,7 +154,7 @@ async fn try_find_target_account(
         .await
         .optional()?;
 
-    let Some(ValidatorScanResult { address, substate }) = existing_account else {
+    let Some(ValidatorScanResult { id: address, substate }) = existing_account else {
         return Ok(false);
     };
     inputs.insert(address.into());
@@ -226,13 +227,27 @@ pub async fn handle_transfer(
     // fetch accounts and its inputs
     let (fee_payer_account, fee_payer_account_inputs) = get_account_with_inputs(Some(&req.fee_payer_account), sdk)?;
     let fee_payer_account = fee_payer_account.account;
-    let fee_payer_account_address = fee_payer_account.address;
+    let fee_payer_key_id = fee_payer_account.owner_key_id.ok_or_else(|| {
+        invalid_params(
+            "fee_payer_account",
+            Some("The fee payer account does not have an owner key ID"),
+        )
+    })?;
+    let fee_payer_account_address = fee_payer_account.component_address;
     let (source_account, mut inputs) = get_account_with_inputs(Some(&req.source_account), sdk)?;
+    let account_owner_key_id = source_account.account.owner_key_id().ok_or_else(|| {
+        invalid_params(
+            "source_account",
+            Some("The source account does not have an owner key ID"),
+        )
+    })?;
     inputs.extend(fee_payer_account_inputs);
-    let source_account_address = *source_account.address();
+    let source_account_address = *source_account.component_address();
 
-    let target_account_address =
-        derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.target_account_public_key);
+    let target_account_address = derive_component_address_from_public_key(
+        &ACCOUNT_TEMPLATE_ADDRESS,
+        req.target_account_address.account_public_key(),
+    );
 
     // TODO: this can be simplified
     let mut builder = context.transaction_builder();
@@ -241,12 +256,12 @@ pub async fn handle_transfer(
 
     if !try_find_target_account(context, &mut inputs, target_account_address, req.resource_address).await? {
         // We need to create the target account
-        builder = builder.create_account(req.target_account_public_key)
+        builder = builder.create_account(*req.target_account_address.account_public_key())
     }
     // add the input for the source account vault substate
     let src_vault = sdk
         .accounts_api()
-        .get_vault_by_resource(source_account.address(), &req.resource_address)?;
+        .get_vault_by_resource(source_account.component_address(), &req.resource_address)?;
     let src_vault_substate = sdk.substate_api().get_substate(&src_vault.id.into())?;
     inputs.insert(src_vault_substate.substate_id.into());
     inputs.insert(SubstateRequirement::unversioned(src_vault.resource_address));
@@ -276,23 +291,20 @@ pub async fn handle_transfer(
             .call_method(target_account_address, "deposit", args![Workspace(format!("b-{i}"))]);
     }
 
-    let (fee_payer_account_secret_key, fee_payer_account_public_key) = sdk
-        .key_manager_api()
-        .derive_account_keypair(fee_payer_account.key_index)?;
-
-    let source_account_secret_key = sdk.key_manager_api().derive_account_key(source_account.key_index())?;
+    let fee_owner_key = sdk.key_manager_api().get_public_key(fee_payer_key_id)?;
 
     let transaction = builder
         .with_dry_run(req.dry_run)
-        .fee_transaction_pay_from_component(fee_payer_account_address, req.max_fee)
-        .with_inputs(inputs)
-        // Seal signer is the fee payer account
-        .with_authorized_seal_signer()
-        .add_signature(
-            &fee_payer_account_public_key.to_byte_type(),
-            &source_account_secret_key.key,
-        )
-        .build_and_seal(&fee_payer_account_secret_key.key);
+        .pay_fee_from_component(fee_payer_account_address, req.max_fee)
+        .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
+        .finish();
+
+    let transaction = sdk
+        .signer_api()
+        .with_context(&fee_owner_key.public_key().to_byte_type())
+        .sign(account_owner_key_id, transaction)?;
+
+    let transaction = sdk.signer_api().sign(fee_payer_key_id, transaction)?;
 
     // if dry run, we can return the result immediately
     if req.dry_run {
@@ -339,17 +351,4 @@ pub async fn handle_transfer(
         fee_refunded: req.max_fee - finalized.final_fee,
         result: finalized.finalize,
     })
-}
-
-async fn wait_for_result(
-    events: &mut broadcast::Receiver<WalletEvent>,
-    transaction_id: TransactionId,
-) -> Result<TransactionFinalizedEvent, anyhow::Error> {
-    loop {
-        let wallet_event = events.recv().await?;
-        match wallet_event {
-            WalletEvent::TransactionFinalized(event) if event.transaction_id == transaction_id => return Ok(event),
-            _ => {},
-        }
-    }
 }

@@ -6,14 +6,12 @@ use std::vec;
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine::runtime::{AssertError, RuntimeError};
 use tari_template_lib::{
-    args::WorkspaceOffsetId,
-    call_args,
     models::{ComponentAddress, NonFungibleAddress, ResourceAddress},
     prelude::XTR,
     types::Amount,
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
-use tari_transaction::{args, Instruction, Transaction};
+use tari_transaction::{args, args::WorkspaceOffsetId, call_args, Instruction, Transaction};
 
 const FAUCET_WITHDRAWAL_AMOUNT: u32 = 1000;
 
@@ -36,7 +34,7 @@ fn setup() -> AssertTest {
         .execute_and_commit(
             vec![Instruction::CallFunction {
                 address: faucet_template,
-                function: "mint".to_string(),
+                function: "mint".try_into().unwrap(),
                 args: call_args![initial_supply],
             }],
             vec![template_test.owner_proof()],
@@ -71,7 +69,7 @@ fn successful_assert() {
     let mut test: AssertTest = setup();
 
     test.template_test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(test.faucet_component, "take_free_coins", args![])
             .put_last_instruction_output_on_workspace("faucet_bucket")
             .assert_bucket_contains("faucet_bucket", test.faucet_resource, FAUCET_WITHDRAWAL_AMOUNT)
@@ -89,7 +87,7 @@ fn it_fails_with_invalid_resource() {
     let invalid_resource_address = XTR;
 
     let reason = test.template_test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(test.faucet_component, "take_free_coins", args![])
             .put_last_instruction_output_on_workspace("faucet_bucket")
             .assert_bucket_contains("faucet_bucket", invalid_resource_address, FAUCET_WITHDRAWAL_AMOUNT)
@@ -115,7 +113,7 @@ fn it_fails_with_invalid_amount() {
     let min_amount = FAUCET_WITHDRAWAL_AMOUNT + 1;
 
     let reason = test.template_test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(test.faucet_component, "take_free_coins", args![])
             .put_last_instruction_output_on_workspace("faucet_bucket")
             .assert_bucket_contains("faucet_bucket", test.faucet_resource, min_amount)
@@ -138,7 +136,7 @@ fn it_fails_with_invalid_bucket() {
     let mut test: AssertTest = setup();
 
     let reason = test.template_test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(test.faucet_component, "take_free_coins", args![])
             // we are going to assert a workspace value that is NOT a bucket
             .call_method(test.account, "get_balances", args![])
@@ -157,7 +155,7 @@ fn it_fails_with_invalid_workspace_key() {
     let mut test: AssertTest = setup();
 
     let reason = test.template_test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(test.faucet_component, "take_free_coins", args![])
             .put_last_instruction_output_on_workspace("faucet_bucket")
             // we are going to assert a key that does not exist in the workspace

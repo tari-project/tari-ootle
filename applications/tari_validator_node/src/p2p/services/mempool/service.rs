@@ -27,11 +27,11 @@ use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_networking::NetworkingHandle;
-use tari_ootle_common_types::{optional::Optional, PeerAddress, ShardGroup, ToSubstateAddress};
+use tari_ootle_common_types::{optional::Optional, PeerAddress, ShardGroup};
 use tari_ootle_p2p::{NewTransactionMessage, TariMessage, TariMessagingSpec};
 use tari_ootle_storage::{consensus_models::TransactionRecord, StateStore, StateStoreReadTransaction};
 use tari_transaction::{Transaction, TransactionId};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 #[cfg(feature = "metrics")]
 use super::metrics::PrometheusMempoolMetrics;
@@ -92,28 +92,55 @@ where
     }
 
     pub async fn run(mut self) -> anyhow::Result<()> {
-        let mut consensus_events = self.consensus_handle.subscribe_to_hotstuff_events();
+        let mut consensus_events = self.consensus_handle.subscribe_to_hotstuff_events()?;
 
         loop {
             tokio::select! {
-                Some(req) = self.mempool_requests.recv() => self.handle_request(req).await,
-                Some(result) = self.gossip.next_message() => {
-                    if let Err(e) = self.handle_new_transaction_from_remote(result).await {
-                        warn!(target: LOG_TARGET, "Mempool rejected transaction: {}", e);
+                req = self.mempool_requests.recv() => {
+                    match req {
+                        Some(req) => self.handle_request(req).await,
+                        None => {
+                            info!(target: LOG_TARGET, "Mempool request channel closed, shutting down");
+                            break;
+                        }
                     }
+                },
+                result = self.gossip.next_message() => {
+                    match result {
+                        Some(msg) => {
+                            if let Err(e) = self.handle_new_transaction_from_remote(msg).await {
+                                warn!(target: LOG_TARGET, "Mempool rejected transaction: {}", e);
+                            }
+                        }
+                        None => {
+                            info!(target: LOG_TARGET, "Gossip channel closed, shutting down mempool service");
+                            break;
+                        }
+                    };
                 }
-                Ok(HotstuffEvent::EpochChanged { epoch, registered_shard_group}) = consensus_events.recv() => {
-                    if let Some(shard_group) = registered_shard_group {
-                        info!(target: LOG_TARGET, "Mempool service subscribing transaction messages for {shard_group} in {epoch}");
-                        self.gossip.subscribe(shard_group).await?;
-                    } else {
-                        info!(target: LOG_TARGET, "Not registered for epoch {epoch}, unsubscribing from gossip if necessary");
-                        self.gossip.unsubscribe().await?;
+                event = consensus_events.recv() => {
+                    match event {
+                        Ok(HotstuffEvent::EpochChanged { epoch, registered_shard_group})  => {
+                            if let Some(shard_group) = registered_shard_group {
+                                info!(target: LOG_TARGET, "Mempool service subscribing transaction messages for {shard_group} in {epoch}");
+                                self.gossip.subscribe(shard_group).await?;
+                            } else {
+                                info!(target: LOG_TARGET, "Not registered for epoch {epoch}, unsubscribing from gossip if necessary");
+                                self.gossip.unsubscribe().await?;
+                            }
+                        },
+                        Ok(_) => {},
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            warn!(target: LOG_TARGET, "Missed {} consensus events", n);
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            info!(target: LOG_TARGET, "Consensus event channel closed, shutting down mempool service");
+                            break;
+                        }
                     }
                 },
 
                 else => {
-                    info!(target: LOG_TARGET, "Mempool service shutting down");
                     break;
                 }
             }
@@ -121,6 +148,7 @@ where
 
         self.gossip.unsubscribe().await?;
 
+        info!(target: LOG_TARGET, "💤 Mempool service shutting down");
         Ok(())
     }
 
@@ -236,26 +264,12 @@ where
             return Err(e.into());
         }
 
-        if transaction.num_unique_inputs() == 0 {
-            warn!(target: LOG_TARGET, "⚠ No involved shards for transaction {tx_id}");
-            return Err(MempoolError::TransactionValidationError(
-                TransactionValidationError::NoInvolvedShards { transaction_id: tx_id },
-            ));
-        }
-
         let current_epoch = self.consensus_handle.current_view().get_epoch();
-        let tx_substate_address = tx_id.to_substate_address();
 
         let local_committee_shard = self.epoch_manager.get_local_committee_info(current_epoch).await?;
-        let is_input_shard = transaction.is_involved_inputs(&local_committee_shard);
-        let is_output_shard = transaction.is_global() ||
-            local_committee_shard.includes_substate_address(
-                // Known output shards
-                // This is to allow for the txreceipt output and indicates shard involvement.
-                &tx_substate_address,
-            );
+        let is_involved = transaction.is_involved(&local_committee_shard);
 
-        if is_input_shard || is_output_shard {
+        if is_involved {
             debug!(target: LOG_TARGET, "🎱 New transaction {tx_id} in mempool");
             self.transactions.insert(tx_id);
             self.consensus_handle
@@ -296,7 +310,7 @@ where
             target: LOG_TARGET,
             "🎱 Propagating transaction {} ({} input(s))",
             tx_id,
-            transaction.num_unique_inputs(),
+            transaction.num_inputs(),
         );
         if let Err(e) = self
             .gossip

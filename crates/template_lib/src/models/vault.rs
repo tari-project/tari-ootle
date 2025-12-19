@@ -35,6 +35,7 @@ use tari_template_abi::{
 use tari_template_lib_types::{EntityId, KeyParseError, ObjectKey};
 
 use super::{
+    address_prefixes,
     BinaryTag,
     Bucket,
     ConfidentialWithdrawProof,
@@ -43,6 +44,7 @@ use super::{
     Proof,
     ProofAuth,
     ResourceAddress,
+    StealthTransferStatement,
 };
 use crate::{
     args::{
@@ -55,20 +57,16 @@ use crate::{
         VaultWithdrawArg,
     },
     newtype_struct_serde_impl,
-    prelude::ResourceType,
     resource::ResourceManager,
-    types::Amount,
+    types::{Amount, ResourceType},
 };
 
 const TAG: u64 = BinaryTag::VaultId as u64;
 
 /// A vault's unique identification in the Tari network
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct VaultId(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl VaultId {
@@ -81,7 +79,7 @@ impl VaultId {
         Ok(Self::new(key))
     }
 
-    pub fn as_object_key(&self) -> &ObjectKey {
+    pub const fn as_object_key(&self) -> &ObjectKey {
         self.0.inner()
     }
 
@@ -98,7 +96,7 @@ impl From<ObjectKey> for VaultId {
 
 impl Display for VaultId {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "vault_{}", *self.0)
+        write!(f, "{}_{}", address_prefixes::VAULT, *self.0)
     }
 }
 
@@ -127,25 +125,6 @@ impl TryFrom<&[u8]> for VaultId {
 }
 
 newtype_struct_serde_impl!(VaultId, BorTag<ObjectKey, TAG>);
-
-#[cfg(feature = "borsh")]
-mod borsh_impl {
-    use std::io::Read;
-
-    use super::*;
-    impl ::borsh::BorshSerialize for VaultId {
-        fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-            borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
-        }
-    }
-
-    impl borsh::BorshDeserialize for VaultId {
-        fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
-            let key = borsh::BorshDeserialize::deserialize_reader(reader)?;
-            Ok(Self::new(ObjectKey::from_array(key)))
-        }
-    }
-}
 
 /// Encapsulates all the ways that a vault can be referenced
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -376,12 +355,17 @@ impl Vault {
             .expect("GetResourceAddress returned invalid resource address")
     }
 
-    /// Returns the the type of resource that this vault holds.
-    pub fn resource_type(&self) -> ResourceType {
-        ResourceManager::get(self.resource_address()).resource_type()
+    /// Returns the [ResourceManager] for the resource that this vault holds.
+    pub fn to_resource_manager(&self) -> ResourceManager {
+        ResourceManager::get(self.resource_address())
     }
 
-    /// Pay a transaction fee with the funds present in the vault.
+    /// Returns the the type of resource that this vault holds.
+    pub fn resource_type(&self) -> ResourceType {
+        self.to_resource_manager().resource_type()
+    }
+
+    /// Pay a transaction fee with revealed funds present in the vault.
     /// Note that the vault must hold native Tari tokens to perform this operation.
     pub fn pay_fee<A: Into<Amount>>(&self, amount: A) {
         let _resp: InvokeResult = call_engine(EngineOp::VaultInvoke, &VaultInvokeArg {
@@ -389,21 +373,22 @@ impl Vault {
             action: VaultAction::PayFee,
             args: invoke_args![PayFeeArg {
                 amount: amount.into(),
-                proof: None
+                statement: None
             }],
         });
     }
 
-    /// Pay a transaction fee with the confidential funds present in the vault.
-    /// Note that the vault must hold native Tari tokens to perform this operation
-    /// The withdraw proof must result in a non-zero amount of revealed funds.
-    pub fn pay_fee_confidential(&self, proof: ConfidentialWithdrawProof) {
+    /// Pay a transaction fee with stealth funds.
+    /// Note that the vault must hold native XTR tokens to perform this operation
+    /// The transfer statement must result in a positive amount of revealed funds (from this vault and/or from consumed
+    /// utxos).
+    pub fn pay_fee_stealth(&self, transfer: StealthTransferStatement) {
         let _resp: InvokeResult = call_engine(EngineOp::VaultInvoke, &VaultInvokeArg {
             vault_ref: self.vault_ref(),
             action: VaultAction::PayFee,
             args: invoke_args![PayFeeArg {
                 amount: Amount::zero(),
-                proof: Some(proof)
+                statement: Some(transfer)
             }],
         });
     }

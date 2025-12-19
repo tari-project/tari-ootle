@@ -11,21 +11,23 @@ fn main() {
     //       because this is not currently supported.
     let picture_seller = PictureSeller::new(1_000u64);
 
-    let picture_seller = global!["picture_seller_addr"];
-    let faucet = global!["test_faucet"];
+    let picture_seller = var!["picture_seller_addr"];
+    let faucet = var!["test_faucet"];
     // TODO: Implement sugar for the account component
     // e.g.  let account = default_account!();
-    let mut account = global!["account"];
+    let mut account = var!["account"];
 
     // initialize a user account with some faucet funds
-    let funds = faucet.take_free_coins(Amount(1_000));
+    let funds = faucet.take_free_coins(1_000);
     account.deposit(funds);
-
-    // TODO: XTR builtin
-    let XTR = global!["xtr_resource"];
+    account.set_public_key(
+        PublicKey("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+        Address("component_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+        cbor!({"some": {"data": [1, 2, 3]}}),
+    );
 
     // buy a picture
-    let bucket = account.withdraw(XTR, Amount(1_000));
+    let bucket = account.withdraw(XTR, 1_000);
     let picture = picture_seller.buy(bucket);
 
     // store our brand new picture in our account

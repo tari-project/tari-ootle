@@ -4,25 +4,21 @@
 use borsh::BorshSerialize;
 use tari_bor::{Deserialize, Serialize};
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
-use tari_template_lib::{models::EncryptedData, prelude::RistrettoPublicKeyBytes};
+use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, EncryptedData};
 
 use crate::{
-    crypto::{CompressedElgamalVerifiableBalance, ElgamalVerifiableBalance},
+    crypto::{ElgamalVerifiableBalance, ElgamalVerifiableBalanceBytes},
     ToByteType,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PrivateOutput {
     pub public_nonce: RistrettoPublicKeyBytes,
     pub encrypted_data: EncryptedData,
     #[cfg_attr(feature = "ts", ts(type = "number | bigint"))]
     pub minimum_value_promise: u64,
-    pub viewable_balance: Option<CompressedElgamalVerifiableBalance>,
+    pub viewable_balance: Option<ElgamalVerifiableBalanceBytes>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

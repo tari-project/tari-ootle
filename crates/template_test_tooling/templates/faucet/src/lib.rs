@@ -36,13 +36,22 @@ mod faucet_template {
         }
 
         pub fn mint_with_symbol(initial_supply: Amount, symbol: String) -> Component<Self> {
-            let coins = ResourceBuilder::fungible()
+            Self::mint_with_opts(initial_supply, symbol, None)
+        }
+
+        pub fn mint_with_opts(
+            initial_supply: Amount,
+            symbol: String,
+            address_alloc: Option<ComponentAddressAllocation>,
+        ) -> Component<Self> {
+            let coins = ResourceBuilder::public_fungible()
                 .with_token_symbol(symbol)
                 .initial_supply(initial_supply);
 
             Component::new(Self {
                 vault: Vault::from_bucket(coins),
             })
+            .with_address_allocation_opt(address_alloc)
             .with_access_rules(AccessRules::allow_all())
             .create()
         }
@@ -57,11 +66,6 @@ mod faucet_template {
             self.vault.withdraw(amount)
         }
 
-        pub fn take_free_coins_confidential(&mut self, proof: ConfidentialWithdrawProof) -> Bucket {
-            debug!("Withdrawing <unknown> coins from faucet");
-            self.vault.withdraw_confidential(proof)
-        }
-
         pub fn burn_coins(&mut self, amount: Amount) {
             let mut bucket = self.vault.withdraw(amount);
             bucket.burn();
@@ -69,16 +73,6 @@ mod faucet_template {
 
         pub fn total_supply(&self) -> Amount {
             ResourceManager::get(self.vault.resource_address()).total_supply()
-        }
-
-        pub fn pay_fee(&mut self, amount: Amount) {
-            debug!("Paying fee from faucet");
-            self.vault.pay_fee(amount);
-        }
-
-        pub fn pay_fee_confidential(&mut self, proof: ConfidentialWithdrawProof) {
-            debug!("Paying fee from faucet");
-            self.vault.pay_fee_confidential(proof);
         }
     }
 }

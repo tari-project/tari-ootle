@@ -9,9 +9,9 @@ use tari_consensus_types::{
     HighPc,
     HighestSeenBlock,
     LastSentVote,
+    PcId,
     ProposalCertificate,
     ProposalVote,
-    QcId,
     TimeoutVote,
     TimeoutVoteMessage,
     ValidatorSignatureBytes,
@@ -28,7 +28,6 @@ use tari_ootle_storage::{
     consensus_models::{
         Block,
         BookkeepingModel,
-        EpochStateRoot,
         ForeignProposalRecord,
         ForeignProposalStatus,
         NoVoteReason,
@@ -36,6 +35,7 @@ use tari_ootle_storage::{
         ValidBlock,
     },
     StateStore,
+    StateStoreReadTransaction,
 };
 use tari_sidechain::{ProposalCertificateSignatureFields, QuorumDecision};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
@@ -76,7 +76,7 @@ pub struct OnReceiveLocalProposalHandler<TConsensusSpec: ConsensusSpec> {
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     signing_service: TConsensusSpec::SignerService,
     on_receive_foreign_proposal: OnReceiveForeignProposalHandler<TConsensusSpec>,
-    tx_events: broadcast::Sender<HotstuffEvent>,
+    tx_events: broadcast::WeakSender<HotstuffEvent>,
     hooks: TConsensusSpec::Hooks,
 }
 
@@ -90,7 +90,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         outbound_messaging: TConsensusSpec::OutboundMessaging,
         signing_service: TConsensusSpec::SignerService,
         transaction_pool: TransactionPool<TConsensusSpec::StateStore>,
-        tx_events: broadcast::Sender<HotstuffEvent>,
+        tx_events: broadcast::WeakSender<HotstuffEvent>,
         transaction_manager: ConsensusTransactionManager<
             TConsensusSpec::TransactionExecutor,
             TConsensusSpec::StateStore,
@@ -370,13 +370,13 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
         // End of epoch committed? No need to enter the view or send votes
         if !block_decision.is_committed_epoch_end() {
-            if let Some(decision) = block_decision.quorum_decision {
+            if let Some(decision) = block_decision.local_decision {
                 // Enter the highest view justified by this block
                 self.pacemaker
                     .enter_view(
                         valid_block.epoch(),
                         block_decision.highest_qc_view(),
-                        block_decision.high_pc.block_height(),
+                        block_decision.high_pc.height(),
                     )
                     .await?;
 
@@ -480,9 +480,20 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     )));
                 }
                 checkpoint.save(tx)?;
-                EpochStateRoot::new(eoe_block.epoch(), eoe_block.shard_group(), calculated_mr).set(tx)?;
 
                 if let Some(next_shard_group) = next_shard_group {
+                    // If this shard group remains the same, we can just continue. However, if shard groups change and
+                    // we now manage a shard we have not synced, we should to kick into sync.
+                    if next_shard_group != eoe_block.shard_group() {
+                        return Err(HotStuffError::NeedsSync {
+                            reason: format!(
+                                "Shard group changed from {} to {}. We need to sync the new shard group.",
+                                eoe_block.shard_group(),
+                                next_shard_group
+                            ),
+                        });
+                    }
+
                     // Create the next genesis
                     let mut genesis = Block::genesis(
                         network,
@@ -495,7 +506,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     info!(target: LOG_TARGET, "⭐️ Creating new genesis block {genesis}");
                     genesis.justify().save(tx)?;
                     genesis.insert(tx)?;
-                    genesis.add_justify_qc(tx, &QcId::zero())?;
+                    genesis.add_justify_qc(tx, &PcId::zero())?;
                     // We'll propose using the new genesis as parent
                     genesis.as_locked().set(tx)?;
                     genesis.as_highest_seen().set(tx)?;
@@ -530,7 +541,9 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
     }
 
     fn publish_event(&self, event: HotstuffEvent) {
-        let _ignore = self.tx_events.send(event);
+        if let Some(sender) = self.tx_events.upgrade() {
+            let _ignore = sender.send(event);
+        }
     }
 
     async fn send_vote_to_leader(
@@ -796,16 +809,29 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         } else {
             // Load our local version of the justified block. Check that details included in the justify match
             // previously added blocks
-            Block::get(tx, &candidate_block.justify().calculate_block_id())
-                .optional()?
-                .ok_or_else(|| {
+            let justify_block_id = candidate_block.justify().calculate_block_id();
+            match Block::get(tx, &justify_block_id).optional()? {
+                Some(b) => b,
+                None => {
+                    if tx.parked_block_exists(&justify_block_id)? {
+                        // This case shouldnt happen because the message buffer should not yet send the proposal through
+                        warn!(target: LOG_TARGET, "⚠️ BUG: Justify block {} for candidate block {} is parked", justify_block_id, candidate_block);
+                        return Err(ProposalValidationError::JustifyBlockParked {
+                            proposed_by: candidate_block.proposed_by().to_string(),
+                            block_description: candidate_block.to_string(),
+                            justify_block: candidate_block.justify().as_leaf_block(),
+                        }
+                        .into());
+                    }
                     // This will trigger a catch-up sync
-                    ProposalValidationError::JustifyBlockNotFound {
+                    return Err(ProposalValidationError::JustifyBlockNotFound {
                         proposed_by: candidate_block.proposed_by().to_string(),
                         block_description: candidate_block.to_string(),
                         justify_block: candidate_block.justify().as_leaf_block(),
                     }
-                })?
+                    .into());
+                },
+            }
         };
 
         if candidate_block.justifies_parent() && !candidate_block.parent_exists(tx)? {

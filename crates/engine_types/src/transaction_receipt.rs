@@ -4,34 +4,46 @@
 use std::{
     fmt,
     fmt::{Display, Formatter},
-    io::Read,
     str::FromStr,
 };
 
 use serde::{Deserialize, Serialize};
 use tari_bor::BorTag;
+use tari_common_types::types::FixedHash;
 use tari_template_lib::{
-    models::BinaryTag,
+    models::{address_prefixes, BinaryTag},
     types::{Hash, KeyParseError, ObjectKey},
 };
 
-use crate::{events::Event, fees::FeeReceipt, logs::LogEntry};
+use crate::{
+    events::Event,
+    fees::FeeReceipt,
+    logs::LogEntry,
+    serde_with,
+    substate::{hash_substate, SubstateDiff, SubstateId},
+    ValidatorFeeWithdrawal,
+};
 
 const TAG: u64 = BinaryTag::TransactionReceipt.as_u64();
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    borsh::BorshSerialize,
+    borsh::BorshDeserialize,
 )]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionReceiptAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl TransactionReceiptAddress {
-    const fn new(key: ObjectKey) -> Self {
-        Self(BorTag::new(key))
-    }
-
     pub const fn from_hash(hash: Hash) -> Self {
         Self::from_array(hash.into_array())
     }
@@ -41,7 +53,7 @@ impl TransactionReceiptAddress {
         Self(BorTag::new(key))
     }
 
-    pub fn as_object_key(&self) -> &ObjectKey {
+    pub const fn as_object_key(&self) -> &ObjectKey {
         self.0.inner()
     }
 
@@ -58,7 +70,7 @@ impl<T: Into<Hash>> From<T> for TransactionReceiptAddress {
 
 impl Display for TransactionReceiptAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "txreceipt_{}", self.as_object_key())
+        write!(f, "{}_{}", address_prefixes::TRANSACTION_RECEIPT, self.as_object_key())
     }
 }
 
@@ -71,28 +83,51 @@ impl FromStr for TransactionReceiptAddress {
     }
 }
 
-impl borsh::BorshSerialize for TransactionReceiptAddress {
-    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
-    }
-}
-
-impl borsh::BorshDeserialize for TransactionReceiptAddress {
-    fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
-        let key = borsh::BorshDeserialize::deserialize_reader(reader)?;
-        Ok(Self::new(ObjectKey::from_array(key)))
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionReceipt {
-    pub transaction_hash: Hash,
-    pub events: Vec<Event>,
-    pub logs: Vec<LogEntry>,
+    pub outcome: FinalizeOutcome,
+    pub diff_summary: DiffSummary,
+    pub fee_withdrawals: Box<[ValidatorFeeWithdrawal]>,
+    pub events: Box<[Event]>,
+    pub logs: Box<[LogEntry]>,
     pub fee_receipt: FeeReceipt,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, borsh::BorshSerialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum FinalizeOutcome {
+    Commit,
+    FeeIntentCommit,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, borsh::BorshSerialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct DiffSummary {
+    pub upped: Box<[UpSubstate]>,
+}
+
+impl From<&SubstateDiff> for DiffSummary {
+    fn from(diff: &SubstateDiff) -> Self {
+        Self {
+            upped: diff
+                .up_iter()
+                .map(|(id, s)| UpSubstate {
+                    substate_id: id.clone(),
+                    version: s.version(),
+                    value_hash: hash_substate(s.substate_value(), s.version()),
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct UpSubstate {
+    pub substate_id: SubstateId,
+    pub version: u32,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "serde_with::hex")]
+    pub value_hash: FixedHash,
 }

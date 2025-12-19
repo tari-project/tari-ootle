@@ -95,9 +95,13 @@ impl Validator {
 
     pub fn has_committed_substates(&self, tx_id: &TransactionId) -> bool {
         let tx = self.state_store().create_read_tx().unwrap();
-        let tx_rec = tx.transactions_get(tx_id).unwrap();
-        let exec_result = tx_rec.get_finalized_execution(&tx).unwrap();
-        if let Some(diff) = exec_result.result().finalize.accept() {
+        let Some(tx_rec) = tx.transactions_get(tx_id).optional().unwrap() else {
+            return false;
+        };
+        let Some(exec_result) = tx_rec.get_finalized_execution(&tx).optional().unwrap() else {
+            return false;
+        };
+        if let Some(diff) = exec_result.result().finalize.any_accept() {
             for (substate_id, substate) in diff.up_iter() {
                 let id = VersionedSubstateIdRef::new(substate_id, substate.version());
                 if tx.substates_any_exist(Some(id)).unwrap() {

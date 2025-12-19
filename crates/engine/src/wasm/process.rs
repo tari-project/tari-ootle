@@ -22,9 +22,16 @@
 
 use log::*;
 use serde::{de::DeserializeOwned, Serialize};
-use tari_bor::{decode_exact, encode, encode_into_writer, encode_with_len_to_writer, encoded_len};
-use tari_engine_types::{indexed_value::IndexedValue, instruction_result::InstructionResult};
-use tari_template_abi::{version, CallInfo, EngineOp, FunctionDef};
+use tari_bor::{
+    decode_exact,
+    encode,
+    encode_into_writer,
+    encode_with_len_to_writer,
+    encoded_len,
+    encoded_len_with_limit,
+};
+use tari_engine_types::{indexed_value::IndexedValue, instruction_result::InstructionResult, limits};
+use tari_template_abi::{version, CallInfo, EngineOp, FunctionDef, TemplateDef};
 use tari_template_lib::{
     args::{
         AddressAllocationInvokeArg,
@@ -42,8 +49,8 @@ use tari_template_lib::{
         ProofInvokeArg,
         ResourceInvokeArg,
         VaultInvokeArg,
-        WorkspaceInvokeArg,
     },
+    types::engine_args::SignatureInvokeArg,
     AbiContext,
 };
 use wasmer::{imports, AsStoreMut, Function, FunctionEnv, FunctionEnvMut, Instance, Store, StoreMut, WasmPtr};
@@ -70,7 +77,7 @@ pub struct WasmProcess {
 
 impl WasmProcess {
     pub fn init(store: &mut Store, module: LoadedWasmTemplate, state: Runtime) -> Result<Self, WasmExecutionError> {
-        Self::validate_template_tari_version(&module)?;
+        Self::validate_template_tari_version(module.template_def())?;
 
         let mut env = WasmEnv::new(state);
         let fn_env = FunctionEnv::new(store, env.clone());
@@ -102,7 +109,11 @@ impl WasmProcess {
         store: &mut S,
         val: &T,
     ) -> Result<AllocPtr, WasmExecutionError> {
-        let len = encoded_len(val)?;
+        let len = encoded_len_with_limit(val, limits::ENGINE_LIMITS.max_call_size).map_err(|_| {
+            WasmExecutionError::CallSizeLimitExceeded {
+                limit: limits::ENGINE_LIMITS.max_call_size,
+            }
+        })?;
         let len = u32::try_from(len).map_err(|_| WasmExecutionError::MemoryAllocationTooLarge)?;
 
         let ptr = self.env.alloc(store, len)?;
@@ -115,6 +126,7 @@ impl WasmProcess {
         Ok(AllocPtr::new(ptr.offset(), len))
     }
 
+    #[allow(clippy::too_many_lines)]
     fn tari_engine_entrypoint(
         mut env: FunctionEnvMut<WasmEnv<Runtime>>,
         op: i32,
@@ -128,6 +140,16 @@ impl WasmProcess {
                 return WasmPtr::null();
             },
         };
+
+        if arg_len as usize > limits::ENGINE_LIMITS.max_internal_call_size {
+            log::error!(
+                target: LOG_TARGET,
+                "Engine call size limit of {} bytes exceeded: {} bytes",
+                limits::ENGINE_LIMITS.max_internal_call_size,
+                arg_len
+            );
+            return WasmPtr::null();
+        }
 
         let (env_mut, mut store) = env.data_and_store_mut();
         let arg = match env_mut.read_from_memory(&mut store, arg_ptr, arg_len) {
@@ -158,9 +180,6 @@ impl WasmProcess {
             EngineOp::BucketInvoke => Self::handle(store, env_mut, arg, |env, arg: BucketInvokeArg| {
                 env.interface()
                     .bucket_invoke(arg.bucket_ref, arg.action, arg.args.into())
-            }),
-            EngineOp::WorkspaceInvoke => Self::handle(store, env_mut, arg, |env, arg: WorkspaceInvokeArg| {
-                env.interface().workspace_invoke(arg.action, arg.args.into())
             }),
             EngineOp::NonFungibleInvoke => Self::handle(store, env_mut, arg, |env, arg: NonFungibleInvokeArg| {
                 env.interface()
@@ -198,6 +217,9 @@ impl WasmProcess {
                     env.interface().builtin_template_invoke(arg.action)
                 })
             },
+            EngineOp::SignatureInvoke => Self::handle(store, env_mut, arg, |env, arg: SignatureInvokeArg| {
+                env.interface().signature_invoke(arg.action, arg.args.into())
+            }),
         };
 
         result.unwrap_or_else(|err| {
@@ -229,7 +251,10 @@ impl WasmProcess {
         U: Serialize,
         WasmExecutionError: From<E>,
     {
-        let decoded = decode_exact(&args).map_err(WasmExecutionError::EngineArgDecodeFailed)?;
+        let decoded = decode_exact(&args).map_err(|e| {
+            eprintln!("Failed to decode args: {}", e);
+            WasmExecutionError::EngineArgDecodeFailed(e)
+        })?;
         let resp = f(env_mut.state_mut(), decoded)?;
         let len = encoded_len(&resp)?;
         let ptr = env_mut.alloc(&mut store, len as u32)?;
@@ -244,15 +269,15 @@ impl WasmProcess {
 
     /// Determine if the version of the template_lib crate in the WASM is valid.
     /// This is just a placeholder that logs the result, as we don't manage version incompatibilities yet
-    fn validate_template_tari_version(module: &LoadedWasmTemplate) -> Result<(), WasmExecutionError> {
-        let template_tari_version = module.template_def().tari_version();
+    pub fn validate_template_tari_version(template_def: &TemplateDef) -> Result<(), WasmExecutionError> {
+        let template_tari_version = template_def.tari_version();
 
-        if are_versions_compatible(template_tari_version, version::MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION)? {
-            log::debug!(target: LOG_TARGET, "The Tari version in the template WASM (\"{}\") is compatible with the one used in the engine", template_tari_version);
+        if are_versions_compatible(template_tari_version, version::MINIMUM_SUPPORTED_WASM_ABI_VERSION)? {
+            log::debug!(target: LOG_TARGET, "The WASM ABI version (\"{}\") is compatible with the one used in the engine", template_tari_version);
         } else {
-            log::error!(target: LOG_TARGET, "The Tari version in the template WASM (\"{}\") is incompatible with the one used in the engine (\"{}\")", template_tari_version, version::MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION);
+            log::error!(target: LOG_TARGET, "The WASM ABI version (\"{}\") is incompatible with the one used in the engine (\"{}\")", template_tari_version, version::MINIMUM_SUPPORTED_WASM_ABI_VERSION);
             return Err(WasmExecutionError::TemplateVersionMismatch {
-                engine_version: version::MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION.to_owned(),
+                engine_version: version::MINIMUM_SUPPORTED_WASM_ABI_VERSION.to_owned(),
                 template_version: template_tari_version.to_owned(),
             });
         }
@@ -291,7 +316,25 @@ impl Invokable<Store> for WasmProcess {
                 if let Some(err) = self.env.take_last_engine_error() {
                     return Err(WasmExecutionError::RuntimeError(err));
                 }
-                if let Some(message) = self.env.take_last_panic_message() {
+                if let Some(mut message) = self.env.take_last_panic_message() {
+                    if message.len() > limits::ENGINE_LIMITS.max_panic_message_size {
+                        let limit = limits::ENGINE_LIMITS.max_panic_message_size;
+                        let mut end = limit;
+                        // Ensure we truncate at a char boundary (to avoid a panic when calling truncate)
+                        while end > 0 && !message.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        message.truncate(end);
+                        error!(target: LOG_TARGET, "Panic message size limit exceeded: for panic {}", message);
+                        return Err(WasmExecutionError::Panic {
+                            message: format!(
+                                "Panic message size limit of {} bytes exceeded",
+                                limits::ENGINE_LIMITS.max_panic_message_size
+                            ),
+                            runtime_error: err,
+                        });
+                    }
+
                     return Err(WasmExecutionError::Panic {
                         message,
                         runtime_error: err,

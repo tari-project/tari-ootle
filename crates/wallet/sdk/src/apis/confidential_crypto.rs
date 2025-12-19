@@ -1,27 +1,23 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::ops::RangeInclusive;
-
 use tari_common_types::types::PrivateKey;
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::{
-    crypto::{ElgamalVerifiableBalance, PrivateOutput, ValueLookupTable},
-    FromByteType,
-};
 use tari_ootle_wallet_crypto::{
     confidential,
-    encrypted_data::{encrypt_value_and_mask, extract_value_and_mask, unblind_output},
+    encrypted_data::{decrypt_data, encrypt_data, unblind_output},
     kdfs,
+    memo::Memo,
     ConfidentialProofError,
+    DecryptedData,
     MaskAndValue,
-    UnblindedOutputStatement,
+    OutputWitness,
     WalletCryptoError,
 };
 use tari_template_lib::{
-    models::{ConfidentialOutputStatement, ConfidentialWithdrawProof, EncryptedData},
+    models::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     prelude::PedersenCommitmentBytes,
-    types::Amount,
+    types::{Amount, EncryptedData},
 };
 
 pub struct ConfidentialCryptoApi;
@@ -43,9 +39,9 @@ impl ConfidentialCryptoApi {
         &self,
         inputs: &[MaskAndValue],
         input_revealed_amount: A,
-        output_statement: Option<&UnblindedOutputStatement>,
+        output_statement: Option<&OutputWitness>,
         output_revealed_amount: A,
-        change_statement: Option<&UnblindedOutputStatement>,
+        change_statement: Option<&OutputWitness>,
         change_revealed_amount: A,
     ) -> Result<ConfidentialWithdrawProof, ConfidentialCryptoApiError> {
         let proof = confidential::create_withdraw_proof(
@@ -74,28 +70,31 @@ impl ConfidentialCryptoApi {
         mask: &PrivateKey,
         public_nonce: &RistrettoPublicKey,
         secret: &PrivateKey,
+        memo: Option<&Memo>,
     ) -> Result<EncryptedData, ConfidentialCryptoApiError> {
-        let data = encrypt_value_and_mask(amount, mask, public_nonce, secret)?;
+        let key = kdfs::encrypted_data_dh_kdf_aead(secret, public_nonce);
+        let data = encrypt_data(amount, mask, &key, memo)?;
         Ok(data)
     }
 
-    pub fn extract_value_and_mask(
+    pub fn decrypt_output_data(
         &self,
         encryption_key: &PrivateKey,
         commitment: &PedersenCommitmentBytes,
         encrypted_data: &EncryptedData,
-    ) -> Result<(u64, PrivateKey), ConfidentialCryptoApiError> {
-        let value_and_mask = extract_value_and_mask(encryption_key, commitment, encrypted_data)?;
-        Ok(value_and_mask)
+        skip_memo: bool,
+    ) -> Result<DecryptedData, ConfidentialCryptoApiError> {
+        let decrypted = decrypt_data(encryption_key, commitment, encrypted_data, skip_memo)?;
+        Ok(decrypted)
     }
 
     pub fn generate_output_proof<A: Into<Amount>>(
         &self,
-        statement: &UnblindedOutputStatement,
+        statement: &OutputWitness,
         revealed_amount: A,
     ) -> Result<ConfidentialOutputStatement, ConfidentialCryptoApiError> {
         let proof = confidential::create_output_statement(
-            Some(statement).filter(|s| !s.amount.is_zero()),
+            Some(statement).filter(|s| s.amount > 0),
             revealed_amount.into(),
             None,
             Amount::zero(),
@@ -109,47 +108,16 @@ impl ConfidentialCryptoApi {
         output_encrypted_value: &EncryptedData,
         claim_secret: &PrivateKey,
         reciprocal_public_key: &RistrettoPublicKey,
-    ) -> Result<MaskAndValue, ConfidentialCryptoApiError> {
-        let unmasked_output = unblind_output(
+        skip_memo: bool,
+    ) -> Result<DecryptedData, ConfidentialCryptoApiError> {
+        let decrypted = unblind_output(
             output_commitment,
             output_encrypted_value,
             claim_secret,
             reciprocal_public_key,
+            skip_memo,
         )?;
-        Ok(unmasked_output)
-    }
-
-    pub fn try_brute_force_commitment_balances<'a, TLookup, TOutputsIter>(
-        &self,
-        secret_view_key: &PrivateKey,
-        outputs: TOutputsIter,
-        value_range: RangeInclusive<u64>,
-        lookup: &mut TLookup,
-    ) -> Result<Vec<Option<u64>>, ConfidentialCryptoApiError>
-    where
-        TLookup: ValueLookupTable,
-        TOutputsIter: Iterator<Item = &'a PrivateOutput>,
-    {
-        let outputs_viewable_balance_decompressed = outputs
-            .filter_map(|output| output.viewable_balance.as_ref())
-            .map(ElgamalVerifiableBalance::try_from_byte_type)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| WalletCryptoError::InvalidArgument {
-                name: "outputs",
-                details: "Malformed viewable balance in output when decompressing ElgamalVerifiableBalance for brute \
-                          forcing"
-                    .to_string(),
-            })?;
-
-        let results = ElgamalVerifiableBalance::batched_brute_force(
-            secret_view_key,
-            value_range,
-            lookup,
-            &outputs_viewable_balance_decompressed,
-        )
-        .map_err(|e| ConfidentialCryptoApiError::ValueLookupTableError { details: e.to_string() })?;
-
-        Ok(results)
+        Ok(decrypted)
     }
 }
 
@@ -159,8 +127,6 @@ pub enum ConfidentialCryptoApiError {
     WalletCryptoError(#[from] WalletCryptoError),
     #[error("Confidential proof error: {0}")]
     ConfidentialProofError(#[from] ConfidentialProofError),
-    #[error("Value lookup table error: {details}")]
-    ValueLookupTableError { details: String },
     #[error("Negative amount")]
     NegativeAmount,
 }

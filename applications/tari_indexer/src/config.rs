@@ -20,11 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{
-    net::SocketAddr,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use config::Config;
 use serde::{Deserialize, Serialize};
@@ -40,7 +36,8 @@ use tari_ootle_app_utilities::{
     p2p_config::{P2pConfig, PeerSeedsConfig},
 };
 use tari_ootle_common_types::Network;
-use tari_template_manager::implementation::TemplateConfig;
+
+use crate::network_state_sync::EventFilter;
 
 #[derive(Debug, Clone)]
 pub struct ApplicationConfig {
@@ -53,15 +50,38 @@ pub struct ApplicationConfig {
 
 impl ApplicationConfig {
     pub fn load_from(cfg: &Config) -> Result<Self, ConfigurationError> {
-        let mut config = Self {
+        let config = Self {
             common: CommonConfig::load_from(cfg)?,
             indexer: IndexerConfig::load_from(cfg)?,
             peer_seeds: PeerSeedsConfig::load_from(cfg)?,
             epoch_oracle: EpochOracleConfig::load_from(cfg)?,
             network: cfg.get("network")?,
         };
-        config.indexer.set_base_path(config.common.base_path());
         Ok(config)
+    }
+
+    pub fn to_identity_file_path(&self) -> PathBuf {
+        if self.indexer.identity_file.is_absolute() {
+            return self.indexer.identity_file.clone();
+        }
+
+        self.common.base_path.join(&self.indexer.identity_file)
+    }
+
+    pub fn to_data_dir(&self) -> PathBuf {
+        if self.indexer.data_dir.is_absolute() {
+            return self.indexer.data_dir.clone();
+        }
+
+        self.common.base_path.join(&self.indexer.data_dir)
+    }
+
+    pub fn state_db_path(&self) -> PathBuf {
+        self.to_data_dir().join("state.db")
+    }
+
+    pub fn global_db_path(&self) -> PathBuf {
+        self.to_data_dir().join("global_storage.sqlite")
     }
 }
 
@@ -72,29 +92,27 @@ pub struct IndexerConfig {
     override_from: Option<String>,
     /// A path to the file that stores your node identity and secret key
     pub identity_file: PathBuf,
-    /// A path to the file that stores the tor hidden service private key, if using the tor transport
-    pub tor_identity_file: PathBuf,
     /// The relative path to store persistent data
     pub data_dir: PathBuf,
     /// The p2p configuration settings
     pub p2p: P2pConfig,
-    /// JSON-RPC address of the indexer application
-    pub json_rpc_address: Option<SocketAddr>,
+    /// Listening address for the indexer API server
+    pub api_listen_address: Option<SocketAddr>,
     /// GraphQL port of the indexer application
     pub graphql_address: Option<SocketAddr>,
     /// The address of the Web UI
     pub web_ui_address: Option<SocketAddr>,
-    /// The jrpc address where the UI should connect to the JSON RPC (it can be the same as the json_rpc_address, but
-    /// doesn't have to be), if this will be None, then the listen_addr will be used.
-    pub web_ui_public_json_rpc_url: Option<String>,
+    /// The publicly-accessible URL that the UI uses to connect to the API.
+    /// If this is None, then the api_listen_address will be used.
+    pub web_ui_public_api_url: Option<String>,
     /// The jrpc address where the UI should connect to the GraphQL API(it can be the same as the json_rpc_address, but
     /// doesn't have to be), if this will be None, then the listen_addr will be used.
     pub web_ui_public_graphql_url: Option<String>,
     /// How often do we want to scan the second layer for new versions
     #[serde(with = "serializers::seconds")]
-    pub scanning_interval: Duration,
-    /// Template config
-    pub templates: TemplateConfig,
+    pub block_scanning_interval: Duration,
+    #[serde(with = "serializers::seconds")]
+    pub state_scanning_interval: Duration,
     /// The sidechain to listen on.
     pub sidechain_id: Option<RistrettoPublicKey>,
     /// The templates sidechain id
@@ -102,25 +120,7 @@ pub struct IndexerConfig {
     /// The burnt utxos sidechain id
     pub burnt_utxo_sidechain_id: Option<RistrettoPublicKey>,
     /// The event filtering configuration
-    pub event_filters: Vec<EventFilterConfig>,
-}
-
-impl IndexerConfig {
-    pub fn state_db_path(&self) -> PathBuf {
-        self.data_dir.join("state.db")
-    }
-
-    pub fn set_base_path<P: AsRef<Path>>(&mut self, base_path: P) {
-        if !self.identity_file.is_absolute() {
-            self.identity_file = base_path.as_ref().join(&self.identity_file);
-        }
-        if !self.tor_identity_file.is_absolute() {
-            self.tor_identity_file = base_path.as_ref().join(&self.tor_identity_file);
-        }
-        if !self.data_dir.is_absolute() {
-            self.data_dir = base_path.as_ref().join(&self.data_dir);
-        }
-    }
+    pub event_filters: Vec<EventFilter>,
 }
 
 impl Default for IndexerConfig {
@@ -128,16 +128,15 @@ impl Default for IndexerConfig {
         Self {
             override_from: None,
             identity_file: PathBuf::from("indexer_id.json"),
-            tor_identity_file: PathBuf::from("indexer_tor_id.json"),
             data_dir: PathBuf::from("data/indexer"),
             p2p: P2pConfig::default(),
-            json_rpc_address: Some("127.0.0.1:18300".parse().unwrap()),
+            api_listen_address: Some("127.0.0.1:18300".parse().unwrap()),
             graphql_address: Some("127.0.0.1:18301".parse().unwrap()),
             web_ui_address: Some("127.0.0.1:15000".parse().unwrap()),
-            web_ui_public_json_rpc_url: None,
+            web_ui_public_api_url: None,
             web_ui_public_graphql_url: None,
-            scanning_interval: Duration::from_secs(10),
-            templates: TemplateConfig::default(),
+            block_scanning_interval: Duration::from_secs(10),
+            state_scanning_interval: Duration::from_secs(60),
             sidechain_id: None,
             templates_sidechain_id: None,
             burnt_utxo_sidechain_id: None,
@@ -150,12 +149,4 @@ impl SubConfigPath for IndexerConfig {
     fn main_key_prefix() -> &'static str {
         "indexer"
     }
-}
-
-#[derive(Default, Debug, Serialize, Deserialize, Clone)]
-pub struct EventFilterConfig {
-    pub topic: Option<String>,
-    pub entity_id: Option<String>,
-    pub substate_id: Option<String>,
-    pub template_address: Option<String>,
 }

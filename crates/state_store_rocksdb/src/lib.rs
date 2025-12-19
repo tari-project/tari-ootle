@@ -39,7 +39,9 @@ pub mod snapshot;
 
 mod options;
 pub use options::*;
+mod range;
 mod read_only;
+mod template_provider;
 #[cfg(test)]
 mod tests;
 mod versioned_types;

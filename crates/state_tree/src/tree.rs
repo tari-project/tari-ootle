@@ -15,7 +15,7 @@ use log::debug;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_ootle_common_types::VersionedSubstateId;
+use tari_ootle_common_types::{ToSubstateAddress, VersionedSubstateId};
 pub use tari_sidechain::SidechainJmtHasher;
 
 use crate::{
@@ -25,6 +25,7 @@ use crate::{
     key_mapper::{DbKeyMapper, HashIdentityKeyMapper, SpreadPrefixKeyMapper},
     memory_store::MemoryTreeStore,
     SparseMerkleProof,
+    StateTreePayload,
     TreeStoreBatchWriter,
     TreeStoreWriter,
 };

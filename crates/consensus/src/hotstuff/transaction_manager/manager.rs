@@ -6,7 +6,11 @@ use std::{collections::HashMap, marker::PhantomData};
 use indexmap::{IndexMap, IndexSet};
 use log::*;
 use tari_consensus_types::{Decision, LeafBlock};
-use tari_engine_types::{commit_result::RejectReason, substate::Substate};
+use tari_engine_types::{
+    commit_result::RejectReason,
+    substate::{Substate, SubstateId},
+    template_lib_models::ClaimedOutputTombstoneAddress,
+};
 use tari_ootle_common_types::{
     committee::CommitteeInfo,
     optional::{IsNotFoundError, Optional},
@@ -101,13 +105,14 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                     non_local_inputs,
                     block,
                 ),
+            ResolvedTransactionInputs::OnlyTombstones => {
+                self.prepare_local_input_transaction(store, local_committee_info, &transaction, IndexMap::new(), block)
+            },
             ResolvedTransactionInputs::OneOrMoreLocalInputsNotFound { is_local_only, err } => {
                 // Currently, this message will differ depending on which involved shard is asked.
                 // e.g. local nodes will say "failed to lock inputs", foreign nodes will say "foreign shard abort"
-                let execution = TransactionExecution::abort(
-                    &transaction_id,
-                    RejectReason::OneOrMoreInputsNotFound(err.to_string()),
-                );
+                let execution =
+                    TransactionExecution::abort(&transaction_id, RejectReason::SubstateNotFound(err.to_string()));
                 if is_local_only {
                     warn!(target: LOG_TARGET, "⚠️ PREPARE: OneOrMoreInputsNotFound transaction {} local ABORT", transaction_id);
                     Ok(PreparedTransaction::new_local_early_abort(execution))
@@ -127,19 +132,13 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         store: &PendingSubstateStore<TStateStore>,
         local_committee_info: &CommitteeInfo,
         transaction: &'a Transaction,
-    ) -> Result<
-        (
-            IndexMap<SubstateRequirementRef<'a>, u32>,
-            IndexSet<SubstateRequirementRef<'a>>,
-        ),
-        BlockTransactionExecutorError,
-    > {
-        let mut resolved_substates = IndexMap::with_capacity(transaction.num_unique_inputs());
+    ) -> Result<ResolvedInputs<'a>, BlockTransactionExecutorError> {
+        let mut local_inputs = IndexMap::with_capacity(transaction.num_inputs());
 
-        let mut non_local_inputs = IndexSet::new();
+        let mut foreign_inputs = IndexSet::new();
         for input in transaction.all_inputs_iter() {
             if !local_committee_info.includes_substate_id(input.substate_id()) {
-                non_local_inputs.insert(input);
+                foreign_inputs.insert(input);
                 continue;
             }
 
@@ -148,7 +147,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                     let id = input.with_version(version);
                     store.lock_assert_is_up(id)?;
                     debug!(target: LOG_TARGET, "Resolved LOCAL substate: {id}");
-                    resolved_substates.insert(input, version);
+                    local_inputs.insert(input, version);
                 },
                 None => {
                     let latest = store.get_latest_version(input.substate_id())?;
@@ -159,11 +158,17 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                         .into());
                     }
                     debug!(target: LOG_TARGET, "Resolved LOCAL unversioned substate: {input} to version {}",latest.version());
-                    resolved_substates.insert(input, latest.version());
+                    local_inputs.insert(input, latest.version());
                 },
             }
         }
-        if resolved_substates.is_empty() && non_local_inputs.is_empty() {
+
+        let local_tombstones = transaction
+            .claim_burn_outputs_iter()
+            .filter(|tombstone| local_committee_info.includes_substate_id(&SubstateId::from(*tombstone)))
+            .collect::<IndexSet<_>>();
+
+        if local_inputs.is_empty() && foreign_inputs.is_empty() && local_tombstones.is_empty() {
             // Mempool/missing transaction validations should have not sent the transaction to consensus
             warn!(target: LOG_TARGET, "⚠️ PREPARE: NEVER HAPPEN transaction {} has no inputs.", transaction.calculate_id());
             return Err(BlockTransactionExecutorError::InvariantError(format!(
@@ -171,7 +176,12 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 transaction.calculate_id()
             )));
         }
-        Ok((resolved_substates, non_local_inputs))
+
+        Ok(ResolvedInputs {
+            local_inputs,
+            foreign_inputs,
+            local_tombstones,
+        })
     }
 
     pub fn execute(
@@ -253,27 +263,38 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         local_committee_info: &CommitteeInfo,
     ) -> Result<ResolvedTransactionInputs<'a>, BlockTransactionExecutorError> {
         match self.resolve_local_versions(store, local_committee_info, transaction.transaction()) {
-            Ok((local_versions, non_local_inputs)) => {
-                if !local_versions.is_empty() && non_local_inputs.is_empty() {
+            Ok(resolved) => {
+                if resolved.local_inputs.is_empty() &&
+                    resolved.foreign_inputs.is_empty() &&
+                    !resolved.local_tombstones.is_empty()
+                {
+                    return Ok(ResolvedTransactionInputs::OnlyTombstones);
+                }
+
+                if !resolved.local_inputs.is_empty() && resolved.foreign_inputs.is_empty() {
                     // EDGE CASE: global transaction, but single committee = OnlyLocalInputs behaviour, otherwise
                     // LocalAndForeignInputs behaviour
                     if transaction.transaction().is_global() && local_committee_info.num_committees() > 1 {
                         return Ok(ResolvedTransactionInputs::LocalAndForeignInputs {
-                            local_versions,
-                            non_local_inputs,
+                            local_versions: resolved.local_inputs,
+                            non_local_inputs: resolved.foreign_inputs,
                         });
                     }
 
-                    return Ok(ResolvedTransactionInputs::OnlyLocalInputs { local_versions });
+                    return Ok(ResolvedTransactionInputs::OnlyLocalInputs {
+                        local_versions: resolved.local_inputs,
+                    });
                 }
 
-                if local_versions.is_empty() && !non_local_inputs.is_empty() {
-                    return Ok(ResolvedTransactionInputs::OnlyForeignInputs { non_local_inputs });
+                if resolved.local_inputs.is_empty() && !resolved.foreign_inputs.is_empty() {
+                    return Ok(ResolvedTransactionInputs::OnlyForeignInputs {
+                        non_local_inputs: resolved.foreign_inputs,
+                    });
                 }
 
                 Ok(ResolvedTransactionInputs::LocalAndForeignInputs {
-                    local_versions,
-                    non_local_inputs,
+                    local_versions: resolved.local_inputs,
+                    non_local_inputs: resolved.foreign_inputs,
                 })
             },
             Err(err) => {
@@ -283,7 +304,8 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                     return Err(err);
                 }
 
-                let is_local_only = local_committee_info.is_all_local(transaction.transaction.all_inputs_iter());
+                let is_local_only = local_committee_info.is_all_local(transaction.transaction.all_inputs_iter()) &&
+                    local_committee_info.is_all_local(transaction.transaction.known_outputs_iter());
                 Ok(ResolvedTransactionInputs::OneOrMoreLocalInputsNotFound { is_local_only, err })
             },
         }
@@ -300,6 +322,14 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         let transaction_id = *transaction.id();
         // CASE: All inputs are local and we can execute the transaction.
         //       Outputs may or may not be local
+
+        info!(
+            target: LOG_TARGET,
+            "👨‍🔧 PREPARE: transaction {} has {} local input(s) and {} tombstone(s)",
+            transaction_id,
+            local_versions.len(),
+            transaction.transaction().claim_burn_iter().count()
+        );
 
         let local_inputs = store.get_many(local_versions.iter().map(|(req, v)| (req.to_owned(), *v)))?;
         let execution = self.execute_or_fetch(store, transaction, &local_inputs, &block)?;
@@ -367,6 +397,16 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         non_local_inputs: IndexSet<SubstateRequirementRef<'_>>,
         block: LeafBlock,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
+        // CASE: Multishard transaction, some inputs are local, some are foreign
+
+        info!(
+            target: LOG_TARGET,
+            "👨‍🔧 PREPARE: transaction {} has {} local input(s) and {} foreign input(s)",
+            transaction.id(),
+            local_versions.len(),
+            non_local_inputs.len()
+        );
+
         match self.fetch_execution(store, transaction.id(), &block)? {
             Some(exec) => self.prepare_multishard_from_execution(store, local_committee_info, *transaction.id(), exec),
             None => self.prepare_multishard_no_execution(
@@ -471,6 +511,13 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         // We're output-only
         let foreign_pledges = transaction.get_foreign_pledges(store.read_transaction())?;
 
+        info!(
+            target: LOG_TARGET,
+            "👨‍🔧 PREPARE: Transaction {} is output-only with {} foreign pledge(s)",
+            transaction_id,
+            foreign_pledges.len()
+        );
+
         let resolved_inputs = foreign_pledges
             .into_iter()
             // Exclude any output pledges
@@ -505,7 +552,9 @@ enum ResolvedTransactionInputs<'a> {
         local_versions: IndexMap<SubstateRequirementRef<'a>, u32>,
         non_local_inputs: IndexSet<SubstateRequirementRef<'a>>,
     },
-    // a.k.a "output-only"
+    /// Does not involve any local inputs, but involves a local tombstone output
+    OnlyTombstones,
+    /// a.k.a "output-only"
     OnlyForeignInputs {
         non_local_inputs: IndexSet<SubstateRequirementRef<'a>>,
     },
@@ -513,4 +562,10 @@ enum ResolvedTransactionInputs<'a> {
         is_local_only: bool,
         err: BlockTransactionExecutorError,
     },
+}
+
+struct ResolvedInputs<'a> {
+    pub local_inputs: IndexMap<SubstateRequirementRef<'a>, u32>,
+    pub foreign_inputs: IndexSet<SubstateRequirementRef<'a>>,
+    pub local_tombstones: IndexSet<ClaimedOutputTombstoneAddress>,
 }

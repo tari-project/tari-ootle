@@ -14,6 +14,7 @@ use rocksdb::{
     ColumnFamilyDescriptor,
     IteratorMode,
     SingleThreaded,
+    SliceTransform,
     TransactionDB,
     TransactionDBOptions,
     TransactionOptions,
@@ -27,45 +28,7 @@ use tari_ootle_storage::{StateStore, StorageError};
 use crate::{
     cf_api::DbContext,
     codecs::ByteColumn,
-    column_families::{
-        block,
-        block::BlockCf,
-        block_diff,
-        block_diff::BlockDiffCf,
-        block_transaction_execution,
-        block_transaction_execution::BlockTransactionExecutionCf,
-        bookkeeping,
-        bookkeeping::DatabaseMigrationVersion,
-        burnt_utxo,
-        burnt_utxo::BurntUtxoCf,
-        certificates::{proposal::ProposalCertificateCf, timeout::TimeoutCertificateCf},
-        chain,
-        epoch_checkpoint::EpochCheckpointCf,
-        evicted_node::EvictedNodeCf,
-        finalized_transaction::FinalizedTransactionLinkCf,
-        foreign_parked_blocks,
-        foreign_parked_blocks::ForeignParkedBlockCf,
-        foreign_proposal,
-        foreign_proposal::ForeignProposalCf,
-        foreign_substate_pledge::ForeignSubstatePledgeCf,
-        lock_conflict::LockConflictCf,
-        missing_transactions::MissingTransactionCf,
-        parked_block::ParkedBlockCf,
-        pending_state_tree_diff::PendingStateTreeDiffCf,
-        state_transition,
-        state_transition::StateTransitionCf,
-        state_tree::{StateTreeCf, StateTreeStaleNodesModel},
-        state_tree_shard_versions::StateTreeShardVersionCf,
-        substate,
-        substate::SubstateCf,
-        substate_locks,
-        substate_locks::SubstateLockModel,
-        transaction::TransactionCf,
-        transaction_pool::TransactionPoolCf,
-        transaction_pool_state_update,
-        transaction_pool_state_update::TransactionPoolStateUpdateCf,
-        validator_node_epoch_stats::ValidatorNodeEpochStatsCf,
-    },
+    column_families::{bookkeeping::DatabaseMigrationVersion, cf_names},
     dbs::read_only::ReadOnlyDb,
     error::RocksDbStorageError,
     info::ColumnFamilyInfo,
@@ -74,7 +37,7 @@ use crate::{
     read_only_ctx::ReadOnlyContext,
     reader::RocksDbStateStoreReadTransaction,
     snapshot::SnapshotContext,
-    traits::{Cf, RocksDatabase, RocksReader},
+    traits::{RocksDatabase, RocksReader},
     writer::RocksDbStateStoreWriteTransaction,
 };
 
@@ -82,62 +45,46 @@ const LOG_TARGET: &str = "tari::ootle::storage::rocksdb::state_store";
 
 pub fn all_column_families_iter() -> impl Iterator<Item = &'static str> {
     [
-        bookkeeping::CF_NAME,
-        chain::PendingChainIndex::name(),
-        chain::CommittedParentChildChainIndex::name(),
-        chain::PendingParentChildIndex::name(),
-        ForeignProposalCf::name(),
-        foreign_proposal::ProposedInBlockIndex::name(),
-        foreign_proposal::EpochIndex::name(),
-        foreign_proposal::UnconfirmedIndex::name(),
-        BlockCf::name(),
-        block::EpochHeightIndex::name(),
-        BlockDiffCf::name(),
-        block_diff::SubstateIdIndex::name(),
-        ProposalCertificateCf::name(),
-        TimeoutCertificateCf::name(),
-        BlockTransactionExecutionCf::name(),
-        block_transaction_execution::BlockIndex::name(),
-        FinalizedTransactionLinkCf::name(),
-        TransactionCf::name(),
-        TransactionPoolCf::name(),
-        TransactionPoolStateUpdateCf::name(),
-        transaction_pool_state_update::TransactionPoolStateUpdateDebugHistoryCf::name(),
-        MissingTransactionCf::name(),
-        ParkedBlockCf::name(),
-        ForeignParkedBlockCf::name(),
-        foreign_parked_blocks::MissingTransactionsModel::name(),
-        SubstateLockModel::name(),
-        substate_locks::HeadIndex::name(),
-        substate_locks::BlockIdIndex::name(),
-        substate_locks::SubstateIdIndex::name(),
-        SubstateCf::name(),
-        substate::HeadIndex::name(),
-        substate::UnprunedDownedValuesIndex::name(),
-        StateTransitionCf::name(),
-        state_transition::ShardSeqIndex::name(),
-        ForeignSubstatePledgeCf::name(),
-        PendingStateTreeDiffCf::name(),
-        StateTreeCf::name(),
-        StateTreeStaleNodesModel::name(),
-        StateTreeShardVersionCf::name(),
-        EpochCheckpointCf::name(),
-        BurntUtxoCf::name(),
-        burnt_utxo::ProposedInBlockIndex::name(),
-        LockConflictCf::name(),
-        EvictedNodeCf::name(),
-        ValidatorNodeEpochStatsCf::name(),
+        cf_names::BOOKKEEPING,
+        cf_names::CHAIN_METADATA,
+        cf_names::TRANSACTIONS,
+        cf_names::BLOCK,
+        cf_names::FOREIGN_PROPOSALS,
+        cf_names::CERTIFICATES,
+        cf_names::SUBSTATES,
+        cf_names::DIAGNOSTICS,
+        cf_names::STATE_TREE,
     ]
     .into_iter()
 }
 
 fn build_default_store_opts() -> rocksdb::Options {
     let mut opts = rocksdb::Options::default();
+    // Don't error if the DB exists
     opts.set_error_if_exists(false);
+    // Create the DB if it doesn't exist
     opts.create_if_missing(true);
+    // Create any missing column families
     opts.create_missing_column_families(true);
-    // TODO: evaluate - might depend on cores?
+    // Schedule background workers instead of using the main worker thread for long-latency operations
     opts.set_avoid_unnecessary_blocking_io(true);
+    // All CFs will use a 1-byte prefix extractor
+    opts.set_prefix_extractor(SliceTransform::create_fixed_prefix(1));
+    // Use a small memtable prefix bloom filter to speed up prefix lookups
+    opts.set_memtable_prefix_bloom_ratio(0.05);
+    // Better suggested defaults: https://github.com/facebook/rocksdb/wiki/Setup-Options-and-Basic-Tuning
+    opts.set_max_background_jobs(6);
+    opts.set_bytes_per_sync(1_048_576);
+    opts.set_compaction_pri(rocksdb::CompactionPri::MinOverlappingRatio);
+    opts.set_level_compaction_dynamic_level_bytes(true);
+    let mut bb_opts = rocksdb::BlockBasedOptions::default();
+    bb_opts.set_block_size(16 * 1024);
+    bb_opts.set_cache_index_and_filter_blocks(true);
+    bb_opts.set_pin_l0_filter_and_index_blocks_in_cache(true);
+    bb_opts.set_format_version(6);
+    bb_opts.set_optimize_filters_for_memory(true);
+
+    opts.set_block_based_table_factory(&bb_opts);
     opts
 }
 
@@ -151,13 +98,13 @@ pub struct RocksDbStateStore<TAddr, DB = TransactionDB> {
 impl<TAddr> RocksDbStateStore<TAddr, TransactionDB> {
     pub fn open<P: AsRef<Path>>(path: P, options: DatabaseOptions) -> Result<Self, StorageError> {
         let rocks_opts = build_default_store_opts();
+        let tx_db_opts = TransactionDBOptions::default();
 
-        let cf_names = all_column_families_iter();
-        let db =
-            TransactionDB::<SingleThreaded>::open_cf(&rocks_opts, &TransactionDBOptions::default(), path, cf_names)
-                .map_err(|e| StorageError::ConnectionError {
-                    reason: e.into_string(),
-                })?;
+        let cf_names = all_column_families_iter().map(|name| ColumnFamilyDescriptor::new(name, rocks_opts.clone()));
+        let db = TransactionDB::<SingleThreaded>::open_cf_descriptors(&rocks_opts, &tx_db_opts, path, cf_names)
+            .map_err(|e| StorageError::ConnectionError {
+                reason: e.into_string(),
+            })?;
         let db = Self {
             db: Arc::new(db),
             options,

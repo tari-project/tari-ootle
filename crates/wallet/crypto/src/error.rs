@@ -32,12 +32,16 @@ pub enum WalletCryptoError {
     ConfidentialProof(#[from] ConfidentialProofError),
     #[error("Failed to decrypt data: {details}")]
     FailedDecryptData { details: String },
-    #[error("Unable to open the commitment")]
-    UnableToOpenCommitment,
+    #[error("Failed to encrypt data: {details}")]
+    FailedEncryptData { details: String },
+    #[error("Commitment does not match commitment derived from decrypted data")]
+    CommitmentMismatchDecryptedData,
     #[error("Invalid argument {name}: {details}")]
     InvalidArgument { name: &'static str, details: String },
     #[error("AEAD error: {0}")]
     AeadError(aead::Error),
+    #[error("BUG: Invariant violated: {details}")]
+    Invariant { details: String },
 }
 
 impl From<aead::Error> for WalletCryptoError {

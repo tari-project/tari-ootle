@@ -82,7 +82,7 @@ use crate::{
     server::early_close::EarlyClose,
 };
 
-const LOG_TARGET: &str = "comms::rpc::server";
+const LOG_TARGET: &str = "libp2p::rpc::server";
 
 pub trait NamedProtocolService {
     const PROTOCOL_NAME: &'static str;
@@ -821,7 +821,12 @@ where TSvc: Service<Request<Bytes>, Response = Response<Body>, Error = RpcStatus
                 if msg_flags.is_fin() {
                     Poll::Ready(Some(RpcServerError::ClientInterruptedStream))
                 } else {
-                    Poll::Ready(Some(RpcServerError::UnexpectedIncomingMessage(decoded_msg)))
+                    Poll::Ready(Some(RpcServerError::UnexpectedIncomingMessage(format!(
+                        "flags={:?}, method={}, req_id={}",
+                        decoded_msg.flags(),
+                        decoded_msg.method,
+                        decoded_msg.request_id
+                    ))))
                 }
             },
             Poll::Ready(Some(Err(err))) if err.kind() == io::ErrorKind::WouldBlock => Poll::Ready(None),

@@ -1,0 +1,17 @@
+[workspace]
+[package]
+name = "template_v2"
+version = "0.1.0"
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tari_template_lib = { path = "../../../../../template_lib" }
+serde = "1.0"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+v1_compat = []

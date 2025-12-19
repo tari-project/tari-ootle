@@ -25,7 +25,9 @@ use tari_consensus_types::BlockId;
 use tari_ootle_storage::consensus_models::{Block, ForeignProposal};
 
 use crate::{
-    codecs::{BlockIdCodec, DefaultCodec, DefaultCodecRef},
+    codecs::{BlockIdCodec, DefaultCodec, DefaultCodecRef, KeyPrefix},
+    column_families::cf_names,
+    prefixed,
     traits::Cf,
 };
 
@@ -35,16 +37,19 @@ pub struct ParkedBlockData {
     pub foreign_proposals: Vec<ForeignProposal>,
 }
 
+prefixed!(ParkedBlockPrefix, KeyPrefix::ParkedBlocks);
+
 pub struct ParkedBlockCf;
 
 impl Cf for ParkedBlockCf {
     type Key = BlockId;
     type KeyCodec = BlockIdCodec;
+    type Prefix = ParkedBlockPrefix;
     type Value = ParkedBlockData;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "parked_blocks"
+        cf_names::BLOCK
     }
 }
 
@@ -62,6 +67,7 @@ pub struct ParkedBlockModelRef<'a> {
 impl<'a> Cf for ParkedBlockModelRef<'a> {
     type Key = BlockId;
     type KeyCodec = BlockIdCodec;
+    type Prefix = ParkedBlockPrefix;
     type Value = ParkedBlockDataRef<'a>;
     type ValueCodec = DefaultCodecRef<Self::Value>;
 

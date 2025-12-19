@@ -20,37 +20,30 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    time::{Duration, SystemTime},
-};
+use std::{path::PathBuf, time::Duration};
 
+use multiaddr::multiaddr;
 use reqwest::Url;
-use tari_common::{
-    configuration::{CommonConfig, StringList},
-    exit_codes::ExitError,
-};
-use tari_crypto::tari_utilities::{hex::Hex, message_format::MessageFormat};
-use tari_engine_types::substate::SubstateId;
+use tari_common::configuration::{CommonConfig, StringList};
 use tari_indexer::{
-    config::{ApplicationConfig, EventFilterConfig, IndexerConfig},
+    config::{ApplicationConfig, IndexerConfig},
     run_indexer,
 };
 use tari_indexer_client::{
     graphql_client::IndexerGraphQLClient,
-    json_rpc_client::IndexerJsonRpcClient,
-    types::{GetNonFungiblesRequest, GetSubstateRequest, GetSubstateResponse, NonFungibleSubstate},
+    rest_api_client::IndexerRestApiClient,
+    types::{AddPeerRequest, GetNonFungiblesRequest, GetSubstateResponse, NonFungibleSubstate},
 };
 use tari_ootle_app_utilities::{epoch_oracle_config::EpochOracleConfig, p2p_config::PeerSeedsConfig};
 use tari_ootle_common_types::Network;
 use tari_shutdown::Shutdown;
-use tari_template_lib::types::ObjectKey;
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tokio::task;
 
 use crate::{
     helpers::{check_join_handle, get_address_from_output, get_os_assigned_ports, wait_listener_on_local_port},
     logging::get_base_dir_for_scenario,
+    util::cucumber_log,
     TariWorld,
 };
 
@@ -58,29 +51,33 @@ use crate::{
 pub struct IndexerProcess {
     pub name: String,
     pub port: u16,
-    pub json_rpc_port: u16,
+    pub api_port: u16,
     pub graphql_port: u16,
     pub base_node_grpc_port: u16,
     pub web_ui_port: u16,
-    pub handle: task::JoinHandle<Result<(), ExitError>>,
+    pub handle: task::JoinHandle<anyhow::Result<()>>,
     pub temp_dir_path: String,
     pub shutdown: Shutdown,
     pub db_path: PathBuf,
 }
 
 impl IndexerProcess {
-    pub async fn get_substate(&self, world: &TariWorld, output_ref: String, version: u32) -> GetSubstateResponse {
-        let address = get_address_from_output(world, output_ref);
-
-        let mut jrpc_client = self.get_jrpc_indexer_client();
-        jrpc_client
-            .get_substate(GetSubstateRequest {
-                address: address.clone(),
-                version: Some(version),
-                local_search_only: true,
+    pub async fn add_peer(&self, public_key: RistrettoPublicKeyBytes, port: u16) {
+        let mut client = self.get_indexer_client();
+        client
+            .add_peer(AddPeerRequest {
+                public_key,
+                addresses: vec![multiaddr!(Ip4([127, 0, 0, 1]), Tcp(port))],
+                wait_for_dial: true,
             })
             .await
-            .unwrap()
+            .unwrap();
+    }
+
+    pub async fn get_substate(&self, world: &TariWorld, output_ref: String, version: u32) -> GetSubstateResponse {
+        let address = get_address_from_output(world, output_ref);
+        let mut client = self.get_indexer_client();
+        client.get_substate(address, Some(version), true).await.unwrap()
     }
 
     pub async fn get_non_fungibles(
@@ -102,42 +99,14 @@ impl IndexerProcess {
             end_index,
         };
 
-        let mut jrpc_client = self.get_jrpc_indexer_client();
-        let resp = jrpc_client.get_non_fungibles(params).await.unwrap();
+        let mut client = self.get_indexer_client();
+        let resp = client.get_non_fungibles(params).await.unwrap();
         resp.non_fungibles
     }
 
-    pub async fn insert_event_mock_data(&mut self) {
-        let mut graphql_client = self.get_graphql_indexer_client().await;
-        let substate_id = SubstateId::Component(ObjectKey::default().into()).to_string();
-        let template_address = [0u8; 32].to_hex();
-        let tx_hash = [0u8; 32].to_hex();
-        let topic = "my_event".to_string();
-        let version = 0;
-        let payload = HashMap::<String, String>::from([("my".to_string(), "event".to_string())])
-            .to_json()
-            .unwrap();
-        let timestamp = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
-        let query = format!(
-            "{{ saveEvent(substateId: {:?}, templateAddress: {:?}, txHash: {:?}, topic: {:?}, payload: {:?}, version: \
-             {:?}, timestamp: {}) {{ substateId templateAddress txHash topic payload }} }}",
-            substate_id, template_address, tx_hash, topic, payload, version, timestamp
-        );
-        let res = graphql_client
-            .send_request::<HashMap<String, tari_indexer::graphql::model::events::Event>>(&query, None, None)
-            .await
-            .unwrap_or_else(|e| panic!("Failed to save event via graphql client: {}", e));
-        let res = res.get("saveEvent").unwrap();
-
-        assert_eq!(res.substate_id, Some(substate_id.to_string()));
-    }
-
-    pub fn get_jrpc_indexer_client(&self) -> IndexerJsonRpcClient {
-        let endpoint: Url = Url::parse(&format!("http://localhost:{}", self.json_rpc_port)).unwrap();
-        IndexerJsonRpcClient::connect(endpoint).unwrap()
+    pub fn get_indexer_client(&self) -> IndexerRestApiClient {
+        let endpoint: Url = Url::parse(&format!("http://localhost:{}", self.api_port)).unwrap();
+        IndexerRestApiClient::connect(endpoint).unwrap()
     }
 
     pub async fn get_graphql_indexer_client(&self) -> IndexerGraphQLClient {
@@ -148,7 +117,7 @@ impl IndexerProcess {
 
 pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_node_name: String) {
     // each spawned indexer will use different ports
-    let (port, json_rpc_port) = get_os_assigned_ports();
+    let (port, api_port) = get_os_assigned_ports();
     let (graphql_port, web_ui_port) = get_os_assigned_ports();
     let base_node_grpc_port = world.base_nodes.get(&base_node_name).unwrap().grpc_port;
     let name = indexer_name.clone();
@@ -159,7 +128,7 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
     // we need to add all the validator nodes as seed peers
     let peer_seeds: Vec<String> = world
         .all_running_validators_iter()
-        .map(|vn| format!("{}::/ip4/127.0.0.1/tcp/{}", vn.public_key, vn.port))
+        .map(|vn| format!("{}::/ip4/127.0.0.1/tcp/{}", vn.public_key, vn.p2p_port))
         .collect();
 
     let shutdown = Shutdown::new();
@@ -180,24 +149,19 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
         config.common.base_path = base_dir.to_path_buf();
         config.indexer.data_dir = base_dir.to_path_buf();
         config.indexer.identity_file = base_dir.join("indexer_id.json");
-        config.indexer.tor_identity_file = base_dir.join("indexer_tor_id.json");
         config.epoch_oracle.base_layer.base_node_grpc_url =
             Some(format!("http://127.0.0.1:{}", base_node_grpc_port).parse().unwrap());
-        config.indexer.scanning_interval = Duration::from_secs(5);
+        config.indexer.block_scanning_interval = Duration::from_secs(5);
+        config.indexer.state_scanning_interval = Duration::from_secs(5);
         config.indexer.p2p.listener_port = port;
 
         config.indexer.p2p.enable_mdns = false;
-        config.indexer.json_rpc_address = Some(format!("127.0.0.1:{}", json_rpc_port).parse().unwrap());
+        config.indexer.api_listen_address = Some(format!("127.0.0.1:{}", api_port).parse().unwrap());
         config.indexer.web_ui_address = Some(format!("127.0.0.1:{}", web_ui_port).parse().unwrap());
         config.indexer.graphql_address = Some(format!("127.0.0.1:{}", graphql_port).parse().unwrap());
 
         // store all events in the database using an empty filter
-        config.indexer.event_filters = vec![EventFilterConfig {
-            topic: None,
-            entity_id: None,
-            substate_id: None,
-            template_address: None,
-        }];
+        config.indexer.event_filters = vec![];
 
         // Add all other VNs as peer seeds
         config.peer_seeds.peer_seeds = StringList::from(peer_seeds);
@@ -206,7 +170,7 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
     });
 
     // Wait for node to start up
-    let handle = wait_listener_on_local_port(handle, json_rpc_port).await;
+    let handle = wait_listener_on_local_port(handle, api_port).await;
     // Check if the task errored/panicked
     let handle = check_join_handle(&name, handle).await;
 
@@ -217,11 +181,13 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
         base_node_grpc_port,
         web_ui_port,
         handle,
-        json_rpc_port,
+        api_port,
         graphql_port,
         temp_dir_path: base_dir_path,
         shutdown,
         db_path,
     };
+
+    cucumber_log(format!("Indexer {} started", indexer_name));
     world.indexers.insert(name, indexer_process);
 }

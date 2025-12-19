@@ -4,7 +4,7 @@
 use tari_networking::NetworkingError;
 use tari_ootle_common_types::{Epoch, Network};
 use tari_ootle_storage::{consensus_models::TransactionPoolError, StorageError};
-use tari_template_manager::interface::TemplateManagerError;
+use tari_template_lib::types::TemplateAddress;
 use tari_transaction::TransactionId;
 
 #[derive(thiserror::Error, Debug)]
@@ -13,12 +13,14 @@ pub enum TransactionValidationError {
     StorageError(#[from] StorageError),
     #[error("Transaction pool error: {0}")]
     TransactionPoolError(#[from] TransactionPoolError),
+    #[error("Template lookup error: {source}")]
+    TemplateLookupError { source: anyhow::Error },
 
     // TODO: move these to MempoolValidationError type
-    #[error("Invalid template address: {0}")]
-    InvalidTemplateAddress(#[from] TemplateManagerError),
-    #[error("No fee instructions")]
-    NoFeeInstructions,
+    #[error("Template not found: {address}")]
+    TemplateNotFound { address: TemplateAddress },
+    #[error("{transaction_id} has no fee instructions")]
+    NoFeeInstructions { transaction_id: TransactionId },
     #[error("Output substate exists in transaction {transaction_id}")]
     OutputSubstateExists { transaction_id: TransactionId },
     #[error("Validator fee claim instruction in transaction {transaction_id} contained invalid epoch {given_epoch}")]
@@ -30,12 +32,10 @@ pub enum TransactionValidationError {
     CurrentEpochLessThanMinimum { current_epoch: Epoch, min_epoch: Epoch },
     #[error("Current epoch ({current_epoch}) is greater than maximum epoch ({max_epoch}) required for transaction")]
     CurrentEpochGreaterThanMaximum { current_epoch: Epoch, max_epoch: Epoch },
-    #[error("Transaction {transaction_id} does not have any inputs")]
-    NoInputs { transaction_id: TransactionId },
-    #[error("Executed transaction {transaction_id} does not involved any shards")]
-    NoInvolvedShards { transaction_id: TransactionId },
     #[error("Invalid transaction signature")]
     InvalidSignature,
+    #[error("Transaction {transaction_id} has no main signer")]
+    NoMainSigner { transaction_id: TransactionId },
     #[error("Transaction {transaction_id} is not signed")]
     TransactionNotSigned { transaction_id: TransactionId },
     #[error("Network error: {0}")]
@@ -44,6 +44,8 @@ pub enum TransactionValidationError {
     UnknownNetwork { byte: u8, details: String },
     #[error("Network mismatch! Current network: {actual}, Transaction network: {expected}")]
     NetworkMismatch { actual: Network, expected: Network },
+    #[error("Transaction {transaction_id} contains a pay fee instruction, which is not allowed")]
+    ContainsPayFeeInstruction { transaction_id: TransactionId },
     #[error("Dry run transactions are not allowed")]
     DryRunNotAllowed,
 }

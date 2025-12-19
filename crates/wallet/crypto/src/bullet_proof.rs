@@ -12,12 +12,12 @@ use tari_crypto::{
         RistrettoSecretKey,
     },
 };
-use tari_engine_types::crypto::bullet_proof_service_factory;
+use tari_engine_types::crypto::{get_static_range_proof_service, MAX_LAZY_BP_AGG_FACTORS};
 use tari_template_lib::types::crypto::RangeProofBytes;
 
-use crate::UnblindedOutputStatement;
+use crate::OutputWitness;
 
-pub fn generate_extended_bullet_proof<'a, I: IntoIterator<Item = &'a UnblindedOutputStatement>>(
+pub fn generate_extended_bullet_proof<'a, I: IntoIterator<Item = &'a OutputWitness>>(
     statements: I,
 ) -> Result<RangeProofBytes, RangeProofError> {
     let mut extended_witnesses = statements
@@ -27,10 +27,7 @@ pub fn generate_extended_bullet_proof<'a, I: IntoIterator<Item = &'a UnblindedOu
                 RistrettoExtendedMask::assign(ExtensionDegree::DefaultPedersen, vec![stmt.mask.clone()]).unwrap();
             RistrettoExtendedWitness {
                 mask: extended_mask,
-                value: stmt
-                    .amount
-                    .to_u64_checked()
-                    .expect("BUG: Invalid output statement amount provided to generate_extended_bullet_proof"),
+                value: stmt.amount,
                 minimum_value_promise: stmt.minimum_value_promise,
             }
         })
@@ -56,8 +53,17 @@ pub fn generate_extended_bullet_proof<'a, I: IntoIterator<Item = &'a UnblindedOu
     }
 
     let agg_factor = extended_witnesses.len();
+    if agg_factor > MAX_LAZY_BP_AGG_FACTORS {
+        return Err(RangeProofError::ProofConstructionError {
+            reason: format!(
+                "Range proof aggregation factor {} exceeds the maximum supported {}",
+                agg_factor, MAX_LAZY_BP_AGG_FACTORS
+            ),
+        });
+    }
+
     let output_range_proof =
-        bullet_proof_service_factory(agg_factor).construct_extended_proof(extended_witnesses, None)?;
+        get_static_range_proof_service(agg_factor).construct_extended_proof(extended_witnesses, None)?;
 
     RangeProofBytes::try_from(output_range_proof)
         .map_err(|e| RangeProofError::ProofConstructionError { reason: e.to_string() })

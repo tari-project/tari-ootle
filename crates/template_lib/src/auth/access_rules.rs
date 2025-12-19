@@ -9,11 +9,8 @@ use crate::models::{ComponentAddress, NonFungibleAddress, ResourceAddress};
 
 /// Represents the types of possible access control rules over a component method or resource
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum AccessRule {
     /// AccessRule always passes
     AllowAll,
@@ -47,41 +44,35 @@ impl AccessRule {
 
 /// An enum that represents the possible ways to restrict access to components or resources
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum RestrictedAccessRule {
     /// Requires a specific condition to be met
     Require(RequireRule),
     /// Requires any of the specified conditions to be met (logical OR)
-    AnyOf(Vec<RestrictedAccessRule>),
+    AnyOf(Box<[RestrictedAccessRule]>),
     /// Requires all of the specified conditions to be met (logical AND)
-    AllOf(Vec<RestrictedAccessRule>),
+    AllOf(Box<[RestrictedAccessRule]>),
 }
 
 impl RestrictedAccessRule {
     pub fn and(self, other: Self) -> Self {
-        Self::AllOf(vec![self, other])
+        Self::AllOf(Box::new([self, other]))
     }
 
     pub fn or(self, other: Self) -> Self {
-        Self::AnyOf(vec![self, other])
+        Self::AnyOf(Box::new([self, other]))
     }
 }
 
 /// Specifies a requirement for a [RequireRule].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum RuleRequirement {
-    /// Requires ownership of a specific resource
+    /// Requires a proof of a specific resource
     Resource(ResourceAddress),
-    /// Requires ownership of a specific non-fungible token
+    /// Requires a proof of a specific non-fungible token
     NonFungibleAddress(NonFungibleAddress),
     /// Requires execution within a specific component
     ScopedToComponent(ComponentAddress),
@@ -115,27 +106,23 @@ impl From<TemplateAddress> for RuleRequirement {
 
 /// A rule requiring specific condition(s) to be met
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum RequireRule {
     /// Requires a specific condition to be met
     Require(RuleRequirement),
     /// Requires any of the specified conditions to be met (logical OR)
-    AnyOf(Vec<RuleRequirement>),
+    AnyOf(Box<[RuleRequirement]>),
     /// Requires all of the specified conditions to be met (logical AND)
-    AllOf(Vec<RuleRequirement>),
+    AllOf(Box<[RuleRequirement]>),
+    /// Requires N of the specified conditions to be met
+    MOfN(u16, Box<[RuleRequirement]>),
 }
 
 /// Information needed to specify access rules to methods of a component
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct ComponentAccessRules {
     #[cfg_attr(feature = "ts", ts(type = "Record<string, AccessRule>"))]
     method_access: BTreeMap<String, AccessRule>,
@@ -216,11 +203,8 @@ impl ResourceAuthAction {
 
 /// Information needed to specify access rules to a resource
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ResourceAccessRules {
     mintable: AccessRule,
     burnable: AccessRule,
@@ -239,7 +223,7 @@ impl ResourceAccessRules {
     /// * Updating the access rules is disabled for all users (i.e. only the OwnerRule applies)
     /// * Minting, burning, recalling and freezing are disabled for all users
     /// * Withdrawals, deposits and non-fungible data updates are allowed for all users
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             // User should explicitly enable minting, burning etc
             mintable: AccessRule::DenyAll,
@@ -340,8 +324,8 @@ impl Default for ResourceAccessRules {
 
 /// A macro to build access rules for components and resources.
 ///
-/// It allows for defining rules such as `allow_all`, `deny_all`, and more complex rules using `any_of` and `all_of`
-/// constructs.
+/// It allows for defining rules such as `allow_all`, `deny_all`, and more complex rules using `any_of`, `all_of` and
+/// `n_of` constructs.
 ///
 /// # Examples:
 ///
@@ -369,11 +353,14 @@ impl Default for ResourceAccessRules {
 ///     tari_template_lib::types::crypto::RistrettoPublicKeyBytes::default(),
 /// );
 /// let non_fungible_rule = rule!(non_fungible(non_fungible_address));
-/// // Complex rules using `any_of` and `all_of`
+/// // Complex rules using `any_of`, `all_of` and `n_of`
 /// let complex_rule = rule!(any_of(
 ///     component(component_address),
 ///     resource(resource_address)
 /// ));
+/// # let pk1 = tari_template_lib::types::crypto::RistrettoPublicKeyBytes::default();
+/// # let pk2 = tari_template_lib::types::crypto::RistrettoPublicKeyBytes::default();
+/// let n_of_rule = rule!(m_of_n(2, public_key(pk1), public_key(pk2)));
 /// ```
 #[macro_export]
 macro_rules! rule {
@@ -391,23 +378,26 @@ macro_rules! rule {
 #[macro_export]
 macro_rules! __restricted_access_rule {
     (any_of($($tail:tt)*)) => {
-        $crate::auth::RestrictedAccessRule::AnyOf($crate::__build_vec!(@ {__restricted_access_rule} $($tail)*))
+        $crate::auth::RestrictedAccessRule::AnyOf($crate::__build_vec!(@ {__restricted_access_rule} $($tail)*).into_boxed_slice())
     };
     (all_of($($tail:tt)*)) => {
-        $crate::auth::RestrictedAccessRule::AllOf($crate::__build_vec!(@ {__restricted_access_rule} $($tail)*))
+        $crate::auth::RestrictedAccessRule::AllOf($crate::__build_vec!(@ {__restricted_access_rule} $($tail)*).into_boxed_slice())
     };
-    ($a:ident($b:expr)) => {
-        $crate::auth::RestrictedAccessRule::Require($crate::__require_rule!($a($b)))
+    ($a:ident($($tail:tt)*)) => {
+        $crate::auth::RestrictedAccessRule::Require($crate::__require_rule!($a($($tail)*)))
     };
 }
 
 #[macro_export]
 macro_rules! __require_rule {
     (any_of($($tail:tt)*)) => {
-        $crate::auth::RequireRule::AnyOf($crate::__build_vec!(@ {__rule_requirement} $($tail)*))
+        $crate::auth::RequireRule::AnyOf($crate::__build_vec!(@ {__rule_requirement} $($tail)*).into_boxed_slice())
     };
     (all_of($($tail:tt)*)) => {
-        $crate::auth::RequireRule::AllOf($crate::__build_vec!(@ {__rule_requirement} $($tail)*))
+        $crate::auth::RequireRule::AllOf($crate::__build_vec!(@ {__rule_requirement} $($tail)*).into_boxed_slice())
+    };
+    (m_of_n($n:literal, $($tail:tt)*)) => {
+        $crate::auth::RequireRule::MOfN($n, $crate::__build_vec!(@ {__rule_requirement} $($tail)*).into_boxed_slice())
     };
     ($a:ident($b:expr)) => {
         $crate::auth::RequireRule::Require($crate::__rule_requirement!($a($b)))
@@ -421,6 +411,9 @@ macro_rules! __rule_requirement {
     };
     (non_fungible($x: expr)) => {
         $crate::auth::RuleRequirement::NonFungibleAddress($x)
+    };
+    (public_key($x: expr)) => {
+        $crate::auth::RuleRequirement::NonFungibleAddress($crate::models::NonFungibleAddress::from_public_key($x))
     };
     (component($x: expr)) => {
         $crate::auth::RuleRequirement::ScopedToComponent($x)
@@ -511,23 +504,35 @@ mod tests {
         let rule = rule!(any_of(component(component_address), resource(resource_address)));
         assert_eq!(
             rule,
-            AccessRule::Restricted(RestrictedAccessRule::AnyOf(vec![
+            AccessRule::Restricted(RestrictedAccessRule::AnyOf(Box::new([
                 RestrictedAccessRule::Require(RequireRule::Require(RuleRequirement::ScopedToComponent(
                     component_address
                 ))),
                 RestrictedAccessRule::Require(RequireRule::Require(RuleRequirement::Resource(resource_address))),
-            ]))
+            ])))
         );
 
         let rule = rule!(all_of(component(component_address), resource(resource_address)));
         assert_eq!(
             rule,
-            AccessRule::Restricted(RestrictedAccessRule::AllOf(vec![
+            AccessRule::Restricted(RestrictedAccessRule::AllOf(Box::new([
                 RestrictedAccessRule::Require(RequireRule::Require(RuleRequirement::ScopedToComponent(
                     component_address
                 ))),
                 RestrictedAccessRule::Require(RequireRule::Require(RuleRequirement::Resource(resource_address))),
-            ]))
+            ])))
+        );
+
+        let rule = rule!(m_of_n(1, component(component_address), resource(resource_address)));
+        assert_eq!(
+            rule,
+            AccessRule::Restricted(RestrictedAccessRule::Require(RequireRule::MOfN(
+                1,
+                Box::new([
+                    RuleRequirement::ScopedToComponent(component_address),
+                    RuleRequirement::Resource(resource_address),
+                ])
+            )))
         );
     }
 

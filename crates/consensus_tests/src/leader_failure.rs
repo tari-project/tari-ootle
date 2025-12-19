@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tari_consensus::hotstuff::HotStuffError;
 use tari_consensus_types::Decision;
@@ -38,9 +38,7 @@ async fn single_shard_node_goes_down() {
     // Take the VN offline - if we do it in the loop below, all transactions may have already been finalized (local
     // only) by committed block 1
     log::info!("😴 {failure_node} is offline");
-    test.network()
-        .go_offline(TestVnDestination::Address(failure_node.clone()))
-        .await;
+    test.network().go_offline(failure_node.clone()).await;
 
     test.start_epoch(Epoch(1)).await;
 
@@ -114,12 +112,8 @@ async fn single_shard_neighbour_nodes_go_down() {
     // only) by committed block 1
     log::info!("😴 {failure_node1} is offline");
     log::info!("😴 {failure_node2} is offline");
-    test.network()
-        .go_offline(TestVnDestination::Address(failure_node1.clone()))
-        .await;
-    test.network()
-        .go_offline(TestVnDestination::Address(failure_node2.clone()))
-        .await;
+    test.network().go_offline(failure_node1.clone()).await;
+    test.network().go_offline(failure_node2.clone()).await;
 
     test.start_epoch(Epoch(1)).await;
 
@@ -193,9 +187,7 @@ async fn single_shard_node_goes_down_and_gets_evicted() {
     // Take the VN offline - if we do it in the loop below, all transactions may have already been finalized (local
     // only) by committed block 1
     log::info!("😴 {failure_node} is offline");
-    test.network()
-        .go_offline(TestVnDestination::Address(failure_node.clone()))
-        .await;
+    test.network().go_offline(failure_node.clone()).await;
 
     test.start_epoch(Epoch(1)).await;
 
@@ -314,9 +306,7 @@ async fn multi_shard_node_goes_down() {
     // Take the VN offline - if we do it in the loop below, all transactions may have already been finalized (local
     // only) by committed block 1
     log::info!("😴 {failure_node} is offline");
-    test.network()
-        .go_offline(TestVnDestination::Address(failure_node.clone()))
-        .await;
+    test.network().go_offline(failure_node.clone()).await;
 
     test.start_epoch(Epoch(1)).await;
 
@@ -356,6 +346,80 @@ async fn multi_shard_node_goes_down() {
     //             );
     //         });
     //     });
+
+    log::info!("total messages sent: {}", test.network().total_messages_sent());
+    test.assert_clean_shutdown_except(&[failure_node]).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn single_shard_node_goes_down_and_catches_up() {
+    setup_logger();
+    let mut test = Test::builder()
+        // Allow enough time for leader failures
+        .with_test_timeout(Duration::from_secs(60))
+        .modify_consensus_constants(|constants_mut| {
+            constants_mut.missed_proposal_suspend_threshold = 10;
+            constants_mut.missed_proposal_evict_threshold = 10;
+            constants_mut.pacemaker_block_time = Duration::from_secs(5);
+        })
+        .modify_config(|config_mut| {
+            config_mut.enable_eviction_proposal = false;
+        })
+        .add_committee(0, vec!["1", "2", "3", "4", "5"])
+        .start()
+        .await;
+
+    let failure_node = TestAddress::new("4");
+
+    let mut tx_ids = Vec::with_capacity(12);
+    for _ in 0..10 {
+        let (tx, _, _) = test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
+        tx_ids.push(*tx.id());
+    }
+
+    test.start_epoch(Epoch(1)).await;
+    let epoch_start = Instant::now();
+    let mut is_back_online = false;
+    let mut had_gone_offline = false;
+
+    loop {
+        let (_, _, _, committed_height) = test.on_block_committed().await;
+
+        if !had_gone_offline && epoch_start.elapsed() >= Duration::from_secs(2) {
+            log::info!("😴 {failure_node} is offline");
+            test.network().go_offline(failure_node.clone()).await;
+            let (tx, _, _) = test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
+            tx_ids.push(*tx.id());
+            had_gone_offline = true;
+        }
+
+        if !is_back_online && epoch_start.elapsed() >= Duration::from_secs(13) {
+            log::info!("🚀 {failure_node} is online again");
+            test.network().go_online(&failure_node).await;
+            let (tx, _, _) = test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
+            is_back_online = true;
+            tx_ids.push(*tx.id());
+        }
+
+        if committed_height == NodeHeight(1) {
+            // This allows a few more leader failures to occur
+            test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
+            test.wait_for_pool_count(TestVnDestination::All, 1).await;
+        }
+
+        if is_back_online &&
+            test.validators_iter()
+                .all(|v| tx_ids.iter().all(|tx_id| v.has_committed_substates(tx_id)))
+        {
+            break;
+        }
+
+        if committed_height > NodeHeight(50) {
+            panic!("Not all transaction committed after {} blocks", committed_height);
+        }
+    }
+
+    test.stop();
 
     log::info!("total messages sent: {}", test.network().total_messages_sent());
     test.assert_clean_shutdown_except(&[failure_node]).await;

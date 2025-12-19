@@ -34,7 +34,7 @@ mod template {
 
     impl ResourceTest {
         pub fn new() -> Component<Self> {
-            let fungible = ResourceBuilder::fungible().initial_supply(1000);
+            let fungible = ResourceBuilder::public_fungible().initial_supply(1000);
             let non_fungible = ResourceBuilder::non_fungible()
                 .initial_supply([NonFungibleId::from_u64(1), NonFungibleId::from_u64(2)]);
             let confidential = ResourceBuilder::confidential()

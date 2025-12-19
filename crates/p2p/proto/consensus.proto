@@ -51,18 +51,11 @@ message ForeignProposalNotification {
 message ForeignProposalRequest {
   oneof request {
     ForeignProposalRequestByBlockId by_block_id = 1;
-    ForeignProposalRequestByTransactionId by_transaction_id = 2;
   }
 }
 
 message ForeignProposalRequestByBlockId {
   bytes block_id = 1;
-  uint32 for_shard_group = 2;
-  uint64 epoch = 3;
-}
-
-message ForeignProposalRequestByTransactionId {
-  bytes transaction_id = 1;
   uint32 for_shard_group = 2;
   uint64 epoch = 3;
 }
@@ -91,8 +84,9 @@ message BlockHeader {
   uint64 total_leader_fee = 8;
   tari.ootle.common.Signature signature = 10;
   uint64 timestamp = 11;
-  bytes epoch_hash = 13;
-  ExtraData extra_data = 14;
+  bytes epoch_hash = 12;
+  ExtraData extra_data = 13;
+  ShardGroupAccumulatedData accumulated_data = 14;
 }
 
 message Block {
@@ -102,13 +96,17 @@ message Block {
   TimeoutCertificate timeout_certificate = 4; // optional
 }
 
+message ShardStateVersions {
+  repeated uint64 versions = 1;
+}
+
 message ExtraData {
   bytes encoded_extra_data = 1;
 }
 
 message LeaderFee {
   uint64 leader_fee = 1;
-  uint64 global_exhaust_burn = 2;
+  uint64 exhaust_burn = 2;
 }
 
 message Command {
@@ -120,7 +118,6 @@ message Command {
     TransactionAtom some_accept = 5;
 
     ForeignProposalAtom foreign_proposal = 6;
-    MintConfidentialOutputAtom mint_confidential_output = 7;
     EvictNodeAtom evict_node = 8;
     bool end_epoch = 9;
   }
@@ -129,10 +126,6 @@ message Command {
 message ForeignProposalAtom {
   bytes block_id = 1;
   uint32 shard_group = 2;
-}
-
-message MintConfidentialOutputAtom {
-  bytes commitment = 1;
 }
 
 message TransactionAtom {
@@ -159,6 +152,7 @@ enum AbortReason {
   ONE_OR_MORE_INPUTS_NOT_FOUND = 5;
   FOREIGN_PLEDGE_INPUT_CONFLICT = 6;
   INSUFFICIENT_FEES_PAID = 7;
+  FEE_PAYMENT_IN_MAIN_INTENT = 8;
 }
 
 message Evidence {
@@ -237,19 +231,21 @@ message Substate {
   uint32 version = 2;
   bytes substate = 3;
 
-  uint64 created_epoch = 4;
-  uint32 created_by_shard = 5;
-  bytes created_block = 6;
-  bytes created_justify = 7;
-
-  SubstateDestroyed destroyed = 8;
+  // Required
+  SubstateCreatedMetadata created = 4;
+  // Optional
+  SubstateDestroyedMetadata destroyed = 5;
 }
 
-message SubstateDestroyed {
-  tari.ootle.common.Epoch epoch = 1;
-  uint32 shard = 2;
-  uint64 block_height = 3;
-  bytes justify = 4;
+message SubstateCreatedMetadata {
+  tari.ootle.common.Epoch at_epoch = 1;
+  uint32 in_shard = 2;
+  uint64 at_state_version = 3;
+}
+
+message SubstateDestroyedMetadata {
+  tari.ootle.common.Epoch at_epoch = 1;
+  uint64 at_state_version = 2;
 }
 
 message SyncRequest {
@@ -259,4 +255,9 @@ message SyncRequest {
 
 message EvictNodeAtom {
   bytes public_key = 1;
+}
+
+message ShardGroupAccumulatedData {
+  uint64 total_exhaust_burn_msb = 1;
+  uint64 total_exhaust_burn_lsb = 2;
 }

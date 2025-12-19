@@ -1,11 +1,13 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::{io, io::Read};
+
 use anyhow::anyhow;
 use tari_state_tree::{NibblePath, NodeKey, Version};
 
 use crate::{
-    codecs::{DbCodec, EncodeVec},
+    codecs::DbCodec,
     error::RocksDbStorageError,
     utils::{read_n_bytes, read_to_fixed},
 };
@@ -15,28 +17,49 @@ use crate::{
 pub struct NodeKeyCodec;
 
 impl NodeKeyCodec {
-    fn encode_node_key(&self, key: &NodeKey) -> Result<EncodeVec, RocksDbStorageError> {
+    fn encode_node_key_into<W: io::Write>(&self, key: &NodeKey, writer: &mut W) -> Result<(), RocksDbStorageError> {
         let version = key.version();
         let num_nibbles =
             u64::try_from(key.nibble_path().num_nibbles()).map_err(|_| RocksDbStorageError::EncodeError {
                 source: anyhow!("Number of nibbles exceeds u64"),
             })?;
         let nibble_path = key.nibble_path();
-        Ok(EncodeVec::from_slices(&[
-            &version.to_be_bytes(),
-            &num_nibbles.to_be_bytes(),
-            nibble_path.bytes(),
-        ]))
+        writer
+            .write_all(&version.to_be_bytes())
+            .map_err(|e| RocksDbStorageError::EncodeError {
+                source: anyhow!("NodeKeyCodec: Failed to write version: {}", e),
+            })?;
+        writer
+            .write_all(&num_nibbles.to_be_bytes())
+            .map_err(|e| RocksDbStorageError::EncodeError {
+                source: anyhow!("NodeKeyCodec: Failed to write num_nibbles: {}", e),
+            })?;
+        writer
+            .write_all(nibble_path.bytes())
+            .map_err(|e| RocksDbStorageError::EncodeError {
+                source: anyhow!("NodeKeyCodec: Failed to write nibble_path bytes: {}", e),
+            })?;
+        Ok(())
+    }
+
+    fn get_node_key_encoded_len(&self, key: &NodeKey) -> Result<usize, RocksDbStorageError> {
+        let len = 8 + // version
+            8 + // num_nibbles
+            key.nibble_path().bytes().len(); // nibble_path bytes
+        Ok(len)
     }
 }
 
 impl DbCodec<NodeKey> for NodeKeyCodec {
-    fn encode(&self, key: &NodeKey) -> Result<EncodeVec, RocksDbStorageError> {
-        self.encode_node_key(key)
+    fn encode_len(&self, value: &NodeKey) -> Result<usize, RocksDbStorageError> {
+        self.get_node_key_encoded_len(value)
     }
 
-    fn decode(&self, mut bytes: &[u8]) -> Result<NodeKey, RocksDbStorageError> {
-        let reader = &mut bytes;
+    fn encode_into<W: io::Write>(&self, value: &NodeKey, writer: &mut W) -> Result<(), RocksDbStorageError> {
+        self.encode_node_key_into(value, writer)
+    }
+
+    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<NodeKey, RocksDbStorageError> {
         let buf = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
             source: anyhow!("Invalid version bytes"),
         })?;
@@ -69,11 +92,15 @@ impl DbCodec<NodeKey> for NodeKeyCodec {
 }
 
 impl<'a> DbCodec<&'a NodeKey> for NodeKeyCodec {
-    fn encode(&self, key: &&'a NodeKey) -> Result<EncodeVec, RocksDbStorageError> {
-        self.encode_node_key(key)
+    fn encode_len(&self, value: &&'a NodeKey) -> Result<usize, RocksDbStorageError> {
+        self.get_node_key_encoded_len(value)
     }
 
-    fn decode(&self, _bytes: &[u8]) -> Result<&'a NodeKey, RocksDbStorageError> {
+    fn encode_into<W: io::Write>(&self, value: &&'a NodeKey, writer: &mut W) -> Result<(), RocksDbStorageError> {
+        self.encode_node_key_into(value, writer)
+    }
+
+    fn decode_reader<R: Read>(&self, _reader: &mut R) -> Result<&'a NodeKey, RocksDbStorageError> {
         unreachable!("decode should not be called on NodeKeyCodec with a reference")
     }
 }

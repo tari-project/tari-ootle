@@ -11,6 +11,7 @@ use crate::webserver::{context::HandlerContext, error::WebError};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ListColumnFamiliesResponse {
+    pub cf_names: Vec<String>,
     pub cfs: Vec<ColumnFamilyInfo>,
     pub dir_size: u64,
 }
@@ -65,6 +66,7 @@ pub async fn list(
     let cf_info = db.column_family_info()?;
 
     Ok(Json(ListColumnFamiliesResponse {
+        cf_names: context.registered_cfs().to_vec(),
         cfs: cf_info
             .into_iter()
             .map(|cf| ColumnFamilyInfo {

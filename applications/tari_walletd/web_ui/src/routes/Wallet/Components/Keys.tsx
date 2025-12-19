@@ -27,37 +27,44 @@ import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
-import { useKeysCreate, useKeysList, useKeysSetActive } from "../../../api/hooks/useKeys";
-import { BoxHeading2 } from "../../../Components/StyledComponents";
+import { useKeysCreate, useKeysList, useKeysSetActive } from "@api/hooks/useKeys";
+import { BoxHeading2 } from "@components/StyledComponents";
 import AddIcon from "@mui/icons-material/Add";
 import Fade from "@mui/material/Fade";
 import { Form } from "react-router-dom";
 import Button from "@mui/material/Button/Button";
-import { DataTableCell } from "../../../Components/StyledComponents";
-import FetchStatusCheck from "../../../Components/FetchStatusCheck";
+import { DataTableCell } from "@components/StyledComponents";
+import FetchStatusCheck from "@components/FetchStatusCheck";
+import { KeyId } from "@tari-project/typescript-bindings";
 
-function Key(key: [number, string, boolean], setActive: any) {
+function Key([keyId, pk, active]: [KeyId, string, boolean], setActive: (key_id: KeyId) => void) {
+  const rowKey =
+    "Derived" in keyId
+      ? `derived-${keyId.Derived.index.toString()}`
+      : `imported-${keyId.Imported.local_key_id.toString()}`;
   return (
-    <TableRow key={key[0]}>
-      <DataTableCell>{key[0]}</DataTableCell>
-      <DataTableCell>{key[1]}</DataTableCell>
-      <DataTableCell>{key[2] ? <b>Active</b> : <div onClick={() => setActive(key[0])}>Activate</div>}</DataTableCell>
+    <TableRow>
+      <DataTableCell>{rowKey}</DataTableCell>
+      <DataTableCell>{pk}</DataTableCell>
+      <DataTableCell>{active ? <b>Active</b> : <div onClick={() => setActive(keyId)}>Activate</div>}</DataTableCell>
     </TableRow>
   );
 }
 
 function Keys() {
   const [showKeyDialog, setShowAddKeyDialog] = useState(false);
-  const { data, isLoading, isError, error } = useKeysList();
+  const { data, isLoading, isError, error } = useKeysList("account");
   const { mutate: mutateSetActive } = useKeysSetActive();
-  const { mutate: mutateCreateKey } = useKeysCreate();
+  const { mutate: mutateCreateKey } = useKeysCreate("account");
 
   const showAddKeyDialog = (setElseToggle: boolean = !showKeyDialog) => {
     setShowAddKeyDialog(setElseToggle);
   };
 
-  const setActive = (index: number) => {
-    mutateSetActive(index);
+  const setActive = (keyId: KeyId) => {
+    if ("Derived" in keyId) {
+      mutateSetActive(keyId.Derived.index);
+    }
   };
 
   const onSubmitAddKey = () => {
@@ -101,7 +108,7 @@ function Keys() {
                   <TableCell>Active</TableCell>
                 </TableRow>
               </TableHead>
-              <TableBody>{data && data.keys.map((key: [number, string, boolean]) => Key(key, setActive))}</TableBody>
+              <TableBody>{data && data.keys.map((key: [KeyId, string, boolean]) => Key(key, setActive))}</TableBody>
             </Table>
           </TableContainer>
         </div>

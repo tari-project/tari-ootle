@@ -1,6 +1,8 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
+use std::io::{Read, Write};
+
 use crate::{
     codecs::{DbCodec, EncodeVec},
     error::RocksDbStorageError,
@@ -13,13 +15,21 @@ pub struct VersionedCodec<C, T> {
 }
 
 impl<C: DbCodec<T>, T: Versioned<Latest = V>, V: Into<T> + Clone> DbCodec<V> for VersionedCodec<C, T> {
+    fn encode_len(&self, value: &V) -> Result<usize, RocksDbStorageError> {
+        self.codec.encode_len(&value.clone().into())
+    }
+
+    fn encode_into<W: Write>(&self, value: &V, writer: &mut W) -> Result<(), RocksDbStorageError> {
+        self.codec.encode_into(&value.clone().into(), writer)
+    }
+
     fn encode(&self, value: &V) -> Result<EncodeVec, RocksDbStorageError> {
         let value = value.clone().into();
         self.codec.encode(&value)
     }
 
-    fn decode(&self, bytes: &[u8]) -> Result<V, RocksDbStorageError> {
-        let versioned = self.codec.decode(bytes)?;
+    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<V, RocksDbStorageError> {
+        let versioned = self.codec.decode_reader(reader)?;
         Ok(versioned.full_upgrade().into_latest())
     }
 }

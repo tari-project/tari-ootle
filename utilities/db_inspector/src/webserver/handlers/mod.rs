@@ -9,6 +9,7 @@ pub mod column_families;
 pub mod databases;
 pub mod foreign_substate_pledges;
 pub mod state_transitions;
+pub mod state_tree;
 pub mod tables;
 mod types;
 

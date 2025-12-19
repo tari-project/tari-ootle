@@ -65,6 +65,10 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
             get(handlers::bookkeeping::list),
         )
         .route(
+            &format!("/databases/{{db_name}}/column-families/{}", slugify_type_name(column_families::state_tree::StateTreeCf)),
+            get(handlers::state_tree::list),
+        )
+        .route(
             &format!("/databases/{{db_name}}/column-families/{}", slugify_type_name(column_families::foreign_substate_pledge::ForeignSubstatePledgeCf)),
             get(handlers::foreign_substate_pledges::list),
         );
@@ -104,7 +108,7 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         // column_families::state_transition::StateTransitionModel,
         // column_families::foreign_substate_pledge::ForeignSubstatePledgeModel,
         column_families::pending_state_tree_diff::PendingStateTreeDiffCf,
-        column_families::state_tree::StateTreeCf,
+        // column_families::state_tree::StateTreeCf,
         column_families::state_tree::StateTreeStaleNodesCf,
         column_families::state_tree_shard_versions::StateTreeShardVersionCf,
         column_families::epoch_checkpoint::EpochCheckpointCf,

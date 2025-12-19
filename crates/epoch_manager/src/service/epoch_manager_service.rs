@@ -220,17 +220,6 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     "🖥️ validator exit in {epoch} with public key {validator_node_public_key}",
                 );
             },
-            EpochEvent::NewBlockHeader { epoch, header } => {
-                debug!(target: LOG_TARGET, "New block header at {epoch}: {header}");
-                let height = header.height;
-                if let Err(err) = self.inner.insert_block_header(epoch, header) {
-                    error!(target: LOG_TARGET, "Failed to insert block header {} for epoch {epoch}: {err}", height);
-                    return Err(err.into());
-                }
-            },
-            EpochEvent::NewEvictionProof { epoch, eviction_proof } => {
-                trace!(target: LOG_TARGET, "New Eviction proof for {epoch}: {eviction_proof:?}");
-            },
             EpochEvent::EpochChanged { epoch, epoch_hash } => {
                 info!(
                     target: LOG_TARGET,

@@ -34,35 +34,6 @@ impl<TStore: EpochOracleStore + Send + 'static> HybridEpochOracle<TStore> {
             has_initial_sync_completed: false,
         }
     }
-
-    fn should_emit_configured(&self, event: &EpochEvent) -> bool {
-        match event {
-            EpochEvent::Error(_) |
-            // Let the configured oracle handle validator nodes
-            EpochEvent::ActiveValidatorNodeSetChanged { .. } |
-            EpochEvent::NewValidatorRegistered { .. } |
-            EpochEvent::NewValidatorNodeExit { .. } |
-            EpochEvent::EpochChanged { .. } |
-            EpochEvent::NewEvictionProof { .. } |
-            EpochEvent::DoneForNow { .. } => true,
-            // These events are handled by the base layer oracle
-            EpochEvent::NewBlockHeader { .. }  => false
-        }
-    }
-
-    fn should_emit_base_layer(&self, event: &EpochEvent) -> bool {
-        match event {
-            EpochEvent::Error(_) |
-            // Let the base layer oracle handle epoch timing and UTXO events
-            EpochEvent::NewBlockHeader { .. } => true,
-            EpochEvent::DoneForNow { .. }  |
-            EpochEvent::EpochChanged { .. } |
-            EpochEvent::ActiveValidatorNodeSetChanged { .. } |
-            EpochEvent::NewValidatorRegistered { .. } |
-            EpochEvent::NewValidatorNodeExit { .. } |
-            EpochEvent::NewEvictionProof { .. } => false,
-        }
-    }
 }
 
 impl<TStore: EpochOracleStore + Send + 'static> EpochEventOracle for HybridEpochOracle<TStore> {
@@ -74,9 +45,7 @@ impl<TStore: EpochOracleStore + Send + 'static> EpochEventOracle for HybridEpoch
                 event = self.configured.next_epoch_event() => {
                     let event = event?;
                     debug!(target: LOG_TARGET, "📝 Configured epoch event: {}", event);
-                    if self.should_emit_configured(&event) {
                         return Some(event);
-                    }
                 },
                 event = self.base_layer.next_epoch_event() => {
                     let event = event?;
@@ -102,9 +71,6 @@ impl<TStore: EpochOracleStore + Send + 'static> EpochEventOracle for HybridEpoch
                         },
                         // Ignore other events that are not epoch changes
                         _ => {},
-                    }
-                    if self.should_emit_base_layer(&event) {
-                        return Some(event);
                     }
                 },
             }

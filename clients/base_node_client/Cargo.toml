@@ -20,6 +20,7 @@ log = { workspace = true }
 serde = { workspace = true, default-features = true }
 thiserror = { workspace = true }
 tonic = { workspace = true }
+futures-util = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 url = { workspace = true }
 

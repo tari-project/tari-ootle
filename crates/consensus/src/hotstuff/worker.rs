@@ -359,7 +359,21 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     .get_our_validator_node(current_epoch)
                     .await?
                     .fee_claim_public_key;
-                self.next_epoch = None;
+                // We only clear next_epoch if we've reached it, If more than one eopch has progressed (edge case
+                // expected only on testnets with low difficulties) then we need to keep the next epoch
+                // in place so that we can quickly progress to the actual current epoch.
+                if let Some((next_epoch, _)) = self.next_epoch.as_ref() {
+                    if *next_epoch == current_epoch {
+                        self.next_epoch = None;
+                    } else {
+                        warn!(
+                            target: LOG_TARGET,
+                            "⚠️ this node/shard group is more than one epoch behind! Current epoch: {}, worker epoch: {}",
+                            next_epoch,
+                            current_epoch,
+                        );
+                    }
+                }
             }
 
             if current_height != prev_height {

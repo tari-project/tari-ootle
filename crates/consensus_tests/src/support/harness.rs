@@ -651,7 +651,6 @@ impl TestBuilder {
                     missed_proposal_recovery_threshold: 5,
                     max_number_commands_in_block: 500,
                     fee_exhaust_divisor: 20,
-                    epochs_per_era: Epoch(10),
                 },
                 state_tree_cleanup_interval: Duration::from_secs(1000),
                 epoch_gc_interval: Duration::from_secs(1000),

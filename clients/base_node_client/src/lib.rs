@@ -8,4 +8,5 @@ pub mod grpc;
 pub mod types;
 
 mod traits;
+pub use ::futures_util;
 pub use traits::BaseNodeClient;

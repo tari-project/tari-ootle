@@ -42,7 +42,7 @@ use tari_epoch_manager::{
     EpochManagerReader,
 };
 use tari_epoch_oracles::{
-    base_layer::BaseLayerOracle,
+    base_layer::{BaseLayerEpochOracleConfig, BaseLayerEpochOracleFeatures, BaseLayerOracle},
     configured::{ConfiguredEpochOracle, RealTimeEpochTicker},
     hybrid::{watch_ticker, HybridEpochOracle},
     store::EpochOracleStore,
@@ -498,7 +498,11 @@ async fn create_epoch_oracle<TStore: EpochOracleStore + Send + Clone + 'static>(
 ) -> anyhow::Result<EpochOracle<TStore>> {
     match config.epoch_oracle.oracle_type {
         EpochOracleType::BaseLayer => {
-            let oracle = create_base_layer_epoch_oracle(config, store, consensus_constants).await?;
+            let features = BaseLayerEpochOracleFeatures {
+                sync_headers: true,
+                sync_validator_node_changes: true,
+            };
+            let oracle = create_base_layer_epoch_oracle(config, store, consensus_constants, features).await?;
             Ok(EpochOracle::BaseLayer(oracle))
         },
         EpochOracleType::Configured => {
@@ -516,29 +520,24 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + 'static>(
     config: &ApplicationConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
+    features: BaseLayerEpochOracleFeatures,
 ) -> anyhow::Result<BaseLayerOracle<TStore>> {
     let mut base_node_client = create_base_layer_client(config.network, &config.epoch_oracle.base_layer).await?;
     verify_correct_network(&mut base_node_client, config.network).await?;
     Ok(BaseLayerOracle::new(
         store,
         base_node_client,
-        consensus_constants.base_layer_confirmations,
-        config.epoch_oracle.base_layer.scanning_interval,
-        config
-            .validator_node
-            .validator_node_sidechain_id
-            .as_ref()
-            .map(|p| p.to_byte_type()),
-        config
-            .validator_node
-            .burnt_utxo_sidechain_id
-            .as_ref()
-            .map(|p| p.to_byte_type()),
-        config
-            .validator_node
-            .template_sidechain_id
-            .as_ref()
-            .map(|p| p.to_byte_type()),
+        BaseLayerEpochOracleConfig {
+            start_height: 0,
+            height_lag: consensus_constants.base_layer_confirmations,
+            scanning_interval: config.epoch_oracle.base_layer.scanning_interval,
+            sidechain_id: config
+                .validator_node
+                .validator_node_sidechain_id
+                .as_ref()
+                .map(|p| p.to_byte_type()),
+            features,
+        },
         config.network,
     ))
 }
@@ -557,7 +556,13 @@ async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + Clone + Send + 's
     store: TStore,
     consensus_constants: &ConsensusConstants,
 ) -> anyhow::Result<HybridEpochOracle<TStore>> {
-    let base_layer_oracle = create_base_layer_epoch_oracle(config, store.clone(), consensus_constants).await?;
+    let features = BaseLayerEpochOracleFeatures {
+        sync_headers: true,
+        // Dont sync validator node changes as they are handled by the configured oracle
+        sync_validator_node_changes: false,
+    };
+    let base_layer_oracle =
+        create_base_layer_epoch_oracle(config, store.clone(), consensus_constants, features).await?;
     let oracle_config = config.epoch_oracle.configured.load().await?;
     let (ticker, trigger) = watch_ticker();
     let configured_oracle = ConfiguredEpochOracle::with_custom_ticker(oracle_config, store, ticker);

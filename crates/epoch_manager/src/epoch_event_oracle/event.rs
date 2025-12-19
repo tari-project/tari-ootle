@@ -5,10 +5,7 @@ use std::fmt::Display;
 
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{displayable::Displayable, Epoch, SubstateAddress};
-use tari_sidechain::EvictionProof;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
-
-use crate::epoch_event_oracle::block_header_data::BlockHeaderData;
 
 #[derive(Debug)]
 pub enum EpochEvent {
@@ -25,14 +22,6 @@ pub enum EpochEvent {
     NewValidatorNodeExit {
         epoch: Epoch,
         validator_node_public_key: RistrettoPublicKeyBytes,
-    },
-    NewBlockHeader {
-        epoch: Epoch,
-        header: BlockHeaderData,
-    },
-    NewEvictionProof {
-        epoch: Epoch,
-        eviction_proof: Box<EvictionProof>,
     },
     EpochChanged {
         epoch: Epoch,
@@ -81,17 +70,6 @@ impl Display for EpochEvent {
                     f,
                     "NewValidatorNodeExit {{ epoch: {}, validator_node_public_key: {} }}",
                     epoch, validator_node_public_key
-                )
-            },
-            EpochEvent::NewBlockHeader { epoch, header } => {
-                write!(f, "NewBlockHeader {{ epoch: {}, commitment: {} }}", epoch, header)
-            },
-            EpochEvent::NewEvictionProof { epoch, eviction_proof } => {
-                write!(
-                    f,
-                    "NewEvictionProof {{ epoch: {}, evict_node: {} }}",
-                    epoch,
-                    eviction_proof.node_to_evict()
                 )
             },
             EpochEvent::EpochChanged { epoch, epoch_hash } => {

@@ -154,6 +154,18 @@ loggers:
       - stdout
     additive: false
 
+  tari::ootle::epoch_manager:
+    level: debug
+    appenders:
+      - ootle
+    additive: false
+
+  tari::ootle::epoch_oracles:
+    level: debug
+    appenders:
+      - ootle
+    additive: false
+
   c::sidechain::validations:
     level: debug
     appenders:

@@ -84,7 +84,9 @@ pub async fn spawn(
         state_tree_cleanup_interval: Duration::from_secs(60 * 60),
         epoch_gc_interval: Duration::from_secs(60 * 60),
         enable_eviction_proposal: consensus_config.enable_eviction_proposal,
-        epoch_end_grace_period: Duration::from_secs(15),
+        // NOTE: This value should be greater than the epoch oracle's scanning interval to avoid leader failure by race
+        // condition.
+        epoch_end_grace_period: Duration::from_secs(10),
     };
 
     let hotstuff_worker = HotstuffWorker::<TariConsensusSpec>::new(

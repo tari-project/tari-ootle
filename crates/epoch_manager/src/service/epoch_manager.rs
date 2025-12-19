@@ -42,13 +42,12 @@ use tari_ootle_common_types::{
     SubstateAddress,
     VotePower,
 };
-use tari_ootle_storage::global::{models::ValidatorNode, BlockHeaderModel, GlobalDb, MetadataKey};
+use tari_ootle_storage::global::{models::ValidatorNode, GlobalDb, MetadataKey};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_sidechain::EvictionProof;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
-    epoch_event_oracle::BlockHeaderData,
     error::EpochManagerError,
     service::{config::EpochManagerConfig, NetworkDescription, ShardGroupInfo},
     traits::{EpochManagerSpec, LayerOneTransactionSubmitter},
@@ -125,19 +124,6 @@ where TSpec: EpochManagerSpec
 
         tx.commit()?;
 
-        Ok(())
-    }
-
-    pub fn insert_block_header(&mut self, epoch: Epoch, block_data: BlockHeaderData) -> Result<(), EpochManagerError> {
-        let mut tx = self.global_db.create_transaction()?;
-        self.global_db.block_headers(&mut tx).insert(BlockHeaderModel {
-            epoch,
-            height: block_data.height,
-            block_hash: block_data.hash,
-            kernel_merkle_root: block_data.kernel_merkle_root,
-            validator_node_merkle_root: block_data.validator_node_merkle_root,
-        })?;
-        tx.commit()?;
         Ok(())
     }
 

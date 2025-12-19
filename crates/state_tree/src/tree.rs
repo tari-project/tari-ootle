@@ -4,7 +4,7 @@
 use std::marker::PhantomData;
 
 use jmt::{
-    storage::{NodeKey, TreeReader, TreeUpdateBatch, TreeWriter},
+    storage::{TreeReader, TreeUpdateBatch},
     JellyfishMerkleTree,
     KeyHash,
     OwnedValue,
@@ -12,22 +12,18 @@ use jmt::{
     Version,
 };
 use log::debug;
-use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_ootle_common_types::{ToSubstateAddress, VersionedSubstateId};
-pub use tari_sidechain::SidechainJmtHasher;
+use tari_ootle_common_types::VersionedSubstateId;
 
 use crate::{
     diff::StateHashTreeDiff,
     empty_store::UpdateBatchStore,
     error::StateTreeError,
+    hasher::OotleJmtHasher,
     key_mapper::{DbKeyMapper, HashIdentityKeyMapper, SpreadPrefixKeyMapper},
-    memory_store::MemoryTreeStore,
     SparseMerkleProof,
-    StateTreePayload,
     TreeStoreBatchWriter,
-    TreeStoreWriter,
 };
 
 pub const SPARSE_MERKLE_PLACEHOLDER_HASH: RootHash = RootHash(*b"SPARSE_MERKLE_PLACEHOLDER_HASH__");
@@ -64,7 +60,7 @@ impl<S: TreeReader, M: DbKeyMapper<VersionedSubstateId>> StateTree<'_, S, M> {
     }
 
     pub fn get_root_hash(&self, version: Version) -> Result<RootHash, StateTreeError> {
-        let jmt = JellyfishMerkleTree::<_, SidechainJmtHasher>::new(self.store);
+        let jmt = JellyfishMerkleTree::<_, OotleJmtHasher>::new(self.store);
         let root_hash = jmt.get_root_hash(version)?;
         Ok(root_hash)
     }
@@ -99,18 +95,9 @@ impl<S: TreeReader + TreeStoreBatchWriter, M: DbKeyMapper<VersionedSubstateId>> 
             diff.new_nodes.values.len(),
             diff.stale_tree_nodes.len()
         );
-        self.store.batch_insert_nodes(diff.new_nodes)?;
-        self.store.record_stale_tree_nodes(version, diff.stale_tree_nodes)?;
-        // self.store.write_node_batch(diff.into())?;
-        // for (key, node) in diff.new_nodes.nodes {
-        //     log::debug!("Inserting node: {}", key);
-        //     self.store.insert_node(key, node)?;
-        // }
-        //
-        // for stale_tree_node in diff.stale_tree_nodes {
-        //     log::debug!("Recording stale tree node: {}", stale_tree_node.node_key);
-        //     self.store.record_stale_tree_node(stale_tree_node)?;
-        // }
+        self.store.batch_insert_nodes(diff.new_nodes.into())?;
+        self.store
+            .record_stale_tree_nodes(version, diff.stale_tree_nodes.into_iter().map(Into::into).collect())?;
 
         Ok(())
     }
@@ -130,9 +117,11 @@ impl<S: TreeReader + TreeStoreBatchWriter, M: DbKeyMapper<VersionedSubstateId>> 
             update_batch.new_nodes.nodes.len(),
             update_batch.stale_tree_nodes.len()
         );
-        self.store.batch_insert_nodes(update_batch.new_nodes)?;
-        self.store
-            .record_stale_tree_nodes(next_version, update_batch.stale_tree_nodes)?;
+        self.store.batch_insert_nodes(update_batch.new_nodes.into())?;
+        self.store.record_stale_tree_nodes(
+            next_version,
+            update_batch.stale_tree_nodes.into_iter().map(Into::into).collect(),
+        )?;
 
         Ok(root_hash)
     }
@@ -175,7 +164,7 @@ impl<S: TreeReader, M: DbKeyMapper<KeyHash>> StateTree<'_, S, M> {
         next_version: Version,
         changes: I,
     ) -> Result<(RootHash, TreeUpdateBatch), StateTreeError> {
-        let jmt = JellyfishMerkleTree::<_, SidechainJmtHasher>::new(self.store);
+        let jmt = JellyfishMerkleTree::<_, OotleJmtHasher>::new(self.store);
 
         let changes = changes
             .into_iter()
@@ -196,7 +185,7 @@ fn calculate_substate_changes<
     next_version: Version,
     changes: I,
 ) -> Result<(RootHash, TreeUpdateBatch), StateTreeError> {
-    let jmt = JellyfishMerkleTree::<_, SidechainJmtHasher>::new(store);
+    let jmt = JellyfishMerkleTree::<_, OotleJmtHasher>::new(store);
 
     let changes = changes.into_iter().map(|ch| match ch {
         SubstateTreeChange::Up { id, value_hash } => (M::map_to_leaf_key(&id), Some(value_hash.as_slice().to_vec())),
@@ -207,6 +196,7 @@ fn calculate_substate_changes<
     Ok((root_hash, update_result))
 }
 
+#[derive(Debug, Clone)]
 pub enum SubstateTreeChange {
     Up {
         id: VersionedSubstateId,

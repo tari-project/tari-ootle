@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use jmt::{
-    storage::{Node, NodeKey},
+    storage::{Node, NodeBatch, NodeKey, StaleNodeIndexBatch},
     Version,
 };
 
@@ -13,14 +13,14 @@ use crate::{
 
 pub trait TreeStoreBatchWriter {
     /// Inserts the node under a new, unique key (i.e. never an update).
-    fn batch_insert_nodes(&mut self, nodes: StateTreeNodeBatch) -> Result<(), StateTreeError>;
+    fn batch_insert_nodes(&mut self, nodes: NodeBatch) -> Result<(), StateTreeError>;
 
     /// Marks the given tree node for a (potential) future removal by an arbitrary external pruning
     /// process.
     fn record_stale_tree_nodes(
         &mut self,
         version: Version,
-        stale_nodes: StateTreeStaleNodeIndexBatch,
+        stale_nodes: StaleNodeIndexBatch,
     ) -> Result<(), StateTreeError>;
 }
 

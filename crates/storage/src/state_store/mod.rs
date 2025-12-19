@@ -38,13 +38,10 @@ use tari_ootle_common_types::{
 };
 use tari_state_tree::{
     storage::{Node, NodeKey},
-    Node,
-    NodeKey,
-    StaleTreeNode,
     StateTreeStaleNodeIndex,
     Version,
 };
-use tari_template_lib::{models::UnclaimedConfidentialOutputAddress, types::crypto::RistrettoPublicKeyBytes};
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 use time::PrimitiveDateTime;
 
@@ -293,12 +290,12 @@ pub trait StateStoreReadTransaction: Sized {
 
     // -------------------------------- State Tree -------------------------------- //
 
-    fn state_tree_nodes_get(&self, shard: Shard, key: &NodeKey) -> Result<Node<StateTreePayload>, StorageError>;
+    fn state_tree_nodes_get(&self, shard: Shard, key: &NodeKey) -> Result<Node, StorageError>;
     fn state_tree_nodes_get_all_by_state_version(
         &self,
         shard: Shard,
         state_version: Version,
-    ) -> Result<Vec<(NodeKey, Node<StateTreePayload>)>, StorageError>;
+    ) -> Result<Vec<(NodeKey, Node)>, StorageError>;
     fn state_tree_versions_get_latest(&self, shard: Shard) -> Result<Option<Version>, StorageError>;
     fn state_tree_versions_get_latest_for_shard_group(
         &self,
@@ -529,11 +526,7 @@ pub trait StateStoreWriteTransaction {
     ) -> Result<IndexMap<Shard, Vec<PendingShardStateTreeDiff>>, StorageError>;
 
     //---------------------------------- State tree --------------------------------------------//
-    fn state_tree_nodes_batch_insert(
-        &mut self,
-        shard: Shard,
-        nodes: Vec<(NodeKey, Node<StateTreePayload>)>,
-    ) -> Result<(), StorageError>;
+    fn state_tree_nodes_batch_insert(&mut self, shard: Shard, nodes: Vec<(NodeKey, Node)>) -> Result<(), StorageError>;
 
     fn state_tree_nodes_record_stale_tree_nodes(
         &mut self,

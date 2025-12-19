@@ -87,8 +87,18 @@ use tari_ootle_storage::{
     StateStoreWriteTransaction,
     StorageError,
 };
-use tari_state_tree::{Child, Nibble, Node, NodeKey, NodeType, StaleTreeNode, StateTreePayload, Version};
-use tari_state_tree::{Child, Nibble, Node, NodeKey, NodeType, StaleTreeNode, StateTreeStaleNodeIndex, Version};
+use tari_state_tree::{
+    storage::{Node, NodeKey},
+    Child,
+    Nibble,
+    Node,
+    NodeKey,
+    NodeType,
+    StaleTreeNode,
+    StateTreePayload,
+    StateTreeStaleNodeIndex,
+    Version,
+};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 
@@ -1359,7 +1369,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         trace!(
             target: LOG_TARGET,
             "{OPERATION}: shard {} block {} (v{}, new={}, stale={})", shard, block_id,
-            diff.version,diff.diff.new_nodes.len(),diff.diff.stale_tree_nodes.len()
+            diff.version,diff.diff.new_nodes, diff.diff.stale_tree_nodes.len()
         );
         self.db()
             .cf(PendingStateTreeDiffCf)?
@@ -1401,11 +1411,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(diffs)
     }
 
-    fn state_tree_nodes_batch_insert(
-        &mut self,
-        shard: Shard,
-        nodes: Vec<(NodeKey, Node<StateTreePayload>)>,
-    ) -> Result<(), StorageError> {
+    fn state_tree_nodes_batch_insert(&mut self, shard: Shard, nodes: Vec<(NodeKey, Node)>) -> Result<(), StorageError> {
         const OPERATION: &str = "state_tree_nodes_insert";
         let cf = self.db().cf(StateTreeCf)?;
         for (key, node) in nodes {
@@ -1483,7 +1489,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                                         &cf,
                                         shard,
                                         parent_key,
-                                        node.into_children(),
+                                        node.children_sorted(),
                                     ));
                                 },
                                 Node::Leaf(_) => {

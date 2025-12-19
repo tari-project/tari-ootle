@@ -5053,6 +5053,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "jmt"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b37ade62ca224945201e0c6d65e7a389ada90217895f7aa281470212ce4dddb0"
+dependencies = [
+ "anyhow",
+ "borsh",
+ "digest",
+ "hashbrown 0.13.2",
+ "hex",
+ "ics23",
+ "itertools 0.10.5",
+ "mirai-annotations",
+ "num-derive 0.3.3",
+ "num-traits",
+ "serde",
+ "sha2",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
 name = "jni"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10766,7 +10788,7 @@ dependencies = [
  "hex",
  "hickory-proto 0.26.0-alpha.1",
  "integer-encoding",
- "jmt",
+ "jmt 0.11.0",
  "lmdb-zero",
  "log",
  "monero",
@@ -11658,6 +11680,7 @@ dependencies = [
  "borsh",
  "hex",
  "indexmap 2.12.0",
+ "jmt 0.12.0",
  "log",
  "rand 0.8.5",
  "rocksdb",
@@ -11680,13 +11703,18 @@ dependencies = [
 name = "tari_state_tree"
 version = "0.17.0"
 dependencies = [
+ "anyhow",
+ "digest",
  "indexmap 2.12.0",
+ "jmt 0.12.0",
  "log",
  "serde",
  "tari_common_types",
+ "tari_crypto",
  "tari_engine_types",
- "tari_jellyfish",
+ "tari_hashing",
  "tari_ootle_common_types",
+ "tari_sidechain",
  "tari_template_lib",
  "thiserror 2.0.17",
 ]

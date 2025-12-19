@@ -9,6 +9,7 @@ mod column;
 mod misc;
 #[macro_use]
 mod prefixed;
+mod borsh;
 mod public_key;
 mod shard_group;
 mod small_bytes;

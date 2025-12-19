@@ -1,12 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use jmt::{
-    storage::{TreeReader, TreeWriter},
-    KeyHash,
-    RootHash,
-    Version,
-};
+use jmt::{storage::TreeReader, KeyHash, RootHash, Version};
 use tari_common_types::types::FixedHash;
 use tari_engine_types::{hashing::substate_value_hasher32, substate::SubstateId};
 use tari_ootle_common_types::VersionedSubstateId;
@@ -31,7 +26,7 @@ pub fn change(substate_id_seed: u8, value_seed: Option<u8>) -> SubstateTreeChang
 }
 
 fn hash_value(value: &[u8]) -> [u8; 32] {
-    substate_value_hasher32().chain(value).result().into_array().into()
+    substate_value_hasher32().chain(value).result().into_array()
 }
 
 pub fn hash_value_from_seed(seed: u8) -> [u8; 32] {
@@ -74,7 +69,7 @@ impl<S: TreeReader + TreeStoreBatchWriter> HashTreeTester<S> {
         self.put_changes_at_version(next_version, changes)
     }
 
-    pub fn create_state_tree(&mut self) -> StateTree<'_, S, TestMapper> {
+    pub fn new_state_tree(&mut self) -> StateTree<'_, S, TestMapper> {
         StateTree::<_, TestMapper>::new(&mut self.tree_store)
     }
 }
@@ -85,9 +80,9 @@ impl<S: TreeReader + TreeStoreBatchWriter> HashTreeTester<S> {
         next_version: Version,
         changes: impl IntoIterator<Item = SubstateTreeChange>,
     ) -> RootHash {
-        self.create_state_tree()
+        self.new_state_tree()
             .put_substate_changes(next_version, changes)
-            .unwrap()
+            .unwrap() // TODO
     }
 }
 

@@ -15,6 +15,7 @@ use tari_state_tree::{
     compute_merkle_root_for_hashes,
     JmtStorageError,
     KeyHash,
+    RootHash,
     SpreadPrefixStateTree,
     StagedTreeStore,
     StateHashTreeDiff,
@@ -122,7 +123,7 @@ impl<TTx: StateStoreReadTransaction> ShardedStateTree<&TTx> {
         Ok(root_hash)
     }
 
-    pub fn calculate_state_root(&self, shard_group: ShardGroup) -> Result<TreeHash, StateTreeError> {
+    pub fn calculate_state_root(&self, shard_group: ShardGroup) -> Result<RootHash, StateTreeError> {
         let mut shard_state_roots = HashMap::new();
         for shard in shard_group.shard_iter_with_global() {
             let root = self.get_state_root_for_shard(shard)?;
@@ -134,8 +135,8 @@ impl<TTx: StateStoreReadTransaction> ShardedStateTree<&TTx> {
     fn get_shard_group_root(
         &self,
         shard_group: ShardGroup,
-        mut shard_state_roots: HashMap<Shard, TreeHash>,
-    ) -> Result<TreeHash, StateTreeError> {
+        mut shard_state_roots: HashMap<Shard, RootHash>,
+    ) -> Result<RootHash, StateTreeError> {
         let mut hashes = Vec::with_capacity(shard_group.len() + 1);
         match shard_state_roots.remove(&Shard::global()) {
             Some(r) => hashes.push(r),
@@ -157,7 +158,7 @@ impl<TTx: StateStoreReadTransaction> ShardedStateTree<&TTx> {
         Ok(hash)
     }
 
-    fn get_state_root_for_shard(&self, shard: Shard) -> Result<TreeHash, StateTreeError> {
+    fn get_state_root_for_shard(&self, shard: Shard) -> Result<RootHash, StateTreeError> {
         let Some(version) = self.get_current_version(shard)? else {
             // At v0 there have been no state changes
             return Ok(SPARSE_MERKLE_PLACEHOLDER_HASH);
@@ -204,14 +205,15 @@ impl<TTx: StateStoreWriteTransaction> ShardedStateTree<&mut TTx> {
         &mut self,
         shard: Shard,
         version: Version,
-        diff: StateHashTreeDiff<StateTreePayload>,
+        diff: StateHashTreeDiff,
     ) -> Result<(), StateTreeError> {
         let mut store = ShardScopedTreeStoreWriter::new(self.tx, shard);
 
         trace!(
             target: LOG_TARGET,
-            "Committing diff for shard {shard} (version={version}) with {} new node(s) and {} stale node(s)",
-            diff.new_nodes.len(),
+            "Committing diff for shard {shard} (version={version}) with {} new node(s), {} value(s) and {} stale node(s)",
+            diff.new_nodes.nodes.len(),
+            diff.new_nodes.values.len(),
             diff.stale_tree_nodes.len()
         );
         store.record_stale_tree_nodes(version, diff.stale_tree_nodes)?;

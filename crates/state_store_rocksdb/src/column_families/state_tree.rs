@@ -21,7 +21,14 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tari_ootle_common_types::shard::Shard;
-use tari_state_tree::{Node, NodeKey, StaleTreeNode, StateTreePayload, Version};
+use tari_state_tree::{
+    storage::{Node, NodeKey},
+    Node,
+    NodeKey,
+    StaleTreeNode,
+    StateTreePayload,
+    Version,
+};
 
 use crate::{
     codecs::{DefaultCodec, KeyPrefix, NodeKeyCodec, NumberCodec, ShardCodec},
@@ -37,7 +44,7 @@ impl Cf for StateTreeCf {
     type Key = (Shard, NodeKey);
     type KeyCodec = (ShardCodec, NodeKeyCodec);
     type Prefix = StateTreePrefix;
-    type Value = Node<StateTreePayload>;
+    type Value = Node;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
@@ -53,7 +60,7 @@ impl<'a> Cf for StateTreeCfRef<'a> {
     type Key = (Shard, &'a NodeKey);
     type KeyCodec = (ShardCodec, NodeKeyCodec);
     type Prefix = StateTreePrefix;
-    type Value = Node<StateTreePayload>;
+    type Value = Node;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {

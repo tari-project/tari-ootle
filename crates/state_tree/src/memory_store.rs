@@ -1,30 +1,28 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::BTreeMap, fmt, fmt::Debug};
+use std::{collections::BTreeMap, fmt, fmt::Debug, mem};
 
 use jmt::{
-    storage::{LeafNode, Node, NodeKey, TreeReader},
+    storage::{LeafNode, Node, NodeBatch, NodeKey, StaleNodeIndexBatch, TreeReader},
     KeyHash,
     OwnedValue,
     Version,
 };
 
 use crate::{
-    diff::StateTreeStaleNodeIndex,
     helpers::write_node_key,
     StateTreeError,
     StateTreeNodeBatch,
     StateTreeStaleNodeIndexBatch,
     TreeStoreBatchWriter,
-    TreeStoreWriter,
 };
 
 #[derive(Debug, Default)]
 pub struct MemoryTreeStore {
     pub nodes: BTreeMap<NodeKey, Node>,
     pub values: BTreeMap<(Version, KeyHash), Option<OwnedValue>>,
-    pub stale_nodes: BTreeMap<Version, StateTreeStaleNodeIndexBatch>,
+    pub stale_nodes: BTreeMap<Version, StaleNodeIndexBatch>,
 }
 
 impl MemoryTreeStore {
@@ -61,9 +59,12 @@ impl TreeReader for MemoryTreeStore {
     }
 }
 impl TreeStoreBatchWriter for MemoryTreeStore {
-    fn batch_insert_nodes(&mut self, nodes: StateTreeNodeBatch) -> Result<(), StateTreeError> {
-        self.nodes.extend(nodes.nodes);
-        self.values.extend(nodes.values);
+    fn batch_insert_nodes(&mut self, batch: NodeBatch) -> Result<(), StateTreeError> {
+        // TODO: if jmt ever adds into_parts() or makes the fields public, we can avoid cloning here
+        self.nodes
+            .extend(batch.nodes().iter().map(|(k, v)| (k.clone(), v.clone())));
+        self.values
+            .extend(batch.values().iter().map(|(k, v)| (k.clone(), v.clone())));
 
         Ok(())
     }
@@ -71,7 +72,7 @@ impl TreeStoreBatchWriter for MemoryTreeStore {
     fn record_stale_tree_nodes(
         &mut self,
         version: Version,
-        stale_nodes: StateTreeStaleNodeIndexBatch,
+        stale_nodes: StaleNodeIndexBatch,
     ) -> Result<(), StateTreeError> {
         self.stale_nodes.insert(version, stale_nodes);
         Ok(())
@@ -96,7 +97,7 @@ impl fmt::Display for MemoryTreeStore {
         writeln!(f, "  Nodes:")?;
         for (key, node) in &self.nodes {
             write!(f, "    ")?;
-            write_node_key(f, &key)?;
+            write_node_key(f, key)?;
             writeln!(f, ": {:?}", node)?;
         }
         writeln!(f, "  Stale Nodes:")?;

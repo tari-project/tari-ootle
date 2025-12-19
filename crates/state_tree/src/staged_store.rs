@@ -1,21 +1,17 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 
 use jmt::{
-    storage::{LeafNode, NibblePath, Node, NodeKey, TreeReader},
+    storage::{LeafNode, Node, NodeBatch, NodeKey, StaleNodeIndex, TreeReader},
     KeyHash,
     OwnedValue,
     Version,
 };
 use log::*;
 
-use crate::{
-    diff::{StateHashTreeDiff, StateTreeNodeBatch, StateTreeStaleNodeIndex},
-    StateTreeError,
-    TreeStoreWriter,
-};
+use crate::diff::{StateHashTreeDiff, StateTreeNodeBatch, StateTreeStaleNodeIndex};
 
 const LOG_TARGET: &str = "tari::ootle::consensus::sharded_state_tree";
 
@@ -24,7 +20,7 @@ pub struct StagedTreeStore<'s, S> {
     preceding_pending_state: BTreeMap<NodeKey, Node>,
     new_tree_nodes: BTreeMap<NodeKey, Node>,
     new_values: BTreeMap<(Version, KeyHash), Option<OwnedValue>>,
-    new_stale_nodes: Vec<StateTreeStaleNodeIndex>,
+    new_stale_nodes: Vec<StaleNodeIndex>,
 }
 
 impl<'s, S: TreeReader> StagedTreeStore<'s, S> {
@@ -56,7 +52,7 @@ impl<'s, S: TreeReader> StagedTreeStore<'s, S> {
                 nodes: self.new_tree_nodes,
                 values: self.new_values,
             },
-            stale_tree_nodes: self.new_stale_nodes.into_iter().collect(),
+            stale_tree_nodes: self.new_stale_nodes.into_iter().map(Into::into).collect(),
         }
     }
 }

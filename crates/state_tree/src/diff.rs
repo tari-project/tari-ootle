@@ -1,7 +1,7 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt::Display};
 
 use jmt::{
     storage::{Node, NodeBatch, NodeKey, StaleNodeIndex, TreeUpdateBatch},
@@ -11,7 +11,7 @@ use jmt::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StateHashTreeDiff {
     pub new_nodes: StateTreeNodeBatch,
     pub stale_tree_nodes: StateTreeStaleNodeIndexBatch,
@@ -19,10 +19,7 @@ pub struct StateHashTreeDiff {
 
 impl StateHashTreeDiff {
     pub fn new() -> Self {
-        Self {
-            new_nodes: StateTreeNodeBatch::default(),
-            stale_tree_nodes: StateTreeStaleNodeIndexBatch::default(),
-        }
+        Self::default()
     }
 }
 
@@ -35,11 +32,7 @@ impl From<TreeUpdateBatch> for StateHashTreeDiff {
     }
 }
 
-impl From<StateHashTreeDiff> for NodeBatch {
-    fn from(diff: StateHashTreeDiff) -> Self {
-        NodeBatch::new(diff.new_nodes.nodes, diff.new_nodes.values)
-    }
-}
+pub type NodeValue = Box<[u8]>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StateTreeNodeBatch {
@@ -56,6 +49,23 @@ impl From<NodeBatch> for StateTreeNodeBatch {
     }
 }
 
+impl From<StateTreeNodeBatch> for NodeBatch {
+    fn from(batch: StateTreeNodeBatch) -> Self {
+        Self::new(batch.nodes, batch.values)
+    }
+}
+
+impl Display for StateTreeNodeBatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "NodeBatch {{ nodes: {}, values: {} }}",
+            self.nodes.len(),
+            self.values.len()
+        )
+    }
+}
+
 pub type StateTreeStaleNodeIndexBatch = Vec<StateTreeStaleNodeIndex>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,6 +79,14 @@ pub struct StateTreeStaleNodeIndex {
 
 impl From<StaleNodeIndex> for StateTreeStaleNodeIndex {
     fn from(idx: StaleNodeIndex) -> Self {
+        Self {
+            stale_since_version: idx.stale_since_version,
+            node_key: idx.node_key,
+        }
+    }
+}
+impl From<StateTreeStaleNodeIndex> for StaleNodeIndex {
+    fn from(idx: StateTreeStaleNodeIndex) -> Self {
         Self {
             stale_since_version: idx.stale_since_version,
             node_key: idx.node_key,

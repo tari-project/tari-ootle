@@ -179,7 +179,7 @@ futures = "0.3.30"
 futures-util = "0.3"
 futures-bounded = "0.2.3"
 jfs = "0.7.1"
-jmt = "0.11.0"
+jmt = "0.12.0"
 json5 = "0.4.1"
 jsonwebtoken = "9.3.1"
 hashbrown = { version = "0.13.2" }

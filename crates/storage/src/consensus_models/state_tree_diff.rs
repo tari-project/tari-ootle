@@ -10,22 +10,22 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::BlockId;
 use tari_ootle_common_types::shard::Shard;
-use tari_state_tree::{StateHashTreeDiff, StateTreePayload, Version};
+use tari_state_tree::{StateHashTreeDiff, Version};
 
 use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingShardStateTreeDiff {
     pub version: Version,
-    pub diff: StateHashTreeDiff<StateTreePayload>,
+    pub diff: StateHashTreeDiff,
 }
 
 impl PendingShardStateTreeDiff {
-    pub fn new(version: Version, diff: StateHashTreeDiff<StateTreePayload>) -> Self {
+    pub fn new(version: Version, diff: StateHashTreeDiff) -> Self {
         Self { version, diff }
     }
 
-    pub fn load(version: Version, diff: StateHashTreeDiff<StateTreePayload>) -> Self {
+    pub fn load(version: Version, diff: StateHashTreeDiff) -> Self {
         Self { version, diff }
     }
 }
@@ -68,9 +68,10 @@ impl Display for PendingShardStateTreeDiff {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "PendingShardStateTreeDiff(v{}, {} new node(s), {} stale node(s))",
+            "PendingShardStateTreeDiff(v{}, {} new node(s), {} value(s), {} stale node(s))",
             self.version,
-            self.diff.new_nodes.len(),
+            self.diff.new_nodes.nodes.len(),
+            self.diff.new_nodes.values.len(),
             self.diff.stale_tree_nodes.len()
         )
     }

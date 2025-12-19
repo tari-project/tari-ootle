@@ -5,7 +5,6 @@ use std::collections::{BTreeSet, HashSet};
 
 use jmt::Version;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_ootle_common_types::ToSubstateAddress;
 use tari_state_tree::{memory_store::MemoryTreeStore, SPARSE_MERKLE_PLACEHOLDER_HASH};
 
 use crate::support::{change, hash_value_from_seed, make_value, HashTreeTester};
@@ -94,19 +93,27 @@ fn hash_computed_consistently_after_adding_higher_tier_sibling() {
 }
 
 #[test]
-fn hash_allows_putting_in_same_version() {
+fn hash_differs_when_putting_items_at_a_different_version() {
+    let ch_1 = change(1, Some(30));
+    let ch_2 = change(2, Some(31));
+    let ch_3 = change(3, Some(32));
+    let ch_4 = change(4, Some(33));
+    let ch_5 = change(5, Some(34));
+    let ch_6 = change(6, Some(35));
+
     let mut tester_1 = HashTreeTester::new_empty();
-    tester_1.put_changes_at_version(1, vec![change(1, Some(30))]);
-    tester_1.put_changes_at_version(1, vec![change(2, Some(31))]);
-    tester_1.put_changes_at_version(1, vec![change(3, Some(32))]);
-    tester_1.put_changes_at_version(1, vec![change(4, Some(33))]);
-    tester_1.put_changes_at_version(1, vec![change(5, Some(34))]);
-    let hash_1 = tester_1.put_changes_at_version(1, vec![change(6, Some(35))]);
+    tester_1.put_changes_at_version(1, vec![ch_1.clone()]);
+    tester_1.put_changes_at_version(1, vec![ch_2.clone()]);
+    tester_1.put_changes_at_version(1, vec![ch_3.clone()]);
+    tester_1.put_changes_at_version(1, vec![ch_4.clone()]);
+    tester_1.put_changes_at_version(1, vec![ch_5.clone()]);
+    let hash_1 = tester_1.put_changes_at_version(1, vec![ch_6.clone()]);
+
     let mut tester_2 = HashTreeTester::new_empty();
-    tester_2.put_changes_at_version(1, vec![change(1, Some(30)), change(2, Some(31)), change(3, Some(32))]);
-    let hash_2 =
-        tester_2.put_changes_at_version(2, vec![change(4, Some(33)), change(5, Some(34)), change(6, Some(35))]);
-    assert_eq!(hash_1, hash_2);
+    tester_2.put_changes_at_version(1, vec![ch_1, ch_2, ch_3]);
+    let hash_2 = tester_2.put_changes_at_version(2, vec![ch_4, ch_5, ch_6]);
+
+    assert_ne!(hash_1, hash_2);
 }
 
 #[test]
@@ -178,21 +185,21 @@ fn proofs() {
     tester.put_substate_changes(vec![change(2, Some(40))]);
     let root_hash = tester.put_substate_changes(vec![change(3, Some(50))]);
 
-    let tree = tester.create_state_tree();
+    let tree = tester.new_state_tree();
     let (key, proof_value, proof) = tree.get_proof(3, &make_value(1)).unwrap();
     let hash = hash_value_from_seed(30);
     assert_eq!(proof_value, Some(hash.to_vec()));
-    proof.verify_existence(root_hash, key, &hash).unwrap();
+    proof.verify_existence(root_hash, key, hash).unwrap();
     let (key, proof_value, proof) = tree.get_proof(3, &make_value(2)).unwrap();
     let hash = hash_value_from_seed(40);
     assert_eq!(proof_value, Some(hash.to_vec()));
-    proof.verify_existence(root_hash, key, &hash).unwrap();
+    proof.verify_existence(root_hash, key, hash).unwrap();
     let (key, proof_value, proof) = tree.get_proof(3, &make_value(3)).unwrap();
     let hash = hash_value_from_seed(50);
     assert_eq!(proof_value, Some(hash.to_vec()));
-    proof.verify_existence(root_hash, key, &hash).unwrap();
+    proof.verify_existence(root_hash, key, hash).unwrap();
     let (key, proof_value, proof) = tree.get_proof(3, &make_value(3)).unwrap();
-    proof.verify_existence(root_hash, key, &proof_value.unwrap()).unwrap();
+    proof.verify_existence(root_hash, key, proof_value.unwrap()).unwrap();
 
     // Fail cases:
     // Fail to proof exclusion for included value
@@ -201,10 +208,10 @@ fn proofs() {
     // Fail to proof inclusion for excluded value
     let (key, _, proof) = tree.get_proof(3, &make_value(1)).unwrap();
     let hash = hash_value_from_seed(50);
-    proof.verify_existence(root_hash, key, &hash).unwrap_err();
+    proof.verify_existence(root_hash, key, hash).unwrap_err();
     // Fail to proof inclusion for old/incorrect merkle root
     let (key, proof_value, proof) = tree.get_proof(3, &make_value(3)).unwrap();
-    proof.verify_existence(root_v1, key, &proof_value.unwrap()).unwrap_err();
+    proof.verify_existence(root_v1, key, proof_value.unwrap()).unwrap_err();
 
     // Exclusion proof
     let (key, proof_value, proof) = tree.get_proof(3, &make_value(4)).unwrap();
@@ -214,5 +221,5 @@ fn proofs() {
     // Fail to verify exclusion proof
     let (key, _, proof) = tree.get_proof(3, &make_value(4)).unwrap();
     let hash = hash_value_from_seed(50);
-    proof.verify_existence(root_hash, key, &hash).unwrap_err();
+    proof.verify_existence(root_hash, key, hash).unwrap_err();
 }

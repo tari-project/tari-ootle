@@ -31,4 +31,5 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+jmt = { workspace = true }
 rand = { workspace = true }

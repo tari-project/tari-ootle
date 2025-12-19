@@ -13,8 +13,9 @@ use tari_ootle_common_types::{shard::Shard, Epoch, ShardGroup, VotePower};
 use tari_sidechain::{CommandCommitProof, SidechainBlockHeader, SidechainProofValidationError, ToCommand};
 use tari_state_tree::{
     compute_merkle_root_for_hashes,
+    KeyHash,
+    RootHash,
     StateTreeError,
-    TreeHash,
     Version,
     SPARSE_MERKLE_PLACEHOLDER_HASH,
 };
@@ -30,7 +31,7 @@ pub struct EpochCheckpoint {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TreeRootSummary {
-    pub root_hash: TreeHash,
+    pub root_hash: RootHash,
     pub state_version: Version,
 }
 
@@ -65,7 +66,7 @@ impl EpochCheckpoint {
         &self.shard_tree_summary
     }
 
-    pub fn get_shard_root(&self, shard: Shard) -> TreeHash {
+    pub fn get_shard_root(&self, shard: Shard) -> RootHash {
         self.shard_tree_summary
             .get(&shard)
             .map(|summary| summary.root_hash)
@@ -79,11 +80,12 @@ impl EpochCheckpoint {
             .unwrap_or_default()
     }
 
-    pub fn compute_state_merkle_root(&self) -> Result<TreeHash, EpochCheckpointValidationError> {
+    pub fn compute_state_merkle_root(&self) -> Result<RootHash, EpochCheckpointValidationError> {
         let shard_group = self.checked_shard_group()?;
         let hashes = iter::once(Shard::global())
             .chain(shard_group.shard_iter())
-            .map(|shard| self.get_shard_root(shard));
+            .map(|shard| self.get_shard_root(shard))
+            .map(|root_hash| KeyHash(root_hash.0));
         let root = compute_merkle_root_for_hashes(hashes)?;
         Ok(root)
     }
@@ -159,9 +161,9 @@ impl EpochCheckpoint {
 
         // Validate state root matches provided header
         let state_root = self.compute_state_merkle_root()?;
-        if state_root != self.proof.header().state_merkle_root {
+        if state_root.as_ref() != self.proof.header().state_merkle_root.as_bytes() {
             return Err(EpochCheckpointValidationError::ShardStateRootMerkleTreeRootMismatch {
-                computed: state_root,
+                computed: state_root.0.into(),
                 header_state_root: self.proof.header().state_merkle_root,
             });
         }
@@ -213,7 +215,7 @@ pub enum EpochCheckpointValidationError {
         "Shard state root merkle tree root mismatch: computed {computed} != header state root {header_state_root}"
     )]
     ShardStateRootMerkleTreeRootMismatch {
-        computed: TreeHash,
+        computed: FixedHash,
         header_state_root: FixedHash,
     },
     #[error("Invalid state tree: {0}")]

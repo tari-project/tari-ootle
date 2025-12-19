@@ -91,7 +91,13 @@ use tari_ootle_storage::{
     StateStoreReadTransaction,
     StorageError,
 };
-use tari_state_tree::{Node, NodeKey, StateTreePayload, Version};
+use tari_state_tree::{
+    storage::{Node, NodeKey},
+    Node,
+    NodeKey,
+    StateTreePayload,
+    Version,
+};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 
@@ -1601,7 +1607,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 trace!(
                     target: LOG_TARGET,
                     "{OPERATION}: got diff for shard {} (v{}, new={}, stale={})",
-                    shard, diff.version, diff.diff.new_nodes.len(), diff.diff.stale_tree_nodes.len()
+                    shard, diff.version, diff.diff.new_nodes, diff.diff.stale_tree_nodes.len()
                 );
                 let diff_mut = diffs.entry(shard).or_insert_with(Vec::new);
                 diff_mut.push(diff);
@@ -1705,7 +1711,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         })
     }
 
-    fn state_tree_nodes_get(&self, shard: Shard, key: &NodeKey) -> Result<Node<StateTreePayload>, StorageError> {
+    fn state_tree_nodes_get(&self, shard: Shard, key: &NodeKey) -> Result<Node, StorageError> {
         const OPERATION: &str = "state_tree_nodes_get";
         let cf = self.db().cf(StateTreeCfRef::default())?;
         let node = cf.get(&(shard, key), OPERATION)?;
@@ -1716,7 +1722,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         &self,
         shard: Shard,
         state_version: Version,
-    ) -> Result<Vec<(NodeKey, Node<StateTreePayload>)>, StorageError> {
+    ) -> Result<Vec<(NodeKey, Node)>, StorageError> {
         let cf = self.db().cf(state_tree::ByShardStateVersionQuery)?;
         let iter = cf.query_prefix_range_iterator(Ordering::default(), &(shard, state_version));
         let nodes = iter

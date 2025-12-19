@@ -111,7 +111,7 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
             .map_err(BaseLayerOracleError::StoreError)?;
         self.last_epoch_hash = self
             .store
-            .get(StoreKey::BaseLayerLastScannedBlockHash.as_key_bytes())
+            .get(StoreKey::BaseLayerLastEpochHash.as_key_bytes())
             .map_err(BaseLayerOracleError::StoreError)?;
         self.last_scanned_height = self
             .store
@@ -419,7 +419,7 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
         self.store
             .set(StoreKey::BaseLayerLastEpochHash.as_key_bytes(), &hash)
             .map_err(BaseLayerOracleError::StoreError)?;
-        // self.last_epoch_hash = Some(hash);
+        self.last_epoch_hash = Some(hash);
         Ok(())
     }
 

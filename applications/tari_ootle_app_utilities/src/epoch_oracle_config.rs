@@ -51,7 +51,7 @@ impl Default for BaseLayerOracleConfig {
             // NOTE: this essentially sets the maximum possible lag (assuming the base node is perfectly in sync) for
             // epoch change. Therefore, the `epoch_end_grace_period` in consensus settings should always be
             // greater than this value to avoid a race condition resulting in leader failure.
-            scanning_interval: Duration::from_secs(9),
+            scanning_interval: Duration::from_secs(8),
         }
     }
 }

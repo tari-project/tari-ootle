@@ -2505,6 +2505,7 @@ dependencies = [
  "mime_guess",
  "serde",
  "serde_json",
+ "tari_jellyfish",
  "tari_ootle_common_types",
  "tari_ootle_storage",
  "tari_state_store_rocksdb",

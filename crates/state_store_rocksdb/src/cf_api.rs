@@ -100,6 +100,8 @@ impl<CF: Cf, DB: RocksReader> CfContext<'_, DB, CF> {
         Ok(value)
     }
 
+    /// Counts the number of entries in the column family.
+    /// WARNING: This operation is O(n) and can be slow for large column families/prefixed tables.
     pub fn count(&self, operation: &'static str) -> Result<usize, RocksDbStorageError> {
         let key_prefix = CF::key_prefix().map(|b| [b]);
         let prefix_bytes = match key_prefix {

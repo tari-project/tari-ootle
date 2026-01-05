@@ -58,7 +58,7 @@ mod template {
         // Creates a new two-resource liquidity pool component for the resources A and B
         pub fn create(
             owner_rule: OwnerRule,
-            pool_token_rules: AccessRule,
+            contribute_and_redeem_rule: AccessRule,
             a_addr: ResourceAddress,
             b_addr: ResourceAddress,
             mut metadata: Metadata,
@@ -76,8 +76,8 @@ mod template {
                 .with_divisibility(0)
                 .with_access_rules(
                     ResourceAccessRules::new()
-                        .mintable(pool_token_rules.clone())
-                        .burnable(pool_token_rules.clone()),
+                        .mintable(contribute_and_redeem_rule.clone())
+                        .burnable(contribute_and_redeem_rule.clone()),
                 )
                 .with_owner_rule(owner_rule.clone())
                 .with_metadata(metadata)
@@ -95,9 +95,13 @@ mod template {
             .with_address_allocation_opt(address_allocation)
             .with_access_rules(
                 ComponentAccessRules::new()
-                    .add_method_rule("add_liquidity", pool_token_rules.clone())
-                    .add_method_rule("remove_liquidity", pool_token_rules.clone())
-                    .add_method_rule("contribute", pool_token_rules)
+                    // Only owners can rebalance the pool by adding/removing liquidity directly
+                    .add_method_rule("protected_add_liquidity", AccessRule::DenyAll)
+                    .add_method_rule("protected_remove_liquidity", AccessRule::DenyAll)
+                    // Since we have to mint and burn LP tokens during contribute/redeem, we set these methods to the same
+                    // access rule as the LP token mint/burn rules
+                    .add_method_rule("contribute", contribute_and_redeem_rule.clone())
+                    .add_method_rule("redeem", contribute_and_redeem_rule)
                     .default(AccessRule::AllowAll),
             )
             .create()
@@ -261,7 +265,7 @@ mod template {
             (a_bucket, b_bucket)
         }
 
-        pub fn add_liquidity(&mut self, bucket: Bucket) {
+        pub fn protected_add_liquidity(&mut self, bucket: Bucket) {
             // check that the buckets are correct
             let resource = bucket.resource_address();
             emit_event("add_liquidity", [
@@ -274,7 +278,7 @@ mod template {
             self.get_pool_vault(pool).deposit(bucket);
         }
 
-        pub fn remove_liquidity(&mut self, resource_address: ResourceAddress, amount: Amount) -> Bucket {
+        pub fn protected_remove_liquidity(&mut self, resource_address: ResourceAddress, amount: Amount) -> Bucket {
             let pool = self.get_pool_from_resource(resource_address);
             emit_event("remove_liquidity", [
                 ("resource_address", resource_address.to_string()),

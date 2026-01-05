@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, path::Path};
+use std::collections::HashMap;
 
 use tari_template_lib::{
     auth::{AccessRule, OwnerRule},
@@ -13,11 +13,7 @@ use tari_transaction::{args, Transaction};
 
 #[test]
 fn initial_contribution_and_redeem() {
-    // TODO: once builtin, we can remove this code
-    let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("templates")
-        .join("liquidity_pool");
-    let mut test = TemplateTest::new([crate_dir]);
+    let mut test = TemplateTest::new_no_templates();
 
     // create a user account
     let (account_address, owner_token, owner_secret) = test.create_empty_account();
@@ -32,7 +28,7 @@ fn initial_contribution_and_redeem() {
         Transaction::builder_localnet()
             // Create the liquidity pool
             .allocate_component_address("pool")
-            .call_function(template_addr, "instantiate", args![
+            .call_function(template_addr, "create", args![
                 OwnerRule::default(),
                 AccessRule::AllowAll,
                 XTR,

@@ -4,12 +4,7 @@
 use std::time::Duration;
 
 use cucumber::{then, when};
-use integration_tests::{
-    claim_proof::CucumberClaimProof,
-    util::{cucumber_log, transaction_builder},
-    wallet_daemon_client,
-    TariWorld,
-};
+use integration_tests::{claim_proof::CucumberClaimProof, util::transaction_builder, wallet_daemon_client, TariWorld};
 use rand::{rngs::OsRng, Rng};
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_wallet_sdk::models::KeyBranch;
@@ -151,10 +146,10 @@ async fn when_i_run_up_fees(world: &mut TariWorld, amount: u64, wallet_daemon_na
 
         fees_total += wait_resp.result.as_ref().unwrap().fee_receipt.total_fees_paid;
         if fees_total >= amount {
-            cucumber_log(format!("Reached target of {} fees", fees_total));
+            integration_tests::cucumber_log!(format!("Reached target of {} fees", fees_total));
             break;
         }
-        cucumber_log(format!("Accumulated {} fees, continuing", fees_total));
+        integration_tests::cucumber_log!(format!("Accumulated {} fees, continuing", fees_total));
     }
 }
 
@@ -208,7 +203,7 @@ async fn when_i_burn_funds_with_wallet_daemon(
     let nonce = wallet_daemon_client.create_key(KeyBranch::Nonce).await.unwrap();
 
     let public_key = nonce.public_key;
-    cucumber_log("Burning funds using claim key {public_key}");
+    integration_tests::cucumber_log!(format!("Burning funds using claim key {}", public_key));
 
     let wallet = world
         .wallets

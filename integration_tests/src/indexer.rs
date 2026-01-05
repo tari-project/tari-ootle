@@ -43,7 +43,6 @@ use tokio::task;
 use crate::{
     helpers::{check_join_handle, get_address_from_output, get_os_assigned_ports, wait_listener_on_local_port},
     logging::get_base_dir_for_scenario,
-    util::cucumber_log,
     TariWorld,
 };
 
@@ -188,6 +187,6 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
         db_path,
     };
 
-    cucumber_log(format!("Indexer {} started", indexer_name));
+    crate::cucumber_log!(format!("Indexer {} started", indexer_name));
     world.indexers.insert(name, indexer_process);
 }

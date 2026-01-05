@@ -6,7 +6,6 @@ use integration_tests::{
     base_node::spawn_base_node,
     indexer::spawn_indexer,
     miner::register_miner_process,
-    util::cucumber_log,
     validator_node::spawn_validator_node,
     wallet::spawn_minotari_wallet,
     wallet_daemon::spawn_wallet_daemon,
@@ -35,7 +34,7 @@ async fn create_network(world: &mut TariWorld, spec: NetworkSpec) {
         if let Some(account) = &wallet_spec.with_account {
             let account =
                 wallet_daemon_client::create_account(world, wallet_spec.node.name.clone(), account.clone()).await;
-            cucumber_log(format!(
+            integration_tests::cucumber_log!(format!(
                 "Created initial account {} on wallet daemon {}",
                 account, wallet_spec.node.name
             ));
@@ -78,29 +77,29 @@ async fn create_network(world: &mut TariWorld, spec: NetworkSpec) {
 
     let num_blocks = 10 + spec.validators.len() as u64;
     miner::miner_mines_new_blocks(world, spec.miner.name.clone(), num_blocks).await;
-    cucumber_log(format!("Mined {num_blocks} blocks"));
+    integration_tests::cucumber_log!(format!("Mined {num_blocks} blocks"));
     wallet::check_balance(world, spec.minotari_wallet.name.clone(), 20, "T".to_string()).await;
 
     for vn_spec in &spec.validators {
         validator_node::send_vn_registration(world, vn_spec.name().to_string(), spec.minotari_wallet.name.clone())
             .await;
-        cucumber_log(format!("Validator node {} sent registration", vn_spec.name()));
+        integration_tests::cucumber_log!(format!("Validator node {} sent registration", vn_spec.name()));
     }
 
     let scan_height = 20 + num_blocks - world.consensus_constants.base_layer_confirmations;
     miner::miner_mines_new_blocks(world, spec.miner.name.clone(), 20).await;
-    cucumber_log("Mined 20 blocks");
+    integration_tests::cucumber_log!("Mined 20 blocks");
     indexer::indexer_has_scanned_to_at_least_height(world, spec.indexer.name.clone(), scan_height).await;
-    cucumber_log(format!("Indexer has scanned up to or past height {}", scan_height));
+    integration_tests::cucumber_log!(format!("Indexer has scanned up to or past height {}", scan_height));
 
     for vn_spec in &spec.validators {
         validator_node::assert_vn_is_registered(world, vn_spec.name().to_string()).await;
-        cucumber_log(format!("Validator node {} is registered", vn_spec.name()));
+        integration_tests::cucumber_log!(format!("Validator node {} is registered", vn_spec.name()));
         world
             .get_validator_node(vn_spec.name())
             .wait_for_consensus_to_start()
             .await;
-        cucumber_log(format!("Validator node {} consensus started", vn_spec.name()));
+        integration_tests::cucumber_log!(format!("Validator node {} consensus started", vn_spec.name()));
     }
 }
 

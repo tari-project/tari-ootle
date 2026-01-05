@@ -39,9 +39,10 @@ use tari_common_types::{
     tari_address::{TariAddress, TariAddressFeatures},
     types::{CompressedPublicKey, PrivateKey},
 };
+use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_crypto::keys::SecretKey;
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::{ConsensusConstants, SubstateRequirement};
+use tari_ootle_common_types::SubstateRequirement;
 use tari_ootle_wallet_sdk::models::AccountWithAddress;
 use tari_sidechain::EvictionProof;
 use tari_transaction_components::{
@@ -109,7 +110,7 @@ impl TariWorld {
         )
         .unwrap();
         Self {
-            consensus_constants: ConsensusConstants::devnet(),
+            consensus_constants: ConsensusConstants::devnet(7),
             base_nodes: IndexMap::new(),
             wallets: IndexMap::new(),
             validator_nodes: IndexMap::new(),

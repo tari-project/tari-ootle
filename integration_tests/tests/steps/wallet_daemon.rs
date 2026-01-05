@@ -203,7 +203,7 @@ async fn when_i_burn_funds_with_wallet_daemon(
     let nonce = wallet_daemon_client.create_key(KeyBranch::Nonce).await.unwrap();
 
     let public_key = nonce.public_key;
-    integration_tests::cucumber_log!("Burning funds using claim key {public_key}");
+    integration_tests::cucumber_log!(format!("Burning funds using claim key {}", public_key));
 
     let wallet = world
         .wallets

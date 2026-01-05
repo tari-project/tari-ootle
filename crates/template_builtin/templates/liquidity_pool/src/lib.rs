@@ -31,6 +31,15 @@ enum Pool {
     B,
 }
 
+impl Pool {
+    fn other(self) -> Self {
+        match self {
+            Self::A => Self::B,
+            Self::B => Self::A,
+        }
+    }
+}
+
 #[template]
 mod template {
     use alloc::string::ToString;
@@ -47,7 +56,7 @@ mod template {
 
     impl TwoResourceLiquidityPool {
         // Creates a new two-resource liquidity pool component for the resources A and B
-        pub fn instantiate(
+        pub fn create(
             owner_rule: OwnerRule,
             pool_token_rules: AccessRule,
             a_addr: ResourceAddress,
@@ -273,6 +282,46 @@ mod template {
             ]);
 
             self.get_pool_vault(pool).withdraw(amount)
+        }
+
+        /// A simple constant product swap implementation without fees. This is provided as a convenience but
+        /// may not be generally useful.
+        /// Users of this template can implement their own swap logic with fees as needed and use an instance of this
+        /// pool template as a sub-component.
+        pub fn swap_constant_product(&mut self, mut input_bucket: Bucket) -> Bucket {
+            let input_resource = input_bucket.resource_address();
+
+            let input_amount = input_bucket.amount();
+            if input_amount.is_zero() {
+                panic!("Cannot swap zero amount");
+            }
+
+            let input_pool = self.get_pool_from_resource(input_resource);
+            let output_pool = input_pool.other();
+
+            let input_reserve = self.get_pool_vault(input_pool).balance();
+            let output_reserve = self.get_pool_vault(output_pool).balance();
+
+            // Simple constant product formula without fees
+            // Δy = y.Δx / (X + Δx)
+            let output_amount = input_amount
+                .checked_mul(output_reserve)
+                .and_then(|num| num.checked_div(input_reserve.checked_add(input_amount).expect("Div zero")))
+                .expect("Overflow in swap calculation");
+
+            // Perform the swap
+            let taken_input = input_bucket.take(input_amount);
+            self.get_pool_vault(input_pool).deposit(taken_input);
+            let output_bucket = self.get_pool_vault(output_pool).withdraw(output_amount);
+
+            emit_event("swap", [
+                ("input_resource", input_resource.to_string()),
+                ("input_amount", input_amount.to_string()),
+                ("output_resource", output_bucket.resource_address().to_string()),
+                ("output_amount", output_amount.to_string()),
+            ]);
+
+            output_bucket
         }
 
         pub fn get_redemption_value(&self, lp_redeem_amount: Amount) -> (Amount, Amount) {

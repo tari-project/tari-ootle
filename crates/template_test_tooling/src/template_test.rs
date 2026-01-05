@@ -4,6 +4,7 @@
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
+    iter,
     path::Path,
     sync::Arc,
     time::Instant,
@@ -27,13 +28,14 @@ use tari_engine::{
 };
 use tari_engine_types::{
     commit_result::{ExecuteResult, RejectReason},
+    component::derive_component_address_from_public_key,
     indexed_value::IndexedWellKnownTypes,
     substate::{SubstateDiff, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
     ToByteType,
 };
 use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType, SubstateRequirement};
-use tari_template_builtin::all_builtin_templates;
+use tari_template_builtin::{all_builtin_templates, ACCOUNT_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS},
     models::{ComponentAddress, NonFungibleAddress, ResourceAddress},
@@ -93,6 +95,10 @@ impl TemplateTest {
 
     pub fn new<I: IntoIterator<Item = T>, T: Into<TemplateSpec>>(template_paths: I) -> Self {
         Self::new_internal(template_paths, None::<(String, String)>)
+    }
+
+    pub fn new_no_templates() -> Self {
+        Self::new_internal(iter::empty::<TemplateSpec>(), None::<(String, String)>)
     }
 
     pub fn new_with_compile_envs<I, T, TEnvs, K, V>(template_paths: I, envs: TEnvs) -> Self
@@ -449,7 +455,7 @@ impl TemplateTest {
         let (owner_proof, public_key, secret_key) = self.create_owner_proof();
         let old_fail_fees = self.enable_fees;
         self.enable_fees = false;
-        let result = self.execute_expect_success(
+        self.execute_expect_success(
             Transaction::builder_localnet()
                 .call_method(xtr_faucet_component(), "take", args![
                     Self::FUNDED_ACCOUNT_INITIAL_BALANCE
@@ -460,16 +466,11 @@ impl TemplateTest {
             vec![owner_proof.clone()],
         );
 
-        let component = result
-            .finalize
-            .execution_results
-            .get(2)
-            .expect("instruction at 2 no execution result")
-            .decode::<ComponentAddress>()
-            .unwrap();
+        let account_address =
+            derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &public_key.to_byte_type());
 
         self.enable_fees = old_fail_fees;
-        (component, owner_proof, secret_key)
+        (account_address, owner_proof, secret_key)
     }
 
     #[track_caller]

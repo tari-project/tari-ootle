@@ -99,11 +99,16 @@ where
     K: AsRef<OsStr>,
     V: AsRef<OsStr>,
 {
-    let pkg_dir = Path::new(CRATE_DIR).join(package_dir);
+    let pkg_dir = if package_dir.as_ref().is_relative() {
+        // TODO: update tests to use absolute paths and remove this hack
+        Path::new(CRATE_DIR).join(package_dir)
+    } else {
+        package_dir.as_ref().to_path_buf()
+    };
     if !pkg_dir.exists() {
         return Err(io::Error::new(
             ErrorKind::NotFound,
-            format!("Package directory not found: {}", pkg_dir.display(),),
+            format!("Package directory not found: {}", pkg_dir.display()),
         ));
     }
 

@@ -5,7 +5,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tari_template_lib = { path = "../../../../crates/template_lib", default-features = false, features = ["macro", "alloc", "extra-arith"] }
+tari_template_lib = { path = "../../../template_lib", default-features = false, features = ["macro", "alloc", "extra-arith"] }
 
 [lib]
 crate-type = ["cdylib", "lib"]
@@ -17,3 +17,6 @@ codegen-units = 1   # Reduce number of codegen units to increase optimizations.
 panic = 'abort'     # Abort on panic (reduces binary size).
 strip = 'debuginfo' # Strip debug info to reduce binary size.
 
+[dev-dependencies]
+tari_template_test_tooling = { path = "../../../template_test_tooling" }
+tari_transaction = { path = "../../../transaction" }

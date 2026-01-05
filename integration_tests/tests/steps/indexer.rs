@@ -9,7 +9,6 @@ use std::{
 use cucumber::{given, then, when};
 use integration_tests::{
     indexer::{spawn_indexer, IndexerProcess},
-    util::cucumber_log,
     TariWorld,
 };
 use libp2p::Multiaddr;
@@ -264,7 +263,7 @@ async fn i_wait_for_the_indexer_to_sync_with_the_network(world: &mut TariWorld, 
         let state = client.get_network_sync_state().await.unwrap();
         if let Some(ref progress) = state.sync_progress {
             if progress.last_state_versions.is_empty() {
-                cucumber_log(format!(
+                integration_tests::cucumber_log!(format!(
                     "Waiting for indexer {} to sync. Current epoch: {}, no checkpoint progress yet",
                     indexer_name, prev_epoch
                 ));
@@ -277,7 +276,7 @@ async fn i_wait_for_the_indexer_to_sync_with_the_network(world: &mut TariWorld, 
                 // If the indexer is not at the epoch and not scanned to the state version for the shard, we are not synced
                 .find(|(s, (v, e))| *e < prev_epoch || state_versions.get(s).is_none_or(|sv| sv > v))
             {
-                cucumber_log(format!(
+                integration_tests::cucumber_log!(format!(
                     "Waiting for indexer {} to sync. Current epoch: {}, shard_group: {}, state_version: {}, scanned \
                      epoch: {}",
                     indexer_name, prev_epoch, shard, state_version, epoch
@@ -288,7 +287,7 @@ async fn i_wait_for_the_indexer_to_sync_with_the_network(world: &mut TariWorld, 
 
             break;
         } else {
-            cucumber_log(format!(
+            integration_tests::cucumber_log!(format!(
                 "Waiting for indexer {} to sync. Current epoch: {}, no sync progress yet",
                 indexer_name, prev_epoch
             ));

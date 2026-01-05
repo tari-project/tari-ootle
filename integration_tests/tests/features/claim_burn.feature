@@ -25,7 +25,7 @@ Feature: Claim Burn
 
 #  @serial
   @concurrent
-  Scenario: Double Claim base layer burn funds with wallet daemon. should fail
+  Scenario: Double claim base layer burn funds with wallet daemon. should fail
     Given a network with registered validator VN and wallet daemon WALLET_D
 
     When I create an account ACC via the wallet daemon WALLET_D

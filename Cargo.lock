@@ -4857,6 +4857,7 @@ dependencies = [
  "tari_common_types",
  "tari_comms",
  "tari_comms_dht",
+ "tari_consensus",
  "tari_crypto",
  "tari_engine",
  "tari_engine_types",

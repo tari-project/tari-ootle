@@ -137,6 +137,7 @@ pub async fn spawn_base_node(world: &mut TariWorld, bn_name: String) {
                 GrpcMethod::GetHeaderByHash,
                 GrpcMethod::GetSideChainUtxos,
                 GrpcMethod::GetValidatorNodeChanges,
+                GrpcMethod::ListHeaders,
             ]
             .into();
             base_node_config.base_node.http_wallet_query_service.port = http_port;

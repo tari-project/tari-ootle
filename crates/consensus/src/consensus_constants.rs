@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::time::Duration;
+use std::{env, time::Duration};
 
 use tari_ootle_common_types::{Network, NumPreshards};
 
@@ -47,10 +47,26 @@ pub struct ConsensusConstants {
 }
 
 impl ConsensusConstants {
-    pub const fn devnet() -> Self {
+    pub const fn devnet(committee_size: u32) -> Self {
         Self {
             base_layer_confirmations: 3,
-            committee_size: 7,
+            committee_size,
+            max_base_layer_blocks_ahead: 5,
+            max_base_layer_blocks_behind: 5,
+            num_preshards: NumPreshards::current(),
+            pacemaker_block_time: Duration::from_secs(10),
+            missed_proposal_suspend_threshold: 5,
+            missed_proposal_evict_threshold: 10,
+            missed_proposal_recovery_threshold: 5,
+            max_number_commands_in_block: 500,
+            fee_exhaust_divisor: 20, // 1/20 = 5%
+        }
+    }
+
+    pub const fn testnet() -> Self {
+        Self {
+            base_layer_confirmations: 3,
+            committee_size: 40,
             max_base_layer_blocks_ahead: 5,
             max_base_layer_blocks_behind: 5,
             num_preshards: NumPreshards::current(),
@@ -68,9 +84,14 @@ impl From<Network> for ConsensusConstants {
     fn from(network: Network) -> Self {
         match network {
             Network::MainNet => unimplemented!("Mainnet consensus constants not implemented"),
-            Network::StageNet | Network::NextNet | Network::LocalNet | Network::Igor | Network::Esmeralda => {
-                Self::devnet()
-            },
+            // Allow committee size to be overridden for LocalNet
+            Network::LocalNet => Self::devnet(
+                env::var("TARI_DEVNET_COMMITTEE_SIZE")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(7),
+            ),
+            Network::StageNet | Network::NextNet | Network::Igor | Network::Esmeralda => Self::testnet(),
         }
     }
 }

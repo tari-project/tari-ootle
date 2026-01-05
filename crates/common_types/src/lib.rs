@@ -6,7 +6,6 @@ pub mod base_layer_hashing;
 pub mod borsh;
 mod bytes;
 pub mod committee;
-mod consensus_constants;
 pub mod crypto;
 pub mod displayable;
 mod engine_signature;
@@ -38,7 +37,6 @@ mod versioned_substate_id;
 mod vote_power;
 
 pub use bytes::*;
-pub use consensus_constants::*;
 pub use engine_signature::*;
 pub use epoch::Epoch;
 pub use era::*;

@@ -10,7 +10,6 @@ use std::{
 use cucumber::{given, then, when};
 use integration_tests::{
     base_node::get_base_node_client,
-    cucumber_log,
     template,
     template::{send_template_registration, RegisteredTemplate},
     validator_node::{spawn_validator_node, ValidatorNodeProcess},

@@ -10,10 +10,11 @@ pub fn transaction_builder() -> TransactionBuilder {
 
 #[macro_export]
 macro_rules! cucumber_log {
-    ($msg:expr) => {
+    ($msg:expr) => {{
+        let msg = $msg;
         if option_env!("CUC_DEBUG") == Some("1") {
-            eprintln!("🥒 [{}:{}] {}", file!(), line!(), $msg);
+            eprintln!("🥒 [{}:{}] {}", file!(), line!(), msg);
         }
-        log::info!(target: "cucumber", "🥒 [{}:{}] {}", file!(), line!(), $msg);
-    };
+        log::info!(target: "cucumber", "🥒 [{}:{}] {}", file!(), line!(), msg);
+    }};
 }

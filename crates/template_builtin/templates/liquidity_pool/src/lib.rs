@@ -288,7 +288,7 @@ mod template {
         /// may not be generally useful.
         /// Users of this template can implement their own swap logic with fees as needed and use an instance of this
         /// pool template as a sub-component.
-        pub fn swap_constant_product(&mut self, mut input_bucket: Bucket) -> Bucket {
+        pub fn swap_constant_product(&mut self, input_bucket: Bucket) -> Bucket {
             let input_resource = input_bucket.resource_address();
 
             let input_amount = input_bucket.amount();
@@ -306,12 +306,13 @@ mod template {
             // Δy = y.Δx / (X + Δx)
             let output_amount = input_amount
                 .checked_mul(output_reserve)
-                .and_then(|num| num.checked_div(input_reserve.checked_add(input_amount).expect("Div zero")))
+                .and_then(|num| {
+                    num.checked_div(input_reserve.checked_add(input_amount).expect("Overflow in swap calc"))
+                })
                 .expect("Overflow in swap calculation");
 
             // Perform the swap
-            let taken_input = input_bucket.take(input_amount);
-            self.get_pool_vault(input_pool).deposit(taken_input);
+            self.get_pool_vault(input_pool).deposit(input_bucket);
             let output_bucket = self.get_pool_vault(output_pool).withdraw(output_amount);
 
             emit_event("swap", [

@@ -194,9 +194,9 @@ fn swap() {
     /// We duplicate the formula here to verify the template calculation.
     /// NOTE: this will not work for all values due to rounding errors.
     fn constant_product_calc(x_balance: u64, y_balance: u64, delta_x: u64) -> u64 {
-        let x_balance = x_balance as f64;
-        let y_balance = y_balance as f64;
-        let delta_x = delta_x as f64;
+        let x_balance = x_balance as u128;
+        let y_balance = y_balance as u128;
+        let delta_x = delta_x as u128;
         let delta_y = (y_balance * delta_x) / (x_balance + delta_x);
         delta_y as u64
     }

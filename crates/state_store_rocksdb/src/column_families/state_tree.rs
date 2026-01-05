@@ -20,13 +20,11 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::shard::Shard;
 use tari_state_tree::{
     storage::{Node, NodeKey},
-    Node,
-    NodeKey,
-    StaleTreeNode,
-    StateTreePayload,
+    StateTreeStaleNodeIndexBatch,
     Version,
 };
 
@@ -52,30 +50,6 @@ impl Cf for StateTreeCf {
     }
 }
 
-pub struct StateTreeCfRef<'a> {
-    _phantom: std::marker::PhantomData<&'a ()>,
-}
-
-impl<'a> Cf for StateTreeCfRef<'a> {
-    type Key = (Shard, &'a NodeKey);
-    type KeyCodec = (ShardCodec, NodeKeyCodec);
-    type Prefix = StateTreePrefix;
-    type Value = Node;
-    type ValueCodec = DefaultCodec<Self::Value>;
-
-    fn name() -> &'static str {
-        StateTreeCf::name()
-    }
-}
-
-impl Default for StateTreeCfRef<'_> {
-    fn default() -> Self {
-        Self {
-            _phantom: std::marker::PhantomData,
-        }
-    }
-}
-
 pub struct ByShardStateVersionQuery;
 
 impl QueryCf for ByShardStateVersionQuery {
@@ -87,13 +61,36 @@ impl QueryCf for ByShardStateVersionQuery {
 
 prefixed!(StateTreeStaleNodesPrefix, KeyPrefix::StateTreeStaleTreeNodesIndex);
 
+/// A part of a tree that may become stale (i.e. need eventual pruning).
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+pub enum StaleTreeNode {
+    /// A single node to be removed.
+    Node(NodeKey),
+    /// An entire subtree of descendants of a specific node (including itself).
+    Subtree(NodeKey),
+}
+
+impl StaleTreeNode {
+    pub fn into_node_key(self) -> NodeKey {
+        match self {
+            Self::Node(key) | Self::Subtree(key) => key,
+        }
+    }
+
+    pub fn as_node_key(&self) -> &NodeKey {
+        match self {
+            Self::Node(key) | Self::Subtree(key) => key,
+        }
+    }
+}
+
 pub struct StateTreeStaleNodesCf;
 
 impl Cf for StateTreeStaleNodesCf {
     type Key = (Shard, Version);
     type KeyCodec = (ShardCodec, NumberCodec<Version>);
     type Prefix = StateTreeStaleNodesPrefix;
-    type Value = Vec<StaleTreeNode>;
+    type Value = StateTreeStaleNodeIndexBatch;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {

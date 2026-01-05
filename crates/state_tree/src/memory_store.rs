@@ -1,7 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::BTreeMap, fmt, fmt::Debug, mem};
+use std::{collections::BTreeMap, fmt, fmt::Debug};
 
 use jmt::{
     storage::{LeafNode, Node, NodeBatch, NodeKey, StaleNodeIndexBatch, TreeReader},
@@ -10,13 +10,7 @@ use jmt::{
     Version,
 };
 
-use crate::{
-    helpers::write_node_key,
-    StateTreeError,
-    StateTreeNodeBatch,
-    StateTreeStaleNodeIndexBatch,
-    TreeStoreBatchWriter,
-};
+use crate::{helpers::write_node_key, StateTreeError, TreeStoreBatchWriter};
 
 #[derive(Debug, Default)]
 pub struct MemoryTreeStore {
@@ -63,8 +57,7 @@ impl TreeStoreBatchWriter for MemoryTreeStore {
         // TODO: if jmt ever adds into_parts() or makes the fields public, we can avoid cloning here
         self.nodes
             .extend(batch.nodes().iter().map(|(k, v)| (k.clone(), v.clone())));
-        self.values
-            .extend(batch.values().iter().map(|(k, v)| (k.clone(), v.clone())));
+        self.values.extend(batch.values().iter().map(|(k, v)| (*k, v.clone())));
 
         Ok(())
     }

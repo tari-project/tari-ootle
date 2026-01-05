@@ -16,6 +16,7 @@ use tari_state_tree::{
     StaleTreeNode,
     StateTreeError,
     StateTreeStaleNodeIndex,
+    StateTreeStaleNodeIndexBatch,
     TreeStoreBatchWriter,
     TreeStoreReader,
     Version,
@@ -72,7 +73,7 @@ impl<'a, TTx: StateStoreWriteTransaction> ShardScopedTreeStoreWriter<'a, TTx> {
     pub fn record_stale_tree_nodes(
         &mut self,
         version: Version,
-        nodes: Vec<StaleTreeNode>,
+        nodes: StateTreeStaleNodeIndexBatch,
     ) -> Result<(), tari_state_tree::JmtStorageError> {
         self.tx
             .state_tree_nodes_record_stale_tree_nodes(self.shard, version, nodes)

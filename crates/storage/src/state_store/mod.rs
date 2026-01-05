@@ -39,6 +39,7 @@ use tari_ootle_common_types::{
 use tari_state_tree::{
     storage::{Node, NodeKey},
     StateTreeStaleNodeIndex,
+    StateTreeStaleNodeIndexBatch,
     Version,
 };
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
@@ -532,7 +533,7 @@ pub trait StateStoreWriteTransaction {
         &mut self,
         shard: Shard,
         version: Version,
-        nodes: Vec<StateTreeStaleNodeIndex>,
+        nodes: StateTreeStaleNodeIndexBatch,
     ) -> Result<(), StorageError>;
 
     fn state_tree_nodes_clear_stale(&mut self, num_preshards: NumPreshards) -> Result<(), StorageError>;

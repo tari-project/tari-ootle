@@ -93,8 +93,6 @@ use tari_ootle_storage::{
 };
 use tari_state_tree::{
     storage::{Node, NodeKey},
-    Node,
-    NodeKey,
     StateTreePayload,
     Version,
 };
@@ -142,7 +140,7 @@ use crate::{
         state_transition,
         state_transition::StateTransitionType,
         state_tree,
-        state_tree::StateTreeCfRef,
+        state_tree::StateTreeCf,
         state_tree_shard_versions,
         state_tree_shard_versions::StateTreeShardVersionCf,
         substate,
@@ -1713,8 +1711,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn state_tree_nodes_get(&self, shard: Shard, key: &NodeKey) -> Result<Node, StorageError> {
         const OPERATION: &str = "state_tree_nodes_get";
-        let cf = self.db().cf(StateTreeCfRef::default())?;
-        let node = cf.get(&(shard, key), OPERATION)?;
+        let cf = self.db().cf(StateTreeCf)?;
+        let node = cf.get(&(shard, key.clone()), OPERATION)?;
         Ok(node)
     }
 

@@ -93,3 +93,24 @@ impl From<StateTreeStaleNodeIndex> for StaleNodeIndex {
         }
     }
 }
+
+pub struct DisplayNodeKey<'a> {
+    node_key: &'a NodeKey,
+}
+
+impl Display for DisplayNodeKey<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "NodeKey(v{}, ", self.node_key.version())?;
+        for n in self.node_key.nibble_path().nibbles() {
+            let nibble = u8::from(n);
+            // Single hex char since nibble is 0-15
+            write!(f, "{:x}", nibble)?;
+        }
+        write!(f, ")")?;
+        Ok(())
+    }
+}
+
+pub fn display_node_key(node_key: &NodeKey) -> DisplayNodeKey<'_> {
+    DisplayNodeKey { node_key }
+}

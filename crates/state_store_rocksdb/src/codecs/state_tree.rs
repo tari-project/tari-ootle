@@ -1,19 +1,12 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{io, io::Read};
+use std::io::Read;
 
 use anyhow::anyhow;
-use tari_state_tree::{
-    storage::{NibblePath, NodeKey},
-    Version,
-};
+use tari_state_tree::storage::NodeKey;
 
-use crate::{
-    codecs::{borsh::BorshCodec, DbCodec},
-    error::RocksDbStorageError,
-    utils::{read_n_bytes, read_to_fixed},
-};
+use crate::codecs::{borsh::BorshCodec, DbCodec};
 
 /// Codec for `NodeKey`
 pub type NodeKeyCodec = BorshCodec<NodeKey>;
@@ -22,7 +15,7 @@ pub type NodeKeyCodec = BorshCodec<NodeKey>;
 mod tests {
     use std::iter;
 
-    use jmt::JellyfishMerkleTree;
+    use jmt::{storage::NibblePath, JellyfishMerkleTree};
     use rand::Rng;
     use tari_state_tree::{memory_store::MemoryTreeStore, KeyHash, TreeStoreBatchWriter, TreeStoreWriter};
 

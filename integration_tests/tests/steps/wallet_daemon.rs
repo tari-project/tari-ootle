@@ -146,10 +146,10 @@ async fn when_i_run_up_fees(world: &mut TariWorld, amount: u64, wallet_daemon_na
 
         fees_total += wait_resp.result.as_ref().unwrap().fee_receipt.total_fees_paid;
         if fees_total >= amount {
-            integration_tests::cucumber_log!(format!("Reached target of {} fees", fees_total));
+            integration_tests::cucumber_log!("Reached target of {} fees", fees_total);
             break;
         }
-        integration_tests::cucumber_log!(format!("Accumulated {} fees, continuing", fees_total));
+        integration_tests::cucumber_log!("Accumulated {} fees, continuing", fees_total);
     }
 }
 
@@ -203,7 +203,7 @@ async fn when_i_burn_funds_with_wallet_daemon(
     let nonce = wallet_daemon_client.create_key(KeyBranch::Nonce).await.unwrap();
 
     let public_key = nonce.public_key;
-    integration_tests::cucumber_log!(format!("Burning funds using claim key {}", public_key));
+    integration_tests::cucumber_log!("Burning funds using claim key {}", public_key);
 
     let wallet = world
         .wallets

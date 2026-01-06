@@ -10,8 +10,8 @@ pub fn transaction_builder() -> TransactionBuilder {
 
 #[macro_export]
 macro_rules! cucumber_log {
-    ($msg:expr) => {{
-        let msg = $msg;
+    ($($msg:tt)*) => {{
+        let msg = format_args!($($msg)*);
         if option_env!("CUC_DEBUG") == Some("1") {
             eprintln!("🥒 [{}:{}] {}", file!(), line!(), msg);
         }

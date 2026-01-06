@@ -107,7 +107,7 @@ pub async fn spawn_wallet_daemon(world: &mut TariWorld, wallet_daemon_name: Stri
         shutdown,
     };
 
-    crate::cucumber_log!(format!("Wallet daemon {} started", wallet_daemon_name));
+    crate::cucumber_log!("Wallet daemon {} started", wallet_daemon_name);
     world.wallet_daemons.insert(wallet_daemon_name, wallet_daemon_process);
 }
 

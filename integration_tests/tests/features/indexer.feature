@@ -84,7 +84,7 @@ Feature: Indexer node
     Given a network with registered validator VN and wallet daemon WALLET_D
 
     # publish template
-    When I create an account ACC via the wallet daemon WALLET_D with 2000000 XTR
+    When I create an account ACC via the wallet daemon WALLET_D with 10000 XTR
     When wallet daemon WALLET_D publishes the template "faucet" using account ACC
 
     When I create an account ACC_1 via the wallet daemon WALLET_D with 10000 XTR

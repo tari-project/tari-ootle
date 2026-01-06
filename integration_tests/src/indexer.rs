@@ -187,6 +187,6 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
         db_path,
     };
 
-    crate::cucumber_log!(format!("Indexer {} started", indexer_name));
+    crate::cucumber_log!("Indexer {} started", indexer_name);
     world.indexers.insert(name, indexer_process);
 }

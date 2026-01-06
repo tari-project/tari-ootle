@@ -11,9 +11,10 @@ use minotari_app_grpc::tari_rpc::{
     TemplateType,
     WasmInfo,
 };
-use tari_engine::wasm::compile::compile_template;
+use tari_engine::wasm::WasmModule;
 use tari_engine_types::hashing::hash_template_code;
-use tari_template_lib::types::{Hash, TemplateAddress};
+use tari_template_lib::types::TemplateAddress;
+use tari_template_test_tooling::compile::compile_template;
 use tari_wallet_daemon_client::{
     types::{PublishTemplateRequest, TransactionWaitResultRequest},
     ComponentAddressOrName,
@@ -34,15 +35,14 @@ pub async fn publish_template(
     template_name: String,
 ) -> anyhow::Result<TemplateAddress> {
     // compile and load wasm
-    compile_wasm_template(template_name.clone())?;
-    let wasm_file_path = get_template_wasm_path(template_name.clone());
-    let wasm_binary = tokio::fs::read(&wasm_file_path).await?;
+    let module = compile_wasm_template(template_name.clone())?;
+    let wasm_binary = module.into_code();
 
     // send publish template request
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
     let response = client
         .publish_template(PublishTemplateRequest {
-            binary: wasm_binary,
+            binary: wasm_binary.into_vec(),
             fee_account: Some(ComponentAddressOrName::Name(account_name)),
             max_fee: 1_000_000,
             detect_inputs: true,
@@ -89,7 +89,8 @@ pub async fn send_template_registration(
     template_name: String,
     wallet_name: String,
 ) -> anyhow::Result<TemplateAddress> {
-    let binary_sha = compile_wasm_template(template_name.clone())?;
+    let module = compile_wasm_template(template_name.clone())?;
+    let binary_sha = hash_template_code(module.code());
 
     // publish the wasm file into http to be able to be fetched by the VN later
     let wasm_file_path = get_template_wasm_path(template_name.clone());
@@ -127,13 +128,12 @@ pub async fn send_template_registration(
     Ok(TemplateAddress::try_from_slice(&resp.template_address).unwrap())
 }
 
-pub fn compile_wasm_template(template_name: String) -> Result<Hash, anyhow::Error> {
+pub fn compile_wasm_template(template_name: String) -> Result<WasmModule, anyhow::Error> {
     let mut template_path = get_template_root_path();
 
     template_path.push(template_name);
     let wasm_module = compile_template(template_path.as_path(), &[])?;
-    let wasm_code = wasm_module.code();
-    Ok(hash_template_code(wasm_code))
+    Ok(wasm_module)
 }
 
 pub fn get_template_wasm_path(template_name: String) -> PathBuf {

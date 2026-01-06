@@ -16,6 +16,7 @@ tari_ootle_address = { workspace = true }
 tari_ootle_storage = { workspace = true }
 tari_consensus = { workspace = true }
 tari_template_builtin = { workspace = true }
+tari_template_test_tooling = { workspace = true }
 
 tari_transaction_components = { workspace = true }
 minotari_app_grpc = { workspace = true }

@@ -4857,6 +4857,7 @@ dependencies = [
  "tari_sidechain",
  "tari_template_builtin",
  "tari_template_lib",
+ "tari_template_test_tooling",
  "tari_transaction",
  "tari_transaction_components",
  "tari_transaction_manifest",
@@ -10781,7 +10782,6 @@ name = "tari_engine"
 version = "0.17.0"
 dependencies = [
  "blake2",
- "cargo_toml 0.22.3",
  "indexmap 2.12.0",
  "log",
  "rand 0.8.5",
@@ -10799,7 +10799,6 @@ dependencies = [
  "tari_transaction",
  "tari_transaction_manifest",
  "tari_utilities",
- "tempfile",
  "thiserror 2.0.17",
  "wasmer",
  "wasmer-middlewares",
@@ -11769,6 +11768,7 @@ name = "tari_template_test_tooling"
 version = "0.9.0"
 dependencies = [
  "anyhow",
+ "cargo_toml 0.22.3",
  "rand 0.8.5",
  "serde",
  "tari_bor",

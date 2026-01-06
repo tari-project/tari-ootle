@@ -4,7 +4,7 @@
 use std::iter;
 
 use rand::random;
-use tari_engine::{transaction::TransactionError, wasm::compile::compile_template};
+use tari_engine::transaction::TransactionError;
 use tari_engine_types::{
     commit_result::{RejectReason, TransactionResult},
     hashing::hash_template_code,
@@ -13,7 +13,11 @@ use tari_engine_types::{
     substate::{SubstateId, SubstateValue},
     ToByteType,
 };
-use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
+use tari_template_test_tooling::{
+    compile::compile_template,
+    support::assert_error::assert_reject_reason,
+    TemplateTest,
+};
 use tari_transaction::Transaction;
 
 #[test]

@@ -11,13 +11,15 @@ use std::{
 use tari_engine::{
     abi::TemplateDef,
     template::{LoadedTemplate, TemplateLoaderError, TemplateModuleLoader},
-    wasm::{compile::compile_template_with_envs, WasmModule},
+    wasm::WasmModule,
 };
 use tari_engine_types::hashing::hash_template_code;
 use tari_ootle_common_types::services::template_provider::TemplateProvider;
 use tari_template_builtin::get_template_builtin;
 use tari_template_lib::types::TemplateAddress;
 use thiserror::Error;
+
+use crate::compile::compile_template_with_envs;
 
 #[derive(Debug, Clone)]
 pub struct Package {

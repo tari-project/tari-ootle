@@ -24,7 +24,7 @@ use std::iter;
 use serde::{Deserialize, Serialize};
 use tari_engine::{
     template::{TemplateLoaderError, TemplateModuleLoader},
-    wasm::{compile::compile_template, WasmExecutionError},
+    wasm::WasmExecutionError,
 };
 use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason},
@@ -38,7 +38,11 @@ use tari_template_lib::{
     models::{ComponentAddress, NonFungible, NonFungibleAddress, ResourceAddress},
     types::{crypto::RistrettoPublicKeyBytes, Amount, TemplateAddress},
 };
-use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
+use tari_template_test_tooling::{
+    compile::compile_template,
+    support::assert_error::assert_reject_reason,
+    TemplateTest,
+};
 use tari_transaction::{args, call_args, Transaction};
 use tari_transaction_manifest::ManifestValue;
 use tari_utilities::hex::to_hex;

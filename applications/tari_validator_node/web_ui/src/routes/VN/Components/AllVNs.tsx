@@ -32,7 +32,7 @@ import Typography from "@mui/material/Typography";
 import TablePagination from "@mui/material/TablePagination";
 import { DataTableCell } from "../../../Components/StyledComponents";
 import { emptyRows } from "../../../utils/helpers";
-import type { BaseLayerValidatorNode } from "@tari-project/typescript-bindings";
+import type { BaseLayerValidatorNode } from "@tari-project/ootle-ts-bindings";
 
 function AllVNs({ epoch }: { epoch: number }) {
   const [vns, setVns] = useState<BaseLayerValidatorNode[]>([]);

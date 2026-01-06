@@ -20,7 +20,7 @@ importers:
 
   .:
     dependencies:
-      '@tari-project/typescript-bindings':
+      '@tari-project/ootle-ts-bindings':
         specifier: link:bindings
         version: link:bindings
       '@tari-project/wallet_jrpc_client':
@@ -53,7 +53,7 @@ importers:
       '@tari-project/indexer-client':
         specifier: link:../../../clients/javascript/indexer_client
         version: link:../../../clients/javascript/indexer_client
-      '@tari-project/typescript-bindings':
+      '@tari-project/ootle-ts-bindings':
         specifier: link:../../../bindings
         version: link:../../../bindings
       file-saver:
@@ -123,7 +123,7 @@ importers:
       '@tanstack/react-query-devtools':
         specifier: ^4.36.1
         version: 4.36.1(@tanstack/react-query@4.36.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-      '@tari-project/typescript-bindings':
+      '@tari-project/ootle-ts-bindings':
         specifier: link:../../../bindings
         version: link:../../../bindings
       async-mutex:
@@ -202,6 +202,9 @@ importers:
       '@tanstack/react-query-devtools':
         specifier: ^5.85.7
         version: 5.87.4(@tanstack/react-query@5.87.4(react@19.1.1))(react@19.1.1)
+      '@tari-project/ootle-ts-bindings':
+        specifier: link:../../../bindings
+        version: link:../../../bindings
       '@tari-project/tari-extension-common':
         specifier: ^0.0.14
         version: 0.0.14
@@ -209,11 +212,8 @@ importers:
         specifier: ^0.0.15
         version: 0.0.15(@types/node@22.14.0)(@types/react-dom@18.3.7(@types/react@18.3.24))(@types/react@18.3.24)(acorn@8.14.1)(jiti@2.4.2)(lightningcss@1.30.1)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)(typescript@5.8.3)(webextension-polyfill@0.12.0)(zustand@5.0.8(@types/react@18.3.24)(react@19.1.1)(use-sync-external-store@1.5.0(react@19.1.1)))
       '@tari-project/tari-permissions':
-        specifier: 0.10.1
-        version: 0.10.1
-      '@tari-project/typescript-bindings':
-        specifier: link:../../../bindings
-        version: link:../../../bindings
+        specifier: 0.14.4
+        version: 0.14.4
       '@tari-project/wallet_jrpc_client':
         specifier: workspace:*
         version: link:../../../clients/javascript/wallet_daemon_client
@@ -318,7 +318,7 @@ importers:
 
   clients/javascript/indexer_client:
     dependencies:
-      '@tari-project/typescript-bindings':
+      '@tari-project/ootle-ts-bindings':
         specifier: workspace:^
         version: link:../../../bindings
     devDependencies:
@@ -331,7 +331,7 @@ importers:
 
   clients/javascript/wallet_daemon_client:
     dependencies:
-      '@tari-project/typescript-bindings':
+      '@tari-project/ootle-ts-bindings':
         specifier: workspace:^
         version: link:../../../bindings
     devDependencies:
@@ -2164,11 +2164,11 @@ packages:
       react-dom: '>=19.0.0'
       zustand: '>= 5.0.0'
 
-  '@tari-project/tari-permissions@0.10.1':
-    resolution: {integrity: sha512-JJTvBCN3iZjtTxwyNNBY7nECKp9Dazs9yE6DTeLmAdhxJXLU1L0xtiSZDy2TtQCkW9iZYRb4EF4ty+qnunLl0Q==}
-
   '@tari-project/tari-permissions@0.11.0':
     resolution: {integrity: sha512-tmRt7SUSLjcJe0L2kyMGIoUsa14gOPAKmzgKlCsZqafJVadquENe32jY+QY8KDTxQxbf/ZLLXZcckYlSPt0KYw==}
+
+  '@tari-project/tari-permissions@0.14.4':
+    resolution: {integrity: sha512-UC9XXhl2nNHsPZffNeAeo8Kq+gwRLWUyhygZPH+z4ka2Na8Ab5kwlIb8k2wKcGq5Y1ECp/5cLCiie8xhPDH7Zg==}
 
   '@tari-project/tari-provider@0.11.0':
     resolution: {integrity: sha512-oBCposQkxMpSzN2Rul4UWGWPAt6FpNeu5u5Ic6e7hV3MZvJCYyahKg1j9PV80XkkEpQ7ZZVYE3KTi6KzRHabzQ==}
@@ -7493,9 +7493,9 @@ snapshots:
       - webextension-polyfill
       - yaml
 
-  '@tari-project/tari-permissions@0.10.1': {}
-
   '@tari-project/tari-permissions@0.11.0': {}
+
+  '@tari-project/tari-permissions@0.14.4': {}
 
   '@tari-project/tari-provider@0.11.0':
     dependencies:
@@ -7573,7 +7573,7 @@ snapshots:
 
   '@tari-project/wallet-connect-signer@0.11.0(@types/react@18.3.24)(react@19.1.1)(typescript@5.8.3)(zod@3.25.67)':
     dependencies:
-      '@tari-project/tari-permissions': 0.11.0
+      '@tari-project/tari-permissions': 0.14.4
       '@tari-project/tari-signer': 0.11.0
       '@tari-project/tarijs-builders': 0.11.0
       '@tari-project/tarijs-types': 0.11.0

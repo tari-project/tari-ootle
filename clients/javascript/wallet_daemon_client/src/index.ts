@@ -99,7 +99,7 @@ import type {
   WebauthnStartRegisterResponse,
   WebRtcStartRequest,
   WebRtcStartResponse,
-} from "@tari-project/typescript-bindings";
+} from "@tari-project/ootle-ts-bindings";
 import { FetchRpcTransport, RpcTransport } from "./transports";
 
 export * as transports from "./transports";

@@ -30,7 +30,7 @@ import {
 import { ApiError } from "@api/helpers/types";
 import queryClient from "@api/queryClient";
 
-import type { TransactionGetAllRequest } from "@tari-project/typescript-bindings";
+import type { TransactionGetAllRequest } from "@tari-project/ootle-ts-bindings";
 
 export const useTransactionDetails = (hash: string) => {
   return useQuery({

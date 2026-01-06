@@ -29,10 +29,10 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import { IoArrowDownCircle, IoArrowUpCircle } from "react-icons/io5";
 import CodeBlockDialog from "../../Components/CodeBlock";
-import { substateIdToString, SubstateRecord } from "@tari-project/typescript-bindings";
-import { VersionedSubstateId } from "@tari-project/typescript-bindings/dist/types/VersionedSubstateId";
-import { SubstateId } from "@tari-project/typescript-bindings/dist/types/SubstateId";
-import { Substate } from "@tari-project/typescript-bindings/dist/types/Substate";
+import { substateIdToString, SubstateRecord } from "@tari-project/ootle-ts-bindings";
+import { VersionedSubstateId } from "@tari-project/ootle-ts-bindings/dist/types/VersionedSubstateId";
+import { SubstateId } from "@tari-project/ootle-ts-bindings/dist/types/SubstateId";
+import { Substate } from "@tari-project/ootle-ts-bindings/dist/types/Substate";
 
 function UpSubstateRowData({ id, substate }: { id: SubstateId; substate: Substate }) {
   const [open, setOpen] = useState(false);

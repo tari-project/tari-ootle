@@ -43,12 +43,12 @@ import type {
   VersionedSubstateId,
   SubstateId,
   Substate,
-} from "@tari-project/typescript-bindings";
-import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tari-project/typescript-bindings";
+} from "@tari-project/ootle-ts-bindings";
+import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tari-project/ootle-ts-bindings";
 import StatusChip from "../../Components/StatusChip";
-import { getSubstateDiffFromTransactionResult } from "@tari-project/typescript-bindings/dist/helpers/helpers";
-import { Transaction } from "@tari-project/typescript-bindings/dist/types/Transaction";
-import { Decision } from "@tari-project/typescript-bindings/dist/types/Decision";
+import { getSubstateDiffFromTransactionResult } from "@tari-project/ootle-ts-bindings/dist/helpers/helpers";
+import { Transaction } from "@tari-project/ootle-ts-bindings/dist/types/Transaction";
+import { Decision } from "@tari-project/ootle-ts-bindings/dist/types/Decision";
 
 export default function TransactionDetails() {
   const { transactionHash } = useParams();

@@ -34,7 +34,7 @@ import {
   TableRow,
   Box,
 } from "@mui/material";
-import { NonFungibleSubstate, shortenString } from "@tari-project/typescript-bindings";
+import { NonFungibleSubstate, shortenString } from "@tari-project/ootle-ts-bindings";
 import { convertCborValue } from "../../../utils/cbor";
 import { useGetSubstate, useGetNonFungibles } from "../../../api/hooks/useSubstates";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";

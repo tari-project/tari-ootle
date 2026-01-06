@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 import { Stack, Select, MenuItem, FormControl } from "@mui/material";
-import { OutputStatus } from "@tari-project/typescript-bindings";
+import { OutputStatus } from "@tari-project/ootle-ts-bindings";
 import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
 
 interface SortableHeaderProps {

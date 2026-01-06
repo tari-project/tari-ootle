@@ -1,5 +1,5 @@
 {
-  "name": "@tari-project/typescript-bindings",
+  "name": "@tari-project/ootle-ts-bindings",
   "version": "1.23.1",
   "description": "TypeScript types synchronized to the Tari Ootle Rust codebase",
   "homepage": "https://github.com/tari-project/tari-ootle#readme",

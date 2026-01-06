@@ -23,7 +23,7 @@
 import React from "react";
 import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
 import StatusChip from "../../Components/StatusChip";
-import type { TransactionAtom } from "@tari-project/typescript-bindings";
+import type { TransactionAtom } from "@tari-project/ootle-ts-bindings";
 import { Link } from "react-router-dom";
 import { renderJson } from "../../utils/helpers";
 import CodeBlockDialog from "../../Components/CodeBlock";

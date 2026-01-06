@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { Box, Button, Stack, Typography, Divider } from "@mui/material";
-import type { ResourceAddress, ResourceType } from "@tari-project/typescript-bindings";
+import type { ResourceAddress, ResourceType } from "@tari-project/ootle-ts-bindings";
 import CopyAddress from "@components/CopyAddress";
 import { formatCurrency } from "@utils/helpers";
 import { SendMoneyFormState } from "./FormStep";

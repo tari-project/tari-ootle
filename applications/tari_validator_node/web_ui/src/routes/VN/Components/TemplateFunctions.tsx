@@ -33,7 +33,7 @@ import { DataTableCell, BoxHeading, BoxHeading2 } from "../../../Components/Styl
 import PageHeading from "../../../Components/PageHeading";
 import Grid from "@mui/material/Grid";
 import { StyledPaper } from "../../../Components/StyledComponents";
-import type { GetTemplateResponse } from "@tari-project/typescript-bindings";
+import type { GetTemplateResponse } from "@tari-project/ootle-ts-bindings";
 
 function TemplateFunctions() {
   const { address } = useParams();

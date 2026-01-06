@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { ChangeEvent } from "react";
-import type { Amount, SubstateId, NonFungibleId } from "@tari-project/typescript-bindings";
+import type { Amount, SubstateId, NonFungibleId } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/constants";
 import useCurrencyStore from "@store/currencyStore";
 

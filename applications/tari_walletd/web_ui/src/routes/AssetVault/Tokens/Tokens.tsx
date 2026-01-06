@@ -37,14 +37,7 @@ import { bigintToDecimalString, shortenSubstateId, substateIdToString } from "@u
 import { Button } from "@mui/material";
 import { SendMoneyDialog } from "./components/SendMoney";
 import ClaimCoinsButton from "./components/ClaimCoinsButton";
-import {
-  ResourceAddress,
-  ResourceType,
-  VaultId,
-  BalanceEntry,
-  Account,
-  Amount,
-} from "@tari-project/typescript-bindings";
+import { ResourceAddress, ResourceType, VaultId, BalanceEntry, Account, Amount } from "@tari-project/ootle-ts-bindings";
 import CopyAddress from "@components/CopyAddress";
 import { IoWalletOutline } from "react-icons/io5";
 import { useNavigate } from "react-router-dom";

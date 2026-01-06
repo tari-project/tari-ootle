@@ -42,7 +42,7 @@ import {
   rejectReasonToString,
   substateIdToString,
   TransactionResult,
-} from "@tari-project/typescript-bindings";
+} from "@tari-project/ootle-ts-bindings";
 import PopupTitle from "@/components/PopupTitle";
 
 interface FormState {

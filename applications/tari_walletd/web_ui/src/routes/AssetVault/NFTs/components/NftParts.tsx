@@ -23,7 +23,7 @@
 import CancelRoundedIcon from "@mui/icons-material/CancelRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import { Avatar, Box, CardContent, CardMedia, Chip, Divider, Grid, TableRow, Typography } from "@mui/material";
-import type { NonFungibleToken } from "@tari-project/typescript-bindings";
+import type { NonFungibleToken } from "@tari-project/ootle-ts-bindings";
 import CopyAddress from "@components/CopyAddress";
 import { NftCard as Card, DataTableCell } from "@components/StyledComponents";
 import { convertCborValue } from "@utils/cbor";

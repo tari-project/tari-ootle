@@ -23,7 +23,7 @@
 import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Chip, Box, Typography } from "@mui/material";
 import { DataTableCell } from "@components/StyledComponents";
 import CopyAddress from "@components/CopyAddress";
-import { TransactionSignature } from "@tari-project/typescript-bindings";
+import { TransactionSignature } from "@tari-project/ootle-ts-bindings";
 
 interface SignersProps {
   seal_signature?: TransactionSignature;

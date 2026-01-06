@@ -38,7 +38,7 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import CodeBlockExpand from "@components/CodeBlock";
 import { useTheme } from "@mui/material/styles";
-import { Event, substateIdToString } from "@tari-project/typescript-bindings";
+import { Event, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import CopyAddress from "@components/CopyAddress";
 
 function renderPayloadField(key: string, value: any) {

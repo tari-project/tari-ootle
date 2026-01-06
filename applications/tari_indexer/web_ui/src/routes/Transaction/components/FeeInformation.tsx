@@ -36,7 +36,7 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { DataTableCell } from "../../../Components/StyledComponents";
 import { Stack } from "@mui/material";
 import { useState, useEffect } from "react";
-import type { FeeReceipt } from "@tari-project/typescript-bindings";
+import type { FeeReceipt } from "@tari-project/ootle-ts-bindings";
 import { formatXTM } from "../../../utils/helpers";
 
 interface FeeInformationProps extends FeeReceipt {

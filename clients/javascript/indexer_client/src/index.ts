@@ -32,7 +32,7 @@ import type {
   TransactionId, TransactionReceiptAddress,
   TransactionSubmitRequest,
   TransactionSubmitResponse,
-} from "@tari-project/typescript-bindings";
+} from "@tari-project/ootle-ts-bindings";
 import { FetchTransport, HttpTransport } from "./transports";
 
 export * as transports from "./transports";

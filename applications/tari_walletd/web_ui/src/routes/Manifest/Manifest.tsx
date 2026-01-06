@@ -30,7 +30,7 @@ import Button from "@mui/material/Button/Button";
 import TextField from "@mui/material/TextField/TextField";
 import Box from "@mui/material/Box";
 import { useSubmitManifest } from "@api/hooks/useTransactions";
-import { rejectReasonToString } from "@tari-project/typescript-bindings";
+import { rejectReasonToString } from "@tari-project/ootle-ts-bindings";
 import { useTheme } from "@mui/material";
 import { DataTableCell } from "@components/StyledComponents";
 

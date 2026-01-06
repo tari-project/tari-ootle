@@ -32,7 +32,7 @@ import { TextField } from "@mui/material";
 import type {
   GetEpochManagerStatsResponse,
   VNGetIdentityResponse,
-} from "@tari-project/typescript-bindings";
+} from "@tari-project/ootle-ts-bindings";
 
 function Info({
                 epoch,

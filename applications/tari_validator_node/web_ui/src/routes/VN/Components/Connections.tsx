@@ -36,7 +36,7 @@ import { TextField } from "@mui/material";
 import { Form } from "react-router-dom";
 import Fade from "@mui/material/Fade";
 import CopyToClipboard from "../../../Components/CopyToClipboard";
-import type { VNConnection } from "@tari-project/typescript-bindings";
+import type { VNConnection } from "@tari-project/ootle-ts-bindings";
 import { displayDuration } from "../../../utils/helpers";
 
 const useInterval = (fn: () => Promise<unknown>, ms: number) => {

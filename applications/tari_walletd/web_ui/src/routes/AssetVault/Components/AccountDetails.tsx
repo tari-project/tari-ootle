@@ -28,7 +28,7 @@ import {
   encodeOotleAddress,
   OotleAddress,
   substateIdToString,
-} from "@tari-project/typescript-bindings";
+} from "@tari-project/ootle-ts-bindings";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";

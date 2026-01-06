@@ -23,7 +23,7 @@
 import { Chip, Avatar } from "@mui/material";
 import { IoCheckmarkOutline, IoCloseOutline } from "react-icons/io5";
 import { useTheme } from "@mui/material/styles";
-import type { Decision } from "@tari-project/typescript-bindings";
+import type { Decision } from "@tari-project/ootle-ts-bindings";
 
 interface StatusChipProps {
   status: Decision;

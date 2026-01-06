@@ -40,7 +40,7 @@ import type {
   ForeignProposalAtom,
   TransactionAtom,
   VNGetIdentityResponse,
-} from "@tari-project/typescript-bindings";
+} from "@tari-project/ootle-ts-bindings";
 
 const COMMANDS = [
   "LocalOnly",

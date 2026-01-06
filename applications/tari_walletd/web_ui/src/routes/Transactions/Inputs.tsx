@@ -22,7 +22,7 @@
 
 import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Box, Chip, Typography } from "@mui/material";
 import { DataTableCell } from "@components/StyledComponents";
-import { SubstateRequirement, substateIdToString } from "@tari-project/typescript-bindings";
+import { SubstateRequirement, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import CopyAddress from "@components/CopyAddress";
 
 function getSubstateType(substateId: string): string {

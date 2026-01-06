@@ -12,9 +12,11 @@ use tari_template_test_tooling::{
 };
 use tari_transaction::{args, Transaction};
 
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
 #[test]
 fn it_does_not_overflow_when_minting_a_huge_initial_supply() {
-    let mut test = TemplateTest::new(["tests/templates/fungible"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/fungible"]);
     let template = test.get_template_address("Fungible");
 
     let result = test.execute_expect_success(
@@ -49,7 +51,7 @@ fn it_does_not_overflow_when_minting_a_huge_initial_supply() {
 
 #[test]
 fn it_does_not_overflow_when_minting_more_then_amount_max_fungible_tokens() {
-    let mut test = TemplateTest::new(["tests/templates/fungible"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/fungible"]);
     let template = test.get_template_address("Fungible");
 
     let result = test.execute_expect_success(
@@ -75,7 +77,7 @@ fn it_does_not_overflow_when_minting_more_then_amount_max_fungible_tokens() {
 
 #[test]
 fn it_does_not_overflow_when_minting_more_then_amount_max_confidential_tokens() {
-    let mut test = TemplateTest::new(["tests/templates/fungible"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/fungible"]);
     let template = test.get_template_address("Fungible");
 
     let all_to_confidential = generate_withdraw_proof_with_inputs(&[], u64::MAX, u64::MAX, None, 0);

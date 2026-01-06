@@ -393,7 +393,8 @@ impl ProposedBlockChangeSet {
         transaction: &Transaction,
         initial_evidence: Evidence,
     ) -> TransactionPoolRecord {
-        let rec = TransactionPoolRecord::new_from_transaction(transaction, initial_evidence);
+        let mut rec = TransactionPoolRecord::new_from_transaction(transaction, initial_evidence);
+        rec.set_ready(true);
         self.new_transactions_to_sequence.push(rec.clone());
         rec
     }

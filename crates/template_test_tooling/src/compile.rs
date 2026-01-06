@@ -26,8 +26,6 @@ where
     compile_template_internal(package_dir, features, envs)
 }
 
-const CRATE_DIR: &str = env!("CARGO_MANIFEST_DIR");
-
 fn compile_template_internal<P, TEnvs, K, V>(package_dir: P, features: &[&str], envs: TEnvs) -> io::Result<WasmModule>
 where
     P: AsRef<Path>,
@@ -35,12 +33,7 @@ where
     K: AsRef<OsStr>,
     V: AsRef<OsStr>,
 {
-    let pkg_dir = if package_dir.as_ref().is_relative() {
-        // TODO: update tests to use absolute paths and remove this hack
-        Path::new(CRATE_DIR).join(package_dir)
-    } else {
-        package_dir.as_ref().to_path_buf()
-    };
+    let pkg_dir = package_dir.as_ref();
     if !pkg_dir.exists() {
         return Err(io::Error::new(
             ErrorKind::NotFound,
@@ -50,7 +43,7 @@ where
 
     let mut command = Command::new("cargo");
     command
-        .current_dir(&pkg_dir)
+        .current_dir(pkg_dir)
         .envs(envs)
         .args(["build", "--target", "wasm32-unknown-unknown", "--release"]);
 
@@ -72,7 +65,8 @@ where
     }
 
     // resolve wasm name
-    let manifest = Manifest::from_path(pkg_dir.join("Cargo.toml")).unwrap();
+    let manifest = Manifest::from_path(pkg_dir.join("Cargo.toml"))
+        .map_err(|e| io::Error::other(format!("Failed to read Cargo.toml: {}", e)))?;
     let wasm_name = if let Some(Product { name: Some(name), .. }) = manifest.lib {
         // lib name
         name

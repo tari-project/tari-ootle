@@ -14,7 +14,7 @@ use tari_transaction::{args, Transaction};
 #[test]
 fn basic_nft_mint() {
     // setup the test
-    let mut test = TemplateTest::new::<_, &str>([]);
+    let mut test = TemplateTest::new_no_templates();
 
     // create a user account
     let (owner_component_address, owner_token, _) = test.create_funded_account();
@@ -41,7 +41,7 @@ fn basic_nft_mint() {
 #[test]
 fn mint_multiple_times() {
     // setup the test
-    let mut account_nft_template_test = TemplateTest::new::<_, &str>([]);
+    let mut account_nft_template_test = TemplateTest::new_no_templates();
 
     // create a user account
     let (owner_component_address, owner_token, _) = account_nft_template_test.create_funded_account();

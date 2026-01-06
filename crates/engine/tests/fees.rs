@@ -1,16 +1,16 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::iter;
-
 use tari_engine_types::commit_result::RejectReason;
 use tari_template_lib::{constants::STEALTH_TARI_RESOURCE_ADDRESS, models::ComponentAddress, types::Amount};
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, xtr_faucet_component, TemplateTest};
 use tari_transaction::{args, call_args, Transaction};
 
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
 #[test]
 fn deducts_fees_from_payments_and_refunds_the_rest() {
-    let mut test = TemplateTest::new(["tests/templates/state"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/state"]);
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let orig_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
@@ -37,7 +37,7 @@ fn deducts_fees_from_payments_and_refunds_the_rest() {
 
 #[test]
 fn deducts_fees_when_transaction_fails() {
-    let mut test = TemplateTest::new(["tests/templates/state"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/state"]);
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let vaults = test.read_only_state_store().get_vaults_for_account(account).unwrap();
@@ -67,7 +67,7 @@ fn deducts_fees_when_transaction_fails() {
 
 #[test]
 fn deposit_from_faucet_then_pay() {
-    let mut test = TemplateTest::new(["tests/templates/state"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/state"]);
 
     let (account, owner_token, private_key) = test.create_empty_account();
 
@@ -97,7 +97,7 @@ fn deposit_from_faucet_then_pay() {
 
 #[test]
 fn another_account_pays_partially_for_fees() {
-    let mut test = TemplateTest::new(iter::empty::<&str>());
+    let mut test = TemplateTest::new_no_templates();
 
     let (account, _, _) = test.create_empty_account();
     let (account_fee, owner_token_fee, _) = test.create_funded_account();
@@ -149,7 +149,7 @@ fn another_account_pays_partially_for_fees() {
 
 #[test]
 fn failed_fee_transaction() {
-    let mut test = TemplateTest::new(["tests/templates/state"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/state"]);
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let initial_balance: Amount =
@@ -182,7 +182,7 @@ fn failed_fee_transaction() {
 
 #[test]
 fn fail_partial_paid_fees() {
-    let mut test = TemplateTest::new(["tests/templates/state"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/state"]);
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let (account2, owner_token2, _) = test.create_funded_account();
@@ -221,7 +221,7 @@ fn fail_partial_paid_fees() {
 
 #[test]
 fn fail_pay_negative_fee() {
-    let mut test = TemplateTest::new(["tests/templates/state"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/state"]);
 
     let (account, owner_token, private_key) = test.create_funded_account();
     test.enable_fees();
@@ -244,7 +244,7 @@ fn fail_pay_negative_fee() {
 
 #[test]
 fn fail_pay_less_fees_than_fee_transaction() {
-    let mut test = TemplateTest::new(["tests/templates/state"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/state"]);
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let (account2, owner_token2, _) = test.create_funded_account();
@@ -305,7 +305,7 @@ fn fail_pay_less_fees_than_fee_transaction() {
 
 #[test]
 fn fail_pay_too_little_no_fee_instruction() {
-    let mut test = TemplateTest::new(iter::empty::<&str>());
+    let mut test = TemplateTest::new_no_templates();
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let (account2, owner_token2, _) = test.create_funded_account();
@@ -344,7 +344,7 @@ fn fail_pay_too_little_no_fee_instruction() {
 
 #[test]
 fn failure_pay_fee_in_main_instructions() {
-    let mut test = TemplateTest::new(iter::empty::<&str>());
+    let mut test = TemplateTest::new_no_templates();
 
     let (account, owner_token, private_key) = test.create_funded_account();
 
@@ -367,7 +367,7 @@ fn failure_pay_fee_in_main_instructions() {
 
 #[test]
 fn dangling_bucket_pay_fees() {
-    let mut test = TemplateTest::new(["tests/templates/state"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/state"]);
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let orig_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);

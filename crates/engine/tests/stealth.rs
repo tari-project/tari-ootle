@@ -34,6 +34,7 @@ use tari_transaction::{args, call_args, Transaction};
 
 const TEMPLATE_PATHS: &[&str] = &["tests/templates/stealth"];
 const TEMPLATE_NAME: &str = "StealthFaucet";
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 
 fn setup(
     test: &mut TemplateTest,
@@ -65,7 +66,7 @@ fn setup(
 
 #[test]
 fn mint_initial_supply() {
-    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let outputs = vec![100, 1000, 10000];
     let mint = stealth::generate_mint_statement(outputs, 0, None);
     let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
@@ -77,7 +78,7 @@ fn mint_initial_supply() {
 
 #[test]
 fn mint_more_later() {
-    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let mint = stealth::generate_mint_statement([1200], 0, None);
     let (faucet, faucet_resx) = setup(&mut test, &mint, None);
 
@@ -90,7 +91,7 @@ fn mint_more_later() {
 
 #[test]
 fn basic_transfer() {
-    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let outputs = vec![100, 1000, 10000];
     let mint = stealth::generate_mint_statement(outputs, 0, None);
     let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
@@ -124,7 +125,7 @@ fn basic_transfer() {
 
 #[test]
 fn programmatic_transfer() {
-    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let outputs = vec![100, 1000, 10000];
     let mint = stealth::generate_mint_statement(outputs, 100, None);
     let (faucet, _faucet_resx) = setup(&mut test, &mint, None);
@@ -165,7 +166,7 @@ fn programmatic_transfer() {
 
 #[test]
 fn transfer_with_revealed_outputs() {
-    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let outputs = [100, 1000, 10000];
     let mint = stealth::generate_mint_statement(outputs, 0, None);
     let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
@@ -205,7 +206,7 @@ fn transfer_with_revealed_outputs() {
 
 #[test]
 fn transfer_revealed_between_accounts() {
-    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let (alice, alice_proof, alice_sk) = test.create_empty_account();
     let (bob, _proof, _sk) = test.create_empty_account();
 
@@ -265,7 +266,7 @@ fn transfer_revealed_between_accounts() {
 
 #[test]
 fn transfer_invalid_balance_in_statement() {
-    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let outputs = [100, 1000];
     let mint = stealth::generate_mint_statement(outputs, 0, None);
     let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
@@ -299,7 +300,7 @@ fn transfer_invalid_balance_in_statement() {
 
 #[test]
 fn transfer_fails_if_transaction_is_not_signed_by_utxo_owner() {
-    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let outputs = [100, 1000];
     let mint = stealth::generate_mint_statement(outputs, 0, None);
     let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
@@ -330,7 +331,7 @@ fn transfer_fails_if_transaction_is_not_signed_by_utxo_owner() {
 
 #[test]
 fn transfer_invalid_range_proof_in_statement() {
-    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let outputs = [100, 1000];
     let mint = stealth::generate_mint_statement(outputs, 0, None);
     let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
@@ -370,7 +371,7 @@ fn transfer_invalid_range_proof_in_statement() {
 
 #[test]
 fn many_outputs_in_one_transfer() {
-    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     use std::{iter, time::Instant};
 
     use tari_engine_types::limits;
@@ -449,7 +450,7 @@ where
 
 #[test]
 fn mint_with_view_key() {
-    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let (view_key_secret, view_key) = RistrettoPublicKey::random_keypair(&mut OsRng);
     let mint = stealth::generate_mint_statement([1000], 0, Some(&view_key));
     let (_faucet, faucet_resx) = setup(&mut test, &mint, Some(&view_key));
@@ -493,7 +494,7 @@ fn mint_with_view_key() {
 
 #[test]
 fn freeze_then_attempt_spend() {
-    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let outputs = vec![100u64, 1000, 10000];
     let mint = stealth::generate_mint_statement(outputs.clone(), 0, None);
     let (faucet, faucet_resx) = setup(&mut test, &mint, None);
@@ -573,7 +574,7 @@ fn freeze_then_attempt_spend() {
 
 #[test]
 fn burn_then_attempt_spend() {
-    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let outputs = vec![100u64, 1000, 10000];
     let mint = stealth::generate_mint_statement(outputs.clone(), 0, None);
     let (faucet, faucet_resx) = setup(&mut test, &mint, None);
@@ -633,7 +634,7 @@ fn burn_then_attempt_spend() {
 
 #[test]
 fn transfer_restricted_by_access_rules_n_of_m() {
-    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let (_, pk1) = create_key_pair_from_seed(100);
     let pk1 = pk1.to_byte_type();
     let (sk2, pk2) = create_key_pair_from_seed(101);
@@ -704,7 +705,7 @@ fn transfer_restricted_by_access_rules_n_of_m() {
 
 #[test]
 fn transfer_restricted_by_access_rules_component_scope() {
-    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
 
     let outputs = vec![(100u64, SpendCondition::Signed(test.to_public_key_bytes()))];
     let mint = stealth::generate_mint_statement(outputs.clone(), 0, None);

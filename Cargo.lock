@@ -11207,7 +11207,6 @@ dependencies = [
  "multiaddr 0.18.1",
  "rand 0.8.5",
  "serde",
- "serde_json",
  "serde_json5",
  "tari_base_node_client",
  "tari_bor",

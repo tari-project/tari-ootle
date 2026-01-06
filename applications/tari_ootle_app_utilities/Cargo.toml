@@ -32,7 +32,6 @@ log = { workspace = true, features = ["std"] }
 multiaddr = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true, features = ["default", "derive", "rc"] }
-serde_json = { workspace = true }
 serde_json5 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["default", "macros", "time", "sync", "rt-multi-thread", "fs", "net"] }

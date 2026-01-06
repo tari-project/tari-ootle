@@ -18,9 +18,11 @@ use tari_template_test_tooling::{
 };
 use tari_transaction::{args, call_args, Instruction, Transaction};
 
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
 #[test]
 fn basic_faucet_transfer() {
-    let mut template_test = TemplateTest::new(Vec::<&str>::new());
+    let mut template_test = TemplateTest::new(CRATE_PATH, Vec::<&str>::new());
 
     let (faucet_component, faucet_resource) = template_test.create_test_faucet_component(1_000_000_000_000u64);
 
@@ -63,7 +65,7 @@ fn basic_faucet_transfer() {
 
 #[test]
 fn withdraw_from_account_prevented() {
-    let mut template_test = TemplateTest::new(Vec::<&str>::new());
+    let mut template_test = TemplateTest::new(CRATE_PATH, Vec::<&str>::new());
 
     let faucet_template = template_test.get_template_address("TestFaucet");
 
@@ -147,7 +149,7 @@ fn withdraw_from_account_prevented() {
 
 #[test]
 fn attempt_to_overwrite_account() {
-    let mut template_test = TemplateTest::new::<_, &str>([]);
+    let mut template_test = TemplateTest::new_no_templates();
 
     // Create initial account with faucet funds
     let (source_account, source_account_proof, source_account_sk) = template_test.create_funded_account();
@@ -184,7 +186,7 @@ fn attempt_to_overwrite_account() {
 
 #[test]
 fn gasless() {
-    let mut test = TemplateTest::new::<_, &str>([]);
+    let mut test = TemplateTest::new_no_templates();
     test.enable_fees();
 
     // Create initial account with faucet funds
@@ -215,7 +217,7 @@ fn gasless() {
 
 #[test]
 fn custom_access_rules() {
-    let mut template_test = TemplateTest::new::<_, &str>([]);
+    let mut template_test = TemplateTest::new_no_templates();
 
     // First we create a account with a custom rule that anyone can withdraw
     let (owner_proof, public_key, secret_key) = template_test.create_owner_proof();
@@ -261,7 +263,7 @@ fn custom_access_rules() {
 
 #[test]
 fn take_from_bucket() {
-    let mut test = TemplateTest::new(Vec::<&str>::new());
+    let mut test = TemplateTest::new(CRATE_PATH, Vec::<&str>::new());
 
     let faucet_template = test.get_template_address("TestFaucet");
     let (alice, _proof, _alice_sk) = test.create_empty_account();

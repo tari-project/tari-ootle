@@ -5,9 +5,11 @@ use tari_template_lib::{prelude::ComponentAddress, types::Amount};
 use tari_template_test_tooling::{support::confidential::generate_confidential_output_statement, TemplateTest};
 use tari_transaction::{args, Transaction};
 
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
 #[test]
 fn it_burns_all_resource_types() {
-    let mut test = TemplateTest::new(["tests/templates/burn"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/burn"]);
     let recall_template = test.get_template_address("Burn");
 
     let (mut initial_supply, _mask, _) = generate_confidential_output_statement(1000, None);

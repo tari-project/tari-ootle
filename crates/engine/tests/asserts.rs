@@ -13,6 +13,8 @@ use tari_template_lib::{
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 use tari_transaction::{args, args::WorkspaceOffsetId, call_args, Instruction, Transaction};
 
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
 const FAUCET_WITHDRAWAL_AMOUNT: u32 = 1000;
 
 struct AssertTest {
@@ -25,7 +27,7 @@ struct AssertTest {
 }
 
 fn setup() -> AssertTest {
-    let mut template_test = TemplateTest::new(vec!["tests/templates/tariswap"]);
+    let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/tariswap"]);
 
     let faucet_template = template_test.get_template_address("TestFaucet");
 

@@ -7,9 +7,11 @@ use tari_template_lib::{models::ComponentAddress, types::Amount};
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 use tari_transaction::{args, call_args, Instruction, Transaction};
 
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
 #[test]
 fn basic_emit_event() {
-    let mut template_test = TemplateTest::new(vec!["tests/templates/events"]);
+    let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/events"]);
     let event_emitter_template = template_test.get_template_address("EventEmitter");
     let topic = "Hello_world";
     let result = template_test
@@ -35,7 +37,7 @@ fn basic_emit_event() {
 
 #[test]
 fn cannot_use_standard_topic() {
-    let mut template_test = TemplateTest::new(vec!["tests/templates/events"]);
+    let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/events"]);
     let event_emitter_template = template_test.get_template_address("EventEmitter");
     let (_, _, private_key) = template_test.create_funded_account();
     let invalid_topic = "std.mytopic";
@@ -53,7 +55,7 @@ fn cannot_use_standard_topic() {
 
 #[test]
 fn builtin_vault_events() {
-    let mut template_test = TemplateTest::new(Vec::<&str>::new());
+    let mut template_test = TemplateTest::new(CRATE_PATH, Vec::<&str>::new());
 
     // create a fungible resource for transfer
     let faucet_template = template_test.get_template_address("TestFaucet");

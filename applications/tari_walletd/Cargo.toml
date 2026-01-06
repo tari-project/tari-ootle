@@ -65,7 +65,7 @@ tokio = { workspace = true, features = [
 ] }
 tower-http = { workspace = true, features = ["cors", "trace"] }
 url = { workspace = true }
-webrtc = { workspace = true }
+webrtc = "0.14.0"
 webauthn-rs = { workspace = true }
 uuid = { workspace = true }
 wasm-opt = "0.116.1"

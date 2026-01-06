@@ -24,7 +24,7 @@ use std::iter;
 use serde::{Deserialize, Serialize};
 use tari_engine::{
     template::{TemplateLoaderError, TemplateModuleLoader},
-    wasm::{compile::compile_template, WasmExecutionError},
+    wasm::WasmExecutionError,
 };
 use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason},
@@ -38,15 +38,21 @@ use tari_template_lib::{
     models::{ComponentAddress, NonFungible, NonFungibleAddress, ResourceAddress},
     types::{crypto::RistrettoPublicKeyBytes, Amount, TemplateAddress},
 };
-use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
+use tari_template_test_tooling::{
+    compile::compile_template,
+    support::assert_error::assert_reject_reason,
+    TemplateTest,
+};
 use tari_transaction::{args, call_args, Transaction};
 use tari_transaction_manifest::ManifestValue;
 use tari_utilities::hex::to_hex;
 use wasmer::ExportError;
 
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
 #[test]
 fn test_hello_world() {
-    let mut template_test = TemplateTest::new(vec!["tests/templates/hello_world"]);
+    let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/hello_world"]);
     let result: String = template_test.call_function("HelloWorld", "greet", call_args![], vec![]);
 
     assert_eq!(result, "Hello World!");
@@ -54,7 +60,7 @@ fn test_hello_world() {
 
 #[test]
 fn test_state() {
-    let mut template_test = TemplateTest::new(vec!["tests/templates/state"]);
+    let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/state"]);
 
     // constructor
     let component_address1: ComponentAddress = template_test.call_function("State", "new", call_args![], vec![]);
@@ -89,7 +95,7 @@ fn test_state() {
 
 #[test]
 fn state_create_multiple_in_one_call() {
-    let mut template_test = TemplateTest::new(["tests/templates/state"]);
+    let mut template_test = TemplateTest::new(CRATE_PATH, ["tests/templates/state"]);
 
     // constructor
     template_test.call_function::<()>("State", "create_multiple", call_args![10u32], vec![]);
@@ -113,7 +119,7 @@ fn state_create_multiple_in_one_call() {
 
 #[test]
 fn test_composed() {
-    let mut template_test = TemplateTest::new(vec!["tests/templates/state", "tests/templates/hello_world"]);
+    let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/state", "tests/templates/hello_world"]);
 
     let module = template_test.get_module("HelloWorld");
     let functions = module
@@ -211,7 +217,7 @@ fn test_buggy_template() {
 #[test]
 fn test_private_function() {
     // instantiate the counter
-    let mut template_test = TemplateTest::new(vec!["tests/templates/private_function"]);
+    let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/private_function"]);
 
     // check that the private method and function are not exported
     let module = template_test.get_module("PrivateCounter");
@@ -233,7 +239,7 @@ fn test_private_function() {
 #[test]
 fn test_engine_errors() {
     // instantiate the counter
-    let mut test = TemplateTest::new(vec!["tests/templates/errors"]);
+    let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/errors"]);
 
     // check that public methods can still internally call private ones
     let reason = test.execute_expect_failure(
@@ -255,7 +261,7 @@ fn test_engine_errors() {
 
 #[test]
 fn test_tuples() {
-    let mut template_test = TemplateTest::new(vec!["tests/templates/tuples"]);
+    let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/tuples"]);
 
     // check that the ABI is valid
     let module = template_test.get_module("Tuple");
@@ -289,7 +295,7 @@ fn test_tuples() {
 
 #[test]
 fn test_get_template_address() {
-    let mut template_test = TemplateTest::new(vec!["tests/templates/component_manager"]);
+    let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/component_manager"]);
     let (account, _, _) = template_test.create_empty_account();
 
     let addr: TemplateAddress = template_test.call_function(
@@ -303,7 +309,7 @@ fn test_get_template_address() {
 
 #[test]
 fn test_caller_context() {
-    let mut template_test = TemplateTest::new(vec!["tests/templates/caller_context"]);
+    let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/caller_context"]);
 
     // tuples returned in a regular function
     let component: ComponentAddress = template_test.call_function("CallerContextTest", "create", call_args![], vec![]);
@@ -316,7 +322,7 @@ fn test_caller_context() {
 
 #[test]
 fn test_random() {
-    let mut template_test = TemplateTest::new(vec!["tests/templates/random"]);
+    let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/random"]);
     let component_address: ComponentAddress = template_test.call_function("RandomTest", "create", args![], vec![]);
     let value: u32 = template_test.call_method(component_address, "get_random", call_args![], vec![]);
     assert_ne!(value, 0);
@@ -332,7 +338,7 @@ fn test_random() {
 
 #[test]
 fn test_errors_on_infinite_loop() {
-    let mut test = TemplateTest::new(vec!["tests/templates/infinity_loop"]);
+    let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/infinity_loop"]);
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
             .call_function(test.get_template_address("InfinityLoopTest"), "infinity_loop", args![])
@@ -350,7 +356,7 @@ mod errors {
 
     #[test]
     fn panic() {
-        let mut template_test = TemplateTest::new(vec!["tests/templates/errors"]);
+        let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/errors"]);
 
         let result = template_test
             .try_execute_instructions(
@@ -376,7 +382,7 @@ mod errors {
 
     #[test]
     fn invalid_args() {
-        let mut template_test = TemplateTest::new(vec!["tests/templates/errors"]);
+        let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/errors"]);
 
         let text = "this isn't an amount";
         let result = template_test
@@ -412,7 +418,7 @@ mod consensus {
 
     #[test]
     fn current_epoch() {
-        let mut template_test = TemplateTest::new(vec!["tests/templates/consensus"]);
+        let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/consensus"]);
 
         // the default value for a current epoch in the mocks is 0
         let result: u64 = template_test.call_function("TestConsensus", "current_epoch", args![], vec![]);
@@ -434,7 +440,7 @@ mod fungible {
 
     #[test]
     fn fungible_mint_and_burn() {
-        let mut template_test = TemplateTest::new(Vec::<&str>::new());
+        let mut template_test = TemplateTest::new(CRATE_PATH, Vec::<&str>::new());
 
         let faucet_template = template_test.get_template_address("TestFaucet");
 
@@ -508,7 +514,7 @@ mod basic_nft {
         ComponentAddress,
         SubstateId,
     ) {
-        let mut template_test = TemplateTest::new(vec!["tests/templates/nft/basic_nft"]);
+        let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/nft/basic_nft"]);
 
         let (account_address, owner_token, _) = template_test.create_funded_account();
         let nft_component: ComponentAddress = template_test.call_function("SparkleNft", "new", args![], vec![]);
@@ -928,7 +934,7 @@ mod emoji_id {
     #[test]
     #[allow(clippy::too_many_lines)]
     fn mint_emoji_ids() {
-        let mut test = TemplateTest::new(vec!["tests/templates/nft/emoji_id"]);
+        let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/nft/emoji_id"]);
 
         // create an account
         let (account_address, owner_proof, _) = test.create_funded_account();
@@ -1027,7 +1033,7 @@ mod tickets {
     #[test]
     #[allow(clippy::too_many_lines)]
     fn buy_and_redeem_ticket() {
-        let mut test = TemplateTest::new(vec!["tests/templates/nft/tickets"]);
+        let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/nft/tickets"]);
 
         // create an account
         let (account_address, owner_proof, secret) = test.create_funded_account();
@@ -1126,7 +1132,7 @@ mod tickets {
 
 #[test]
 fn test_builtin_templates() {
-    let mut template_test = TemplateTest::new(vec!["tests/templates/builtin_templates"]);
+    let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/builtin_templates"]);
 
     let account_template_address: TemplateAddress =
         template_test.call_function("BuiltinTest", "get_account_template_address", args![], vec![]);

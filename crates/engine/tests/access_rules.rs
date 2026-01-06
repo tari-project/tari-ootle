@@ -27,12 +27,14 @@ use tari_template_test_tooling::{
 };
 use tari_transaction::{args, Transaction};
 
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
 mod component_access_rules {
     use super::*;
 
     #[test]
     fn it_restricts_component_methods() {
-        let mut test = TemplateTest::new(["tests/templates/access_rules"]);
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 
         // Create sender and receiver accounts
         let (owner1_proof, _, owner1_key) = test.create_owner_proof();
@@ -100,7 +102,7 @@ mod component_access_rules {
 
     #[test]
     fn it_allows_owner_to_update_component_access_rules() {
-        let mut test = TemplateTest::new(["tests/templates/access_rules"]);
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 
         // Create sender and receiver accounts
         let (owner_proof, _, owner_key) = test.create_owner_proof();
@@ -172,7 +174,7 @@ mod component_access_rules {
 
     #[test]
     fn it_prevents_access_rule_modification_if_owner_is_none() {
-        let mut test = TemplateTest::new(["tests/templates/access_rules"]);
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 
         // Create sender and receiver accounts
         let (owner_proof, _, owner_key) = test.create_owner_proof();
@@ -222,7 +224,7 @@ mod resource_access_rules {
 
     #[test]
     fn it_denies_actions_on_resource() {
-        let mut test = TemplateTest::new(["tests/templates/access_rules"]);
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 
         // Create sender and receiver accounts
         let (owner_account, owner_proof, owner_key) = test.create_empty_account();
@@ -296,7 +298,7 @@ mod resource_access_rules {
     #[allow(clippy::too_many_lines)]
     #[test]
     fn it_denies_recall_for_owner() {
-        let mut test = TemplateTest::new(["tests/templates/access_rules"]);
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 
         // Create sender and receiver accounts
         let (owner_proof, _, owner_key) = test.create_owner_proof();
@@ -364,7 +366,7 @@ mod resource_access_rules {
     #[allow(clippy::too_many_lines)]
     #[test]
     fn it_allows_resource_access_with_badge_then_recall() {
-        let mut test = TemplateTest::new(["tests/templates/access_rules"]);
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 
         // Create sender and receiver accounts
         let (owner_proof, _, owner_key) = test.create_owner_proof();
@@ -479,7 +481,7 @@ mod resource_access_rules {
 
     #[test]
     fn it_allows_access_for_proofs_by_amount() {
-        let mut test = TemplateTest::new(["tests/templates/access_rules"]);
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 
         // Create sender and receiver accounts
         let (owner_proof, _, owner_key) = test.create_owner_proof();
@@ -551,7 +553,7 @@ mod resource_access_rules {
 
     #[test]
     fn it_locks_resources_used_in_proofs() {
-        let mut test = TemplateTest::new(["tests/templates/access_rules"]);
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 
         // Create sender and receiver accounts
         let (owner_account, owner_proof, owner_key) = test.create_empty_account();
@@ -632,7 +634,7 @@ mod resource_access_rules {
 
     #[test]
     fn it_permits_cross_template_calls_using_proofs() {
-        let mut test = TemplateTest::new(["tests/templates/access_rules", "tests/templates/composability"]);
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules", "tests/templates/composability"]);
 
         // Create sender and receiver accounts
         let (owner_account, owner_proof, owner_key) = test.create_empty_account();
@@ -706,7 +708,7 @@ mod resource_access_rules {
     #[allow(clippy::too_many_lines)]
     #[test]
     fn it_creates_a_proof_from_bucket() {
-        let mut test = TemplateTest::new(["tests/templates/access_rules"]);
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 
         // Create sender and receiver accounts
         let (owner_proof, _, owner_key) = test.create_owner_proof();
@@ -842,7 +844,7 @@ mod resource_access_rules {
 
     #[test]
     fn it_restricts_resource_actions_to_component() {
-        let mut test = TemplateTest::new(["tests/templates/access_rules"]);
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 
         // Create sender and receiver accounts
         let (owner_account, owner_proof, owner_key) = test.create_empty_account();
@@ -901,7 +903,7 @@ mod resource_access_rules {
 
     #[test]
     fn it_allows_resource_actions_if_auth_hook_passes() {
-        let mut test = TemplateTest::new(["tests/templates/access_rules"]);
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 
         // Create sender and receiver accounts
         let (owner_account, owner_proof, owner_key) = test.create_empty_account();
@@ -931,7 +933,7 @@ mod resource_access_rules {
 
     #[test]
     fn it_denies_resource_actions_if_auth_hook_fails() {
-        let mut test = TemplateTest::new(["tests/templates/access_rules"]);
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 
         let (owner_account, owner_proof, owner_key) = test.create_empty_account();
 
@@ -965,7 +967,7 @@ mod resource_access_rules {
 
     #[test]
     fn it_disallows_hook_that_writes_to_caller_component() {
-        let mut test = TemplateTest::new(["tests/templates/access_rules"]);
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 
         let (_owner_account, owner_proof, owner_key) = test.create_empty_account();
         let (user_account, user_proof, user_key) = test.create_empty_account();
@@ -1003,7 +1005,7 @@ mod resource_access_rules {
 
     #[test]
     fn it_disallows_hook_that_attempts_mutable_call_to_caller() {
-        let mut test = TemplateTest::new(["tests/templates/access_rules"]);
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 
         let (_owner_account, owner_proof, owner_key) = test.create_empty_account();
         let (user_account, user_proof, user_key) = test.create_empty_account();
@@ -1043,7 +1045,7 @@ mod resource_access_rules {
 
     #[test]
     fn it_disallows_hook_that_attempts_mutable_call_to_another_component_in_the_transaction() {
-        let mut test = TemplateTest::new(["tests/templates/access_rules", "tests/templates/state"]);
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules", "tests/templates/state"]);
 
         let (_owner_account, owner_proof, owner_key) = test.create_empty_account();
         let (user_account, user_proof, user_key) = test.create_empty_account();
@@ -1097,7 +1099,7 @@ mod resource_access_rules {
 
     #[test]
     fn it_fails_if_auth_hook_is_invalid() {
-        let mut test = TemplateTest::new(["tests/templates/access_rules"]);
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 
         let access_rules_template = test.get_template_address("AccessRulesTest");
 

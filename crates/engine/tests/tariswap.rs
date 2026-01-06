@@ -10,6 +10,8 @@ use tari_template_lib::{
 use tari_template_test_tooling::TemplateTest;
 use tari_transaction::{args, call_args, Instruction, Transaction};
 
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
 struct TariSwapTest {
     template_test: TemplateTest,
     a_resource: ResourceAddress,
@@ -21,7 +23,7 @@ struct TariSwapTest {
 }
 
 fn setup(fee: u16) -> TariSwapTest {
-    let mut template_test = TemplateTest::new(vec!["tests/templates/tariswap"]);
+    let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/tariswap"]);
 
     // create the token pair for the swap pool
     let (a_faucet, a_resource) = create_faucet_component(&mut template_test, "A".to_string());

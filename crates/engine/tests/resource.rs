@@ -5,23 +5,25 @@ use tari_template_lib::models::ComponentAddress;
 use tari_template_test_tooling::{support::confidential::generate_confidential_output_statement, TemplateTest};
 use tari_transaction::call_args;
 
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
 #[test]
 fn fungible_join() {
-    let mut test = TemplateTest::new(vec!["tests/templates/resource"]);
+    let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/resource"]);
     let component: ComponentAddress = test.call_function("ResourceTest", "new", call_args![], vec![]);
     test.call_method::<()>(component, "fungible_join", call_args![], vec![]);
 }
 
 #[test]
 fn non_fungible_join() {
-    let mut test = TemplateTest::new(vec!["tests/templates/resource"]);
+    let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/resource"]);
     let component: ComponentAddress = test.call_function("ResourceTest", "new", call_args![], vec![]);
     test.call_method::<()>(component, "non_fungible_join", call_args![], vec![]);
 }
 
 #[test]
 fn confidential_join() {
-    let mut test = TemplateTest::new(vec!["tests/templates/resource"]);
+    let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/resource"]);
     let component: ComponentAddress = test.call_function("ResourceTest", "new", call_args![], vec![]);
     let (output, _, _) = generate_confidential_output_statement(1000, None);
     test.call_method::<()>(component, "confidential_join", call_args![output], vec![]);

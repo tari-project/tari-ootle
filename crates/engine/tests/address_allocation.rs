@@ -7,9 +7,11 @@ use tari_template_lib::models::{ComponentAddress, ResourceAddress};
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 use tari_transaction::{args, builder::CallFromWorkspace, Transaction};
 
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
 #[test]
 fn it_allocates_addresses_in_template_code() {
-    let mut test = TemplateTest::new(["tests/templates/address_allocation"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/address_allocation"]);
 
     let result = test.execute_expect_success(
         Transaction::builder_localnet()
@@ -62,7 +64,7 @@ fn it_allocates_addresses_in_template_code() {
 
 #[test]
 fn it_fails_if_address_allocation_is_not_used() {
-    let mut test = TemplateTest::new(["tests/templates/address_allocation"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/address_allocation"]);
     let template_addr = test.get_template_address("AddressAllocationTest");
 
     let reason = test.execute_expect_failure(
@@ -85,7 +87,7 @@ fn it_fails_if_address_allocation_is_not_used() {
 
 #[test]
 fn it_fails_if_instruction_allocated_addresses_are_not_used() {
-    let mut test = TemplateTest::new(["tests/templates/address_allocation"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/address_allocation"]);
 
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
@@ -100,7 +102,7 @@ fn it_fails_if_instruction_allocated_addresses_are_not_used() {
 
 #[test]
 fn it_allocates_an_address_using_instructions() {
-    let mut test = TemplateTest::new(["tests/templates/address_allocation"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/address_allocation"]);
 
     let template_addr = test.get_template_address("AddressAllocationTest");
 
@@ -149,7 +151,7 @@ fn it_allocates_an_address_using_instructions() {
 
 #[test]
 fn it_allows_calls_to_component_using_the_allocated_address() {
-    let mut test = TemplateTest::new(["tests/templates/address_allocation"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/address_allocation"]);
 
     let template_addr = test.get_template_address("AddressAllocationTest");
 

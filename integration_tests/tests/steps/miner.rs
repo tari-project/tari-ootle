@@ -1,18 +1,20 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use cucumber::{given, then, when};
+use cucumber::{gherkin::Step, given, then, when};
 use tari_base_node_client::BaseNodeClient;
 
 use crate::{mine_blocks, register_miner_process, TariWorld};
 
 #[given(expr = "a miner {word} connected to base node {word} and wallet {word}")]
-async fn create_miner(world: &mut TariWorld, miner_name: String, bn_name: String, wallet_name: String) {
+async fn create_miner(world: &mut TariWorld, step: &Step, miner_name: String, bn_name: String, wallet_name: String) {
+    integration_tests::cucumber_log!("==== Step: {}", step.value);
     register_miner_process(world, miner_name, bn_name, wallet_name);
 }
 
 #[when(expr = "miner {word} mines {int} new blocks")]
-pub async fn miner_mines_new_blocks(world: &mut TariWorld, miner_name: String, num_blocks: u64) {
+pub async fn miner_mines_new_blocks(world: &mut TariWorld, step: &Step, miner_name: String, num_blocks: u64) {
+    integration_tests::cucumber_log!("==== Step: {}", step.value);
     let bn = world
         .base_nodes
         .values()
@@ -27,7 +29,8 @@ pub async fn miner_mines_new_blocks(world: &mut TariWorld, miner_name: String, n
 }
 
 #[then(expr = "miner {word} mines to the next epoch")]
-pub async fn miner_mines_to_next_epoch(world: &mut TariWorld, miner_name: String) {
+pub async fn miner_mines_to_next_epoch(world: &mut TariWorld, step: &Step, miner_name: String) {
+    integration_tests::cucumber_log!("==== Step: {}", step.value);
     let bn = world
         .base_nodes
         .values()

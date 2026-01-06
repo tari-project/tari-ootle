@@ -1,23 +1,26 @@
 //  Copyright 2022 The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
-use cucumber::{given, then};
+use cucumber::{gherkin::Step, given, then};
 use integration_tests::base_node::spawn_base_node;
 
 use crate::TariWorld;
 
 #[given(expr = "a base node {word}")]
-async fn start_base_node(world: &mut TariWorld, bn_name: String) {
+async fn start_base_node(world: &mut TariWorld, step: &Step, bn_name: String) {
+    integration_tests::cucumber_log!("==== Step: {}", step.value);
     spawn_base_node(world, bn_name).await;
 }
 
 #[then(expr = "there is {int} transaction in the mempool of {word} within {int} seconds")]
 async fn then_there_is_transaction_in_the_mempool_of(
     world: &mut TariWorld,
+    step: &Step,
     num_tx: usize,
     node: String,
     seconds: usize,
 ) {
+    integration_tests::cucumber_log!("==== Step: {}", step.value);
     let node = world.get_base_node(&node);
     let mut client = node.create_client();
     for _ in 0..seconds {

@@ -6,8 +6,9 @@ use std::{
     str::FromStr,
 };
 
-use cucumber::{given, then, when};
+use cucumber::{gherkin::Step, given, then, when};
 use integration_tests::{
+    cucumber_log,
     indexer::{spawn_indexer, IndexerProcess},
     TariWorld,
 };
@@ -46,7 +47,13 @@ async fn given_validator_connects_to_other_vns(world: &mut TariWorld, name: Stri
 }
 
 #[then(expr = "indexer {word} has scanned to at least height {int}")]
-pub async fn indexer_has_scanned_to_at_least_height(world: &mut TariWorld, name: String, block_height: u64) {
+pub async fn indexer_has_scanned_to_at_least_height(
+    world: &mut TariWorld,
+    step: &Step,
+    name: String,
+    block_height: u64,
+) {
+    cucumber_log!("=== Step:{}", step.value);
     let indexer = world.get_indexer(&name);
     let mut client = indexer.get_indexer_client();
     let mut last_block_height = 0;

@@ -7,10 +7,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use cucumber::{given, then, when};
+use cucumber::{gherkin::Step, given, then, when};
 use integration_tests::{
     base_node::get_base_node_client,
-    template,
+    cucumber_log, template,
     template::{send_template_registration, RegisteredTemplate},
     validator_node::{spawn_validator_node, ValidatorNodeProcess},
     TariWorld,
@@ -22,20 +22,13 @@ use notify::Watcher;
 use tari_base_node_client::{grpc::GrpcBaseNodeClient, BaseNodeClient};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_ootle_common_types::{
-    layer_one_transaction::LayerOneTransactionDef,
-    optional::Optional,
-    Epoch,
-    SubstateAddress,
+    layer_one_transaction::LayerOneTransactionDef, optional::Optional, Epoch, SubstateAddress,
 };
 use tari_ootle_storage::Ordering;
 use tari_sidechain::EvictionProof;
 use tari_transaction_components::transaction_components::{memo_field::TxType, MemoField};
 use tari_validator_node_client::types::{
-    AddPeerRequest,
-    GetBlocksRequest,
-    GetStateRequest,
-    GetTemplateRequest,
-    ListBlocksRequest,
+    AddPeerRequest, GetBlocksRequest, GetStateRequest, GetTemplateRequest, ListBlocksRequest,
 };
 use tokio::{sync::mpsc, time::timeout};
 use tonic::codegen::tokio_stream::StreamExt;
@@ -77,13 +70,15 @@ async fn spawn_seed_node(
 }
 
 #[given(expr = "a validator node {word} connected to base node {word}")]
-async fn start_vn_without_claim_fee(world: &mut TariWorld, seed_vn_name: String, bn_name: String) {
+async fn start_vn_without_claim_fee(world: &mut TariWorld, step: &Step, seed_vn_name: String, bn_name: String) {
+    cucumber_log!("==== Step: {}", step.value);
     let validator = spawn_validator_node(world, seed_vn_name.clone(), bn_name, None).await;
     world.validator_nodes.insert(seed_vn_name, validator);
 }
 
 #[given(expr = "a seed validator node {word} connected to base node {word}")]
-async fn start_seed_vn_without_claim_fee(world: &mut TariWorld, seed_vn_name: String, bn_name: String) {
+async fn start_seed_vn_without_claim_fee(world: &mut TariWorld, step: &Step, seed_vn_name: String, bn_name: String) {
+    cucumber_log!("==== Step: {}", step.value);
     let validator = spawn_seed_node(world, seed_vn_name.clone(), bn_name, None).await;
     world.vn_seeds.insert(seed_vn_name, validator);
 }
@@ -91,16 +86,19 @@ async fn start_seed_vn_without_claim_fee(world: &mut TariWorld, seed_vn_name: St
 #[given(expr = "a seed validator node {word} connected to base node {word} using claim fee account {word}")]
 async fn start_seed_validator_node(
     world: &mut TariWorld,
+    step: &Step,
     seed_vn_name: String,
     bn_name: String,
     claim_fee_account: String,
 ) {
+    cucumber_log!("==== Step: {}", step.value);
     let validator = spawn_seed_node(world, seed_vn_name.clone(), bn_name, Some(&claim_fee_account)).await;
     world.vn_seeds.insert(seed_vn_name, validator);
 }
 
 #[given(expr = "validator {word} nodes connect to all other validators")]
-async fn given_validator_connects_to_other_vns(world: &mut TariWorld, name: String) {
+async fn given_validator_connects_to_other_vns(world: &mut TariWorld, step: &Step, name: String) {
+    cucumber_log!("==== Step: {}", step.value);
     let details = world
         .all_running_validators_iter()
         .filter(|vn| vn.name != name)
@@ -131,7 +129,8 @@ async fn given_validator_connects_to_other_vns(world: &mut TariWorld, name: Stri
 }
 
 #[when(expr = "validator node {word} sends a registration transaction to base wallet {word}")]
-pub async fn send_vn_registration(world: &mut TariWorld, vn_name: String, base_wallet_name: String) {
+pub async fn send_vn_registration(world: &mut TariWorld, step: &Step, vn_name: String, base_wallet_name: String) {
+    cucumber_log!("==== Step: {}", step.value);
     let vn = world.get_validator_node(&vn_name);
 
     let mut base_layer_wallet = world.get_wallet(&base_wallet_name).create_client().await;
@@ -172,10 +171,12 @@ pub async fn send_vn_registration(world: &mut TariWorld, vn_name: String, base_w
 #[when(expr = "wallet daemon {word} publishes the template \"{word}\" using account {word}")]
 async fn publish_template(
     world: &mut TariWorld,
+    step: &Step,
     wallet_daemon_name: String,
     template_name: String,
     account_name: String,
 ) {
+    cucumber_log!("==== Step: {}", step.value);
     world.mark_point_in_logs("Start publishing template");
     let template_address =
         match template::publish_template(world, wallet_daemon_name, account_name, template_name.clone()).await {
@@ -198,7 +199,8 @@ async fn publish_template(
 }
 
 #[when(expr = "base wallet {word} registers the template \"{word}\"")]
-async fn register_template(world: &mut TariWorld, wallet_name: String, template_name: String) {
+async fn register_template(world: &mut TariWorld, step: &Step, wallet_name: String, template_name: String) {
+    cucumber_log!("==== Step: {}", step.value);
     world.mark_point_in_logs("Start register template");
     let template_address = match send_template_registration(world, template_name.clone(), wallet_name).await {
         Ok(resp) => resp,
@@ -223,7 +225,8 @@ async fn register_template(world: &mut TariWorld, wallet_name: String, template_
 }
 
 #[then(expr = "all validator nodes are listed as registered")]
-async fn assert_all_vns_are_registered(world: &mut TariWorld) {
+async fn assert_all_vns_are_registered(world: &mut TariWorld, step: &Step) {
+    cucumber_log!("==== Step: {}", step.value);
     for vn_ps in world.all_running_validators_iter() {
         // create a base node client
         let base_node_grpc_port = vn_ps.base_node_grpc_port;
@@ -250,7 +253,8 @@ async fn assert_all_vns_are_registered(world: &mut TariWorld) {
 }
 
 #[then(expr = "the validator node {word} is listed as registered")]
-pub async fn assert_vn_is_registered(world: &mut TariWorld, vn_name: String) {
+pub async fn assert_vn_is_registered(world: &mut TariWorld, step: &Step, vn_name: String) {
+    cucumber_log!("==== Step: {}", step.value);
     // create a base node client
     let vn = world.get_validator_node(&vn_name);
     let mut base_node_client: GrpcBaseNodeClient = get_base_node_client(vn.base_node_grpc_port);
@@ -292,7 +296,8 @@ pub async fn assert_vn_is_registered(world: &mut TariWorld, vn_name: String) {
 }
 
 #[then(expr = "the template \"{word}\" is listed as registered by the validator node {word}")]
-async fn assert_template_is_registered(world: &mut TariWorld, template_name: String, vn_name: String) {
+async fn assert_template_is_registered(world: &mut TariWorld, step: &Step, template_name: String, vn_name: String) {
+    cucumber_log!("==== Step: {}", step.value);
     // give it some time for the template tx to be picked up by the VNs
     // tokio::time::sleep(Duration::from_secs(4)).await;
 
@@ -323,7 +328,8 @@ async fn assert_template_is_registered(world: &mut TariWorld, template_name: Str
 }
 
 #[then(expr = "the template \"{word}\" is listed as registered by all validator nodes")]
-async fn assert_template_is_registered_by_all(world: &mut TariWorld, template_name: String) {
+async fn assert_template_is_registered_by_all(world: &mut TariWorld, step: &Step, template_name: String) {
+    cucumber_log!("==== Step: {}", step.value);
     // give it some time for the template tx to be picked up by the VNs
     // tokio::time::sleep(Duration::from_secs(4)).await;
 
@@ -357,10 +363,12 @@ async fn assert_template_is_registered_by_all(world: &mut TariWorld, template_na
 #[then(expr = "validator node {word} has state at {word} within {int} seconds")]
 async fn then_validator_node_has_state_at(
     world: &mut TariWorld,
+    step: &Step,
     vn_name: String,
     state_address_name: String,
     timeout_secs: u64,
 ) {
+    cucumber_log!("==== Step: {}", step.value);
     let state_address = world
         .substate_ids
         .get(&state_address_name)
@@ -393,7 +401,8 @@ async fn then_validator_node_has_state_at(
 }
 
 #[then(expr = "I wait for {word} to have at least {int} blocks for the current epoch")]
-async fn vn_has_blocks_for_current_epoch(world: &mut TariWorld, vn_name: String, num_blocks: u64) {
+async fn vn_has_blocks_for_current_epoch(world: &mut TariWorld, step: &Step, vn_name: String, num_blocks: u64) {
+    cucumber_log!("==== Step: {}", step.value);
     let vn = world.get_validator_node(&vn_name);
     let mut client = vn.create_client();
     for _ in 0..10 {
@@ -418,7 +427,8 @@ async fn vn_has_blocks_for_current_epoch(world: &mut TariWorld, vn_name: String,
 }
 
 #[then(expr = "{word} is on epoch {int} within {int} seconds")]
-async fn vn_has_scanned_to_epoch(world: &mut TariWorld, vn_name: String, epoch: u64, seconds: usize) {
+async fn vn_has_scanned_to_epoch(world: &mut TariWorld, step: &Step, vn_name: String, epoch: u64, seconds: usize) {
+    cucumber_log!("==== Step: {}", step.value);
     let epoch = Epoch(epoch);
     let vn = world.get_validator_node(&vn_name);
     let mut client = vn.create_client();
@@ -435,7 +445,8 @@ async fn vn_has_scanned_to_epoch(world: &mut TariWorld, vn_name: String, epoch: 
 }
 
 #[then(expr = "{word} has scanned to at least height {int}")]
-async fn vn_has_scanned_to_height(world: &mut TariWorld, vn_name: String, block_height: u64) {
+async fn vn_has_scanned_to_height(world: &mut TariWorld, step: &Step, vn_name: String, block_height: u64) {
+    cucumber_log!("==== Step: {}", step.value);
     let vn = world.get_validator_node(&vn_name);
     let mut client = vn.create_client();
     let mut last_block_height = 0;
@@ -465,19 +476,27 @@ async fn vn_has_scanned_to_height(world: &mut TariWorld, vn_name: String, block_
 
 #[then(expr = "all validators have scanned to height {int}")]
 #[when(expr = "all validators have scanned to height {int}")]
-async fn all_vns_have_scanned_to_height(world: &mut TariWorld, block_height: u64) {
+async fn all_vns_have_scanned_to_height(world: &mut TariWorld, step: &Step, block_height: u64) {
+    cucumber_log!("==== Step: {}", step.value);
     let all_names = world
         .all_running_validators_iter()
         .filter(|vn| !vn.handle.is_finished())
         .map(|vn| vn.name.clone())
         .collect::<Vec<_>>();
     for vn in all_names {
-        vn_has_scanned_to_height(world, vn, block_height).await;
+        vn_has_scanned_to_height(world, step, vn, block_height).await;
     }
 }
 
 #[when(expr = "I wait for validator {word} has leaf block height of at least {int} at epoch {int}")]
-async fn when_i_wait_for_validator_leaf_block_at_least(world: &mut TariWorld, name: String, height: u64, epoch: u64) {
+async fn when_i_wait_for_validator_leaf_block_at_least(
+    world: &mut TariWorld,
+    step: &Step,
+    name: String,
+    height: u64,
+    epoch: u64,
+) {
+    cucumber_log!("==== Step: {}", step.value);
     let vn = world.get_validator_node(&name);
     let mut client = vn.create_client();
     let epoch_stats = client.get_epoch_manager_stats().await.unwrap();
@@ -542,7 +561,8 @@ async fn when_i_wait_for_validator_leaf_block_at_least(world: &mut TariWorld, na
 }
 
 #[when(expr = "Block height on VN {word} is at least {int}")]
-async fn when_block_height(world: &mut TariWorld, vn_name: String, height: u64) {
+async fn when_block_height(world: &mut TariWorld, step: &Step, vn_name: String, height: u64) {
+    cucumber_log!("==== Step: {}", step.value);
     let vn = world.get_validator_node(&vn_name);
     let mut client = vn.create_client();
     for _ in 0..20 {
@@ -555,8 +575,8 @@ async fn when_block_height(world: &mut TariWorld, vn_name: String, height: u64) 
             .unwrap()
             .blocks[0]
             .height()
-            .as_u64() >=
-            height
+            .as_u64()
+            >= height
         {
             return;
         }
@@ -566,7 +586,8 @@ async fn when_block_height(world: &mut TariWorld, vn_name: String, height: u64) 
 }
 
 #[then(expr = "the validator node {word} has started epoch {int}")]
-async fn then_validator_node_switches_epoch(world: &mut TariWorld, vn_name: String, epoch: u64) {
+async fn then_validator_node_switches_epoch(world: &mut TariWorld, step: &Step, vn_name: String, epoch: u64) {
+    cucumber_log!("==== Step: {}", step.value);
     let vn = world.get_validator_node(&vn_name);
     let mut client = vn.create_client();
     for _ in 0..200 {
@@ -598,10 +619,12 @@ async fn then_validator_node_switches_epoch(world: &mut TariWorld, vn_name: Stri
 #[then(expr = "I wait for {word} to list {word} as evicted in {word}")]
 async fn then_i_wait_for_validator_node_to_be_evicted(
     world: &mut TariWorld,
+    step: &Step,
     vn_name: String,
     evict_vn_name: String,
     proof_name: String,
 ) {
+    cucumber_log!("==== Step: {}", step.value);
     let vn = world.get_validator_node(&vn_name);
     let evict_vn = world.get_validator_node(&evict_vn_name);
 
@@ -661,7 +684,8 @@ async fn then_i_wait_for_validator_node_to_be_evicted(
 }
 
 #[when(expr = "all validator nodes have started epoch {int}")]
-async fn all_validators_have_started_epoch(world: &mut TariWorld, epoch: u64) {
+async fn all_validators_have_started_epoch(world: &mut TariWorld, step: &Step, epoch: u64) {
+    cucumber_log!("==== Step: {}", step.value);
     let mut remaining_attempts = 60;
     for vn in world.all_running_validators_iter().cycle() {
         let mut client = vn.create_client();
@@ -685,7 +709,8 @@ async fn all_validators_have_started_epoch(world: &mut TariWorld, epoch: u64) {
 }
 
 #[then(expr = "validator {word} is not a member of the current network according to {word}")]
-async fn validator_not_member_of_network(world: &mut TariWorld, validator: String, base_node: String) {
+async fn validator_not_member_of_network(world: &mut TariWorld, step: &Step, validator: String, base_node: String) {
+    cucumber_log!("==== Step: {}", step.value);
     let bn = world.get_base_node(&base_node);
     let vn = world.get_validator_node(&validator);
     let mut client = bn.create_client();

@@ -3,8 +3,10 @@
 
 use std::time::Duration;
 
-use cucumber::{then, when};
-use integration_tests::{claim_proof::CucumberClaimProof, util::transaction_builder, wallet_daemon_client, TariWorld};
+use cucumber::{gherkin::Step, then, when};
+use integration_tests::{
+    claim_proof::CucumberClaimProof, cucumber_log, util::transaction_builder, wallet_daemon_client, TariWorld,
+};
 use rand::{rngs::OsRng, Rng};
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_wallet_sdk::models::KeyBranch;
@@ -49,10 +51,12 @@ async fn claim_burn(
 #[then(expr = "I claim burn {word} and spend it into account {word} using wallet daemon {word}")]
 async fn when_i_claim_burn_via_wallet_daemon(
     world: &mut TariWorld,
+    step: &Step,
     proof_name: String,
     account_name: String,
     wallet_daemon_name: String,
 ) {
+    cucumber_log!("==== Step: {}", step.value);
     let result = claim_burn(world, proof_name, account_name, wallet_daemon_name)
         .await
         .unwrap();
@@ -64,10 +68,12 @@ async fn when_i_claim_burn_via_wallet_daemon(
 #[when(expr = "I claim burn {word} and spend it into account {word} using wallet daemon {word}, it fails")]
 async fn when_i_claim_burn_via_wallet_daemon_it_fails(
     world: &mut TariWorld,
+    step: &Step,
     proof_name: String,
     account_name: String,
     wallet_daemon_name: String,
 ) {
+    cucumber_log!("==== Step: {}", step.value);
     let result = claim_burn(world, proof_name, account_name, wallet_daemon_name)
         .await
         .unwrap();
@@ -82,10 +88,12 @@ async fn when_i_claim_burn_via_wallet_daemon_it_fails(
 #[when(expr = "I claim fees for validator {word} into account {word} using the wallet daemon {word}")]
 async fn when_i_claim_fees_for_validator_and_epoch(
     world: &mut TariWorld,
+    step: &Step,
     validator_node: String,
     account_name: String,
     wallet_daemon_name: String,
 ) {
+    cucumber_log!("==== Step: {}", step.value);
     let resp = wallet_daemon_client::claim_fees(world, wallet_daemon_name, account_name, validator_node, false)
         .await
         .unwrap();
@@ -98,7 +106,14 @@ async fn when_i_claim_fees_for_validator_and_epoch(
 }
 
 #[then(expr = "I run up {int} in fees using the wallet daemon {word} and account {word}")]
-async fn when_i_run_up_fees(world: &mut TariWorld, amount: u64, wallet_daemon_name: String, account_name: String) {
+async fn when_i_run_up_fees(
+    world: &mut TariWorld,
+    step: &Step,
+    amount: u64,
+    wallet_daemon_name: String,
+    account_name: String,
+) {
+    cucumber_log!("==== Step: {}", step.value);
     let template = world
         .templates
         .get("fees")
@@ -156,10 +171,12 @@ async fn when_i_run_up_fees(world: &mut TariWorld, amount: u64, wallet_daemon_na
 #[when(expr = "I claim fees for validator {word} into account {word} using the wallet daemon {word}, it fails")]
 async fn when_i_claim_fees_for_validator_and_epoch_fails(
     world: &mut TariWorld,
+    step: &Step,
     validator_node: String,
     account_name: String,
     wallet_daemon_name: String,
 ) {
+    cucumber_log!("==== Step: {}", step.value);
     let err = wallet_daemon_client::claim_fees(world, wallet_daemon_name, account_name, validator_node, false)
         .await
         .unwrap_err();
@@ -171,9 +188,11 @@ async fn when_i_claim_fees_for_validator_and_epoch_fails(
 #[when(expr = "I create an account {word} via the wallet daemon {word}")]
 async fn when_i_create_account_via_wallet_daemon(
     world: &mut TariWorld,
+    step: &Step,
     account_name: String,
     wallet_daemon_name: String,
 ) {
+    cucumber_log!("==== Step: {}", step.value);
     wallet_daemon_client::create_account(world, wallet_daemon_name, account_name).await;
 }
 
@@ -181,10 +200,12 @@ async fn when_i_create_account_via_wallet_daemon(
 #[when(expr = "I create an account {word} via the wallet daemon {word} with {int} XTR")]
 async fn when_i_create_account_via_wallet_daemon_with_free_coins(
     world: &mut TariWorld,
+    step: &Step,
     account_name: String,
     wallet_daemon_name: String,
     amount: i64,
 ) {
+    cucumber_log!("==== Step: {}", step.value);
     wallet_daemon_client::create_account_with_free_coins(world, account_name, wallet_daemon_name, amount * 1_000_000)
         .await;
 }
@@ -192,11 +213,13 @@ async fn when_i_create_account_via_wallet_daemon_with_free_coins(
 #[when(expr = "I burn {int}T on wallet {word} for wallet daemon {word} into proof {word}")]
 async fn when_i_burn_funds_with_wallet_daemon(
     world: &mut TariWorld,
+    step: &Step,
     amount: u64,
     wallet_name: String,
     wallet_daemon_name: String,
     proof_name: String,
 ) {
+    cucumber_log!("==== Step: {}", step.value);
     let mut wallet_daemon_client =
         wallet_daemon_client::get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
@@ -286,12 +309,14 @@ async fn when_i_burn_funds_with_wallet_daemon(
 #[when(regex = r"I check the balance of (\S+) on wallet daemon (\S+) the amount is (at )?(\S+) (\d+)")]
 async fn check_account_balance_via_daemon(
     world: &mut TariWorld,
+    step: &Step,
     account_name: String,
     wallet_daemon_name: String,
     _at: String,
     least_or_most: String,
     amount: i64,
 ) {
+    cucumber_log!("==== Step: {}", step.value);
     // This also refreshes the wallet vaults
     let current_balance = wallet_daemon_client::get_balance(world, &account_name, &wallet_daemon_name, XTR).await;
     match least_or_most.to_lowercase().as_str() {
@@ -323,6 +348,7 @@ async fn check_account_balance_via_daemon(
 )]
 async fn check_account_balance_for_resource_via_daemon(
     world: &mut TariWorld,
+    step: &Step,
     account_name: String,
     resource_input_name: String,
     wallet_daemon_name: String,
@@ -330,6 +356,7 @@ async fn check_account_balance_for_resource_via_daemon(
     least_or_most: String,
     amount: i64,
 ) {
+    cucumber_log!("==== Step: {}", step.value);
     let output = world.get_output_fq(&resource_input_name);
     // This also refreshes the wallet vaults
     let current_balance = wallet_daemon_client::get_balance(
@@ -370,11 +397,13 @@ async fn check_account_balance_for_resource_via_daemon(
 #[then(expr = "I wait for {word} on wallet daemon {word} to have balance {word} {int}")]
 async fn wait_account_balance_via_daemon(
     world: &mut TariWorld,
+    step: &Step,
     account_name: String,
     wallet_daemon_name: String,
     operator: String,
     amount: i64,
 ) {
+    cucumber_log!("==== Step: {}", step.value);
     let op = match operator.as_str() {
         "gt" => |a, b| a > b,
         "gte" => |a, b| a >= b,
@@ -403,11 +432,13 @@ async fn wait_account_balance_via_daemon(
 #[when(expr = "I check the confidential balance of {word} on wallet daemon {word} the amount is at {word} {int}")]
 async fn check_account_confidential_balance_is_via_daemon(
     world: &mut TariWorld,
+    step: &Step,
     account_name: String,
     wallet_daemon_name: String,
     least_or_most: String,
     amount: i64,
 ) {
+    cucumber_log!("==== Step: {}", step.value);
     // This also refreshes the wallet vaults
     let current_balance = wallet_daemon_client::get_confidential_balance(world, account_name, wallet_daemon_name).await;
     match least_or_most.to_lowercase().as_str() {
@@ -432,6 +463,7 @@ async fn check_account_confidential_balance_is_via_daemon(
 )]
 async fn when_transfer_via_wallet_daemon(
     world: &mut TariWorld,
+    step: &Step,
     amount: i32,
     resource_name: String,
     account_name: String,
@@ -439,6 +471,7 @@ async fn when_transfer_via_wallet_daemon(
     wallet_daemon_name: String,
     outputs_name: String,
 ) {
+    cucumber_log!("==== Step: {}", step.value);
     let amount = Amount::new(amount);
 
     let resource_address = world
@@ -469,12 +502,14 @@ async fn when_transfer_via_wallet_daemon(
 )]
 async fn when_i_create_transfer_proof_via_wallet_daemon(
     world: &mut TariWorld,
+    step: &Step,
     amount: u64,
     source_account_name: String,
     dest_account_name: String,
     outputs_name: String,
     wallet_daemon_name: String,
 ) {
+    cucumber_log!("==== Step: {}", step.value);
     wallet_daemon_client::transfer_stealth(
         world,
         source_account_name,
@@ -494,12 +529,14 @@ async fn when_i_create_transfer_proof_via_wallet_daemon(
 )]
 async fn when_stealth_transfer_via_wallet_daemon(
     world: &mut TariWorld,
+    step: &Step,
     amount: u64,
     account_name: String,
     destination_acc_name: String,
     wallet_daemon_name: String,
     outputs_name: String,
 ) {
+    cucumber_log!("==== Step: {}", step.value);
     wallet_daemon_client::transfer_stealth(
         world,
         account_name,
@@ -513,7 +550,8 @@ async fn when_stealth_transfer_via_wallet_daemon(
 }
 
 #[when(expr = "I set the default account for {word} to {word}")]
-async fn when_i_set_the_default_account(world: &mut TariWorld, wallet_name: String, account_name: String) {
+async fn when_i_set_the_default_account(world: &mut TariWorld, step: &Step, wallet_name: String, account_name: String) {
+    cucumber_log!("==== Step: {}", step.value);
     let wallet = world
         .wallet_daemons
         .get(&wallet_name)

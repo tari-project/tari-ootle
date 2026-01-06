@@ -54,7 +54,6 @@ use log::*;
 use serde::Serialize;
 use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_consensus::consensus_constants::ConsensusConstants;
-use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_epoch_manager::{
     traits::{EpochManagerSpec, LayerOneTransactionSubmitter},
     EpochManagerEvent,
@@ -233,7 +232,9 @@ impl LayerOneTransactionSubmitter for Noop {
 }
 
 #[cfg(feature = "metrics")]
-fn create_metrics_registry(public_key: &RistrettoPublicKey) -> prometheus_client::registry::Registry {
+fn create_metrics_registry(
+    public_key: &tari_crypto::ristretto::RistrettoPublicKey,
+) -> prometheus_client::registry::Registry {
     use std::borrow::Cow;
     prometheus_client::registry::Registry::with_labels(
         [

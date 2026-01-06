@@ -212,7 +212,7 @@ pub async fn spawn_validator_node(
     // get the public key of the VN
     let public_key = get_vn_identity(json_rpc_port).await;
 
-    crate::cucumber_log!(format!("Validator node {} started", name));
+    crate::cucumber_log!("Validator node {} started", name);
     // make the new vn able to be referenced by other processes
     ValidatorNodeProcess {
         name: name.clone(),

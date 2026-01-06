@@ -219,7 +219,7 @@ pub async fn spawn_minotari_wallet(world: &mut TariWorld, wallet_name: String, b
     //     status = wallet_client.get_network_status(Empty {}).await.unwrap().into_inner();
     // }
 
-    crate::cucumber_log!(format!("Minotari wallet {} started", wallet_name));
+    crate::cucumber_log!("Minotari wallet {} started", wallet_name);
     world.wallets.insert(wallet_name, wallet_process);
 }
 

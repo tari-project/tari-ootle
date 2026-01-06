@@ -31,6 +31,15 @@ enum Pool {
     B,
 }
 
+impl Pool {
+    fn other(self) -> Self {
+        match self {
+            Self::A => Self::B,
+            Self::B => Self::A,
+        }
+    }
+}
+
 #[template]
 mod template {
     use alloc::string::ToString;
@@ -47,9 +56,9 @@ mod template {
 
     impl TwoResourceLiquidityPool {
         // Creates a new two-resource liquidity pool component for the resources A and B
-        pub fn instantiate(
+        pub fn create(
             owner_rule: OwnerRule,
-            pool_token_rules: AccessRule,
+            contribute_and_redeem_rule: AccessRule,
             a_addr: ResourceAddress,
             b_addr: ResourceAddress,
             mut metadata: Metadata,
@@ -67,8 +76,8 @@ mod template {
                 .with_divisibility(0)
                 .with_access_rules(
                     ResourceAccessRules::new()
-                        .mintable(pool_token_rules.clone())
-                        .burnable(pool_token_rules.clone()),
+                        .mintable(contribute_and_redeem_rule.clone())
+                        .burnable(contribute_and_redeem_rule.clone()),
                 )
                 .with_owner_rule(owner_rule.clone())
                 .with_metadata(metadata)
@@ -86,9 +95,13 @@ mod template {
             .with_address_allocation_opt(address_allocation)
             .with_access_rules(
                 ComponentAccessRules::new()
-                    .add_method_rule("add_liquidity", pool_token_rules.clone())
-                    .add_method_rule("remove_liquidity", pool_token_rules.clone())
-                    .add_method_rule("contribute", pool_token_rules)
+                    // Only owners can rebalance the pool by adding/removing liquidity directly
+                    .add_method_rule("protected_add_liquidity", AccessRule::DenyAll)
+                    .add_method_rule("protected_remove_liquidity", AccessRule::DenyAll)
+                    // Since we have to mint and burn LP tokens during contribute/redeem, we set these methods to the same
+                    // access rule as the LP token mint/burn rules
+                    .add_method_rule("contribute", contribute_and_redeem_rule.clone())
+                    .add_method_rule("redeem", contribute_and_redeem_rule)
                     .default(AccessRule::AllowAll),
             )
             .create()
@@ -252,7 +265,7 @@ mod template {
             (a_bucket, b_bucket)
         }
 
-        pub fn add_liquidity(&mut self, bucket: Bucket) {
+        pub fn protected_add_liquidity(&mut self, bucket: Bucket) {
             // check that the buckets are correct
             let resource = bucket.resource_address();
             emit_event("add_liquidity", [
@@ -265,7 +278,7 @@ mod template {
             self.get_pool_vault(pool).deposit(bucket);
         }
 
-        pub fn remove_liquidity(&mut self, resource_address: ResourceAddress, amount: Amount) -> Bucket {
+        pub fn protected_remove_liquidity(&mut self, resource_address: ResourceAddress, amount: Amount) -> Bucket {
             let pool = self.get_pool_from_resource(resource_address);
             emit_event("remove_liquidity", [
                 ("resource_address", resource_address.to_string()),
@@ -273,6 +286,47 @@ mod template {
             ]);
 
             self.get_pool_vault(pool).withdraw(amount)
+        }
+
+        /// A simple constant product swap implementation without fees. This is provided as a convenience but
+        /// may not be generally useful.
+        /// Users of this template can implement their own swap logic with fees as needed and use an instance of this
+        /// pool template as a sub-component.
+        pub fn swap_constant_product(&mut self, input_bucket: Bucket) -> Bucket {
+            let input_resource = input_bucket.resource_address();
+
+            let input_amount = input_bucket.amount();
+            if input_amount.is_zero() {
+                panic!("Cannot swap zero amount");
+            }
+
+            let input_pool = self.get_pool_from_resource(input_resource);
+            let output_pool = input_pool.other();
+
+            let input_reserve = self.get_pool_vault(input_pool).balance();
+            let output_reserve = self.get_pool_vault(output_pool).balance();
+
+            // Simple constant product formula without fees
+            // Δy = y.Δx / (X + Δx)
+            let output_amount = input_amount
+                .checked_mul(output_reserve)
+                .and_then(|num| {
+                    num.checked_div(input_reserve.checked_add(input_amount).expect("Overflow in swap calc"))
+                })
+                .expect("Overflow in swap calculation");
+
+            // Perform the swap
+            self.get_pool_vault(input_pool).deposit(input_bucket);
+            let output_bucket = self.get_pool_vault(output_pool).withdraw(output_amount);
+
+            emit_event("swap", [
+                ("input_resource", input_resource.to_string()),
+                ("input_amount", input_amount.to_string()),
+                ("output_resource", output_bucket.resource_address().to_string()),
+                ("output_amount", output_amount.to_string()),
+            ]);
+
+            output_bucket
         }
 
         pub fn get_redemption_value(&self, lp_redeem_amount: Amount) -> (Amount, Amount) {

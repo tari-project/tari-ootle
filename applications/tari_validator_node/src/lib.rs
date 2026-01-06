@@ -70,7 +70,7 @@ pub enum ShardKeyError {
     #[error("Path is not a file")]
     NotFile,
     #[error("Malformed shard key file: {0}")]
-    JsonError(#[from] json5::Error),
+    JsonError(#[from] serde_json5::Error),
     #[error(transparent)]
     Io(#[from] io::Error),
     #[error("Not yet mined")]

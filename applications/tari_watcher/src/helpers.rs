@@ -37,9 +37,12 @@ pub async fn read_registration_file<P: AsRef<Path>>(
         "Using VN registration file at: {}",
         vn_registration_file.as_ref().display()
     );
-    match fs::read_to_string(vn_registration_file).await {
-        Ok(info) => {
-            let reg = json5::from_str(&info)?;
+    match fs::File::open(vn_registration_file).await {
+        Ok(file) => {
+            let mut file = file
+                .try_into_std()
+                .map_err(|_| anyhow!("Failed to convert async file to std file (inflight operations)"))?;
+            let reg = serde_json5::from_reader(&mut file)?;
             Ok(Some(reg))
         },
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),

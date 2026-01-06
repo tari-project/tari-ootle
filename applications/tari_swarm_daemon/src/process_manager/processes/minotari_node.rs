@@ -1,9 +1,10 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::fs::File;
+
 use anyhow::{anyhow, Context};
 use minotari_node_grpc_client::{grpc, BaseNodeGrpcClient};
-use tokio::{fs::File, io::AsyncReadExt};
 
 use crate::process_manager::Instance;
 
@@ -34,16 +35,13 @@ impl MinoTariNodeProcess {
         Ok(client)
     }
 
-    pub async fn get_identity(&self) -> anyhow::Result<String> {
+    pub fn get_identity(&self) -> anyhow::Result<String> {
         // We cannot call identify because we'd need to override the allowed methods via cli, and this is not
         // supported. So we read from the base node identity file
         let id_file = self.instance.base_path().join("config").join("base_node_id.json");
-        let mut config = File::open(&id_file)
-            .await
-            .with_context(|| format!("Loading base node ID failed {}", id_file.display()))?;
-        let mut s = String::new();
-        config.read_to_string(&mut s).await?;
-        let identity = json5::from_str::<serde_json::Value>(&s)?;
+        let mut config =
+            File::open(&id_file).with_context(|| format!("Loading base node ID failed {}", id_file.display()))?;
+        let identity = serde_json5::from_reader::<_, serde_json::Value>(&mut config)?;
         let public_key = identity["public_key"]
             .as_str()
             .ok_or_else(|| anyhow!("public_key not found or not a string"))?;

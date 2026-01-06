@@ -4,7 +4,7 @@
 use std::{fs::File, path::PathBuf};
 
 use anyhow::anyhow;
-use minotari_node_grpc_client::grpc;
+use minotari_node_grpc_client::grpc::{self, RevalidateRequest};
 use minotari_wallet_grpc_client::WalletGrpcClient;
 use serde::Serialize;
 use tari_crypto::tari_utilities::ByteArray;
@@ -189,7 +189,12 @@ impl MinoTariWalletProcess {
 
     pub async fn revalidate_all_transactions(&self) -> anyhow::Result<()> {
         let mut client = self.connect_client().await?;
-        client.revalidate_all_transactions(grpc::RevalidateRequest {}).await?;
+        client
+            .revalidate_all_transactions(RevalidateRequest {
+                transaction_mode: RevalidateRequest::Mode::Full,
+                output_mode: RevalidateRequest::Mode::Full,
+            })
+            .await?;
         Ok(())
     }
 

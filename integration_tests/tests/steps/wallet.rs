@@ -65,10 +65,71 @@ async fn when_i_burn_on_wallet(
 
     assert!(resp.is_success);
 
-    world.claim_proofs.insert(proof_name, CucumberClaimProof::Pending {
-        commitment: PedersenCommitmentBytes::from_bytes(&resp.commitment).unwrap(),
-        nonce_id: nonce.id,
-    });
+    // Extract kernel signature datai
+    let kernel_excess_sig_nonce = resp.kernel_excess_nonce.clone();
+    let kernel_excess_sig_signature = resp.kernel_excess_signature.clone();
+
+    integration_tests::cucumber_log!(
+        "Burn transaction created with kernel_excess_sig nonce: {}, signature: {}",
+        hex::encode(&kernel_excess_sig_nonce),
+        hex::encode(&kernel_excess_sig_signature)
+    );
+
+    // Get the base node connected to this wallet to call the HTTP endpoint
+    let base_node_name = world
+        .wallets
+        .iter()
+        .find(|(name, _)| *name == &wallet_name)
+        .and_then(|(_, wallet_process)| {
+            // Find which base node this wallet is connected to by checking spawn parameters
+            // For now, we'll use the first base node
+            world.base_nodes.keys().next().cloned()
+        })
+        .expect("No base node found");
+
+    let base_node = world
+        .base_nodes
+        .get(&base_node_name)
+        .unwrap_or_else(|| panic!("Base node {} not found", base_node_name));
+
+    // Call the base node HTTP endpoint to get kernel merkle proof
+    let http_client = reqwest::Client::new();
+    let url = format!(
+        "http://127.0.0.1:{}/generate_kernel_merkle_proof?excess_sig_public_nonce={}&excess_sig_signature={}",
+        base_node.http_port,
+        hex::encode(&kernel_excess_sig_nonce),
+        hex::encode(&kernel_excess_sig_signature)
+    );
+
+    integration_tests::cucumber_log!("Calling base node HTTP endpoint: {}", url);
+
+    // Try to get the kernel proof (it may not be available yet if not mined)
+    match http_client.get(&url).send().await {
+        Ok(response) => {
+            if response.status().is_success() {
+                let proof_response = response.text().await.unwrap();
+                integration_tests::cucumber_log!("Kernel merkle proof response: {}", proof_response);
+            } else {
+                integration_tests::cucumber_log!(
+                    "Kernel merkle proof not yet available (status: {}). This is expected if the transaction hasn't been mined yet.",
+                    response.status()
+                );
+            }
+        },
+        Err(e) => {
+            integration_tests::cucumber_log!("Failed to call kernel merkle proof endpoint: {}", e);
+        },
+    }
+
+    world.claim_proofs.insert(
+        proof_name,
+        CucumberClaimProof::Pending {
+            commitment: PedersenCommitmentBytes::from_bytes(&resp.commitment).unwrap(),
+            nonce_id: nonce.id,
+            kernel_excess_sig_nonce,
+            kernel_excess_sig_signature,
+        },
+    );
 }
 
 #[when(expr = "I wait for proof {word} to confirm on wallet {word}")]
@@ -82,7 +143,13 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
         panic!("Claim proof {} not found", proof_name);
     });
 
-    let CucumberClaimProof::Pending { commitment, nonce_id } = proof else {
+    let CucumberClaimProof::Pending {
+        commitment,
+        nonce_id,
+        kernel_excess_sig_nonce,
+        kernel_excess_sig_signature,
+    } = proof
+    else {
         // Already confirmed
         return Ok(());
     };
@@ -114,6 +181,43 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
             sleep(Duration::from_secs(1)).await;
             continue;
         };
+
+        // Now that the proof is confirmed, call the base node HTTP endpoint to get kernel merkle proof
+        integration_tests::cucumber_log!(
+            "Proof confirmed! Now calling base node HTTP endpoint to get kernel merkle proof"
+        );
+
+        let base_node = world.base_nodes.values().next().expect("No base node found");
+
+        let http_client = reqwest::Client::new();
+        let url = format!(
+            "http://127.0.0.1:{}/generate_kernel_merkle_proof?excess_sig_public_nonce={}&excess_sig_signature={}",
+            base_node.http_port,
+            hex::encode(kernel_excess_sig_nonce),
+            hex::encode(kernel_excess_sig_signature)
+        );
+
+        integration_tests::cucumber_log!("Calling base node HTTP endpoint: {}", url);
+
+        match http_client.get(&url).send().await {
+            Ok(response) => {
+                if response.status().is_success() {
+                    let proof_response = response.text().await.unwrap();
+                    integration_tests::cucumber_log!("SUCCESS! Kernel merkle proof response: {}", proof_response);
+                } else {
+                    let status = response.status();
+                    let error_text = response.text().await.unwrap_or_default();
+                    integration_tests::cucumber_log!(
+                        "WARNING: Failed to get kernel merkle proof (status: {}): {}",
+                        status,
+                        error_text
+                    );
+                }
+            },
+            Err(e) => {
+                integration_tests::cucumber_log!("ERROR: Failed to call kernel merkle proof endpoint: {}", e);
+            },
+        }
 
         let claim_proof = resp.claim_proof.ok_or_else(|| anyhow!("No claim proof in response"))?;
         let ownership_proof = claim_proof
@@ -187,9 +291,12 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
                 .map_err(|e| anyhow!("Encrypted data length is out of bounds: {e}",))?,
         };
 
-        world.claim_proofs.insert(proof_name, CucumberClaimProof::Confirmed {
-            proof: Box::new(proof.clone()),
-        });
+        world.claim_proofs.insert(
+            proof_name,
+            CucumberClaimProof::Confirmed {
+                proof: Box::new(proof.clone()),
+            },
+        );
         break;
     }
 

@@ -10,10 +10,7 @@ use minotari_node_grpc_client::BaseNodeGrpcClient;
 use minotari_wallet_grpc_client::WalletGrpcClient;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_ootle_common_types::layer_one_transaction::{
-    LayerOnePayloadType,
-    LayerOneTransactionDef,
-    ValidatorExitParams,
-    ValidatorRegistrationParams,
+    LayerOnePayloadType, LayerOneTransactionDef, ValidatorExitParams, ValidatorRegistrationParams,
 };
 use tari_sidechain::EvictionProof;
 use tari_transaction_components::transaction_components::{memo_field::TxType, MemoField};

@@ -230,10 +230,57 @@ async fn when_i_burn_funds_with_wallet_daemon(
 
     let commitment = PedersenCommitmentBytes::from_bytes(&resp.commitment).expect("commitment parse error");
 
-    world.claim_proofs.insert(proof_name, CucumberClaimProof::Pending {
-        commitment,
-        nonce_id: nonce.id,
-    });
+    // Extract kernel signature data
+    let kernel_excess_sig_nonce = resp.kernel_excess_nonce.clone();
+    let kernel_excess_sig_signature = resp.kernel_excess_signature.clone();
+
+    integration_tests::cucumber_log!(
+        "Burn transaction created with kernel_excess_sig nonce: {}, signature: {}",
+        hex::encode(&kernel_excess_sig_nonce),
+        hex::encode(&kernel_excess_sig_signature)
+    );
+
+    // Get the base node to call the HTTP endpoint
+    let base_node = world.base_nodes.values().next().expect("No base node found");
+
+    // Call the base node HTTP endpoint to get kernel merkle proof
+    let http_client = reqwest::Client::new();
+    let url = format!(
+        "http://127.0.0.1:{}/generate_kernel_merkle_proof?excess_sig_public_nonce={}&excess_sig_signature={}",
+        base_node.http_port,
+        hex::encode(&kernel_excess_sig_nonce),
+        hex::encode(&kernel_excess_sig_signature)
+    );
+
+    integration_tests::cucumber_log!("Calling base node HTTP endpoint: {}", url);
+
+    // Try to get the kernel proof (it may not be available yet if not mined)
+    match http_client.get(&url).send().await {
+        Ok(response) => {
+            if response.status().is_success() {
+                let proof_response = response.text().await.unwrap();
+                integration_tests::cucumber_log!("Kernel merkle proof response: {}", proof_response);
+            } else {
+                integration_tests::cucumber_log!(
+                    "Kernel merkle proof not yet available (status: {}). This is expected if the transaction hasn't been mined yet.",
+                    response.status()
+                );
+            }
+        },
+        Err(e) => {
+            integration_tests::cucumber_log!("Failed to call kernel merkle proof endpoint: {}", e);
+        },
+    }
+
+    world.claim_proofs.insert(
+        proof_name,
+        CucumberClaimProof::Pending {
+            commitment,
+            nonce_id: nonce.id,
+            kernel_excess_sig_nonce,
+            kernel_excess_sig_signature,
+        },
+    );
 }
 
 #[when(regex = r"I check the balance of (\S+) on wallet daemon (\S+) the amount is (at )?(\S+) (\d+)")]

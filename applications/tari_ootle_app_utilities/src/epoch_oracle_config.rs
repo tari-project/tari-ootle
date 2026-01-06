@@ -79,7 +79,7 @@ impl ConfiguredOracleConfig {
                     .context("Failed to read oracle config file")?;
                 toml::from_str(&s).context("Failed to parse oracle TOML config file")?
             },
-            "json" => {
+            "json" | "json5" => {
                 let mut file = file.into_std().await;
                 serde_json5::from_reader(&mut file).context("Failed to parse oracle JSON config file")?
             },

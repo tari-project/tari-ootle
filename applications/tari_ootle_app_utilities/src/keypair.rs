@@ -222,8 +222,8 @@ pub fn load_from_json<P: AsRef<Path>, T: DeserializeOwned>(path: P) -> Result<Op
         return Ok(None);
     }
 
-    let contents = fs::File::open(path)?;
-    let object = serde_json5::from_reader(&contents)?;
+    let mut file = fs::File::open(path)?;
+    let object = serde_json5::from_reader(&mut file)?;
     Ok(Some(object))
 }
 

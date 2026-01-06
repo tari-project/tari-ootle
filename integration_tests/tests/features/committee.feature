@@ -15,7 +15,7 @@ Feature: Committee scenarios
     """
 
     # Initialize indexer and connect wallet daemon
-    When I create an account ACC via the wallet daemon WALLETD with 2000000 XTR
+    When I create an account ACC via the wallet daemon WALLETD with 10000 XTR
     When wallet daemon WALLETD publishes the template "counter" using account ACC
     Then the template "counter" is listed as registered by all validator nodes
 
@@ -31,7 +31,7 @@ Feature: Committee scenarios
     """
 
     # Register the "counter" template
-    When I create an account ACC via the wallet daemon WALLETD with 2000000 XTR
+    When I create an account ACC via the wallet daemon WALLETD with 10000 XTR
     When wallet daemon WALLETD publishes the template "counter" using account ACC
     Then the template "counter" is listed as registered by all validator nodes
 

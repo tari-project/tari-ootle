@@ -4,7 +4,6 @@
 use std::{net::SocketAddr, time::Duration};
 
 use axum::{
-    middleware,
     routing::{get, post},
     Extension,
     Router,
@@ -73,7 +72,7 @@ impl Server {
     }
 
     pub async fn spawn(
-        mut self,
+        #[allow(unused_mut)] mut self,
         preferred_addr: SocketAddr,
         services: &Services,
         shutdown: ShutdownSignal,
@@ -153,7 +152,7 @@ impl Server {
 
         #[cfg(feature = "metrics")]
         let router = router
-            .layer(middleware::from_fn_with_state(
+            .layer(axum::middleware::from_fn_with_state(
                 metrics::register(&mut self.registry),
                 metrics::layer,
             ))

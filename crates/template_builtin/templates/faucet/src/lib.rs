@@ -5,7 +5,7 @@ use tari_template_lib::prelude::*;
 
 #[template]
 mod template {
-    const FAUCET_MAX: u64 = 1_000_000_000;
+    const FAUCET_MAX: u64 = 10_000 * 1_000_000;
     use super::*;
 
     pub struct XtrFaucet {

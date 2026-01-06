@@ -33,7 +33,7 @@ impl ProcessDefinition for MinotariNode {
         let base_nodes = context.minotari_nodes();
         let mut base_node_addresses = Vec::new();
         for base_node in base_nodes {
-            let identity = base_node.get_identity().await?;
+            let identity = base_node.get_identity()?;
             debug!("Base node identity: {identity}");
             base_node_addresses.push(identity);
         }

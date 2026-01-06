@@ -4,7 +4,7 @@ import sys
 import glob
 import toml
 
-def get_workspace_dependencies(root_path):
+def get_workspace_dependencies(root_path: str) -> list[str]:
     cargo_path = os.path.join(root_path, "Cargo.toml")
     with open(cargo_path, 'r') as f:
         data = toml.load(f)

@@ -93,7 +93,8 @@ pub async fn spawn_base_node(world: &mut TariWorld, bn_name: String) {
                 },
             };
 
-            crate::cucumber_log!("Using base_node temp_dir: {}", temp_dir.display());
+            let tmp_dir_display = temp_dir.display();
+            crate::cucumber_log!("Using base_node temp_dir: {}", tmp_dir_display);
             base_node_config.common.base_path.clone_from(&temp_dir);
             base_node_config.base_node.network = Network::LocalNet;
             base_node_config.base_node.grpc_enabled = true;

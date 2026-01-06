@@ -178,7 +178,6 @@ fern = "0.7.1"
 futures = "0.3.30"
 futures-util = "0.3"
 futures-bounded = "0.2.3"
-jfs = "0.7.1"
 json5 = "0.4.1"
 jsonwebtoken = "9.3.1"
 hashbrown = { version = "0.13.2" }
@@ -229,7 +228,7 @@ syn = "2.0"
 tempfile = "3.3.0"
 thiserror = "2.0.17"
 time = "0.3.15"
-tokio = { version = "1.47.1", default-features = false }
+tokio = { version = "1.49.0", default-features = false }
 tokio-stream = "0.1.17"
 tokio-util = "0.7.16"
 tonic = "0.13.1"

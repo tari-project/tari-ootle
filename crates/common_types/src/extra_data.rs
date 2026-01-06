@@ -24,8 +24,6 @@ use std::collections::BTreeMap;
 
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "ts")]
-use ts_rs::TS;
 
 use crate::MaxSizeBytes;
 
@@ -37,11 +35,14 @@ type ExtraFieldValue = MaxSizeBytes<MAX_DATA_SIZE>;
 #[borsh(use_discriminant = true)]
 pub enum ExtraFieldKey {
     SidechainId = 0x00,
+    Custom = 0xff,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Default, BorshSerialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export))]
-pub struct ExtraData(#[cfg_attr(feature = "ts", ts(type = "string"))] BTreeMap<ExtraFieldKey, ExtraFieldValue>);
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct ExtraData(
+    #[cfg_attr(feature = "ts", ts(type = "Record<string, any>"))] BTreeMap<ExtraFieldKey, ExtraFieldValue>,
+);
 
 impl ExtraData {
     pub const fn new() -> Self {

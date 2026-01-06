@@ -9,7 +9,7 @@ Feature: Account transfers
     Given a network with registered validator VN and wallet daemon WALLET_D
 
     # Publish the "faucet" template
-    When I create an account ACC via the wallet daemon WALLET_D with 2000000 XTR
+    When I create an account ACC via the wallet daemon WALLET_D with 10000 XTR
     When wallet daemon WALLET_D publishes the template "faucet" using account ACC
 
     # Create the sender account
@@ -63,7 +63,7 @@ Feature: Account transfers
     Given a network with registered validator VN and wallet daemon WALLET_D
 
     # Publish the "faucet" template
-    When I create an account ACC via the wallet daemon WALLET_D with 2000000 XTR
+    When I create an account ACC via the wallet daemon WALLET_D with 10000 XTR
     When wallet daemon WALLET_D publishes the template "faucet" using account ACC
 
     # Create the sender account with some tokens

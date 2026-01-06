@@ -9535,6 +9535,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_json5"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d34d03f54462862f2a42918391c9526337f53171eaa4d8894562be7f252edd3"
+dependencies = [
+ "pest",
+ "pest_derive",
+ "serde",
+]
+
+[[package]]
 name = "serde_path_to_error"
 version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11191,13 +11202,12 @@ dependencies = [
  "bincode 2.0.1",
  "blake2",
  "config",
- "json5",
  "libp2p-identity",
  "log",
  "multiaddr 0.18.1",
  "rand 0.8.5",
  "serde",
- "serde_json",
+ "serde_json5",
  "tari_base_node_client",
  "tari_bor",
  "tari_common",
@@ -11729,7 +11739,6 @@ dependencies = [
  "humantime 2.3.0",
  "include_dir",
  "indexmap 2.12.0",
- "json5",
  "lockfile",
  "log",
  "mime_guess",
@@ -11738,6 +11747,7 @@ dependencies = [
  "nix 0.28.0",
  "serde",
  "serde_json",
+ "serde_json5",
  "slug",
  "tari_common_types",
  "tari_crypto",
@@ -12004,7 +12014,6 @@ dependencies = [
  "futures 0.3.31",
  "include_dir",
  "indexmap 2.12.0",
- "json5",
  "lazy_static",
  "libp2p",
  "libsqlite3-sys",
@@ -12017,6 +12026,7 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "serde_json",
+ "serde_json5",
  "sqlite_message_logger",
  "std-semaphore",
  "tari_base_node_client",
@@ -12129,7 +12139,6 @@ dependencies = [
  "clap 3.2.25",
  "fern",
  "humantime 2.3.0",
- "json5",
  "log",
  "minotari_app_grpc",
  "minotari_node_grpc_client",
@@ -12137,6 +12146,7 @@ dependencies = [
  "reqwest 0.11.27",
  "serde",
  "serde_json",
+ "serde_json5",
  "tari_crypto",
  "tari_ootle_common_types",
  "tari_shutdown",
@@ -12375,9 +12385,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.48.0"
+version = "1.49.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff360e02eab121e0bc37a2d3b4d4dc622e6eda3a8e5253d5435ecf5bd4c68408"
+checksum = "72a2903cd7736441aac9df9d7688bd0ce48edccaadf181c3b90be801e81d3d86"
 dependencies = [
  "bytes 1.10.1",
  "libc",

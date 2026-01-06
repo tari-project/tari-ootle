@@ -61,7 +61,7 @@ lazy_static = { workspace = true }
 futures = { workspace = true }
 include_dir = { workspace = true }
 indexmap = { workspace = true }
-json5 = { workspace = true }
+serde_json5 = { workspace = true }
 libsqlite3-sys = { workspace = true, features = ["bundled"] }
 log = { workspace = true, features = ["std"] }
 log4rs = { workspace = true, features = [

@@ -1,4 +1,4 @@
-//   Copyright 2025 The Tari Project
+//   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
 export * from "./types/AbortReason";
@@ -11,6 +11,7 @@ export * from "./types/Amount";
 export * from "./types/ArgDef";
 export * from "./types/AuthHook";
 export * from "./types/BlockHeader";
+export * from "./types/BlockId";
 export * from "./types/Block";
 export * from "./types/BucketId";
 export * from "./types/Bytes";

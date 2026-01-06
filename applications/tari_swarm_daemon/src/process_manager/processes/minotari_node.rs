@@ -43,7 +43,7 @@ impl MinoTariNodeProcess {
             .with_context(|| format!("Loading base node ID failed {}", id_file.display()))?;
         let mut s = String::new();
         config.read_to_string(&mut s).await?;
-        let identity = json5::from_str::<serde_json::Value>(&s)?;
+        let identity = serde_json5::from_str::<serde_json::Value>(&s)?;
         let public_key = identity["public_key"]
             .as_str()
             .ok_or_else(|| anyhow!("public_key not found or not a string"))?;

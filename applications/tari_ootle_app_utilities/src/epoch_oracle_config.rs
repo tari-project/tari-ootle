@@ -81,7 +81,7 @@ impl ConfiguredOracleConfig {
             },
             "json" => {
                 let mut file = file.into_std().await;
-                serde_json::from_reader(&mut file).context("Failed to parse oracle JSON config file")?
+                serde_json5::from_reader(&mut file).context("Failed to parse oracle JSON config file")?
             },
             ext => bail!("Failed to load oracle config. Unsupported file extension {}", ext),
         };

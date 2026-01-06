@@ -36,7 +36,7 @@ import { createContext, useState, useEffect } from "react";
 import { getEpochManagerStats, getIdentity, getShardKey } from "./utils/json_rpc";
 import TransactionDetails from "./routes/Transactions/TransactionDetails";
 import BlockDetails from "./routes/Blocks/BlockDetails";
-import type { GetEpochManagerStatsResponse, VNGetIdentityResponse } from "@tari-project/typescript-bindings";
+import type { GetEpochManagerStatsResponse, VNGetIdentityResponse } from "@tari-project/ootle-ts-bindings";
 
 interface IContext {
   epoch?: GetEpochManagerStatsResponse;

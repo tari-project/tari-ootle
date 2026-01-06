@@ -10,7 +10,7 @@ import {
   IoWarningOutline,
 } from "react-icons/io5";
 import { useTheme } from "@mui/material/styles";
-import type { OutputStatus } from "@tari-project/typescript-bindings";
+import type { OutputStatus } from "@tari-project/ootle-ts-bindings";
 
 interface StatusChipProps {
   status: OutputStatus;

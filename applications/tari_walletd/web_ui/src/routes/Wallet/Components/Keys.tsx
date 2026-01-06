@@ -35,7 +35,7 @@ import { Form } from "react-router-dom";
 import Button from "@mui/material/Button/Button";
 import { DataTableCell } from "@components/StyledComponents";
 import FetchStatusCheck from "@components/FetchStatusCheck";
-import { KeyId } from "@tari-project/typescript-bindings";
+import { KeyId } from "@tari-project/ootle-ts-bindings";
 
 function Key([keyId, pk, active]: [KeyId, string, boolean], setActive: (key_id: KeyId) => void) {
   const rowKey =

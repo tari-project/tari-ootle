@@ -24,7 +24,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { ApiError } from "@api/helpers/types";
 import queryClient from "@api/queryClient";
 import { keysCreate, keysList, keysSetActive } from "@utils/json_rpc";
-import { KeyBranch } from "@tari-project/typescript-bindings";
+import { KeyBranch } from "@tari-project/ootle-ts-bindings";
 
 export const useKeysList = (branch: KeyBranch) => {
   return useQuery({

@@ -40,7 +40,7 @@ import SubstateChanges from "./SubstateChanges";
 import type {
   IndexerTransactionFinalizedResult,
   IndexerGetTransactionResultRequest,
-} from "@tari-project/typescript-bindings";
+} from "@tari-project/ootle-ts-bindings";
 import { validateHash } from "../../../utils/helpers";
 
 // Type guard to check if result is finalized

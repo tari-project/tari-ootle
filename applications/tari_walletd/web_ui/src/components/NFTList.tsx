@@ -26,7 +26,7 @@ import type { ApiError } from "@api/helpers/types";
 import { DataTableCell } from "@components/StyledComponents";
 import { renderJson, shortenString, shortenSubstateId, toHexString } from "@utils/helpers";
 import { IoCheckmarkOutline, IoCloseOutline } from "react-icons/io5";
-import type { NonFungibleId, NonFungibleToken, ListNftsResponse } from "@tari-project/typescript-bindings";
+import type { NonFungibleId, NonFungibleToken, ListNftsResponse } from "@tari-project/ootle-ts-bindings";
 import { convertCborValue } from "@utils/cbor";
 
 function NftListItem({ nft }: { nft: NonFungibleToken }) {

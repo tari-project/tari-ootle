@@ -37,7 +37,7 @@ import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
 import { DataTableCell } from "../../../Components/StyledComponents";
 import { useState, useEffect } from "react";
-import type { Event } from "@tari-project/typescript-bindings";
+import type { Event } from "@tari-project/ootle-ts-bindings";
 
 interface EventsProps {
   events: Event[];

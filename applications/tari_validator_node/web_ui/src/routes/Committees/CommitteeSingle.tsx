@@ -30,7 +30,7 @@ import TableContainer from "@mui/material/TableContainer";
 import TablePagination from "@mui/material/TablePagination";
 import "./Committees.css";
 import { emptyRows } from "../../utils/helpers";
-import { CommitteeMember } from "@tari-project/typescript-bindings";
+import { CommitteeMember } from "@tari-project/ootle-ts-bindings";
 
 function Committee({
                      begin,

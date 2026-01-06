@@ -29,7 +29,7 @@ import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import { IoArrowDownCircle, IoArrowUpCircle } from "react-icons/io5";
 import CodeBlockExpand from "@components/CodeBlock";
 import { useTheme } from "@mui/material/styles";
-import { Substate, SubstateId, substateIdToString, TransactionResult } from "@tari-project/typescript-bindings";
+import { Substate, SubstateId, substateIdToString, TransactionResult } from "@tari-project/ootle-ts-bindings";
 import CopyAddress from "@components/CopyAddress";
 
 function renderSubstateDetails(substate: any, id: SubstateId) {
@@ -38,30 +38,30 @@ function renderSubstateDetails(substate: any, id: SubstateId) {
   }
 
   const substateObj = substate.substate || substate;
-  
+
   if (substateObj?.NonFungible) {
     const nft = substateObj.NonFungible;
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <Typography variant="subtitle2">NFT Details</Typography>
-        
+
         {nft.data && (
           <Box>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Immutable Data:</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              Immutable Data:
+            </Typography>
             <Box sx={{ pl: 2 }}>
               {nft.data.Tag && nft.data.Tag[1]?.Map && (
                 <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
                   {nft.data.Tag[1].Map.map((item: any, index: number) => (
                     <Box key={index} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                      <Chip 
-                        label={item[0]?.Text || JSON.stringify(item[0])} 
-                        size="small" 
-                        color="primary" 
-                        variant="outlined" 
+                      <Chip
+                        label={item[0]?.Text || JSON.stringify(item[0])}
+                        size="small"
+                        color="primary"
+                        variant="outlined"
                       />
-                      <Typography variant="body2">
-                        {item[1]?.Text || JSON.stringify(item[1])}
-                      </Typography>
+                      <Typography variant="body2">{item[1]?.Text || JSON.stringify(item[1])}</Typography>
                     </Box>
                   ))}
                 </Box>
@@ -69,24 +69,24 @@ function renderSubstateDetails(substate: any, id: SubstateId) {
             </Box>
           </Box>
         )}
-        
+
         {nft.mutable_data && (
           <Box>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Mutable Data:</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              Mutable Data:
+            </Typography>
             <Box sx={{ pl: 2 }}>
               {nft.mutable_data.Map && (
                 <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
                   {nft.mutable_data.Map.map((item: any, index: number) => (
                     <Box key={index} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                      <Chip 
-                        label={item[0]?.Text || JSON.stringify(item[0])} 
-                        size="small" 
-                        color="secondary" 
-                        variant="outlined" 
+                      <Chip
+                        label={item[0]?.Text || JSON.stringify(item[0])}
+                        size="small"
+                        color="secondary"
+                        variant="outlined"
                       />
-                      <Typography variant="body2">
-                        {item[1]?.Text || JSON.stringify(item[1])}
-                      </Typography>
+                      <Typography variant="body2">{item[1]?.Text || JSON.stringify(item[1])}</Typography>
                     </Box>
                   ))}
                 </Box>
@@ -97,30 +97,36 @@ function renderSubstateDetails(substate: any, id: SubstateId) {
       </Box>
     );
   }
-  
+
   if (substateObj?.Vault) {
     const vault = substateObj.Vault;
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <Typography variant="subtitle2">Vault Details</Typography>
-        
+
         {vault.resource_container && (
           <Box>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Resource Container:</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              Resource Container:
+            </Typography>
             <Box sx={{ pl: 2 }}>
               {vault.resource_container.Confidential && (
                 <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    <Typography variant="body2" color="text.secondary">Address:</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Address:
+                    </Typography>
                     <CopyAddress address={vault.resource_container.Confidential.address} />
                   </Box>
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    <Typography variant="body2" color="text.secondary">Revealed Amount:</Typography>
-                    <Chip 
-                      label={vault.resource_container.Confidential.revealed_amount} 
-                      size="small" 
-                      color="success" 
-                      variant="outlined" 
+                    <Typography variant="body2" color="text.secondary">
+                      Revealed Amount:
+                    </Typography>
+                    <Chip
+                      label={vault.resource_container.Confidential.revealed_amount}
+                      size="small"
+                      color="success"
+                      variant="outlined"
                     />
                   </Box>
                 </Box>
@@ -128,20 +134,24 @@ function renderSubstateDetails(substate: any, id: SubstateId) {
               {vault.resource_container.NonFungible && (
                 <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    <Typography variant="body2" color="text.secondary">Address:</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Address:
+                    </Typography>
                     <CopyAddress address={vault.resource_container.NonFungible.address} />
                   </Box>
                   {vault.resource_container.NonFungible.token_ids && (
                     <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                      <Typography variant="body2" color="text.secondary">Token IDs:</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Token IDs:
+                      </Typography>
                       <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
                         {vault.resource_container.NonFungible.token_ids.map((token: any, index: number) => (
-                          <Chip 
+                          <Chip
                             key={index}
-                            label={token.Uint64 || JSON.stringify(token)} 
-                            size="small" 
-                            color="info" 
-                            variant="outlined" 
+                            label={token.Uint64 || JSON.stringify(token)}
+                            size="small"
+                            color="info"
+                            variant="outlined"
                           />
                         ))}
                       </Box>
@@ -155,39 +165,26 @@ function renderSubstateDetails(substate: any, id: SubstateId) {
       </Box>
     );
   }
-  
+
   if (substateObj?.Resource) {
     const resource = substateObj.Resource;
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <Typography variant="subtitle2">Resource Details</Typography>
-        
+
         <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-          <Chip 
-            label={`Type: ${resource.resource_type}`} 
-            size="small" 
-            color="primary" 
-            variant="outlined" 
-          />
-          <Chip 
-            label={`Supply: ${resource.total_supply}`} 
-            size="small" 
-            color="secondary" 
-            variant="outlined" 
-          />
+          <Chip label={`Type: ${resource.resource_type}`} size="small" color="primary" variant="outlined" />
+          <Chip label={`Supply: ${resource.total_supply}`} size="small" color="secondary" variant="outlined" />
         </Box>
-        
+
         {resource.metadata && (
           <Box>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Metadata:</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              Metadata:
+            </Typography>
             <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
               {Object.entries(resource.metadata).map(([key, value]) => (
-                <Chip 
-                  key={key}
-                  label={`${key}: ${value}`} 
-                  size="small" 
-                  variant="outlined" 
-                />
+                <Chip key={key} label={`${key}: ${value}`} size="small" variant="outlined" />
               ))}
             </Box>
           </Box>
@@ -195,7 +192,7 @@ function renderSubstateDetails(substate: any, id: SubstateId) {
       </Box>
     );
   }
-  
+
   return null;
 }
 
@@ -264,11 +261,7 @@ function SubstateRowData(
         >
           <Collapse in={open} timeout="auto" unmountOnExit>
             <Box sx={{ p: 2, backgroundColor: theme.palette.accent.background, borderRadius: 1 }}>
-              {renderSubstateDetails(substate, id) && (
-                <Box sx={{ mb: 2 }}>
-                  {renderSubstateDetails(substate, id)}
-                </Box>
-              )}
+              {renderSubstateDetails(substate, id) && <Box sx={{ mb: 2 }}>{renderSubstateDetails(substate, id)}</Box>}
               <CodeBlockExpand title="Raw Substate Data" content={{ substate, id }} />
             </Box>
           </Collapse>

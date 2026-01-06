@@ -34,7 +34,7 @@ import type {
   ListRecentTransactionsResponse,
   ListSubstatesRequest,
   ListSubstatesResponse, SubstateId,
-} from "@tari-project/typescript-bindings";
+} from "@tari-project/ootle-ts-bindings";
 import { IndexerClient } from "@tari-project/indexer-client";
 
 const DEFAULT_API_ADDRESS = new URL(

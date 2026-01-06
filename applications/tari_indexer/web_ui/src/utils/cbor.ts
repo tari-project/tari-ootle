@@ -1,7 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-import { TariTypeTag } from "@tari-project/typescript-bindings";
+import { TariTypeTag } from "@tari-project/ootle-ts-bindings";
 
 export function getValueByPath(cborRepr: object, path: string): any {
   let value = cborRepr;

@@ -27,7 +27,7 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import CodeBlockExpand from "@components/CodeBlock";
 import { useTheme } from "@mui/material/styles";
-import type { Instruction } from "@tari-project/typescript-bindings";
+import type { Instruction } from "@tari-project/ootle-ts-bindings";
 import { decode } from "cbor2";
 import { toHexString } from "@utils/helpers";
 import { BinaryTag } from "@utils/cbor";

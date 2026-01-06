@@ -35,7 +35,7 @@ import { useAccountsList } from "@api/hooks/useAccounts";
 import { useTheme } from "@mui/material/styles";
 import { accountsClaimBurn, transactionsWaitResult } from "@utils/json_rpc";
 import useAccountStore from "@store/accountStore";
-import type { ComponentAddress, AccountInfo } from "@tari-project/typescript-bindings";
+import type { ComponentAddress, AccountInfo } from "@tari-project/ootle-ts-bindings";
 import PopupTitle from "@/components/PopupTitle";
 
 type FormState = {

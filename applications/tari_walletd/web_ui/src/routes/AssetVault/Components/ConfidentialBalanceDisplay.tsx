@@ -31,7 +31,7 @@ import { useAccountsGetBalances } from "@api/hooks/useAccounts";
 import useAccountStore from "@store/accountStore";
 import { useEffect } from "react";
 import { substateIdToString, bigintToDecimalString } from "@utils/helpers";
-import { Account } from "@tari-project/typescript-bindings";
+import { Account } from "@tari-project/ootle-ts-bindings";
 
 const XTR_RESOURCE = "resource_0101010101010101010101010101010101010101010101010101010101010101";
 
@@ -42,7 +42,9 @@ export default function ConfidentialBalanceDisplay() {
 
   if (!account) return <></>;
 
-  return <ConfidentialBalanceDisplayInner account={account} showBalance={showBalance} setShowBalance={setShowBalance} />;
+  return (
+    <ConfidentialBalanceDisplayInner account={account} showBalance={showBalance} setShowBalance={setShowBalance} />
+  );
 }
 
 function ConfidentialBalanceDisplayInner({

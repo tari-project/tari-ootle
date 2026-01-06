@@ -22,7 +22,7 @@
 
 import { create } from "zustand";
 import { GeneratedCodeType } from "@tari-project/tari-extension-common";
-import { AccountInfo } from "@tari-project/typescript-bindings";
+import { AccountInfo } from "@tari-project/ootle-ts-bindings";
 import { persist } from "zustand/middleware";
 
 interface FlowEditorStore {

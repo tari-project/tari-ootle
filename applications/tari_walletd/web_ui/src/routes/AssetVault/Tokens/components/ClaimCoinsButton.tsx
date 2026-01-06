@@ -23,7 +23,7 @@
 import Button from "@mui/material/Button";
 import { useAccountsCreateFreeTestCoins } from "@api/hooks/useAccounts";
 import useAccountStore from "@store/accountStore";
-import { substateIdToString, AccountsCreateFreeTestCoinsResponse } from "@tari-project/typescript-bindings";
+import { substateIdToString, AccountsCreateFreeTestCoinsResponse } from "@tari-project/ootle-ts-bindings";
 import queryClient from "@api/queryClient";
 import { useErrorNotification } from "@/contexts/ErrorNotificationContext";
 

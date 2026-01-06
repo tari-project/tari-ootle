@@ -23,7 +23,7 @@
 import Button from "@mui/material/Button";
 import { useMintTestnetFaucetNfts } from "@api/hooks/useAccounts";
 import useAccountStore from "@store/accountStore";
-import { substateIdToString } from "@tari-project/typescript-bindings";
+import { substateIdToString } from "@tari-project/ootle-ts-bindings";
 import queryClient from "@api/queryClient";
 import { useErrorNotification } from "../../../../contexts/ErrorNotificationContext";
 
@@ -61,7 +61,9 @@ function ClaimNftsButton() {
         onError: (error: any) => {
           console.error("Error claiming NFTs:", error);
           // Show user-friendly error message
-          const errorMessage = error?.message || "Failed to claim NFTs. Please ensure you have sufficient funds to pay for transaction fees.";
+          const errorMessage =
+            error?.message ||
+            "Failed to claim NFTs. Please ensure you have sufficient funds to pay for transaction fees.";
           showError(errorMessage);
         },
       },
@@ -69,11 +71,7 @@ function ClaimNftsButton() {
   };
 
   return (
-    <Button
-      variant="outlined"
-      onClick={() => onClaimTestnetNfts()}
-      disabled={isPending}
-    >
+    <Button variant="outlined" onClick={() => onClaimTestnetNfts()} disabled={isPending}>
       {isPending ? "Claiming..." : "Claim Testnet NFTs"}
     </Button>
   );

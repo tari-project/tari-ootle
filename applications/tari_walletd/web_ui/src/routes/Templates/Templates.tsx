@@ -29,7 +29,7 @@ import {
   decodeOotleAddress,
   substateIdToString,
   Type as FuncType,
-} from "@tari-project/typescript-bindings";
+} from "@tari-project/ootle-ts-bindings";
 import CopyAddress from "@components/CopyAddress";
 import { AccordionIconButton, DataTableCell, StyledPaper } from "@components/StyledComponents";
 import Grid from "@mui/material/Grid";

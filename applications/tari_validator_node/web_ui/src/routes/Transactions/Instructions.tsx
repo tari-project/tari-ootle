@@ -27,7 +27,7 @@ import { renderJson } from "../../utils/helpers";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import CodeBlockDialog from "../../Components/CodeBlock";
-import type { Instruction } from "@tari-project/typescript-bindings";
+import type { Instruction } from "@tari-project/ootle-ts-bindings";
 
 function RowData({ title, data }: { title: string; data: Instruction }, index: number) {
   const [open, setOpen] = useState(false);

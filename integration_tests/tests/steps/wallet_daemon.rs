@@ -61,6 +61,7 @@ async fn when_i_claim_burn_via_wallet_daemon(
         .await
         .unwrap();
     if let Some(ref reason) = result.any_reject() {
+        cucumber_log!("Transaction failed: {}", reason);
         panic!("Transaction failed: {}", reason);
     }
 }

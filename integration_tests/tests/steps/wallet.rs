@@ -285,6 +285,12 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
             },
         };
 
+        integration_tests::cucumber_log!(
+            "DEBUG: creating confirmed proof. commitment: {}, encrypted_data: {}, reciprocal_key: {}",
+            commitment,
+            hex::encode(&resp.encrypted_data),
+            reciprocal_claim_public_key
+        );
         let proof = ClaimBurnProof {
             claim_proof: MinotariBurnClaimProof {
                 burn_public_key: reciprocal_claim_public_key,

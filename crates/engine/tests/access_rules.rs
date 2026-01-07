@@ -634,7 +634,10 @@ mod resource_access_rules {
 
     #[test]
     fn it_permits_cross_template_calls_using_proofs() {
-        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules", "tests/templates/composability"]);
+        let mut test = TemplateTest::new(CRATE_PATH, [
+            "tests/templates/access_rules",
+            "tests/templates/composability",
+        ]);
 
         // Create sender and receiver accounts
         let (owner_account, owner_proof, owner_key) = test.create_empty_account();

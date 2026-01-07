@@ -55,6 +55,8 @@ pub enum IndexerRestClientError {
     RequestFailedWithStatus { code: i64, message: String },
     #[error("Invalid response: {message}")]
     InvalidResponse { message: String },
+    #[error("Unable to construct request due to unsatisfied invariant: {details}")]
+    RequestInvariant { details: String },
 }
 
 impl IsNotFoundError for IndexerRestClientError {

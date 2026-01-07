@@ -10,7 +10,7 @@ use std::{
 use rand::Rng;
 use reqwest::Client;
 use serde_json::json;
-use tari_indexer_client::types::ListUtxosRequest;
+use tari_indexer_client::types::{GetSubstateRequest, ListUtxosRequest};
 use tari_ootle_common_types::{
     displayable::Displayable,
     engine_types::published_template::PublishedTemplateAddress,
@@ -614,7 +614,10 @@ impl TrafficSim {
         let mut indexer = self.connect_indexer_client().await?;
 
         let resource = indexer
-            .get_substate(&resource_address.into(), None, true)
+            .get_substate(&resource_address.into(), GetSubstateRequest {
+                version: None,
+                local_search_only: true,
+            })
             .await?
             .substate
             .into_resource();

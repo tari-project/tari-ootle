@@ -33,7 +33,12 @@ use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::ToByteType;
 use tari_epoch_manager::service::{EpochManagerConfig, EpochManagerHandle};
 use tari_epoch_oracles::{
-    base_layer::{BaseLayerEpochOracleConfig, BaseLayerEpochOracleFeatures, BaseLayerOracle},
+    base_layer::{
+        BaseLayerBlockHeaderStore,
+        BaseLayerEpochOracleConfig,
+        BaseLayerEpochOracleFeatures,
+        BaseLayerOracle,
+    },
     configured::{ConfiguredEpochOracle, RealTimeEpochTicker},
     hybrid::{watch_ticker, HybridEpochOracle},
     store::EpochOracleStore,
@@ -304,7 +309,7 @@ async fn create_base_layer_client(config: &ApplicationConfig) -> anyhow::Result<
         .context("Failed to create gRPC base node client")
 }
 
-async fn create_epoch_oracle<TStore: EpochOracleStore + Clone + Send + 'static>(
+async fn create_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Clone + Send + 'static>(
     config: &ApplicationConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
@@ -325,7 +330,7 @@ async fn create_epoch_oracle<TStore: EpochOracleStore + Clone + Send + 'static>(
     }
 }
 
-async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + 'static>(
+async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + 'static>(
     config: &ApplicationConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
@@ -358,7 +363,7 @@ async fn create_configured_epoch_oracle<TStore: EpochOracleStore + Send>(
     Ok(oracle)
 }
 
-async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + Clone + Send + 'static>(
+async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Clone + Send + 'static>(
     config: &ApplicationConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,

@@ -42,7 +42,12 @@ use tari_epoch_manager::{
     EpochManagerReader,
 };
 use tari_epoch_oracles::{
-    base_layer::{BaseLayerEpochOracleConfig, BaseLayerEpochOracleFeatures, BaseLayerOracle},
+    base_layer::{
+        BaseLayerBlockHeaderStore,
+        BaseLayerEpochOracleConfig,
+        BaseLayerEpochOracleFeatures,
+        BaseLayerOracle,
+    },
     configured::{ConfiguredEpochOracle, RealTimeEpochTicker},
     hybrid::{watch_ticker, HybridEpochOracle},
     store::EpochOracleStore,
@@ -491,7 +496,7 @@ async fn create_base_layer_client(
     Ok(base_node_client)
 }
 
-async fn create_epoch_oracle<TStore: EpochOracleStore + Send + Clone + 'static>(
+async fn create_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + Clone + 'static>(
     config: &ApplicationConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
@@ -516,7 +521,7 @@ async fn create_epoch_oracle<TStore: EpochOracleStore + Send + Clone + 'static>(
     }
 }
 
-async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + 'static>(
+async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + 'static>(
     config: &ApplicationConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
@@ -551,7 +556,7 @@ async fn create_configured_epoch_oracle<TStore: EpochOracleStore + Send>(
     Ok(oracle)
 }
 
-async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + Clone + Send + 'static>(
+async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Clone + Send + 'static>(
     config: &ApplicationConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,

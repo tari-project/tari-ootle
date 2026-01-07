@@ -32,7 +32,7 @@ use tari_indexer::{
 use tari_indexer_client::{
     graphql_client::IndexerGraphQLClient,
     rest_api_client::IndexerRestApiClient,
-    types::{AddPeerRequest, GetNonFungiblesRequest, GetSubstateResponse, NonFungibleSubstate},
+    types::{AddPeerRequest, GetNonFungiblesRequest, GetSubstateRequest, GetSubstateResponse, NonFungibleSubstate},
 };
 use tari_ootle_app_utilities::{epoch_oracle_config::EpochOracleConfig, p2p_config::PeerSeedsConfig};
 use tari_ootle_common_types::Network;
@@ -76,7 +76,13 @@ impl IndexerProcess {
     pub async fn get_substate(&self, world: &TariWorld, output_ref: String, version: u32) -> GetSubstateResponse {
         let address = get_address_from_output(world, output_ref);
         let mut client = self.get_indexer_client();
-        client.get_substate(address, Some(version), true).await.unwrap()
+        client
+            .get_substate(address, GetSubstateRequest {
+                version: Some(version),
+                local_search_only: true,
+            })
+            .await
+            .unwrap()
     }
 
     pub async fn get_non_fungibles(

@@ -24,7 +24,10 @@ struct ComposabilityComponentInfo {
 }
 
 fn setup() -> ComposabilityTest {
-    let template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/composability", "tests/templates/state"]);
+    let template_test = TemplateTest::new(CRATE_PATH, vec![
+        "tests/templates/composability",
+        "tests/templates/state",
+    ]);
 
     let composability_template = template_test.get_template_address("Composability");
     let state_template = template_test.get_template_address("State");

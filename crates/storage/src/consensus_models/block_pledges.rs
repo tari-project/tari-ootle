@@ -274,7 +274,7 @@ mod tests {
             owner_key: None,
             owner_rule: Default::default(),
             access_rules: ComponentAccessRules::allow_all(),
-            entity_id: EntityId::from_array([seed; 20]),
+            entity_id: EntityId::from_array([seed; EntityId::LENGTH]),
             body: ComponentBody::empty(),
         })
     }

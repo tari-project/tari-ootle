@@ -524,7 +524,13 @@ where TConsensusSpec: ConsensusSpec
         // TODO(perf): proposer shouldn't have to do this twice, esp. executing the transaction and locking
         let prepared = self
             .transaction_manager
-            .prepare(substate_store, local_committee_info, &pool_tx, block.as_leaf())
+            .prepare(
+                substate_store,
+                local_committee_info,
+                &pool_tx,
+                block.as_leaf(),
+                proposed_block_change_set,
+            )
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
 
         match prepared {
@@ -707,7 +713,13 @@ where TConsensusSpec: ConsensusSpec
             PreparedTransaction::new_multishard_executed(execution.into_transaction_execution(), LockStatus::new())
         } else {
             self.transaction_manager
-                .prepare(substate_store, local_committee_info, tx_rec, block.as_leaf())
+                .prepare(
+                    substate_store,
+                    local_committee_info,
+                    tx_rec,
+                    block.as_leaf(),
+                    proposed_block_change_set,
+                )
                 .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?
         };
 
@@ -965,7 +977,13 @@ where TConsensusSpec: ConsensusSpec
                 return Ok(Some(NoVoteReason::NotAllForeignInputPledges));
             }
             let transaction_id = *tx_rec.id();
-            let execution = self.execute_transaction(tx, block.as_leaf(), block.epoch(), transaction)?;
+            let execution = self.execute_transaction(
+                tx,
+                block.as_leaf(),
+                block.epoch(),
+                transaction,
+                proposed_block_change_set,
+            )?;
             let execution = execution.into_transaction_execution();
 
             // TODO: can we modify input locks at this point? For multi-shard input transactions, we locked all inputs
@@ -1450,6 +1468,7 @@ where TConsensusSpec: ConsensusSpec
         block: LeafBlock,
         current_epoch: Epoch,
         transaction: TransactionRecord,
+        change_set: &ProposedBlockChangeSet,
     ) -> Result<BlockTransactionExecution, HotStuffError> {
         info!(
             target: LOG_TARGET,
@@ -1464,9 +1483,12 @@ where TConsensusSpec: ConsensusSpec
             return Ok(execution);
         }
 
-        let pledged = PledgedTransaction::load_pledges(tx, transaction)?;
-
+        let mut pledged = PledgedTransaction::load_pledges(tx, transaction)?;
         let transaction_id = *pledged.id();
+        pledged
+            .foreign_pledges
+            .extend(change_set.get_foreign_pledges(&transaction_id).cloned());
+
         let executed = self
             .transaction_manager
             .execute(current_epoch, pledged)

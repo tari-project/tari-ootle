@@ -34,7 +34,10 @@ use tari_transaction::{Transaction, TransactionId};
 
 use super::{PledgedTransaction, PreparedTransaction};
 use crate::{
-    hotstuff::substate_store::{LockStatus, PendingSubstateStore, SubstateStoreError},
+    hotstuff::{
+        block_change_set::ProposedBlockChangeSet,
+        substate_store::{LockStatus, PendingSubstateStore, SubstateStoreError},
+    },
     tracing::TraceTimer,
     traits::{BlockTransactionExecutor, BlockTransactionExecutorError},
 };
@@ -63,6 +66,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         local_committee_info: &CommitteeInfo,
         pool_tx: &TransactionPoolRecord,
         block: LeafBlock,
+        change_set: &ProposedBlockChangeSet,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         let _timer = TraceTimer::info(LOG_TARGET, "prepare");
         let transaction = pool_tx.get_transaction(store.read_transaction())?;
@@ -104,6 +108,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                     &transaction,
                     non_local_inputs,
                     block,
+                    change_set,
                 ),
             ResolvedTransactionInputs::OnlyTombstones => {
                 self.prepare_local_input_transaction(store, local_committee_info, &transaction, IndexMap::new(), block)
@@ -503,12 +508,12 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         store: &mut PendingSubstateStore<TStateStore>,
         local_committee_info: &CommitteeInfo,
         transaction: &TransactionRecord,
-        // TODO: check if we have all pledges before executing
-        _non_local_inputs: IndexSet<SubstateRequirementRef<'_>>,
+        non_local_inputs: IndexSet<SubstateRequirementRef<'_>>,
         block: LeafBlock,
+        change_set: &ProposedBlockChangeSet,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         let transaction_id = *transaction.id();
-        // We're output-only
+        // We're output-only, so only need to gather foreign pledges
         let foreign_pledges = transaction.get_foreign_pledges(store.read_transaction())?;
 
         info!(
@@ -518,19 +523,37 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             foreign_pledges.len()
         );
 
+        let proposed_foreign_pledges = change_set.get_foreign_pledges(&transaction_id);
         let resolved_inputs = foreign_pledges
             .into_iter()
+            // NOTE: that duplicate pledges (which should not happen) will be NOT overwritten by the proposed ones due to HashMap from_iter behaviour
+            .chain(proposed_foreign_pledges.cloned())
             // Exclude any output pledges
             .filter_map(|pledge| pledge.into_input())
             .map(|(id, substate)|
                 {
                     let version = id.version();
                     (
+                        // SubstateRequirement
                         id.into(),
                         Substate::new(version, substate),
                     )
                 })
-            .collect();
+            .collect::<HashMap<_, _>>();
+
+        // Check that we have all the required foreign input pledges
+        if let Some(req) = non_local_inputs
+            .iter()
+            .find(|req| !resolved_inputs.contains_key(req.substate_id()))
+        {
+            error!(target: LOG_TARGET, "⚠️ PREPARE: Missing {req} foreign input pledge for transaction {}", transaction_id);
+            // NOTE: crashes consensus. The foreign proposal should have already been verified to include all input
+            // pledges.
+            return Err(BlockTransactionExecutorError::InvariantError(format!(
+                "Missing foreign input pledge for transaction {}: {}",
+                transaction_id, req
+            )));
+        }
 
         let execution = self.execute_or_fetch(store, transaction, &resolved_inputs, &block)?;
         info!(

@@ -26,7 +26,7 @@ use log::*;
 use tari_bor::to_value;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult},
-    component::derive_component_address_from_public_key,
+    component::{derive_component_address_from_public_key, ComponentHeader},
     entity_id_provider::EntityIdProvider,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     instruction_result::InstructionResult,
@@ -35,14 +35,14 @@ use tari_engine_types::{
     published_template::TemplateBlob,
     virtual_substate::VirtualSubstates,
 };
-use tari_ootle_common_types::services::template_provider::TemplateProvider;
+use tari_ootle_common_types::{optional::Optional, services::template_provider::TemplateProvider};
 use tari_template_abi::{FunctionDef, Type};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     args::{AllocateAddressResult, BucketAction, BucketGetAmountArg, BucketRef, WorkspaceAction},
     auth::{ComponentAccessRules, OwnerRule},
     invoke_args,
-    models::{Bucket, NonFungibleAddress, StealthTransferStatement},
+    models::{Bucket, ComponentAddress, NonFungibleAddress, StealthTransferStatement},
     prelude::STEALTH_TARI_RESOURCE_ADDRESS,
     types::{crypto::RistrettoPublicKeyBytes, Amount, TemplateAddress},
 };
@@ -80,6 +80,7 @@ use crate::{
 const LOG_TARGET: &str = "tari::ootle::engine::instruction_processor";
 pub const MAX_CALL_DEPTH: usize = 10;
 const ACCOUNT_CONSTRUCTOR_FUNCTION: &str = "create";
+const ACCOUNT_DEPOSIT_METHOD: &str = "deposit";
 
 pub struct TransactionProcessor<TTemplateProvider> {
     template_provider: Arc<TTemplateProvider>,
@@ -392,7 +393,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
 
         let resolved_args = migrate
             .as_ref()
-            .map(|f| runtime.resolve_args(&f.args))
+            .map(|f| runtime.resolve_args(None, &f.args))
             .transpose()?
             .unwrap_or_default();
         let arg_scope = resolved_args
@@ -575,51 +576,104 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
                 address: ACCOUNT_TEMPLATE_ADDRESS,
             })?;
 
-        let function_def = template
-            .template_def()
-            .get_function(ACCOUNT_CONSTRUCTOR_FUNCTION)
-            .cloned()
-            .ok_or_else(|| TransactionError::FunctionNotFound {
-                name: ACCOUNT_CONSTRUCTOR_FUNCTION.to_string(),
-            })?;
-
         let account_address = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, public_key_address);
 
-        // the public key is the first argument of the Account template constructor
-        let mut args = call_args![
-            NonFungibleAddress::from_public_key(*public_key_address),
-            owner_rule,
-            access_rules
-        ];
+        let maybe_existing_account = runtime
+            .interface()
+            .load_component(ComponentReference::Address(account_address))
+            .optional()?;
 
-        // add the optional workspace bucket with the initial funds of the account
-        if let Some(workspace_id) = workspace_id {
-            args.push(call_arg![WorkspaceOffset(workspace_id)]);
-        } else {
-            let none: Option<Bucket> = None;
-            args.push(call_arg![Literal(none)]);
+        match maybe_existing_account {
+            Some((_, component)) => {
+                // Component exists, we'll attempt deposit funds into it as necessary
+
+                // Ensure that the existing component is indeed an Account
+                if component.template_address != ACCOUNT_TEMPLATE_ADDRESS {
+                    return Err(TransactionError::InvalidCreateAccount {
+                        component_address: account_address,
+                        details: format!(
+                            "A component already exists at the derived account address {}, but it is not an Account \
+                             (template address: {})",
+                            account_address, component.template_address
+                        ),
+                    });
+                }
+
+                if owner_rule.is_some() || access_rules.is_some() {
+                    return Err(TransactionError::InvalidCreateAccount {
+                        component_address: account_address,
+                        details: "Cannot specify owner_rule or access_rules when an account already exists at the \
+                                  derived address"
+                            .to_string(),
+                    });
+                }
+
+                if let Some(workspace_id) = workspace_id {
+                    let args = call_args![WorkspaceOffset(workspace_id)];
+                    Self::invoke_component(
+                        template,
+                        runtime,
+                        account_address,
+                        &component,
+                        ACCOUNT_DEPOSIT_METHOD,
+                        args,
+                    )?;
+                }
+
+                Ok(InstructionResult {
+                    indexed: IndexedValue::from_type(&account_address)?,
+                    return_type: Type::Other {
+                        name: "ComponentAddress".to_string(),
+                    },
+                })
+            },
+            None => {
+                let function_def = template
+                    .template_def()
+                    .get_function(ACCOUNT_CONSTRUCTOR_FUNCTION)
+                    .cloned()
+                    .ok_or_else(|| TransactionError::FunctionNotFound {
+                        name: ACCOUNT_CONSTRUCTOR_FUNCTION.to_string(),
+                    })?;
+
+                let mut args = call_args![
+                    // the public key NFT is the first argument of the Account template constructor specifying the
+                    // default OwnerRule and the component address
+                    NonFungibleAddress::from_public_key(*public_key_address),
+                    owner_rule,
+                    access_rules
+                ];
+
+                // add the optional workspace bucket with the initial funds of the account
+                if let Some(workspace_id) = workspace_id {
+                    args.push(call_arg![WorkspaceOffset(workspace_id)]);
+                } else {
+                    let none: Option<()> = None;
+                    args.push(call_arg![Literal(none)]);
+                }
+
+                let resolved_args = runtime.resolve_args(None, &args)?;
+                let arg_scope = resolved_args
+                    .iter()
+                    .map(IndexedWellKnownTypes::from_value)
+                    .collect::<Result<_, _>>()?;
+
+                runtime.interface().push_call_frame(PushCallFrame::Static {
+                    template_address: ACCOUNT_TEMPLATE_ADDRESS,
+                    module_name: template.template_name().to_string(),
+                    arg_scope,
+                    entity_id: account_address.entity_id(),
+                })?;
+
+                let result = Self::invoke_template(template, runtime.clone(), function_def, resolved_args)?;
+
+                runtime.interface().validate_return_value(&result.indexed)?;
+
+                runtime.interface().pop_call_frame()?;
+
+                Ok(result)
+            },
         }
-
-        let resolved_args = runtime.resolve_args(&args)?;
-        let arg_scope = resolved_args
-            .iter()
-            .map(IndexedWellKnownTypes::from_value)
-            .collect::<Result<_, _>>()?;
-
-        runtime.interface().push_call_frame(PushCallFrame::Static {
-            template_address: ACCOUNT_TEMPLATE_ADDRESS,
-            module_name: template.template_name().to_string(),
-            arg_scope,
-            entity_id: account_address.entity_id(),
-        })?;
-
-        let result = Self::invoke_template(template, runtime.clone(), function_def, resolved_args)?;
-
-        runtime.interface().validate_return_value(&result.indexed)?;
-
-        runtime.interface().pop_call_frame()?;
-
-        Ok(result)
     }
 
     pub(crate) fn call_function(
@@ -655,7 +709,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
             });
         }
 
-        let resolved_args = runtime.resolve_args(&args)?;
+        let resolved_args = runtime.resolve_args(None, &args)?;
         let arg_scope = resolved_args
             .iter()
             .map(IndexedWellKnownTypes::from_value)
@@ -701,6 +755,17 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
             .interface()
             .track_template_loaded(&template_address, template.code_size())?;
 
+        Self::invoke_component(template, runtime, component_address, &component, method, args)
+    }
+
+    fn invoke_component(
+        template: LoadedTemplate,
+        runtime: &Runtime,
+        component_address: ComponentAddress,
+        component: &ComponentHeader,
+        method: &str,
+        args: Vec<InstructionArg>,
+    ) -> Result<InstructionResult, TransactionError> {
         let function_def = template.template_def().get_function(method).cloned().ok_or_else(|| {
             TransactionError::FunctionNotFound {
                 name: method.to_string(),
@@ -721,16 +786,17 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
 
         let component_lock = runtime.interface().lock_component(component_address, lock_flag)?;
 
-        let resolved_args = runtime.resolve_args(&args)?;
+        let resolved_args = runtime.resolve_args(Some(InstructionArg::from_type(&component_address)?), &args)?;
         let arg_scope = resolved_args
             .iter()
+            .skip(1)
             .map(IndexedWellKnownTypes::from_value)
             .collect::<Result<_, _>>()?;
 
         let component_scope = IndexedWellKnownTypes::from_value(component.state())?;
 
         runtime.interface().push_call_frame(PushCallFrame::ForComponent {
-            template_address,
+            template_address: component.template_address,
             module_name: template.template_name().to_string(),
             component_scope,
             component_lock,
@@ -741,15 +807,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
         // This must come after the call frame as that defines the authorization scope
         runtime.interface().check_component_access_rules(method)?;
 
-        let mut final_args = Vec::with_capacity(resolved_args.len() + 1);
-        final_args.push(to_value(&component_address)?);
-        final_args.extend(resolved_args);
-
-        let result = Self::invoke_template(template, runtime.clone(), function_def, final_args)?;
+        let result = Self::invoke_template(template, runtime.clone(), function_def, resolved_args)?;
 
         runtime.interface().validate_return_value(&result.indexed)?;
         runtime.interface().pop_call_frame()?;
-
         Ok(result)
     }
 

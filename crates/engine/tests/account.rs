@@ -4,13 +4,8 @@
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine::runtime::{ActionIdent, RuntimeError};
 use tari_engine_types::ToByteType;
-use tari_template_lib::{
-    constants::XTR,
-    models::{ComponentAddress, ResourceAddress},
-    prelude::AccessRules,
-    rule,
-    types::Amount,
-};
+use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
+use tari_template_lib::{constants::XTR, models::ComponentAddress, prelude::AccessRules, rule, types::Amount};
 use tari_template_test_tooling::{
     support::assert_error::{assert_access_denied_for_action, assert_reject_reason},
     xtr_faucet_component,
@@ -149,16 +144,21 @@ fn withdraw_from_account_prevented() {
 
 #[test]
 fn attempt_to_overwrite_account() {
-    let mut template_test = TemplateTest::new_no_templates();
+    let mut test = TemplateTest::new_no_templates();
 
     // Create initial account with faucet funds
-    let (source_account, source_account_proof, source_account_sk) = template_test.create_funded_account();
-    let source_account_pk = RistrettoPublicKey::from_secret_key(&source_account_sk);
+    let (source_account, source_account_proof, source_account_sk) = test.create_funded_account();
 
-    let overwriting_tx = template_test.execute_expect_failure(
+    let null: Option<()> = None;
+    let overwriting_tx = test.execute_expect_failure(
         Transaction::builder_localnet()
             // Create component with the same ID
-            .create_account(source_account_pk.to_byte_type())
+            // The create account instruction is idempotent, so we'll call the template directly to force an overwrite attempt
+            .call_function(
+                ACCOUNT_TEMPLATE_ADDRESS,
+                "create",
+                args![source_account_proof, null, null, null],
+            )
             // Signed by source account so that it can pay the fees for the new account creation
             .build_and_seal(&source_account_sk),
         vec![source_account_proof],
@@ -169,19 +169,77 @@ fn attempt_to_overwrite_account() {
         address: source_account,
     });
 
-    let result = template_test.execute_expect_success(
-        Transaction::builder_localnet()
-            .call_method(source_account, "get_balances", call_args![])
-            .build_and_seal(&source_account_sk),
-        vec![],
-    );
-
-    let balances = result.finalize.execution_results[0]
-        .decode::<Vec<(ResourceAddress, Amount)>>()
-        .unwrap();
+    let store = test.read_only_state_store();
+    let account = store.get_account(source_account).unwrap();
+    let vault = account.get_vault_by_resource(&XTR).unwrap();
     // Double check that the source account was not overwritten due to the address collision, if it was, then we'd have
     // no vaults
-    assert_eq!(balances.len(), 1);
+    let vault = store.get_vault(&vault.vault_id()).expect("no vaults");
+    assert_eq!(vault.balance(), TemplateTest::FUNDED_ACCOUNT_INITIAL_BALANCE);
+}
+
+#[test]
+fn create_account_is_idempotent() {
+    let mut test = TemplateTest::new_no_templates();
+
+    // Create initial account with faucet funds
+    let (source_account, source_account_proof, source_account_sk) = test.create_funded_account();
+    let source_account_pk = RistrettoPublicKey::from_secret_key(&source_account_sk);
+
+    let result = test.execute_expect_success(
+        Transaction::builder_localnet()
+            // Create component with the same ID
+            .create_account(source_account_pk.to_byte_type())
+            // Signed by source account so that it can pay the fees for the new account creation
+            .build_and_seal(&source_account_sk),
+        vec![source_account_proof],
+    );
+
+    assert!(result
+        .finalize
+        .events
+        .iter()
+        .all(|e| e.topic() != "std.component.created"));
+
+    let store = test.read_only_state_store();
+    let account = store.get_account(source_account).unwrap();
+    let vault = account.get_vault_by_resource(&XTR).unwrap();
+    // Double check that the source account was not overwritten due to the address collision, if it was, then we'd have
+    // no vaults
+    let vault = store.get_vault(&vault.vault_id()).expect("no vaults");
+    assert_eq!(vault.balance(), TemplateTest::FUNDED_ACCOUNT_INITIAL_BALANCE);
+}
+
+#[test]
+fn create_account_is_idempotent_with_deposit() {
+    let mut test = TemplateTest::new_no_templates();
+
+    // Create initial account with faucet funds
+    let (source_account, source_account_proof, source_account_sk) = test.create_empty_account();
+    let source_account_pk = RistrettoPublicKey::from_secret_key(&source_account_sk);
+
+    let result = test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_method(xtr_faucet_component(), "take", args![1000])
+            .put_last_instruction_output_on_workspace("bucket")
+            // Create component with the same ID
+            .create_account_with_bucket(source_account_pk.to_byte_type(), "bucket")
+            // Signed by source account so that it can pay the fees for the new account creation
+            .build_and_seal(&source_account_sk),
+        vec![source_account_proof],
+    );
+
+    assert!(result
+        .finalize
+        .events
+        .iter()
+        .all(|e| e.topic() != "std.component.created"));
+
+    let store = test.read_only_state_store();
+    let account = store.get_account(source_account).unwrap();
+    let vault = account.get_vault_by_resource(&XTR).unwrap();
+    let vault = store.get_vault(&vault.vault_id()).unwrap();
+    assert_eq!(vault.balance(), 1000u64);
 }
 
 #[test]

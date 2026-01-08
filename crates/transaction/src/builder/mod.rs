@@ -325,6 +325,9 @@ impl<D> TransactionBuilder<D> {
         f(self)
     }
 
+    /// Adds a CreateAccount instruction to the transaction.
+    /// Note that CreateAccount is idempotent, so can be called regardless of whether the account already exists or not.
+    /// If it does exist, this instruction will be a no-op.
     pub fn create_account(self, owner_public_key: RistrettoPublicKeyBytes) -> Self {
         self.add_instruction(Instruction::CreateAccount {
             owner_public_key,
@@ -334,6 +337,9 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
+    /// Adds a CreateAccount instruction to the transaction, depositing the bucket into the newly created account.
+    /// Note that CreateAccount is idempotent, so can be called regardless of whether the account already exists or not.
+    /// If it does exist, this instruction will deposit the bucket into the existing account.
     pub fn create_account_with_bucket<T: Into<BuilderWorkspaceKey>>(
         self,
         owner_public_key: RistrettoPublicKeyBytes,

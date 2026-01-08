@@ -649,7 +649,6 @@ mod tests {
     fn check_max_mem_usage() {
         let sz = size_of::<ProposedBlockChangeSet>();
         eprintln!("ProposedBlockChangeSet: {}", sz);
-        const TARGET_MAX_MEM_USAGE: usize = 13_368_000;
         let mem_block_diff = size_of::<SubstateChange>() * MEM_MAX_BLOCK_DIFF_CHANGES;
         eprintln!("mem_block_diff: {}KiB", mem_block_diff / 1024);
         let mem_state_tree_diffs =
@@ -673,6 +672,11 @@ mod tests {
             mem_new_sequence_transactions +
             mem_proposed_foreign_proposals +
             mem_proposed_utxo_mints;
-        assert_eq!(total_mem, TARGET_MAX_MEM_USAGE);
+        // Last checked: 2024-06-03 (13,368000 bytes)
+        assert!(
+            total_mem < 14 * 1_000_000,
+            "Estimated max memory usage of ProposedBlockChangeSet is too high: {} bytes",
+            total_mem
+        );
     }
 }

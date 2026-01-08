@@ -640,7 +640,8 @@ where TConsensusSpec: ConsensusSpec
                         .set_evidence(execution.to_evidence(
                             local_committee_info.num_preshards(),
                             local_committee_info.num_committees(),
-                        ));
+                        ))
+                        .update_locked_epoch(parent_block.epoch());
 
                     info!(
                         target: LOG_TARGET,
@@ -695,7 +696,8 @@ where TConsensusSpec: ConsensusSpec
                         .merge_evidence(execution.to_evidence(
                             local_committee_info.num_preshards(),
                             local_committee_info.num_committees(),
-                        ));
+                        ))
+                        .update_locked_epoch(parent_block.epoch());
 
                     executed_transactions.insert(*pool_tx.id(), execution);
                     let atom = pool_tx.get_current_transaction_atom();
@@ -797,9 +799,16 @@ where TConsensusSpec: ConsensusSpec
             return Ok(Some(Command::LocalAccept(tx_rec.get_current_transaction_atom())));
         }
 
+        let locked_epoch = tx_rec.locked_epoch().ok_or_else(|| {
+            HotStuffError::InvariantError(format!(
+                "PROPOSE: local_accept_transaction: Transaction {} is in LocalPrepared stage but has no locked epoch",
+                tx_rec.id(),
+            ))
+        })?;
+
         let tx = substate_store.read_transaction();
         let transaction = tx_rec.get_transaction(tx)?;
-        let execution = self.execute_transaction(tx, parent_block, transaction, change_set)?;
+        let execution = self.execute_transaction(tx, parent_block, transaction, change_set, locked_epoch)?;
 
         // Try to lock all local outputs
         let local_outputs = execution
@@ -907,6 +916,7 @@ where TConsensusSpec: ConsensusSpec
         parent_block: &LeafBlock,
         transaction: TransactionRecord,
         change_set: &ProposedBlockChangeSet,
+        execution_epoch: Epoch,
     ) -> Result<TransactionExecution, HotStuffError> {
         // Should have been executed already if all inputs are local
         if let Some(execution) =
@@ -934,7 +944,7 @@ where TConsensusSpec: ConsensusSpec
 
         let executed = self
             .transaction_manager
-            .execute(parent_block.epoch(), pledged)
+            .execute(execution_epoch, pledged)
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
 
         Ok(executed)

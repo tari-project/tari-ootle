@@ -601,6 +601,7 @@ async fn multishard_local_inputs_foreign_outputs_abort() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn multishard_local_inputs_and_outputs_foreign_outputs() {
+    // Transaction involves inputs and outputs for committee 0 and 1, and outputs for committee 2
     setup_logger();
     let mut test = Test::builder()
         .add_committee(0, vec!["1", "2"])

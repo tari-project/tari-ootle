@@ -522,7 +522,7 @@ pub fn process_newly_justified_block<TStore: StateStore>(
             if !pool_tx.is_ready() && pool_tx.is_ready_for_pending_stage(local_shard_group) {
                 debug!(
                     target: LOG_TARGET,
-                    "✅ Setting READY for transaction {} in block {}",
+                    "✅ Justified block: Setting READY for transaction {} in block {}",
                     atom.id(),
                     new_leaf_block,
                 );

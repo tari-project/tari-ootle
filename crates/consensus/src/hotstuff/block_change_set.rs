@@ -649,7 +649,7 @@ mod tests {
     fn check_max_mem_usage() {
         let sz = size_of::<ProposedBlockChangeSet>();
         eprintln!("ProposedBlockChangeSet: {}", sz);
-        const TARGET_MAX_MEM_USAGE: usize = 13_336_000;
+        const TARGET_MAX_MEM_USAGE: usize = 13_368_000;
         let mem_block_diff = size_of::<SubstateChange>() * MEM_MAX_BLOCK_DIFF_CHANGES;
         eprintln!("mem_block_diff: {}KiB", mem_block_diff / 1024);
         let mem_state_tree_diffs =

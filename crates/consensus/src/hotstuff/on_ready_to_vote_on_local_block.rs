@@ -521,6 +521,9 @@ where TConsensusSpec: ConsensusSpec
             }));
         }
 
+        // LocalOnly so we can lock the epoch here
+        pool_tx.update_locked_epoch(block.epoch());
+
         // TODO(perf): proposer shouldn't have to do this twice, esp. executing the transaction and locking
         let prepared = self
             .transaction_manager
@@ -770,11 +773,14 @@ where TConsensusSpec: ConsensusSpec
                         );
                         // CASE: All inputs are local and outputs are foreign (i.e. the transaction is
                         // executed), or we're output-only and have received all pledges.
-                        tx_rec.update_from_execution(
-                            local_committee_info.num_preshards(),
-                            local_committee_info.num_committees(),
-                            &execution,
-                        );
+                        tx_rec
+                            .update_from_execution(
+                                local_committee_info.num_preshards(),
+                                local_committee_info.num_committees(),
+                                &execution,
+                            )
+                            // Executed - input-only, so we can set the locked epoch
+                            .update_locked_epoch(block.epoch());
                         if execution.decision().is_commit() {
                             let involves_inputs = tx_rec.evidence().has_inputs(local_committee_info.shard_group());
                             if !involves_inputs {
@@ -804,6 +810,7 @@ where TConsensusSpec: ConsensusSpec
                         tx_rec.set_local_decision(Decision::Commit);
                         // Set partial evidence for local inputs using what we know.
                         tx_rec.merge_evidence(evidence);
+                        // tx_rec epoch will be locked by foreign proposal(s) when we get it
                     },
                 }
             },
@@ -977,10 +984,17 @@ where TConsensusSpec: ConsensusSpec
                 return Ok(Some(NoVoteReason::NotAllForeignInputPledges));
             }
             let transaction_id = *tx_rec.id();
+
+            let locked_epoch = tx_rec.locked_epoch().ok_or_else(|| {
+                HotStuffError::InvariantError(format!(
+                    "Locked epoch not set for transaction {} in LocalAccept stage",
+                    tx_rec.id()
+                ))
+            })?;
             let execution = self.execute_transaction(
                 tx,
                 block.as_leaf(),
-                block.epoch(),
+                locked_epoch,
                 transaction,
                 proposed_block_change_set,
             )?;
@@ -1466,7 +1480,7 @@ where TConsensusSpec: ConsensusSpec
         &self,
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         block: LeafBlock,
-        current_epoch: Epoch,
+        execution_epoch: Epoch,
         transaction: TransactionRecord,
         change_set: &ProposedBlockChangeSet,
     ) -> Result<BlockTransactionExecution, HotStuffError> {
@@ -1491,7 +1505,7 @@ where TConsensusSpec: ConsensusSpec
 
         let executed = self
             .transaction_manager
-            .execute(current_epoch, pledged)
+            .execute(execution_epoch, pledged)
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
 
         Ok(executed.for_block(block, transaction_id))

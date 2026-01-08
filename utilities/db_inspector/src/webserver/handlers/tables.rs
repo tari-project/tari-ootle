@@ -193,6 +193,7 @@ fn create_table_for_cf<CF: Cf>() -> TableResponse {
                 Column::new("original_decision", "Original Decision"),
                 Column::new("local_decision", "Local Decision"),
                 Column::new("remote_decision", "Remote Decision"),
+                Column::new("locked_epoch", "Locked Epoch"),
                 Column::new("is_global", "Is Global"),
                 Column::new("is_ready", "Is Ready"),
             ]);

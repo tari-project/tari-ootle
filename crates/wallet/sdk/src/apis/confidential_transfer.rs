@@ -378,13 +378,7 @@ where TSpec: WalletSdkSpec
             .with_dry_run(params.is_dry_run)
             // TODO: we assume that from_account has XTR
             .pay_fee_from_component(*from_account.component_address(), max_fee)
-            .then(|builder| {
-                if dest_account_exists {
-                    builder
-                } else {
-                    builder.create_account(*params.destination_address.account_public_key())
-                }
-            })
+            .create_account(*params.destination_address.account_public_key())
             .then(|builder| {
                 if let Some(ref badge) = params.proof_from_resource {
                     builder

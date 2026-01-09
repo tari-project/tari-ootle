@@ -77,7 +77,8 @@ pub async fn wait_for_result_and_account(
         }
         if let Some(ref result) = maybe_result {
             // If accept, we wait for the account. If reject we return immediately
-            if (result.finalize.result.is_accept() && maybe_account.is_some()) || result.finalize.result.is_reject() {
+            if (result.finalize.result.is_any_accept() && maybe_account.is_some()) || result.finalize.result.is_reject()
+            {
                 return Ok((maybe_result.unwrap(), maybe_account));
             }
         }

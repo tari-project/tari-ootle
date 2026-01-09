@@ -53,7 +53,7 @@ fn mint_multiple_times() {
         owner_token.clone(),
         Metadata::new(),
     );
-    assert!(result.finalize.result.is_accept());
+    assert!(result.finalize.result.is_any_accept());
 
     // mint a second nft
     let result = mint_faucet_nft(
@@ -62,7 +62,7 @@ fn mint_multiple_times() {
         owner_token.clone(),
         Metadata::new(),
     );
-    assert!(result.finalize.result.is_accept());
+    assert!(result.finalize.result.is_any_accept());
 }
 
 fn mint_faucet_nft(

@@ -88,8 +88,10 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         match resolved_inputs {
             ResolvedTransactionInputs::OnlyLocalInputs { local_versions } => {
                 // Because we have only local inputs, this shard group unilaterally decides the locked epoch (though
-                // output shards may abort) TODO: the pool record needs to be updated after this
-                // function returns by the caller, which is not ideal
+                // output shardgroups still may abort)
+
+                // TODO: the pool record needs to be updated after this function returns by the caller, which is not
+                // ideal
                 let execution_epoch = block.epoch();
                 self.prepare_local_input_transaction(
                     store,

@@ -102,7 +102,6 @@ async function jsonRpc(method: string, params: any = null) {
 // Transaction
 export const submitTransaction = (request: VNSubmitTransactionRequest): Promise<VNSubmitTransactionResponse> =>
   jsonRpc("submit_transaction", request);
-export const getRecentTransactions = (): Promise<GetRecentTransactionsResponse> => jsonRpc("get_recent_transactions");
 export const getTransaction = (request: GetTransactionRequest): Promise<GetTransactionResponse> =>
   jsonRpc("get_transaction", request);
 export const getTransactionResult = (request: VNGetTransactionResultRequest): Promise<VNGetTransactionResultResponse> =>

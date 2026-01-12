@@ -414,8 +414,8 @@ pub fn process_foreign_block<TStore: StateStore>(
                     continue;
                 }
 
-                // We update this in the Accept phase because we may be output-only and not have seen the Prepare
-                // (therefore locked_epoch is None) TODO: worth asserting this invariant?
+                // We update this in the foreign Accept phase because we may be output-only and not yet performed the
+                // prepare phase. (therefore locked_epoch is None)
                 tx_rec.update_locked_epoch(proposal.epoch());
 
                 let remote_decision = atom.decision;

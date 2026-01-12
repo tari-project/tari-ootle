@@ -703,6 +703,9 @@ where TConsensusSpec: ConsensusSpec
             }));
         }
 
+        // Prepare phase, ensure we set a locked_epoch if not already done
+        tx_rec.update_locked_epoch(block.epoch());
+
         // Foreign block could have already resulted in an ABORT execution
         let maybe_execution = proposed_block_change_set.take_transaction_execution(tx_rec.id());
         let prepared = if maybe_execution.as_ref().is_some_and(|e| e.decision().is_abort()) {
@@ -773,14 +776,11 @@ where TConsensusSpec: ConsensusSpec
                         );
                         // CASE: All inputs are local and outputs are foreign (i.e. the transaction is
                         // executed), or we're output-only and have received all pledges.
-                        tx_rec
-                            .update_from_execution(
-                                local_committee_info.num_preshards(),
-                                local_committee_info.num_committees(),
-                                &execution,
-                            )
-                            // Executed - input-only, so we can set the locked epoch
-                            .update_locked_epoch(block.epoch());
+                        tx_rec.update_from_execution(
+                            local_committee_info.num_preshards(),
+                            local_committee_info.num_committees(),
+                            &execution,
+                        );
                         if execution.decision().is_commit() {
                             let involves_inputs = tx_rec.evidence().has_inputs(local_committee_info.shard_group());
                             if !involves_inputs {

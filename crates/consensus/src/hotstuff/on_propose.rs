@@ -631,6 +631,16 @@ where TConsensusSpec: ConsensusSpec
             return Ok(None);
         }
 
+        // Update locked epoch if needed
+        if pool_tx.update_locked_epoch(parent_block.epoch()) {
+            info!(
+                target: LOG_TARGET,
+                "🔒 Updated locked epoch for transaction {} to {}",
+                pool_tx.id(),
+                parent_block.epoch(),
+            );
+        }
+
         match prepared {
             PreparedTransaction::LocalOnly(local) => match *local {
                 LocalPreparedTransaction::Accept { execution, .. } => {
@@ -640,8 +650,7 @@ where TConsensusSpec: ConsensusSpec
                         .set_evidence(execution.to_evidence(
                             local_committee_info.num_preshards(),
                             local_committee_info.num_committees(),
-                        ))
-                        .update_locked_epoch(parent_block.epoch());
+                        ));
 
                     info!(
                         target: LOG_TARGET,
@@ -696,8 +705,7 @@ where TConsensusSpec: ConsensusSpec
                         .merge_evidence(execution.to_evidence(
                             local_committee_info.num_preshards(),
                             local_committee_info.num_committees(),
-                        ))
-                        .update_locked_epoch(parent_block.epoch());
+                        ));
 
                     executed_transactions.insert(*pool_tx.id(), execution);
                     let atom = pool_tx.get_current_transaction_atom();

@@ -63,15 +63,16 @@ async fn epoch_change(mut test: Test) {
                 assert_eq!(r1.finalize.result.is_accept(), r2.finalize.result.is_accept());
 
                 // NB: executions use a consistent epoch
-                // Note that in the multi shard case, transaction may not execute in Epoch(2) in this test because of
-                // one shard may lag behind very slightly.
-                assert_eq!(execution.current_epoch, other_exec.current_epoch);
+                assert_eq!(
+                    execution.current_epoch, other_exec.current_epoch,
+                    "epoch mismatch for tx_id {}",
+                    tx_id
+                );
             }
         }
     }
 
     test.stop();
-
     test.assert_clean_shutdown().await;
     log::info!("total messages sent: {}", test.network().total_messages_sent());
 }

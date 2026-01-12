@@ -16,8 +16,6 @@ use libp2p::{
     identity::Keypair,
     mdns,
     noise,
-    peer_store,
-    peer_store::memory_store::MemoryStore,
     ping,
     relay,
     rendezvous,
@@ -29,6 +27,8 @@ use libp2p::{
     SwarmBuilder,
 };
 use libp2p_messaging as messaging;
+use libp2p_peer_store as peer_store;
+use libp2p_peer_store::memory_store::MemoryStore;
 use libp2p_substream as substream;
 
 use crate::{

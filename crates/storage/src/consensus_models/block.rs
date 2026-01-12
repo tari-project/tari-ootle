@@ -41,7 +41,7 @@ use tari_ootle_common_types::{
     VersionedSubstateId,
     VersionedSubstateIdRef,
 };
-use tari_state_tree::{compute_proof_for_hashes, SparseMerkleProofExt, StateTreeError, TreeHash, Version};
+use tari_state_tree::{compute_proof_for_hashes, KeyHash, SparseMerkleProof, StateTreeError, Version};
 use tari_template_lib::{prelude::SchnorrSignatureBytes, types::crypto::RistrettoPublicKeyBytes};
 use tari_transaction::TransactionId;
 use time::PrimitiveDateTime;
@@ -429,8 +429,8 @@ impl Block {
         self.header.extra_data()
     }
 
-    pub fn compute_command_inclusion_proof(&self, command_index: usize) -> Result<SparseMerkleProofExt, BlockError> {
-        let hashes = self.commands.iter().map(|cmd| TreeHash::from(cmd.hash().into_array()));
+    pub fn compute_command_inclusion_proof(&self, command_index: usize) -> Result<SparseMerkleProof, BlockError> {
+        let hashes = self.commands.iter().map(|cmd| KeyHash(cmd.hash().into_array()));
         let hash =
             hashes
                 .clone()

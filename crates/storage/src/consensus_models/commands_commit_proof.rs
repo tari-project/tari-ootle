@@ -7,7 +7,7 @@ use tari_common_types::types::{CompressedPublicKey, FixedHash};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_ootle_common_types::VotePower;
 use tari_sidechain::{CommitProofElement, SidechainBlockCommitProof, SidechainProofValidationError};
-use tari_state_tree::{compute_merkle_root_for_hashes, StateTreeError, TreeHash};
+use tari_state_tree::{compute_merkle_root_for_hashes, KeyHash, StateTreeError};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 
 use crate::consensus_models::Command;
@@ -134,11 +134,11 @@ impl CommandsCommitProofV1 {
         // key implicitly "encode" the hash ordering for proof verification) and therefore we'd need some other way to
         // represent this ordering within a multi-proof with nonduplicate nodes. Since we only include the full command
         // data for applicable commands, such a multi-proof may not be worthwhile.
-        let command_hashes = self.commands.iter().map(|cmd| TreeHash::new(cmd.hash().into_array()));
+        let command_hashes = self.commands.iter().map(|cmd| KeyHash(cmd.hash().into_array()));
         let root_hash = compute_merkle_root_for_hashes(command_hashes)?;
-        if FixedHash::from(root_hash.into_array()) != self.commit_proof.header.command_merkle_root {
+        if FixedHash::from(root_hash.0) != self.commit_proof.header.command_merkle_root {
             return Err(ForeignProposalCommitProofError::InvalidCommandMerkleRoot {
-                calculated: root_hash,
+                calculated: root_hash.0.into(),
                 expected: self.commit_proof.header.command_merkle_root,
             });
         }
@@ -248,7 +248,7 @@ pub enum ForeignProposalCommitProofError {
     #[error("State tree error: {0}")]
     StateTreeError(#[from] StateTreeError),
     #[error("Invalid command Merkle root. Calculated: {calculated}, expected: {expected}")]
-    InvalidCommandMerkleRoot { calculated: TreeHash, expected: FixedHash },
+    InvalidCommandMerkleRoot { calculated: FixedHash, expected: FixedHash },
     #[error("Sidechain Proof Validation Error: {0}")]
     SidechainProofValidationError(#[from] SidechainProofValidationError),
     #[error("The foreign proposal was invalid: {0}")]

@@ -25,7 +25,7 @@ use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_engine_types::serde_with;
 use tari_ootle_common_types::{hashing, Epoch, ExtraData, Network, NodeHeight, NumPreshards, ShardGroup};
 use tari_sidechain::{BlockHeaderHashFields, BlockHeaderHashFieldsV1};
-use tari_state_tree::{compute_merkle_root_for_hashes, TreeHash};
+use tari_state_tree::{compute_merkle_root_for_hashes, KeyHash};
 use tari_template_lib::{prelude::SchnorrSignatureBytes, types::crypto::RistrettoPublicKeyBytes};
 
 use super::{BlockError, Command};
@@ -449,9 +449,9 @@ impl BlockHeader {
     }
 
     pub fn compute_command_merkle_root(commands: &BTreeSet<Command>) -> Result<FixedHash, BlockError> {
-        let hashes = commands.iter().map(|cmd| TreeHash::from(cmd.hash().into_array()));
+        let hashes = commands.iter().map(|cmd| KeyHash(cmd.hash().into_array()));
         let hash = compute_merkle_root_for_hashes(hashes).map_err(BlockError::StateTreeError)?;
-        Ok(FixedHash::from(hash.into_array()))
+        Ok(FixedHash::from(hash.0))
     }
 }
 

@@ -117,7 +117,7 @@ async fn check_state_transitions() {
                     .iter()
                     .flat_map(|t| &t.updates)
                     .map(|transition| transition.to_tree_change());
-                let root = tree.put_substate_changes(None, 1, values).unwrap();
+                let root = tree.put_substate_changes(1, values).unwrap();
                 assert_eq!(root, shard_root, "Shard {} root hash mismatch", shard);
             }
 

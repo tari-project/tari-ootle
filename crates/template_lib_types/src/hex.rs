@@ -1,7 +1,10 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::fmt;
+use tari_template_abi::rust::{
+    fmt,
+    fmt::{Display, Formatter},
+};
 
 use crate::HashParseError;
 
@@ -41,6 +44,18 @@ pub fn write_hex_fmt<W: fmt::Write>(writer: &mut W, bytes: &[u8]) -> fmt::Result
         write!(writer, "{:02x}", b)?;
     }
     Ok(())
+}
+
+#[derive(Debug)]
+pub struct HexParseError;
+
+#[cfg(feature = "std")]
+impl std::error::Error for HexParseError {}
+
+impl Display for HexParseError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "Failed to parse hex string")
+    }
 }
 
 #[cfg(test)]

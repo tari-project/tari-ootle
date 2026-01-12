@@ -261,8 +261,8 @@ pub struct KeyParseError;
 impl std::error::Error for KeyParseError {}
 
 impl Display for KeyParseError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Failed to parse substate key")
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "Failed to parse byte key")
     }
 }
 

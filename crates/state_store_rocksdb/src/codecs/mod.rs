@@ -9,6 +9,7 @@ mod column;
 mod misc;
 #[macro_use]
 mod prefixed;
+mod borsh;
 mod public_key;
 mod shard_group;
 mod small_bytes;
@@ -22,6 +23,7 @@ use std::io;
 
 pub use bincode::*;
 pub use block_diff::*;
+pub use borsh::*;
 pub use bytes::*;
 pub use column::*;
 pub use misc::*;

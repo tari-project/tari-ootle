@@ -31,6 +31,7 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+jmt = { workspace = true }
 rand = { workspace = true }
 tari_utilities = { workspace = true }
 tari_template_lib = { workspace = true, features = ["bincode-compat"] }

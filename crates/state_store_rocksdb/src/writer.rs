@@ -87,7 +87,14 @@ use tari_ootle_storage::{
     StateStoreWriteTransaction,
     StorageError,
 };
-use tari_state_tree::{Child, Nibble, Node, NodeKey, NodeType, StaleTreeNode, StateTreePayload, Version};
+use tari_state_tree::{
+    display_node_key,
+    storage::{Node, NodeKey},
+    StateTreePayload,
+    StateTreeStaleNodeIndex,
+    StateTreeStaleNodeIndexBatch,
+    Version,
+};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 
@@ -143,7 +150,7 @@ use crate::{
             StateTransitionType,
         },
         state_tree,
-        state_tree::{StateTreeCf, StateTreeStaleNodesCf},
+        state_tree::{StaleTreeNode, StateTreeCf, StateTreeStaleNodesCf},
         state_tree_shard_versions::StateTreeShardVersionCf,
         substate,
         substate::{SubstateCf, SubstateHeadData},
@@ -1361,7 +1368,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         trace!(
             target: LOG_TARGET,
             "{OPERATION}: shard {} block {} (v{}, new={}, stale={})", shard, block_id,
-            diff.version,diff.diff.new_nodes.len(),diff.diff.stale_tree_nodes.len()
+            diff.version,diff.diff.new_nodes, diff.diff.stale_tree_nodes.len()
         );
         self.db()
             .cf(PendingStateTreeDiffCf)?
@@ -1403,11 +1410,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(diffs)
     }
 
-    fn state_tree_nodes_batch_insert(
-        &mut self,
-        shard: Shard,
-        nodes: Vec<(NodeKey, Node<StateTreePayload>)>,
-    ) -> Result<(), StorageError> {
+    fn state_tree_nodes_batch_insert(&mut self, shard: Shard, nodes: Vec<(NodeKey, Node)>) -> Result<(), StorageError> {
         const OPERATION: &str = "state_tree_nodes_insert";
         let cf = self.db().cf(StateTreeCf)?;
         for (key, node) in nodes {
@@ -1420,13 +1423,13 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         &mut self,
         shard: Shard,
         version: Version,
-        nodes: Vec<StaleTreeNode>,
+        stale_indexes: StateTreeStaleNodeIndexBatch,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "state_tree_nodes_record_stale_tree_nodes";
 
         self.db()
             .cf(StateTreeStaleNodesCf)?
-            .put(&(shard, version), &nodes, OPERATION)?;
+            .put(&(shard, version), &stale_indexes, OPERATION)?;
 
         Ok(())
     }
@@ -1451,13 +1454,13 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 continue;
             };
             for result in stale_iter {
-                let ((shard, version), nodes) = result?;
+                let ((shard, version), stale_batch) = result?;
                 // Only delete up to history length back from the max version
                 if version > to_version {
                     break;
                 }
 
-                for node in nodes {
+                for stale in stale_batch {
                     // Deletes are buffered to ensure that we delete entire subtrees at once.
                     if delete_buffer.len() >= DELETE_BUFFER_FLUSH_THRESHOLD {
                         debug!(target: LOG_TARGET, "Deleting {} stale nodes from shard {}", delete_buffer.len(), shard);
@@ -1467,34 +1470,25 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                         num_deleted += delete_buffer.len();
                         delete_buffer.clear();
                     }
+                    let node = cf.get(&(shard, stale.node_key.clone()), OPERATION)?;
 
                     match node {
-                        StaleTreeNode::Node(key) => {
-                            trace!(target: LOG_TARGET, "Deleting stale node {key} from shard {shard}", );
-                            delete_buffer.push((shard, key));
+                        Node::Leaf(_) => {
+                            trace!(target: LOG_TARGET, "Deleting stale node {} from shard {shard}", display_node_key(&stale.node_key));
+                            delete_buffer.push((shard, stale.node_key));
                         },
-                        StaleTreeNode::Subtree(parent_key) => {
-                            trace!(target: LOG_TARGET, "Deleting stale substree {parent_key} from shard {shard}", );
-                            let Some(parent_node) = cf.get(&(shard, parent_key.clone()), OPERATION).optional()? else {
-                                continue;
-                            };
-
-                            match parent_node {
-                                Node::Internal(node) => {
-                                    delete_buffer.extend(recurse_subtree_depth_first_post_order(
-                                        &cf,
-                                        shard,
-                                        parent_key,
-                                        node.into_children(),
-                                    ));
-                                },
-                                Node::Leaf(_) => {
-                                    // Subtree is a single leaf node
-                                    trace!(target: LOG_TARGET, "Deleting stale leaf node {parent_key} from shard {shard}", );
-                                    delete_buffer.push((shard, parent_key));
-                                },
-                                Node::Null => {},
-                            }
+                        Node::Internal(internal) => {
+                            let parent_key = stale.node_key;
+                            trace!(target: LOG_TARGET, "Deleting stale substree {} from shard {shard}", display_node_key(&parent_key));
+                            delete_buffer.extend(recurse_subtree_depth_first_post_order(
+                                &cf,
+                                shard,
+                                parent_key,
+                                internal.children_sorted(),
+                            ));
+                        },
+                        Node::Null => {
+                            warn!(target: LOG_TARGET, "Stale node {} in shard {shard} is null", display_node_key(&stale.node_key));
                         },
                     }
                 }
@@ -1796,7 +1790,10 @@ fn recurse_subtree_depth_first_post_order<'a>(
         .into_iter()
         .flat_map(move |(nibble, child)| -> Box<dyn Iterator<Item = (Shard, NodeKey)>> {
             let child_key = parent_key.gen_child_node_key(child.version, nibble);
-            match child.node_type{
+              let mut node_nibble_path = parent_key.nibble_path().clone();
+        node_nibble_path.push(nibble);
+        let child_key = NodeKey::new(child.version, node_nibble_path);
+            match child.node_type {
                 NodeType::Leaf => {
                     Box::new(iter::once((shard, child_key)))
                 }

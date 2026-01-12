@@ -1,17 +1,14 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_jellyfish::JmtStorageError;
-use tari_ootle_common_types::optional::IsNotFoundError;
+use jmt::storage::NodeKey;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StateTreeError {
-    #[error("JMT Storage error: {0}")]
-    JmtStorageError(#[from] JmtStorageError),
-}
-
-impl IsNotFoundError for StateTreeError {
-    fn is_not_found_error(&self) -> bool {
-        matches!(self, StateTreeError::JmtStorageError(JmtStorageError::NotFound(_)))
-    }
+    #[error("JMT error: {0}")]
+    JmtError(#[from] anyhow::Error),
+    #[error("Attempted to insert a node with an existing key: {0:?}")]
+    Conflict(NodeKey),
+    #[error("Unexpected error: {0}")]
+    Unexpected(String),
 }

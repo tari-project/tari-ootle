@@ -49,7 +49,6 @@ use tari_utilities::hex::to_hex;
 use wasmer::ExportError;
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
-
 #[test]
 fn test_hello_world() {
     let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/hello_world"]);

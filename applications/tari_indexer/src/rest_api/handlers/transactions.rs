@@ -55,26 +55,30 @@ pub async fn submit_transaction(
         .submit_transaction(transaction)
         .await
         .map_err(|e| match e {
-            TransactionManagerError::NetworkClientError(NetworkClientError::AllValidatorsFailed {
-                last_error: Some(last_err),
-                committee_size,
-            }) => match last_err.status() {
-                Some(status) => match status.as_status_code() {
-                    RpcStatusCode::BadRequest => {
-                        ErrorResponse::bad_request(format!("Bad request: {}", status.details()))
+            TransactionManagerError::NetworkClientError(net_err) => match *net_err {
+                NetworkClientError::AllValidatorsFailed {
+                    last_error: Some(last_err),
+                    committee_size,
+                } => match last_err.status() {
+                    Some(status) => match status.as_status_code() {
+                        RpcStatusCode::BadRequest => {
+                            ErrorResponse::bad_request(format!("Bad request: {}", status.details()))
+                        },
+                        RpcStatusCode::NotFound => ErrorResponse::not_found(format!("Not found: {}", status.details())),
+                        _ => ErrorResponse::general_error(format!(
+                            "Rpc error: ({} members) {}",
+                            committee_size,
+                            status.details()
+                        )),
                     },
-                    RpcStatusCode::NotFound => ErrorResponse::not_found(format!("Not found: {}", status.details())),
-                    _ => ErrorResponse::general_error(format!(
-                        "Rpc error: ({} members) {}",
-                        committee_size,
-                        status.details()
-                    )),
+                    None => {
+                        ErrorResponse::general_error(format!("Rpc error: ({} members) {}", committee_size, last_err))
+                    },
                 },
-                None => ErrorResponse::general_error(format!("Rpc error: ({} members) {}", committee_size, last_err)),
-            },
-            TransactionManagerError::NetworkClientError(NetworkClientError::AllValidatorsFailed { .. }) |
-            TransactionManagerError::NetworkClientError(NetworkClientError::NoCommitteeMembers) => {
-                ErrorResponse::service_unavailable(format!("All validators failed: {}", e))
+                e @ NetworkClientError::AllValidatorsFailed { .. } | e @ NetworkClientError::NoCommitteeMembers => {
+                    ErrorResponse::service_unavailable(format!("All validators failed: {}", e))
+                },
+                e => ErrorResponse::anyhow(e),
             },
             TransactionManagerError::InvalidTransaction {
                 transaction_id,

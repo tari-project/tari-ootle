@@ -27,7 +27,7 @@ import "../../theme/echarts.css";
 import type {
   VNCommitteeShardInfo,
   GetNetworkCommitteeResponse,
-} from "@tari-project/typescript-bindings";
+} from "@tari-project/ootle-ts-bindings";
 
 interface IData {
   value: number;

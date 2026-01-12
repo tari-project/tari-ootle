@@ -51,7 +51,6 @@ use tokio::task;
 use crate::{
     helpers::{check_join_handle, get_os_assigned_port, get_os_assigned_ports, wait_listener_on_local_port},
     logging::get_base_dir_for_scenario,
-    util::cucumber_log,
     TariWorld,
 };
 
@@ -213,7 +212,7 @@ pub async fn spawn_validator_node(
     // get the public key of the VN
     let public_key = get_vn_identity(json_rpc_port).await;
 
-    cucumber_log(format!("Validator node {} started", name));
+    crate::cucumber_log!("Validator node {} started", name);
     // make the new vn able to be referenced by other processes
     ValidatorNodeProcess {
         name: name.clone(),

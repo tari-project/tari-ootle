@@ -832,6 +832,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             None,
             None,
             is_ready,
+            None,
             time::OffsetDateTime::now_utc(),
             None,
         );
@@ -861,6 +862,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             stage: update.stage(),
             local_decision: update.decision(),
             remote_decision: update.remote_decision(),
+            locked_epoch: update.locked_epoch(),
             is_ready: update.is_ready(),
         };
 
@@ -930,6 +932,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             }
             pool.set_evidence(update.evidence.clone());
             pool.set_is_ready(update.is_ready);
+            pool.set_locked_epoch(update.locked_epoch);
             if let Some(remote_decision) = update.remote_decision {
                 pool.set_remote_decision(remote_decision);
             }

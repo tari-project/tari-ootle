@@ -151,75 +151,86 @@ impl WasmProcess {
             return WasmPtr::null();
         }
 
-        let (env_mut, mut store) = env.data_and_store_mut();
-        let arg = match env_mut.read_from_memory(&mut store, arg_ptr, arg_len) {
-            Ok(arg) => arg,
-            Err(err) => {
-                log::error!(target: LOG_TARGET, "Failed to read from memory: {}", err);
-                return WasmPtr::null();
-            },
-        };
+        let (env_mut, store) = env.data_and_store_mut();
 
         log::debug!(target: LOG_TARGET, "Engine call: {:?}", op);
 
         let result = match op {
-            EngineOp::EmitLog => Self::handle(store, env_mut, arg, |env, arg: EmitLogArg| {
+            EngineOp::EmitLog => Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: EmitLogArg| {
                 env.interface().emit_log(arg.level, arg.message)
             }),
-            EngineOp::ComponentInvoke => Self::handle(store, env_mut, arg, |env, arg: ComponentInvokeArg| {
-                env.interface()
-                    .component_invoke(arg.component_ref, arg.action, arg.args.into())
-            }),
-            EngineOp::ResourceInvoke => Self::handle(store, env_mut, arg, |env, arg: ResourceInvokeArg| {
-                env.interface()
-                    .resource_invoke(arg.resource_ref, arg.action, arg.args.into())
-            }),
-            EngineOp::VaultInvoke => Self::handle(store, env_mut, arg, |env, arg: VaultInvokeArg| {
+            EngineOp::ComponentInvoke => {
+                Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: ComponentInvokeArg| {
+                    env.interface()
+                        .component_invoke(arg.component_ref, arg.action, arg.args.into())
+                })
+            },
+            EngineOp::ResourceInvoke => {
+                Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: ResourceInvokeArg| {
+                    env.interface()
+                        .resource_invoke(arg.resource_ref, arg.action, arg.args.into())
+                })
+            },
+            EngineOp::VaultInvoke => Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: VaultInvokeArg| {
                 env.interface().vault_invoke(arg.vault_ref, arg.action, arg.args.into())
             }),
-            EngineOp::BucketInvoke => Self::handle(store, env_mut, arg, |env, arg: BucketInvokeArg| {
+            EngineOp::BucketInvoke => Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: BucketInvokeArg| {
                 env.interface()
                     .bucket_invoke(arg.bucket_ref, arg.action, arg.args.into())
             }),
-            EngineOp::NonFungibleInvoke => Self::handle(store, env_mut, arg, |env, arg: NonFungibleInvokeArg| {
-                env.interface()
-                    .non_fungible_invoke(arg.address, arg.action, arg.args.into())
-            }),
-            EngineOp::GenerateUniqueId => {
-                Self::handle(store, env_mut, arg, |env, _arg: ()| env.interface().generate_uuid())
-            },
-            EngineOp::ConsensusInvoke => Self::handle(store, env_mut, arg, |env, arg: ConsensusInvokeArg| {
-                env.interface().consensus_invoke(arg.action)
-            }),
-            EngineOp::CallerContextInvoke => Self::handle(store, env_mut, arg, |env, arg: CallerContextInvokeArg| {
-                env.interface().caller_context_invoke(arg.action, arg.args.into())
-            }),
-            EngineOp::AddressAllocationInvoke => {
-                Self::handle(store, env_mut, arg, |env, arg: AddressAllocationInvokeArg| {
-                    env.interface().allocate_address_invoke(arg)
+            EngineOp::NonFungibleInvoke => {
+                Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: NonFungibleInvokeArg| {
+                    env.interface()
+                        .non_fungible_invoke(arg.address, arg.action, arg.args.into())
                 })
             },
-            EngineOp::GenerateRandomInvoke => Self::handle(store, env_mut, arg, |env, arg: GenerateRandomInvokeArg| {
-                env.interface().generate_random_invoke(arg.action)
+            EngineOp::GenerateUniqueId => Self::handle(store, env_mut, arg_ptr, arg_len, |env, _arg: ()| {
+                env.interface().generate_uuid()
             }),
-            EngineOp::EmitEvent => Self::handle(store, env_mut, arg, |env, arg: EmitEventArg| {
+            EngineOp::ConsensusInvoke => {
+                Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: ConsensusInvokeArg| {
+                    env.interface().consensus_invoke(arg.action)
+                })
+            },
+            EngineOp::CallerContextInvoke => {
+                Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: CallerContextInvokeArg| {
+                    env.interface().caller_context_invoke(arg.action, arg.args.into())
+                })
+            },
+            EngineOp::AddressAllocationInvoke => Self::handle(
+                store,
+                env_mut,
+                arg_ptr,
+                arg_len,
+                |env, arg: AddressAllocationInvokeArg| env.interface().allocate_address_invoke(arg),
+            ),
+            EngineOp::GenerateRandomInvoke => {
+                Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: GenerateRandomInvokeArg| {
+                    env.interface().generate_random_invoke(arg.action)
+                })
+            },
+            EngineOp::EmitEvent => Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: EmitEventArg| {
                 env.interface().emit_event(arg.topic, arg.payload)
             }),
-            EngineOp::CallInvoke => Self::handle(store, env_mut, arg, |env, arg: CallInvokeArg| {
+            EngineOp::CallInvoke => Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: CallInvokeArg| {
                 env.interface().call_invoke(arg.action, arg.args.into())
             }),
-            EngineOp::ProofInvoke => Self::handle(store, env_mut, arg, |env, arg: ProofInvokeArg| {
+            EngineOp::ProofInvoke => Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: ProofInvokeArg| {
                 log::debug!(target: LOG_TARGET, "proof action = {:?}", arg.action);
                 env.interface().proof_invoke(arg.proof_ref, arg.action, arg.args.into())
             }),
-            EngineOp::BuiltinTemplateInvoke => {
-                Self::handle(store, env_mut, arg, |env, arg: BuiltinTemplateInvokeArg| {
-                    env.interface().builtin_template_invoke(arg.action)
+            EngineOp::BuiltinTemplateInvoke => Self::handle(
+                store,
+                env_mut,
+                arg_ptr,
+                arg_len,
+                |env, arg: BuiltinTemplateInvokeArg| env.interface().builtin_template_invoke(arg.action),
+            ),
+            EngineOp::SignatureInvoke => {
+                Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: SignatureInvokeArg| {
+                    env.interface().signature_invoke(arg.action, arg.args.into())
                 })
             },
-            EngineOp::SignatureInvoke => Self::handle(store, env_mut, arg, |env, arg: SignatureInvokeArg| {
-                env.interface().signature_invoke(arg.action, arg.args.into())
-            }),
         };
 
         result.unwrap_or_else(|err| {
@@ -243,7 +254,8 @@ impl WasmProcess {
     pub fn handle<T, U, E>(
         mut store: StoreMut,
         env_mut: &mut WasmEnv<Runtime>,
-        args: Vec<u8>,
+        arg_ptr: WasmPtr<u8>,
+        arg_len: u32,
         f: fn(&mut Runtime, T) -> Result<U, E>,
     ) -> Result<WasmPtr<u8>, WasmExecutionError>
     where
@@ -251,13 +263,19 @@ impl WasmProcess {
         U: Serialize,
         WasmExecutionError: From<E>,
     {
-        let decoded = decode_exact(&args).map_err(|e| {
-            eprintln!("Failed to decode args: {}", e);
-            WasmExecutionError::EngineArgDecodeFailed(e)
-        })?;
+        // SAFETY: WasmProcess is not used concurrently and templates are not able to spawn threads
+        let decoded = unsafe {
+            env_mut.with_memory_slice(&mut store, arg_ptr, arg_len, |arg| {
+                decode_exact(arg).map_err(|e| {
+                    log::error!(target: LOG_TARGET, "Failed to decode args for engine call: {}", e);
+                    WasmExecutionError::EngineArgDecodeFailed(e)
+                })
+            })
+        }??;
         let resp = f(env_mut.state_mut(), decoded)?;
         let len = encoded_len(&resp)?;
         let ptr = env_mut.alloc(&mut store, len as u32)?;
+        // Encode response directly into the WASM memory. The WASM code is responsible for freeing it.
         let mut writer = env_mut.memory_writer(&mut store, ptr)?;
         encode_with_len_to_writer(&mut writer, &resp)?;
         Ok(ptr)
@@ -346,10 +364,13 @@ impl Invokable<Store> for WasmProcess {
         };
 
         // Read response from memory
-        let raw = self.env.read_memory_with_embedded_len(store, ptr.offset())?;
+        // SAFETY: WasmProcess is not used concurrently
+        let value = unsafe {
+            self.env
+                .with_memory_with_embedded_len(store, ptr.offset(), IndexedValue::from_raw)??
+        };
 
-        let value = IndexedValue::from_raw(&raw)?;
-
+        self.env.state().interface().validate_return_value(&value)?;
         self.env
             .state()
             .interface()
@@ -366,13 +387,13 @@ fn debug_handler<T: Send + 'static>(mut env: FunctionEnvMut<WasmEnv<T>>, arg_ptr
     const WASM_DEBUG_LOG_TARGET: &str = "tari::ootle::wasm";
     let (state, mut store) = env.data_and_store_mut();
 
-    match state.read_from_memory(&mut store, arg_ptr, arg_len) {
-        Ok(arg) => {
-            eprintln!("DEBUG: {}", String::from_utf8_lossy(&arg));
-        },
-        Err(err) => {
+    // SAFETY: WasmProcess is not used concurrently
+    unsafe {
+        if let Err(err) = state.with_memory_slice(&mut store, arg_ptr, arg_len, |msg| {
+            eprintln!("DEBUG: {}", String::from_utf8_lossy(msg));
+        }) {
             log::error!(target: WASM_DEBUG_LOG_TARGET, "Failed to read from memory: {}", err);
-        },
+        }
     }
 }
 
@@ -386,23 +407,25 @@ fn on_panic_handler<T: Send + 'static>(
     const WASM_DEBUG_LOG_TARGET: &str = "tari::ootle::wasm";
     let (state, mut store) = env.data_and_store_mut();
 
-    match state.read_from_memory(&mut store, msg_ptr, msg_len as u32) {
-        Ok(msg) => {
-            let msg = String::from_utf8_lossy(&msg);
-            log::error!(target: WASM_DEBUG_LOG_TARGET, "📣 PANIC: ({}:{}) {}", line, col, msg);
-            state.set_last_panic(msg.to_string());
-        },
-        Err(err) => {
-            log::error!(
-                target: WASM_DEBUG_LOG_TARGET,
-                "📣 PANIC: WASM template panicked but did not provide a valid memory pointer to on_panic \
-                 callback: {}",
-                err
-            );
-            state.set_last_panic(format!(
-                "WASM panicked but did not provide a valid message pointer to on_panic callback: {}",
-                err
-            ));
-        },
+    // SAFETY: There is no way to call this function concurrently
+    unsafe {
+        state
+            .with_memory_slice(&mut store, msg_ptr, msg_len as u32, |msg| {
+                let msg = String::from_utf8_lossy(msg);
+                log::error!(target: WASM_DEBUG_LOG_TARGET, "📣 PANIC: ({}:{}) {}", line, col, msg);
+                state.set_last_panic(msg.to_string());
+            })
+            .unwrap_or_else(|err| {
+                log::error!(
+                    target: WASM_DEBUG_LOG_TARGET,
+                    "📣 PANIC: WASM template panicked but did not provide a valid memory pointer to on_panic \
+                     callback: {}",
+                    err
+                );
+                state.set_last_panic(format!(
+                    "WASM panicked but did not provide a valid message pointer to on_panic callback: {}",
+                    err
+                ));
+            });
     }
 }

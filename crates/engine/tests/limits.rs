@@ -8,10 +8,11 @@ use tari_transaction::{args, Transaction};
 
 const TEMPLATE_PATHS: &[&str] = &["tests/templates/limits"];
 const TEMPLATE_NAME: &str = "PushItToTheLimit";
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 
 #[test]
 fn practical_limit() {
-    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let template = test.get_template_address(TEMPLATE_NAME);
 
     test.execute_expect_success(

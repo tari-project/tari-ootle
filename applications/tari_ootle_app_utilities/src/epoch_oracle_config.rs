@@ -79,9 +79,9 @@ impl ConfiguredOracleConfig {
                     .context("Failed to read oracle config file")?;
                 toml::from_str(&s).context("Failed to parse oracle TOML config file")?
             },
-            "json" => {
+            "json" | "json5" => {
                 let mut file = file.into_std().await;
-                serde_json::from_reader(&mut file).context("Failed to parse oracle JSON config file")?
+                serde_json5::from_reader(&mut file).context("Failed to parse oracle JSON config file")?
             },
             ext => bail!("Failed to load oracle config. Unsupported file extension {}", ext),
         };

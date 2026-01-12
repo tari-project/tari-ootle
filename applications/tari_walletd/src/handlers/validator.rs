@@ -138,19 +138,7 @@ pub async fn handle_claim_validator_fees(
         .with_dry_run(req.dry_run)
         .with_fee_instructions_builder(|builder| {
             builder
-                .then(|b| {
-                    if account.is_confirmed_on_chain() {
-                        b
-                    } else {
-                        // TODO: make create account idempotent so we don't need to check if the account exists
-                        // This is easy enough, but assumes that the account is given as an input (which requires
-                        // checking anyway). So ideally, we'd be adding "auto-inputs" from the instructions i.e.
-                        // create_account instruction would automatically add the account as an
-                        // input if it exists. This could add complications to multi-shard networks but should be
-                        // possible (a good idea tho?).
-                        b.create_account(*account.address.account_public_key())
-                    }
-                })
+                .create_account(*account.address.account_public_key())
                 .then(|builder| {
                     let mut bucket_names = vec![];
                     fee_pool_addresses

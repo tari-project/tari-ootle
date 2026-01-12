@@ -33,7 +33,7 @@ import { getNetworkCommittees } from "../../utils/json_rpc";
 import type {
   VNCommitteeShardInfo,
   GetNetworkCommitteeResponse,
-} from "@tari-project/typescript-bindings";
+} from "@tari-project/ootle-ts-bindings";
 
 function CommitteesLayout() {
   const [committees, setCommittees] = useState<GetNetworkCommitteeResponse | null>(null);

@@ -30,7 +30,7 @@ import Transactions from "@routes/Transactions/Transactions";
 import AccountDetails from "./AccountDetails";
 import ActionMenu from "./ActionMenu";
 import Assets from "./Assets";
-import { substateIdToString } from "@tari-project/typescript-bindings";
+import { substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { Refresh } from "@mui/icons-material";
 import queryClient from "@api/queryClient";
 import PageHeader from "@components/PageHeader";

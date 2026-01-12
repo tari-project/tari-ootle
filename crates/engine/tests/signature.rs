@@ -31,6 +31,7 @@ const TEMPLATE_PATHS: &[&str] = &["tests/templates/signature"];
 const TEMPLATE_NAME: &str = "SignatureTest";
 const MESSAGE: &[u8] = b"Some message that binds to something important";
 const INITIAL_SUPPLY: Amount = amount!("1000000000000000000000");
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 
 const TEST_DOMAIN: &[u8] = b"tari.test.signature domain for tests";
 fn sign_it(secret: &RistrettoSecretKey) -> Signature<NoSignatureDomain> {
@@ -51,7 +52,7 @@ fn sign_it_with(secret: &RistrettoSecretKey, message: &[u8]) -> Signature<NoSign
 }
 
 fn setup(allow_list: Vec<PublicKey>) -> (TemplateTest, ComponentAddress) {
-    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let template_addr = test.get_template_address(TEMPLATE_NAME);
 
     let transaction = Transaction::builder_localnet()

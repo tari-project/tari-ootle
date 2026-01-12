@@ -6,7 +6,7 @@ use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle};
 use tokio::sync::watch;
 
 use crate::{
-    base_layer::BaseLayerOracle,
+    base_layer::{BaseLayerBlockHeaderStore, BaseLayerOracle},
     configured::{ConfiguredEpochOracle, EpochTickerData},
     hybrid::watch_ticker::WatchEpochTicker,
     store::EpochOracleStore,
@@ -21,7 +21,7 @@ pub struct HybridEpochOracle<TStore> {
     has_initial_sync_completed: bool,
 }
 
-impl<TStore: EpochOracleStore + Send + 'static> HybridEpochOracle<TStore> {
+impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> HybridEpochOracle<TStore> {
     pub fn new(
         configured: ConfiguredEpochOracle<TStore, WatchEpochTicker>,
         base_layer: BaseLayerOracle<TStore>,
@@ -36,7 +36,9 @@ impl<TStore: EpochOracleStore + Send + 'static> HybridEpochOracle<TStore> {
     }
 }
 
-impl<TStore: EpochOracleStore + Send + 'static> EpochEventOracle for HybridEpochOracle<TStore> {
+impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> EpochEventOracle
+    for HybridEpochOracle<TStore>
+{
     async fn next_epoch_event(&mut self) -> Option<EpochEvent> {
         loop {
             tokio::select! {

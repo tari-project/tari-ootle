@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { create } from "zustand";
-import { Account, OotleAddress } from "@tari-project/typescript-bindings";
+import { Account, OotleAddress } from "@tari-project/ootle-ts-bindings";
 
 interface Store {
   showBalance: boolean;

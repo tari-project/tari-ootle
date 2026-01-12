@@ -44,6 +44,7 @@ pub struct TransactionPoolStateUpdateData {
     pub stage: TransactionPoolStage,
     pub local_decision: Decision,
     pub remote_decision: Option<Decision>,
+    pub locked_epoch: Option<Epoch>,
     pub is_ready: bool,
 }
 
@@ -59,6 +60,7 @@ impl TransactionPoolStateUpdateData {
         if let Some(remote_decision) = self.remote_decision {
             other.set_remote_decision(remote_decision);
         }
+        other.set_locked_epoch(self.locked_epoch);
         other.set_is_ready(self.is_ready);
     }
 }

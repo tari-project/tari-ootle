@@ -22,7 +22,7 @@ use tokio::{
 use crate::support::{
     address::TestAddress,
     epoch_manager::TestEpochManager,
-    executions_store::TestExecutionSpecStore,
+    TestBlockTransactionProcessor,
     TestStore,
     ValidatorBuilder,
 };
@@ -48,7 +48,7 @@ pub struct Validator {
 
     pub _current_view: CurrentView,
     pub state_store: TestStore,
-    pub transaction_executions: TestExecutionSpecStore,
+    pub transaction_executor: TestBlockTransactionProcessor,
     pub epoch_manager: TestEpochManager,
     pub events: broadcast::Receiver<HotstuffEvent>,
     pub current_state_machine_state: watch::Receiver<ConsensusCurrentState>,

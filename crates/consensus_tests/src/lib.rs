@@ -5,6 +5,8 @@ mod consensus;
 #[cfg(test)]
 mod dummy_blocks;
 #[cfg(test)]
+mod epoch_change;
+#[cfg(test)]
 mod eviction_proof;
 #[cfg(test)]
 mod leader_failure;

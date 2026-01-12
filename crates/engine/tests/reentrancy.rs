@@ -7,9 +7,11 @@ use tari_template_lib::models::ComponentAddress;
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 use tari_transaction::{args, Transaction};
 
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
 #[test]
 fn it_prevents_reentrant_withdraw() {
-    let mut test = TemplateTest::new(["tests/templates/reentrancy"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/reentrancy"]);
     let template_addr = test.get_template_address("Reentrancy");
     let faucet_addr = test.get_template_address("TestFaucet");
     let (account, _, _) = test.create_empty_account();
@@ -56,7 +58,7 @@ fn it_prevents_reentrant_withdraw() {
 
 #[test]
 fn it_allows_multiple_immutable_access_to_component() {
-    let mut test = TemplateTest::new(["tests/templates/reentrancy"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/reentrancy"]);
 
     let reentrancy: ComponentAddress = test.call_function("Reentrancy", "new", args![], vec![]);
 
@@ -70,7 +72,7 @@ fn it_allows_multiple_immutable_access_to_component() {
 
 #[test]
 fn it_prevents_read_access_to_mutating_component() {
-    let mut test = TemplateTest::new(["tests/templates/reentrancy"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/reentrancy"]);
 
     let reentrancy: ComponentAddress = test.call_function("Reentrancy", "new", args![], vec![]);
 
@@ -91,7 +93,7 @@ fn it_prevents_read_access_to_mutating_component() {
 
 #[test]
 fn it_prevents_multiple_mutable_access_to_component() {
-    let mut test = TemplateTest::new(["tests/templates/reentrancy"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/reentrancy"]);
 
     let reentrancy: ComponentAddress = test.call_function("Reentrancy", "new", args![], vec![]);
 

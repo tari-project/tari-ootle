@@ -12,7 +12,6 @@ use integration_tests::{
     base_node::get_base_node_client,
     template,
     template::{send_template_registration, RegisteredTemplate},
-    util::cucumber_log,
     validator_node::{spawn_validator_node, ValidatorNodeProcess},
     TariWorld,
 };
@@ -166,10 +165,7 @@ pub async fn send_vn_registration(world: &mut TariWorld, vn_name: String, base_w
         "Failed to register validator node {}",
         response.failure_message
     );
-    cucumber_log(format!(
-        "Validator node registration tx id: {}",
-        response.transaction_id
-    ));
+    integration_tests::cucumber_log!("Validator node registration tx id: {}", response.transaction_id);
     world.mark_point_in_logs("after register_validator_node");
 }
 
@@ -369,7 +365,7 @@ async fn then_validator_node_has_state_at(
         .substate_ids
         .get(&state_address_name)
         .unwrap_or_else(|| panic!("Address {} not found", state_address_name));
-    cucumber_log(format!("Waiting for state at address {}", state_address));
+    integration_tests::cucumber_log!("Waiting for state at address {}", state_address);
     let vn = world.get_validator_node(&vn_name);
     let mut client = vn.create_client();
     let substate_address = SubstateAddress::from_substate_id(state_address, 0);
@@ -410,10 +406,13 @@ async fn vn_has_blocks_for_current_epoch(world: &mut TariWorld, vn_name: String,
         if status.height.as_u64() >= num_blocks {
             return;
         }
-        cucumber_log(format!(
+        integration_tests::cucumber_log!(
             "Validator node {} has height {} ({}), waiting for at least {}",
-            vn_name, status.height, status.state, num_blocks
-        ));
+            vn_name,
+            status.height,
+            status.state,
+            num_blocks
+        );
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 }
@@ -495,12 +494,12 @@ async fn when_i_wait_for_validator_leaf_block_at_least(world: &mut TariWorld, na
             .await
             .unwrap();
 
-        cucumber_log(format!(
+        integration_tests::cucumber_log!(
             "Validator {name} leaf block height at epoch {} is {} (current epoch is {})",
             epoch,
             resp.blocks.first().map(|b| b.height().as_u64()).unwrap_or(0),
             epoch_stats.current_epoch.as_u64()
-        ));
+        );
 
         if let Some(block) = resp.blocks.first() {
             assert!(block.epoch().as_u64() <= epoch);

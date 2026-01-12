@@ -3,7 +3,9 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    env,
     ffi::OsStr,
+    iter,
     path::Path,
     sync::Arc,
     time::Instant,
@@ -27,13 +29,14 @@ use tari_engine::{
 };
 use tari_engine_types::{
     commit_result::{ExecuteResult, RejectReason},
+    component::derive_component_address_from_public_key,
     indexed_value::IndexedWellKnownTypes,
     substate::{SubstateDiff, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
     ToByteType,
 };
 use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType, SubstateRequirement};
-use tari_template_builtin::all_builtin_templates;
+use tari_template_builtin::{all_builtin_templates, ACCOUNT_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS},
     models::{ComponentAddress, NonFungibleAddress, ResourceAddress},
@@ -91,12 +94,28 @@ impl TemplateTest {
     /// The initial balance of a funded account created by `create_funded_account`.
     pub const FUNDED_ACCOUNT_INITIAL_BALANCE: u64 = 1_000_000_000;
 
-    pub fn new<I: IntoIterator<Item = T>, T: Into<TemplateSpec>>(template_paths: I) -> Self {
-        Self::new_internal(template_paths, None::<(String, String)>)
+    pub fn new<P: AsRef<Path>, I: IntoIterator<Item = T>, T: Into<TemplateSpec>>(
+        base_path: P,
+        template_paths: I,
+    ) -> Self {
+        Self::new_internal(base_path, template_paths, iter::empty::<(String, String)>())
     }
 
-    pub fn new_with_compile_envs<I, T, TEnvs, K, V>(template_paths: I, envs: TEnvs) -> Self
+    pub fn new_cwd<I: IntoIterator<Item = T>, T: Into<TemplateSpec>>(template_paths: I) -> Self {
+        Self::new_internal(
+            env::current_dir().expect("cannot get CWD"),
+            template_paths,
+            None::<(String, String)>,
+        )
+    }
+
+    pub fn new_no_templates() -> Self {
+        Self::new(".", iter::empty::<TemplateSpec>())
+    }
+
+    pub fn new_with_compile_envs<P, I, T, TEnvs, K, V>(base_path: P, template_paths: I, envs: TEnvs) -> Self
     where
+        P: AsRef<Path>,
         I: IntoIterator<Item = T>,
         T: Into<TemplateSpec>,
         TEnvs: IntoIterator<Item = (K, V)>,
@@ -104,11 +123,12 @@ impl TemplateTest {
         K: AsRef<OsStr>,
         V: AsRef<OsStr>,
     {
-        Self::new_internal(template_paths, envs)
+        Self::new_internal(base_path, template_paths, envs)
     }
 
-    fn new_internal<I, T, TEnvs, K, V>(templates: I, envs: TEnvs) -> Self
+    fn new_internal<P, I, T, TEnvs, K, V>(base_path: P, templates: I, envs: TEnvs) -> Self
     where
+        P: AsRef<Path>,
         I: IntoIterator<Item = T>,
         T: Into<TemplateSpec>,
         TEnvs: IntoIterator<Item = (K, V)>,
@@ -128,9 +148,10 @@ impl TemplateTest {
 
         // Add all of the templates specified in the argument
         let envs_iter = envs.into_iter();
+        let base_path = base_path.as_ref();
         for template in templates {
             let spec = template.into();
-            builder.add_template_opts(spec.path, &spec.features, envs_iter.clone());
+            builder.add_template_opts(spec.get_path(base_path), &spec.features, envs_iter.clone());
         }
 
         let package = builder.build();
@@ -449,7 +470,7 @@ impl TemplateTest {
         let (owner_proof, public_key, secret_key) = self.create_owner_proof();
         let old_fail_fees = self.enable_fees;
         self.enable_fees = false;
-        let result = self.execute_expect_success(
+        self.execute_expect_success(
             Transaction::builder_localnet()
                 .call_method(xtr_faucet_component(), "take", args![
                     Self::FUNDED_ACCOUNT_INITIAL_BALANCE
@@ -460,16 +481,11 @@ impl TemplateTest {
             vec![owner_proof.clone()],
         );
 
-        let component = result
-            .finalize
-            .execution_results
-            .get(2)
-            .expect("instruction at 2 no execution result")
-            .decode::<ComponentAddress>()
-            .unwrap();
+        let account_address =
+            derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &public_key.to_byte_type());
 
         self.enable_fees = old_fail_fees;
-        (component, owner_proof, secret_key)
+        (account_address, owner_proof, secret_key)
     }
 
     #[track_caller]

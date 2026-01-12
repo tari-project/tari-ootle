@@ -53,7 +53,6 @@ type WalletGrpcClient = WalletClient<InterceptedService<Channel, ClientAuthentic
 use crate::{
     helpers::{get_os_assigned_ports, wait_listener_on_local_port_os_thread},
     logging::get_base_dir_for_scenario,
-    util::cucumber_log,
     TariWorld,
 };
 
@@ -220,7 +219,7 @@ pub async fn spawn_minotari_wallet(world: &mut TariWorld, wallet_name: String, b
     //     status = wallet_client.get_network_status(Empty {}).await.unwrap().into_inner();
     // }
 
-    cucumber_log(format!("Minotari wallet {} started", wallet_name));
+    crate::cucumber_log!("Minotari wallet {} started", wallet_name);
     world.wallets.insert(wallet_name, wallet_process);
 }
 

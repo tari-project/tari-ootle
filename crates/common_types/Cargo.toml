@@ -40,4 +40,4 @@ indexmap = { workspace = true }
 ignored = ["prost", "prost-types"] # false positive, used in OUT_DIR structs
 
 [features]
-ts = ["ts-rs"]
+ts = ["ts-rs", "tari_bor/ts", "tari_template_lib_types/ts", "tari_engine_types/ts"]

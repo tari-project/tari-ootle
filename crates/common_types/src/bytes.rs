@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 type BoundedByteVec<const MAX: usize> = BoundedVec<u8, 0, MAX, witnesses::Empty<MAX>>;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(transparent)]
 pub struct MaxSizeBytes<const MAX: usize> {
     inner: BoundedByteVec<MAX>,
 }

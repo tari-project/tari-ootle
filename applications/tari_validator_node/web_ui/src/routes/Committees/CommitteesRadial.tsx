@@ -30,7 +30,7 @@ import type {
   VNCommitteeShardInfo,
   GetNetworkCommitteeResponse,
   ValidatorNode,
-} from "@tari-project/typescript-bindings";
+} from "@tari-project/ootle-ts-bindings";
 
 export default function CommitteesRadial({ committees }: { committees: GetNetworkCommitteeResponse }) {
   const [chartData, setChartData] = useState<ICommitteeChart>({

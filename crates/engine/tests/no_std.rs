@@ -6,9 +6,11 @@ use tari_template_lib::models::ComponentAddress;
 use tari_template_test_tooling::TemplateTest;
 use tari_transaction::{args, Transaction};
 
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
 #[test]
 fn it_compiles_when_using_no_std() {
-    let mut test = TemplateTest::new(["tests/templates/no_std"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/no_std"]);
 
     let access_rules_template = test.get_template_address("NoStdCounter");
 

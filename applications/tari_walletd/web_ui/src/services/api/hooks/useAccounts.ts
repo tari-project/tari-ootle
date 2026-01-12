@@ -53,7 +53,7 @@ import {
   ResourceType,
   XTR,
   PayTo,
-} from "@tari-project/typescript-bindings";
+} from "@tari-project/ootle-ts-bindings";
 
 const DEFAULT_MAX_FEE = 2000;
 

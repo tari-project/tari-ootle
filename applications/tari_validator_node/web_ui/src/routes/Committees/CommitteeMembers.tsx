@@ -28,7 +28,7 @@ import { StyledPaper } from "../../Components/StyledComponents";
 import PageHeading from "../../Components/PageHeading";
 import Committee from "./CommitteeSingle";
 import { VNContext } from "../../App";
-import { CommitteeMember } from "@tari-project/typescript-bindings";
+import { CommitteeMember } from "@tari-project/ootle-ts-bindings";
 
 async function getMembers(currentEpoch: number, shardKey: string, publicKey: string) {
   const committee = await getCommittee({ epoch: currentEpoch, substate_address: shardKey });

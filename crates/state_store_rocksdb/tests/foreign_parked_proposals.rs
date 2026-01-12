@@ -1,6 +1,9 @@
-//   Copyright 2025 The Tari Project
+//   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+pub mod helpers;
+
+use helpers::{create_foreign_proposal, create_rocksdb, transaction_id_from_seed};
 use tari_ootle_common_types::{Epoch, Network};
 use tari_ootle_storage::{
     consensus_models::{Block, BookkeepingModel, ForeignParkedProposal},
@@ -8,10 +11,7 @@ use tari_ootle_storage::{
     StateStoreWriteTransaction,
 };
 
-use crate::{
-    helpers::{create_foreign_proposal, create_rocksdb, transaction_id_from_seed},
-    TEST_NUM_PRESHARDS,
-};
+use crate::helpers::num_preshards;
 
 #[test]
 fn rocksdb() {
@@ -22,7 +22,7 @@ fn rocksdb() {
 fn run_test(db: impl StateStore) {
     let mut tx = db.create_write_tx().unwrap();
 
-    let zero_block = Block::zero_block(Network::LocalNet, TEST_NUM_PRESHARDS);
+    let zero_block = Block::zero_block(Network::LocalNet, num_preshards());
     tx.blocks_insert(&zero_block).unwrap();
     zero_block.as_locked().set(&mut tx).unwrap();
 

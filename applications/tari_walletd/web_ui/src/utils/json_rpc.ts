@@ -110,7 +110,7 @@ import type {
   StealthUtxosDecryptValueRequest,
   StealthUtxosDecryptValueResponse,
   TransactionSubmitDryRunResponse,
-} from "@tari-project/typescript-bindings";
+} from "@tari-project/ootle-ts-bindings";
 import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
 import useAuthStore from "@store/authStore";
 import { AUTH_TOKEN_FOR_NONE_AUTH } from "@routes/Auth/Auth";

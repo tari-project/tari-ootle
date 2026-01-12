@@ -69,7 +69,7 @@ import {
   ACCOUNT_TEMPLATE_ADDRESS,
   TESTNET_NFT_FAUCET_ADDRESS,
   TESTNET_XTR_FAUCET_ADDRESS,
-} from "@tari-project/typescript-bindings";
+} from "@tari-project/ootle-ts-bindings";
 import { settingsGet, submitTransactionDryRun, transactionsSubmit, transactionsWaitResult } from "@utils/json_rpc";
 import { useAccountsList } from "@api/hooks/useAccounts";
 import CopyAddress from "@components/CopyAddress";

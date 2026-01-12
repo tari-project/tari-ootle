@@ -9,7 +9,7 @@ Feature: NFTs
     Given a network with registered validator VN and wallet daemon WALLET_D
 
     # Publish the "basic_nft" template
-    When I create an account ACC via the wallet daemon WALLET_D with 2000000 XTR
+    When I create an account ACC via the wallet daemon WALLET_D with 10000 XTR
     When wallet daemon WALLET_D publishes the template "basic_nft" using account ACC
 
     ###### Scenario
@@ -62,7 +62,7 @@ Feature: NFTs
     Given a network with registered validator VN and wallet daemon WALLET_D
 
     # Publish the "basic_nft" template
-    When I create an account ACC via the wallet daemon WALLET_D with 2000000 XTR
+    When I create an account ACC via the wallet daemon WALLET_D with 10000 XTR
     When wallet daemon WALLET_D publishes the template "basic_nft" using account ACC
 
     ###### Scenario
@@ -79,7 +79,7 @@ Feature: NFTs
   let sparkle_nft = global!["NFT/components/SparkleNft"];
   let mut acc1 = global!["ACC1/accounts/ACC1"];
 
-  // get the initailly NFT from the component's vault
+  // get the initially NFT from the component's vault
   let nft_bucket = sparkle_nft.take_initial_nft();
   acc1.deposit(nft_bucket);
   """

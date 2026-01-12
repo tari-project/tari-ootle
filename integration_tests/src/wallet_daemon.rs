@@ -54,7 +54,6 @@ use tokio::task;
 use crate::{
     helpers::{check_join_handle, get_os_assigned_ports, wait_listener_on_local_port},
     logging::get_base_dir_for_scenario,
-    util::cucumber_log,
     TariWorld,
 };
 
@@ -108,7 +107,7 @@ pub async fn spawn_wallet_daemon(world: &mut TariWorld, wallet_daemon_name: Stri
         shutdown,
     };
 
-    cucumber_log(format!("Wallet daemon {} started", wallet_daemon_name));
+    crate::cucumber_log!("Wallet daemon {} started", wallet_daemon_name);
     world.wallet_daemons.insert(wallet_daemon_name, wallet_daemon_process);
 }
 

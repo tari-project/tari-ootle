@@ -39,7 +39,7 @@ import { TextField } from "@mui/material";
 import { Form } from "react-router-dom";
 import Fade from "@mui/material/Fade";
 import CopyToClipboard from "../../../Components/CopyToClipboard";
-import type { IndexerConnection } from "@tari-project/typescript-bindings";
+import type { IndexerConnection } from "@tari-project/ootle-ts-bindings";
 import { displayDuration } from "../../../utils/helpers";
 
 const useInterval = (fn: () => Promise<unknown>, ms: number) => {

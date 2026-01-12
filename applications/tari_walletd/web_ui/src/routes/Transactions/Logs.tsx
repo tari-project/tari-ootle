@@ -22,7 +22,7 @@
 
 import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Chip } from "@mui/material";
 import { DataTableCell } from "@components/StyledComponents";
-import type { LogEntry } from "@tari-project/typescript-bindings";
+import type { LogEntry } from "@tari-project/ootle-ts-bindings";
 
 function getLogLevelColor(
   level: string,

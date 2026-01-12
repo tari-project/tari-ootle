@@ -25,7 +25,7 @@ import { fromHexString } from "../VN/Components/helpers";
 import EChartsReact from "echarts-for-react";
 import { ICommitteeChart } from "../../utils/interfaces";
 import "../../theme/echarts.css";
-import type { VNCommitteeShardInfo, ValidatorNode } from "@tari-project/typescript-bindings";
+import type { VNCommitteeShardInfo, ValidatorNode } from "@tari-project/ootle-ts-bindings";
 
 export default function CommitteesWaterfall({ committees }: { committees: VNCommitteeShardInfo[] }) {
   const [chartData, setChartData] = useState<ICommitteeChart>({

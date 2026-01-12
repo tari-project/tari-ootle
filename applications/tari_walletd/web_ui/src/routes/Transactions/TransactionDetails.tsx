@@ -53,8 +53,8 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import Loading from "@components/Loading";
 import Error from "@components/Error";
-import { FinalizeResult, TransactionResult } from "@tari-project/typescript-bindings";
-import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tari-project/typescript-bindings";
+import { FinalizeResult, TransactionResult } from "@tari-project/ootle-ts-bindings";
+import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tari-project/ootle-ts-bindings";
 import { BsQuestionCircle } from "react-icons/bs";
 import { formatCurrency } from "@/utils/helpers";
 

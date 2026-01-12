@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { Box, Button, Stack, Typography, Avatar, Divider } from "@mui/material";
-import type { Account, NonFungibleId, NonFungibleToken } from "@tari-project/typescript-bindings";
+import type { Account, NonFungibleId, NonFungibleToken } from "@tari-project/ootle-ts-bindings";
 import CopyAddress from "@components/CopyAddress";
 import { useNftTransferStore } from "@store/nftTransferStore";
 import { formatCurrency, substateIdToString, displayNftId } from "@utils/helpers";

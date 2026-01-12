@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use cucumber::{given, then, when};
-use integration_tests::{claim_proof::CucumberClaimProof, util::cucumber_log};
+use integration_tests::claim_proof::CucumberClaimProof;
 use minotari_app_grpc::{
     tari_rpc,
     tari_rpc::{GetBalanceRequest, SubmitValidatorEvictionProofRequest, ValidateRequest},
@@ -106,7 +106,7 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
             .into_inner();
 
         let Some(merkle_proof) = resp.merkle_proof else {
-            cucumber_log("Proof not yet confirmed, waiting...");
+            integration_tests::cucumber_log!("Proof not yet confirmed, waiting...");
             if remaining_attempts == 0 {
                 panic!("Proof not confirmed after maximum ({ATTEMPTS}) attempts");
             }

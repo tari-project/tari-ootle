@@ -749,7 +749,7 @@ pub async fn handle_transfer(
         .await
         .optional()?;
 
-    let mut builder = context.transaction_builder();
+    let builder = context.transaction_builder().create_account(req.destination_public_key);
 
     if let Some(ValidatorScanResult { id: address, substate }) = existing_dest_account {
         inputs.insert(address.into());
@@ -806,8 +806,6 @@ pub async fn handle_transfer(
         if let Some(found) = found_dest_vault {
             inputs.insert(SubstateRequirement::unversioned(found));
         }
-    } else {
-        builder = builder.create_account(req.destination_public_key);
     }
 
     // build the transaction

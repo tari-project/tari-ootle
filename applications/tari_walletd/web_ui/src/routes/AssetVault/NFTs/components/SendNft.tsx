@@ -32,7 +32,7 @@ import {
   ResourceAddress,
   NonFungibleId,
   NonFungibleToken,
-} from "@tari-project/typescript-bindings";
+} from "@tari-project/ootle-ts-bindings";
 import { useNftsTransfer, useNFTsList } from "@api/hooks/useNfts";
 import { substateIdToString } from "@utils/helpers";
 import { useAccountsList } from "@api/hooks/useAccounts";

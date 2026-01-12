@@ -91,7 +91,7 @@ export default function InspectCf() {
   const fetch = () => {
     setError(null);
     setIsLoading(true);
-
+    
     const query = { limit: pagination.pageSize, page: pagination.page, query: pagination.query || "", desc: true };
     client.listCfItems(dbName!, cfName!, query as Params).then((res) => {
       setData(res);

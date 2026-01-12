@@ -279,8 +279,12 @@ pub enum TransactionResult {
 }
 
 impl TransactionResult {
-    pub fn is_accept(&self) -> bool {
+    pub fn is_any_accept(&self) -> bool {
         matches!(self, Self::Accept(_) | Self::AcceptFeeRejectRest(_, _))
+    }
+
+    pub fn is_accept(&self) -> bool {
+        matches!(self, Self::Accept(_))
     }
 
     pub fn is_reject(&self) -> bool {

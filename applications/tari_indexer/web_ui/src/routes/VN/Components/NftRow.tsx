@@ -23,7 +23,7 @@
 import { TableRow, Avatar, Box, Typography, Stack } from "@mui/material";
 import { DataTableCell } from "../../../Components/StyledComponents";
 import CopyToClipboard from "../../../Components/CopyToClipboard";
-import { NonFungibleSubstate } from "@tari-project/typescript-bindings";
+import { NonFungibleSubstate } from "@tari-project/ootle-ts-bindings";
 import { shortenString } from "./helpers";
 
 export interface NftData {

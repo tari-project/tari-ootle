@@ -37,7 +37,7 @@ use tari_transaction_components::{
     MicroMinotari,
 };
 
-use crate::{util::cucumber_log, TariWorld};
+use crate::TariWorld;
 
 type BaseNodeClient = BaseNodeGrpcClient<tonic::transport::Channel>;
 
@@ -55,7 +55,7 @@ pub fn register_miner_process(world: &mut TariWorld, miner_name: String, base_no
         wallet_name,
     };
 
-    cucumber_log(format!("Miner {} registered", miner_name));
+    crate::cucumber_log!("Miner {} registered", miner_name);
     world.miners.insert(miner_name, miner);
 }
 

@@ -20,14 +20,28 @@ pub enum EpochOracle<TStore> {
     Hybrid(hybrid::HybridEpochOracle<TStore>),
 }
 
-impl<TStore: EpochOracleStore + Send + 'static> EpochEventOracle for EpochOracle<TStore> {
+#[cfg(feature = "base_layer")]
+impl<TStore> EpochEventOracle for EpochOracle<TStore>
+where
+    TStore: EpochOracleStore + Send + 'static,
+    TStore: base_layer::BaseLayerBlockHeaderStore,
+{
     async fn next_epoch_event(&mut self) -> Option<EpochEvent> {
         match self {
-            #[cfg(feature = "base_layer")]
             EpochOracle::BaseLayer(base_layer) => base_layer.next_epoch_event().await,
             EpochOracle::Configured(configured) => configured.next_epoch_event().await,
-            #[cfg(feature = "base_layer")]
             EpochOracle::Hybrid(hybrid) => hybrid.next_epoch_event().await,
+        }
+    }
+}
+
+#[cfg(not(feature = "base_layer"))]
+impl<TStore> EpochEventOracle for EpochOracle<TStore>
+where TStore: EpochOracleStore + Send + 'static
+{
+    async fn next_epoch_event(&mut self) -> Option<EpochEvent> {
+        match self {
+            EpochOracle::Configured(configured) => configured.next_epoch_event().await,
         }
     }
 }

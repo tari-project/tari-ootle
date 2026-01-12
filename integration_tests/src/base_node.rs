@@ -36,7 +36,6 @@ use tokio::task;
 use crate::{
     helpers::{get_os_assigned_port, get_os_assigned_ports, wait_listener_on_local_port},
     logging::get_base_dir_for_scenario,
-    util::cucumber_log,
     TariWorld,
 };
 
@@ -68,7 +67,7 @@ pub async fn spawn_base_node(world: &mut TariWorld, bn_name: String) {
     // };
     let base_node_address = Multiaddr::from_str(&format!("/ip4/127.0.0.1/tcp/{}", port)).unwrap();
     let base_node_identity = NodeIdentity::random(&mut OsRng, base_node_address, PeerFeatures::COMMUNICATION_NODE);
-    cucumber_log(format!("Base node identity: {}", base_node_identity));
+    crate::cucumber_log!("Base node identity: {}", base_node_identity);
     let identity = base_node_identity.clone();
     let temp_dir = get_base_dir_for_scenario("base_node", world.current_scenario_name.as_ref().unwrap(), &bn_name);
     let temp_dir_path = temp_dir.clone();
@@ -94,7 +93,8 @@ pub async fn spawn_base_node(world: &mut TariWorld, bn_name: String) {
                 },
             };
 
-            cucumber_log(format!("Using base_node temp_dir: {}", temp_dir.display()));
+            let tmp_dir_display = temp_dir.display();
+            crate::cucumber_log!("Using base_node temp_dir: {}", tmp_dir_display);
             base_node_config.common.base_path.clone_from(&temp_dir);
             base_node_config.base_node.network = Network::LocalNet;
             base_node_config.base_node.grpc_enabled = true;
@@ -137,6 +137,7 @@ pub async fn spawn_base_node(world: &mut TariWorld, bn_name: String) {
                 GrpcMethod::GetHeaderByHash,
                 GrpcMethod::GetSideChainUtxos,
                 GrpcMethod::GetValidatorNodeChanges,
+                GrpcMethod::ListHeaders,
             ]
             .into();
             base_node_config.base_node.http_wallet_query_service.port = http_port;
@@ -166,7 +167,7 @@ pub async fn spawn_base_node(world: &mut TariWorld, bn_name: String) {
         shutdown,
     };
 
-    cucumber_log(format!("Base node {} started", bn_name));
+    crate::cucumber_log!("Base node {} started", bn_name);
 
     world.base_nodes.insert(bn_name, node_process);
 }

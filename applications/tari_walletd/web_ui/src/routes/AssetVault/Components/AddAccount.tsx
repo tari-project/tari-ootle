@@ -29,7 +29,7 @@ import DialogContent from "@mui/material/DialogContent";
 import { CircularProgress } from "@mui/material";
 import { useAccountsCreate } from "@api/hooks/useAccounts";
 import useAccountStore from "@store/accountStore";
-import type { AccountsCreateResponse } from "@tari-project/typescript-bindings";
+import type { AccountsCreateResponse } from "@tari-project/ootle-ts-bindings";
 import { useTheme } from "@mui/material/styles";
 import queryClient from "@api/queryClient";
 import { Stack, Fade, Typography } from "@mui/material";

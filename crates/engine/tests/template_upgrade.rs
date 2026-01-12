@@ -15,8 +15,10 @@ use tari_template_lib::{
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 use tari_transaction::{args, Transaction};
 
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
 fn setup() -> (TemplateTest, ComponentAddress) {
-    let mut test = TemplateTest::new(vec![
+    let mut test = TemplateTest::new(CRATE_PATH, vec![
         "tests/templates/template_upgrade/v1",
         "tests/templates/template_upgrade/v2",
     ]);
@@ -52,7 +54,7 @@ fn create_component(test_mut: &mut TemplateTest) -> ComponentAddress {
 
 #[test]
 fn it_sets_migrate_to_true_in_the_function_def() {
-    let test = TemplateTest::new(vec![
+    let test = TemplateTest::new(CRATE_PATH, vec![
         "tests/templates/template_upgrade/v1",
         "tests/templates/template_upgrade/v2",
     ]);
@@ -213,7 +215,7 @@ fn it_migrates_to_a_new_template_without_migration_call() {
     // validation, so it's possible to upgrade to an incompatible template making the component unusable. However,
     // the template address could be reverted back to a compatible template to recover the component.
 
-    let mut test = TemplateTest::new(vec![
+    let mut test = TemplateTest::new(CRATE_PATH, vec![
         ("tests/templates/template_upgrade/v1", &[] as &[&str]),
         ("tests/templates/template_upgrade/v2", &["v1_compat"]),
     ]);
@@ -263,7 +265,7 @@ fn it_fails_when_a_migration_attempts_a_cross_template_call() {
 
 #[test]
 fn it_disallows_calling_the_migration_function_directly() {
-    let mut test = TemplateTest::new(vec![
+    let mut test = TemplateTest::new(CRATE_PATH, vec![
         "tests/templates/template_upgrade/v1",
         "tests/templates/template_upgrade/v2",
     ]);

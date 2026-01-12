@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { create } from "zustand";
-import type { NonFungibleId, OotleAddress, ResourceAddress } from "@tari-project/typescript-bindings";
+import type { NonFungibleId, OotleAddress, ResourceAddress } from "@tari-project/ootle-ts-bindings";
 
 export type DialogStep = "form" | "confirmation" | "result";
 
@@ -101,7 +101,6 @@ const createInitialValidity = (preSelectedNftId?: NonFungibleId): Validity => ({
   nfts: preSelectedNftId ? true : false,
   targetAccountPublicKey: false,
 });
-
 
 export const useNftTransferStore = create<NftTransferState>((set, get) => ({
   // Initial state

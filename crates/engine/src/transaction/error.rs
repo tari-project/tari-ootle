@@ -21,7 +21,10 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tari_engine_types::{commit_result::RejectReason, indexed_value::IndexedValueError};
-use tari_template_lib::types::{HashParseError, TemplateAddress};
+use tari_template_lib::{
+    models::ComponentAddress,
+    types::{HashParseError, TemplateAddress},
+};
 
 use crate::{runtime::RuntimeError, template::TemplateLoaderError, wasm::WasmExecutionError};
 
@@ -55,6 +58,11 @@ pub enum TransactionError {
     NotAMigrationFunction { name: String },
     #[error("Migration functions cannot be called directly: {name}")]
     CannotCallMigrationFunctionDirectly { name: String },
+    #[error("Invalid CreateAccount operation for component {component_address}: {details}")]
+    InvalidCreateAccount {
+        component_address: ComponentAddress,
+        details: String,
+    },
 }
 
 impl TransactionError {

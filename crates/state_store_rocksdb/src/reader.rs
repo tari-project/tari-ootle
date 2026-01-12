@@ -291,27 +291,6 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
         Ok(value)
     }
 
-    /// Used for tests
-    pub fn transactions_get_paginated(
-        &self,
-        limit: u64,
-        offset: u64,
-        _asc_desc_created_at: Option<Ordering>,
-    ) -> Result<Vec<TransactionRecord>, StorageError> {
-        const OPERATION: &str = "transactions_get_paginated";
-
-        let cf = self.db().cf(TransactionCf)?;
-        let iter = cf.value_iterator(Ordering::Ascending, OPERATION);
-
-        // pagination - not super efficient but since this is just used in tests, optimising is not important
-        let transactions = iter
-            .skip(offset as usize)
-            .take(limit as usize)
-            .collect::<Result<_, _>>()?;
-
-        Ok(transactions)
-    }
-
     pub fn blocks_get_parent_chain(&self, start_block_id: &BlockId, limit: usize) -> Result<Vec<Block>, StorageError> {
         // Only used for JSON-RPC - not optimised
         const OPERATION: &str = "blocks_get_parent_chain";

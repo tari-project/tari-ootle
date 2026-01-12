@@ -16,9 +16,10 @@ use tari_ootle_common_types::{
 };
 
 use crate::consensus_models::ShardGroupEvidence;
-pub type SubstatePledges = Vec<SubstatePledge>;
 
 const LOG_TARGET: &str = "tari::ootle::storage::consensus_models::block_pledges";
+
+pub type SubstatePledges = Vec<SubstatePledge>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BlockPledge {
@@ -44,8 +45,8 @@ impl BlockPledge {
         self.pledges.contains_key(id)
     }
 
-    pub fn get_all_pledges_for_evidence(&self, evidence: &ShardGroupEvidence) -> Option<Vec<SubstatePledge>> {
-        let mut pledges = Vec::with_capacity(evidence.inputs().len());
+    pub fn get_all_pledges_for_evidence(&self, evidence: &ShardGroupEvidence) -> Option<SubstatePledges> {
+        let mut pledges = SubstatePledges::with_capacity(evidence.inputs().len());
         for (substate_id, ev) in evidence.all_pledged_inputs_iter() {
             // If any are missing return None
             let substate = self.pledges.get(substate_id)?;
@@ -220,7 +221,7 @@ impl SubstatePledge {
     }
 }
 
-/// These are to detect and prevent duplicates in pledging.
+/// Used to detect and prevent duplicate pledges without making SubstateValue implement Hash/PartialEq/Eq
 impl Hash for SubstatePledge {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.substate_id().hash(state);
@@ -231,6 +232,7 @@ impl Hash for SubstatePledge {
 
 impl PartialEq for SubstatePledge {
     fn eq(&self, other: &Self) -> bool {
+        // NB: important that PartialEq and Hash are consistent
         self.as_substate_lock_type() == other.as_substate_lock_type() &&
             self.versioned_substate_id() == other.versioned_substate_id()
     }
@@ -274,7 +276,7 @@ mod tests {
             owner_key: None,
             owner_rule: Default::default(),
             access_rules: ComponentAccessRules::allow_all(),
-            entity_id: EntityId::from_array([seed; 20]),
+            entity_id: EntityId::from_array([seed; EntityId::LENGTH]),
             body: ComponentBody::empty(),
         })
     }
@@ -306,5 +308,64 @@ mod tests {
 
         evidence.insert(id3.substate_id().clone(), id3.version(), SubstateLockType::Write);
         assert!(!pledge.has_all_input_substate_values_for(&evidence));
+    }
+
+    #[test]
+    fn partial_eq_and_hash_are_consistent() {
+        let substate_value1 = substate_value(1);
+        let id1 = create_substate_id(1);
+
+        let pledge1 = SubstatePledge::Input {
+            substate_id: id1.clone(),
+            is_write: true,
+            substate: Box::new(substate_value1.clone()),
+        };
+
+        let pledge2 = SubstatePledge::Input {
+            substate_id: id1.clone(),
+            is_write: true,
+            substate: Box::new(substate_value1.clone()),
+        };
+
+        let pledge3 = SubstatePledge::Input {
+            substate_id: id1,
+            is_write: false,
+            substate: Box::new(substate_value1),
+        };
+
+        use std::{
+            collections::hash_map::DefaultHasher,
+            hash::{Hash, Hasher},
+        };
+
+        let mut hasher1 = DefaultHasher::new();
+        pledge1.hash(&mut hasher1);
+        let hash1 = hasher1.finish();
+
+        let mut hasher2 = DefaultHasher::new();
+        pledge2.hash(&mut hasher2);
+        let hash2 = hasher2.finish();
+
+        let mut hasher3 = DefaultHasher::new();
+        pledge3.hash(&mut hasher3);
+        let hash3 = hasher3.finish();
+
+        if pledge1 == pledge2 {
+            assert_eq!(hash1, hash2);
+        } else {
+            assert_ne!(hash1, hash2);
+        }
+
+        if pledge1 == pledge3 {
+            assert_eq!(hash1, hash3);
+        } else {
+            assert_ne!(hash1, hash3);
+        }
+
+        if pledge2 == pledge3 {
+            assert_eq!(hash2, hash3);
+        } else {
+            assert_ne!(hash2, hash3);
+        }
     }
 }

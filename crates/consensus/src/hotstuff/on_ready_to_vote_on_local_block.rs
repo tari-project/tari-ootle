@@ -521,10 +521,19 @@ where TConsensusSpec: ConsensusSpec
             }));
         }
 
+        // LocalOnly so we can lock the epoch here
+        pool_tx.update_locked_epoch(block.epoch());
+
         // TODO(perf): proposer shouldn't have to do this twice, esp. executing the transaction and locking
         let prepared = self
             .transaction_manager
-            .prepare(substate_store, local_committee_info, &pool_tx, block.as_leaf())
+            .prepare(
+                substate_store,
+                local_committee_info,
+                &pool_tx,
+                block.as_leaf(),
+                proposed_block_change_set,
+            )
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
 
         match prepared {
@@ -694,6 +703,9 @@ where TConsensusSpec: ConsensusSpec
             }));
         }
 
+        // Prepare phase, ensure we set a locked_epoch if not already done
+        tx_rec.update_locked_epoch(block.epoch());
+
         // Foreign block could have already resulted in an ABORT execution
         let maybe_execution = proposed_block_change_set.take_transaction_execution(tx_rec.id());
         let prepared = if maybe_execution.as_ref().is_some_and(|e| e.decision().is_abort()) {
@@ -707,7 +719,13 @@ where TConsensusSpec: ConsensusSpec
             PreparedTransaction::new_multishard_executed(execution.into_transaction_execution(), LockStatus::new())
         } else {
             self.transaction_manager
-                .prepare(substate_store, local_committee_info, tx_rec, block.as_leaf())
+                .prepare(
+                    substate_store,
+                    local_committee_info,
+                    tx_rec,
+                    block.as_leaf(),
+                    proposed_block_change_set,
+                )
                 .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?
         };
 
@@ -792,6 +810,7 @@ where TConsensusSpec: ConsensusSpec
                         tx_rec.set_local_decision(Decision::Commit);
                         // Set partial evidence for local inputs using what we know.
                         tx_rec.merge_evidence(evidence);
+                        // tx_rec epoch will be locked by foreign proposal(s) when we get it
                     },
                 }
             },
@@ -965,7 +984,20 @@ where TConsensusSpec: ConsensusSpec
                 return Ok(Some(NoVoteReason::NotAllForeignInputPledges));
             }
             let transaction_id = *tx_rec.id();
-            let execution = self.execute_transaction(tx, block.as_leaf(), block.epoch(), transaction)?;
+
+            let locked_epoch = tx_rec.locked_epoch().ok_or_else(|| {
+                HotStuffError::InvariantError(format!(
+                    "Locked epoch not set for transaction {} in LocalAccept stage",
+                    tx_rec.id()
+                ))
+            })?;
+            let execution = self.execute_transaction(
+                tx,
+                block.as_leaf(),
+                locked_epoch,
+                transaction,
+                proposed_block_change_set,
+            )?;
             let execution = execution.into_transaction_execution();
 
             // TODO: can we modify input locks at this point? For multi-shard input transactions, we locked all inputs
@@ -1448,8 +1480,9 @@ where TConsensusSpec: ConsensusSpec
         &self,
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         block: LeafBlock,
-        current_epoch: Epoch,
+        execution_epoch: Epoch,
         transaction: TransactionRecord,
+        change_set: &ProposedBlockChangeSet,
     ) -> Result<BlockTransactionExecution, HotStuffError> {
         info!(
             target: LOG_TARGET,
@@ -1464,12 +1497,15 @@ where TConsensusSpec: ConsensusSpec
             return Ok(execution);
         }
 
-        let pledged = PledgedTransaction::load_pledges(tx, transaction)?;
-
+        let mut pledged = PledgedTransaction::load_pledges(tx, transaction)?;
         let transaction_id = *pledged.id();
+        pledged
+            .foreign_pledges
+            .extend(change_set.get_foreign_pledges(&transaction_id).cloned());
+
         let executed = self
             .transaction_manager
-            .execute(current_epoch, pledged)
+            .execute(execution_epoch, pledged)
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
 
         Ok(executed.for_block(block, transaction_id))

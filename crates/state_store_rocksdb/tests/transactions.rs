@@ -1,8 +1,10 @@
-//   Copyright 2024 The Tari Project
+//   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+pub mod helpers;
 use std::time::Duration;
 
+use helpers::{assert_eq_debug, commit_chain, create_chain, create_random_substate_id, create_rocksdb, create_tx_atom};
 use tari_common_types::types::{FixedHash, PrivateKey};
 use tari_consensus_types::{Decision, PcId, ShardGroupAccumulatedData};
 use tari_engine_types::{
@@ -30,13 +32,9 @@ use tari_template_lib::{prelude::SchnorrSignatureBytes, types::Hash};
 use tari_transaction::{Instruction, Transaction};
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::{
-    helpers::{assert_eq_debug, commit_chain, create_chain, create_random_substate_id, create_rocksdb, create_tx_atom},
-    TEST_NUM_PRESHARDS,
-};
-
 mod confirm_all_transitions {
     use super::*;
+    use crate::helpers::num_preshards;
 
     #[test]
     fn it_sets_pending_stage_to_stage_rocksdb() {
@@ -52,7 +50,7 @@ mod confirm_all_transitions {
         let atom3 = create_tx_atom();
 
         let network = Network::LocalNet;
-        let zero_block = Block::zero_block(network, TEST_NUM_PRESHARDS);
+        let zero_block = Block::zero_block(network, num_preshards());
         zero_block.insert(&mut tx).unwrap();
         tx.proposal_certificates_save(zero_block.justify()).unwrap();
         tx.blocks_set_qcs(zero_block.id(), Some(&PcId::zero()), Some(&PcId::zero()))

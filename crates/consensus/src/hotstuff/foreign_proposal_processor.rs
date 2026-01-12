@@ -124,6 +124,24 @@ pub fn process_foreign_block<TStore: StateStore>(
                     continue;
                 }
 
+                if tx_rec.update_locked_epoch(proposal.epoch()) {
+                    debug!(
+                        target: LOG_TARGET,
+                        "🔒 Foreign proposal {} updated locked epoch for transaction {} to {}",
+                        proposal,
+                        tx_rec.id(),
+                        proposal.epoch()
+                    );
+                } else {
+                    debug!(
+                        target: LOG_TARGET,
+                        "Foreign proposal {} locked epoch for transaction {} remains at {}",
+                        proposal,
+                        tx_rec.id(),
+                        tx_rec.locked_epoch().display()
+                    );
+                }
+
                 let remote_decision = atom.decision;
                 let local_decision = tx_rec.current_decision();
                 if let Some(abort_reason) = remote_decision.abort_reason() {
@@ -395,6 +413,10 @@ pub fn process_foreign_block<TStore: StateStore>(
                     );
                     continue;
                 }
+
+                // We update this in the foreign Accept phase because we may be output-only and not yet performed the
+                // prepare phase. (therefore locked_epoch is None)
+                tx_rec.update_locked_epoch(proposal.epoch());
 
                 let remote_decision = atom.decision;
                 let local_decision = tx_rec.current_decision();

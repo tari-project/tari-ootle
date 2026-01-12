@@ -183,7 +183,9 @@ pub trait RuntimeInterface: Send + Sync {
 
     fn builtin_template_invoke(&self, action: BuiltinTemplateAction) -> Result<InvokeResult, RuntimeError>;
 
+    /// Checks whether the current execution context has access to the given component method.
     fn check_component_access_rules(&self, method: &str) -> Result<(), RuntimeError>;
+    /// Checks whether the current execution context has owner permission of the given component.
     fn check_component_ownership(&self, action: ActionIdent) -> Result<(), RuntimeError>;
 
     fn update_component_template(&self, new_template: TemplateAddress) -> Result<(), RuntimeError>;
@@ -230,15 +232,32 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    pub(crate) fn resolve_args(&self, args: &[InstructionArg]) -> Result<Vec<tari_bor::Value>, RuntimeError> {
-        if args.len() > limits::WASM_LIMITS.max_function_arguments {
+    pub(crate) fn resolve_args(
+        &self,
+        prepend: Option<InstructionArg>,
+        args: &[InstructionArg],
+    ) -> Result<Vec<tari_bor::Value>, RuntimeError> {
+        let prepend_len = usize::from(prepend.is_some());
+        let total_len = prepend_len + args.len();
+        if total_len > limits::WASM_LIMITS.max_function_arguments {
             return Err(ArgumentValidationError::TooManyArguments {
-                got: args.len(),
+                got: total_len,
                 max: limits::WASM_LIMITS.max_function_arguments,
             }
             .into());
         }
-        let mut resolved = Vec::with_capacity(args.len());
+
+        let mut resolved = Vec::with_capacity(total_len);
+        if let Some(ref p) = prepend {
+            match p {
+                InstructionArg::Workspace(key) => {
+                    let result = self.resolve_workspace_id(key)?;
+                    resolved.push(result.into_value()?);
+                },
+                InstructionArg::Literal(v) => resolved.push(decode_exact(v)?),
+            }
+        }
+
         for arg in args {
             match arg {
                 InstructionArg::Workspace(key) => {

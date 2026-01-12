@@ -28,7 +28,7 @@ import Box from "@mui/material/Box";
 import { useTheme } from "@mui/material/styles";
 import { Divider } from "@mui/material";
 import { stealthDecryptUtxoBalance } from "@utils/json_rpc";
-import { StealthUtxosDecryptValueRequest, StealthUtxosDecryptValueResponse } from "@tari-project/typescript-bindings";
+import { StealthUtxosDecryptValueRequest, StealthUtxosDecryptValueResponse } from "@tari-project/ootle-ts-bindings";
 
 function DecryptUtxoBalanceForm() {
   const [formState, setFormState] = useState({

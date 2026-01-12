@@ -20,7 +20,10 @@ pub struct EntityId(
 );
 
 impl EntityId {
-    pub const LENGTH: usize = 20;
+    /// The length in bytes of an EntityId
+    /// This is only 1 byte because a single byte is a sufficient prefix to "bind" a substate to a particular shard
+    /// given that max NumPreshards is 256.
+    pub const LENGTH: usize = 1;
 
     pub const fn new(bytes: [u8; Self::LENGTH]) -> Self {
         Self(bytes)
@@ -117,7 +120,9 @@ pub struct ComponentKey(
 );
 
 impl ComponentKey {
-    pub const LENGTH: usize = 12;
+    /// The length in bytes of a ComponentKey
+    /// This is 31 bytes so that when combined with the 1 byte EntityId it forms a 32 byte ObjectKey
+    pub const LENGTH: usize = 31;
 
     pub const fn new(bytes: [u8; Self::LENGTH]) -> Self {
         Self(bytes)

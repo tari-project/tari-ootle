@@ -10,6 +10,8 @@ use tari_template_lib::{
 use tari_template_test_tooling::{support::assert_error::assert_access_denied_for_action, TemplateTest};
 use tari_transaction::{args, call_args, Instruction, Transaction};
 
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
 struct ComposabilityTest {
     template_test: TemplateTest,
     composability_template: TemplateAddress,
@@ -22,7 +24,10 @@ struct ComposabilityComponentInfo {
 }
 
 fn setup() -> ComposabilityTest {
-    let template_test = TemplateTest::new(vec!["tests/templates/composability", "tests/templates/state"]);
+    let template_test = TemplateTest::new(CRATE_PATH, vec![
+        "tests/templates/composability",
+        "tests/templates/state",
+    ]);
 
     let composability_template = template_test.get_template_address("Composability");
     let state_template = template_test.get_template_address("State");

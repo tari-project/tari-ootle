@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { toHexString } from "../routes/VN/Components/helpers";
-import { ShardGroup, SubstateId, substateIdToString } from "@tari-project/typescript-bindings";
+import { ShardGroup, SubstateId, substateIdToString } from "@tari-project/ootle-ts-bindings";
 
 export const renderJson = (json: any) => {
 

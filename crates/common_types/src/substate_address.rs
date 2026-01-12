@@ -125,12 +125,6 @@ impl SubstateAddress {
             .expect("SubstateAddress: object_key_bytes must return valid ObjectKey bytes")
     }
 
-    pub fn to_version(&self) -> u32 {
-        let mut buf = [0u8; size_of::<u32>()];
-        buf.copy_from_slice(&self.0[ObjectKey::LENGTH..]);
-        u32::from_be_bytes(buf)
-    }
-
     pub fn to_u256(&self) -> U256 {
         let mut buf = [0u8; ObjectKey::LENGTH];
         buf.copy_from_slice(&self.0[..ObjectKey::LENGTH]);
@@ -154,41 +148,6 @@ impl SubstateAddress {
             .min(num_shards);
 
         Shard::from(shard_number)
-
-        // // 2^15-1 shards with 40 vns per shard = 1,310,680 validators. This limit exists to prevent next_power_of_two
-        // // from panicking.
-        // let num_shards = num_shards.min(MAX_NUM_SHARDS);
-        //
-        // // Round down to the next power of two.
-        // let next_shards_pow_two = num_shards.next_power_of_two();
-        // let half_shard_size = U256::MAX >> next_shards_pow_two.trailing_zeros();
-        // let mut next_pow_2_shard =
-        //     u32::try_from(addr_u256 / half_shard_size).expect("to_shard: num_shards is a u32, so this cannot fail");
-        //
-        // // On boundary
-        // if addr_u256 % half_shard_size == 0 {
-        //     next_pow_2_shard = next_pow_2_shard.saturating_sub(1);
-        // }
-        //
-        // // Half the next power of two i.e. num_shards rounded down to previous power of two
-        // let num_shards_pow_two = next_shards_pow_two >> 1;
-        // // The "extra" half shards in the space
-        // let num_half_shards = num_shards % num_shards_pow_two;
-        //
-        // // Shard that we would be in if num_shards was a power of two
-        // let shard = next_pow_2_shard / 2;
-        //
-        // // If the shard is higher than all half shards,
-        // let shard = if shard >= num_half_shards {
-        //     // then add those half shards in
-        //     shard + num_half_shards
-        // } else {
-        //     // otherwise, we use the shard number we'd be in if num_shards was the next power of two
-        //     next_pow_2_shard
-        // };
-        //
-        // // u256::MAX address needs to be clamped to the last shard index
-        // cmp::min(shard, num_shards - 1).into()
     }
 
     pub fn to_shard_group(&self, num_shards: NumPreshards, num_committees: u32) -> ShardGroup {
@@ -356,63 +315,6 @@ mod tests {
         let range = Shard::from(8).to_substate_address_range(NumPreshards::P8);
         assert_range(range, address_at(7, 8)..=address_at(8, 8));
     }
-
-    // #[test]
-    // fn shard_range() {
-    //     let range = SubstateAddress::zero().to_address_range(2);
-    //     assert_range(range, SubstateAddress::zero()..address_at(1, 2));
-    //     let range = SubstateAddress::max().to_address_range(2);
-    //     assert_range(range, address_at(1, 2)..=SubstateAddress::max());
-    //
-    //     // num_shards is a power of two
-    //     let power_of_twos =
-    //         iter::successors(Some(MAX_NUM_SHARDS.next_power_of_two() >> 1), |&x| Some(x >> 1)).take(15 - 2);
-    //     for power_of_two in power_of_twos {
-    //         for i in 0..power_of_two {
-    //             let range = address_at(i, power_of_two).to_address_range(power_of_two);
-    //             if i == 0 {
-    //                 assert_range(range, SubstateAddress::zero()..address_at(1, power_of_two));
-    //             } else if i >= power_of_two - 1 {
-    //                 assert_range(range, address_at(i, power_of_two)..=SubstateAddress::max());
-    //             } else {
-    //                 assert_range(range, address_at(i, power_of_two)..address_at(i + 1, power_of_two));
-    //             }
-    //         }
-    //     }
-    //
-    //     // Half shards
-    //     let range = address_at(0, 8).to_address_range(6);
-    //     assert_range(range, SubstateAddress::zero()..address_at(1, 8));
-    //     let range = address_at(1, 8).to_address_range(6);
-    //     assert_range(range, address_at(1, 8)..address_at(2, 8));
-    //     let range = address_at(2, 8).to_address_range(6);
-    //     assert_range(range, address_at(2, 8)..address_at(3, 8));
-    //     let range = address_at(3, 8).to_address_range(6);
-    //     assert_range(range, address_at(3, 8)..address_at(4, 8));
-    //     // Whole shards
-    //     let range = address_at(4, 8).to_address_range(6);
-    //     assert_range(range, address_at(4, 8)..address_at(6, 8));
-    //     let range = address_at(5, 8).to_address_range(6);
-    //     assert_range(range, address_at(4, 8)..address_at(6, 8));
-    //     let range = address_at(6, 8).to_address_range(6);
-    //     assert_range(range, address_at(6, 8)..=SubstateAddress::max());
-    //     let range = address_at(7, 8).to_address_range(6);
-    //     assert_range(range, address_at(6, 8)..=SubstateAddress::max());
-    //     let range = address_at(8, 8).to_address_range(6);
-    //     assert_range(range, address_at(6, 8)..=SubstateAddress::max());
-    //
-    //     let range = plus_one(address_at(1, 4)).to_address_range(20);
-    //     // The half shards will split at intervals of END_SHARD_MAX / 32
-    //     assert_range(range, address_at(8, 32)..address_at(10, 32));
-    //
-    //     let range = plus_one(divide_floor(SubstateAddress::max(), 2)).to_address_range(10);
-    //     assert_range(range, address_at(8, 16)..address_at(10, 16));
-    //
-    //     let range = address_at(42, 256).to_address_range(256);
-    //     assert_range(range, address_at(42, 256)..address_at(43, 256));
-    //     let range = address_at(128, 256).to_address_range(256);
-    //     assert_range(range, address_at(128, 256)..address_at(129, 256));
-    // }
 
     #[test]
     fn to_shard() {

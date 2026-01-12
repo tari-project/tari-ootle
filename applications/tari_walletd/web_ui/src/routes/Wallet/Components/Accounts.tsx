@@ -38,7 +38,7 @@ import { BoxHeading2, DataTableCell } from "@components/StyledComponents";
 import { useAccountsCreate, useAccountsList } from "@api/hooks/useAccounts";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import queryClient from "@api/queryClient";
-import { AccountInfo, substateIdToString, shortenSubstateId } from "@tari-project/typescript-bindings";
+import { AccountInfo, substateIdToString, shortenSubstateId } from "@tari-project/ootle-ts-bindings";
 import CopyAddress from "@components/CopyAddress";
 
 function Account({ account }: { account: AccountInfo }) {

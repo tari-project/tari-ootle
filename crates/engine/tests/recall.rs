@@ -15,9 +15,11 @@ use tari_template_test_tooling::{
 };
 use tari_transaction::{args, Transaction};
 
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
 #[test]
 fn it_recalls_all_resource_types() {
-    let mut test = TemplateTest::new(["tests/templates/recall"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/recall"]);
     let recall_template = test.get_template_address("Recall");
     let (account, _, _) = test.create_empty_account();
 

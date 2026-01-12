@@ -67,7 +67,7 @@ use tokio::{task::JoinSet, time::timeout};
 
 use crate::{
     helpers::get_address_from_output,
-    util::{cucumber_log, transaction_builder},
+    util::transaction_builder,
     validator_node_client::{add_outputs_from_diff, parse_arg},
     TariWorld,
 };
@@ -372,7 +372,8 @@ pub async fn get_balance(
         .get_account_balances(get_balance_req)
         .await
         .expect("Failed to get balance from account");
-    cucumber_log(format!("resp = {}", serde_json::to_string_pretty(&resp).unwrap()));
+    let json = serde_json::to_string_pretty(&resp).unwrap();
+    crate::cucumber_log!("resp = {json}");
     resp.balances
         .iter()
         .find(|b| b.resource_address == resource_addr)
@@ -396,7 +397,8 @@ pub async fn get_confidential_balance(
         .get_account_balances(get_balance_req)
         .await
         .expect("Failed to get balance from account");
-    cucumber_log(format!("resp = {}", serde_json::to_string_pretty(&resp).unwrap()));
+    let json = serde_json::to_string_pretty(&resp).unwrap();
+    crate::cucumber_log!("resp = {json}");
     resp.balances.iter().map(|e| e.confidential_balance).sum()
 }
 

@@ -36,9 +36,9 @@ pub const XTR_FAUCET_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::from_a
     1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ]);
 
-// pub const LIQUIDITY_POOL_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::from_array([
-//     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
-// ]);
+pub const LIQUIDITY_POOL_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::from_array([
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+]);
 
 pub fn get_template_builtin(address: &TemplateAddress) -> &'static [u8] {
     try_get_template_builtin(address).unwrap_or_else(|| panic!("Unknown builtin template address {address}"))
@@ -65,11 +65,10 @@ pub const fn all_builtin_templates() -> &'static [(TemplateAddress, &'static [u8
             XTR_FAUCET_TEMPLATE_ADDRESS,
             include_bytes!("../templates/faucet/faucet.wasm"),
         ),
-        // TODO: Uncomment when the liquidity pool template is ready
-        // (
-        //     LIQUIDITY_POOL_TEMPLATE_ADDRESS,
-        //     include_bytes!("../templates/liquidity_pool/liquidity_pool.wasm"),
-        // ),
+        (
+            LIQUIDITY_POOL_TEMPLATE_ADDRESS,
+            include_bytes!("../templates/liquidity_pool/liquidity_pool.wasm"),
+        ),
     ]
 }
 

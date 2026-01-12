@@ -30,10 +30,10 @@ import Checkbox from "@mui/material/Checkbox";
 import ListItemText from "@mui/material/ListItemText";
 import { Divider, InputLabel, Stack, Alert } from "@mui/material";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
-import type { NonFungibleId, NonFungibleToken, Account } from "@tari-project/typescript-bindings";
+import type { NonFungibleId, NonFungibleToken, Account } from "@tari-project/ootle-ts-bindings";
 import { substateIdToString, displayNftId } from "@utils/helpers";
 import { useNftTransferStore } from "@store/nftTransferStore";
-import { validateOotleAddress } from "@tari-project/typescript-bindings/dist/helpers/ootleAddress";
+import { validateOotleAddress } from "@tari-project/ootle-ts-bindings/dist/helpers/ootleAddress";
 
 interface FormStepProps {
   account: Account;

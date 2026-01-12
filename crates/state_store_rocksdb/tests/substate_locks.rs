@@ -1,5 +1,7 @@
-//   Copyright 2025 The Tari Project
+//   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
+
+pub mod helpers;
 
 use std::collections::HashMap;
 
@@ -25,7 +27,7 @@ use crate::helpers::{
 
 #[test]
 fn rocksdb() {
-    env_logger::builder().filter_level(log::LevelFilter::Debug).init();
+    // env_logger::builder().filter_level(log::LevelFilter::Debug).init();
     let (db, _tmp) = create_rocksdb();
     run_test(db);
 }

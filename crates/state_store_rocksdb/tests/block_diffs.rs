@@ -1,4 +1,4 @@
-//   Copyright 2025 The Tari Project
+//   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::substate::{hash_substate, Substate};
@@ -10,7 +10,8 @@ use tari_ootle_storage::{
     StateStoreWriteTransaction,
 };
 
-use crate::helpers::{
+pub mod helpers;
+use helpers::{
     build_substate_record,
     build_substate_value,
     commit_chain,

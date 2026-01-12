@@ -1,8 +1,10 @@
-//   Copyright 2024 The Tari Project
+//   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+pub mod helpers;
 use std::collections::HashSet;
 
+use helpers::{assert_eq_debug, build_substate_record, create_rocksdb, create_substate_update_batch};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{Epoch, Network, VersionedSubstateId, VersionedSubstateIdRef};
 use tari_ootle_storage::{
@@ -13,10 +15,7 @@ use tari_ootle_storage::{
 };
 use tari_template_lib::{models::ComponentAddress, types::ObjectKey};
 
-use crate::{
-    helpers::{assert_eq_debug, build_substate_record, create_rocksdb, create_substate_update_batch},
-    TEST_NUM_PRESHARDS,
-};
+use crate::helpers::num_preshards;
 
 fn substate_id(seed: u8) -> SubstateId {
     let address = ComponentAddress::from_array([seed; ObjectKey::LENGTH]);
@@ -32,7 +31,7 @@ fn rocksdb() {
 fn operations(db: impl StateStore) {
     let mut tx = db.create_write_tx().unwrap();
 
-    let zero_block = Block::zero_block(Network::LocalNet, TEST_NUM_PRESHARDS);
+    let zero_block = Block::zero_block(Network::LocalNet, num_preshards());
     zero_block.insert(&mut tx).unwrap();
 
     // substate 1
@@ -129,7 +128,7 @@ fn operations(db: impl StateStore) {
     assert!(res.destroyed.is_none());
 
     let versioned_substate_id = VersionedSubstateId::new(substate2.substate_id, substate2.version);
-    let shard = versioned_substate_id.to_shard(TEST_NUM_PRESHARDS);
+    let shard = versioned_substate_id.to_shard(num_preshards());
     let epoch = Epoch::zero();
 
     let mut batch = SubstateUpdateBatch::new(epoch);

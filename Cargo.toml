@@ -31,7 +31,6 @@ members = [
     "crates/state_tree",
     "crates/storage_sqlite",
     "crates/storage",
-    "crates/state_store_tests",
     "crates/tari_bor",
     "crates/template_abi",
     "crates/template_builtin",

@@ -1,6 +1,9 @@
-//   Copyright 2025 The Tari Project
+//   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+pub mod helpers;
+
+use helpers::{create_block, create_rocksdb, create_tx_atom};
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::ShardGroupAccumulatedData;
 use tari_ootle_common_types::{Epoch, ExtraData, Network, NodeHeight};
@@ -11,8 +14,6 @@ use tari_ootle_storage::{
 };
 use tari_template_lib::prelude::SchnorrSignatureBytes;
 use tari_utilities::epoch_time::EpochTime;
-
-use crate::helpers::{create_block, create_rocksdb, create_tx_atom};
 
 #[test]
 fn missing_transactions_rocksdb() {

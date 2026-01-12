@@ -1,6 +1,9 @@
-//   Copyright 2025 The Tari Project
+//   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+pub mod helpers;
+
+use helpers::{assert_eq_debug, create_rocksdb};
 use indexmap::IndexMap;
 use tari_consensus_types::{
     BlockId,
@@ -25,10 +28,7 @@ use tari_sidechain::{CommandCommitProof, QuorumDecision, SidechainBlockCommitPro
 use tari_state_tree::{compute_proof_for_hashes, TreeHash};
 use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
-use crate::{
-    helpers::{assert_eq_debug, create_rocksdb},
-    TEST_NUM_PRESHARDS,
-};
+use crate::helpers::num_preshards;
 
 #[test]
 #[allow(clippy::too_many_lines)]
@@ -129,7 +129,7 @@ fn miscellaneous_rocksdb() {
         block_id: BlockId::zero(),
         height: NodeHeight(123),
         epoch,
-        shard_group: ShardGroup::all_shards(TEST_NUM_PRESHARDS),
+        shard_group: ShardGroup::all_shards(num_preshards()),
     };
     tx.leaf_block_set(&leaf_block).unwrap();
     let res = tx.leaf_block_get(epoch).unwrap();
@@ -160,8 +160,8 @@ fn miscellaneous_rocksdb() {
     assert_eq_debug(&res, &high_qc);
 
     // epoch checkpoints
-    let shard_group = ShardGroup::all_shards(TEST_NUM_PRESHARDS);
-    let block = Block::zero_block(Network::LocalNet, TEST_NUM_PRESHARDS);
+    let shard_group = ShardGroup::all_shards(num_preshards());
+    let block = Block::zero_block(Network::LocalNet, num_preshards());
     let mut shard_summary = IndexMap::new();
     shard_summary.insert(shard_group.start(), TreeRootSummary {
         root_hash: TreeHash::zero(),

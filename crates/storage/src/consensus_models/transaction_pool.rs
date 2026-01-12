@@ -18,6 +18,7 @@ use tari_ootle_common_types::{
     committee::CommitteeInfo,
     displayable::Displayable,
     optional::IsNotFoundError,
+    Epoch,
     NumPreshards,
     ShardGroup,
     SubstateAddress,
@@ -343,6 +344,9 @@ pub struct TransactionPoolRecord {
     local_decision: Option<Decision>,
     remote_decision: Option<Decision>,
     is_ready: bool,
+    /// Epoch to use when executing the transaction. This updates as foreign proposals are received
+    /// until the transaction is executed.
+    locked_epoch: Option<Epoch>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     last_updated: time::OffsetDateTime,
     last_updated_in_block: Option<BlockId>,
@@ -362,6 +366,7 @@ impl TransactionPoolRecord {
             local_decision: None,
             remote_decision: None,
             is_ready: false,
+            locked_epoch: None,
             last_updated: time::OffsetDateTime::now_utc(),
             last_updated_in_block: None,
         }
@@ -379,6 +384,7 @@ impl TransactionPoolRecord {
         local_decision: Option<Decision>,
         remote_decision: Option<Decision>,
         is_ready: bool,
+        locked_epoch: Option<Epoch>,
         last_updated: time::OffsetDateTime,
         last_updated_in_block: Option<BlockId>,
     ) -> Self {
@@ -394,6 +400,7 @@ impl TransactionPoolRecord {
             local_decision,
             remote_decision,
             is_ready,
+            locked_epoch,
             last_updated,
             last_updated_in_block,
         }
@@ -442,6 +449,10 @@ impl TransactionPoolRecord {
 
     pub fn remote_decision(&self) -> Option<Decision> {
         self.remote_decision
+    }
+
+    pub fn locked_epoch(&self) -> Option<Epoch> {
+        self.locked_epoch
     }
 
     pub fn id(&self) -> &TransactionId {
@@ -579,6 +590,24 @@ impl TransactionPoolRecord {
     pub fn set_last_updated(&mut self, in_block: BlockId, timestamp: time::OffsetDateTime) -> &mut Self {
         self.last_updated_in_block = Some(in_block);
         self.last_updated = timestamp;
+        self
+    }
+
+    /// Updates the locked epoch if the new epoch is less than the current locked epoch.
+    /// Returns true if the locked epoch was updated, otherwise false.
+    pub fn update_locked_epoch(&mut self, new_epoch: Epoch) -> bool {
+        if self.locked_epoch.is_none_or(|e| e > new_epoch) {
+            self.locked_epoch = Some(new_epoch);
+            return true;
+        }
+        false
+    }
+
+    /// Sets the locked epoch to the given value.
+    /// This is used for database loading and transaction pool record update merging only.
+    /// Use `update_locked_epoch` to update the locked epoch during foreign proposal etc processing.
+    pub fn set_locked_epoch(&mut self, locked_epoch: Option<Epoch>) -> &mut Self {
+        self.locked_epoch = locked_epoch;
         self
     }
 
@@ -905,6 +934,7 @@ mod tests {
                 local_decision: None,
                 remote_decision: None,
                 is_ready: false,
+                locked_epoch: None,
                 last_updated: time::OffsetDateTime::now_utc(),
                 last_updated_in_block: None,
             }

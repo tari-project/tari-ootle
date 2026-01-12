@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::{Decision, LeafBlock};
+use tari_ootle_common_types::Epoch;
 use tari_transaction::TransactionId;
 
 use crate::{
@@ -53,6 +54,10 @@ impl TransactionPoolStatusUpdate {
         self.transaction.remote_decision()
     }
 
+    pub fn local_decision(&self) -> Option<Decision> {
+        self.transaction.local_decision()
+    }
+
     pub fn transaction_fee(&self) -> u64 {
         self.transaction.transaction_fee()
     }
@@ -61,10 +66,15 @@ impl TransactionPoolStatusUpdate {
         self.transaction.leader_fee()
     }
 
+    pub fn locked_epoch(&self) -> Option<Epoch> {
+        self.transaction.locked_epoch()
+    }
+
     pub fn apply(&self, tx_rec_mut: &mut TransactionPoolRecord) {
         tx_rec_mut.set_evidence(self.evidence().clone());
         tx_rec_mut.set_ready(self.is_ready_now());
         tx_rec_mut.set_local_decision(self.transaction().current_decision());
+        tx_rec_mut.set_locked_epoch(self.locked_epoch());
         if let Some(decision) = self.transaction().remote_decision() {
             tx_rec_mut.set_remote_decision(decision);
         }

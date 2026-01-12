@@ -631,6 +631,16 @@ where TConsensusSpec: ConsensusSpec
             return Ok(None);
         }
 
+        // Update locked epoch if needed
+        if pool_tx.update_locked_epoch(parent_block.epoch()) {
+            info!(
+                target: LOG_TARGET,
+                "🔒 Updated locked epoch for transaction {} to {}",
+                pool_tx.id(),
+                parent_block.epoch(),
+            );
+        }
+
         match prepared {
             PreparedTransaction::LocalOnly(local) => match *local {
                 LocalPreparedTransaction::Accept { execution, .. } => {
@@ -797,9 +807,16 @@ where TConsensusSpec: ConsensusSpec
             return Ok(Some(Command::LocalAccept(tx_rec.get_current_transaction_atom())));
         }
 
+        let locked_epoch = tx_rec.locked_epoch().ok_or_else(|| {
+            HotStuffError::InvariantError(format!(
+                "PROPOSE: local_accept_transaction: Transaction {} is in LocalPrepared stage but has no locked epoch",
+                tx_rec.id(),
+            ))
+        })?;
+
         let tx = substate_store.read_transaction();
         let transaction = tx_rec.get_transaction(tx)?;
-        let execution = self.execute_transaction(tx, parent_block, transaction, change_set)?;
+        let execution = self.execute_transaction(tx, parent_block, transaction, change_set, locked_epoch)?;
 
         // Try to lock all local outputs
         let local_outputs = execution
@@ -907,6 +924,7 @@ where TConsensusSpec: ConsensusSpec
         parent_block: &LeafBlock,
         transaction: TransactionRecord,
         change_set: &ProposedBlockChangeSet,
+        execution_epoch: Epoch,
     ) -> Result<TransactionExecution, HotStuffError> {
         // Should have been executed already if all inputs are local
         if let Some(execution) =
@@ -934,7 +952,7 @@ where TConsensusSpec: ConsensusSpec
 
         let executed = self
             .transaction_manager
-            .execute(parent_block.epoch(), pledged)
+            .execute(execution_epoch, pledged)
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
 
         Ok(executed)

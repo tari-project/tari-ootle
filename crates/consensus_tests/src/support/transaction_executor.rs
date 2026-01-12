@@ -1,7 +1,11 @@
 //    Copyright 2024 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, iter};
+use std::{
+    collections::HashMap,
+    iter,
+    sync::{Arc, Mutex},
+};
 
 use tari_consensus::traits::{BlockTransactionExecutor, BlockTransactionExecutorError};
 use tari_engine::state_store::{memory::MemoryStateStore, new_memory_store, StateWriter};
@@ -23,7 +27,7 @@ use tari_ootle_storage::{
     StateStore,
 };
 use tari_template_lib::prelude::XTR;
-use tari_transaction::Transaction;
+use tari_transaction::{Transaction, TransactionId};
 
 use crate::support::{create_execution_result_for_transaction, executions_store::TestExecutionSpecStore, TestAddress};
 
@@ -31,11 +35,24 @@ use crate::support::{create_execution_result_for_transaction, executions_store::
 pub struct TestBlockTransactionProcessor {
     address: TestAddress,
     store: TestExecutionSpecStore,
+    history: Arc<Mutex<HashMap<TransactionId, TestHistoricalExecution>>>,
 }
 
 impl TestBlockTransactionProcessor {
     pub fn new(address: TestAddress, store: TestExecutionSpecStore) -> Self {
-        Self { address, store }
+        Self {
+            address,
+            store,
+            history: Default::default(),
+        }
+    }
+
+    pub fn store(&self) -> &TestExecutionSpecStore {
+        &self.store
+    }
+
+    pub fn get_history(&self) -> HashMap<TransactionId, TestHistoricalExecution> {
+        self.history.lock().unwrap().clone()
     }
 
     fn add_substates_to_memory_db<'a, I: IntoIterator<Item = (&'a SubstateRequirement, &'a Substate)>>(
@@ -62,6 +79,7 @@ impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBloc
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     fn execute(
         &self,
         transaction: &Transaction,
@@ -177,6 +195,16 @@ impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBloc
             executed.execution_time(),
             executed.result().finalize.result
         );
+        self.history.lock().unwrap().insert(id, TestHistoricalExecution {
+            execution: executed.clone(),
+            current_epoch,
+        });
         Ok(executed)
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct TestHistoricalExecution {
+    pub execution: TransactionExecution,
+    pub current_epoch: Epoch,
 }

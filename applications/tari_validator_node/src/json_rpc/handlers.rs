@@ -57,7 +57,6 @@ use tari_ootle_p2p::TariMessagingSpec;
 use tari_ootle_storage::{
     consensus_models::{Block, BookkeepingModel, SubstateRecord, TransactionExecution, TransactionRecord},
     global::GlobalDb,
-    Ordering,
     StateStore,
     StateStoreReadTransaction,
     StorageError,
@@ -87,7 +86,6 @@ use tari_validator_node_client::types::{
     GetFilteredBlocksCountRequest,
     GetIdentityResponse,
     GetMempoolStatsResponse,
-    GetRecentTransactionsResponse,
     GetShardKeyRequest,
     GetShardKeyResponse,
     GetStateRequest,
@@ -259,21 +257,6 @@ impl JsonRpcHandlers {
         Ok(JsonRpcResponse::success(answer_id, GetStateResponse {
             data: substate.to_bytes(),
         }))
-    }
-
-    pub async fn get_recent_transactions(&self, value: JsonRpcExtractor) -> JrpcResult {
-        let answer_id = value.get_answer_id();
-        let tx = self
-            .state_store
-            .create_read_tx()
-            .map_err(internal_error(answer_id.clone()))?;
-        let recent_transactions = tx
-            .transactions_get_paginated(1000, 0, Some(Ordering::Descending))
-            .map_err(internal_error(answer_id.clone()))?;
-        let res = GetRecentTransactionsResponse {
-            transactions: recent_transactions.into_iter().map(|t| t.transaction).collect(),
-        };
-        Ok(JsonRpcResponse::success(answer_id, res))
     }
 
     pub async fn list_blocks(&self, value: JsonRpcExtractor) -> JrpcResult {

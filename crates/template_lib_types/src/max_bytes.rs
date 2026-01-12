@@ -23,6 +23,16 @@ impl<const N: usize> Deref for MaxBytes<N> {
 }
 
 impl<const N: usize> MaxBytes<N> {
+    pub fn new() -> Self {
+        Self::empty()
+    }
+
+    pub fn empty() -> Self {
+        Self { bytes: Box::new([]) }
+    }
+
+    /// Constructs a new `MaxBytes<N>` if the length of the input is less than or equal to `N`.
+    /// Returns `None` if the length exceeds `N`.
     pub fn new_checked(bytes: impl Into<Box<[u8]>>) -> Option<Self> {
         let bytes = bytes.into();
         if bytes.len() <= N {
@@ -48,10 +58,6 @@ impl<const N: usize> MaxBytes<N> {
 
     pub fn into_vec(self) -> Vec<u8> {
         self.into_bytes().into_vec()
-    }
-
-    pub fn empty() -> Self {
-        Self { bytes: Box::new([]) }
     }
 
     pub fn as_slice(&self) -> &[u8] {

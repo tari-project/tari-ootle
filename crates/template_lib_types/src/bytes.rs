@@ -59,6 +59,12 @@ impl From<Bytes> for Vec<u8> {
     }
 }
 
+impl From<Bytes> for Box<[u8]> {
+    fn from(value: Bytes) -> Self {
+        value.0
+    }
+}
+
 impl AsRef<[u8]> for Bytes {
     fn as_ref(&self) -> &[u8] {
         &self.0

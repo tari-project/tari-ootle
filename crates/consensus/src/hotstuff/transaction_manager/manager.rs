@@ -9,7 +9,6 @@ use tari_consensus_types::{Decision, LeafBlock};
 use tari_engine_types::{
     commit_result::RejectReason,
     substate::{Substate, SubstateId},
-    template_lib_models::ClaimedOutputTombstoneAddress,
 };
 use tari_ootle_common_types::{
     committee::CommitteeInfo,
@@ -88,7 +87,20 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
 
         match resolved_inputs {
             ResolvedTransactionInputs::OnlyLocalInputs { local_versions } => {
-                self.prepare_local_input_transaction(store, local_committee_info, &transaction, local_versions, block)
+                // Because we have only local inputs, this shard group unilaterally decides the locked epoch (though
+                // output shardgroups still may abort)
+
+                // TODO: the pool record needs to be updated after this function returns by the caller, which is not
+                // ideal
+                let execution_epoch = block.epoch();
+                self.prepare_local_input_transaction(
+                    store,
+                    local_committee_info,
+                    &transaction,
+                    local_versions,
+                    block,
+                    execution_epoch,
+                )
             },
             ResolvedTransactionInputs::LocalAndForeignInputs {
                 local_versions,
@@ -101,17 +113,36 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 non_local_inputs,
                 block,
             ),
-            ResolvedTransactionInputs::OnlyForeignInputs { non_local_inputs } => self
-                .prepare_multishard_output_only_transaction(
+            ResolvedTransactionInputs::OnlyForeignInputs { non_local_inputs } => {
+                let execution_epoch = pool_tx.locked_epoch().ok_or_else(|| {
+                    BlockTransactionExecutorError::InvariantError(format!(
+                        "Output-only transaction {} has no locked epoch",
+                        transaction_id
+                    ))
+                })?;
+                self.prepare_multishard_output_only_transaction(
                     store,
                     local_committee_info,
                     &transaction,
                     non_local_inputs,
                     block,
                     change_set,
-                ),
+                    execution_epoch,
+                )
+            },
             ResolvedTransactionInputs::OnlyTombstones => {
-                self.prepare_local_input_transaction(store, local_committee_info, &transaction, IndexMap::new(), block)
+                // Because we have only local inputs, this shard group unilaterally decides the locked epoch (though
+                // output shards may abort) TODO: the pool record needs to be updated after this
+                // function returns by the caller, which is not ideal
+                let execution_epoch = block.epoch();
+                self.prepare_local_input_transaction(
+                    store,
+                    local_committee_info,
+                    &transaction,
+                    IndexMap::new(),
+                    block,
+                    execution_epoch,
+                )
             },
             ResolvedTransactionInputs::OneOrMoreLocalInputsNotFound { is_local_only, err } => {
                 // Currently, this message will differ depending on which involved shard is asked.
@@ -168,12 +199,12 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             }
         }
 
-        let local_tombstones = transaction
+        let num_local_tombstones = transaction
             .claim_burn_outputs_iter()
             .filter(|tombstone| local_committee_info.includes_substate_id(&SubstateId::from(*tombstone)))
-            .collect::<IndexSet<_>>();
+            .count();
 
-        if local_inputs.is_empty() && foreign_inputs.is_empty() && local_tombstones.is_empty() {
+        if local_inputs.is_empty() && foreign_inputs.is_empty() && num_local_tombstones == 0 {
             // Mempool/missing transaction validations should have not sent the transaction to consensus
             warn!(target: LOG_TARGET, "⚠️ PREPARE: NEVER HAPPEN transaction {} has no inputs.", transaction.calculate_id());
             return Err(BlockTransactionExecutorError::InvariantError(format!(
@@ -185,13 +216,13 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         Ok(ResolvedInputs {
             local_inputs,
             foreign_inputs,
-            local_tombstones,
+            num_local_tombstones,
         })
     }
 
     pub fn execute(
         &self,
-        current_epoch: Epoch,
+        execution_epoch: Epoch,
         pledged_transaction: PledgedTransaction,
     ) -> Result<TransactionExecution, BlockTransactionExecutorError> {
         let resolved_inputs = pledged_transaction
@@ -211,7 +242,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             .collect();
         let executed = self.executor.execute(
             pledged_transaction.transaction.transaction(),
-            current_epoch,
+            execution_epoch,
             &resolved_inputs,
         )?;
 
@@ -224,6 +255,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         transaction: &TransactionRecord,
         resolved_inputs: &HashMap<SubstateRequirement, Substate>,
         block: &LeafBlock,
+        execution_epoch: Epoch,
     ) -> Result<TransactionExecution, BlockTransactionExecutorError> {
         // Might have been executed already in on propose
         if let Some(execution) = self.fetch_execution(store, transaction.id(), block)? {
@@ -242,7 +274,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         );
         let execution = self
             .executor
-            .execute(transaction.transaction(), block.epoch(), resolved_inputs)?;
+            .execute(transaction.transaction(), execution_epoch, resolved_inputs)?;
         Ok(execution)
     }
 
@@ -271,8 +303,9 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             Ok(resolved) => {
                 if resolved.local_inputs.is_empty() &&
                     resolved.foreign_inputs.is_empty() &&
-                    !resolved.local_tombstones.is_empty()
+                    resolved.num_local_tombstones > 0
                 {
+                    // EDGE CASE: transaction with only tombstone outputs and no inputs has to be handled differently
                     return Ok(ResolvedTransactionInputs::OnlyTombstones);
                 }
 
@@ -323,6 +356,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         transaction: &TransactionRecord,
         local_versions: IndexMap<SubstateRequirementRef<'_>, u32>,
         block: LeafBlock,
+        execution_epoch: Epoch,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         let transaction_id = *transaction.id();
         // CASE: All inputs are local and we can execute the transaction.
@@ -337,7 +371,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         );
 
         let local_inputs = store.get_many(local_versions.iter().map(|(req, v)| (req.to_owned(), *v)))?;
-        let execution = self.execute_or_fetch(store, transaction, &local_inputs, &block)?;
+        let execution = self.execute_or_fetch(store, transaction, &local_inputs, &block, execution_epoch)?;
 
         let is_outputs_local_only = local_committee_info.is_all_local(execution.resulting_outputs());
         if is_outputs_local_only {
@@ -511,6 +545,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         non_local_inputs: IndexSet<SubstateRequirementRef<'_>>,
         block: LeafBlock,
         change_set: &ProposedBlockChangeSet,
+        execution_epoch: Epoch,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         let transaction_id = *transaction.id();
         // We're output-only, so only need to gather foreign pledges
@@ -555,7 +590,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             )));
         }
 
-        let execution = self.execute_or_fetch(store, transaction, &resolved_inputs, &block)?;
+        let execution = self.execute_or_fetch(store, transaction, &resolved_inputs, &block, execution_epoch)?;
         info!(
             target: LOG_TARGET,
             "👨‍🔧 PREPARE: Output-Only Executed transaction {} with {} decision",
@@ -575,7 +610,7 @@ enum ResolvedTransactionInputs<'a> {
         local_versions: IndexMap<SubstateRequirementRef<'a>, u32>,
         non_local_inputs: IndexSet<SubstateRequirementRef<'a>>,
     },
-    /// Does not involve any local inputs, but involves a local tombstone output
+    /// Does not involve any local inputs, but involves one or more local tombstone outputs
     OnlyTombstones,
     /// a.k.a "output-only"
     OnlyForeignInputs {
@@ -590,5 +625,5 @@ enum ResolvedTransactionInputs<'a> {
 struct ResolvedInputs<'a> {
     pub local_inputs: IndexMap<SubstateRequirementRef<'a>, u32>,
     pub foreign_inputs: IndexSet<SubstateRequirementRef<'a>>,
-    pub local_tombstones: IndexSet<ClaimedOutputTombstoneAddress>,
+    pub num_local_tombstones: usize,
 }

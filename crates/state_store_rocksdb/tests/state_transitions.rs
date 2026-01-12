@@ -1,8 +1,11 @@
-//   Copyright 2025 The Tari Project
+//   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
+
+pub mod helpers;
 
 use std::collections::{HashMap, HashSet};
 
+use helpers::{create_rocksdb, create_substate_update_batch, gen_substates};
 use tari_ootle_common_types::{Epoch, Network};
 use tari_ootle_storage::{
     consensus_models::{Block, SubstateValueFilterFlags},
@@ -12,10 +15,7 @@ use tari_ootle_storage::{
 };
 use tari_state_tree::Version;
 
-use crate::{
-    helpers::{create_rocksdb, create_substate_update_batch, gen_substates},
-    TEST_NUM_PRESHARDS,
-};
+use crate::helpers::num_preshards;
 
 #[test]
 fn rocksdb() {
@@ -25,7 +25,7 @@ fn rocksdb() {
     const EPOCH: Epoch = Epoch::zero();
     let mut tx = db.create_write_tx().unwrap();
 
-    let zero_block = Block::zero_block(Network::LocalNet, TEST_NUM_PRESHARDS);
+    let zero_block = Block::zero_block(Network::LocalNet, num_preshards());
     zero_block.insert(&mut tx).unwrap();
 
     let mut shards = HashMap::new();

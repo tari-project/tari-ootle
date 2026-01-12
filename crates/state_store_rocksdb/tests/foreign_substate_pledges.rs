@@ -1,6 +1,9 @@
-//   Copyright 2025 The Tari Project
+//   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+pub mod helpers;
+
+use helpers::{build_substate_value, create_random_substate_id, create_rocksdb, transaction_id_from_seed};
 use tari_ootle_common_types::{NumPreshards, ShardGroup, VersionedSubstateId};
 use tari_ootle_storage::{
     consensus_models::SubstatePledge,
@@ -8,8 +11,6 @@ use tari_ootle_storage::{
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
 };
-
-use crate::helpers::{build_substate_value, create_random_substate_id, create_rocksdb, transaction_id_from_seed};
 
 #[test]
 fn foreign_substate_pledges_rocksdb() {

@@ -1,6 +1,9 @@
-//   Copyright 2025 The Tari Project
+//   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+pub mod helpers;
+
+use helpers::{create_block, create_rocksdb};
 use tari_consensus_types::PcId;
 use tari_ootle_storage::{
     consensus_models::{BookkeepingModel, PendingShardStateTreeDiff},
@@ -9,8 +12,6 @@ use tari_ootle_storage::{
     StateStoreWriteTransaction,
 };
 use tari_state_tree::StateHashTreeDiff;
-
-use crate::helpers::{create_block, create_rocksdb};
 
 #[test]
 fn pending_state_tree_diff_rocksdb() {

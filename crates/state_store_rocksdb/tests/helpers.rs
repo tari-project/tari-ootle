@@ -1,24 +1,5 @@
-//   Copyright 2025. The Tari Project
-//
-//   Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
-//   following conditions are met:
-//
-//   1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following
-//   disclaimer.
-//
-//   2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
-//   following disclaimer in the documentation and/or other materials provided with the distribution.
-//
-//   3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote
-//   products derived from this software without specific prior written permission.
-//
-//   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
-//   INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-//   DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-//   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-//   SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-//   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
-//   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//   Copyright 2026 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{io::Write, ops::Deref};
 
@@ -69,8 +50,6 @@ use tari_template_lib::{
 use tari_transaction::TransactionId;
 use tari_utilities::epoch_time::EpochTime;
 use tempfile::TempDir;
-
-use crate::TEST_NUM_PRESHARDS;
 
 pub const fn num_preshards() -> NumPreshards {
     NumPreshards::P256
@@ -135,7 +114,7 @@ pub fn build_substate_record(substate_id: &SubstateId, version: u32, state_versi
         substate_value: Some(value),
         created: SubstateCreated {
             at_epoch: Epoch::zero(),
-            in_shard: VersionedSubstateIdRef::new(substate_id, version).to_shard(TEST_NUM_PRESHARDS),
+            in_shard: VersionedSubstateIdRef::new(substate_id, version).to_shard(num_preshards()),
             at_state_version: state_version,
         },
         destroyed: None,
@@ -171,7 +150,7 @@ pub fn create_substate_update_batch<'a, I: IntoIterator<Item = &'a SubstateRecor
         if let Some(destroyed) = &substate.destroyed {
             batch
                 .with_transition(
-                    substate.to_versioned_substate_id().to_shard(TEST_NUM_PRESHARDS),
+                    substate.to_versioned_substate_id().to_shard(num_preshards()),
                     destroyed.at_state_version,
                 )
                 .push(tari_ootle_storage::consensus_models::SubstateTransition::Down {
@@ -180,7 +159,7 @@ pub fn create_substate_update_batch<'a, I: IntoIterator<Item = &'a SubstateRecor
         } else {
             batch
                 .with_transition(
-                    substate.to_versioned_substate_id().to_shard(TEST_NUM_PRESHARDS),
+                    substate.to_versioned_substate_id().to_shard(num_preshards()),
                     substate.created().at_state_version,
                 )
                 .push(tari_ootle_storage::consensus_models::SubstateTransition::Up {
@@ -244,7 +223,7 @@ pub fn gen_substates(
     range.into_iter().map(move |i| {
         let substate_id = substate_id_seed(i);
         let value = substate_value_for_entity(substate_id.to_object_key().as_entity_id());
-        let shard = VersionedSubstateIdRef::new(&substate_id, version).to_shard(TEST_NUM_PRESHARDS);
+        let shard = VersionedSubstateIdRef::new(&substate_id, version).to_shard(num_preshards());
         SubstateRecord::new(substate_id, version, value, SubstateCreated {
             at_epoch: epoch,
             in_shard: shard,
@@ -388,7 +367,7 @@ where
 }
 
 pub fn create_foreign_proposal(parent_id: BlockId, epoch: Epoch) -> ForeignProposalRecord {
-    let shard_group = ShardGroup::all_shards(TEST_NUM_PRESHARDS);
+    let shard_group = ShardGroup::all_shards(num_preshards());
     let qc1 = ProposalCertificate::new(
         *parent_id.hash(),
         parent_id,

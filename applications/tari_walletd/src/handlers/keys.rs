@@ -7,11 +7,7 @@ use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId};
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{
-        KeysCreateRequest,
-        KeysCreateResponse,
-        KeysListRequest,
-        KeysListResponse,
-        KeysSetActiveRequest,
+        KeysCreateRequest, KeysCreateResponse, KeysListRequest, KeysListResponse, KeysSetActiveRequest,
         KeysSetActiveResponse,
     },
 };

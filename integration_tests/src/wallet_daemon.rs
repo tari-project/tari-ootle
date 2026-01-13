@@ -52,6 +52,7 @@ use tari_wallet_daemon_client::{
 use tokio::task;
 
 use crate::{
+    cucumber_log,
     helpers::{check_join_handle, get_os_assigned_ports, wait_listener_on_local_port},
     logging::get_base_dir_for_scenario,
     TariWorld,
@@ -122,6 +123,7 @@ impl TariWalletDaemonProcess {
     }
 
     pub async fn get_authed_client(&self) -> WalletDaemonClient {
+        cucumber_log!("Authenticating wallet daemon {}", self.name);
         let mut client = self.get_client();
         // authentication
         let AuthLoginResponse { auth_token, .. } = client
@@ -139,6 +141,7 @@ impl TariWalletDaemonProcess {
             })
             .await
             .unwrap();
+        cucumber_log!("Authenticated wallet daemon {}", self.name);
         client.set_auth_token(auth_response.permissions_token);
         client
     }
@@ -148,6 +151,7 @@ impl TariWalletDaemonProcess {
         account_name: &str,
         claim_proof: ClaimBurnProof,
     ) -> Result<ClaimBurnResponse, WalletDaemonClientError> {
+        cucumber_log!("Claiming burn for account {}", account_name);
         let mut client = self.get_authed_client().await;
 
         let req = ClaimBurnRequest {
@@ -156,7 +160,10 @@ impl TariWalletDaemonProcess {
             max_fee: Some(5000),
         };
 
-        client.claim_burn(req).await
+        client
+            .claim_burn(req)
+            .await
+            .inspect_err(|e| cucumber_log!("Claim burn failed: {}", e))
     }
 
     pub async fn wait_for_transaction_result(&self, tx_id: TransactionId) -> TransactionWaitResultResponse {

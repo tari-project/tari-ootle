@@ -8,6 +8,9 @@ use integration_tests::{
     claim_proof::CucumberClaimProof, cucumber_log, util::transaction_builder, wallet_daemon_client, TariWorld,
 };
 use rand::{rngs::OsRng, Rng};
+use tari_crypto::keys::SecretKey;
+use tari_crypto::ristretto::RistrettoSecretKey;
+use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_wallet_sdk::models::KeyBranch;
 use tari_template_lib::{
@@ -225,6 +228,8 @@ async fn when_i_burn_funds_with_wallet_daemon(
         wallet_daemon_client::get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let nonce = wallet_daemon_client.create_key(KeyBranch::Nonce).await.unwrap();
+    // let private_ephemeral_key = RistrettoSecretKey::random(&mut OsRng);
+    // let public_key = private_ephemeral_key.public_key();
 
     let public_key = nonce.public_key;
     integration_tests::cucumber_log!("Burning funds using claim key {}", public_key);
@@ -268,33 +273,33 @@ async fn when_i_burn_funds_with_wallet_daemon(
     let base_node = world.base_nodes.values().next().expect("No base node found");
 
     // Call the base node HTTP endpoint to get kernel merkle proof
-    let http_client = reqwest::Client::new();
-    let url = format!(
-        "http://127.0.0.1:{}/generate_kernel_merkle_proof?excess_sig_public_nonce={}&excess_sig_signature={}",
-        base_node.http_port,
-        hex::encode(&kernel_excess_sig_nonce),
-        hex::encode(&kernel_excess_sig_signature)
-    );
+    // let http_client = reqwest::Client::new();
+    // let url = format!(
+    //     "http://127.0.0.1:{}/generate_kernel_merkle_proof?excess_sig_public_nonce={}&excess_sig_signature={}",
+    //     base_node.http_port,
+    //     hex::encode(&kernel_excess_sig_nonce),
+    //     hex::encode(&kernel_excess_sig_signature)
+    // );
 
-    integration_tests::cucumber_log!("Calling base node HTTP endpoint: {}", url);
+    // integration_tests::cucumber_log!("Calling base node HTTP endpoint: {}", url);
 
     // Try to get the kernel proof (it may not be available yet if not mined)
-    match http_client.get(&url).send().await {
-        Ok(response) => {
-            if response.status().is_success() {
-                let proof_response = response.text().await.unwrap();
-                integration_tests::cucumber_log!("Kernel merkle proof response: {}", proof_response);
-            } else {
-                integration_tests::cucumber_log!(
-                    "Kernel merkle proof not yet available (status: {}). This is expected if the transaction hasn't been mined yet.",
-                    response.status()
-                );
-            }
-        },
-        Err(e) => {
-            integration_tests::cucumber_log!("Failed to call kernel merkle proof endpoint: {}", e);
-        },
-    }
+    // match http_client.get(&url).send().await {
+    //     Ok(response) => {
+    //         if response.status().is_success() {
+    //             let proof_response = response.text().await.unwrap();
+    //             integration_tests::cucumber_log!("Kernel merkle proof response: {}", proof_response);
+    //         } else {
+    //             integration_tests::cucumber_log!(
+    //                 "Kernel merkle proof not yet available (status: {}). This is expected if the transaction hasn't been mined yet.",
+    //                 response.status()
+    //             );
+    //         }
+    //     },
+    //     Err(e) => {
+    //         integration_tests::cucumber_log!("Failed to call kernel merkle proof endpoint: {}", e);
+    //     },
+    // }
 
     world.claim_proofs.insert(
         proof_name,

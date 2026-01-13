@@ -10,8 +10,11 @@ use log::*;
 use rand::rngs::OsRng;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
-    component::derive_component_address_from_public_key, confidential::ClaimBurnOutputData, substate::SubstateId,
-    FromByteType, ToByteType,
+    component::derive_component_address_from_public_key,
+    confidential::ClaimBurnOutputData,
+    substate::SubstateId,
+    FromByteType,
+    ToByteType,
 };
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
 use tari_ootle_wallet_crypto::{memo::Memo, OutputWitness, SecretStealthOutputStatement, StealthInputWitness};
@@ -34,15 +37,38 @@ use tari_transaction::args;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{
-        AccountGetByKeyIndexRequest, AccountGetDefaultRequest, AccountGetRequest, AccountGetResponse, AccountInfo,
-        AccountSetDefaultRequest, AccountSetDefaultResponse, AccountsAssociateStealthResourceRequest,
-        AccountsAssociateStealthResourceResponse, AccountsCreateFreeTestCoinsRequest,
-        AccountsCreateFreeTestCoinsResponse, AccountsCreateOrGetRequest, AccountsCreateOrGetResponse,
-        AccountsCreateRequest, AccountsCreateResponse, AccountsCreateStealthTransferStatementRequest,
-        AccountsCreateStealthTransferStatementResponse, AccountsGetBalancesRequest, AccountsGetBalancesResponse,
-        AccountsListRequest, AccountsListResponse, AccountsRenameRequest, AccountsRenameResponse,
-        AccountsTransferRequest, AccountsTransferResponse, BalanceEntry, ClaimBurnProof, ClaimBurnRequest,
-        ClaimBurnResponse, ConfidentialTransferRequest, ConfidentialTransferResponse, StealthTransferRequest,
+        AccountGetByKeyIndexRequest,
+        AccountGetDefaultRequest,
+        AccountGetRequest,
+        AccountGetResponse,
+        AccountInfo,
+        AccountSetDefaultRequest,
+        AccountSetDefaultResponse,
+        AccountsAssociateStealthResourceRequest,
+        AccountsAssociateStealthResourceResponse,
+        AccountsCreateFreeTestCoinsRequest,
+        AccountsCreateFreeTestCoinsResponse,
+        AccountsCreateOrGetRequest,
+        AccountsCreateOrGetResponse,
+        AccountsCreateRequest,
+        AccountsCreateResponse,
+        AccountsCreateStealthTransferStatementRequest,
+        AccountsCreateStealthTransferStatementResponse,
+        AccountsGetBalancesRequest,
+        AccountsGetBalancesResponse,
+        AccountsListRequest,
+        AccountsListResponse,
+        AccountsRenameRequest,
+        AccountsRenameResponse,
+        AccountsTransferRequest,
+        AccountsTransferResponse,
+        BalanceEntry,
+        ClaimBurnProof,
+        ClaimBurnRequest,
+        ClaimBurnResponse,
+        ConfidentialTransferRequest,
+        ConfidentialTransferResponse,
+        StealthTransferRequest,
         StealthTransferResponse,
     },
     ComponentAddressOrName,
@@ -52,8 +78,17 @@ use tokio::task;
 use super::context::HandlerContext;
 use crate::{
     handlers::helpers::{
-        general_error, get_account, get_account_by_key_index, get_account_or_default, get_account_with_inputs,
-        invalid_params, invalid_request, not_found, transaction_rejected, wait_for_result, wait_for_result_and_account,
+        general_error,
+        get_account,
+        get_account_by_key_index,
+        get_account_or_default,
+        get_account_with_inputs,
+        invalid_params,
+        invalid_request,
+        not_found,
+        transaction_rejected,
+        wait_for_result,
+        wait_for_result_and_account,
     },
     DEFAULT_FEE,
 };
@@ -234,10 +269,9 @@ pub async fn handle_get_balances(
 ) -> Result<AccountsGetBalancesResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
-    context.check_auth(
-        token,
-        &[JrpcPermission::AccountBalance(account.account.component_address.into())],
-    )?;
+    context.check_auth(token, &[JrpcPermission::AccountBalance(
+        account.account.component_address.into(),
+    )])?;
     if req.refresh {
         context
             .account_monitor()
@@ -387,6 +421,7 @@ pub async fn handle_claim_burn(
         encrypted_data: claimed_encrypted_data,
         claim_proof,
     } = claim_proof;
+    debug!(target: LOG_TARGET, "Claim burn proof: {:?}", claim_proof);
 
     let accounts_api = sdk.accounts_api();
     let account = get_account(&account, &accounts_api)?;
@@ -433,6 +468,13 @@ pub async fn handle_claim_burn(
         hex::encode(claimed_encrypted_data.as_bytes()),
         reciprocal_claim_public_key_expanded
     );
+
+    
+
+    // TODO: remove before merging
+    // if cfg!(debug_assertions) {
+    info!(target: LOG_TARGET, "DEBUG: Secret key for decrypting: {:?}", claim_nonce_key.secret.reveal());
+    // }
     let decrypted = sdk.stealth_crypto_api().decrypt_value_and_mask(
         &claimed_encrypted_data,
         &claim_proof.commitment,
@@ -612,11 +654,9 @@ pub async fn handle_create_free_test_coins(
                 .put_last_instruction_output_on_workspace("faucet_funds")
                 .then(|builder| {
                     if account.is_confirmed_on_chain() {
-                        builder.call_method(
-                            *account.component_address(),
-                            "deposit",
-                            args![Workspace("faucet_funds")],
-                        )
+                        builder.call_method(*account.component_address(), "deposit", args![Workspace(
+                            "faucet_funds"
+                        )])
                     } else {
                         // If the account is not on-chain yet, we create it
                         builder.create_account_with_bucket(*account.address.account_public_key(), "faucet_funds")
@@ -801,11 +841,10 @@ pub async fn handle_transfer(
                 builder
             }
         })
-        .call_method(
-            source_account_address,
-            "withdraw",
-            args![req.resource_address, req.amount],
-        )
+        .call_method(source_account_address, "withdraw", args![
+            req.resource_address,
+            req.amount
+        ])
         .put_last_instruction_output_on_workspace("bucket")
         .call_method(destination_account_address, "deposit", args![Workspace("bucket")])
         .then(|builder| {

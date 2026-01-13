@@ -30,7 +30,7 @@ mod engine_args;
 pub use crate::runtime::engine_args::EngineArgs;
 
 mod error;
-pub use error::{AssertError, RuntimeError, TransactionCommitError};
+pub use error::*;
 
 mod actions;
 pub use actions::*;
@@ -51,15 +51,13 @@ mod validation;
 mod working_state;
 mod workspace;
 
-use std::{fmt::Debug, sync::Arc};
+use std::{fmt::Debug, ptr::NonNull};
 
-use tari_bor::decode_exact;
 use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason},
     component::ComponentHeader,
     confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
     indexed_value::IndexedValue,
-    limits,
     lock::LockFlag,
     published_template::TemplateBlob,
     ValidatorFeePoolAddress,
@@ -87,7 +85,6 @@ use tari_template_lib::{
         VaultAction,
         WorkspaceAction,
     },
-    invoke_args,
     models::{BucketId, ComponentAddress, Metadata, NonFungibleAddress, StealthTransferStatement, VaultRef},
     types::{engine_args::SignatureAction, EntityId, TemplateAddress},
 };
@@ -99,197 +96,228 @@ use tari_transaction::{
 };
 pub use tracker::StateTracker;
 
-use crate::runtime::{error::ArgumentValidationError, locking::LockedSubstate, scope::PushCallFrame};
+use crate::runtime::{locking::LockedSubstate, scope::PushCallFrame};
 
 pub trait RuntimeInterface: Send + Sync {
     fn next_entity_id(&self) -> Result<EntityId, RuntimeError>;
-    fn emit_event(&self, topic: String, payload: Metadata) -> Result<(), RuntimeError>;
+    fn emit_event(&mut self, topic: String, payload: Metadata) -> Result<(), RuntimeError>;
 
-    fn emit_log(&self, level: LogLevel, message: String) -> Result<(), RuntimeError>;
+    fn emit_log(&mut self, level: LogLevel, message: String) -> Result<(), RuntimeError>;
 
-    fn load_component(&self, call: ComponentReference) -> Result<(ComponentAddress, ComponentHeader), RuntimeError>;
+    fn load_component(&mut self, call: ComponentReference)
+        -> Result<(ComponentAddress, ComponentHeader), RuntimeError>;
 
-    fn lock_component(&self, address: ComponentAddress, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError>;
+    fn lock_component(
+        &mut self,
+        address: ComponentAddress,
+        lock_flag: LockFlag,
+    ) -> Result<LockedSubstate, RuntimeError>;
 
     fn component_invoke(
-        &self,
+        &mut self,
         component_ref: ComponentRef,
         action: ComponentAction,
         args: EngineArgs,
     ) -> Result<InvokeResult, RuntimeError>;
 
     fn resource_invoke(
-        &self,
+        &mut self,
         resource_ref: ResourceRef,
         action: ResourceAction,
         args: EngineArgs,
     ) -> Result<InvokeResult, RuntimeError>;
 
     fn vault_invoke(
-        &self,
+        &mut self,
         vault_ref: VaultRef,
         action: VaultAction,
         args: EngineArgs,
     ) -> Result<InvokeResult, RuntimeError>;
 
     fn bucket_invoke(
-        &self,
+        &mut self,
         bucket_ref: BucketRef,
         action: BucketAction,
         args: EngineArgs,
     ) -> Result<InvokeResult, RuntimeError>;
 
     fn proof_invoke(
-        &self,
+        &mut self,
         proof_ref: ProofRef,
         action: ProofAction,
         args: EngineArgs,
     ) -> Result<InvokeResult, RuntimeError>;
-    fn workspace_invoke(&self, action: WorkspaceAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError>;
+    fn workspace_invoke(&mut self, action: WorkspaceAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError>;
 
     fn non_fungible_invoke(
-        &self,
+        &mut self,
         nf_addr: NonFungibleAddress,
         action: NonFungibleAction,
         args: EngineArgs,
     ) -> Result<InvokeResult, RuntimeError>;
 
-    fn consensus_invoke(&self, action: ConsensusAction) -> Result<InvokeResult, RuntimeError>;
+    fn consensus_invoke(&mut self, action: ConsensusAction) -> Result<InvokeResult, RuntimeError>;
 
-    fn generate_random_invoke(&self, action: GenerateRandomAction) -> Result<InvokeResult, RuntimeError>;
+    fn generate_random_invoke(&mut self, action: GenerateRandomAction) -> Result<InvokeResult, RuntimeError>;
 
-    fn generate_uuid(&self) -> Result<[u8; 32], RuntimeError>;
+    fn generate_uuid(&mut self) -> Result<[u8; 32], RuntimeError>;
 
-    fn set_last_instruction_output(&self, value: IndexedValue) -> Result<(), RuntimeError>;
+    fn set_last_instruction_output(&mut self, value: IndexedValue) -> Result<(), RuntimeError>;
 
-    fn claim_burn(&self, claim: MinotariBurnClaimProof, output_data: ClaimBurnOutputData) -> Result<(), RuntimeError>;
+    fn claim_burn(
+        &mut self,
+        claim: MinotariBurnClaimProof,
+        output_data: ClaimBurnOutputData,
+    ) -> Result<(), RuntimeError>;
 
-    fn claim_validator_fees(&self, address: ValidatorFeePoolAddress) -> Result<(), RuntimeError>;
+    fn claim_validator_fees(&mut self, address: ValidatorFeePoolAddress) -> Result<(), RuntimeError>;
 
-    fn checkpoint_fee_intent(&self) -> Result<(), RuntimeError>;
-    fn finalize(&self) -> Result<FinalizeResult, RuntimeError>;
-    fn finalize_failure(&self, reason: RejectReason) -> Result<FinalizeResult, RuntimeError>;
+    fn checkpoint_fee_intent(&mut self) -> Result<(), RuntimeError>;
+    fn finalize(&mut self) -> Result<FinalizeResult, RuntimeError>;
+    fn finalize_failure(&mut self, reason: RejectReason) -> Result<FinalizeResult, RuntimeError>;
     fn validate_finalized(&self) -> Result<(), RuntimeError>;
 
     fn caller_context_invoke(
-        &self,
+        &mut self,
         action: CallerContextAction,
         args: EngineArgs,
     ) -> Result<InvokeResult, RuntimeError>;
 
-    fn allocate_address_invoke(&self, action: AddressAllocationInvokeArg) -> Result<InvokeResult, RuntimeError>;
+    fn allocate_address_invoke(&mut self, action: AddressAllocationInvokeArg) -> Result<InvokeResult, RuntimeError>;
 
-    fn call_invoke(&self, action: CallAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError>;
+    fn call_invoke(&mut self, action: CallAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError>;
 
-    fn builtin_template_invoke(&self, action: BuiltinTemplateAction) -> Result<InvokeResult, RuntimeError>;
+    fn builtin_template_invoke(&mut self, action: BuiltinTemplateAction) -> Result<InvokeResult, RuntimeError>;
 
     /// Checks whether the current execution context has access to the given component method.
     fn check_component_access_rules(&self, method: &str) -> Result<(), RuntimeError>;
     /// Checks whether the current execution context has owner permission of the given component.
     fn check_component_ownership(&self, action: ActionIdent) -> Result<(), RuntimeError>;
 
-    fn update_component_template(&self, new_template: TemplateAddress) -> Result<(), RuntimeError>;
+    fn update_component_template(&mut self, new_template: TemplateAddress) -> Result<(), RuntimeError>;
 
     fn validate_return_value(&self, value: &IndexedValue) -> Result<(), RuntimeError>;
 
-    fn push_call_frame(&self, frame: PushCallFrame) -> Result<(), RuntimeError>;
-    fn pop_call_frame(&self) -> Result<(), RuntimeError>;
-    fn publish_template(&self, template: TemplateBlob) -> Result<(), RuntimeError>;
-    fn put_on_workspace(&self, id: WorkspaceId, value: IndexedValue) -> Result<(), RuntimeError>;
+    fn push_call_frame(&mut self, frame: PushCallFrame) -> Result<(), RuntimeError>;
+    fn pop_call_frame(&mut self) -> Result<(), RuntimeError>;
+    fn publish_template(&mut self, template: TemplateBlob) -> Result<(), RuntimeError>;
+    fn put_on_workspace(&mut self, id: WorkspaceId, value: IndexedValue) -> Result<(), RuntimeError>;
 
-    fn signature_invoke(&self, action: SignatureAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError>;
+    fn signature_invoke(&mut self, action: SignatureAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError>;
 
     fn allocate_address(
-        &self,
+        &mut self,
         substate_type: AllocatableAddressType,
         entity_id: EntityId,
         workspace_id: WorkspaceId,
     ) -> Result<AllocateAddressResult, RuntimeError>;
 
     fn stealth_transfer(
-        &self,
+        &mut self,
         resource_address: ResourceAddressRef,
         statement: StealthTransferStatement,
         revealed_funds_bucket: Option<BucketId>,
     ) -> Result<Option<BucketId>, RuntimeError>;
 
     fn pay_fee(
-        &self,
+        &mut self,
         statement: StealthTransferStatement,
         revealed_funds_bucket: Option<BucketId>,
     ) -> Result<(), RuntimeError>;
 
     fn track_template_loaded(
-        &self,
+        &mut self,
         template_address: &TemplateAddress,
         bytes_loaded: usize,
     ) -> Result<(), RuntimeError>;
+
+    fn resolve_args(
+        &self,
+        prepend: Option<InstructionArg>,
+        args: &[InstructionArg],
+    ) -> Result<Vec<tari_bor::Value>, RuntimeError>;
+
+    fn resolve_workspace_id(&self, workspace_id: &WorkspaceOffsetId) -> Result<tari_bor::Value, RuntimeError>;
 }
 
 #[derive(Clone)]
 pub struct Runtime {
-    interface: Arc<dyn RuntimeInterface>,
+    interface: NonNull<Box<dyn RuntimeInterface>>,
 }
 
-impl Runtime {
-    pub(crate) fn resolve_args(
-        &self,
-        prepend: Option<InstructionArg>,
-        args: &[InstructionArg],
-    ) -> Result<Vec<tari_bor::Value>, RuntimeError> {
-        let prepend_len = usize::from(prepend.is_some());
-        let total_len = prepend_len + args.len();
-        if total_len > limits::WASM_LIMITS.max_function_arguments {
-            return Err(ArgumentValidationError::TooManyArguments {
-                got: total_len,
-                max: limits::WASM_LIMITS.max_function_arguments,
-            }
-            .into());
-        }
-
-        let mut resolved = Vec::with_capacity(total_len);
-        if let Some(ref p) = prepend {
-            match p {
-                InstructionArg::Workspace(key) => {
-                    let result = self.resolve_workspace_id(key)?;
-                    resolved.push(result.into_value()?);
-                },
-                InstructionArg::Literal(v) => resolved.push(decode_exact(v)?),
-            }
-        }
-
-        for arg in args {
-            match arg {
-                InstructionArg::Workspace(key) => {
-                    let result = self.resolve_workspace_id(key)?;
-                    resolved.push(result.into_value()?);
-                },
-                InstructionArg::Literal(v) => resolved.push(decode_exact(v)?),
-            }
-        }
-        Ok(resolved)
-    }
-
-    pub(crate) fn resolve_workspace_id(&self, workspace_id: &WorkspaceOffsetId) -> Result<InvokeResult, RuntimeError> {
-        self.interface
-            .workspace_invoke(WorkspaceAction::Get, invoke_args![workspace_id].into())
-    }
-}
+// SAFETY: We promise that we will not access this concurrently,
+// satisfying the Sync requirement manually.
+unsafe impl Sync for Runtime {}
+unsafe impl Send for Runtime {}
 
 impl Runtime {
-    pub fn new(interface: Arc<dyn RuntimeInterface>) -> Self {
-        Self { interface }
+    pub const fn from_mut(interface: &mut Box<dyn RuntimeInterface>) -> Self {
+        Self {
+            interface: NonNull::from_mut(interface),
+        }
+    }
+
+    /// Creates a Runtime from a raw pointer.
+    ///
+    /// # Safety
+    /// This function is unsafe because it takes a raw pointer and assumes ownership of it. The caller must ensure that
+    /// the pointer is valid (See `Box::from_raw`). Remember that after calling this function, ownership is taken and
+    /// therefore when the resulting Runtime is dropped, the memory will be freed unless `mem::forget` is used.
+    pub unsafe fn from_raw(interface: *mut dyn RuntimeInterface) -> Self {
+        let mut raw = Box::from_raw(interface);
+        Self {
+            interface: NonNull::from_mut(&mut raw),
+        }
     }
 
     pub fn interface(&self) -> &dyn RuntimeInterface {
-        &*self.interface
+        // SAFETY: Caller promises that the interface is non-null and valid for the lifetime of Runtime.
+        unsafe { self.interface.as_ref() }.as_ref()
+    }
+
+    pub fn interface_mut(&mut self) -> &mut dyn RuntimeInterface {
+        // SAFETY: Caller promises that the interface is non-null and valid for the lifetime of Runtime.
+        unsafe { self.interface.as_mut() }.as_mut()
     }
 }
 
 impl Debug for Runtime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Runtime")
-            .field("interface", &"dyn RuntimeEngine")
+            .field("interface", &"dyn RuntimeInterface")
             .finish()
     }
 }
+
+// /// A reference-counted wrapper around RefCell that unsafely implements Sync.
+// /// This is NOT thread-safe and is only safe if we do not access it concurrently.
+// /// The reason for this is to avoid having to use locks in the single-threaded WASM environment.
+// /// Wasmer "supports threads" but only using WASIX extensions. We do not use multithreading over the lifetime of the
+// /// Runtime.
+// struct UnsafeSyncCell<T: ?Sized>(Rc<RefCell<T>>);
+//
+// // SAFETY: We promise that we will not access this concurrently,
+// // satisfying the Sync requirement manually.
+// unsafe impl<T: ?Sized + Send> Sync for UnsafeSyncCell<T> {}
+// unsafe impl<T: ?Sized + Send> Send for UnsafeSyncCell<T> {}
+//
+// impl<T: ?Sized> UnsafeSyncCell<T> {
+//     pub fn new(inner: T) -> Self
+//     where T: Sized {
+//         Self(Rc::new(RefCell::new(inner)))
+//     }
+//
+//     pub fn get(&self) -> cell::Ref<'_, T> {
+//         self.0.borrow()
+//     }
+//
+//     pub fn get_mut(&mut self) -> cell::RefMut<'_, T> {
+//         self.0.borrow_mut()
+//     }
+// }
+//
+// impl<T: ?Sized> Clone for UnsafeSyncCell<T> {
+//     fn clone(&self) -> Self {
+//         Self(Rc::clone(&self.0))
+//     }
+// }

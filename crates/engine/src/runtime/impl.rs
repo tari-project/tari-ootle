@@ -20,9 +20,10 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::sync::Arc;
+use std::{mem, sync::Arc};
 
 use log::{warn, *};
+use tari_bor::decode_exact;
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason},
@@ -135,28 +136,26 @@ use super::{working_state::WorkingState, ActionIdent, Runtime, RuntimeEvent};
 use crate::{
     runtime::{
         engine_args::EngineArgs,
-        error::AssertError,
+        error::{ArgumentValidationError, AssertError},
         locking::{LockError, LockedSubstate},
         scope::PushCallFrame,
         tracker::StateTracker,
         RuntimeError,
         RuntimeInterface,
-        RuntimeModule,
     },
     template::LoadedTemplate,
     traits::ClaimProofVerifier,
-    transaction::TransactionProcessor,
+    transaction::{ModulesCollection, TransactionProcessor},
 };
 
 const LOG_TARGET: &str = "tari::ootle::engine::runtime::impl";
 
-#[derive(Clone)]
 pub struct RuntimeInterfaceImpl<TTemplateProvider> {
     tracker: StateTracker,
     template_provider: Arc<TTemplateProvider>,
     entity_id_provider: EntityIdProvider,
     seal_signer_public_key: RistrettoPublicKeyBytes,
-    modules: Vec<Arc<dyn RuntimeModule>>,
+    modules: ModulesCollection,
     max_call_depth: usize,
     claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
 }
@@ -167,11 +166,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         template_provider: Arc<TTemplateProvider>,
         signer_public_key: RistrettoPublicKeyBytes,
         entity_id_provider: EntityIdProvider,
-        modules: Vec<Arc<dyn RuntimeModule>>,
+        modules: ModulesCollection,
         max_call_depth: usize,
         claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
     ) -> Result<Self, RuntimeError> {
-        let runtime = Self {
+        let mut runtime = Self {
             tracker,
             template_provider,
             entity_id_provider,
@@ -184,30 +183,30 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         Ok(runtime)
     }
 
-    fn invoke_modules_on_initialize(&self) -> Result<(), RuntimeError> {
-        for module in &self.modules {
-            module.on_initialize(&self.tracker)?;
+    fn invoke_modules_on_initialize(&mut self) -> Result<(), RuntimeError> {
+        for module in self.modules.iter() {
+            module.on_initialize(&mut self.tracker)?;
         }
         Ok(())
     }
 
-    fn invoke_modules_on_runtime_call(&self, function: &'static str) -> Result<(), RuntimeError> {
-        for module in &self.modules {
-            module.on_runtime_call(&self.tracker, function)?;
+    fn invoke_modules_on_runtime_call(&mut self, function: &'static str) -> Result<(), RuntimeError> {
+        for module in self.modules.iter() {
+            module.on_runtime_call(&mut self.tracker, function)?;
         }
         Ok(())
     }
 
-    fn invoke_modules_on_before_finalize(&self) -> Result<(), RuntimeError> {
-        for module in &self.modules {
-            module.on_before_finalize(&self.tracker)?;
+    fn invoke_modules_on_before_finalize(&mut self) -> Result<(), RuntimeError> {
+        for module in self.modules.iter() {
+            module.on_before_finalize(&mut self.tracker)?;
         }
         Ok(())
     }
 
-    fn invoke_modules_on_runtime_event(&self, event: RuntimeEvent) -> Result<(), RuntimeError> {
-        for module in &self.modules {
-            module.on_runtime_event(&self.tracker, &event)?;
+    fn invoke_modules_on_runtime_event(&mut self, event: RuntimeEvent) -> Result<(), RuntimeError> {
+        for module in self.modules.iter() {
+            module.on_runtime_event(&mut self.tracker, &event)?;
         }
         Ok(())
     }
@@ -253,7 +252,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     }
 
     fn emit_std_event<T: Into<SubstateId>>(
-        &self,
         object_name: &str,
         action: &str,
         substate_id: T,
@@ -268,7 +266,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     }
 
     fn invoke_resource_access_hook(
-        &self,
+        &mut self,
         auth_hook: AuthHook,
         mut auth_caller: AuthHookCaller,
         action: ResourceAuthAction,
@@ -325,20 +323,29 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     }
 
     fn invoke_component_method(
-        &self,
+        &mut self,
         component_address: ComponentAddress,
         method: &str,
         args: Vec<Bytes>,
     ) -> Result<InstructionResult, RuntimeError> {
-        let call_runtime = Runtime::new(Arc::new(self.clone()));
-        TransactionProcessor::call_method(
+        let ptr = self as *mut Self;
+        // SAFETY: single threaded access
+        let mut boxed = unsafe { Box::from_raw(ptr) } as Box<dyn RuntimeInterface>;
+        let mut call_runtime = Runtime::from_mut(&mut boxed);
+
+        let result = TransactionProcessor::call_method(
             &*self.template_provider,
-            &call_runtime,
+            &mut call_runtime,
             component_address.into(),
             method,
             args.into_iter().map(InstructionArg::Literal).collect(),
-        )
-        .map_err(|e| RuntimeError::CrossTemplateCallMethodError {
+        );
+
+        // Do not free the boxed pointer because we obtained it from a raw pointer which must remain valid after
+        // this call
+        mem::forget(boxed);
+
+        result.map_err(|e| RuntimeError::CrossTemplateCallMethodError {
             component_address,
             method: method.to_string(),
             details: e.to_string(),
@@ -346,28 +353,37 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     }
 
     fn invoke_template_function(
-        &self,
+        &mut self,
         template_address: &TemplateAddress,
         function: &str,
         args: Vec<Bytes>,
     ) -> Result<InstructionResult, RuntimeError> {
+        let ptr: *mut dyn RuntimeInterface = self as *mut Self;
+        // SAFETY: single threaded access
+        let mut boxed = unsafe { Box::from_raw(ptr) } as Box<dyn RuntimeInterface>;
+        let mut call_runtime = Runtime::from_mut(&mut boxed);
+
         // we are initializing a new runtime for the nested call
-        let call_runtime = Runtime::new(Arc::new(self.clone()));
-        TransactionProcessor::call_function(
+        let result = TransactionProcessor::call_function(
             &*self.template_provider,
-            &call_runtime,
+            &mut call_runtime,
             template_address,
             function,
             args.into_iter().map(InstructionArg::Literal).collect(),
-        )
-        .map_err(|e| RuntimeError::CrossTemplateCallFunctionError {
+        );
+
+        // Do not free the boxed pointer because we obtained it from a raw pointer which must remain valid after
+        // this call
+        mem::forget(boxed);
+
+        result.map_err(|e| RuntimeError::CrossTemplateCallFunctionError {
             template_address: *template_address,
             function: function.to_string(),
             details: e.to_string(),
         })
     }
 
-    fn check_resource_auth_hook(&self, hook: &AuthHook) -> Result<(), RuntimeError> {
+    fn check_resource_auth_hook(&mut self, hook: &AuthHook) -> Result<(), RuntimeError> {
         let template_address = self
             .tracker
             .write_with(|state| state.get_template_for_component(&hook.component_address))?;
@@ -435,7 +451,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         Ok(id)
     }
 
-    fn emit_event(&self, topic: String, payload: Metadata) -> Result<(), RuntimeError> {
+    fn emit_event(&mut self, topic: String, payload: Metadata) -> Result<(), RuntimeError> {
         if let Err(reason) = Event::validate_custom_topic(&topic) {
             return Err(RuntimeError::InvalidEventTopic { topic, reason });
         }
@@ -460,7 +476,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         Ok(())
     }
 
-    fn emit_log(&self, level: LogLevel, message: String) -> Result<(), RuntimeError> {
+    fn emit_log(&mut self, level: LogLevel, message: String) -> Result<(), RuntimeError> {
         self.invoke_modules_on_runtime_call("emit_log")?;
 
         let log_level = match level {
@@ -476,7 +492,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         Ok(())
     }
 
-    fn load_component(&self, call: ComponentReference) -> Result<(ComponentAddress, ComponentHeader), RuntimeError> {
+    fn load_component(
+        &mut self,
+        call: ComponentReference,
+    ) -> Result<(ComponentAddress, ComponentHeader), RuntimeError> {
         self.invoke_modules_on_runtime_call("load_component")?;
         match call {
             ComponentReference::Address(address) => self.tracker.write_with(|state_mut| {
@@ -524,13 +543,17 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         }
     }
 
-    fn lock_component(&self, address: ComponentAddress, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError> {
+    fn lock_component(
+        &mut self,
+        address: ComponentAddress,
+        lock_flag: LockFlag,
+    ) -> Result<LockedSubstate, RuntimeError> {
         self.tracker.lock_substate(&SubstateId::Component(address), lock_flag)
     }
 
     #[allow(clippy::too_many_lines)]
     fn component_invoke(
-        &self,
+        &mut self,
         component_ref: ComponentRef,
         action: ComponentAction,
         args: EngineArgs,
@@ -734,7 +757,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
     #[allow(clippy::too_many_lines)]
     fn resource_invoke(
-        &self,
+        &mut self,
         resource_ref: ResourceRef,
         action: ResourceAction,
         args: EngineArgs,
@@ -830,7 +853,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         payload.insert(IMAGE_URL, image_url);
                     }
 
-                    self.emit_std_event("resource", "create", resource_address, payload, state_mut)?;
+                    Self::emit_std_event("resource", "create", resource_address, payload, state_mut)?;
 
                     state_mut.new_substate(resource_address, resource)?;
                     let resource_lock = state_mut.write_lock_substate(&SubstateId::Resource(resource_address))?;
@@ -928,7 +951,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         ("resource_type", resource.resource_type().to_string()),
                         ("amount", resource.unlocked_amount().to_string()),
                     ]);
-                    self.emit_std_event("resource", "mint", resource_address, payload, state_mut)?;
+                    Self::emit_std_event("resource", "mint", resource_address, payload, state_mut)?;
 
                     state_mut.new_bucket(bucket_id, resource)?;
                     let bucket = tari_template_lib::models::Bucket::from_id(bucket_id);
@@ -979,7 +1002,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         ("vault_id", arg.vault_id.to_string()),
                         ("recall_desc", arg.resource.to_string()),
                     ]);
-                    self.emit_std_event("resource", "recall", resource_address, payload, state_mut)?;
+                    Self::emit_std_event("resource", "recall", resource_address, payload, state_mut)?;
 
                     let bucket_id = state_mut.id_provider()?.new_bucket_id();
                     state_mut.new_bucket(bucket_id, resource)?;
@@ -1072,7 +1095,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     contents.set_mutable_data(arg.data);
 
                     let payload = Metadata::from_iter([("resource_type", ResourceType::NonFungible.to_string())]);
-                    self.emit_std_event(
+                    Self::emit_std_event(
                         "resource",
                         "update_nonfungible_data",
                         resource_address,
@@ -1118,7 +1141,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let resource_mut = state_mut.get_resource_mut(&resource_lock)?;
                     resource_mut.set_access_rules(access_rules);
                     let payload = Metadata::from_iter([("resource_type", resource_mut.resource_type().to_string())]);
-                    self.emit_std_event("resource", "update_access_rules", resource_address, payload, state_mut)?;
+                    Self::emit_std_event("resource", "update_access_rules", resource_address, payload, state_mut)?;
 
                     state_mut.unlock_substate(resource_lock)?;
 
@@ -1170,7 +1193,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let payload =
                         Metadata::from_iter([("vault_id", arg.vault_id.to_string()), ("flags", arg.flags.to_string())]);
                     let action = if arg.flags.is_empty() { "unfreeze" } else { "freeze" };
-                    self.emit_std_event("resource", action, resource_address, payload, state_mut)?;
+                    Self::emit_std_event("resource", action, resource_address, payload, state_mut)?;
 
                     state_mut.unlock_substate(vault_lock)?;
 
@@ -1341,7 +1364,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
     #[allow(clippy::too_many_lines)]
     fn vault_invoke(
-        &self,
+        &mut self,
         vault_ref: VaultRef,
         action: VaultAction,
         args: EngineArgs,
@@ -1469,7 +1492,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         ("amount", bucket.unlocked_amount().to_string()),
                     ]);
 
-                    self.emit_std_event("vault", "deposit", vault_id, payload, state_mut)?;
+                    Self::emit_std_event("vault", "deposit", vault_id, payload, state_mut)?;
 
                     let vault_mut = state_mut.get_vault_mut(&vault_lock)?;
 
@@ -1558,7 +1581,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         ("amount", public_amount.to_string()),
                     ]);
 
-                    self.emit_std_event("vault", "withdraw", vault_id, payload, state)?;
+                    Self::emit_std_event("vault", "withdraw", vault_id, payload, state)?;
 
                     let bucket_id = state.id_provider()?.new_bucket_id();
                     state.new_bucket(bucket_id, resource_container)?;
@@ -1708,7 +1731,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         });
                     }
 
-                    self.emit_std_event(
+                    Self::emit_std_event(
                         "vault",
                         "pay_fee",
                         vault_id,
@@ -1904,7 +1927,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
     #[allow(clippy::too_many_lines)]
     fn bucket_invoke(
-        &self,
+        &mut self,
         bucket_ref: BucketRef,
         action: BucketAction,
         args: EngineArgs,
@@ -2182,7 +2205,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     }
 
     fn proof_invoke(
-        &self,
+        &mut self,
         proof_ref: ProofRef,
         action: ProofAction,
         args: EngineArgs,
@@ -2291,7 +2314,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         }
     }
 
-    fn workspace_invoke(&self, action: WorkspaceAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError> {
+    fn workspace_invoke(&mut self, action: WorkspaceAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError> {
         self.invoke_modules_on_runtime_call("workspace_invoke")?;
 
         debug!(target: LOG_TARGET, "Workspace invoke: {:?}", action,);
@@ -2401,7 +2424,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     }
 
     fn non_fungible_invoke(
-        &self,
+        &mut self,
         nf_addr: NonFungibleAddress,
         action: NonFungibleAction,
         args: EngineArgs,
@@ -2456,7 +2479,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         }
     }
 
-    fn consensus_invoke(&self, action: ConsensusAction) -> Result<InvokeResult, RuntimeError> {
+    fn consensus_invoke(&mut self, action: ConsensusAction) -> Result<InvokeResult, RuntimeError> {
         self.invoke_modules_on_runtime_call("consensus_invoke")?;
         match action {
             ConsensusAction::GetCurrentEpoch => {
@@ -2466,7 +2489,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         }
     }
 
-    fn generate_random_invoke(&self, action: GenerateRandomAction) -> Result<InvokeResult, RuntimeError> {
+    fn generate_random_invoke(&mut self, action: GenerateRandomAction) -> Result<InvokeResult, RuntimeError> {
         self.invoke_modules_on_runtime_call("generate_random_invoke")?;
         match action {
             GenerateRandomAction::GetRandomBytes { len } => {
@@ -2476,7 +2499,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         }
     }
 
-    fn generate_uuid(&self) -> Result<[u8; 32], RuntimeError> {
+    fn generate_uuid(&mut self) -> Result<[u8; 32], RuntimeError> {
         self.invoke_modules_on_runtime_call("generate_uuid")?;
         self.tracker.read_with(|state| {
             let id_provider = state.id_provider()?;
@@ -2484,7 +2507,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         })
     }
 
-    fn set_last_instruction_output(&self, value: IndexedValue) -> Result<(), RuntimeError> {
+    fn set_last_instruction_output(&mut self, value: IndexedValue) -> Result<(), RuntimeError> {
         self.invoke_modules_on_runtime_call("set_last_instruction_output")?;
         self.tracker.write_with(|state| {
             state.set_last_instruction_output(value);
@@ -2492,7 +2515,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         Ok(())
     }
 
-    fn claim_burn(&self, claim: MinotariBurnClaimProof, output_data: ClaimBurnOutputData) -> Result<(), RuntimeError> {
+    fn claim_burn(
+        &mut self,
+        claim: MinotariBurnClaimProof,
+        output_data: ClaimBurnOutputData,
+    ) -> Result<(), RuntimeError> {
         let epoch = self.tracker.get_current_epoch()?;
         self.claim_burn_proof_verifier
             .verify_claim_proof(epoch, &self.seal_signer_public_key, &claim)
@@ -2527,7 +2554,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         Ok(())
     }
 
-    fn claim_validator_fees(&self, pool_address: ValidatorFeePoolAddress) -> Result<(), RuntimeError> {
+    fn claim_validator_fees(&mut self, pool_address: ValidatorFeePoolAddress) -> Result<(), RuntimeError> {
         self.tracker.write_with(|state| {
             let resource = state.withdraw_all_fees_from_pool(pool_address)?;
             let bucket_id = state.new_bucket_id();
@@ -2537,7 +2564,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         })
     }
 
-    fn checkpoint_fee_intent(&self) -> Result<(), RuntimeError> {
+    fn checkpoint_fee_intent(&mut self) -> Result<(), RuntimeError> {
         if self.tracker.total_fee_payments() < self.tracker.total_fee_charges() {
             return Err(RuntimeError::InsufficientFeesPaid {
                 required_fee: self.tracker.total_fee_charges(),
@@ -2547,7 +2574,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         self.tracker.fee_checkpoint()
     }
 
-    fn finalize(&self) -> Result<FinalizeResult, RuntimeError> {
+    fn finalize(&mut self) -> Result<FinalizeResult, RuntimeError> {
         self.invoke_modules_on_runtime_call("finalize")?;
         // If the fee module is present, this will add substate storage fees
         self.invoke_modules_on_before_finalize()?;
@@ -2555,7 +2582,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         Ok(finalized)
     }
 
-    fn finalize_failure(&self, reason: RejectReason) -> Result<FinalizeResult, RuntimeError> {
+    fn finalize_failure(&mut self, reason: RejectReason) -> Result<FinalizeResult, RuntimeError> {
         self.invoke_modules_on_runtime_call("finalize_failure")?;
         // If the fee module is present, this will add substate storage fees
         self.invoke_modules_on_before_finalize()?;
@@ -2571,7 +2598,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     }
 
     fn caller_context_invoke(
-        &self,
+        &mut self,
         action: CallerContextAction,
         args: EngineArgs,
     ) -> Result<InvokeResult, RuntimeError> {
@@ -2593,7 +2620,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         }
     }
 
-    fn allocate_address_invoke(&self, action: AddressAllocationInvokeArg) -> Result<InvokeResult, RuntimeError> {
+    fn allocate_address_invoke(&mut self, action: AddressAllocationInvokeArg) -> Result<InvokeResult, RuntimeError> {
         self.invoke_modules_on_runtime_call("allocate_address_invoke")?;
 
         self.tracker.write_with(|state| {
@@ -2639,7 +2666,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         })
     }
 
-    fn call_invoke(&self, action: CallAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError> {
+    fn call_invoke(&mut self, action: CallAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError> {
         self.invoke_modules_on_runtime_call("call_invoke")?;
         self.tracker.read_with(|state| {
             let frame = state.current_call_frame()?;
@@ -2680,7 +2707,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         Ok(InvokeResult::from_value(exec_result.indexed.into_value()))
     }
 
-    fn builtin_template_invoke(&self, action: BuiltinTemplateAction) -> Result<InvokeResult, RuntimeError> {
+    fn builtin_template_invoke(&mut self, action: BuiltinTemplateAction) -> Result<InvokeResult, RuntimeError> {
         self.invoke_modules_on_runtime_call("builtin_template_invoke")?;
 
         let address = match action {
@@ -2715,7 +2742,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         })
     }
 
-    fn update_component_template(&self, new_template: TemplateAddress) -> Result<(), RuntimeError> {
+    fn update_component_template(&mut self, new_template: TemplateAddress) -> Result<(), RuntimeError> {
         self.tracker.write_with(|state_mut| {
             let locked = state_mut
                 .current_call_scope()?
@@ -2746,17 +2773,17 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             .read_with(|state| state.check_all_substates_known(value.well_known_types()))
     }
 
-    fn push_call_frame(&self, frame: PushCallFrame) -> Result<(), RuntimeError> {
+    fn push_call_frame(&mut self, frame: PushCallFrame) -> Result<(), RuntimeError> {
         self.tracker.push_call_frame(frame, self.max_call_depth)?;
         Ok(())
     }
 
-    fn pop_call_frame(&self) -> Result<(), RuntimeError> {
+    fn pop_call_frame(&mut self) -> Result<(), RuntimeError> {
         self.tracker.pop_call_frame()?;
         Ok(())
     }
 
-    fn publish_template(&self, template: TemplateBlob) -> Result<(), RuntimeError> {
+    fn publish_template(&mut self, template: TemplateBlob) -> Result<(), RuntimeError> {
         self.invoke_modules_on_runtime_call("publish_template")?;
         self.tracker.write_with(|state_mut| {
             let template_byte_size = template.len();
@@ -2790,7 +2817,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         })
     }
 
-    fn put_on_workspace(&self, id: WorkspaceId, value: IndexedValue) -> Result<(), RuntimeError> {
+    fn put_on_workspace(&mut self, id: WorkspaceId, value: IndexedValue) -> Result<(), RuntimeError> {
         self.invoke_modules_on_runtime_call("put_on_workspace")?;
 
         self.validate_return_value(&value)?;
@@ -2800,7 +2827,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         Ok(())
     }
 
-    fn signature_invoke(&self, action: SignatureAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError> {
+    fn signature_invoke(&mut self, action: SignatureAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError> {
         self.invoke_modules_on_runtime_call("signature_invoke")?;
 
         match action {
@@ -2822,7 +2849,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
     /// Create a new address allocation for the provided substate type and entity id
     fn allocate_address(
-        &self,
+        &mut self,
         substate_type: AllocatableAddressType,
         entity_id: EntityId,
         workspace_id: WorkspaceId,
@@ -2854,7 +2881,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     }
 
     fn stealth_transfer(
-        &self,
+        &mut self,
         resource_address: ResourceAddressRef,
         statement: StealthTransferStatement,
         revealed_funds_bucket_id: Option<BucketId>,
@@ -2872,7 +2899,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     }
 
     fn pay_fee(
-        &self,
+        &mut self,
         statement: StealthTransferStatement,
         revealed_funds_bucket: Option<BucketId>,
     ) -> Result<(), RuntimeError> {
@@ -2898,7 +2925,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     }
 
     fn track_template_loaded(
-        &self,
+        &mut self,
         template_address: &TemplateAddress,
         bytes_loaded: usize,
     ) -> Result<(), RuntimeError> {
@@ -2907,10 +2934,60 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             return Ok(());
         }
 
-        for module in &self.modules {
-            module.on_template_loaded(&self.tracker, bytes_loaded)?;
+        for module in self.modules.iter() {
+            module.on_template_loaded(&mut self.tracker, bytes_loaded)?;
         }
         Ok(())
+    }
+
+    fn resolve_args(
+        &self,
+        prepend: Option<InstructionArg>,
+        args: &[InstructionArg],
+    ) -> Result<Vec<tari_bor::Value>, RuntimeError> {
+        let prepend_len = usize::from(prepend.is_some());
+        let total_len = prepend_len + args.len();
+        if total_len > limits::WASM_LIMITS.max_function_arguments {
+            return Err(ArgumentValidationError::TooManyArguments {
+                got: total_len,
+                max: limits::WASM_LIMITS.max_function_arguments,
+            }
+            .into());
+        }
+
+        let mut resolved = Vec::with_capacity(total_len);
+        if let Some(ref p) = prepend {
+            match p {
+                InstructionArg::Workspace(id) => {
+                    let result = self.resolve_workspace_id(id)?;
+                    resolved.push(result);
+                },
+                InstructionArg::Literal(v) => resolved.push(decode_exact(v)?),
+            }
+        }
+
+        for arg in args {
+            match arg {
+                InstructionArg::Workspace(id) => {
+                    let result = self.resolve_workspace_id(id)?;
+                    resolved.push(result.clone());
+                },
+                InstructionArg::Literal(v) => resolved.push(decode_exact(v)?),
+            }
+        }
+        Ok(resolved)
+    }
+
+    fn resolve_workspace_id(&self, workspace_id: &WorkspaceOffsetId) -> Result<tari_bor::Value, RuntimeError> {
+        self.tracker.with_workspace(|workspace| {
+            let id = *workspace_id;
+            workspace.get(id).map(|opt| opt.cloned()).map(|opt| {
+                opt.ok_or_else(|| RuntimeError::ItemNotOnWorkspace {
+                    id,
+                    existing_ids: workspace.all_ids_iter().collect(),
+                })
+            })
+        })?
     }
 }
 

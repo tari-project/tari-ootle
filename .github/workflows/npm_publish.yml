@@ -13,6 +13,10 @@ env:
   # Set the pnpm version to use
   PNPM_VERSION: '10'
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   # Publish the TypeScript bindings to the NPM registry
   publish-typescript-bindings:
@@ -33,11 +37,7 @@ jobs:
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build-dist
-      - run: |
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
-          pnpm publish --access public --no-git-checks || echo "Publish failed (probably already published)"
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: pnpm publish --access public --no-git-checks || echo "Publish failed (probably already published)"
 
   # Publish the Tari Wallet Daemon client to the NPM registry
   publish-wallet-daemon-client:
@@ -62,11 +62,7 @@ jobs:
         name: "Build Bindings Dist"
         working-directory: bindings
       - run: pnpm run build
-      - run: |
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
-          pnpm publish --access public --no-git-checks || echo "Publish failed (probably already published)"
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: pnpm publish --access public --no-git-checks || echo "Publish failed (probably already published)"
 
 
   # Publish the Tari Indexer client to the NPM registry
@@ -92,9 +88,5 @@ jobs:
         name: "Build Bindings Dist"
         working-directory: bindings
       - run: pnpm run build
-      - run: |
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
-          pnpm publish --access public --no-git-checks || echo "Publish failed (probably already published)"
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: pnpm publish --access public --no-git-checks || echo "Publish failed (probably already published)"
 

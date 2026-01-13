@@ -162,6 +162,7 @@ impl MinoTariWalletProcess {
                         },
                         kernel,
                         value,
+                        sender_offset_public_key:claim_proof.sender_offset_public_key.try_from_byte_type().map_err(|e| anyhow!("sender_offset_public_key parse error: {e}"))?,
                     },
                     owner_nonce_key_index: nonce_key_index,
                     encrypted_data: EncryptedData::try_from(resp.encrypted_data)

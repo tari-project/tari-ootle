@@ -22,6 +22,7 @@ pub struct MinotariBurnClaimProof {
     pub encoded_merkle_proof: EncodedMerkleProof,
     pub kernel: AbridgedTransactionKernel,
     pub value: u64,
+    pub sender_offset_public_key: RistrettoPublicKeyBytes,
 }
 
 impl Display for MinotariBurnClaimProof {

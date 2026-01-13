@@ -31,8 +31,12 @@ mod webrtc;
 
 use std::{fs, panic, pin, process};
 
+use blake2::Blake2b;
+use digest::{consts::U64, FixedOutput};
 use log::*;
 use tari_common_types::seeds::seed_words::SeedWords;
+use tari_crypto::{hashing::DomainSeparatedHasher, keys::SecretKey, ristretto::{RistrettoPublicKey, RistrettoSecretKey}};
+use tari_hashing::WalletOutputEncryptionKeysDomain;
 use tari_ootle_app_utilities::genesis_resources::{get_public_identity_resource, get_stealth_tari_resource};
 use tari_ootle_common_types::{optional::Optional, Network, NumPreshards};
 use tari_ootle_wallet_sdk::{
@@ -51,6 +55,7 @@ use tari_ootle_wallet_sdk_services::{
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_shutdown::ShutdownSignal;
+use tari_utilities::ByteArray;
 
 use crate::{
     config::ApplicationConfig,
@@ -217,4 +222,14 @@ const fn get_epoch_birthday(network: Network) -> EpochBirthday {
         Network::Igor => EpochBirthday::far_future(),
         Network::Esmeralda => EpochBirthday::far_future(),
     }
+}
+type WalletOutputEncryptionKeysDomainHasher = DomainSeparatedHasher<Blake2b<U64>, WalletOutputEncryptionKeysDomain>;
+
+pub fn public_key_to_output_encryption_key(public_key: &RistrettoPublicKey) -> RistrettoSecretKey {
+    let hash = WalletOutputEncryptionKeysDomainHasher::new()
+        .chain(public_key.as_bytes())
+        .finalize_fixed();
+
+    RistrettoSecretKey::from_uniform_bytes(hash.as_ref())
+        .expect("hash length matches RistrettoSecretKey::WIDE_REDUCTION_LEN")
 }

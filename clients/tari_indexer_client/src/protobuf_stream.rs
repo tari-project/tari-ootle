@@ -10,6 +10,16 @@ use bytes::{BufMut, Bytes, BytesMut};
 use futures::Stream;
 use log::*;
 
+#[derive(Debug, thiserror::Error)]
+pub enum ProtobufStreamError {
+    #[error("Reqwest error: {0}")]
+    ReqwestError(#[from] reqwest::Error),
+    #[error("Prost decode error: {0}")]
+    DecodeError(#[from] prost::DecodeError),
+    #[error("Message size {len} exceeds maximum allowed size of {max} bytes")]
+    MessageSizeExceeded { len: usize, max: usize },
+}
+
 pub struct ProtobufStream<TMsg> {
     bytes_stream: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>,
     buf: BytesMut,
@@ -36,7 +46,7 @@ impl<TMsg> ProtobufStream<TMsg> {
 }
 
 impl<TMsg: prost::Message + Default + Unpin> Stream for ProtobufStream<TMsg> {
-    type Item = Result<TMsg, prost::DecodeError>;
+    type Item = Result<TMsg, ProtobufStreamError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -53,13 +63,12 @@ impl<TMsg: prost::Message + Default + Unpin> Stream for ProtobufStream<TMsg> {
                         // Need more bytes to finish reading the delimiter.
                         continue;
                     }
-                    let len = prost::decode_length_delimiter(tmp_slice)
-                        .map_err(|e| prost::DecodeError::new(format!("Failed to decode length delimiter: {}", e)))?;
+                    let len = prost::decode_length_delimiter(tmp_slice)?;
                     if len > this.max_message_size {
-                        return Poll::Ready(Some(Err(prost::DecodeError::new(format!(
-                            "Message length {} exceeds maximum allowed size of {} bytes",
-                            len, this.max_message_size
-                        )))));
+                        return Poll::Ready(Some(Err(ProtobufStreamError::MessageSizeExceeded {
+                            len,
+                            max: this.max_message_size,
+                        })));
                     }
 
                     let len_delim_len = prost::length_delimiter_len(len);
@@ -78,10 +87,7 @@ impl<TMsg: prost::Message + Default + Unpin> Stream for ProtobufStream<TMsg> {
                     break Poll::Ready(Some(Ok(msg)));
                 },
                 Poll::Ready(Some(Err(e))) => {
-                    break Poll::Ready(Some(Err(prost::DecodeError::new(format!(
-                        "Error receiving bytes from stream: {}",
-                        e
-                    )))));
+                    break Poll::Ready(Some(Err(e.into())));
                 },
                 Poll::Ready(None) => break Poll::Ready(None),
                 Poll::Pending => break Poll::Pending,

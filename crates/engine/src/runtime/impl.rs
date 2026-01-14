@@ -20,7 +20,10 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{mem, sync::Arc};
+use std::{
+    ptr::NonNull,
+    sync::{atomic, atomic::AtomicPtr, Arc},
+};
 
 use log::{warn, *};
 use tari_bor::decode_exact;
@@ -158,6 +161,9 @@ pub struct RuntimeInterfaceImpl<TTemplateProvider> {
     modules: ModulesCollection,
     max_call_depth: usize,
     claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
+    /// A pointer to the runtime that is set after initialization to allow for cross-template calls.
+    /// This is using an atomic pointer simply to make RuntimeInterfaceImpl Send + Sync to satisfy wasmer trait bounds.
+    runtime_pointer: Option<AtomicPtr<Box<dyn RuntimeInterface>>>,
 }
 
 impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInterfaceImpl<TTemplateProvider> {
@@ -178,6 +184,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             modules,
             max_call_depth,
             claim_burn_proof_verifier,
+            runtime_pointer: None,
         };
         runtime.invoke_modules_on_initialize()?;
         Ok(runtime)
@@ -322,31 +329,32 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         Ok(())
     }
 
+    fn get_call_runtime(&self) -> Runtime {
+        // Load the runtime pointer that must be set by whoever initialized this interface
+        let ptr = self
+            .runtime_pointer
+            .as_ref()
+            .expect("BUG: Runtime pointer not set")
+            .load(atomic::Ordering::Acquire);
+        Runtime::from_pointer(ptr).expect("Runtime pointer is null")
+    }
+
     fn invoke_component_method(
         &mut self,
         component_address: ComponentAddress,
         method: &str,
         args: Vec<Bytes>,
     ) -> Result<InstructionResult, RuntimeError> {
-        let ptr = self as *mut Self;
-        // SAFETY: single threaded access
-        // TODO: this is unsound, due to loss of pointer provenance.
-        let mut boxed = unsafe { Box::from_raw(ptr) } as Box<dyn RuntimeInterface>;
-        let mut call_runtime = Runtime::from_mut(&mut boxed);
+        let mut call_runtime = self.get_call_runtime();
 
-        let result = TransactionProcessor::call_method(
+        TransactionProcessor::call_method(
             &*self.template_provider,
             &mut call_runtime,
             component_address.into(),
             method,
             args.into_iter().map(InstructionArg::Literal).collect(),
-        );
-
-        // Do not free the boxed pointer because we obtained it from a raw pointer which must remain valid after
-        // this call
-        mem::forget(boxed);
-
-        result.map_err(|e| RuntimeError::CrossTemplateCallMethodError {
+        )
+        .map_err(|e| RuntimeError::CrossTemplateCallMethodError {
             component_address,
             method: method.to_string(),
             details: e.to_string(),
@@ -359,25 +367,16 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         function: &str,
         args: Vec<Bytes>,
     ) -> Result<InstructionResult, RuntimeError> {
-        let ptr = self as *mut Self;
-        // SAFETY: single threaded access
-        let mut boxed = unsafe { Box::from_raw(ptr) } as Box<dyn RuntimeInterface>;
-        let mut call_runtime = Runtime::from_mut(&mut boxed);
+        let mut call_runtime = self.get_call_runtime();
 
-        // we are initializing a new runtime for the nested call
-        let result = TransactionProcessor::call_function(
+        TransactionProcessor::call_function(
             &*self.template_provider,
             &mut call_runtime,
             template_address,
             function,
             args.into_iter().map(InstructionArg::Literal).collect(),
-        );
-
-        // Do not free the boxed pointer because we obtained it from a raw pointer which must remain valid after
-        // this call
-        mem::forget(boxed);
-
-        result.map_err(|e| RuntimeError::CrossTemplateCallFunctionError {
+        )
+        .map_err(|e| RuntimeError::CrossTemplateCallFunctionError {
             template_address: *template_address,
             function: function.to_string(),
             details: e.to_string(),
@@ -2989,6 +2988,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 })
             })
         })?
+    }
+
+    fn set_runtime_pointer(&mut self, pointer: NonNull<Box<dyn RuntimeInterface>>) {
+        self.runtime_pointer = Some(AtomicPtr::new(pointer.as_ptr()));
     }
 }
 

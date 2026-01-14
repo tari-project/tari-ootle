@@ -169,6 +169,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
         )?) as Box<dyn RuntimeInterface>;
 
         let runtime = Runtime::from_mut(&mut runtime_interface);
+
         let transaction_hash = id.as_hash();
 
         let instructions = executable.into_instructions();

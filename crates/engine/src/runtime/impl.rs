@@ -330,6 +330,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     ) -> Result<InstructionResult, RuntimeError> {
         let ptr = self as *mut Self;
         // SAFETY: single threaded access
+        // TODO: this is unsound, due to loss of pointer provenance.
         let mut boxed = unsafe { Box::from_raw(ptr) } as Box<dyn RuntimeInterface>;
         let mut call_runtime = Runtime::from_mut(&mut boxed);
 
@@ -358,7 +359,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         function: &str,
         args: Vec<Bytes>,
     ) -> Result<InstructionResult, RuntimeError> {
-        let ptr: *mut dyn RuntimeInterface = self as *mut Self;
+        let ptr = self as *mut Self;
         // SAFETY: single threaded access
         let mut boxed = unsafe { Box::from_raw(ptr) } as Box<dyn RuntimeInterface>;
         let mut call_runtime = Runtime::from_mut(&mut boxed);
@@ -2970,7 +2971,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             match arg {
                 InstructionArg::Workspace(id) => {
                     let result = self.resolve_workspace_id(id)?;
-                    resolved.push(result.clone());
+                    resolved.push(result);
                 },
                 InstructionArg::Literal(v) => resolved.push(decode_exact(v)?),
             }

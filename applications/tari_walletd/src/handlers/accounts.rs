@@ -482,10 +482,25 @@ pub async fn handle_claim_burn(
     // Get the sender_offset_public_key and use it to create a DH with the claim_nonce_key
     let sender_offset_pub_key: RistrettoPublicKey =  claim_proof
         .sender_offset_public_key.try_from_byte_type()
-        .map_err(|e| invalid_params("claim_proof.reciprocal_claim_public_key", Some(e)))?;
+        .map_err(|e| invalid_params("claim_proof.sender_offset_public_key", Some(e)))?;
 
-    let claim_secret_pubkey = claim_nonce_key.secret() * sender_offset_pub_key;
-    let claim_secret = public_key_to_output_encryption_key(&claim_secret_pubkey);
+    info!(
+        target: LOG_TARGET,
+        "DEBUG: sender offset public key: {}",
+        sender_offset_pub_key
+    );
+    let shared_secret_pub = claim_nonce_key.secret() * sender_offset_pub_key;
+    let claim_secret = public_key_to_output_encryption_key(&shared_secret_pub);
+    info!(
+        target: LOG_TARGET,
+        "DEBUG: derived shared secret public key: {}",
+        shared_secret_pub
+    );
+    info!(
+        target: LOG_TARGET,
+        "DEBUG: derived claim secret key: {}",
+        claim_secret.reveal()
+    );
     let decrypted = sdk.stealth_crypto_api().decrypt_value_and_mask(
         &claimed_encrypted_data,
         &claim_proof.commitment,

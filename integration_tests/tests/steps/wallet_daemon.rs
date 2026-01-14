@@ -40,6 +40,8 @@ async fn claim_burn(
     let claim_proof = claim_proof
         .confirmed()
         .unwrap_or_else(|| panic!("Burn proof {} is not confirmed, cannot claim burn", proof_name));
+
+    cucumber_log!("Claiming burn with proof: {:?}", claim_proof);
     let walletd = world.get_wallet_daemon(&wallet_daemon_name);
     // Then burn into the new account
     let claim_burn_resp = walletd.claim_burn(&account_name, claim_proof.clone()).await?;

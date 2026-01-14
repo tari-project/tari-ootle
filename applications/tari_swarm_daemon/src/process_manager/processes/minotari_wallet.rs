@@ -111,6 +111,10 @@ impl MinoTariWalletProcess {
                 let reciprocal_claim_public_key =
                     RistrettoPublicKeyBytes::from_bytes(&claim_proof.reciprocal_claim_public_key)
                         .map_err(|e| anyhow!("reciprocal_claim_public_key parse error {e}"))?;
+
+                let sender_offset_public_key = RistrettoPublicKeyBytes::from_bytes(&claim_proof.sender_offset_public_key )
+                    .map_err(|e| anyhow!("sender_offset_public_key parse error {e}"))?;
+
                 let kernel = resp.kernel.ok_or_else(|| anyhow!("No kernel in response"))?;
                 let kernel = AbridgedTransactionKernel {
                     version: kernel.version as u8,
@@ -162,7 +166,7 @@ impl MinoTariWalletProcess {
                         },
                         kernel,
                         value,
-                        sender_offset_public_key:claim_proof.sender_offset_public_key.try_from_byte_type().map_err(|e| anyhow!("sender_offset_public_key parse error: {e}"))?,
+                        sender_offset_public_key,
                     },
                     owner_nonce_key_index: nonce_key_index,
                     encrypted_data: EncryptedData::try_from(resp.encrypted_data)
@@ -192,8 +196,8 @@ impl MinoTariWalletProcess {
         let mut client = self.connect_client().await?;
         client
             .revalidate_all_transactions(RevalidateRequest {
-                transaction_mode: RevalidateRequest::Mode::Full,
-                output_mode: RevalidateRequest::Mode::Full,
+                transaction_mode: 1, // Full mode
+                output_mode: 1,      // Full mode
             })
             .await?;
         Ok(())

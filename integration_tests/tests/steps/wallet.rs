@@ -23,7 +23,7 @@ use tari_transaction_components::{
 };
 use tari_wallet_daemon_client::types::ClaimBurnProof;
 use tokio::time::sleep;
-
+use tari_engine_types::FromByteType;
 use crate::{spawn_minotari_wallet, TariWorld};
 
 #[given(expr = "a wallet {word} connected to base node {word}")]
@@ -254,6 +254,10 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
 
         let reciprocal_claim_public_key = RistrettoPublicKeyBytes::from_bytes(&claim_proof.reciprocal_claim_public_key)
             .map_err(|e| anyhow!("reciprocal_claim_public_key parse error {e}"))?;
+
+        let sender_offset_public_key = RistrettoPublicKeyBytes::from_bytes(&claim_proof.kernel_excess)
+            .map_err(|e| anyhow!("kernel_excess parse error {e}"))?;
+
         let kernel = resp.kernel.ok_or_else(|| anyhow!("No kernel in response"))?;
         let kernel = AbridgedTransactionKernel {
             version: kernel.version as u8,
@@ -299,6 +303,7 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
                 encoded_merkle_proof: merkle_proof,
                 kernel,
                 value: resp.value,
+                sender_offset_public_key,
             },
             owner_nonce_key_index: *nonce_id,
             encrypted_data: EncryptedData::try_from(resp.encrypted_data)

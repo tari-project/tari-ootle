@@ -3,6 +3,7 @@
 
 use serde::{de::DeserializeOwned, Serialize};
 use tari_common_types::types::FixedHash;
+#[cfg(feature = "base_layer")]
 use tari_node_components::blocks::BlockHeader;
 use tari_ootle_common_types::{Epoch, NodeAddressable};
 use tari_ootle_storage::global::{BlockHeaderModel, GlobalDb};
@@ -11,6 +12,7 @@ use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 pub trait EpochOracleStore {
     fn get<T: DeserializeOwned>(&self, key: &[u8]) -> anyhow::Result<Option<T>>;
     fn set<T: Serialize>(&self, key: &[u8], value: &T) -> anyhow::Result<()>;
+    #[cfg(feature = "base_layer")]
     fn add_block_headers<I: IntoIterator<Item = (Epoch, FixedHash, BlockHeader)>>(
         &self,
         headers: I,
@@ -53,6 +55,7 @@ impl<TAddr: NodeAddressable> EpochOracleStore for GlobalDb<SqliteGlobalDbAdapter
         Ok(())
     }
 
+    #[cfg(feature = "base_layer")]
     fn add_block_headers<I: IntoIterator<Item = (Epoch, FixedHash, BlockHeader)>>(
         &self,
         headers: I,

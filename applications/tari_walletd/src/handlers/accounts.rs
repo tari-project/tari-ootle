@@ -489,23 +489,23 @@ pub async fn handle_claim_burn(
         "DEBUG: sender offset public key: {}",
         sender_offset_pub_key
     );
-    let shared_secret_pub = claim_nonce_key.secret() * sender_offset_pub_key;
-    let claim_secret = public_key_to_output_encryption_key(&shared_secret_pub);
-    info!(
-        target: LOG_TARGET,
-        "DEBUG: derived shared secret public key: {}",
-        shared_secret_pub
-    );
-    info!(
-        target: LOG_TARGET,
-        "DEBUG: derived claim secret key: {}",
-        claim_secret.reveal()
-    );
+    // let shared_secret_pub = claim_nonce_key.secret() * sender_offset_pub_key;
+    // let claim_secret = public_key_to_output_encryption_key(&shared_secret_pub);
+    // info!(
+    //     target: LOG_TARGET,
+    //     "DEBUG: derived shared secret public key: {}",
+    //     shared_secret_pub
+    // );
+    // info!(
+    //     target: LOG_TARGET,
+    //     "DEBUG: derived claim secret key: {}",
+    //     claim_secret.reveal()
+    // );
     let decrypted = sdk.stealth_crypto_api().decrypt_value_and_mask(
         &claimed_encrypted_data,
         &claim_proof.commitment,
-        &claim_secret,
-        &reciprocal_claim_public_key_expanded,
+        claim_nonce_key.secret(),
+        &sender_offset_pub_key,
         true,
     )?;
 

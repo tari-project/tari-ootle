@@ -24,6 +24,7 @@ use tari_hashing::TransactionSecureNonceKdfDomain;
 use tari_template_lib::types::{crypto::PedersenCommitmentBytes, EncryptedData};
 use tari_utilities::{safe_array::SafeArray, ByteArray};
 use zeroize::{Zeroize, Zeroizing};
+use log::info;
 
 use crate::{kdfs, kdfs::EncryptedDataKey, memo::Memo, DecryptedData, MaskAndValue, WalletCryptoError};
 
@@ -31,11 +32,12 @@ pub fn unblind_output(
     output_commitment: &PedersenCommitmentBytes,
     output_encrypted_value: &EncryptedData,
     claim_secret: &RistrettoSecretKey,
-    reciprocal_public_key: &RistrettoPublicKey,
+    sender_offset_public_key: &RistrettoPublicKey,
     skip_memo: bool,
 ) -> Result<DecryptedData, WalletCryptoError> {
-    let encryption_key = kdfs::encrypted_data_dh_kdf_aead(claim_secret, reciprocal_public_key);
+    let encryption_key = kdfs::encrypted_data_dh_kdf_aead(claim_secret, sender_offset_public_key);
 
+    info!(target: "tari::ootle::wallet_daemon", "XXX remove: encryption_key: {}", encryption_key.reveal());
     let decrypted = decrypt_data(&encryption_key, output_commitment, output_encrypted_value, skip_memo)?;
     let commitment = decrypted.to_commitment();
     if output_commitment.as_bytes() == commitment.as_bytes() {

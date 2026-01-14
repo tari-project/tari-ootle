@@ -134,14 +134,14 @@ impl StealthCryptoApi {
         output_encrypted_value: &EncryptedData,
         output_commitment: &PedersenCommitmentBytes,
         claim_secret: &RistrettoSecretKey,
-        reciprocal_public_key: &RistrettoPublicKey,
+        sender_offset_public_key: &RistrettoPublicKey,
         skip_memo: bool,
     ) -> Result<DecryptedData, StealthCryptoApiError> {
         let decrypted = unblind_output(
             output_commitment,
             output_encrypted_value,
             claim_secret,
-            reciprocal_public_key,
+            sender_offset_public_key,
             skip_memo,
         )?;
         Ok(decrypted)

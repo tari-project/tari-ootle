@@ -34,13 +34,13 @@ pub fn encrypted_data_dh_kdf_aead(
     public_key: &RistrettoPublicKey,
 ) -> RistrettoSecretKey {
     let shared_secret = dh(public_key, private_key);
-    let mut aead_key = SafeKey64::from(SafeArray::default());
+
+     RistrettoSecretKey::from_uniform_bytes(
     // Must match base layer burn
     encrypted_data_hasher()
         .chain(shared_secret.as_bytes())
-        .finalize_into(GenericArray::from_mut_slice(aead_key.reveal_mut()));
+        .finalize().as_ref()).unwrap()
 
-    RistrettoSecretKey::from_uniform_bytes(aead_key.reveal()).unwrap()
 }
 
 /// Generate a decryption key for the owner key from a private key and nonce

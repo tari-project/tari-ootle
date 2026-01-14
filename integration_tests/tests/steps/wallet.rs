@@ -255,8 +255,8 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
         let reciprocal_claim_public_key = RistrettoPublicKeyBytes::from_bytes(&claim_proof.reciprocal_claim_public_key)
             .map_err(|e| anyhow!("reciprocal_claim_public_key parse error {e}"))?;
 
-        let sender_offset_public_key = RistrettoPublicKeyBytes::from_bytes(&claim_proof.kernel_excess)
-            .map_err(|e| anyhow!("kernel_excess parse error {e}"))?;
+        let sender_offset_public_key = RistrettoPublicKeyBytes::from_bytes(&claim_proof.sender_offset_public_key)
+            .map_err(|e| anyhow!("sender_offset_public_key parse error {e}"))?;
 
         let kernel = resp.kernel.ok_or_else(|| anyhow!("No kernel in response"))?;
         let kernel = AbridgedTransactionKernel {

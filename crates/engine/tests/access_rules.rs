@@ -636,7 +636,7 @@ mod resource_access_rules {
     fn it_permits_cross_template_calls_using_proofs() {
         let mut test = TemplateTest::new(CRATE_PATH, [
             "tests/templates/access_rules",
-            "tests/templates/composability",
+            "tests/templates/cross_template",
         ]);
 
         // Create sender and receiver accounts

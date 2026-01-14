@@ -33,6 +33,7 @@ use crate::{
 };
 
 /// Utility for managing components inside templates
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct ComponentManager {
     address: ComponentAddress,
 }

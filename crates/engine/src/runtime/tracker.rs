@@ -28,6 +28,7 @@ use tari_engine_types::{
     events::Event,
     fees::FeeSource,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
+    limits,
     lock::LockFlag,
     logs::LogEntry,
     substate::{Substate, SubstateId, SubstateValue},
@@ -196,7 +197,7 @@ impl StateTracker {
         self.write_with(|state| state.unlock_substate(locked))
     }
 
-    pub fn push_call_frame(&mut self, push_frame: PushCallFrame, max_call_depth: usize) -> Result<(), RuntimeError> {
+    pub fn push_call_frame(&mut self, push_frame: PushCallFrame) -> Result<(), RuntimeError> {
         self.write_with(|state| {
             // If substates used in args are in scope for the current frame, we can bring then into scope for the new
             // frame
@@ -210,7 +211,7 @@ impl StateTracker {
             let new_frame = push_frame.into_new_call_frame();
             trace!(target: LOG_TARGET, "NEW CALL FRAME:\n{}", new_frame.scope());
 
-            state.push_frame(new_frame, max_call_depth)
+            state.push_frame(new_frame, limits::ENGINE_LIMITS.max_call_depth)
         })
     }
 

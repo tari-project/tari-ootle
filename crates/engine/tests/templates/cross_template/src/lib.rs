@@ -23,26 +23,26 @@
 use tari_template_lib::prelude::*;
 
 #[template]
-mod composability {
+mod template {
     use tari_template_lib::invoke_args;
 
     use super::*;
 
-    pub struct Composability {
+    pub struct CrossTemplate {
         // we assume the inner component is a "State" template component
-        state_component_address: ComponentAddress,
+        state_component: ComponentManager,
 
         // we optionally store other composability components just to test recursion limits
         nested_composability: Option<ComponentAddress>,
     }
 
-    impl Composability {
+    impl CrossTemplate {
         // function-to-function call
-        // both "composability" and "state" components are created
+        // both "cross template" and "state" components are created
         pub fn new(state_template_address: TemplateAddress) -> Component<Self> {
             let state_component_address = TemplateManager::get(state_template_address).call("new", args![]);
             Component::new(Self {
-                state_component_address,
+                state_component: ComponentManager::get(state_component_address),
                 nested_composability: None,
             })
             .with_access_rules(AccessRules::allow_all())
@@ -50,20 +50,24 @@ mod composability {
         }
 
         // function-to-component call
-        // the argument is a "Composability" component, we get the "State" component address from it
-        pub fn new_from_component(other_composability_component_address: ComponentAddress) -> Component<Self> {
+        // the argument is a "CrossTemplate" component, we get the "State" component address from it
+        pub fn new_from_component(
+            address_alloc: ComponentAddressAllocation,
+            other_composability_component_address: ComponentAddress,
+        ) -> Component<Self> {
             let state_component_address = ComponentManager::get(other_composability_component_address)
                 .call("get_state_component_address", args![]);
             Component::new(Self {
-                state_component_address,
+                state_component: ComponentManager::get(state_component_address),
                 nested_composability: None,
             })
+            .with_address_allocation(address_alloc)
             .with_access_rules(AccessRules::allow_all())
             .create()
         }
 
         pub fn get_state_component_address(&self) -> ComponentAddress {
-            self.state_component_address
+            self.state_component.component_address()
         }
 
         pub fn set_nested_composability(&mut self, address: ComponentAddress) {
@@ -72,24 +76,22 @@ mod composability {
 
         // component-to-component call
         pub fn increase_inner_state_component(&self) {
-            let component = ComponentManager::get(self.state_component_address);
-
             // read operation, to get the current value of the inner "State" component
-            let value: u32 = component.call("get", args![]);
+            let value: u32 = self.state_component.call("get", args![]);
 
             // write operation, to update the value of the inner "State" component
-            component.call("set".to_string(), args![value + 1])
+            self.state_component.call("set".to_string(), args![value + 1])
         }
 
         // function-to-component call
         pub fn replace_state_component(&mut self, state_template_address: TemplateAddress) {
-            self.state_component_address =
-                TemplateManager::get(state_template_address).call("new".to_string(), args![]);
+            let new_address = TemplateManager::get(state_template_address).call("new".to_string(), args![]);
+            self.state_component = ComponentManager::get(new_address);
         }
 
-        // invalid call (target method does not exists)
-        pub fn invalid_state_call(&self) {
-            ComponentManager::get(self.state_component_address).call("invalid_method".to_string(), args![])
+        pub fn call_method_that_does_not_exist(&self) {
+            self.state_component
+                .call("this_method_does_not_exist".to_string(), args![])
         }
 
         // malicious method, that tries to withdraw from caller's account
@@ -119,9 +121,16 @@ mod composability {
                 },
                 None => {
                     // base case that will end a recursive call chain
-                    ComponentManager::get(self.state_component_address).call("get", args![])
+                    self.state_component.call("get", args![])
                 },
             }
+        }
+
+        pub fn recursion(&self, depth: usize) {
+            if depth == 0 {
+                return;
+            }
+            ComponentManager::current().invoke("recursion", args![depth - 1])
         }
 
         pub fn call_component_with_args(

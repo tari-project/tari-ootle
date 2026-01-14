@@ -79,7 +79,6 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::ootle::engine::instruction_processor";
-pub const MAX_CALL_DEPTH: usize = 10;
 const ACCOUNT_CONSTRUCTOR_FUNCTION: &str = "create";
 const ACCOUNT_DEPOSIT_METHOD: &str = "deposit";
 
@@ -164,7 +163,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
             transaction_signer_public_key,
             entity_id_provider,
             modules,
-            MAX_CALL_DEPTH,
             claim_burn_proof_verifier,
         )?) as Box<dyn RuntimeInterface>;
 

@@ -53,7 +53,7 @@ fn deducts_fees_when_transaction_fails() {
         vec![owner_token],
     );
 
-    let reason = result.expect_transaction_failure();
+    let reason = result.expect_failure();
     result.expect_finalization_success();
     assert!(matches!(reason, RejectReason::ExecutionFailure(_)));
 
@@ -172,7 +172,7 @@ fn failed_fee_transaction() {
 
     let reason = result.expect_finalization_failure();
     assert!(matches!(reason, RejectReason::ExecutionFailure(_)));
-    let reason = result.expect_transaction_failure();
+    let reason = result.expect_failure();
     assert!(matches!(reason, RejectReason::ExecutionFailure(_)));
     test.disable_fees();
 
@@ -206,7 +206,7 @@ fn fail_partial_paid_fees() {
 
     test.disable_fees();
 
-    let reason = result.expect_transaction_failure();
+    let reason = result.expect_failure();
     assert!(
         matches!(reason, RejectReason::InsufficientFeesPaid(_)),
         "actual reason: {reason}"
@@ -384,7 +384,7 @@ fn dangling_bucket_pay_fees() {
     );
 
     // Check that the failure reason is actually the dangling bucket
-    let reason = result.expect_transaction_failure();
+    let reason = result.expect_failure();
     assert!(matches!(reason, RejectReason::ExecutionFailure(_)));
     assert!(reason.to_string().contains("dangling bucket"));
 

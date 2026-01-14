@@ -159,7 +159,6 @@ pub struct RuntimeInterfaceImpl<TTemplateProvider> {
     entity_id_provider: EntityIdProvider,
     seal_signer_public_key: RistrettoPublicKeyBytes,
     modules: ModulesCollection,
-    max_call_depth: usize,
     claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
     /// A pointer to the runtime that is set after initialization to allow for cross-template calls.
     /// This is using an atomic pointer simply to make RuntimeInterfaceImpl Send + Sync to satisfy wasmer trait bounds.
@@ -173,7 +172,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         signer_public_key: RistrettoPublicKeyBytes,
         entity_id_provider: EntityIdProvider,
         modules: ModulesCollection,
-        max_call_depth: usize,
         claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
     ) -> Result<Self, RuntimeError> {
         let mut runtime = Self {
@@ -182,7 +180,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             entity_id_provider,
             seal_signer_public_key: signer_public_key,
             modules,
-            max_call_depth,
             claim_burn_proof_verifier,
             runtime_pointer: None,
         };
@@ -2774,7 +2771,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     }
 
     fn push_call_frame(&mut self, frame: PushCallFrame) -> Result<(), RuntimeError> {
-        self.tracker.push_call_frame(frame, self.max_call_depth)?;
+        self.tracker.push_call_frame(frame)?;
         Ok(())
     }
 
@@ -2955,27 +2952,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             .into());
         }
 
-        let mut resolved = Vec::with_capacity(total_len);
-        if let Some(ref p) = prepend {
-            match p {
-                InstructionArg::Workspace(id) => {
-                    let result = self.resolve_workspace_id(id)?;
-                    resolved.push(result);
-                },
-                InstructionArg::Literal(v) => resolved.push(decode_exact(v)?),
-            }
-        }
-
-        for arg in args {
-            match arg {
-                InstructionArg::Workspace(id) => {
-                    let result = self.resolve_workspace_id(id)?;
-                    resolved.push(result);
-                },
-                InstructionArg::Literal(v) => resolved.push(decode_exact(v)?),
-            }
-        }
-        Ok(resolved)
+        prepend
+            .iter()
+            .chain(args.iter())
+            .map(|arg| match arg {
+                InstructionArg::Workspace(id) => self.resolve_workspace_id(id),
+                InstructionArg::Literal(v) => Ok(decode_exact(v)?),
+            })
+            .collect()
     }
 
     fn resolve_workspace_id(&self, workspace_id: &WorkspaceOffsetId) -> Result<tari_bor::Value, RuntimeError> {

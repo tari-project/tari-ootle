@@ -20,10 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{
-    ptr::NonNull,
-    sync::{atomic, atomic::AtomicPtr, Arc},
-};
+use std::sync::{atomic, atomic::AtomicPtr, Arc};
 
 use log::{warn, *};
 use tari_bor::decode_exact;
@@ -2974,8 +2971,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         })?
     }
 
-    fn set_runtime_pointer(&mut self, pointer: NonNull<Box<dyn RuntimeInterface>>) {
-        self.runtime_pointer = Some(AtomicPtr::new(pointer.as_ptr()));
+    fn set_runtime_pointer(&mut self, pointer: *mut Box<dyn RuntimeInterface>) {
+        self.runtime_pointer = Some(AtomicPtr::new(pointer));
     }
 }
 

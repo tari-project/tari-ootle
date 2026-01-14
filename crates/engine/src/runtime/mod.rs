@@ -238,7 +238,7 @@ pub trait RuntimeInterface: Send + Sync {
     ) -> Result<Vec<tari_bor::Value>, RuntimeError>;
 
     fn resolve_workspace_id(&self, workspace_id: &WorkspaceOffsetId) -> Result<tari_bor::Value, RuntimeError>;
-    fn set_runtime_pointer(&mut self, pointer: NonNull<Box<dyn RuntimeInterface>>);
+    fn set_runtime_pointer(&mut self, pointer: *mut Box<dyn RuntimeInterface>);
 }
 
 #[derive(Clone)]
@@ -278,8 +278,8 @@ impl Runtime {
         }
     }
 
-    pub fn as_pointer(&self) -> NonNull<Box<dyn RuntimeInterface>> {
-        self.interface
+    pub fn as_pointer(&self) -> *mut Box<dyn RuntimeInterface> {
+        self.interface.as_ptr()
     }
 
     pub fn interface(&self) -> &dyn RuntimeInterface {
@@ -300,36 +300,3 @@ impl Debug for Runtime {
             .finish()
     }
 }
-
-// /// A reference-counted wrapper around RefCell that unsafely implements Sync.
-// /// This is NOT thread-safe and is only safe if we do not access it concurrently.
-// /// The reason for this is to avoid having to use locks in the single-threaded WASM environment.
-// /// Wasmer "supports threads" but only using WASIX extensions. We do not use multithreading over the lifetime of the
-// /// Runtime.
-// struct UnsafeSyncCell<T: ?Sized>(Rc<RefCell<T>>);
-//
-// // SAFETY: We promise that we will not access this concurrently,
-// // satisfying the Sync requirement manually.
-// unsafe impl<T: ?Sized + Send> Sync for UnsafeSyncCell<T> {}
-// unsafe impl<T: ?Sized + Send> Send for UnsafeSyncCell<T> {}
-//
-// impl<T: ?Sized> UnsafeSyncCell<T> {
-//     pub fn new(inner: T) -> Self
-//     where T: Sized {
-//         Self(Rc::new(RefCell::new(inner)))
-//     }
-//
-//     pub fn get(&self) -> cell::Ref<'_, T> {
-//         self.0.borrow()
-//     }
-//
-//     pub fn get_mut(&mut self) -> cell::RefMut<'_, T> {
-//         self.0.borrow_mut()
-//     }
-// }
-//
-// impl<T: ?Sized> Clone for UnsafeSyncCell<T> {
-//     fn clone(&self) -> Self {
-//         Self(Rc::clone(&self.0))
-//     }
-// }

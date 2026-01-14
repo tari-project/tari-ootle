@@ -30,6 +30,10 @@ mod template {
             Self::default()
         }
 
+        pub fn new_with_address(addr: ComponentAddressAllocation) -> Component<Self> {
+            Component::new(Self::default()).with_address_allocation(addr).create()
+        }
+
         pub fn with_vault() -> Self {
             let vault = Vault::new_empty(STEALTH_TARI_RESOURCE_ADDRESS);
             Self {

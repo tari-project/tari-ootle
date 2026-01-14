@@ -4,23 +4,23 @@
 use crate::runtime::StateTracker;
 
 pub trait RuntimeModule: Send + Sync {
-    fn on_initialize(&self, _track: &StateTracker) -> Result<(), RuntimeModuleError> {
+    fn on_initialize(&self, _track: &mut StateTracker) -> Result<(), RuntimeModuleError> {
         Ok(())
     }
 
-    fn on_runtime_call(&self, _track: &StateTracker, _call: &'static str) -> Result<(), RuntimeModuleError> {
+    fn on_runtime_call(&self, _track: &mut StateTracker, _call: &'static str) -> Result<(), RuntimeModuleError> {
         Ok(())
     }
 
-    fn on_template_loaded(&self, _track: &StateTracker, _bytes_loaded: usize) -> Result<(), RuntimeModuleError> {
+    fn on_template_loaded(&self, _track: &mut StateTracker, _bytes_loaded: usize) -> Result<(), RuntimeModuleError> {
         Ok(())
     }
 
-    fn on_before_finalize(&self, _track: &StateTracker) -> Result<(), RuntimeModuleError> {
+    fn on_before_finalize(&self, _track: &mut StateTracker) -> Result<(), RuntimeModuleError> {
         Ok(())
     }
 
-    fn on_runtime_event(&self, _track: &StateTracker, _call: &RuntimeEvent) -> Result<(), RuntimeModuleError> {
+    fn on_runtime_event(&self, _track: &mut StateTracker, _call: &RuntimeEvent) -> Result<(), RuntimeModuleError> {
         Ok(())
     }
 }

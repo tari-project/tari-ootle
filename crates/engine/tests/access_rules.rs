@@ -636,7 +636,7 @@ mod resource_access_rules {
     fn it_permits_cross_template_calls_using_proofs() {
         let mut test = TemplateTest::new(CRATE_PATH, [
             "tests/templates/access_rules",
-            "tests/templates/composability",
+            "tests/templates/cross_template",
         ]);
 
         // Create sender and receiver accounts
@@ -667,7 +667,7 @@ mod resource_access_rules {
             .next()
             .unwrap();
 
-        let cross_call_template = test.get_template_address("Composability");
+        let cross_call_template = test.get_template_address("CrossTemplate");
         // Try to take tokens without proof. Even though I'm the owner of the resource, the scope does not carry over
         // when cross-template calls are made.
         let reason = test.execute_expect_failure(

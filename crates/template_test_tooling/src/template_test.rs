@@ -597,10 +597,12 @@ impl TemplateTest {
         transaction: Transaction,
         mut proofs: Vec<NonFungibleAddress>,
     ) -> Result<ExecuteResult, TransactionError> {
-        let mut modules: Vec<Arc<dyn RuntimeModule>> = vec![Arc::new(self.track_calls.clone())];
+        let mut modules: Vec<Box<dyn RuntimeModule>> = Vec::with_capacity(2);
+
+        modules.push(Box::new(self.track_calls.clone()));
 
         if self.enable_fees {
-            modules.push(Arc::new(FeeModule::new(0, self.fee_table.clone())));
+            modules.push(Box::new(FeeModule::new(0, self.fee_table.clone())));
         }
 
         if self.auto_add_proofs_from_signers {
@@ -620,7 +622,7 @@ impl TemplateTest {
             self.state_store.clone().into_read_only(),
             auth_params,
             self.virtual_substates.clone(),
-            modules,
+            Arc::from(modules.into_boxed_slice()),
             Arc::new(AlwaysPassesProofVerifier),
         );
 

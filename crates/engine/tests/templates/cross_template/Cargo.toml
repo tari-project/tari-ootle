@@ -1,6 +1,6 @@
 [workspace]
 [package]
-name = "composability"
+name = "cross_template"
 version = "0.1.0"
 edition = "2021"
 

@@ -22,14 +22,7 @@
 
 use log::*;
 use serde::{de::DeserializeOwned, Serialize};
-use tari_bor::{
-    decode_exact,
-    encode,
-    encode_into_writer,
-    encode_with_len_to_writer,
-    encoded_len,
-    encoded_len_with_limit,
-};
+use tari_bor::{decode_exact, encode_into_writer, encode_with_len_to_writer, encoded_len, encoded_len_with_limit};
 use tari_engine_types::{indexed_value::IndexedValue, instruction_result::InstructionResult, limits};
 use tari_template_abi::{version, CallInfo, EngineOp, FunctionDef, TemplateDef};
 use tari_template_lib::{
@@ -51,7 +44,6 @@ use tari_template_lib::{
         VaultInvokeArg,
     },
     types::engine_args::SignatureInvokeArg,
-    AbiContext,
 };
 use wasmer::{imports, AsStoreMut, Function, FunctionEnv, FunctionEnvMut, Instance, Store, StoreMut, WasmPtr};
 
@@ -156,88 +148,101 @@ impl WasmProcess {
         log::debug!(target: LOG_TARGET, "Engine call: {:?}", op);
 
         let result = match op {
-            EngineOp::EmitLog => Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: EmitLogArg| {
-                env.interface().emit_log(arg.level, arg.message)
+            EngineOp::EmitLog => Self::handle(store, env_mut, arg_ptr, arg_len, |state, arg: EmitLogArg| {
+                state.interface_mut().emit_log(arg.level, arg.message)
             }),
             EngineOp::ComponentInvoke => {
-                Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: ComponentInvokeArg| {
-                    env.interface()
+                Self::handle(store, env_mut, arg_ptr, arg_len, |state, arg: ComponentInvokeArg| {
+                    state
+                        .interface_mut()
                         .component_invoke(arg.component_ref, arg.action, arg.args.into())
                 })
             },
             EngineOp::ResourceInvoke => {
-                Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: ResourceInvokeArg| {
-                    env.interface()
+                Self::handle(store, env_mut, arg_ptr, arg_len, |state, arg: ResourceInvokeArg| {
+                    state
+                        .interface_mut()
                         .resource_invoke(arg.resource_ref, arg.action, arg.args.into())
                 })
             },
-            EngineOp::VaultInvoke => Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: VaultInvokeArg| {
-                env.interface().vault_invoke(arg.vault_ref, arg.action, arg.args.into())
+            EngineOp::VaultInvoke => Self::handle(store, env_mut, arg_ptr, arg_len, |state, arg: VaultInvokeArg| {
+                state
+                    .interface_mut()
+                    .vault_invoke(arg.vault_ref, arg.action, arg.args.into())
             }),
-            EngineOp::BucketInvoke => Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: BucketInvokeArg| {
-                env.interface()
+            EngineOp::BucketInvoke => Self::handle(store, env_mut, arg_ptr, arg_len, |state, arg: BucketInvokeArg| {
+                state
+                    .interface_mut()
                     .bucket_invoke(arg.bucket_ref, arg.action, arg.args.into())
             }),
             EngineOp::NonFungibleInvoke => {
-                Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: NonFungibleInvokeArg| {
-                    env.interface()
+                Self::handle(store, env_mut, arg_ptr, arg_len, |state, arg: NonFungibleInvokeArg| {
+                    state
+                        .interface_mut()
                         .non_fungible_invoke(arg.address, arg.action, arg.args.into())
                 })
             },
-            EngineOp::GenerateUniqueId => Self::handle(store, env_mut, arg_ptr, arg_len, |env, _arg: ()| {
-                env.interface().generate_uuid()
+            EngineOp::GenerateUniqueId => Self::handle(store, env_mut, arg_ptr, arg_len, |state, _arg: ()| {
+                state.interface_mut().generate_uuid()
             }),
             EngineOp::ConsensusInvoke => {
-                Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: ConsensusInvokeArg| {
-                    env.interface().consensus_invoke(arg.action)
+                Self::handle(store, env_mut, arg_ptr, arg_len, |state, arg: ConsensusInvokeArg| {
+                    state.interface_mut().consensus_invoke(arg.action)
                 })
             },
-            EngineOp::CallerContextInvoke => {
-                Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: CallerContextInvokeArg| {
-                    env.interface().caller_context_invoke(arg.action, arg.args.into())
-                })
-            },
+            EngineOp::CallerContextInvoke => Self::handle(
+                store,
+                env_mut,
+                arg_ptr,
+                arg_len,
+                |state, arg: CallerContextInvokeArg| {
+                    state.interface_mut().caller_context_invoke(arg.action, arg.args.into())
+                },
+            ),
             EngineOp::AddressAllocationInvoke => Self::handle(
                 store,
                 env_mut,
                 arg_ptr,
                 arg_len,
-                |env, arg: AddressAllocationInvokeArg| env.interface().allocate_address_invoke(arg),
+                |state, arg: AddressAllocationInvokeArg| state.interface_mut().allocate_address_invoke(arg),
             ),
-            EngineOp::GenerateRandomInvoke => {
-                Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: GenerateRandomInvokeArg| {
-                    env.interface().generate_random_invoke(arg.action)
-                })
-            },
-            EngineOp::EmitEvent => Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: EmitEventArg| {
-                env.interface().emit_event(arg.topic, arg.payload)
+            EngineOp::GenerateRandomInvoke => Self::handle(
+                store,
+                env_mut,
+                arg_ptr,
+                arg_len,
+                |state, arg: GenerateRandomInvokeArg| state.interface_mut().generate_random_invoke(arg.action),
+            ),
+            EngineOp::EmitEvent => Self::handle(store, env_mut, arg_ptr, arg_len, |state, arg: EmitEventArg| {
+                state.interface_mut().emit_event(arg.topic, arg.payload)
             }),
-            EngineOp::CallInvoke => Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: CallInvokeArg| {
-                env.interface().call_invoke(arg.action, arg.args.into())
+            EngineOp::CallInvoke => Self::handle(store, env_mut, arg_ptr, arg_len, |state, arg: CallInvokeArg| {
+                state.interface_mut().call_invoke(arg.action, arg.args.into())
             }),
-            EngineOp::ProofInvoke => Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: ProofInvokeArg| {
-                log::debug!(target: LOG_TARGET, "proof action = {:?}", arg.action);
-                env.interface().proof_invoke(arg.proof_ref, arg.action, arg.args.into())
+            EngineOp::ProofInvoke => Self::handle(store, env_mut, arg_ptr, arg_len, |state, arg: ProofInvokeArg| {
+                state
+                    .interface_mut()
+                    .proof_invoke(arg.proof_ref, arg.action, arg.args.into())
             }),
             EngineOp::BuiltinTemplateInvoke => Self::handle(
                 store,
                 env_mut,
                 arg_ptr,
                 arg_len,
-                |env, arg: BuiltinTemplateInvokeArg| env.interface().builtin_template_invoke(arg.action),
+                |state, arg: BuiltinTemplateInvokeArg| state.interface_mut().builtin_template_invoke(arg.action),
             ),
             EngineOp::SignatureInvoke => {
-                Self::handle(store, env_mut, arg_ptr, arg_len, |env, arg: SignatureInvokeArg| {
-                    env.interface().signature_invoke(arg.action, arg.args.into())
+                Self::handle(store, env_mut, arg_ptr, arg_len, |state, arg: SignatureInvokeArg| {
+                    state.interface_mut().signature_invoke(arg.action, arg.args.into())
                 })
             },
         };
 
         result.unwrap_or_else(|err| {
             if let Err(err) = env
-                .data()
-                .state()
-                .interface()
+                .data_mut()
+                .state_mut()
+                .interface_mut()
                 .emit_log(LogLevel::Error, format!("Execution error: {}", err))
             {
                 log::error!(target: LOG_TARGET, "Error emitting log: {}", err);
@@ -281,10 +286,6 @@ impl WasmProcess {
         Ok(ptr)
     }
 
-    fn encoded_abi_context(&self) -> Vec<u8> {
-        encode(&AbiContext {}).unwrap()
-    }
-
     /// Determine if the version of the template_lib crate in the WASM is valid.
     /// This is just a placeholder that logs the result, as we don't manage version incompatibilities yet
     pub fn validate_template_tari_version(template_def: &TemplateDef) -> Result<(), WasmExecutionError> {
@@ -314,7 +315,6 @@ impl Invokable<Store> for WasmProcess {
         args: Vec<tari_bor::Value>,
     ) -> Result<InstructionResult, Self::Error> {
         let call_info = CallInfo {
-            abi_context: self.encoded_abi_context(),
             func_name: func_def.name.clone(),
             args,
         };
@@ -372,8 +372,8 @@ impl Invokable<Store> for WasmProcess {
 
         self.env.state().interface().validate_return_value(&value)?;
         self.env
-            .state()
-            .interface()
+            .state_mut()
+            .interface_mut()
             .set_last_instruction_output(value.clone())?;
 
         Ok(InstructionResult {

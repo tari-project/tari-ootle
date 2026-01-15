@@ -33,11 +33,23 @@ jobs:
       - name: Use Node.js ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v6
         with:
+          registry-url: "https://registry.npmjs.org"
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build-dist
-      - run: pnpm publish --access public --no-git-checks || echo "Publish failed (probably already published)"
+      - name: Debug auth info
+        run: |
+          echo "Registry: $(npm config get registry)"
+          env | grep ACTIONS_ID_TOKEN || echo "No OIDC env found"
+          npm whoami || echo "Expected fail: OIDC not visible via npm whoami"
+      - name: Publish to NPM
+        run: |
+          if pnpm info . version | grep -q "^$VERSION$"; then
+            echo "Version $VERSION already published, skipping."
+          else
+            pnpm publish --access public --no-git-checks --provenance
+          fi
 
   # Publish the Tari Wallet Daemon client to the NPM registry
   publish-wallet-daemon-client:
@@ -63,7 +75,6 @@ jobs:
         working-directory: bindings
       - run: pnpm run build
       - run: pnpm publish --access public --no-git-checks || echo "Publish failed (probably already published)"
-
 
   # Publish the Tari Indexer client to the NPM registry
   publish-indexer-client:

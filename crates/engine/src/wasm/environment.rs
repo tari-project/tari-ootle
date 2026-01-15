@@ -52,7 +52,7 @@ pub struct WasmEnv<T> {
     last_engine_error: Arc<Mutex<Option<RuntimeError>>>,
 }
 
-impl<T: Send + 'static> WasmEnv<T> {
+impl<T> WasmEnv<T> {
     pub fn new(state: T) -> Self {
         Self {
             memory: None,
@@ -238,7 +238,7 @@ impl<T: Send + 'static> WasmEnv<T> {
     }
 }
 
-impl<T: Clone + Sync + Send> WasmEnv<T> {
+impl<T> WasmEnv<T> {
     pub fn set_memory(&mut self, memory: Memory) -> &mut Self {
         self.memory = Some(memory);
         self

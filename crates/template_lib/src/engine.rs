@@ -28,25 +28,21 @@ use crate::{
     args::{ComponentAction, ComponentInvokeArg, ComponentRef, CreateComponentArg, EmitLogArg, InvokeResult, LogLevel},
     auth::OwnerRule,
     component::ComponentManager,
-    context::Context,
-    get_context,
     models::{ComponentAddress, ComponentAddressAllocation},
     prelude::ComponentAccessRules,
 };
 
 /// Returns the corresponding `TariEngine` of the current template execution
 pub fn engine() -> TariEngine {
-    TariEngine::new(get_context())
+    TariEngine::new()
 }
 
 #[derive(Debug, Default)]
-pub struct TariEngine {
-    _context: Context,
-}
+pub struct TariEngine {}
 
 impl TariEngine {
-    fn new(context: Context) -> Self {
-        Self { _context: context }
+    fn new() -> Self {
+        Self {}
     }
 
     pub fn create_component<T: Serialize>(

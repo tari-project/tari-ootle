@@ -27,7 +27,7 @@ impl TrackCallsModule {
 }
 
 impl RuntimeModule for TrackCallsModule {
-    fn on_runtime_call(&self, _tracker: &StateTracker, call: &'static str) -> Result<(), RuntimeModuleError> {
+    fn on_runtime_call(&self, _tracker: &mut StateTracker, call: &'static str) -> Result<(), RuntimeModuleError> {
         self.calls.write().unwrap().push(call);
         Ok(())
     }

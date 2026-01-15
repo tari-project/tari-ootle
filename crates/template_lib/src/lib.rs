@@ -54,8 +54,6 @@ mod consensus;
 pub use consensus::Consensus;
 
 pub mod caller_context;
-mod context;
-pub use context::{get_context, init_context, AbiContext};
 
 pub mod rand;
 pub mod resource;

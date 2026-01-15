@@ -27,4 +27,4 @@ pub use tari_template_abi::{rust, wrap_ptr, CallInfo};
 
 #[cfg(target_arch = "wasm32")]
 pub use crate::debug;
-pub use crate::{args::LogLevel, engine, get_context as context, init_context, panic_hook::register_panic_hook};
+pub use crate::{args::LogLevel, engine, panic_hook::register_panic_hook};

@@ -10,7 +10,7 @@ use tari_engine::{
     state_store::{memory::ReadOnlyMemoryStateStore, StateStoreError},
     template::LoadedTemplate,
     traits::ClaimProofVerifier,
-    transaction::{TransactionError, TransactionProcessor},
+    transaction::{ModulesCollection, TransactionError, TransactionProcessor},
 };
 use tari_engine_types::{commit_result::ExecuteResult, substate::Substate, virtual_substate::VirtualSubstates};
 use tari_ootle_common_types::{
@@ -85,7 +85,7 @@ impl ExecutionOutput {
 #[derive(Clone)]
 pub struct TariTransactionProcessor<TTemplateProvider> {
     template_provider: Arc<TTemplateProvider>,
-    fee_table: FeeTable,
+    modules: ModulesCollection,
     claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
 }
 
@@ -95,9 +95,10 @@ impl<TTemplateProvider> TariTransactionProcessor<TTemplateProvider> {
         fee_table: FeeTable,
         claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
     ) -> Self {
+        let modules = vec![Box::new(FeeModule::new(0, fee_table)) as Box<dyn RuntimeModule>];
         Self {
             template_provider: Arc::new(template_provider),
-            fee_table,
+            modules: Arc::from(modules),
             claim_burn_proof_verifier,
         }
     }
@@ -124,14 +125,12 @@ where TTemplateProvider: TemplateProvider<Template = LoadedTemplate>
             initial_ownership_proofs: Arc::new(initial_ownership_proofs),
         };
 
-        let modules: Vec<Arc<dyn RuntimeModule>> = vec![Arc::new(FeeModule::new(0, self.fee_table.clone()))];
-
         let processor = TransactionProcessor::new(
             self.template_provider.clone(),
             state_store,
             auth_params,
             virtual_substates,
-            modules,
+            self.modules.clone(),
             self.claim_burn_proof_verifier.clone(),
         );
         let result = processor.execute(transaction.clone())?;

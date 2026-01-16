@@ -14,6 +14,7 @@ use chacha20poly1305::{
     XNonce,
 };
 use digest::FixedOutput;
+use log::info;
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
     hashing::DomainSeparatedHasher,
@@ -24,7 +25,6 @@ use tari_hashing::TransactionSecureNonceKdfDomain;
 use tari_template_lib::types::{crypto::PedersenCommitmentBytes, EncryptedData};
 use tari_utilities::{safe_array::SafeArray, ByteArray};
 use zeroize::{Zeroize, Zeroizing};
-use log::info;
 
 use crate::{kdfs, kdfs::EncryptedDataKey, memo::Memo, DecryptedData, MaskAndValue, WalletCryptoError};
 
@@ -37,7 +37,6 @@ pub fn unblind_output(
 ) -> Result<DecryptedData, WalletCryptoError> {
     let encryption_key = kdfs::encrypted_data_dh_kdf_aead(claim_secret, sender_offset_public_key);
 
-    info!(target: "tari::ootle::wallet_daemon", "XXX remove: encryption_key: {}", encryption_key.reveal());
     let decrypted = decrypt_data(&encryption_key, output_commitment, output_encrypted_value, skip_memo)?;
     let commitment = decrypted.to_commitment();
     if output_commitment.as_bytes() == commitment.as_bytes() {

@@ -8,7 +8,10 @@ use axum_extra::headers::authorization::Bearer;
 use indexmap::{IndexMap, IndexSet};
 use log::*;
 use rand::rngs::OsRng;
-use tari_crypto::{keys::PublicKey as _, ristretto::{RistrettoPublicKey, RistrettoSecretKey}};
+use tari_crypto::{
+    keys::PublicKey as _,
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+};
 use tari_engine_types::{
     component::derive_component_address_from_public_key,
     confidential::ClaimBurnOutputData,
@@ -74,11 +77,10 @@ use tari_wallet_daemon_client::{
     ComponentAddressOrName,
 };
 use tokio::task;
-use webrtc::interceptor::report::sender;
 
 use super::context::HandlerContext;
 use crate::{
-    DEFAULT_FEE, handlers::helpers::{
+    handlers::helpers::{
         general_error,
         get_account,
         get_account_by_key_index,
@@ -90,7 +92,8 @@ use crate::{
         transaction_rejected,
         wait_for_result,
         wait_for_result_and_account,
-    }, public_key_to_output_encryption_key
+    },
+    DEFAULT_FEE,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::transaction";
@@ -399,7 +402,6 @@ pub async fn handle_get_default(
     })
 }
 
-
 #[allow(clippy::too_many_lines)]
 pub async fn handle_claim_burn(
     context: &HandlerContext,
@@ -422,8 +424,6 @@ pub async fn handle_claim_burn(
         encrypted_data: claimed_encrypted_data,
         claim_proof,
     } = claim_proof;
-    debug!(target: LOG_TARGET, "Claim burn proof: {:?}", claim_proof);
-    debug!(target: LOG_TARGET, "Claim burn encrypted data: {}", hex::encode(claimed_encrypted_data.as_bytes()));
 
     let accounts_api = sdk.accounts_api();
     let account = get_account(&account, &accounts_api)?;
@@ -463,13 +463,6 @@ pub async fn handle_claim_burn(
         .burn_public_key
         .try_from_byte_type()
         .map_err(|e| invalid_params("claim_proof.reciprocal_claim_public_key", Some(e)))?;
-    info!(
-        target: LOG_TARGET,
-        "DEBUG: decrypting burn claim. commitment: {}, encrypted_data: {}, secret: [hidden], public: {}",
-        claim_proof.commitment,
-        hex::encode(claimed_encrypted_data.as_bytes()),
-        reciprocal_claim_public_key_expanded
-    );
 
     if reciprocal_claim_public_key_expanded != claim_public_key {
         warn!(
@@ -479,29 +472,13 @@ pub async fn handle_claim_burn(
             claim_public_key
         );
     }
-    
+
     // Get the sender_offset_public_key and use it to create a DH with the claim_nonce_key
-    let sender_offset_pub_key: RistrettoPublicKey =  claim_proof
-        .sender_offset_public_key.try_from_byte_type()
+    let sender_offset_pub_key: RistrettoPublicKey = claim_proof
+        .sender_offset_public_key
+        .try_from_byte_type()
         .map_err(|e| invalid_params("claim_proof.sender_offset_public_key", Some(e)))?;
 
-    info!(
-        target: LOG_TARGET,
-        "DEBUG: sender offset public key: {}",
-        sender_offset_pub_key
-    );
-    // let shared_secret_pub = claim_nonce_key.secret() * sender_offset_pub_key;
-    // let claim_secret = public_key_to_output_encryption_key(&shared_secret_pub);
-    // info!(
-    //     target: LOG_TARGET,
-    //     "DEBUG: derived shared secret public key: {}",
-    //     shared_secret_pub
-    // );
-    // info!(
-    //     target: LOG_TARGET,
-    //     "DEBUG: derived claim secret key: {}",
-    //     claim_secret.reveal()
-    // );
     let decrypted = sdk.stealth_crypto_api().decrypt_value_and_mask(
         &claimed_encrypted_data,
         &claim_proof.commitment,

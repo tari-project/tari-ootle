@@ -423,6 +423,7 @@ pub async fn handle_claim_burn(
         claim_proof,
     } = claim_proof;
     debug!(target: LOG_TARGET, "Claim burn proof: {:?}", claim_proof);
+    debug!(target: LOG_TARGET, "Claim burn encrypted data: {}", hex::encode(claimed_encrypted_data.as_bytes()));
 
     let accounts_api = sdk.accounts_api();
     let account = get_account(&account, &accounts_api)?;

@@ -192,6 +192,7 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
         //     sleep(Duration::from_secs(1)).await;
         //     continue;
         // };
+        cucumber_log!("Received burn claim proof response: {:?}", resp);
 
         // Now that the proof is confirmed, call the base node HTTP endpoint to get kernel merkle proof
         integration_tests::cucumber_log!(

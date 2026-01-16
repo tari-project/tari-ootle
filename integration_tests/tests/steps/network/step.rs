@@ -3,8 +3,12 @@
 
 use cucumber::{gherkin::Step, given};
 use integration_tests::{
-    base_node::spawn_base_node, indexer::spawn_indexer, miner::register_miner_process,
-    validator_node::spawn_validator_node, wallet::spawn_minotari_wallet, wallet_daemon::spawn_wallet_daemon,
+    base_node::spawn_base_node,
+    indexer::spawn_indexer,
+    miner::register_miner_process,
+    validator_node::spawn_validator_node,
+    wallet::spawn_minotari_wallet,
+    wallet_daemon::spawn_wallet_daemon,
     wallet_daemon_client,
 };
 use tari_validator_node_client::types::AddPeerRequest;
@@ -31,11 +35,7 @@ async fn create_network(world: &mut TariWorld, step: &Step, spec: NetworkSpec) {
             let account =
                 wallet_daemon_client::create_account(world, wallet_spec.node.name.clone(), account.clone()).await;
             integration_tests::cucumber_log!(
-            integration_tests::cucumber_log!(
                 "Created initial account {} on wallet daemon {}",
-                account,
-                wallet_spec.node.name
-            );
                 account,
                 wallet_spec.node.name
             );
@@ -89,7 +89,8 @@ async fn create_network(world: &mut TariWorld, step: &Step, spec: NetworkSpec) {
             spec.minotari_wallet.name.clone(),
         )
         .await;
-        integration_tests::cucumber_log!("Validator node {} sent registration", vn_spec.name());
+        let vn_name = vn_spec.name().to_string();
+        integration_tests::cucumber_log!("Validator node {} sent registration", vn_name);
     }
 
     let scan_height = 20 + num_blocks;
@@ -100,13 +101,14 @@ async fn create_network(world: &mut TariWorld, step: &Step, spec: NetworkSpec) {
     integration_tests::cucumber_log!("Indexer has scanned up to or past height {}", scan_height);
 
     for vn_spec in &spec.validators {
-        validator_node::assert_vn_is_registered(world, step, vn_spec.name().to_string()).await;
-        integration_tests::cucumber_log!("Validator node {} is registered", vn_spec.name());
+        let vn_name = vn_spec.name().to_string();
+        validator_node::assert_vn_is_registered(world, step, vn_name.clone()).await;
+
+        integration_tests::cucumber_log!("Validator node {} is registered", vn_name);
         world
             .get_validator_node(vn_spec.name())
             .wait_for_consensus_to_start()
             .await;
-        integration_tests::cucumber_log!("Validator node {} consensus started", vn_spec.name());
     }
 }
 

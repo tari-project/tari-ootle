@@ -11,7 +11,10 @@ use minotari_app_grpc::{
     tari_rpc::{GetBalanceRequest, SubmitValidatorEvictionProofRequest, ValidateRequest},
 };
 use serde_json;
-use tari_engine_types::confidential::{AbridgedTransactionKernel, EncodedMerkleProof, MinotariBurnClaimProof};
+use tari_engine_types::{
+    confidential::{AbridgedTransactionKernel, EncodedMerkleProof, MinotariBurnClaimProof},
+    FromByteType,
+};
 use tari_ootle_wallet_sdk::models::KeyBranch;
 use tari_template_lib::{
     prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
@@ -23,7 +26,7 @@ use tari_transaction_components::{
 };
 use tari_wallet_daemon_client::types::ClaimBurnProof;
 use tokio::time::sleep;
-use tari_engine_types::FromByteType;
+
 use crate::{spawn_minotari_wallet, TariWorld};
 
 #[given(expr = "a wallet {word} connected to base node {word}")]
@@ -120,8 +123,8 @@ async fn when_i_burn_on_wallet(
     //             integration_tests::cucumber_log!("Kernel merkle proof response: {}", proof_response);
     //         } else {
     //             integration_tests::cucumber_log!(
-    //                 "Kernel merkle proof not yet available (status: {}). This is expected if the transaction hasn't been mined yet.",
-    //                 response.status()
+    //                 "Kernel merkle proof not yet available (status: {}). This is expected if the transaction hasn't
+    // been mined yet.",                 response.status()
     //             );
     //         }
     //     },
@@ -130,15 +133,12 @@ async fn when_i_burn_on_wallet(
     //     },
     // }
 
-    world.claim_proofs.insert(
-        proof_name,
-        CucumberClaimProof::Pending {
-            commitment: PedersenCommitmentBytes::from_bytes(&resp.commitment).unwrap(),
-            nonce_id: nonce.id,
-            kernel_excess_sig_nonce,
-            kernel_excess_sig_signature,
-        },
-    );
+    world.claim_proofs.insert(proof_name, CucumberClaimProof::Pending {
+        commitment: PedersenCommitmentBytes::from_bytes(&resp.commitment).unwrap(),
+        nonce_id: nonce.id,
+        kernel_excess_sig_nonce,
+        kernel_excess_sig_signature,
+    });
 }
 
 #[when(expr = "I wait for proof {word} to confirm on wallet {word}")]
@@ -253,7 +253,7 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
             Scalar32Bytes::from_bytes(&ownership_proof.signature).map_err(|e| anyhow!("sig parse error {e}"))?,
         );
 
-        let reciprocal_claim_public_key = RistrettoPublicKeyBytes::from_bytes(&claim_proof.reciprocal_claim_public_key)
+        let reciprocal_claim_public_key = RistrettoPublicKeyBytes::from_bytes(&claim_proof.claim_public_key)
             .map_err(|e| anyhow!("reciprocal_claim_public_key parse error {e}"))?;
 
         let sender_offset_public_key = RistrettoPublicKeyBytes::from_bytes(&claim_proof.sender_offset_public_key)
@@ -311,12 +311,9 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
                 .map_err(|e| anyhow!("Encrypted data length is out of bounds: {e}",))?,
         };
 
-        world.claim_proofs.insert(
-            proof_name,
-            CucumberClaimProof::Confirmed {
-                proof: Box::new(proof.clone()),
-            },
-        );
+        world.claim_proofs.insert(proof_name, CucumberClaimProof::Confirmed {
+            proof: Box::new(proof.clone()),
+        });
         break;
     }
 

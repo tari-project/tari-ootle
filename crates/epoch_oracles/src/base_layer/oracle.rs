@@ -25,7 +25,12 @@ use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 use tokio::time;
 
 use crate::{
-    base_layer::{header_hasher::hash_header, BaseLayerEpochOracleConfig, BaseLayerEpochOracleFeatures},
+    base_layer::{
+        header_hasher::hash_header,
+        BaseLayerBlockHeaderStore,
+        BaseLayerEpochOracleConfig,
+        BaseLayerEpochOracleFeatures,
+    },
     store::{EpochOracleStore, StoreKey},
 };
 
@@ -63,7 +68,7 @@ struct BaseLayerOracleInner<TStore> {
     network: Network,
 }
 
-impl<TStore: EpochOracleStore + 'static> BaseLayerOracle<TStore> {
+impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + 'static> BaseLayerOracle<TStore> {
     pub fn new(
         store: TStore,
         base_node_client: GrpcBaseNodeClient,
@@ -99,7 +104,7 @@ impl<TStore: EpochOracleStore + 'static> BaseLayerOracle<TStore> {
     }
 }
 
-impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
+impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<TStore> {
     fn load_initial_state(&mut self) -> Result<(), BaseLayerOracleError> {
         self.last_scanned_tip = self
             .store
@@ -435,7 +440,7 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
     }
 }
 
-impl<TStore: EpochOracleStore + Send + 'static> BaseLayerOracle<TStore> {
+impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> BaseLayerOracle<TStore> {
     fn poll_next_event(&mut self, cx: &mut Context) -> Poll<Option<EpochEvent>> {
         if self.is_done {
             return Poll::Ready(None);
@@ -518,7 +523,9 @@ impl<TStore: EpochOracleStore + Send + 'static> BaseLayerOracle<TStore> {
     }
 }
 
-impl<TStore: EpochOracleStore + Send + 'static> EpochEventOracle for BaseLayerOracle<TStore> {
+impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> EpochEventOracle
+    for BaseLayerOracle<TStore>
+{
     /// Returns a Future that returns the next event, completing a round of scanning if necessary.
     /// This Future is cancel-safe. Returns None if a shutdown is triggered.
     async fn next_epoch_event(&mut self) -> Option<EpochEvent> {

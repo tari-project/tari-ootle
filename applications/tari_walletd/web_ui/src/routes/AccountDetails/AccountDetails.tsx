@@ -36,7 +36,7 @@ import { useNFTsList } from "@api/hooks/useNfts";
 import { ApiError } from "@api/helpers/types";
 import { DataTableCell } from "@components/StyledComponents";
 import FetchStatusCheck from "@components/FetchStatusCheck";
-import { BalanceEntry, decodeOotleAddressOrNull, substateIdToString } from "@tari-project/typescript-bindings";
+import { BalanceEntry, decodeOotleAddressOrNull, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import NftList from "@routes/AssetVault/NFTs/NFTList";
 import CopyAddress from "@components/CopyAddress";
 import { Form, useParams } from "react-router-dom";

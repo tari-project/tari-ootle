@@ -1,11 +1,24 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::path::{Path, PathBuf};
+use std::{
+    borrow::Cow,
+    path::{Path, PathBuf},
+};
 
 pub struct TemplateSpec {
     pub path: PathBuf,
     pub features: Vec<&'static str>,
+}
+
+impl TemplateSpec {
+    pub fn get_path<P: AsRef<Path>>(&self, base_path: P) -> Cow<'_, Path> {
+        if self.path.is_relative() {
+            Cow::Owned(base_path.as_ref().join(&self.path))
+        } else {
+            Cow::Borrowed(self.path.as_path())
+        }
+    }
 }
 
 impl From<&str> for TemplateSpec {

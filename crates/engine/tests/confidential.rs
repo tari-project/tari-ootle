@@ -38,11 +38,13 @@ use tari_transaction::{args, call_args, Transaction};
 use tari_transaction_manifest::ManifestValue;
 use tari_utilities::ByteArray;
 
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
 fn setup(
     initial_supply: ConfidentialOutputStatement,
     view_key: Option<&RistrettoPublicKey>,
 ) -> (TemplateTest, ComponentAddress, SubstateId) {
-    let mut template_test = TemplateTest::new(vec![
+    let mut template_test = TemplateTest::new(CRATE_PATH, vec![
         "tests/templates/confidential/faucet",
         "tests/templates/confidential/utilities",
     ]);

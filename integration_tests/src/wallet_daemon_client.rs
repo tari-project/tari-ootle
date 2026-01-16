@@ -372,7 +372,8 @@ pub async fn get_balance(
         .get_account_balances(get_balance_req)
         .await
         .expect("Failed to get balance from account");
-    crate::cucumber_log!("resp = {}", serde_json::to_string_pretty(&resp).unwrap());
+    let json = serde_json::to_string_pretty(&resp).unwrap();
+    crate::cucumber_log!("resp = {json}");
     resp.balances
         .iter()
         .find(|b| b.resource_address == resource_addr)
@@ -396,7 +397,8 @@ pub async fn get_confidential_balance(
         .get_account_balances(get_balance_req)
         .await
         .expect("Failed to get balance from account");
-    crate::cucumber_log!("resp = {}", serde_json::to_string_pretty(&resp).unwrap());
+    let json = serde_json::to_string_pretty(&resp).unwrap();
+    crate::cucumber_log!("resp = {json}");
     resp.balances.iter().map(|e| e.confidential_balance).sum()
 }
 

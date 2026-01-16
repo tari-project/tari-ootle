@@ -40,7 +40,7 @@ import {
   substateIdToString,
   PublishTemplateResponse,
   AccountInfo,
-} from "@tari-project/typescript-bindings";
+} from "@tari-project/ootle-ts-bindings";
 import InputLabel from "@mui/material/InputLabel";
 import { usePublishTemplate } from "@api/hooks/useTransactions";
 import { FileAmountLimitValidator, FileSizeValidator, FileTypeValidator } from "use-file-picker/validators";

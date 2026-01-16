@@ -45,7 +45,7 @@ import { truncateText, formatTimestamp } from "../../utils/helpers";
 import CopyToClipboard from "../../Components/CopyToClipboard";
 import saveAs from "file-saver";
 import JsonDialog from "../../Components/JsonDialog";
-import { ListSubstateItem, shortenSubstateId, substateIdToString } from "@tari-project/typescript-bindings";
+import { ListSubstateItem, shortenSubstateId, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { Link } from "react-router-dom";
 import FetchStatusCheck from "../../Components/FetchStatusCheck";
 import { useListSubstates, useGetSubstate } from "../../api/hooks/useSubstates";

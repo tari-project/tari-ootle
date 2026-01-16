@@ -18,6 +18,7 @@ use tari_indexer_client::{
     protobuf,
     rest_api_client::IndexerRestApiClient,
     types::{
+        GetSubstateRequest,
         GetSubstatesRequest,
         GetTransactionResultRequest,
         GetUtxoUpdatesRequest,
@@ -92,7 +93,12 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
         local_search_only: bool,
     ) -> Result<SubstateQueryResult, Self::Error> {
         let mut client = self.get_client()?;
-        let result = client.get_substate(substate_id, version, local_search_only).await?;
+        let result = client
+            .get_substate(substate_id, GetSubstateRequest {
+                version,
+                local_search_only,
+            })
+            .await?;
         Ok(SubstateQueryResult {
             version: result.version,
             substate: result.substate,
@@ -104,14 +110,9 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
         let resp = client
             .fetch_substates(GetSubstatesRequest {
                 requests: substate_ids.try_into().map_err(|_| {
-                    // We can't send the request, but return an error that would be the same/similar to what the indexer
-                    // would return
-                    IndexerRestApiNetworkInterfaceError::IndexerClientError(
-                        IndexerRestClientError::RequestFailedWithStatus {
-                            code: INVALID_REQUEST_CODE,
-                            message: "Too many substate IDs requested".to_string(),
-                        },
-                    )
+                    IndexerRestApiNetworkInterfaceError::IndexerClientError(IndexerRestClientError::RequestInvariant {
+                        details: "Too many substate IDs requested".to_string(),
+                    })
                 })?,
             })
             .await?;

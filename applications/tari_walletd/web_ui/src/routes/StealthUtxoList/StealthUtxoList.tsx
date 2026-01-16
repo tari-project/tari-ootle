@@ -13,7 +13,7 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import { useStealthUtxosList } from "@/services/api/hooks/useAccounts";
-import { Account, OutputStatus, XTR } from "@tari-project/typescript-bindings";
+import { Account, OutputStatus, XTR } from "@tari-project/ootle-ts-bindings";
 import FetchStatusCheck from "@/components/FetchStatusCheck";
 import { DataTableCell } from "@components/StyledComponents";
 import StatusChip from "./components/StatusChip";

@@ -16,10 +16,13 @@ use tari_template_lib::{
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 use tari_transaction::{args, Transaction};
 
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+const TEMPLATE_NAME: &str = "Shenanigans";
+
 #[test]
 fn it_rejects_dangling_vaults_in_constructor() {
-    let mut test = TemplateTest::new(["tests/templates/shenanigans"]);
-    let template_addr = test.get_template_address("Shenanigans");
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/shenanigans"]);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
 
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
@@ -37,8 +40,8 @@ fn it_rejects_dangling_vaults_in_constructor() {
 
 #[test]
 fn it_rejects_dangling_vault_that_has_been_returned() {
-    let mut test = TemplateTest::new(["tests/templates/shenanigans"]);
-    let template_addr = test.get_template_address("Shenanigans");
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/shenanigans"]);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
 
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
@@ -52,8 +55,8 @@ fn it_rejects_dangling_vault_that_has_been_returned() {
 
 #[test]
 fn it_rejects_dangling_vaults_in_component() {
-    let mut test = TemplateTest::new(["tests/templates/shenanigans"]);
-    let template_addr = test.get_template_address("Shenanigans");
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/shenanigans"]);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
 
     //  Create with vault
     let result = test.execute_expect_success(
@@ -83,8 +86,8 @@ fn it_rejects_dangling_vaults_in_component() {
 
 #[test]
 fn it_rejects_dangling_resources() {
-    let mut test = TemplateTest::new(["tests/templates/shenanigans"]);
-    let template_addr = test.get_template_address("Shenanigans");
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/shenanigans"]);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
 
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
@@ -98,8 +101,8 @@ fn it_rejects_dangling_resources() {
 
 #[test]
 fn it_rejects_unknown_substate_ids() {
-    let mut test = TemplateTest::new(["tests/templates/shenanigans"]);
-    let template_addr = test.get_template_address("Shenanigans");
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/shenanigans"]);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
 
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
@@ -120,8 +123,8 @@ fn it_rejects_unknown_substate_ids() {
 
 #[test]
 fn it_rejects_references_to_buckets_that_arent_in_scope() {
-    let mut test = TemplateTest::new(["tests/templates/shenanigans"]);
-    let template_addr = test.get_template_address("Shenanigans");
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/shenanigans"]);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
     let (account, owner_token, owner_key) = test.create_funded_account();
 
     let result = test.execute_expect_success(
@@ -150,8 +153,8 @@ fn it_rejects_references_to_buckets_that_arent_in_scope() {
 
 #[test]
 fn it_rejects_double_ownership_of_vault() {
-    let mut test = TemplateTest::new(["tests/templates/shenanigans"]);
-    let template_addr = test.get_template_address("Shenanigans");
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/shenanigans"]);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
 
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
@@ -165,8 +168,8 @@ fn it_rejects_double_ownership_of_vault() {
 
 #[test]
 fn it_prevents_access_to_vault_id_in_component_context() {
-    let mut test = TemplateTest::new(["tests/templates/shenanigans"]);
-    let template_addr = test.get_template_address("Shenanigans");
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/shenanigans"]);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
     let (account, _, _) = test.create_funded_account();
 
     let vault_id = {
@@ -202,8 +205,8 @@ fn it_prevents_access_to_vault_id_in_component_context() {
 
 #[test]
 fn it_prevents_access_to_out_of_scope_component() {
-    let mut test = TemplateTest::new(["tests/templates/shenanigans"]);
-    let template_addr = test.get_template_address("Shenanigans");
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/shenanigans"]);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
     let (account, _, _) = test.create_funded_account();
 
     let result = test.execute_expect_success(
@@ -233,8 +236,8 @@ fn it_prevents_access_to_out_of_scope_component() {
 
 #[test]
 fn it_disallows_calls_on_vaults_that_are_not_owned_by_current_component() {
-    let mut test = TemplateTest::new(["tests/templates/shenanigans"]);
-    let template_addr = test.get_template_address("Shenanigans");
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/shenanigans"]);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
     let (victim, _, _) = test.create_funded_account();
     let (attacker, _, _) = test.create_empty_account();
 
@@ -264,8 +267,8 @@ fn it_disallows_calls_on_vaults_that_are_not_owned_by_current_component() {
 
 #[test]
 fn it_disallows_vault_access_if_vault_is_not_owned() {
-    let mut test = TemplateTest::new(["tests/templates/shenanigans"]);
-    let template_addr = test.get_template_address("Shenanigans");
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/shenanigans"]);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
     let (victim, _, _) = test.create_funded_account();
 
     let vault_id = {
@@ -288,8 +291,8 @@ fn it_disallows_vault_access_if_vault_is_not_owned() {
 
 #[test]
 fn it_disallows_minting_different_resource_type() {
-    let mut test = TemplateTest::new(["tests/templates/resource_shenanigans"]);
-    let template_addr = test.get_template_address("Shenanigans");
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/resource_shenanigans"]);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
     let (account, _, _) = test.create_empty_account();
 
     let result = test.execute_expect_success(
@@ -323,8 +326,8 @@ fn it_disallows_minting_different_resource_type() {
 
 #[test]
 fn it_does_not_bring_non_owned_vault_id_into_scope() {
-    let mut test = TemplateTest::new(["tests/templates/shenanigans"]);
-    let template_addr = test.get_template_address("Shenanigans");
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/shenanigans"]);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
     let (account, _, _) = test.create_funded_account();
     let vault_id = {
         let store = test.read_only_state_store();
@@ -348,7 +351,7 @@ fn it_does_not_bring_non_owned_vault_id_into_scope() {
 
 #[test]
 fn it_disallows_withdraws_from_vaults_outside_of_component_context() {
-    let mut test = TemplateTest::new(["tests/templates/shenanigans"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/shenanigans"]);
     let (account, _, _) = test.create_funded_account();
     let vault_id = {
         let store = test.read_only_state_store();
@@ -357,7 +360,7 @@ fn it_disallows_withdraws_from_vaults_outside_of_component_context() {
         values.vault_ids()[0]
     };
 
-    let template_addr = test.compile_new_template("Shenanigans", "tests/templates/shenanigans", &[], [(
+    let template_addr = test.compile_new_template(TEMPLATE_NAME, "tests/templates/shenanigans", &[], [(
         "VAULT_ID",
         vault_id.to_string(),
     )]);
@@ -393,7 +396,7 @@ fn it_disallows_withdraws_from_vaults_outside_of_component_context() {
 
 #[test]
 fn it_disallows_withdraws_from_vaults_outside_of_owning_component() {
-    let mut test = TemplateTest::new(["tests/templates/shenanigans"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/shenanigans"]);
     let (account, _, _) = test.create_funded_account();
     let vault_id = {
         let store = test.read_only_state_store();
@@ -402,7 +405,8 @@ fn it_disallows_withdraws_from_vaults_outside_of_owning_component() {
         values.vault_ids()[0]
     };
 
-    let template_addr = test.compile_new_template("Shenanigans", "tests/templates/shenanigans", &[], [(
+    // Compile a template with the vault id hardcoded
+    let template_addr = test.compile_new_template(TEMPLATE_NAME, "tests/templates/shenanigans", &[], [(
         "VAULT_ID",
         vault_id.to_string(),
     )]);

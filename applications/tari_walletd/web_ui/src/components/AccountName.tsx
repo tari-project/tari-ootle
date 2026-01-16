@@ -23,7 +23,7 @@
 import React, { useState } from "react";
 import { Box, TextField, IconButton } from "@mui/material";
 import { IoCheckmark, IoClose } from "react-icons/io5";
-import { ComponentAddress } from "@tari-project/typescript-bindings";
+import { ComponentAddress } from "@tari-project/ootle-ts-bindings";
 import { useAccountsRename } from "../services/api/hooks/useAccounts";
 import { LuPencilLine } from "react-icons/lu";
 import { useTheme } from "@mui/material/styles";

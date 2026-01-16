@@ -26,7 +26,7 @@ use tari_engine_types::limits;
 use tari_template_abi::{FunctionDef, TemplateDef, Type, ABI_TEMPLATE_DEF_GLOBAL_NAME};
 use wasmer::{
     imports,
-    sys::{BaseTunables, CompilerConfig, Cranelift, CraneliftOptLevel, NativeEngineExt, Target},
+    sys::{BaseTunables, CompilerConfig, Cranelift, CraneliftOptLevel, EngineBuilder, Target},
     AsStoreMut,
     Engine,
     ExportError,
@@ -117,10 +117,24 @@ impl WasmModule {
             .canonicalize_nans(true);
         // TODO: Configure metering limit
         compiler.push_middleware(Arc::new(metering::middleware(100_000_000)));
-        let mut engine = Engine::from(compiler);
-        engine.set_tunables(tunables);
 
-        engine
+        let mut features = wasmer::sys::Features::default();
+        features
+            // Explicitly disable threads and multi value, the remaining defaults are repeated here for clarity
+            .threads(false)
+            .bulk_memory(true)
+            .multi_value(false)
+            .reference_types(true)
+            .simd(true)
+            .tail_call(false)
+            .memory64(false)
+            .multi_memory(false)
+            .exceptions(false)
+            .module_linking(false);
+
+        let mut engine = EngineBuilder::new(compiler).set_features(Some(features)).engine();
+        engine.set_tunables(tunables);
+        Engine::from(engine)
     }
 }
 

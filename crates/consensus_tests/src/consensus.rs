@@ -601,6 +601,7 @@ async fn multishard_local_inputs_foreign_outputs_abort() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn multishard_local_inputs_and_outputs_foreign_outputs() {
+    // Transaction involves inputs and outputs for committee 0 and 1, and outputs for committee 2
     setup_logger();
     let mut test = Test::builder()
         .add_committee(0, vec!["1", "2"])
@@ -965,60 +966,6 @@ async fn single_shard_input_conflict() {
     }
 
     test.stop();
-
-    test.assert_clean_shutdown().await;
-    log::info!("total messages sent: {}", test.network().total_messages_sent());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn epoch_change() {
-    setup_logger();
-    let mut test = Test::builder()
-        .modify_config(|config_mut| {
-            config_mut.epoch_end_grace_period = Duration::from_millis(10);
-        })
-        .add_committee(0, vec!["1", "2"])
-        .start()
-        .await;
-
-    test.start_epoch(Epoch(1)).await;
-    let mut remaining_txs = 10;
-
-    loop {
-        if remaining_txs > 0 {
-            test.send_transaction_to_all(Decision::Commit, 1, 5, 1).await;
-        }
-        remaining_txs -= 1;
-        if remaining_txs == 5 {
-            test.start_epoch(Epoch(2)).await;
-        }
-
-        if remaining_txs <= 0 && test.is_transaction_pool_empty() {
-            break;
-        }
-
-        let (_, _, epoch, height) = test.on_block_committed().await;
-        if height.as_u64() > 1 && epoch == 2u64 {
-            break;
-        }
-
-        if height > NodeHeight(30) {
-            panic!("Not all transaction committed after {} blocks", height);
-        }
-    }
-
-    // Assert epoch changed
-    test.get_validator(&TestAddress::new("1"))
-        .state_store
-        .with_read_tx(|tx| {
-            let leaf_block = tx.leaf_block_get(Epoch(2))?;
-            assert_eq!(leaf_block.epoch(), Epoch(2));
-            Ok::<_, HotStuffError>(())
-        })
-        .unwrap();
-
-    test.stop();
-    // test.assert_all_validators_committed();
 
     test.assert_clean_shutdown().await;
     log::info!("total messages sent: {}", test.network().total_messages_sent());

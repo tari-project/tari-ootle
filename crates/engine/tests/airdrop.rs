@@ -7,8 +7,10 @@ use tari_template_lib::{models::ComponentAddress, types::Amount};
 use tari_template_test_tooling::TemplateTest;
 use tari_transaction::{args, call_args, Transaction};
 
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
 fn setup() -> (TemplateTest, ComponentAddress, SubstateId) {
-    let mut template_test = TemplateTest::new(vec!["tests/templates/nft/airdrop"]);
+    let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/nft/airdrop"]);
     let airdrop: ComponentAddress = template_test.call_function("Airdrop", "new", call_args![], vec![]);
     let airdrop_resx = template_test.get_previous_output_address(SubstateType::Resource);
     (template_test, airdrop, airdrop_resx)

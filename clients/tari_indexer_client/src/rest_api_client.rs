@@ -84,14 +84,9 @@ impl IndexerRestApiClient {
     pub async fn get_substate(
         &mut self,
         id: &SubstateId,
-        version: Option<u32>,
-        local_search_only: bool,
+        req: GetSubstateRequest,
     ) -> Result<GetSubstateResponse, IndexerRestClientError> {
-        self.send_get(format!("substates/{id}"), GetSubstateRequest {
-            version,
-            local_search_only,
-        })
-        .await
+        self.send_get(format!("substates/{id}"), req).await
     }
 
     pub async fn get_non_fungibles(
@@ -157,13 +152,6 @@ impl IndexerRestApiClient {
     ) -> Result<GetTemplateDefinitionResponse, IndexerRestClientError> {
         self.send_get(format!("templates/{template_address}"), ()).await
     }
-
-    // pub async fn get_non_fungibles(
-    //     &mut self,
-    //     req: GetNonFungiblesRequest,
-    // ) -> Result<GetNonFungiblesResponse, IndexerRestClientError> {
-    //     self.send_get("get_non_fungibles", req).await
-    // }
 
     pub async fn get_epoch_manager_stats(&mut self) -> Result<GetEpochManagerStatsResponse, IndexerRestClientError> {
         self.send_get("epoch-manager/stats", ()).await

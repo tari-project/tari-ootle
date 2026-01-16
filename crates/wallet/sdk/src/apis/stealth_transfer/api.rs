@@ -1,12 +1,12 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{cmp, collections::HashSet, time::Duration};
+use std::{cmp, time::Duration};
 
 use log::*;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::{substate::SubstateId, ConvertFromByteType, FromByteType};
-use tari_ootle_address::RistrettoOotleAddress;
+use tari_ootle_address::{OotleAddress, RistrettoOotleAddress};
 use tari_ootle_common_types::{displayable::Displayable, optional::Optional, Network, SubstateRequirement};
 use tari_ootle_wallet_crypto::memo::Memo;
 use tari_template_lib::{
@@ -30,7 +30,6 @@ use super::{
     types::{InputsToSpend, StealthOutputToCreate, StealthTransferOutput},
     BadgeUsage,
     PayTo,
-    TransferOutput,
 };
 use crate::{
     apis::{
@@ -322,15 +321,13 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         // add the input for the resource address to be transferred
         substate_inputs.push(SubstateRequirement::unversioned(params.resource_address));
 
-        let mut accounts_to_create = HashSet::new();
         for output in &params.outputs {
-            let need_to_create_dest_account = self
-                .determine_destination_account_inputs(output, &params.resource_address, &mut substate_inputs)
-                .await?;
-            if need_to_create_dest_account {
-                let dest_account = derive_account_address_from_public_key(output.address.account_public_key());
-                accounts_to_create.insert(dest_account);
+            // No revealed outputs, no need to use the account
+            if !output.revealed_amount.is_positive() {
+                continue;
             }
+            self.determine_destination_account_inputs(&output.address, &params.resource_address, &mut substate_inputs)
+                .await?;
         }
 
         // We need to fetch the resource substate to check if there is a view key present.
@@ -602,7 +599,6 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 substate_inputs,
                 fee_transfer_statement,
                 transfer_statement,
-                &accounts_to_create,
             )?;
 
             Ok((lock, StealthTransferOutput {
@@ -616,18 +612,15 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         })
     }
 
+    /// Determine if the destination account exists and add any required inputs to the substate inputs list
+    /// If the account exists on-chain, returns true. If not, returns false.
     async fn determine_destination_account_inputs(
         &self,
-        output: &TransferOutput,
+        address: &OotleAddress,
         resource_address: &ResourceAddress,
         substate_inputs: &mut Vec<SubstateRequirement>,
     ) -> Result<bool, StealthTransferApiError> {
-        // No revealed outputs, no need to use the account
-        if !output.revealed_amount.is_positive() {
-            return Ok(false);
-        }
-
-        let destination_account = derive_account_address_from_public_key(output.address.account_public_key());
+        let destination_account = derive_account_address_from_public_key(address.account_public_key());
 
         // Local account? (Saves a call to the indexer)
         match self
@@ -646,15 +639,13 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                         substate_inputs.push(SubstateRequirement::unversioned(vault.id));
                     }
 
-                    Ok(false)
-                } else {
                     Ok(true)
+                } else {
+                    Ok(false)
                 }
             },
             None => {
-                // TODO: we're just determining if the account exists - symptom of a larger problem/missing
-                // feature: the account should be created as needed by the execution layer, instead of having to be
-                // determined by the client side
+                // We need to determine if the account exists and fetch any existing vault for that resource
                 let to_account_substate = self
                     .substate_api
                     .fetch_substate_from_network(&SubstateId::Component(destination_account), None)
@@ -696,10 +687,9 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                             destination_account
                         );
                     }
-                    Ok(false)
-                } else {
-                    // If the account does not exist, we need to create it
                     Ok(true)
+                } else {
+                    Ok(false)
                 }
             },
         }
@@ -714,7 +704,6 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         inputs: Vec<SubstateRequirement>,
         fee_transfer_statement: StealthTransferStatement,
         transfer_statement: StealthTransferStatement,
-        accounts_to_create: &HashSet<ComponentAddress>,
     ) -> Result<UnsignedTransaction, StealthTransferApiError> {
         let revealed_input_amount = transfer_statement.inputs_statement.revealed_amount;
         let revealed_output_amount = transfer_statement.outputs_statement.revealed_output_amount;
@@ -791,28 +780,15 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                             }
                             let needs_to_split = params.outputs.len() > 1;
 
-                            let dest_account =
-                                derive_account_address_from_public_key(output.address.account_public_key());
-                            let need_to_create_account = accounts_to_create.contains(&dest_account);
+                            // let need_to_create_account = accounts_to_create.contains(&dest_account);
                             if needs_to_split {
                                 let sub_bucket_name = format!("output-sub-bucket-{i}");
-                                if need_to_create_account {
-                                    builder
-                                        .take_from_bucket("output_bucket", output.revealed_amount, &sub_bucket_name)
-                                        .create_account_with_bucket(
-                                            *output.address.account_public_key(),
-                                            sub_bucket_name,
-                                        )
-                                } else {
-                                    builder
-                                        .take_from_bucket("output_bucket", output.revealed_amount, &sub_bucket_name)
-                                        .call_method(dest_account, "deposit", args![Workspace(sub_bucket_name)])
-                                }
-                            } else if need_to_create_account {
+                                builder
+                                    .take_from_bucket("output_bucket", output.revealed_amount, &sub_bucket_name)
+                                    .create_account_with_bucket(*output.address.account_public_key(), sub_bucket_name)
+                            } else {
                                 builder
                                     .create_account_with_bucket(*output.address.account_public_key(), "output_bucket")
-                            } else {
-                                builder.call_method(dest_account, "deposit", args![Workspace("output_bucket")])
                             }
                         })
                     })

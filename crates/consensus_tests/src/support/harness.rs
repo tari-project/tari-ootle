@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{hash_map, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fmt::Display,
     fs,
     time::Duration,
@@ -35,11 +35,15 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::{
     consensus_models::{SubstateCreated, SubstateRecord, SubstateUpdateBatch, TransactionExecution, TransactionRecord},
+    Ordering,
     StateStore,
     StateStoreReadTransaction,
-    StorageError,
 };
 use tari_shutdown::{Shutdown, ShutdownSignal};
+use tari_state_store_rocksdb::column_families::{
+    finalized_transaction::FinalizedTransactionLinkCf,
+    transaction::TransactionCf,
+};
 use tari_transaction::TransactionId;
 use tokio::{sync::broadcast, task, time::sleep};
 
@@ -72,6 +76,7 @@ pub struct Test {
     _leader_strategy: RoundRobinLeaderStrategy,
     _epoch_manager: TestEpochManager,
     num_committees: u32,
+    submitted_transactions: Vec<TransactionId>,
     shutdown: Shutdown,
     timeout: Option<Duration>,
 }
@@ -82,7 +87,7 @@ impl Test {
     }
 
     pub async fn send_transaction_to_all(
-        &self,
+        &mut self,
         decision: Decision,
         fee: u64,
         num_inputs: usize,
@@ -93,6 +98,8 @@ impl Test {
         let new_outputs = (0..num_new_outputs)
             .map(|i| build_substate_id_for_committee(i as u32 % self.num_committees, self.num_committees))
             .collect::<Vec<_>>();
+
+        self.submitted_transactions.push(*transaction.id());
 
         self.add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
             transaction: transaction.transaction().clone(),
@@ -119,7 +126,7 @@ impl Test {
     pub fn add_execution_at_destination(&self, dest: TestVnDestination, execution: ExecuteSpec) -> &Self {
         for vn in self.validators.values() {
             if dest.is_for(&vn.address, vn.shard_group, vn.num_committees) {
-                vn.transaction_executions.insert(execution.clone());
+                vn.transaction_executor.store().insert(execution.clone());
             }
         }
         self
@@ -213,7 +220,7 @@ impl Test {
             .collect()
     }
 
-    pub fn validators_iter(&self) -> hash_map::Values<'_, TestAddress, Validator> {
+    pub fn validators_iter(&self) -> impl Iterator<Item = &Validator> {
         self.validators.values()
     }
 
@@ -429,6 +436,24 @@ impl Test {
         })
     }
 
+    #[track_caller]
+    pub fn is_all_submitted_transactions_finalized(&self) -> bool {
+        assert!(
+            !self.submitted_transactions.is_empty(),
+            "No submitted transactions to check"
+        );
+        self.validators.values().all(|v| {
+            let cx = v.state_store.snapshot();
+            let link_cf = cx.cf(FinalizedTransactionLinkCf).unwrap();
+            for id in &self.submitted_transactions {
+                if !link_cf.exists(id, "test").unwrap() {
+                    return false;
+                }
+            }
+            true
+        })
+    }
+
     pub fn is_transaction_finalized_at_destination(
         &self,
         destination: TestVnDestination,
@@ -438,39 +463,31 @@ impl Test {
             .values()
             .filter(|vn| destination.is_for_vn(vn))
             .all(|vn| {
-                vn.state_store
-                    .with_read_tx(|tx| {
-                        let finalized = tx
-                            .finalized_transaction_execution_get_finalized_time(transaction_id)
-                            .optional()?;
-                        Ok::<_, StorageError>(finalized.is_some())
-                    })
-                    .unwrap()
+                let cx = vn.state_store.snapshot();
+                let link_cf = cx.cf(FinalizedTransactionLinkCf).unwrap();
+                link_cf.exists(transaction_id, "test").unwrap()
             })
     }
 
     pub async fn wait_for_n_to_be_finalized(&self, n: usize) {
         self.wait_all_for_predicate(format!("waiting for {n} to be finalized"), |vn| {
-            vn.state_store
-                .with_read_tx(|tx| {
-                    let transactions = tx.transactions_get_paginated(10000, 0, None)?;
-                    let mut count = 0;
-                    log::info!("{} has {} transactions", vn.address, transactions.len());
-                    for transaction in transactions {
-                        if tx
-                            .finalized_transaction_execution_get(transaction.id())
-                            .optional()?
-                            .is_some()
-                        {
-                            count += 1;
-                            if count >= n {
-                                return Ok(true);
-                            }
-                        }
+            let cx = vn.state_store.snapshot();
+            let cf = cx.cf(TransactionCf).unwrap();
+            let transactions = cf.key_iterator(Ordering::Ascending, "test");
+            let link_cf = cx.cf(FinalizedTransactionLinkCf).unwrap();
+            let mut finalized = 0;
+            let mut count = 0;
+            for transaction in transactions {
+                count += 1;
+                if link_cf.exists(&transaction.unwrap(), "test").unwrap() {
+                    finalized += 1;
+                    if finalized >= n {
+                        return true;
                     }
-                    Ok::<_, StorageError>(false)
-                })
-                .unwrap()
+                }
+            }
+            log::info!("{} has {} transactions", vn.address, count);
+            false
         })
         .await
     }
@@ -795,6 +812,7 @@ impl TestBuilder {
             validators,
             network,
             num_committees,
+            submitted_transactions: Vec::new(),
 
             _leader_strategy: leader_strategy,
             _epoch_manager: epoch_manager,

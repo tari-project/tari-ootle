@@ -30,7 +30,7 @@ import CheckBox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import { Divider, InputLabel, Stack, InputAdornment, Typography } from "@mui/material";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
-import { ResourceType, ResourceAddress, validateOotleAddress } from "@tari-project/typescript-bindings";
+import { ResourceType, ResourceAddress, validateOotleAddress } from "@tari-project/ootle-ts-bindings";
 import { formatDisplayCurrency } from "@utils/helpers";
 import { XTR_CURRENCY } from "@utils/constants";
 

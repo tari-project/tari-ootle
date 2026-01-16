@@ -43,7 +43,7 @@ impl ProcessDefinition for MinotariWallet {
 
         let mut base_node_addresses = Vec::with_capacity(base_nodes.len());
         for base_node in base_nodes {
-            let identity = base_node.get_identity().await?;
+            let identity = base_node.get_identity()?;
             debug!("Base node identity: {identity}");
             base_node_addresses.push(identity);
         }

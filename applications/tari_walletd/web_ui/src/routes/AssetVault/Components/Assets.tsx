@@ -26,7 +26,7 @@ import { ApiError } from "@api/helpers/types";
 import { useNFTsList } from "@api/hooks/useNfts";
 import { substateIdToString, handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
 import NFTList from "@routes/AssetVault/NFTs/NFTList";
-import { Account } from "@tari-project/typescript-bindings";
+import { Account } from "@tari-project/ootle-ts-bindings";
 import Tokens from "@routes/AssetVault/Tokens/Tokens";
 
 interface TabPanelProps {

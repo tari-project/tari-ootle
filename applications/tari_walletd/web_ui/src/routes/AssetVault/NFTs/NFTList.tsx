@@ -35,7 +35,7 @@ import {
   Box,
   Button,
 } from "@mui/material";
-import type { ListNftsResponse, NonFungibleToken } from "@tari-project/typescript-bindings";
+import type { ListNftsResponse, NonFungibleToken } from "@tari-project/ootle-ts-bindings";
 import React, { useState } from "react";
 import { IoApps, IoList } from "react-icons/io5";
 import type { ApiError } from "@api/helpers/types";

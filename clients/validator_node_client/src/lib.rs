@@ -103,13 +103,6 @@ impl ValidatorNodeClient {
         self.send_request("get_transaction_result", request).await
     }
 
-    pub async fn get_recent_transactions(
-        &mut self,
-        request: GetRecentTransactionsRequest,
-    ) -> Result<GetRecentTransactionsResponse, ValidatorNodeClientError> {
-        self.send_request("get_recent_transactions", request).await
-    }
-
     pub async fn list_blocks(
         &mut self,
         request: ListBlocksRequest,

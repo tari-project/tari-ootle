@@ -21,6 +21,7 @@ tari_bor = { workspace = true, default-features = true }
 tari_ootle_wallet_crypto = { workspace = true }
 
 anyhow = { workspace = true }
-thiserror = { workspace = true }
-serde = { workspace = true, features = ["default", "derive"] }
+cargo_toml = "0.22.3"
 rand = { workspace = true }
+serde = { workspace = true, features = ["default", "derive"] }
+thiserror = { workspace = true }

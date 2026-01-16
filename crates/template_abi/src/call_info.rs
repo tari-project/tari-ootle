@@ -28,5 +28,4 @@ use crate::rust::{string::String, vec::Vec};
 pub struct CallInfo {
     pub func_name: String,
     pub args: Vec<tari_bor::Value>,
-    pub abi_context: Vec<u8>,
 }

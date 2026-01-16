@@ -35,7 +35,7 @@ import {
   ResourceType,
   substateIdToString,
   XTR,
-} from "@tari-project/typescript-bindings";
+} from "@tari-project/ootle-ts-bindings";
 import { transactionsWaitResult } from "@utils/json_rpc";
 import FormStep, { FormError, SendMoneyFormState } from "../steps/FormStep";
 import ConfirmationStep from "../steps/ConfirmationStep";

@@ -77,16 +77,6 @@ impl ExecuteResult {
         diff
     }
 
-    /// Returns the RejectReason if the transaction failed, or panic if the transaction was successful.
-    #[track_caller]
-    pub fn expect_failure(&self) -> &RejectReason {
-        if let Some(reason) = self.finalize.result.any_reject() {
-            reason
-        } else {
-            panic!("Transaction succeeded but it was expected to fail");
-        }
-    }
-
     #[track_caller]
     pub fn expect_finalization_failure(&self) -> &RejectReason {
         match self.finalize.result {
@@ -108,7 +98,7 @@ impl ExecuteResult {
     }
 
     #[track_caller]
-    pub fn expect_transaction_failure(&self) -> &RejectReason {
+    pub fn expect_failure(&self) -> &RejectReason {
         if let Some(reason) = self.finalize.any_reject() {
             reason
         } else {
@@ -279,8 +269,12 @@ pub enum TransactionResult {
 }
 
 impl TransactionResult {
-    pub fn is_accept(&self) -> bool {
+    pub fn is_any_accept(&self) -> bool {
         matches!(self, Self::Accept(_) | Self::AcceptFeeRejectRest(_, _))
+    }
+
+    pub fn is_accept(&self) -> bool {
+        matches!(self, Self::Accept(_))
     }
 
     pub fn is_reject(&self) -> bool {

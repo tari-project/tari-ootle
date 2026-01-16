@@ -20,8 +20,6 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::sync::{Arc, Mutex, RwLock};
-
 use indexmap::IndexMap;
 use log::*;
 use tari_engine_types::{
@@ -30,6 +28,7 @@ use tari_engine_types::{
     events::Event,
     fees::FeeSource,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
+    limits,
     lock::LockFlag,
     logs::LogEntry,
     substate::{Substate, SubstateId, SubstateValue},
@@ -58,10 +57,10 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::engine::runtime::state_tracker";
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct StateTracker {
-    working_state: Arc<RwLock<WorkingState>>,
-    fee_checkpoint: Arc<Mutex<Option<WorkingState>>>,
+    working_state: WorkingState,
+    fee_checkpoint: Option<WorkingState>,
     transaction_weight: TransactionWeight,
 }
 
@@ -74,13 +73,8 @@ impl StateTracker {
         transaction_weight: TransactionWeight,
     ) -> Self {
         Self {
-            working_state: Arc::new(RwLock::new(WorkingState::new(
-                state_store,
-                virtual_substates,
-                initial_call_scope,
-                transaction_hash,
-            ))),
-            fee_checkpoint: Arc::new(Mutex::new(None)),
+            working_state: WorkingState::new(state_store, virtual_substates, initial_call_scope, transaction_hash),
+            fee_checkpoint: None,
             transaction_weight,
         }
     }
@@ -101,16 +95,16 @@ impl StateTracker {
         })
     }
 
-    pub fn add_event(&self, event: Event) -> Result<(), RuntimeError> {
+    pub fn add_event(&mut self, event: Event) -> Result<(), RuntimeError> {
         debug!(target: LOG_TARGET, "Emit: {event}");
         self.write_with(|state| state.push_event(event))
     }
 
-    pub fn add_log(&self, log: LogEntry) -> Result<(), RuntimeError> {
+    pub fn add_log(&mut self, log: LogEntry) -> Result<(), RuntimeError> {
         self.write_with(|state| state.push_log(log))
     }
 
-    pub fn take_events(&self) -> Vec<Event> {
+    pub fn take_events(&mut self) -> Vec<Event> {
         self.write_with(|state| state.take_events())
     }
 
@@ -131,7 +125,7 @@ impl StateTracker {
     }
 
     pub fn new_component(
-        &self,
+        &mut self,
         component_state: tari_bor::Value,
         owner_key: Option<RistrettoPublicKeyBytes>,
         owner_rule: OwnerRule,
@@ -192,18 +186,18 @@ impl StateTracker {
         })
     }
 
-    pub fn lock_substate(&self, address: &SubstateId, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError> {
+    pub fn lock_substate(&mut self, address: &SubstateId, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError> {
         self.write_with(|state| match lock_flag {
             LockFlag::Read => state.read_lock_substate(address),
             LockFlag::Write => state.write_lock_substate(address),
         })
     }
 
-    pub fn unlock_substate(&self, locked: LockedSubstate) -> Result<(), RuntimeError> {
+    pub fn unlock_substate(&mut self, locked: LockedSubstate) -> Result<(), RuntimeError> {
         self.write_with(|state| state.unlock_substate(locked))
     }
 
-    pub fn push_call_frame(&self, push_frame: PushCallFrame, max_call_depth: usize) -> Result<(), RuntimeError> {
+    pub fn push_call_frame(&mut self, push_frame: PushCallFrame) -> Result<(), RuntimeError> {
         self.write_with(|state| {
             // If substates used in args are in scope for the current frame, we can bring then into scope for the new
             // frame
@@ -217,15 +211,15 @@ impl StateTracker {
             let new_frame = push_frame.into_new_call_frame();
             trace!(target: LOG_TARGET, "NEW CALL FRAME:\n{}", new_frame.scope());
 
-            state.push_frame(new_frame, max_call_depth)
+            state.push_frame(new_frame, limits::ENGINE_LIMITS.max_call_depth)
         })
     }
 
-    pub fn pop_call_frame(&self) -> Result<(), RuntimeError> {
+    pub fn pop_call_frame(&mut self) -> Result<(), RuntimeError> {
         self.write_with(|state| state.pop_frame())
     }
 
-    pub fn take_last_instruction_output(&self) -> Option<IndexedValue> {
+    pub fn take_last_instruction_output(&mut self) -> Option<IndexedValue> {
         self.write_with(|state| state.take_last_instruction_output())
     }
 
@@ -233,11 +227,11 @@ impl StateTracker {
         self.read_with(|state| f(state.workspace()))
     }
 
-    pub fn with_workspace_mut<F: FnOnce(&mut Workspace) -> R, R>(&self, f: F) -> R {
+    pub fn with_workspace_mut<F: FnOnce(&mut Workspace) -> R, R>(&mut self, f: F) -> R {
         self.write_with(|state| f(state.workspace_mut()))
     }
 
-    pub fn add_fee_charge(&self, source: FeeSource, amount: u64) {
+    pub fn add_fee_charge(&mut self, source: FeeSource, amount: u64) {
         if amount == 0 {
             debug!(target: LOG_TARGET, "Add fee: source: {:?}, amount: {}", source, amount);
             return;
@@ -249,7 +243,7 @@ impl StateTracker {
         })
     }
 
-    pub fn finalize(&self, failure: Option<RejectReason>) -> Result<FinalizeResult, RuntimeError> {
+    pub fn finalize(&mut self, failure: Option<RejectReason>) -> Result<FinalizeResult, RuntimeError> {
         let failure = failure.or_else(|| {
             self.read_with(|state| {
                 let fee_state = state.fee_state();
@@ -321,19 +315,18 @@ impl StateTracker {
         Ok(finalized)
     }
 
-    pub fn fee_checkpoint(&self) -> Result<(), RuntimeError> {
-        self.read_with(|state| {
+    pub fn fee_checkpoint(&mut self) -> Result<(), RuntimeError> {
+        let state = self.read_with(|state| {
             // Check that the checkpoint is in a valid state
-            state.validate_finalized()?;
-            let mut checkpoint = self.fee_checkpoint.lock().unwrap();
-            *checkpoint = Some(state.clone());
-            Ok(())
-        })
+            state.validate_finalized().map(|_| state.clone())
+        })?;
+
+        self.fee_checkpoint = Some(state.clone());
+        Ok(())
     }
 
-    fn take_fee_checkpoint(&self) -> Option<WorkingState> {
-        let mut checkpoint = self.fee_checkpoint.lock().unwrap();
-        let mut fee_cp = checkpoint.take()?;
+    fn take_fee_checkpoint(&mut self) -> Option<WorkingState> {
+        let mut fee_cp = self.fee_checkpoint.take()?;
         // Preserve fee state across resets so that we can charge for fees incurred during execution before the
         // failure
         self.read_with(|state| {
@@ -342,11 +335,11 @@ impl StateTracker {
         Some(fee_cp)
     }
 
-    fn take_working_state(&self) -> WorkingState {
+    fn take_working_state(&mut self) -> WorkingState {
         self.write_with(|current_state| current_state.take_state())
     }
 
-    pub fn with_substates_to_persist<F: FnMut(&IndexMap<SubstateId, SubstateValue>) -> R, R>(&self, mut f: F) -> R {
+    pub fn with_substates_to_persist<F: FnMut(&IndexMap<SubstateId, SubstateValue>) -> R, R>(&mut self, mut f: F) -> R {
         self.write_with(|state| f(state.mutated_substates()))
     }
 
@@ -367,15 +360,14 @@ impl StateTracker {
     }
 
     pub(super) fn read_with<R, F: FnOnce(&WorkingState) -> R>(&self, f: F) -> R {
-        f(&self.working_state.read().unwrap())
+        f(&self.working_state)
     }
 
-    pub(super) fn write_with<R, F: FnOnce(&mut WorkingState) -> R>(&self, f: F) -> R {
-        f(&mut self.working_state.write().unwrap())
+    pub(super) fn write_with<R, F: FnOnce(&mut WorkingState) -> R>(&mut self, f: F) -> R {
+        f(&mut self.working_state)
     }
 
     pub(super) fn is_fee_intent_checkpointed(&self) -> bool {
-        let checkpoint = self.fee_checkpoint.lock().unwrap();
-        checkpoint.is_some()
+        self.fee_checkpoint.is_some()
     }
 }

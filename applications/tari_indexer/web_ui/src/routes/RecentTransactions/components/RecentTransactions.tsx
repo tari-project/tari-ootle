@@ -36,7 +36,7 @@ import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import Collapse from "@mui/material/Collapse";
 import IconButton from "@mui/material/IconButton";
 import { ChevronRight } from "@mui/icons-material";
-import { TransactionEntry } from "@tari-project/typescript-bindings";
+import { TransactionEntry } from "@tari-project/ootle-ts-bindings";
 
 type ExtendedTransactionEntry = TransactionEntry & { id: string; show?: boolean };
 import { useListRecentTransactions } from "../../../api/hooks/useTransactions";

@@ -21,7 +21,7 @@ impl<const L: usize> SmallBytes<L> {
     }
 
     pub fn from_slice(slice: &[u8]) -> Self {
-        let inner = SmallVec::from_slice(slice);
+        let inner = SmallVec::from_slice_copy(slice);
         Self { inner }
     }
 

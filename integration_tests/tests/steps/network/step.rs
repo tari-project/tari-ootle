@@ -31,7 +31,11 @@ async fn create_network(world: &mut TariWorld, step: &Step, spec: NetworkSpec) {
             let account =
                 wallet_daemon_client::create_account(world, wallet_spec.node.name.clone(), account.clone()).await;
             integration_tests::cucumber_log!(
+            integration_tests::cucumber_log!(
                 "Created initial account {} on wallet daemon {}",
+                account,
+                wallet_spec.node.name
+            );
                 account,
                 wallet_spec.node.name
             );

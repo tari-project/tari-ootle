@@ -16,7 +16,7 @@ pub enum TransactionManagerError {
         details: String,
     },
     #[error(transparent)]
-    NetworkClientError(#[from] NetworkClientError),
+    NetworkClientError(Box<NetworkClientError>),
     #[error("{entity} not found: {key}")]
     NotFound { entity: &'static str, key: String },
     #[error(transparent)]
@@ -30,5 +30,11 @@ pub enum TransactionManagerError {
 impl IsNotFoundError for TransactionManagerError {
     fn is_not_found_error(&self) -> bool {
         matches!(self, Self::NotFound { .. })
+    }
+}
+
+impl From<NetworkClientError> for TransactionManagerError {
+    fn from(err: NetworkClientError) -> Self {
+        Self::NetworkClientError(Box::new(err))
     }
 }

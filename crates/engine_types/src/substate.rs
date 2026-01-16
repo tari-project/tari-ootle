@@ -212,6 +212,8 @@ impl SubstateId {
                     .trailing_bytes()
                     .into();
 
+                // This makes each NFT live on the same shard as the resource (for possible improved efficiency)
+                // TODO: Review whether this is a good idea, as it leads to shard hotspots.
                 ObjectKey::new(addr.resource_address().as_entity_id(), key)
             },
             SubstateId::ClaimedOutputTombstone(addr) => *addr.as_object_key(),

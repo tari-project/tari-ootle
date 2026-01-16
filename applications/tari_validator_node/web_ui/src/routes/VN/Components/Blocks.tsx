@@ -38,8 +38,8 @@ import HeadingMenu from "../../../Components/HeadingMenu";
 import Filter from "../../../Components/Filter";
 import Fade from "@mui/material/Fade";
 import StatusChip from "../../../Components/StatusChip";
-import { Ordering, type Block } from "@tari-project/typescript-bindings";
-import type { VNGetIdentityResponse } from "@tari-project/typescript-bindings";
+import { Ordering, type Block } from "@tari-project/ootle-ts-bindings";
+import type { VNGetIdentityResponse } from "@tari-project/ootle-ts-bindings";
 
 function Blocks() {
   const [blocks, setBlocks] = useState<Block[]>([]);

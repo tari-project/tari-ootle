@@ -1,14 +1,14 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+pub mod helpers;
+
+use helpers::{assert_eq_debug, create_rocksdb};
 use tari_ootle_common_types::{optional::Optional, shard::Shard, ShardGroup};
 use tari_ootle_storage::{StateStore, StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 use tari_state_tree::{NibblePath, Node, NodeKey, StaleTreeNode, StateTreePayload};
 
-use crate::{
-    helpers::{assert_eq_debug, create_rocksdb},
-    TEST_NUM_PRESHARDS,
-};
+use crate::helpers::num_preshards;
 
 #[test]
 fn state_tree_rocksdb() {
@@ -49,14 +49,14 @@ fn state_tree_operations(db: impl StateStore, num_nodes: usize) {
             tx.state_tree_nodes_record_stale_tree_nodes(SHARD, key.version(), vec![stale_node])
                 .unwrap();
         }
-        for shard in ShardGroup::all_shards(TEST_NUM_PRESHARDS).shard_iter() {
+        for shard in ShardGroup::all_shards(num_preshards()).shard_iter() {
             tx.state_tree_shard_versions_set(shard, 100).unwrap();
         }
         Ok::<_, StorageError>(())
     })
     .unwrap();
 
-    db.with_write_tx(|tx| tx.state_tree_nodes_clear_stale(TEST_NUM_PRESHARDS))
+    db.with_write_tx(|tx| tx.state_tree_nodes_clear_stale(num_preshards()))
         .unwrap();
     db.with_read_tx(|tx| {
         // TODO: stale nodes are not cleared currently - implement test once this is done
@@ -69,7 +69,7 @@ fn state_tree_operations(db: impl StateStore, num_nodes: usize) {
             assert!(res.is_some());
         }
 
-        for shard in ShardGroup::all_shards(TEST_NUM_PRESHARDS).shard_iter() {
+        for shard in ShardGroup::all_shards(num_preshards()).shard_iter() {
             let version = tx.state_tree_versions_get_latest(shard).unwrap().expect("version");
             assert_eq!(version, 100);
         }

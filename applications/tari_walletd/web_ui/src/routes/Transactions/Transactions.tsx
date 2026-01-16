@@ -41,7 +41,7 @@ import TransactionsStatusChip from "@components/TransactionsStatusChip";
 import { DataTableCell } from "@components/StyledComponents";
 import { useGetAllTransactions } from "@api/hooks/useTransactions";
 import { emptyRows, handleChangePage, handleChangeRowsPerPage, formatCurrency } from "@utils/helpers";
-import { Account, WalletTransaction } from "@tari-project/typescript-bindings";
+import { Account, WalletTransaction } from "@tari-project/ootle-ts-bindings";
 import TimeChip from "./TimeChip";
 
 export default function Transactions({ account }: { account: Account }) {

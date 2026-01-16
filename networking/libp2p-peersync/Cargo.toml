@@ -17,7 +17,8 @@ blake2 = { workspace = true }
 prometheus-client = { workspace = true, optional = true }
 
 [build-dependencies]
-pb-rs = "0.10.0"
+# default features include very old versions of clap and env_logger, and are not needed for build scripts
+pb-rs = { version = "0.10.0", default-features = false }
 
 [features]
 default = []

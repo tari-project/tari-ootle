@@ -32,7 +32,7 @@ import Select, { SelectChangeEvent } from "@mui/material/Select";
 import Dialog from "./AddAccount";
 import useAccountStore from "@store/accountStore";
 import { useAccountsList } from "@api/hooks/useAccounts";
-import { AccountInfo, substateIdToString } from "@tari-project/typescript-bindings";
+import { AccountInfo, substateIdToString } from "@tari-project/ootle-ts-bindings";
 
 function SelectAccount() {
   const account = useAccountStore((state) => state.account);
@@ -68,11 +68,14 @@ function SelectAccount() {
           labelId="account-select-label"
           id="account-select"
           value={
-            account && dataAccountsList?.accounts.some((info: AccountInfo) => info.account.component_address === account?.component_address)
+            account &&
+            dataAccountsList?.accounts.some(
+              (info: AccountInfo) => info.account.component_address === account?.component_address,
+            )
               ? substateIdToString(account.component_address)
               : dataAccountsList?.accounts.length
-              ? substateIdToString(dataAccountsList.accounts[0].account.component_address)
-              : "addAccount"
+                ? substateIdToString(dataAccountsList.accounts[0].account.component_address)
+                : "addAccount"
           }
           label="Account"
           onChange={handleChange}

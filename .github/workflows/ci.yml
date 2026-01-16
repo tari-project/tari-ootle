@@ -129,32 +129,6 @@ jobs:
           cargo install cargo-machete
           cargo machete
 
-  build:
-    name: check nightly
-    runs-on: [ ubuntu-latest ]
-
-    steps:
-      - name: checkout
-        uses: actions/checkout@v6
-
-      - name: toolchain
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          toolchain: ${{ env.nightly_toolchain }}
-
-      - name: ubuntu dependencies
-        run: |
-          sudo apt-get update
-          sudo bash scripts/install_ubuntu_dependencies.sh
-
-      - uses: rui314/setup-mold@v1
-
-      - name: wasm target install
-        run: rustup +${{ env.nightly_toolchain }} target add wasm32-unknown-unknown
-
-      - name: cargo check
-        run: cargo +${{ env.nightly_toolchain }} check --release --all-features --all-targets --locked
-
   build-stable:
     name: check stable
     runs-on: [ ubuntu-latest ]

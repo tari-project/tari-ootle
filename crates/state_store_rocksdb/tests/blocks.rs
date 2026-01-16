@@ -1,6 +1,9 @@
-//   Copyright 2024 The Tari Project
+//   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+pub mod helpers;
+
+use helpers::{commit_chain, create_chain, create_rocksdb, create_tx_atom};
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{PcId, ShardGroupAccumulatedData};
 use tari_ootle_common_types::{
@@ -22,8 +25,6 @@ use tari_ootle_storage::{
 };
 use tari_template_lib::prelude::SchnorrSignatureBytes;
 use tari_utilities::epoch_time::EpochTime;
-
-use crate::helpers::{commit_chain, create_chain, create_rocksdb, create_tx_atom};
 
 mod basic_block_operations {
     use super::*;

@@ -119,6 +119,15 @@ macro_rules! __call_args_inner {
         $crate::args::__push(&mut $this, $crate::call_arg!(Workspace($e)));
     };
 
+    (@ { $this:ident } WorkspaceOffset($e:expr), $($tail:tt)*) => {
+        $crate::args::__push(&mut $this, $crate::call_arg!(WorkspaceOffset($e)));
+        $crate::__call_args_inner!(@ { $this } $($tail)*);
+    };
+
+    (@ { $this:ident } WorkspaceOffset($e:expr) $(,)?) => {
+        $crate::args::__push(&mut $this, $crate::call_arg!(WorkspaceOffset($e)));
+    };
+
     (@ { $this:ident } Literal($e:expr), $($tail:tt)*) => {
         $crate::args::__push(&mut $this, $crate::call_arg!(Literal($e)));
         $crate::__call_args_inner!(@ { $this } $($tail)*);
@@ -172,7 +181,16 @@ macro_rules! call_arg {
     };
 }
 
-/// Utility macro for building multiple instruction arguments
+/// Utility macro for building multiple raw instruction arguments either from literal values or workspace references
+///
+/// Examples:
+/// ```ignore
+/// #use tari_transaction::args::{call_args, InstructionArg};
+/// let args = call_args![Workspace(1), "literal value", 42u64];
+/// assert_eq!(args[0], InstructionArg::workspace(1, None));
+/// assert!(matches!(args[1], InstructionArg::Literal(_)));
+/// assert!(matches!(args[2], InstructionArg::Literal(_)));
+/// ```
 #[macro_export]
 macro_rules! call_args {
     () => (Vec::new());

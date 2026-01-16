@@ -290,18 +290,17 @@ fn print_summary(summary: &StressTestResultSummary) {
     println!("  Transactions errored: {}", summary.num_errors);
     println!("  Up substates: {}", summary.num_up_substates);
     println!("  Down substates: {}", summary.num_down_substates);
-    println!(
-        "  Total execution time: {:.2?} (slowest: {:.2?}, fastest: {:.2?})",
-        summary.total_execution_time, summary.slowest_execution_time, summary.fastest_execution_time
-    );
+
+    let avg = summary
+        .total_execution_time
+        .as_nanos()
+        .checked_div(summary.num_committed as u128)
+        .map(|n| Duration::from_nanos(n.try_into().unwrap_or(u64::MAX)))
+        .map(|n| format!("{:.2?}", n))
+        .unwrap_or_else(|| "--".to_string());
 
     println!(
-        "  Avg execution time: {}",
-        summary
-            .total_execution_time
-            .as_millis()
-            .checked_div(summary.num_committed as u128)
-            .map(|n| format!("{}ms", n))
-            .unwrap_or_else(|| "--".to_string())
+        "  Total execution time: {:.2?} (slowest: {:.2?}, fastest: {:.2?}, Avg: {avg})",
+        summary.total_execution_time, summary.slowest_execution_time, summary.fastest_execution_time
     );
 }

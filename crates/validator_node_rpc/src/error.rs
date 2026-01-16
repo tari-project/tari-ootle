@@ -3,13 +3,11 @@
 
 use tari_bor::BorError;
 use tari_networking::NetworkingError;
-use tari_ootle_common_types::{optional::IsNotFoundError, PeerAddress};
+use tari_ootle_common_types::optional::IsNotFoundError;
 use tari_rpc_framework::{RpcError, RpcStatus};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ValidatorNodeRpcClientError {
-    #[error("Protocol violations for peer {peer}: {details}")]
-    ProtocolViolation { peer: PeerAddress, details: String },
     #[error("NetworkingError: {0}")]
     NetworkingError(#[from] NetworkingError),
     #[error("RpcError: {0}")]

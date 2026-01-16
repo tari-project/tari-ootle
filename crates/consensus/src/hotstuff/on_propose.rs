@@ -255,6 +255,7 @@ where TConsensusSpec: ConsensusSpec
         start_of_chain_id: &LeafBlock,
         pool_tx: TransactionPoolRecord,
         local_committee_info: &CommitteeInfo,
+        change_set: &ProposedBlockChangeSet,
         substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
         executed_transactions: &mut HashMap<TransactionId, TransactionExecution>,
         lock_conflicts: &mut TransactionLockConflicts,
@@ -264,6 +265,7 @@ where TConsensusSpec: ConsensusSpec
                 start_of_chain_id,
                 pool_tx,
                 local_committee_info,
+                change_set,
                 substate_store,
                 executed_transactions,
                 lock_conflicts,
@@ -273,6 +275,7 @@ where TConsensusSpec: ConsensusSpec
             TransactionPoolStage::LocalPrepared => self.local_accept_transaction(
                 start_of_chain_id,
                 local_committee_info,
+                change_set,
                 pool_tx,
                 substate_store,
                 executed_transactions,
@@ -419,6 +422,7 @@ where TConsensusSpec: ConsensusSpec
                 &start_of_chain_block.as_leaf(),
                 transaction,
                 local_committee_info,
+                &change_set,
                 &mut substate_store,
                 &mut executed_transactions,
                 &mut lock_conflicts,
@@ -594,6 +598,7 @@ where TConsensusSpec: ConsensusSpec
         parent_block: &LeafBlock,
         mut pool_tx: TransactionPoolRecord,
         local_committee_info: &CommitteeInfo,
+        change_set: &ProposedBlockChangeSet,
         substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
         executed_transactions: &mut HashMap<TransactionId, TransactionExecution>,
         lock_conflicts: &mut TransactionLockConflicts,
@@ -606,7 +611,13 @@ where TConsensusSpec: ConsensusSpec
 
         let prepared = self
             .transaction_manager
-            .prepare(substate_store, local_committee_info, &pool_tx, *parent_block)
+            .prepare(
+                substate_store,
+                local_committee_info,
+                &pool_tx,
+                *parent_block,
+                change_set,
+            )
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
 
         if prepared.lock_status().is_any_failed() && !prepared.lock_status().is_hard_conflict() {
@@ -618,6 +629,16 @@ where TConsensusSpec: ConsensusSpec
 
             lock_conflicts.add(*pool_tx.id(), prepared.into_lock_status().into_lock_conflicts());
             return Ok(None);
+        }
+
+        // Update locked epoch if needed
+        if pool_tx.update_locked_epoch(parent_block.epoch()) {
+            info!(
+                target: LOG_TARGET,
+                "🔒 Updated locked epoch for transaction {} to {}",
+                pool_tx.id(),
+                parent_block.epoch(),
+            );
         }
 
         match prepared {
@@ -776,6 +797,7 @@ where TConsensusSpec: ConsensusSpec
         &self,
         parent_block: &LeafBlock,
         local_committee_info: &CommitteeInfo,
+        change_set: &ProposedBlockChangeSet,
         mut tx_rec: TransactionPoolRecord,
         substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
         executed_transactions: &mut HashMap<TransactionId, TransactionExecution>,
@@ -785,9 +807,16 @@ where TConsensusSpec: ConsensusSpec
             return Ok(Some(Command::LocalAccept(tx_rec.get_current_transaction_atom())));
         }
 
+        let locked_epoch = tx_rec.locked_epoch().ok_or_else(|| {
+            HotStuffError::InvariantError(format!(
+                "PROPOSE: local_accept_transaction: Transaction {} is in LocalPrepared stage but has no locked epoch",
+                tx_rec.id(),
+            ))
+        })?;
+
         let tx = substate_store.read_transaction();
         let transaction = tx_rec.get_transaction(tx)?;
-        let execution = self.execute_transaction(tx, parent_block, transaction)?;
+        let execution = self.execute_transaction(tx, parent_block, transaction, change_set, locked_epoch)?;
 
         // Try to lock all local outputs
         let local_outputs = execution
@@ -894,6 +923,8 @@ where TConsensusSpec: ConsensusSpec
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         parent_block: &LeafBlock,
         transaction: TransactionRecord,
+        change_set: &ProposedBlockChangeSet,
+        execution_epoch: Epoch,
     ) -> Result<TransactionExecution, HotStuffError> {
         // Should have been executed already if all inputs are local
         if let Some(execution) =
@@ -907,7 +938,11 @@ where TConsensusSpec: ConsensusSpec
             return Ok(execution.into_transaction_execution());
         }
 
-        let pledged = PledgedTransaction::load_pledges(tx, transaction)?;
+        let mut pledged = PledgedTransaction::load_pledges(tx, transaction)?;
+        let transaction_id = *pledged.id();
+        pledged
+            .foreign_pledges
+            .extend(change_set.get_foreign_pledges(&transaction_id).cloned());
 
         info!(
             target: LOG_TARGET,
@@ -917,7 +952,7 @@ where TConsensusSpec: ConsensusSpec
 
         let executed = self
             .transaction_manager
-            .execute(parent_block.epoch(), pledged)
+            .execute(execution_epoch, pledged)
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
 
         Ok(executed)

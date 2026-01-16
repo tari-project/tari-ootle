@@ -1,4 +1,4 @@
-//   Copyright 2025 The Tari Project
+//   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
 export * from "./types/validator-node-client/ValidatorNodeChange";
@@ -37,10 +37,8 @@ export * from "./types/validator-node-client/GetBlocksResponse";
 export * from "./types/validator-node-client/ListBlocksResponse";
 export * from "./types/validator-node-client/GetBlockRequest";
 export * from "./types/validator-node-client/VNGetTransactionResultRequest";
-export * from "./types/validator-node-client/GetRecentTransactionsRequest";
 export * from "./types/validator-node-client/VNTemplateMetadata";
 export * from "./types/validator-node-client/VNLogLevel";
-export * from "./types/validator-node-client/GetRecentTransactionsResponse";
 export * from "./types/validator-node-client/VNAddPeerResponse";
 export * from "./types/validator-node-client/VNConnection";
 export * from "./types/validator-node-client/ValidatorNode";

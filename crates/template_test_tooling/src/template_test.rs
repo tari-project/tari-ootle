@@ -3,6 +3,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    env,
     ffi::OsStr,
     iter,
     path::Path,
@@ -93,16 +94,28 @@ impl TemplateTest {
     /// The initial balance of a funded account created by `create_funded_account`.
     pub const FUNDED_ACCOUNT_INITIAL_BALANCE: u64 = 1_000_000_000;
 
-    pub fn new<I: IntoIterator<Item = T>, T: Into<TemplateSpec>>(template_paths: I) -> Self {
-        Self::new_internal(template_paths, None::<(String, String)>)
+    pub fn new<P: AsRef<Path>, I: IntoIterator<Item = T>, T: Into<TemplateSpec>>(
+        base_path: P,
+        template_paths: I,
+    ) -> Self {
+        Self::new_internal(base_path, template_paths, iter::empty::<(String, String)>())
+    }
+
+    pub fn new_cwd<I: IntoIterator<Item = T>, T: Into<TemplateSpec>>(template_paths: I) -> Self {
+        Self::new_internal(
+            env::current_dir().expect("cannot get CWD"),
+            template_paths,
+            None::<(String, String)>,
+        )
     }
 
     pub fn new_no_templates() -> Self {
-        Self::new_internal(iter::empty::<TemplateSpec>(), None::<(String, String)>)
+        Self::new(".", iter::empty::<TemplateSpec>())
     }
 
-    pub fn new_with_compile_envs<I, T, TEnvs, K, V>(template_paths: I, envs: TEnvs) -> Self
+    pub fn new_with_compile_envs<P, I, T, TEnvs, K, V>(base_path: P, template_paths: I, envs: TEnvs) -> Self
     where
+        P: AsRef<Path>,
         I: IntoIterator<Item = T>,
         T: Into<TemplateSpec>,
         TEnvs: IntoIterator<Item = (K, V)>,
@@ -110,11 +123,12 @@ impl TemplateTest {
         K: AsRef<OsStr>,
         V: AsRef<OsStr>,
     {
-        Self::new_internal(template_paths, envs)
+        Self::new_internal(base_path, template_paths, envs)
     }
 
-    fn new_internal<I, T, TEnvs, K, V>(templates: I, envs: TEnvs) -> Self
+    fn new_internal<P, I, T, TEnvs, K, V>(base_path: P, templates: I, envs: TEnvs) -> Self
     where
+        P: AsRef<Path>,
         I: IntoIterator<Item = T>,
         T: Into<TemplateSpec>,
         TEnvs: IntoIterator<Item = (K, V)>,
@@ -134,9 +148,10 @@ impl TemplateTest {
 
         // Add all of the templates specified in the argument
         let envs_iter = envs.into_iter();
+        let base_path = base_path.as_ref();
         for template in templates {
             let spec = template.into();
-            builder.add_template_opts(spec.path, &spec.features, envs_iter.clone());
+            builder.add_template_opts(spec.get_path(base_path), &spec.features, envs_iter.clone());
         }
 
         let package = builder.build();
@@ -582,10 +597,12 @@ impl TemplateTest {
         transaction: Transaction,
         mut proofs: Vec<NonFungibleAddress>,
     ) -> Result<ExecuteResult, TransactionError> {
-        let mut modules: Vec<Arc<dyn RuntimeModule>> = vec![Arc::new(self.track_calls.clone())];
+        let mut modules: Vec<Box<dyn RuntimeModule>> = Vec::with_capacity(2);
+
+        modules.push(Box::new(self.track_calls.clone()));
 
         if self.enable_fees {
-            modules.push(Arc::new(FeeModule::new(0, self.fee_table.clone())));
+            modules.push(Box::new(FeeModule::new(0, self.fee_table.clone())));
         }
 
         if self.auto_add_proofs_from_signers {
@@ -605,7 +622,7 @@ impl TemplateTest {
             self.state_store.clone().into_read_only(),
             auth_params,
             self.virtual_substates.clone(),
-            modules,
+            Arc::from(modules.into_boxed_slice()),
             Arc::new(AlwaysPassesProofVerifier),
         );
 

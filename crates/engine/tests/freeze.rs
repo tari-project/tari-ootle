@@ -12,9 +12,11 @@ use tari_template_lib::{
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 use tari_transaction::{args, Transaction};
 
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
 #[test]
 fn it_freezes_vaults_containing_a_freezable_resource() {
-    let mut test = TemplateTest::new(["tests/templates/freeze"]);
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/freeze"]);
     let template = test.get_template_address("Freeze");
     let (account, account_proof, _) = test.create_empty_account();
 

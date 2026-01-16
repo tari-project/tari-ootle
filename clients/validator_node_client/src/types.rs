@@ -251,16 +251,6 @@ pub struct GetTransactionResultResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
-pub struct GetRecentTransactionsRequest {}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
-pub struct GetRecentTransactionsResponse {
-    pub transactions: Vec<Transaction>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
 pub struct ListBlocksRequest {
     /// If provided, `limit` blocks from the specified block back will be returned. Otherwise `limit` blocks from the
     /// leaf block will be provided.

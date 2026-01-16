@@ -1,6 +1,6 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
-import { Memo as TyMemo } from "@tari-project/typescript-bindings";
+import { Memo as TyMemo } from "@tari-project/ootle-ts-bindings";
 import { hexToU8 } from "cbor2/utils";
 import StatusChip, { StatusChipColors } from "@components/StatusChip";
 import CopyAddress from "@components/CopyAddress";

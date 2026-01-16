@@ -1,6 +1,9 @@
-//   Copyright 2025 The Tari Project
+//   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+pub mod helpers;
+
+use helpers::{assert_eq_debug, create_foreign_proposal, create_random_block_id, create_rocksdb};
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::ShardGroupAccumulatedData;
 use tari_ootle_common_types::{Epoch, ExtraData, Network, NodeHeight, NumPreshards, ShardGroup};
@@ -12,8 +15,6 @@ use tari_ootle_storage::{
 };
 use tari_template_lib::prelude::SchnorrSignatureBytes;
 use tari_utilities::epoch_time::EpochTime;
-
-use crate::helpers::{assert_eq_debug, create_foreign_proposal, create_random_block_id, create_rocksdb};
 
 #[test]
 #[allow(clippy::too_many_lines)]

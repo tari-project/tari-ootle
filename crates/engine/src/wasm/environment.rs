@@ -22,8 +22,7 @@
 
 use std::{
     fmt::{Debug, Formatter},
-    ops::Range,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 use tari_template_abi::{TemplateDef, ABI_TEMPLATE_DEF_GLOBAL_NAME};
@@ -53,7 +52,7 @@ pub struct WasmEnv<T> {
     last_engine_error: Arc<Mutex<Option<RuntimeError>>>,
 }
 
-impl<T: Send + 'static> WasmEnv<T> {
+impl<T> WasmEnv<T> {
     pub fn new(state: T) -> Self {
         Self {
             memory: None,
@@ -65,7 +64,7 @@ impl<T: Send + 'static> WasmEnv<T> {
     }
 
     pub(super) fn set_last_panic(&self, message: String) {
-        *self.last_panic.lock().unwrap() = Some(message);
+        *self.last_panic_mut() = Some(message);
     }
 
     pub(super) fn alloc<S: AsStoreMut>(&self, store: &mut S, len: u32) -> Result<WasmPtr<u8>, WasmExecutionError> {
@@ -77,16 +76,24 @@ impl<T: Send + 'static> WasmEnv<T> {
         Ok(ptr)
     }
 
+    fn last_panic_mut(&self) -> MutexGuard<'_, Option<String>> {
+        self.last_panic.lock().expect("last_panic poisoned")
+    }
+
     pub(super) fn take_last_panic_message(&self) -> Option<String> {
-        self.last_panic.lock().unwrap().take()
+        self.last_panic_mut().take()
+    }
+
+    fn last_engine_error_mut(&self) -> MutexGuard<'_, Option<RuntimeError>> {
+        self.last_engine_error.lock().expect("last_engine_error poisoned")
     }
 
     pub(super) fn set_last_engine_error(&self, error: RuntimeError) {
-        *self.last_engine_error.lock().unwrap() = Some(error);
+        *self.last_engine_error_mut() = Some(error);
     }
 
     pub(super) fn take_last_engine_error(&self) -> Option<RuntimeError> {
-        self.last_engine_error.lock().unwrap().take()
+        self.last_engine_error_mut().take()
     }
 
     pub(super) fn load_abi<S: AsStoreMut>(
@@ -102,9 +109,12 @@ impl<T: Send + 'static> WasmEnv<T> {
             .ok_or(WasmExecutionError::ExportError(ExportError::IncompatibleType))? as u32;
 
         // Load ABI from memory
-        let data = self.read_memory_with_embedded_len(store, ptr)?;
-        let decoded = tari_bor::decode(&data).map_err(WasmExecutionError::AbiDecodeError)?;
-        Ok(decoded)
+        // SAFETY: WasmEnv is not used concurrently
+        unsafe {
+            self.with_memory_with_embedded_len(store, ptr, |data| {
+                tari_bor::decode(data).map_err(WasmExecutionError::AbiDecodeError)
+            })?
+        }
     }
 
     pub(super) fn memory_writer<'a, S: AsStoreMut>(
@@ -116,45 +126,89 @@ impl<T: Send + 'static> WasmEnv<T> {
         Ok(MemWriter::new(ptr, view))
     }
 
-    pub(super) fn read_memory_with_embedded_len<S: AsStoreRef>(
-        &self,
-        store: &mut S,
-        offset: u32,
-    ) -> Result<Vec<u8>, WasmExecutionError> {
-        let memory = self.get_memory()?;
-        let view = memory.view(store);
-        let mut buf = [0u8; 4];
-        view.read(u64::from(offset), &mut buf)?;
-
-        let len = u32::from_le_bytes(buf);
-        let start = offset + 4;
-        let data = copy_range_to_vec(&view, start..start + len)?;
-
-        Ok(data)
-    }
-
-    pub(super) fn read_from_memory<S: AsStoreRef>(
+    /// Retrieves a slice of memory at the given pointer and length, and calls the provided callback with that slice.
+    /// Returns an error if the pointer and length are out of memory bounds.
+    ///
+    /// # Safety
+    /// This function provides direct access to the memory slice. The caller must ensure that the memory is not
+    /// modified while the slice is in use.
+    /// It is undefined behaviour to modify the memory contents in any way including by calling a wasm
+    /// function that writes to the memory or by resizing the memory.
+    pub(super) unsafe fn with_memory_slice<S: AsStoreRef, F: FnMut(&[u8]) -> R, R>(
         &self,
         store: &mut S,
         ptr: WasmPtr<u8>,
         len: u32,
-    ) -> Result<Vec<u8>, WasmExecutionError> {
+        mut callback: F,
+    ) -> Result<R, WasmExecutionError> {
         let memory = self.get_memory()?;
         let view = memory.view(store);
-        let mem_size = view.data_size();
-        let ptr_plus_len = ptr
-            .offset()
-            .checked_add(len)
-            .ok_or(WasmExecutionError::MaxMemorySizeExceeded)?;
-        if u64::from(ptr.offset()) >= mem_size || u64::from(ptr_plus_len) >= mem_size {
-            return Err(WasmExecutionError::MemoryPointerOutOfRange {
-                size: mem_size,
+
+        let slice = view.data_unchecked();
+
+        let start = ptr.offset() as usize;
+        let end = start
+            .checked_add(len as usize)
+            .ok_or(WasmExecutionError::MemoryPointerOutOfRange {
+                size: slice.len() as u64,
                 pointer: u64::from(ptr.offset()),
                 len: u64::from(len),
-            });
-        }
-        let data = copy_range_to_vec(&view, ptr.offset()..ptr_plus_len)?;
-        Ok(data)
+            })?;
+
+        let slice = slice
+            .get(start..end)
+            .ok_or(WasmExecutionError::MemoryPointerOutOfRange {
+                size: slice.len() as u64,
+                pointer: u64::from(ptr.offset()),
+                len: u64::from(len),
+            })?;
+
+        Ok(callback(slice))
+    }
+
+    /// Reads the 4-byte length prefix at the given offset and calls the provided callback with the payload slice
+    /// (`offset + 4..offset + 4 + len`) i.e. excluding the length prefix. Returns an error if the length prefix or
+    /// payload is out of memory bounds.
+    ///
+    /// # Safety
+    /// This function provides direct access to the memory slice. The caller must ensure that the memory is not
+    /// modified while the slice is in use.
+    /// It is undefined behaviour to modify the memory contents in any way including by calling a wasm
+    /// function that writes to the memory or by resizing the memory.
+    pub(super) unsafe fn with_memory_with_embedded_len<S: AsStoreRef, F: FnMut(&[u8]) -> R, R>(
+        &self,
+        store: &mut S,
+        offset: u32,
+        mut callback: F,
+    ) -> Result<R, WasmExecutionError> {
+        let memory = self.get_memory()?;
+        let view = memory.view(store);
+        let len = read_len_from_memory(&view, offset)?;
+        let start = offset
+            .checked_add(4)
+            .ok_or(WasmExecutionError::MemoryPointerOutOfRange {
+                size: view.data_size(),
+                pointer: u64::from(offset),
+                len: 4,
+            })?;
+        let end = start
+            .checked_add(len)
+            .ok_or(WasmExecutionError::MemoryPointerOutOfRange {
+                size: view.data_size(),
+                pointer: u64::from(start),
+                len: u64::from(len),
+            })?;
+
+        let slice = view.data_unchecked();
+        let slice = slice
+            .get(start as usize..end as usize)
+            .ok_or(WasmExecutionError::MemoryPointerOutOfRange {
+                size: slice.len() as u64,
+                pointer: u64::from(start),
+                len: u64::from(len),
+            })?;
+
+        Ok(callback(slice))
     }
 
     pub(super) fn memory_size<S: AsStoreRef>(&self, store: &mut S) -> Result<usize, WasmExecutionError> {
@@ -184,7 +238,7 @@ impl<T: Send + 'static> WasmEnv<T> {
     }
 }
 
-impl<T: Clone + Sync + Send> WasmEnv<T> {
+impl<T> WasmEnv<T> {
     pub fn set_memory(&mut self, memory: Memory) -> &mut Self {
         self.memory = Some(memory);
         self
@@ -201,7 +255,7 @@ impl<T: Debug> Debug for WasmEnv<T> {
         f.debug_struct("WasmEnv")
             .field("memory", &"LazyInit<Memory>")
             .field("tari_alloc", &" LazyInit<NativeFunc<(i32), (i32)>")
-            .field("State", &self.state)
+            .field("state", &self.state)
             .finish()
     }
 }
@@ -227,20 +281,8 @@ impl AllocPtr {
     }
 }
 
-/// Copies a range of the memory and returns it as a vector of bytes
-/// This is a u32 version of MemoryView::copy_range_to_vec
-fn copy_range_to_vec(view: &MemoryView, range: Range<u32>) -> Result<Vec<u8>, MemoryAccessError> {
-    let mut new_memory = Vec::new();
-    let mut offset = range.start;
-    let size = u32::try_from(view.data_size()).map_err(|_| MemoryAccessError::Overflow)?;
-    let end = range.end.min(size);
-    let mut chunk = [0u8; 40960];
-    while offset < end {
-        let remaining = end - offset;
-        let sublen = remaining.min(chunk.len() as u32) as usize;
-        view.read(u64::from(offset), chunk.get_mut(..sublen).expect("length checked"))?;
-        new_memory.extend_from_slice(chunk.get(..sublen).expect("length checked"));
-        offset += sublen as u32;
-    }
-    Ok(new_memory)
+fn read_len_from_memory(view: &MemoryView, offset: u32) -> Result<u32, MemoryAccessError> {
+    let mut buf = [0u8; 4];
+    view.read(u64::from(offset), &mut buf)?;
+    Ok(u32::from_le_bytes(buf))
 }

@@ -142,7 +142,6 @@ fn create_table_for_cf<CF: Cf>() -> TableResponse {
         },
         KeyPrefix::Transactions => {
             table.with_columns([
-                Column::new("transaction.V1.id", "Tx Id"),
                 Column::new("transaction.V1.body.transaction.instructions", "Instructions"),
                 Column::new("transaction.V1.body.transaction.fee_instructions", "Fee Instructions"),
                 Column::new("transaction.V1.body.transaction.inputs", "Inputs"),
@@ -193,6 +192,7 @@ fn create_table_for_cf<CF: Cf>() -> TableResponse {
                 Column::new("original_decision", "Original Decision"),
                 Column::new("local_decision", "Local Decision"),
                 Column::new("remote_decision", "Remote Decision"),
+                Column::new("locked_epoch", "Locked Epoch"),
                 Column::new("is_global", "Is Global"),
                 Column::new("is_ready", "Is Ready"),
             ]);
@@ -216,8 +216,11 @@ fn create_table_for_cf<CF: Cf>() -> TableResponse {
 }
 
 fn create_transformer<CF: Cf>() -> Box<dyn Fn(serde_json::Value) -> anyhow::Result<serde_json::Value>> {
-    match CF::key_prefix() {
-        Some(n) if n == KeyPrefix::TransactionPool.as_u8() => Box::new(|mut v| {
+    let Some(prefix) = CF::key_prefix().map(|p| KeyPrefix::from_repr(p).expect("invalid KeyPrefix")) else {
+        return Box::new(Ok);
+    };
+    match prefix {
+        KeyPrefix::TransactionPool => Box::new(|mut v| {
             let stage = v.get("pending_stage").unwrap().as_str().unwrap_or_else(|| {
                 v.get("stage")
                     .unwrap()
@@ -283,7 +286,7 @@ fn create_transformer<CF: Cf>() -> Box<dyn Fn(serde_json::Value) -> anyhow::Resu
             Ok(v)
         }),
 
-        Some(n) if n == KeyPrefix::ProposalCertificates.as_u8() => Box::new(|mut v| {
+        KeyPrefix::ProposalCertificates => Box::new(|mut v| {
             v["num_signatures"] =
                 serde_json::Value::Number(v["signatures"].as_array().map_or(0, |sigs| sigs.len()).into());
             Ok(v)

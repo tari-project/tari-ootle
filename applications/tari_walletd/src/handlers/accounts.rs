@@ -8,10 +8,7 @@ use axum_extra::headers::authorization::Bearer;
 use indexmap::{IndexMap, IndexSet};
 use log::*;
 use rand::rngs::OsRng;
-use tari_crypto::{
-    keys::PublicKey as _,
-    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
-};
+use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
     component::derive_component_address_from_public_key,
     confidential::ClaimBurnOutputData,

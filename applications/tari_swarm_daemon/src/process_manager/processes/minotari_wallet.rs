@@ -108,12 +108,12 @@ impl MinoTariWalletProcess {
                         .map_err(|e| anyhow!("sig parse error {e}"))?,
                 );
 
-                let reciprocal_claim_public_key =
-                    RistrettoPublicKeyBytes::from_bytes(&claim_proof.reciprocal_claim_public_key)
-                        .map_err(|e| anyhow!("reciprocal_claim_public_key parse error {e}"))?;
+                let reciprocal_claim_public_key = RistrettoPublicKeyBytes::from_bytes(&claim_proof.claim_public_key)
+                    .map_err(|e| anyhow!("reciprocal_claim_public_key parse error {e}"))?;
 
-                let sender_offset_public_key = RistrettoPublicKeyBytes::from_bytes(&claim_proof.sender_offset_public_key )
-                    .map_err(|e| anyhow!("sender_offset_public_key parse error {e}"))?;
+                let sender_offset_public_key =
+                    RistrettoPublicKeyBytes::from_bytes(&claim_proof.sender_offset_public_key)
+                        .map_err(|e| anyhow!("sender_offset_public_key parse error {e}"))?;
 
                 let kernel = resp.kernel.ok_or_else(|| anyhow!("No kernel in response"))?;
                 let kernel = AbridgedTransactionKernel {

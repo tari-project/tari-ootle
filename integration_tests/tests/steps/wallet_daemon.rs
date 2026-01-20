@@ -12,7 +12,7 @@ use integration_tests::{
     TariWorld,
 };
 use rand::{rngs::OsRng, Rng};
-use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey, tari_utilities::ByteArray};
+use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_wallet_sdk::models::KeyBranch;
 use tari_template_lib::{

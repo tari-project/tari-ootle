@@ -11,10 +11,7 @@ use minotari_app_grpc::{
     tari_rpc::{GetBalanceRequest, SubmitValidatorEvictionProofRequest, ValidateRequest},
 };
 use serde_json;
-use tari_engine_types::{
-    confidential::{AbridgedTransactionKernel, EncodedMerkleProof, MinotariBurnClaimProof},
-    FromByteType,
-};
+use tari_engine_types::confidential::{AbridgedTransactionKernel, EncodedMerkleProof, MinotariBurnClaimProof};
 use tari_ootle_wallet_sdk::models::KeyBranch;
 use tari_template_lib::{
     prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
@@ -121,8 +118,6 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
 
     let mut client = wallet.create_client().await;
 
-    const ATTEMPTS: usize = 60;
-    let mut remaining_attempts = ATTEMPTS;
     loop {
         let resp = client
             .get_burn_claim_proof(tari_rpc::GetBurnClaimProofRequest {
@@ -132,15 +127,6 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
             .unwrap()
             .into_inner();
 
-        // let Some(merkle_proof) = resp.merkle_proof else {
-        //     integration_tests::cucumber_log!("Proof not yet confirmed, waiting...");
-        //     if remaining_attempts == 0 {
-        //         panic!("Proof not confirmed after maximum ({ATTEMPTS}) attempts");
-        //     }
-        //     remaining_attempts -= 1;
-        //     sleep(Duration::from_secs(1)).await;
-        //     continue;
-        // };
         cucumber_log!("Received burn claim proof response: {:?}", resp);
 
         // Now that the proof is confirmed, call the base node HTTP endpoint to get kernel merkle proof

@@ -14,7 +14,6 @@ use chacha20poly1305::{
     XNonce,
 };
 use digest::FixedOutput;
-use log::info;
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
     hashing::DomainSeparatedHasher,

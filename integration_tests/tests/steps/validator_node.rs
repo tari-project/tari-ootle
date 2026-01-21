@@ -10,7 +10,8 @@ use std::{
 use cucumber::{gherkin::Step, given, then, when};
 use integration_tests::{
     base_node::get_base_node_client,
-    cucumber_log, template,
+    cucumber_log,
+    template,
     template::{send_template_registration, RegisteredTemplate},
     validator_node::{spawn_validator_node, ValidatorNodeProcess},
     TariWorld,
@@ -22,13 +23,20 @@ use notify::Watcher;
 use tari_base_node_client::{grpc::GrpcBaseNodeClient, BaseNodeClient};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_ootle_common_types::{
-    layer_one_transaction::LayerOneTransactionDef, optional::Optional, Epoch, SubstateAddress,
+    layer_one_transaction::LayerOneTransactionDef,
+    optional::Optional,
+    Epoch,
+    SubstateAddress,
 };
 use tari_ootle_storage::Ordering;
 use tari_sidechain::EvictionProof;
 use tari_transaction_components::transaction_components::{memo_field::TxType, MemoField};
 use tari_validator_node_client::types::{
-    AddPeerRequest, GetBlocksRequest, GetStateRequest, GetTemplateRequest, ListBlocksRequest,
+    AddPeerRequest,
+    GetBlocksRequest,
+    GetStateRequest,
+    GetTemplateRequest,
+    ListBlocksRequest,
 };
 use tokio::{sync::mpsc, time::timeout};
 use tonic::codegen::tokio_stream::StreamExt;
@@ -575,8 +583,8 @@ async fn when_block_height(world: &mut TariWorld, step: &Step, vn_name: String, 
             .unwrap()
             .blocks[0]
             .height()
-            .as_u64()
-            >= height
+            .as_u64() >=
+            height
         {
             return;
         }

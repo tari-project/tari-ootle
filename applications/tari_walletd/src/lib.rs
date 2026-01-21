@@ -35,7 +35,11 @@ use blake2::Blake2b;
 use digest::{consts::U64, FixedOutput};
 use log::*;
 use tari_common_types::seeds::seed_words::SeedWords;
-use tari_crypto::{hashing::DomainSeparatedHasher, keys::SecretKey, ristretto::{RistrettoPublicKey, RistrettoSecretKey}};
+use tari_crypto::{
+    hashing::DomainSeparatedHasher,
+    keys::SecretKey,
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+};
 use tari_hashing::WalletOutputEncryptionKeysDomain;
 use tari_ootle_app_utilities::genesis_resources::{get_public_identity_resource, get_stealth_tari_resource};
 use tari_ootle_common_types::{optional::Optional, Network, NumPreshards};

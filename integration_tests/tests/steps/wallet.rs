@@ -10,7 +10,6 @@ use minotari_app_grpc::{
     tari_rpc,
     tari_rpc::{GetBalanceRequest, SubmitValidatorEvictionProofRequest, ValidateRequest},
 };
-use serde_json;
 use tari_engine_types::confidential::{AbridgedTransactionKernel, EncodedMerkleProof, MinotariBurnClaimProof};
 use tari_ootle_wallet_sdk::models::KeyBranch;
 use tari_template_lib::{
@@ -118,139 +117,134 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
 
     let mut client = wallet.create_client().await;
 
-    loop {
-        let resp = client
-            .get_burn_claim_proof(tari_rpc::GetBurnClaimProofRequest {
-                commitment: commitment.as_bytes().to_vec(),
-            })
-            .await
-            .unwrap()
-            .into_inner();
+    let resp = client
+        .get_burn_claim_proof(tari_rpc::GetBurnClaimProofRequest {
+            commitment: commitment.as_bytes().to_vec(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
 
-        cucumber_log!("Received burn claim proof response: {:?}", resp);
+    cucumber_log!("Received burn claim proof response: {:?}", resp);
 
-        // Now that the proof is confirmed, call the base node HTTP endpoint to get kernel merkle proof
-        integration_tests::cucumber_log!(
-            "Proof confirmed! Now calling base node HTTP endpoint to get kernel merkle proof"
-        );
+    // Now that the proof is confirmed, call the base node HTTP endpoint to get kernel merkle proof
+    integration_tests::cucumber_log!("Proof confirmed! Now calling base node HTTP endpoint to get kernel merkle proof");
 
-        let base_node = world.base_nodes.values().next().expect("No base node found");
+    let base_node = world.base_nodes.values().next().expect("No base node found");
 
-        let http_client = reqwest::Client::new();
-        let url = format!(
-            "http://127.0.0.1:{}/generate_kernel_merkle_proof?excess_sig_public_nonce={}&excess_sig_signature={}",
-            base_node.http_port,
-            hex::encode(kernel_excess_sig_nonce),
-            hex::encode(kernel_excess_sig_signature)
-        );
+    let http_client = reqwest::Client::new();
+    let url = format!(
+        "http://127.0.0.1:{}/generate_kernel_merkle_proof?excess_sig_public_nonce={}&excess_sig_signature={}",
+        base_node.http_port,
+        hex::encode(kernel_excess_sig_nonce),
+        hex::encode(kernel_excess_sig_signature)
+    );
 
-        integration_tests::cucumber_log!("Calling base node HTTP endpoint: {}", url);
+    integration_tests::cucumber_log!("Calling base node HTTP endpoint: {}", url);
 
-        let mut merkle_proof: Option<EncodedMerkleProof> = None;
-        match http_client.get(&url).send().await {
-            Ok(response) => {
-                if response.status().is_success() {
-                    let proof_response = response.text().await.unwrap();
-                    integration_tests::cucumber_log!("SUCCESS! Kernel merkle proof response: {}", proof_response);
-                    merkle_proof = Some(
-                        serde_json::from_str(&proof_response)
-                            .map_err(|e| anyhow!("Failed to deserialize merkle proof: {e}"))?,
-                    );
-                } else {
-                    let status = response.status();
-                    let error_text = response.text().await.unwrap_or_default();
-                    integration_tests::cucumber_log!(
-                        "WARNING: Failed to get kernel merkle proof (status: {}): {}",
-                        status,
-                        error_text
-                    );
-                }
-            },
-            Err(e) => {
-                integration_tests::cucumber_log!("ERROR: Failed to call kernel merkle proof endpoint: {}", e);
-            },
-        }
-        if merkle_proof.is_none() {
-            panic!("Kernel merkle proof not found");
-        }
-        let merkle_proof = merkle_proof.unwrap();
-
-        let claim_proof = resp.claim_proof.ok_or_else(|| anyhow!("No claim proof in response"))?;
-        let ownership_proof = claim_proof
-            .ownership_proof
-            .ok_or_else(|| anyhow!("No ownership proof in response"))?;
-        let commitment = PedersenCommitmentBytes::from_bytes(&claim_proof.commitment)
-            .map_err(|e| anyhow!("commitment parse error: {e}"))?;
-
-        let ownership_proof = SchnorrSignatureBytes::new(
-            RistrettoPublicKeyBytes::from_bytes(&ownership_proof.public_nonce)
-                .map_err(|e| anyhow!("sig public_nonce parse error {e}"))?,
-            Scalar32Bytes::from_bytes(&ownership_proof.signature).map_err(|e| anyhow!("sig parse error {e}"))?,
-        );
-
-        let reciprocal_claim_public_key = RistrettoPublicKeyBytes::from_bytes(&claim_proof.claim_public_key)
-            .map_err(|e| anyhow!("reciprocal_claim_public_key parse error {e}"))?;
-
-        let sender_offset_public_key = RistrettoPublicKeyBytes::from_bytes(&claim_proof.sender_offset_public_key)
-            .map_err(|e| anyhow!("sender_offset_public_key parse error {e}"))?;
-
-        let kernel = resp.kernel.ok_or_else(|| anyhow!("No kernel in response"))?;
-        let kernel = AbridgedTransactionKernel {
-            version: kernel.version as u8,
-            fee: kernel.fee,
-            lock_height: kernel.lock_height,
-            excess: kernel
-                .excess
-                .as_slice()
-                .try_into()
-                .map_err(|e| anyhow!("excess parse error: {e}"))?,
-            excess_sig: {
-                let excess_sig = kernel
-                    .excess_sig
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("No excess_sig in response"))?;
-
-                SchnorrSignatureBytes::new(
-                    excess_sig
-                        .public_nonce
-                        .as_slice()
-                        .try_into()
-                        .map_err(|e| anyhow!("excess_sig parse error: {e}"))?,
-                    excess_sig
-                        .signature
-                        .as_slice()
-                        .try_into()
-                        .map_err(|e| anyhow!("excess_sig parse error: {e}"))?,
-                )
-            },
-        };
-
-        integration_tests::cucumber_log!(
-            "DEBUG: creating confirmed proof. commitment: {}, encrypted_data: {}, reciprocal_key: {}",
-            commitment,
-            hex::encode(&resp.encrypted_data),
-            reciprocal_claim_public_key
-        );
-        let proof = ClaimBurnProof {
-            claim_proof: MinotariBurnClaimProof {
-                burn_public_key: reciprocal_claim_public_key,
-                commitment,
-                ownership_proof,
-                encoded_merkle_proof: merkle_proof,
-                kernel,
-                value: resp.value,
-                sender_offset_public_key,
-            },
-            owner_nonce_key_index: *nonce_id,
-            encrypted_data: EncryptedData::try_from(resp.encrypted_data)
-                .map_err(|e| anyhow!("Encrypted data length is out of bounds: {e}",))?,
-        };
-
-        world.claim_proofs.insert(proof_name, CucumberClaimProof::Confirmed {
-            proof: Box::new(proof.clone()),
-        });
-        break;
+    let mut merkle_proof: Option<EncodedMerkleProof> = None;
+    match http_client.get(&url).send().await {
+        Ok(response) => {
+            if response.status().is_success() {
+                let proof_response = response.text().await.unwrap();
+                integration_tests::cucumber_log!("SUCCESS! Kernel merkle proof response: {}", proof_response);
+                merkle_proof = Some(
+                    serde_json::from_str(&proof_response)
+                        .map_err(|e| anyhow!("Failed to deserialize merkle proof: {e}"))?,
+                );
+            } else {
+                let status = response.status();
+                let error_text = response.text().await.unwrap_or_default();
+                integration_tests::cucumber_log!(
+                    "WARNING: Failed to get kernel merkle proof (status: {}): {}",
+                    status,
+                    error_text
+                );
+            }
+        },
+        Err(e) => {
+            integration_tests::cucumber_log!("ERROR: Failed to call kernel merkle proof endpoint: {}", e);
+        },
     }
+    if merkle_proof.is_none() {
+        panic!("Kernel merkle proof not found");
+    }
+    let merkle_proof = merkle_proof.unwrap();
+
+    let claim_proof = resp.claim_proof.ok_or_else(|| anyhow!("No claim proof in response"))?;
+    let ownership_proof = claim_proof
+        .ownership_proof
+        .ok_or_else(|| anyhow!("No ownership proof in response"))?;
+    let commitment = PedersenCommitmentBytes::from_bytes(&claim_proof.commitment)
+        .map_err(|e| anyhow!("commitment parse error: {e}"))?;
+
+    let ownership_proof = SchnorrSignatureBytes::new(
+        RistrettoPublicKeyBytes::from_bytes(&ownership_proof.public_nonce)
+            .map_err(|e| anyhow!("sig public_nonce parse error {e}"))?,
+        Scalar32Bytes::from_bytes(&ownership_proof.signature).map_err(|e| anyhow!("sig parse error {e}"))?,
+    );
+
+    let reciprocal_claim_public_key = RistrettoPublicKeyBytes::from_bytes(&claim_proof.claim_public_key)
+        .map_err(|e| anyhow!("reciprocal_claim_public_key parse error {e}"))?;
+
+    let sender_offset_public_key = RistrettoPublicKeyBytes::from_bytes(&claim_proof.sender_offset_public_key)
+        .map_err(|e| anyhow!("sender_offset_public_key parse error {e}"))?;
+
+    let kernel = resp.kernel.ok_or_else(|| anyhow!("No kernel in response"))?;
+    let kernel = AbridgedTransactionKernel {
+        version: kernel.version as u8,
+        fee: kernel.fee,
+        lock_height: kernel.lock_height,
+        excess: kernel
+            .excess
+            .as_slice()
+            .try_into()
+            .map_err(|e| anyhow!("excess parse error: {e}"))?,
+        excess_sig: {
+            let excess_sig = kernel
+                .excess_sig
+                .as_ref()
+                .ok_or_else(|| anyhow!("No excess_sig in response"))?;
+
+            SchnorrSignatureBytes::new(
+                excess_sig
+                    .public_nonce
+                    .as_slice()
+                    .try_into()
+                    .map_err(|e| anyhow!("excess_sig parse error: {e}"))?,
+                excess_sig
+                    .signature
+                    .as_slice()
+                    .try_into()
+                    .map_err(|e| anyhow!("excess_sig parse error: {e}"))?,
+            )
+        },
+    };
+
+    integration_tests::cucumber_log!(
+        "DEBUG: creating confirmed proof. commitment: {}, encrypted_data: {}, reciprocal_key: {}",
+        commitment,
+        hex::encode(&resp.encrypted_data),
+        reciprocal_claim_public_key
+    );
+    let proof = ClaimBurnProof {
+        claim_proof: MinotariBurnClaimProof {
+            burn_public_key: reciprocal_claim_public_key,
+            commitment,
+            ownership_proof,
+            encoded_merkle_proof: merkle_proof,
+            kernel,
+            value: resp.value,
+            sender_offset_public_key,
+        },
+        owner_nonce_key_index: *nonce_id,
+        encrypted_data: EncryptedData::try_from(resp.encrypted_data)
+            .map_err(|e| anyhow!("Encrypted data length is out of bounds: {e}",))?,
+    };
+
+    world.claim_proofs.insert(proof_name, CucumberClaimProof::Confirmed {
+        proof: Box::new(proof.clone()),
+    });
 
     Ok(())
 }

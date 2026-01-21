@@ -20,6 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::error::Error;
+
 use tari_engine_types::{commit_result::RejectReason, indexed_value::IndexedValueError};
 use tari_template_lib::{
     models::ComponentAddress,
@@ -28,8 +30,75 @@ use tari_template_lib::{
 
 use crate::{runtime::RuntimeError, template::TemplateLoaderError, wasm::WasmExecutionError};
 
+#[derive(Debug)]
+pub struct TransactionError {
+    instruction_idx: Option<usize>,
+    kind: Box<TransactionErrorKind>,
+}
+
+impl TransactionError {
+    pub(crate) fn new(instruction_num: usize, variant: TransactionErrorKind) -> Self {
+        Self {
+            instruction_idx: Some(instruction_num),
+            kind: Box::new(variant),
+        }
+    }
+
+    pub fn instruction_num(&self) -> Option<usize> {
+        self.instruction_idx
+    }
+
+    pub fn kind(&self) -> &TransactionErrorKind {
+        &self.kind
+    }
+
+    pub fn to_reject_reason(&self) -> RejectReason {
+        match &*self.kind {
+            TransactionErrorKind::RuntimeError(err) => err.to_reject_reason(self.instruction_idx),
+            TransactionErrorKind::WasmExecutionError(WasmExecutionError::RuntimeError(err)) => {
+                err.to_reject_reason(self.instruction_idx)
+            },
+            _ => RejectReason::ExecutionFailure(self.to_string()),
+        }
+    }
+}
+
+impl std::fmt::Display for TransactionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(idx) = self.instruction_idx {
+            write!(f, "At instruction #{}: {}", idx, self.kind)
+        } else {
+            write!(f, "{}", self.kind)
+        }
+    }
+}
+
+impl Error for TransactionError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.kind)
+    }
+}
+
+impl From<RuntimeError> for TransactionError {
+    fn from(variant: RuntimeError) -> Self {
+        Self {
+            instruction_idx: None,
+            kind: Box::new(variant.into()),
+        }
+    }
+}
+
+impl From<TransactionErrorKind> for TransactionError {
+    fn from(variant: TransactionErrorKind) -> Self {
+        Self {
+            instruction_idx: None,
+            kind: Box::new(variant),
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
-pub enum TransactionError {
+pub enum TransactionErrorKind {
     #[error(transparent)]
     WasmExecutionError(#[from] WasmExecutionError),
     #[error("Template not found at address {address}")]
@@ -63,14 +132,4 @@ pub enum TransactionError {
         component_address: ComponentAddress,
         details: String,
     },
-}
-
-impl TransactionError {
-    pub fn to_reject_reason(&self) -> RejectReason {
-        match self {
-            Self::RuntimeError(err) => err.to_reject_reason(),
-            Self::WasmExecutionError(WasmExecutionError::RuntimeError(err)) => err.to_reject_reason(),
-            _ => RejectReason::ExecutionFailure(self.to_string()),
-        }
-    }
 }

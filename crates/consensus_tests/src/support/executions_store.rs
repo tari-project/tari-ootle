@@ -9,7 +9,7 @@ use std::{
 use tari_consensus_types::Decision;
 use tari_engine_types::{substate::SubstateId, ValidatorFeeWithdrawal};
 use tari_ootle_common_types::SubstateLockType;
-use tari_transaction::{Transaction, TransactionId};
+use tari_ootle_transaction::{Transaction, TransactionId};
 
 type TestExecutionOutputMap = HashMap<TransactionId, ExecuteSpec>;
 

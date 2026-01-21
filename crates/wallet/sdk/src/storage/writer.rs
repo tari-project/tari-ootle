@@ -8,11 +8,11 @@ use tari_engine_types::{
     substate::{SubstateDiff, SubstateId},
 };
 use tari_ootle_common_types::{shard::Shard, Epoch, StateVersion, VersionedSubstateIdRef};
+use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_template_lib::{
     models::{ComponentAddress, NonFungibleId, ResourceAddress, UtxoAddress, UtxoId, VaultId},
     prelude::{crypto::UtxoTag, Amount, PedersenCommitmentBytes, RistrettoPublicKeyBytes, TemplateAddress},
 };
-use tari_transaction::{Transaction, TransactionId};
 use webauthn_rs::prelude::Passkey;
 
 use crate::{

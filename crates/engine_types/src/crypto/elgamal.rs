@@ -3,6 +3,7 @@
 
 use borsh::BorshSerialize;
 use log::info;
+use ootle_byte_type::{ConvertFromByteType, ToByteType};
 use tari_bor::{Deserialize, Serialize};
 use tari_common_types::types::PrivateKey;
 use tari_crypto::{
@@ -17,8 +18,6 @@ use tari_template_lib::{models::ViewableBalanceProof, types::crypto::RistrettoPu
 use crate::{
     crypto::{get_commitment_factory, messages, value_lookup_table::ValueLookupTable},
     resource_container::ResourceError,
-    ConvertFromByteType,
-    ToByteType,
 };
 
 const LOG_TARGET: &str = "tari::ootle::engine_types::crypto::elgamal";

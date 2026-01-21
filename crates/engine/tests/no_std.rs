@@ -2,9 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::indexed_value::IndexedValue;
+use tari_ootle_transaction::{args, Transaction};
 use tari_template_lib::models::ComponentAddress;
 use tari_template_test_tooling::TemplateTest;
-use tari_transaction::{args, Transaction};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 

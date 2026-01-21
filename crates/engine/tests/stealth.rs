@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 
+use ootle_byte_type::ToByteType;
 use rand::rngs::OsRng;
 use tari_common_types::types::PrivateKey;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey, ristretto::RistrettoPublicKey};
@@ -10,10 +11,10 @@ use tari_engine::runtime::{ActionIdent, NativeAction};
 use tari_engine_types::{
     crypto::{get_commitment_factory, ElgamalVerifiableBalance, ValueLookupTable},
     resource_container::ResourceError,
-    ToByteType,
     UtxoOutput,
 };
 use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType};
+use tari_ootle_transaction::{args, call_args, Transaction};
 use tari_template_lib::{
     auth::AccessRule,
     models::{ComponentAddress, ResourceAddress, SpendCondition, UtxoAddress, UtxoId},
@@ -30,7 +31,6 @@ use tari_template_test_tooling::{
     wallet_crypto::MaskAndValue,
     TemplateTest,
 };
-use tari_transaction::{args, call_args, Transaction};
 
 const TEMPLATE_PATHS: &[&str] = &["tests/templates/stealth"];
 const TEMPLATE_NAME: &str = "StealthFaucet";

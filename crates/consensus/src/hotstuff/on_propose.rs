@@ -8,10 +8,11 @@ use std::{
 };
 
 use log::*;
+use ootle_byte_type::ToByteType;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{Decision, HighPc, HighestSeenBlock, LeafBlock, ProposalCertificate, TimeoutCertificate};
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
-use tari_engine_types::{commit_result::RejectReason, ToByteType};
+use tari_engine_types::commit_result::RejectReason;
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     committee::CommitteeInfo,
@@ -43,8 +44,8 @@ use tari_ootle_storage::{
     },
     StateStore,
 };
+use tari_ootle_transaction::TransactionId;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
-use tari_transaction::TransactionId;
 use tokio::task;
 
 use crate::{

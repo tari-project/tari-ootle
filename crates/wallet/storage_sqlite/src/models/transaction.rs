@@ -6,11 +6,11 @@ use std::{str::FromStr, time::Duration};
 use diesel::Identifiable;
 use log::*;
 use tari_ootle_common_types::displayable::Displayable;
+use tari_ootle_transaction::Transaction;
 use tari_ootle_wallet_sdk::{
     models::{TransactionStatus, WalletTransaction},
     storage::WalletStorageError,
 };
-use tari_transaction::Transaction;
 use time::PrimitiveDateTime;
 
 use crate::{

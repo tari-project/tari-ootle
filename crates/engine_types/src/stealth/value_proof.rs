@@ -1,6 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use ootle_byte_type::FromByteType;
 use tari_crypto::{
     keys::PublicKey,
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
@@ -17,7 +18,6 @@ use tari_template_lib::{
 use crate::{
     crypto::{commit_amount, convert_amount_to_secret, messages, ElgamalVerifiableBalanceBytes},
     resource_container::ResourceError,
-    FromByteType,
 };
 
 pub fn validate_value_proof(
@@ -104,12 +104,12 @@ pub fn validate_value_proof(
 
 #[cfg(test)]
 mod tests {
+    use ootle_byte_type::ToByteType;
     use rand::rngs::OsRng;
     use tari_crypto::keys::SecretKey;
     use tari_template_lib::types::crypto::{StealthValueProof, ValueKnowledgeProof};
 
     use super::*;
-    use crate::ToByteType;
 
     #[test]
     fn it_proves_knowledge_of_the_value() {

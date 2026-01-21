@@ -32,7 +32,6 @@ use tari_template_lib::{
 use crate::{
     hashing::{hasher32, EngineHashDomainLabel},
     indexed_value::{IndexedValueError, IndexedWellKnownTypes},
-    serde_with,
     substate::SubstateId,
 };
 
@@ -108,7 +107,7 @@ impl ComponentHeader {
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ComponentBody {
-    #[serde(with = "serde_with::cbor_value")]
+    #[serde(with = "ootle_serde::cbor_value")]
     #[cfg_attr(feature = "ts", ts(type = "any"))]
     #[borsh(serialize_with = "crate::borsh::serialize_cbor_value")]
     pub state: tari_bor::Value,

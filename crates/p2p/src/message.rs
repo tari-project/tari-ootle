@@ -4,7 +4,7 @@
 use std::fmt::{Display, Formatter};
 
 use serde::Serialize;
-use tari_transaction::Transaction;
+use tari_ootle_transaction::Transaction;
 
 #[derive(Debug, Clone, Serialize)]
 pub enum TariMessage {

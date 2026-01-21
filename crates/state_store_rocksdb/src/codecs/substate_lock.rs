@@ -8,7 +8,7 @@ use tari_common_types::types::FixedHash;
 use tari_consensus_types::BlockId;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::NodeHeight;
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 
 use crate::{
     codecs::{DbCodec, SubstateIdCodec},

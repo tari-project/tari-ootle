@@ -98,7 +98,6 @@ pub enum ValidatorNodeChange {
     },
 }
 
-#[cfg(feature = "service")]
 impl TryFrom<minotari_app_grpc::tari_rpc::ValidatorNodeChange> for ValidatorNodeChange {
     type Error = anyhow::Error;
 

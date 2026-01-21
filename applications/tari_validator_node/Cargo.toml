@@ -32,7 +32,7 @@ tari_state_store_rocksdb = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_shutdown = { workspace = true }
 tari_template_lib = { workspace = true }
-tari_transaction = { workspace = true }
+tari_ootle_transaction = { workspace = true }
 tari_validator_node_client = { workspace = true }
 tari_base_node_client = { workspace = true }
 tari_epoch_manager = { workspace = true, features = ["service"] }
@@ -45,6 +45,7 @@ tari_rpc_framework = { workspace = true }
 tari_template_builtin = { workspace = true }
 tari_swarm = { workspace = true }
 tari_state_tree = { workspace = true }
+ootle_byte_type = { workspace = true, features = ["crypto"] }
 
 sqlite_message_logger = { workspace = true }
 

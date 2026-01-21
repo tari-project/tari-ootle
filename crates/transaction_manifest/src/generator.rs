@@ -5,12 +5,12 @@ use std::collections::HashMap;
 
 use proc_macro2::Ident;
 use tari_engine_types::substate::SubstateId;
-use tari_template_lib::types::TemplateAddress;
-use tari_transaction::{
+use tari_ootle_transaction::{
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
     call_arg,
     Instruction,
 };
+use tari_template_lib::types::TemplateAddress;
 
 use crate::{
     ast::ManifestAst,

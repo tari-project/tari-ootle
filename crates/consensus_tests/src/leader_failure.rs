@@ -3,10 +3,10 @@
 
 use std::time::{Duration, Instant};
 
+use ootle_byte_type::ToByteType;
 use tari_consensus::hotstuff::HotStuffError;
 use tari_consensus_types::Decision;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_engine_types::ToByteType;
 use tari_ootle_common_types::{Epoch, NodeHeight};
 use tari_ootle_storage::{StateStore, StateStoreReadTransaction};
 

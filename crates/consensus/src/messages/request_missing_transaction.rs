@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use serde::Serialize;
 use tari_consensus_types::BlockId;
 use tari_ootle_common_types::Epoch;
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MissingTransactionsRequest {

@@ -4,14 +4,15 @@
 use std::ops::RangeInclusive;
 
 use log::info;
-use tari_engine_types::{indexed_value::IndexedWellKnownTypes, ToByteType};
+use ootle_byte_type::ToByteType;
+use tari_engine_types::indexed_value::IndexedWellKnownTypes;
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
+use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::models::{Account, KeyBranch, KeyId};
 use tari_template_lib::{
     constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
     prelude::ResourceType,
 };
-use tari_transaction::args;
 
 use crate::{faucet::Faucet, runner::Runner};
 

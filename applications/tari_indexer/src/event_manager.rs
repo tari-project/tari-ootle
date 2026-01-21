@@ -22,7 +22,7 @@
 
 use log::*;
 use tari_engine_types::{events::Event, substate::SubstateId};
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 
 use crate::{
     storage_sqlite::SqliteIndexerStore,

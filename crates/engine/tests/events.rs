@@ -2,10 +2,10 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine::runtime::RuntimeError;
+use tari_ootle_transaction::{args, call_args, Instruction, Transaction};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{models::ComponentAddress, types::Amount};
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
-use tari_transaction::{args, call_args, Instruction, Transaction};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 

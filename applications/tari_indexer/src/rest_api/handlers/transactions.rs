@@ -8,7 +8,6 @@ use axum::{
     Json,
 };
 use log::*;
-use tari_consensus_types::Decision;
 use tari_indexer_client::types::{
     GetTransactionResultResponse,
     IndexerTransactionFinalizedResult,
@@ -19,10 +18,9 @@ use tari_indexer_client::types::{
     SubmitTransactionResponse,
 };
 use tari_ootle_common_types::optional::Optional;
+use tari_ootle_transaction::TransactionId;
 use tari_rpc_framework::RpcStatusCode;
-use tari_transaction::TransactionId;
 use tari_validator_node_rpc::client::TransactionResultStatus;
-use time::{OffsetDateTime, PrimitiveDateTime};
 
 use crate::{
     network_client::NetworkClientError,
@@ -42,14 +40,17 @@ pub async fn submit_transaction(
     Json(req): Json<SubmitTransactionRequest>,
 ) -> HandlerResult<Json<SubmitTransactionResponse>> {
     let request: SubmitTransactionRequest = req;
+    let transaction = request
+        .transaction
+        .decode()
+        .map_err(|e| ErrorResponse::bad_request(format!("Failed to decode transaction: {}", e)))?;
 
-    if request.transaction.is_dry_run() {
+    if transaction.is_dry_run() {
         return Err(ErrorResponse::bad_request(
             "Dry-run transactions must be submitted to the /transactions/dry-run endpoint".to_string(),
         ));
     }
 
-    let transaction = request.transaction;
     let transaction_id = context
         .transaction_manager()
         .submit_transaction(transaction)
@@ -102,34 +103,30 @@ pub async fn submit_transaction_dry_run(
     Json(req): Json<SubmitTransactionRequest>,
 ) -> HandlerResult<Json<SubmitTransactionDryRunResponse>> {
     let request: SubmitTransactionRequest = req;
+    let transaction = request
+        .transaction
+        .decode()
+        .map_err(|e| ErrorResponse::bad_request(format!("Failed to decode transaction: {}", e)))?;
 
-    if !request.transaction.is_dry_run() {
+    if !transaction.is_dry_run() {
         return Err(ErrorResponse::bad_request(
             "Non-dry-run transactions must be submitted to the /transactions endpoint".to_string(),
         ));
     }
-    let transaction_id = request.transaction.calculate_id();
+    // NOTE that we do not validate the signatures for dry-run transactions. Invalid signatures are permissable for
+    // dry-runs.
+
+    let transaction_id = transaction.calculate_id();
     let exec_result = context
         .dry_run_transaction_processor()
-        .process_transaction(request.transaction)
+        .process_transaction(transaction)
         .await
         .map_err(ErrorResponse::anyhow)?;
 
     Ok(Json(SubmitTransactionDryRunResponse {
-        result: IndexerTransactionFinalizedResult::Finalized {
-            execution_result: Some(Box::new(exec_result)),
-            final_decision: Decision::Commit,
-            abort_details: None,
-            finalized_time: now(),
-            execution_time: Default::default(),
-        },
+        result: exec_result,
         transaction_id,
     }))
-}
-
-fn now() -> PrimitiveDateTime {
-    let now = OffsetDateTime::now_utc();
-    PrimitiveDateTime::new(now.date(), now.time())
 }
 
 #[utoipa::path(get, path = "/transactions/recent", description = "List recent transactions")]

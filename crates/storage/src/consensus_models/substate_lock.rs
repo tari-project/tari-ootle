@@ -12,7 +12,7 @@ use tari_ootle_common_types::{
     SubstateRequirementRef,
     ToSubstateAddress,
 };
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 
 use crate::{consensus_models::RequireLockIntentRef, StateStoreReadTransaction, StorageError};
 

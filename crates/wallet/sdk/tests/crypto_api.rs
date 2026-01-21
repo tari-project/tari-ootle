@@ -9,7 +9,7 @@ use tari_crypto::{
     ristretto::RistrettoPublicKey,
     tari_utilities::ByteArray,
 };
-use tari_engine_types::{crypto::get_commitment_factory, ToByteType};
+use tari_engine_types::crypto::get_commitment_factory;
 use tari_ootle_common_types::Network;
 use tari_ootle_wallet_crypto::memo::Memo;
 use tari_ootle_wallet_sdk::apis::stealth_crypto::StealthCryptoApi;
@@ -60,6 +60,7 @@ mod stealth_address {
 }
 
 mod encrypted_data {
+    use ootle_byte_type::ToByteType;
 
     use super::*;
 

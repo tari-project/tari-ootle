@@ -9,7 +9,7 @@ use tari_common_types::types::{FixedHash, PrivateKey};
 use tari_consensus_types::{Decision, PcId, ShardGroupAccumulatedData};
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, TransactionResult},
-    fees::{FeeBreakdown, FeeReceipt},
+    fees::FeeBreakdown,
     substate::SubstateDiff,
 };
 use tari_ootle_common_types::{Epoch, ExtraData, Network, NodeHeight, SubstateRequirement};
@@ -28,8 +28,8 @@ use tari_ootle_storage::{
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
 };
+use tari_ootle_transaction::{Instruction, Transaction};
 use tari_template_lib::{prelude::SchnorrSignatureBytes, types::Hash};
-use tari_transaction::{Instruction, Transaction};
 use tari_utilities::epoch_time::EpochTime;
 
 mod confirm_all_transitions {
@@ -221,6 +221,7 @@ mod transaction_operations {
 }
 
 mod transaction_execution_operations {
+    use tari_engine_types::fees::FeeReceiptBuilder;
 
     use super::*;
 
@@ -264,14 +265,16 @@ mod transaction_execution_operations {
                     vec![],
                     vec![],
                     TransactionResult::Accept(SubstateDiff::new()),
-                    FeeReceipt {
+                    FeeReceiptBuilder {
                         total_fee_payment: 0,
                         total_fees_paid: 0,
                         total_fee_overcharge: 0,
                         cost_breakdown: FeeBreakdown::default(),
-                    },
+                    }
+                    .build(),
                 ),
                 execution_time: Duration::from_secs(1),
+                execute_epoch: None,
             },
             vec![],
             vec![],
@@ -289,14 +292,16 @@ mod transaction_execution_operations {
                     vec![],
                     vec![],
                     TransactionResult::Accept(SubstateDiff::new()),
-                    FeeReceipt {
+                    FeeReceiptBuilder {
                         total_fee_payment: 0,
                         total_fees_paid: 0,
                         total_fee_overcharge: 0,
                         cost_breakdown: FeeBreakdown::default(),
-                    },
+                    }
+                    .build(),
                 ),
                 execution_time: Duration::from_secs(1),
+                execute_epoch: None,
             },
             vec![],
             vec![],

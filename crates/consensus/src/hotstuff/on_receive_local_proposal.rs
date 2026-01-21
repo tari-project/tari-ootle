@@ -4,6 +4,7 @@
 use std::{collections::HashSet, time::Duration};
 
 use log::*;
+use ootle_byte_type::ToByteType;
 use tari_consensus_types::{
     Decision,
     HighPc,
@@ -16,7 +17,6 @@ use tari_consensus_types::{
     TimeoutVoteMessage,
     ValidatorSignatureBytes,
 };
-use tari_engine_types::ToByteType;
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     committee::{Committee, CommitteeInfo},

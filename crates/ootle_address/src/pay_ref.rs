@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, type = "string"))]
 pub struct PayRef(Box<[u8]>);
 
@@ -77,7 +77,7 @@ mod serde_impl {
                 let bytes = bytes_from_hex(&s).map_err(serde::de::Error::custom)?;
                 PayRef::new_checked(bytes).ok_or_else(|| serde::de::Error::custom("Invalid PayRef length"))
             } else {
-                let bytes = deserializer.deserialize_bytes(BytesVisitor::new())?;
+                let bytes = deserializer.deserialize_byte_buf(BytesVisitor::new())?;
                 PayRef::new_checked(bytes).ok_or_else(|| serde::de::Error::custom("Invalid PayRef length"))
             }
         }

@@ -28,13 +28,13 @@ use axum_jrpc::{
 };
 use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use log::*;
+use ootle_byte_type::{ConvertFromByteType, ToByteType};
 use serde_json::{self as json, json};
 use tari_base_node_client::types::BaseLayerValidatorNode;
 use tari_common_types::types::CompressedPublicKey;
 use tari_consensus::hotstuff::ConsensusCurrentState;
 use tari_consensus_types::{Decision, LeafBlock};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
-use tari_engine_types::{ConvertFromByteType, ToByteType};
 use tari_epoch_manager::{service::EpochManagerHandle, traits::LayerOneTransactionSubmitter, EpochManagerReader};
 use tari_epoch_oracles::store::StoreKey;
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};

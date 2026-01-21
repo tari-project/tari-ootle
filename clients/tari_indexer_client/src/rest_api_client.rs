@@ -14,11 +14,13 @@ use crate::{
     error::IndexerRestClientError,
     protobuf,
     protobuf_stream::ProtobufStream,
+    sse::{SseEventStream, SseEventStreamBuilder},
     types::{
         AddPeerRequest,
         AddPeerResponse,
         GetConnectionsResponse,
         GetEpochManagerStatsResponse,
+        GetNetworkInfoResponse,
         GetNetworkSyncStateResponse,
         GetNonFungiblesRequest,
         GetNonFungiblesResponse,
@@ -73,16 +75,16 @@ impl IndexerRestApiClient {
         })
     }
 
-    pub async fn get_connections(&mut self) -> Result<GetConnectionsResponse, IndexerRestClientError> {
+    pub async fn get_connections(&self) -> Result<GetConnectionsResponse, IndexerRestClientError> {
         self.send_get("network/connections", ()).await
     }
 
-    pub async fn add_peer(&mut self, request: AddPeerRequest) -> Result<AddPeerResponse, IndexerRestClientError> {
+    pub async fn add_peer(&self, request: AddPeerRequest) -> Result<AddPeerResponse, IndexerRestClientError> {
         self.send_post("network/connections", request).await
     }
 
     pub async fn get_substate(
-        &mut self,
+        &self,
         id: &SubstateId,
         req: GetSubstateRequest,
     ) -> Result<GetSubstateResponse, IndexerRestClientError> {
@@ -90,42 +92,42 @@ impl IndexerRestApiClient {
     }
 
     pub async fn get_non_fungibles(
-        &mut self,
+        &self,
         req: GetNonFungiblesRequest,
     ) -> Result<GetNonFungiblesResponse, IndexerRestClientError> {
         self.send_get("non-fungibles", req).await
     }
 
     pub async fn fetch_substates(
-        &mut self,
+        &self,
         req: GetSubstatesRequest,
     ) -> Result<GetSubstatesResponse, IndexerRestClientError> {
         self.send_post("substates/fetch", req).await
     }
 
     pub async fn list_substates(
-        &mut self,
+        &self,
         req: ListSubstatesRequest,
     ) -> Result<ListSubstatesResponse, IndexerRestClientError> {
         self.send_get("list_substates", req).await
     }
 
     pub async fn submit_transaction(
-        &mut self,
+        &self,
         req: SubmitTransactionRequest,
     ) -> Result<SubmitTransactionResponse, IndexerRestClientError> {
         self.send_post("transactions", req).await
     }
 
     pub async fn submit_transaction_dry_run(
-        &mut self,
+        &self,
         req: SubmitTransactionRequest,
     ) -> Result<SubmitTransactionDryRunResponse, IndexerRestClientError> {
         self.send_post("transactions/dry-run", req).await
     }
 
     pub async fn get_transaction_result(
-        &mut self,
+        &self,
         req: GetTransactionResultRequest,
     ) -> Result<GetTransactionResultResponse, IndexerRestClientError> {
         self.send_get(format!("transactions/{}/result", req.transaction_id), ())
@@ -133,32 +135,32 @@ impl IndexerRestApiClient {
     }
 
     pub async fn list_recent_transactions(
-        &mut self,
+        &self,
         req: ListRecentTransactionsRequest,
     ) -> Result<ListRecentTransactionsResponse, IndexerRestClientError> {
         self.send_get("transactions/recent", req).await
     }
 
     pub async fn list_cached_templates(
-        &mut self,
+        &self,
         req: ListTemplatesRequest,
     ) -> Result<ListTemplatesResponse, IndexerRestClientError> {
         self.send_get("templates/cached", req).await
     }
 
     pub async fn get_template_definition(
-        &mut self,
+        &self,
         template_address: TemplateAddress,
     ) -> Result<GetTemplateDefinitionResponse, IndexerRestClientError> {
         self.send_get(format!("templates/{template_address}"), ()).await
     }
 
-    pub async fn get_epoch_manager_stats(&mut self) -> Result<GetEpochManagerStatsResponse, IndexerRestClientError> {
+    pub async fn get_epoch_manager_stats(&self) -> Result<GetEpochManagerStatsResponse, IndexerRestClientError> {
         self.send_get("epoch-manager/stats", ()).await
     }
 
     pub async fn stream_utxo_updates_protobuf(
-        &mut self,
+        &self,
         req: GetUtxoUpdatesRequest,
     ) -> Result<ProtobufStream<protobuf::UtxoUpdatePayload>, IndexerRestClientError> {
         const PATH: &str = "utxos/stream";
@@ -172,47 +174,88 @@ impl IndexerRestApiClient {
             .send()
             .await?;
 
+        if !resp.status().is_success() {
+            return Err(IndexerRestClientError::ErrorResponse {
+                source: resp.error_for_status_ref().err().unwrap(),
+                details: None,
+            });
+        }
+
         let stream = resp.bytes_stream();
         let stream = ProtobufStream::<protobuf::UtxoUpdatePayload>::new(stream);
         Ok(stream)
     }
 
-    pub async fn get_utxos(&mut self, req: GetUtxosRequest) -> Result<GetUtxosResponse, IndexerRestClientError> {
+    pub async fn get_utxos(&self, req: GetUtxosRequest) -> Result<GetUtxosResponse, IndexerRestClientError> {
         self.send_post("utxos/fetch", req).await
     }
 
-    pub async fn list_utxos(&mut self, req: ListUtxosRequest) -> Result<ListUtxosResponse, IndexerRestClientError> {
+    pub async fn list_utxos(&self, req: ListUtxosRequest) -> Result<ListUtxosResponse, IndexerRestClientError> {
         self.send_get("utxos", req).await
     }
 
     pub async fn list_transaction_receipts(
-        &mut self,
+        &self,
         req: ListTransactionReceiptsRequest,
     ) -> Result<ListTransactionReceiptsResponse, IndexerRestClientError> {
         self.send_get("transaction-receipts", req).await
     }
 
     pub async fn get_transaction_receipt(
-        &mut self,
+        &self,
         address: TransactionReceiptAddress,
     ) -> Result<GetTransactionReceiptResponse, IndexerRestClientError> {
-        self.send_get(format!("transaction-receipts/{}", address), ()).await
+        // We use as_object_key to get the string representation without the "txreceipt_" prefix
+        self.send_get(format!("transaction-receipts/{}", address.as_object_key()), ())
+            .await
     }
 
-    pub async fn get_network_sync_state(&mut self) -> Result<GetNetworkSyncStateResponse, IndexerRestClientError> {
+    pub async fn get_network_info(&self) -> Result<GetNetworkInfoResponse, IndexerRestClientError> {
+        self.send_get("network", ()).await
+    }
+
+    pub async fn get_network_sync_state(&self) -> Result<GetNetworkSyncStateResponse, IndexerRestClientError> {
         self.send_get("network/stats", ()).await
     }
 
-    pub async fn wait_until_ready(&mut self) -> Result<IndexerReadyResponse, IndexerRestClientError> {
+    pub async fn wait_until_ready(&self) -> Result<IndexerReadyResponse, IndexerRestClientError> {
         self.send_get("wait-until-ready", ()).await
     }
 
-    pub async fn get_resource(&mut self, addr: ResourceAddress) -> Result<GetResourceResponse, IndexerRestClientError> {
+    pub async fn get_resource(&self, addr: ResourceAddress) -> Result<GetResourceResponse, IndexerRestClientError> {
         self.send_get(format!("resources/{addr}"), ()).await
     }
 
+    pub async fn sse_events(&self) -> Result<SseEventStream, IndexerRestClientError> {
+        let sse = self.send_sse("events", ()).await?;
+        sse.into_stream()
+    }
+
+    async fn send_sse<P: Into<String>, T: Serialize>(
+        &self,
+        path: P,
+        params: T,
+    ) -> Result<SseEventStreamBuilder, IndexerRestClientError> {
+        let path = path.into();
+
+        // encode query params
+        let query = serde_urlencoded::to_string(&params).map_err(|e| IndexerRestClientError::SerializeRequest {
+            path: path.clone(),
+            source: e.into(),
+        })?;
+
+        let mut url = format!("{}{}", self.endpoint, path);
+        if !query.is_empty() {
+            url.push('?');
+            url.push_str(&query);
+        }
+
+        let resp = self.client.get(url).send().await?;
+        Ok(resp.into())
+    }
+
     async fn send_get<P: Into<String>, T: Serialize, R: DeserializeOwned>(
-        &mut self,
+        &self,
         path: P,
         params: T,
     ) -> Result<R, IndexerRestClientError> {
@@ -235,7 +278,7 @@ impl IndexerRestApiClient {
     }
 
     async fn send_post<P: Into<String>, T: Serialize, R: DeserializeOwned>(
-        &mut self,
+        &self,
         path: P,
         request: T,
     ) -> Result<R, IndexerRestClientError> {

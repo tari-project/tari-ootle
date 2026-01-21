@@ -7,13 +7,11 @@ use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
 use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use log::*;
+use ootle_byte_type::ToByteType;
 use rand::rngs::OsRng;
 use serde_json::json;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey as _, ristretto::RistrettoPublicKey};
-use tari_engine_types::{
-    crypto::{get_commitment_factory, ValueLookupTable},
-    ToByteType,
-};
+use tari_engine_types::crypto::{get_commitment_factory, ValueLookupTable};
 use tari_ootle_common_types::{displayable::Displayable, optional::Optional};
 use tari_ootle_wallet_crypto::{GenerateValueLookup, MMapValueLookup, OutputWitness};
 use tari_ootle_wallet_sdk::models::{ConfidentialOutputModel, KeyBranch, OutputStatus};

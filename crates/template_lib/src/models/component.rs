@@ -25,7 +25,7 @@ use std::{
     str::FromStr,
 };
 
-use tari_bor::BorTag;
+use tari_bor::{BorTag, Tagged};
 use tari_template_lib_types::{EntityId, KeyParseError, ObjectKey};
 
 use crate::{
@@ -40,6 +40,10 @@ const TAG: u64 = BinaryTag::ComponentAddress.as_u64();
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct ComponentAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
+
+impl Tagged for ComponentAddress {
+    const TAG: u64 = TAG;
+}
 
 impl ComponentAddress {
     /// Creates a new `ComponentAddress` from an `ObjectKey`. For internal use only.

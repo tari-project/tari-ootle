@@ -2,6 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 mod hrp;
+#[macro_use]
+mod macros;
 mod ootle_address;
 mod pay_ref;
 

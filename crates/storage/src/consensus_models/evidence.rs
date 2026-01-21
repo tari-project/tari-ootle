@@ -8,7 +8,7 @@ use indexmap::IndexMap;
 use log::*;
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::PcId;
-use tari_engine_types::{serde_with, substate::SubstateId};
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{
     borsh::indexmap as indexmap_borsh,
     displayable::Displayable,
@@ -30,7 +30,7 @@ const LOG_TARGET: &str = "tari::ootle::consensus_models::evidence";
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Evidence {
     // Serialize JSON as an array of objects since ShardGroup is a non-string key
-    #[serde(with = "serde_with::vec")]
+    #[serde(with = "ootle_serde::vec")]
     #[cfg_attr(feature = "ts", ts(type = "Array<[any, any]>"))]
     #[borsh(serialize_with = "indexmap_borsh::serialize")]
     evidence: IndexMap<ShardGroup, ShardGroupEvidence>,

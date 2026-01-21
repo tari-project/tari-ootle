@@ -6,7 +6,7 @@ use tari_ootle_storage::{
     StateStoreReadTransaction,
     StorageError,
 };
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 
 #[derive(Debug, Clone)]
 pub struct PledgedTransaction {

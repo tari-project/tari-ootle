@@ -14,10 +14,10 @@ tari_node_components = { workspace = true, optional = true }
 tari_ootle_common_types = { workspace = true }
 tari_ootle_storage = { workspace = true }
 tari_ootle_storage_sqlite = { workspace = true }
-tari_engine_types = { workspace = true }
 tari_epoch_manager = { workspace = true }
 tari_template_lib = { workspace = true }
 tari_hashing = { workspace = true }
+ootle_serde = { workspace = true }
 
 anyhow = { workspace = true }
 blake2 = { workspace = true }

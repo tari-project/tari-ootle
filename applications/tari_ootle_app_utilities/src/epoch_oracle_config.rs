@@ -6,7 +6,6 @@ use std::{path::PathBuf, time::Duration};
 use anyhow::{anyhow, bail, Context};
 use tari_bor::{Deserialize, Serialize};
 use tari_common::SubConfigPath;
-use tari_engine_types::serde_with;
 use tari_epoch_oracles::configured;
 use tokio::{fs::File, io::AsyncReadExt};
 use url::Url;
@@ -40,7 +39,7 @@ pub struct BaseLayerOracleConfig {
     /// The Tari base node's GRPC URL. If none is specified, http://localhost:{port} will be used where {port} is the network-specific default.
     pub base_node_grpc_url: Option<Url>,
     /// Interval between base layer scans in seconds.
-    #[serde(with = "serde_with::duration::seconds")]
+    #[serde(with = "ootle_serde::duration::seconds")]
     pub scanning_interval: Duration,
 }
 

@@ -1,9 +1,10 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use ootle_byte_type::ToByteType;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine::runtime::{ActionIdent, RuntimeError};
-use tari_engine_types::ToByteType;
+use tari_ootle_transaction::{args, call_args, Instruction, Transaction};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{constants::XTR, models::ComponentAddress, prelude::AccessRules, rule, types::Amount};
 use tari_template_test_tooling::{
@@ -11,7 +12,6 @@ use tari_template_test_tooling::{
     xtr_faucet_component,
     TemplateTest,
 };
-use tari_transaction::{args, call_args, Instruction, Transaction};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -275,10 +275,10 @@ fn gasless() {
 
 #[test]
 fn custom_access_rules() {
-    let mut template_test = TemplateTest::new_no_templates();
+    let mut test = TemplateTest::new_no_templates();
 
     // First we create a account with a custom rule that anyone can withdraw
-    let (owner_proof, public_key, secret_key) = template_test.create_owner_proof();
+    let (owner_proof, public_key, secret_key) = test.create_owner_proof();
 
     let access_rules = AccessRules::new()
         .add_method_rule("balance", rule!(allow_all))
@@ -288,12 +288,12 @@ fn custom_access_rules() {
         // We are going to make it so anyone can withdraw
         .default(rule!(allow_all));
 
-    let result = template_test.execute_expect_success(
+    test.execute_expect_success(
         Transaction::builder_localnet()
             .call_method(xtr_faucet_component(), "take", args![1000])
             .put_last_instruction_output_on_workspace("bucket")
             // Create component with the same ID
-            .create_account_with_custom_rules(
+            .create_account_custom(
                 public_key.to_byte_type(),
                 None,
                 Some(access_rules),
@@ -303,13 +303,17 @@ fn custom_access_rules() {
             .build_and_seal(&secret_key),
         vec![owner_proof],
     );
-    let user_account = result.finalize.execution_results[2]
-        .decode::<ComponentAddress>()
+    let user_account = *test
+        .read_only_state_store()
+        .all_accounts()
+        .unwrap()
+        .keys()
+        .next()
         .unwrap();
 
     // We create another account and we we will withdraw from the custom one
-    let (user2_account, user2_account_proof, user2_secret_key) = template_test.create_funded_account();
-    template_test.execute_expect_success(
+    let (user2_account, user2_account_proof, user2_secret_key) = test.create_funded_account();
+    test.execute_expect_success(
         Transaction::builder_localnet()
             .call_method(user_account, "withdraw", args![XTR, Amount(100)])
             .put_last_instruction_output_on_workspace("b")

@@ -1,8 +1,8 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use ootle_byte_type::ToByteType;
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_engine_types::ToByteType;
 use tari_template_lib::{
     models::{
         StealthInput,

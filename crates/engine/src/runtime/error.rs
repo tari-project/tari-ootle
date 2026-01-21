@@ -26,6 +26,7 @@ use tari_engine_types::{
     entity_id_provider::EntityIdProviderError,
     id_provider::IdProviderError,
     indexed_value::IndexedValueError,
+    limits,
     lock::LockId,
     resource_container::ResourceError,
     substate::SubstateId,
@@ -33,6 +34,7 @@ use tari_engine_types::{
     virtual_substate::VirtualSubstateId,
 };
 use tari_ootle_common_types::{displayable::Displayable, optional::IsNotFoundError};
+use tari_ootle_transaction::args::{WorkspaceId, WorkspaceOffsetId};
 use tari_template_lib::{
     args::{CallAction, VaultFreezeFlag},
     models::{
@@ -47,7 +49,6 @@ use tari_template_lib::{
     },
     types::{Amount, TemplateAddress},
 };
-use tari_transaction::args::{WorkspaceId, WorkspaceOffsetId};
 
 use super::workspace::WorkspaceError;
 use crate::{
@@ -274,31 +275,38 @@ pub enum RuntimeError {
     #[error("Assert error: {0}")]
     AssertError(#[from] AssertError),
 
-    #[error("Limit error: {details}")]
-    LimitError { details: String },
+    #[error("Limit error: {0}")]
+    LimitError(#[from] LimitError),
 
     #[error("Cross-template calls are not allowed in this context: {action:?}")]
     CrossTemplateCallNotAllowed { action: CallAction },
 }
 
 impl RuntimeError {
-    pub fn to_reject_reason(&self) -> RejectReason {
+    pub fn to_reject_reason(&self, instruction_idx: Option<usize>) -> RejectReason {
+        let instruction_prefix = if let Some(ref idx) = instruction_idx {
+            format_args!("At instruction #{}: ", *idx)
+        } else {
+            format_args!("")
+        };
         match self {
-            Self::SubstateNotFound { id } => RejectReason::SubstateNotFound(format!("{id} not found",)),
-            Self::RootSubstateNotFound { id } => {
-                RejectReason::SubstateNotFound(format!("Template referenced root substate but it was not found: {id}"))
+            Self::SubstateNotFound { id } => {
+                RejectReason::SubstateNotFound(format!("{instruction_prefix}{id} not found",))
             },
-            Self::ReferencedSubstateNotFound { id } => {
-                RejectReason::SubstateNotFound(format!("Template referenced substate but it was not found: {id}"))
-            },
+            Self::RootSubstateNotFound { id } => RejectReason::SubstateNotFound(format!(
+                "{instruction_prefix}Template referenced root substate but it was not found: {id}"
+            )),
+            Self::ReferencedSubstateNotFound { id } => RejectReason::SubstateNotFound(format!(
+                "{instruction_prefix}Template referenced substate but it was not found: {id}"
+            )),
             Self::InsufficientFeesPaid {
                 fees_paid,
                 required_fee,
             } => RejectReason::InsufficientFeesPaid(format!(
-                "Insufficient fees paid: {fees_paid}, required fees: {required_fee}"
+                "{instruction_prefix}Insufficient fees paid: {fees_paid}, required fees: {required_fee}"
             )),
             Self::FeePaymentInMainIntent => RejectReason::FeePaymentInMainIntent,
-            err => RejectReason::ExecutionFailure(err.to_string()),
+            err => RejectReason::ExecutionFailure(format!("{instruction_prefix}{err}")),
         }
     }
 }
@@ -357,4 +365,16 @@ pub enum ArgumentValidationError {
     MaxStealthInputsExceeded { max_inputs: usize, actual_inputs: usize },
     #[error("Too many arguments provided. Got {got}, max is {max}")]
     TooManyArguments { got: usize, max: usize },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum LimitError {
+    #[error("Substate size of {size} bytes exceeds the maximum allowed size of {} bytes", limits::ENGINE_LIMITS.max_substate_size)]
+    SubstateSizeExceeded { size: usize },
+    #[error("Log entry of {size} bytes exceeds maximum size of {} bytes", limits::ENGINE_LIMITS.max_log_size_bytes)]
+    LogSizeExceeded { size: usize },
+    #[error("Exceeded maximum number of logs per transaction: {}", limits::ENGINE_LIMITS.max_logs)]
+    MaxLogsExceeded,
+    #[error("Exceeded maximum number of events per transaction: {}", limits::ENGINE_LIMITS.max_events)]
+    MaxEventsExceeded,
 }

@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::ToByteType;
+use ootle_byte_type::ToByteType;
 use tari_ootle_address::OotleAddress;
 
 use crate::support::Test;

@@ -16,7 +16,7 @@ use tari_crypto::tari_utilities::{
     hex::{from_hex, Hex},
     ByteArray,
 };
-use tari_engine_types::{serde_with, substate::SubstateId, transaction_receipt::TransactionReceiptAddress};
+use tari_engine_types::{substate::SubstateId, transaction_receipt::TransactionReceiptAddress};
 use tari_template_lib_types::ObjectKey;
 
 use crate::{shard::Shard, uint::U256, NumPreshards, ShardGroup};
@@ -28,7 +28,7 @@ pub trait ToSubstateAddress {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SubstateAddress(
-    #[serde(with = "serde_with::hex")]
+    #[serde(with = "ootle_serde::hex")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     [u8; SubstateAddress::LENGTH],
 );

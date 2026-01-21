@@ -40,6 +40,13 @@ impl VirtualSubstates {
         Self::default()
     }
 
+    pub fn current_epoch(&self) -> Option<u64> {
+        match self.get(&VirtualSubstateId::CurrentEpoch) {
+            Some(VirtualSubstate::CurrentEpoch(epoch)) => Some(*epoch),
+            _ => None,
+        }
+    }
+
     pub fn with_capacity(capacity: usize) -> Self {
         Self(HashMap::with_capacity(capacity))
     }

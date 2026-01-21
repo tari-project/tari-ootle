@@ -7,7 +7,7 @@ use tari_template_lib::types::TemplateAddress;
 use crate::cli::CommonArgs;
 
 pub async fn get_templates(cli: &CommonArgs) -> anyhow::Result<(TemplateAddress, TemplateAddress)> {
-    let mut client = tari_indexer_client::rest_api_client::IndexerRestApiClient::connect(cli.indexer_url.clone())?;
+    let client = tari_indexer_client::rest_api_client::IndexerRestApiClient::connect(cli.indexer_url.clone())?;
 
     let templates = if cli.swap_template.is_none() || cli.faucet_template.is_none() {
         let ListTemplatesResponse { templates } = client

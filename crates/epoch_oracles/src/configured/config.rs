@@ -6,13 +6,12 @@ use std::{
     time::Duration,
 };
 
-use tari_engine_types::serde_with;
 use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, SubstateAddress};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Config {
-    #[serde(with = "serde_with::duration::optional_seconds")]
+    #[serde(with = "ootle_serde::duration::optional_seconds")]
     pub epoch_time: Option<Duration>,
     pub initial_epoch: Epoch,
     #[serde(with = "time::serde::iso8601")]

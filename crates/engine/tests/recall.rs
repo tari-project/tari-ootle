@@ -3,7 +3,8 @@
 
 use std::collections::BTreeMap;
 
-use tari_engine_types::ToByteType;
+use ootle_byte_type::ToByteType;
+use tari_ootle_transaction::{args, Transaction};
 use tari_template_lib::{
     models::{NonFungibleId, ResourceAddress, VaultId},
     prelude::ComponentAddress,
@@ -13,7 +14,6 @@ use tari_template_test_tooling::{
     support::confidential::{generate_confidential_output_statement, generate_withdraw_proof},
     TemplateTest,
 };
-use tari_transaction::{args, Transaction};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 

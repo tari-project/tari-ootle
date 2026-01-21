@@ -35,9 +35,9 @@ use tari_ootle_storage::{
     },
     StateStore,
 };
+use tari_ootle_transaction::{Transaction, VersionedSubstateId};
 use tari_rpc_framework::RpcError;
 use tari_state_tree::SubstateTreeChange;
-use tari_transaction::{Transaction, VersionedSubstateId};
 use tari_validator_node_rpc::{
     client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory},
     rpc_service::ValidatorNodeRpcClient,

@@ -28,12 +28,12 @@ use std::{
 use reqwest::Url;
 use tari_common::configuration::CommonConfig;
 use tari_ootle_common_types::Network;
+use tari_ootle_transaction::TransactionId;
 use tari_ootle_walletd::{
     config::{ApplicationConfig, WalletDaemonAuth, WalletDaemonConfig},
     run_tari_ootle_walletd,
 };
 use tari_shutdown::Shutdown;
-use tari_transaction::TransactionId;
 use tari_wallet_daemon_client::{
     error::WalletDaemonClientError,
     types::{

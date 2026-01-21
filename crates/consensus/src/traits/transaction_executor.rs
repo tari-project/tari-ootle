@@ -10,7 +10,7 @@ use tari_ootle_storage::{
     StateStore,
     StorageError,
 };
-use tari_transaction::Transaction;
+use tari_ootle_transaction::Transaction;
 
 use crate::hotstuff::substate_store::{LockFailedError, SubstateStoreError};
 

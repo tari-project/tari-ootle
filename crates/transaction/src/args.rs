@@ -5,7 +5,6 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use tari_bor::encode;
-use tari_engine_types::serde_with;
 use tari_template_lib::prelude::Bytes;
 
 pub type WorkspaceId = u16;
@@ -66,8 +65,8 @@ pub enum InstructionArg {
     /// The argument is a value specified in the transaction
     Literal(
         #[serde(
-            serialize_with = "serde_with::hex::serialize",
-            deserialize_with = "serde_with::hex::deserialize_from_vec"
+            serialize_with = "ootle_serde::hex::serialize",
+            deserialize_with = "ootle_serde::hex::deserialize_from_vec"
         )]
         #[cfg_attr(feature = "ts", ts(type = "string"))]
         Bytes,
@@ -185,7 +184,7 @@ macro_rules! call_arg {
 ///
 /// Examples:
 /// ```ignore
-/// #use tari_transaction::args::{call_args, InstructionArg};
+/// #use tari_ootle_transaction::args::{call_args, InstructionArg};
 /// let args = call_args![Workspace(1), "literal value", 42u64];
 /// assert_eq!(args[0], InstructionArg::workspace(1, None));
 /// assert!(matches!(args[1], InstructionArg::Literal(_)));

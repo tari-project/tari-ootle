@@ -2,8 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
+use ootle_byte_type::{ConvertFromByteType, ToByteType};
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
-use tari_engine_types::{crypto::PrivateOutput, ConvertFromByteType, ToByteType};
+use tari_engine_types::crypto::PrivateOutput;
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 use tari_ootle_wallet_crypto::{kdfs, MaskAndValue};
 use tari_template_lib::{models::VaultId, prelude::PedersenCommitmentBytes, types::Amount};

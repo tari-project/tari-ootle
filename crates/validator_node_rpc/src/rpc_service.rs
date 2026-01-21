@@ -42,4 +42,10 @@ pub trait ValidatorNodeRpcService: Send + Sync + 'static {
         &self,
         request: Request<proto::SyncStateRequest>,
     ) -> Result<Streaming<proto::SyncStateResponse>, RpcStatus>;
+
+    #[rpc(method = 7)]
+    async fn get_substate_batch(
+        &self,
+        req: Request<proto::GetSubstatesBatchRequest>,
+    ) -> Result<Streaming<proto::GetSubstatesBatchResponse>, RpcStatus>;
 }

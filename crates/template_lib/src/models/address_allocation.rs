@@ -1,7 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_bor::BorTag;
+use tari_bor::{BorTag, Tagged};
 use tari_template_abi::{call_engine, EngineOp};
 
 use crate::{
@@ -12,12 +12,16 @@ use crate::{
 /// Represents an allocation of an address for a component or resource.
 pub type AddressAllocationId = u32;
 
-const COMPONENT_TAG: u64 = BinaryTag::AllocatedComponentAddress.as_u64();
+const COMPONENT_ALLOC_TAG: u64 = BinaryTag::AllocatedComponentAddress.as_u64();
 
 /// Represents an allocation of an address for a component.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 #[serde(transparent)]
-pub struct ComponentAddressAllocation(BorTag<AddressAllocationId, COMPONENT_TAG>);
+pub struct ComponentAddressAllocation(BorTag<AddressAllocationId, COMPONENT_ALLOC_TAG>);
+
+impl Tagged for ComponentAddressAllocation {
+    const TAG: u64 = COMPONENT_ALLOC_TAG;
+}
 
 impl ComponentAddressAllocation {
     /// Creates a new `ComponentAddressAllocation` with the given ID.

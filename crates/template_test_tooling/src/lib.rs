@@ -3,6 +3,7 @@
 
 mod builtin_component_state;
 pub mod compile;
+mod helpers;
 mod mocks;
 mod package_builder;
 mod read_only_state_store;
@@ -22,5 +23,5 @@ pub mod crypto {
 }
 
 pub use tari_engine_types as engine_types;
+pub use tari_ootle_transaction as transaction;
 pub use tari_ootle_wallet_crypto as wallet_crypto;
-pub use tari_transaction as transaction;

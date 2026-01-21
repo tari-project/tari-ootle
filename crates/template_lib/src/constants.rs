@@ -6,7 +6,7 @@
 use tari_template_lib_types::ObjectKey;
 
 use crate::models::{ComponentAddress, ResourceAddress, VaultId};
-// TODO: This is set pretty arbitrarily.
+// TODO: These addresses are set pretty arbitrarily.
 
 /// Resource address for all public identity-based non-fungible tokens.
 /// This resource provides a space for a virtual token representing ownership based on a public key.
@@ -22,6 +22,9 @@ pub const STEALTH_TARI_RESOURCE_ADDRESS: ResourceAddress =
 
 /// Shorthand version of the `STEALTH_TARI_RESOURCE_ADDRESS` constant
 pub const XTR: ResourceAddress = STEALTH_TARI_RESOURCE_ADDRESS;
+/// One XTR in the smallest divisible units i.e. 1 XTR = 1,000,000 micro XTR
+/// For example: 10 * MXTR = 10 XTR
+pub const ONE_XTR: u64 = 1_000_000;
 
 /// Address of testnet faucet component
 pub const XTR_FAUCET_COMPONENT_ADDRESS: ComponentAddress = ComponentAddress::new(ObjectKey::from_array([

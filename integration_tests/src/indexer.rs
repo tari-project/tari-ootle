@@ -62,7 +62,7 @@ pub struct IndexerProcess {
 
 impl IndexerProcess {
     pub async fn add_peer(&self, public_key: RistrettoPublicKeyBytes, port: u16) {
-        let mut client = self.get_indexer_client();
+        let client = self.get_indexer_client();
         client
             .add_peer(AddPeerRequest {
                 public_key,
@@ -75,7 +75,7 @@ impl IndexerProcess {
 
     pub async fn get_substate(&self, world: &TariWorld, output_ref: String, version: u32) -> GetSubstateResponse {
         let address = get_address_from_output(world, output_ref);
-        let mut client = self.get_indexer_client();
+        let client = self.get_indexer_client();
         client
             .get_substate(address, GetSubstateRequest {
                 version: Some(version),
@@ -104,7 +104,7 @@ impl IndexerProcess {
             end_index,
         };
 
-        let mut client = self.get_indexer_client();
+        let client = self.get_indexer_client();
         let resp = client.get_non_fungibles(params).await.unwrap();
         resp.non_fungibles
     }

@@ -2,8 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_common_types::SubstateRequirementRef;
+use tari_ootle_transaction::{Transaction, TransactionId, TransactionWeight};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
-use tari_transaction::{Transaction, TransactionId, TransactionWeight};
 
 use crate::executables::{Executable, Instructions, WeightedExecutable};
 

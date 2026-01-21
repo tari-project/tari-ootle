@@ -5,17 +5,17 @@ use std::cmp;
 
 use digest::crypto_common::rand_core::OsRng;
 use log::*;
+use ootle_byte_type::{FromByteType, ToByteType};
 use tari_bor::{Deserialize, Serialize};
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-use tari_engine_types::{FromByteType, ToByteType};
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{optional::IsNotFoundError, SubstateRequirement};
+use tari_ootle_transaction::{args, Transaction};
 use tari_ootle_wallet_crypto::{memo::Memo, MaskAndValue, OutputWitness};
 use tari_template_lib::{
     models::{ComponentAddress, ResourceAddress, VaultId},
     types::Amount,
 };
-use tari_transaction::{args, Transaction};
 
 use crate::{
     apis::{

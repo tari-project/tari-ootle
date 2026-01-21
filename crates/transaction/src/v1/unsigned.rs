@@ -9,14 +9,21 @@ use tari_engine_types::{
     indexed_value::{IndexedValue, IndexedValueError},
     substate::SubstateId,
 };
-use tari_ootle_common_types::{Epoch, Signable, SubstateRequirement};
+use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib::{
     constants::XTR,
     models::{ComponentAddress, UtxoAddress},
     prelude::RistrettoPublicKeyBytes,
 };
 
-use crate::{builder::TransactionBuilder, ComponentReference, Instruction, ResourceAddressRef, TransactionSignature};
+use crate::{
+    builder::TransactionBuilder,
+    ComponentReference,
+    Instruction,
+    ResourceAddressRef,
+    Signable,
+    TransactionSignature,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -92,6 +99,11 @@ impl UnsignedTransactionV1 {
 
     pub fn inputs(&self) -> &IndexSet<SubstateRequirement> {
         &self.inputs
+    }
+
+    pub fn add_input(&mut self, input: SubstateRequirement) -> &mut Self {
+        self.inputs.insert(input);
+        self
     }
 
     /// Returns (fee instructions, instructions)
@@ -202,6 +214,7 @@ impl UnsignedTransactionV1 {
 
 impl Signable<&RistrettoPublicKeyBytes> for UnsignedTransactionV1 {
     type MessageOutput = [u8; 64];
+    type Signature = TransactionSignature;
 
     fn to_signing_message(&self, seal_signer: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
         TransactionSignature::create_message_v1(1, seal_signer, self)

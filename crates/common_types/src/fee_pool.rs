@@ -21,9 +21,9 @@ pub fn derive_fee_pool_address(
 
 #[cfg(test)]
 mod tests {
+    use ootle_byte_type::ToByteType;
     use rand::rngs::OsRng;
     use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-    use tari_engine_types::ToByteType;
 
     use super::*;
     use crate::SubstateAddress;

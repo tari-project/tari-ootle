@@ -28,6 +28,7 @@ use log::{error, warn};
 use serde::de::DeserializeOwned;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, StateVersion};
+use tari_ootle_transaction::TransactionId;
 use tari_ootle_wallet_sdk::{
     models::{
         Account,
@@ -55,7 +56,6 @@ use tari_template_lib::{
     prelude::{ComponentAddress, NonFungibleId, PedersenCommitmentBytes, ResourceType, RistrettoPublicKeyBytes},
     types::{crypto::UtxoTag, TemplateAddress},
 };
-use tari_transaction::TransactionId;
 use webauthn_rs::prelude::Passkey;
 
 use crate::{

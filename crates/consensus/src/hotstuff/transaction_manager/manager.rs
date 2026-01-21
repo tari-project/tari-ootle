@@ -29,7 +29,7 @@ use tari_ootle_storage::{
     },
     StateStore,
 };
-use tari_transaction::{Transaction, TransactionId};
+use tari_ootle_transaction::{Transaction, TransactionId};
 
 use super::{PledgedTransaction, PreparedTransaction};
 use crate::{

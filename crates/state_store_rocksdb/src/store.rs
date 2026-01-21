@@ -227,9 +227,17 @@ impl<TAddr: NodeAddressable + Serialize + DeserializeOwned> StateStore for Rocks
     type ReadTransaction<'a>
         = RocksDbStateStoreReadTransaction<'a, Self::Addr>
     where TAddr: 'a;
+    type Snapshot<'a>
+        = SnapshotContext<'a, TransactionDB>
+    where TAddr: 'a;
     type WriteTransaction<'a>
         = RocksDbStateStoreWriteTransaction<'a, Self::Addr>
     where TAddr: 'a;
+
+    fn snapshot(&self) -> Self::Snapshot<'_> {
+        let snapshot = self.db.snapshot();
+        SnapshotContext::new(&self.db, snapshot)
+    }
 
     fn create_read_tx(&self) -> Result<Self::ReadTransaction<'_>, StorageError> {
         let mut opts = TransactionOptions::default();

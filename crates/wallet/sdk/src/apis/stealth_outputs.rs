@@ -5,18 +5,12 @@ use std::collections::HashMap;
 
 use digest::crypto_common::rand_core::OsRng;
 use log::*;
+use ootle_byte_type::{FromByteType, ToByteType};
 use tari_crypto::{
     keys::PublicKey,
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey},
 };
-use tari_engine_types::{
-    component::derive_component_address_from_public_key,
-    limits,
-    FromByteType,
-    ToByteType,
-    Utxo,
-    UtxoOutput,
-};
+use tari_engine_types::{component::derive_component_address_from_public_key, limits, Utxo, UtxoOutput};
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::{
     displayable::Displayable,

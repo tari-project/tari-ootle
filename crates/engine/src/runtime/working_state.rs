@@ -9,13 +9,14 @@ use std::{
 
 use indexmap::{IndexMap, IndexSet};
 use log::*;
+use ootle_byte_type::{ConvertFromByteType, ToByteType};
 use tari_bor::encoded_len;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::{
     bucket::Bucket,
     component::ComponentHeader,
     events::Event,
-    fees::FeeReceipt,
+    fees::{FeeReceipt, FeeReceiptBuilder},
     id_provider::{IdProvider, ObjectIds},
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     limits,
@@ -31,14 +32,13 @@ use tari_engine_types::{
     transaction_receipt::{FinalizeOutcome, TransactionReceipt},
     vault::Vault,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
-    ConvertFromByteType,
-    ToByteType,
     Utxo,
     UtxoOutput,
     ValidatorFeePoolAddress,
     ValidatorFeeWithdrawal,
 };
 use tari_ootle_common_types::{optional::Optional, Epoch};
+use tari_ootle_transaction::ResourceAddressRef;
 use tari_template_lib::{
     args::{MintArg, ResourceDiscriminator, VaultFreezeFlags},
     auth::ResourceAuthAction,
@@ -59,7 +59,6 @@ use tari_template_lib::{
     prelude::{AuthHookCaller, ResourceAddressAllocation, PUBLIC_IDENTITY_RESOURCE_ADDRESS},
     types::{Amount, EntityId, Hash, TemplateAddress},
 };
-use tari_transaction::ResourceAddressRef;
 
 use super::workspace::Workspace;
 use crate::{
@@ -72,6 +71,7 @@ use crate::{
         tracker_auth::Authorization,
         validation::check_stealth_transfer_limits,
         ActionIdent,
+        LimitError,
         NativeAction,
         RuntimeError,
         TransactionCommitError,
@@ -157,13 +157,7 @@ impl WorkingState {
     fn enforce_substate_size_limit(&self, value: &SubstateValue) -> Result<(), RuntimeError> {
         let size = encoded_len(value)?;
         if size > limits::ENGINE_LIMITS.max_substate_size {
-            return Err(RuntimeError::LimitError {
-                details: format!(
-                    "Substate size of {} bytes exceeds the maximum allowed size of {} bytes",
-                    size,
-                    limits::ENGINE_LIMITS.max_substate_size
-                ),
-            });
+            return Err(LimitError::SubstateSizeExceeded { size }.into());
         }
         Ok(())
     }
@@ -901,7 +895,10 @@ impl WorkingState {
             .ok_or(RuntimeError::AddressAllocationNotFound { id })
     }
 
-    pub fn get_used_address(&self, id: AddressAllocationId) -> Result<SubstateId, RuntimeError> {
+    pub fn get_substate_id_from_used_address_allocation(
+        &self,
+        id: AddressAllocationId,
+    ) -> Result<SubstateId, RuntimeError> {
         self.used_address_allocations
             .get(&id)
             .cloned()
@@ -1027,6 +1024,7 @@ impl WorkingState {
         diff: &SubstateDiff,
         fee_receipt: FeeReceipt,
     ) -> Result<TransactionReceipt, RuntimeError> {
+        let epoch = self.get_current_epoch()?;
         Ok(TransactionReceipt {
             outcome,
             diff_summary: diff.into(),
@@ -1034,6 +1032,7 @@ impl WorkingState {
             events: self.events.clone().into_boxed_slice(),
             logs: self.logs.clone().into_boxed_slice(),
             fee_receipt,
+            epoch: epoch.as_u64(),
         })
     }
 
@@ -1190,7 +1189,7 @@ impl WorkingState {
                         argument: "ResourceAddressRef::Workspace",
                         reason: format!("Item on workspace at key '{id}' is not a valid ResourceAddressRef: {e}",),
                     })?;
-                let substate_id = self.get_used_address(allocation_id.id())?;
+                let substate_id = self.get_substate_id_from_used_address_allocation(allocation_id.id())?;
                 let resource_address = match substate_id {
                     SubstateId::Resource(addr) => addr,
                     substate_id => {
@@ -1301,21 +1300,14 @@ impl WorkingState {
     pub fn push_log(&mut self, log: LogEntry) -> Result<(), RuntimeError> {
         // TIL: that String::len returns the number of bytes, not UTF8 characters
         if log.message.len() > limits::ENGINE_LIMITS.max_log_size_bytes {
-            return Err(RuntimeError::LimitError {
-                details: format!(
-                    "Log entry exceeds maximum size of {} bytes",
-                    limits::ENGINE_LIMITS.max_log_size_bytes
-                ),
-            });
+            return Err(LimitError::LogSizeExceeded {
+                size: log.message.len(),
+            }
+            .into());
         }
 
         if self.logs.len() >= limits::ENGINE_LIMITS.max_logs {
-            return Err(RuntimeError::LimitError {
-                details: format!(
-                    "Exceeded maximum number of logs per transaction: {}",
-                    limits::ENGINE_LIMITS.max_logs
-                ),
-            });
+            return Err(LimitError::MaxLogsExceeded.into());
         }
         self.logs.push(log);
         Ok(())
@@ -1327,12 +1319,7 @@ impl WorkingState {
 
     pub fn push_event(&mut self, event: Event) -> Result<(), RuntimeError> {
         if self.events.len() >= limits::ENGINE_LIMITS.max_events {
-            return Err(RuntimeError::LimitError {
-                details: format!(
-                    "Exceeded maximum number of events per transaction: {}",
-                    limits::ENGINE_LIMITS.max_events
-                ),
-            });
+            return Err(LimitError::MaxEventsExceeded.into());
         }
         self.events.push(event);
         Ok(())
@@ -1433,12 +1420,13 @@ impl WorkingState {
             .to_u64_checked()
             .expect("FeeState guarantees that the total fee payments fit in an u64");
 
-        Ok(FeeReceipt {
+        Ok(FeeReceiptBuilder {
             total_fee_payment,
             total_fees_paid,
             total_fee_overcharge,
             cost_breakdown: self.fee_state.take_fee_charges(),
-        })
+        }
+        .build())
     }
 
     pub fn generate_substate_diff(

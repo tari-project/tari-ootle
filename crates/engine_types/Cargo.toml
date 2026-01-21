@@ -14,9 +14,9 @@ tari_crypto = { workspace = true, features = ["borsh"] }
 tari_hashing = { workspace = true }
 tari_template_abi = { workspace = true, features = ["std"] }
 tari_template_lib = { workspace = true, features = ["borsh"] }
+ootle_serde = { workspace = true, features = ["base64", "bincode-compat"] }
+ootle_byte_type = { workspace = true, features = ["crypto"] }
 
-# if we set this version in the workspace it would break other crates
-base64 = "0.21.0"
 blake2 = { workspace = true }
 borsh = { workspace = true, features = ["indexmap"] }
 bounded-vec = { workspace = true, features = ["serde"] }

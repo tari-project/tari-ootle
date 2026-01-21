@@ -1,6 +1,6 @@
 [package]
-name = "tari_transaction"
-description = "Tari transaction builder and associated data types"
+name = "tari_ootle_transaction"
+description = "Tari Ootle transaction builder and associated data types"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -14,16 +14,21 @@ tari_crypto = { workspace = true, features = ["borsh"] }
 tari_template_lib = { workspace = true, features = ["std"] }
 tari_bor = { workspace = true }
 tari_hashing = { workspace = true }
+ootle_serde = { workspace = true, features = ["base64"] }
+ootle_byte_type = { workspace = true, features = ["crypto"] }
 
 borsh = { workspace = true }
 log = { workspace = true }
 rand = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 serde = { workspace = true, default-features = true }
-serde_json = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 hex = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+bincode = { workspace = true, features = ["serde"] }
 
 [features]
 ts = ["ts-rs", "tari_engine_types/ts", "tari_ootle_common_types/ts", "tari_template_lib/ts", "tari_bor/ts"]

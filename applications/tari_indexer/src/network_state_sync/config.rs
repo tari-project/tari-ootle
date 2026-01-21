@@ -14,7 +14,7 @@ pub struct NetworkWideStateSyncConfig {
 impl Default for NetworkWideStateSyncConfig {
     fn default() -> Self {
         Self {
-            work_interval: Duration::from_secs(60),
+            work_interval: Duration::from_secs(30),
             event_filters: Arc::new([]),
         }
     }

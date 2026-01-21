@@ -11,6 +11,7 @@
 use std::time::Duration;
 
 use log::info;
+use ootle_byte_type::ToByteType;
 use tari_common_types::types::PrivateKey;
 use tari_consensus::{hotstuff::HotStuffError, messages::HotstuffMessage};
 use tari_consensus_types::Decision;
@@ -20,7 +21,6 @@ use tari_engine_types::{
     hashing::hash_template_code,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
-    ToByteType,
     ValidatorFeeWithdrawal,
 };
 use tari_ootle_common_types::{
@@ -40,7 +40,7 @@ use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
 };
-use tari_transaction::Transaction;
+use tari_ootle_transaction::Transaction;
 
 use crate::support::{
     build_transaction_from,

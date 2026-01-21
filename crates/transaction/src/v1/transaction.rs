@@ -96,6 +96,8 @@ impl TransactionV1 {
     }
 
     pub fn calculate_transaction_weight(&self) -> TransactionWeight {
+        const SIGNER_FACTOR: u64 = 5;
+        const INPUT_FACTOR: u64 = 15;
         let num_inputs = self.inputs().len() as u64;
         let num_signers = self.signatures().len() as u64;
         let instruction_weight = self
@@ -104,7 +106,7 @@ impl TransactionV1 {
             .chain(self.fee_instructions())
             .map(calc_instruction_weight)
             .sum::<TransactionWeight>();
-        instruction_weight + num_inputs + num_signers
+        instruction_weight + (num_inputs * INPUT_FACTOR) + (num_signers * SIGNER_FACTOR)
     }
 
     pub fn into_unsealed_transaction(self) -> UnsealedTransactionV1 {
@@ -184,7 +186,7 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
     match instruction {
         Instruction::CreateAccount {
             access_rules,
-            workspace_id,
+            bucket_workspace_id: workspace_id,
             ..
         } => {
             access_rules.as_ref().map(|a| a.num_access_rules() as u64).unwrap_or(0) +

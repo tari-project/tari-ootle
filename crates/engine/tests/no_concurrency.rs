@@ -1,8 +1,8 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_ootle_transaction::{args, Transaction};
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
-use tari_transaction::{args, Transaction};
 
 const TEMPLATE_NAME: &str = "NoConcurrency";
 const TEMPLATE_PATHS: &[&str] = &["no_concurrency"];

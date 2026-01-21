@@ -23,9 +23,18 @@
 use std::{collections::HashMap, time::SystemTime};
 
 use log::*;
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::substate::{Substate, SubstateId};
 use tari_epoch_manager::EpochManagerReader;
-use tari_ootle_common_types::{displayable::Displayable, NodeAddressable, SubstateRequirementRef, ToSubstateAddress};
+use tari_ootle_common_types::{
+    displayable::Displayable,
+    Epoch,
+    NodeAddressable,
+    NumPreshards,
+    ShardGroup,
+    SubstateAddress,
+    SubstateRequirementRef,
+    ToSubstateAddress,
+};
 use tari_validator_node_rpc::client::{SubstateResult, ValidatorNodeClientFactory, ValidatorNodeRpcClient};
 
 use crate::{
@@ -136,6 +145,65 @@ where
         for substate_id in substate_ids {
             let cache_res = self.substate_cache.read(substate_id).await?;
             results.insert(substate_id, cache_res);
+        }
+        Ok(results)
+    }
+
+    async fn build_vn_client_map<'a>(
+        &self,
+        substate_ids: &'a [SubstateId],
+        epoch: Epoch,
+        num_committees: u32,
+    ) -> Result<HashMap<ShardGroup, (TVnClient::Client, Vec<&'a SubstateId>)>, IndexerError> {
+        let mut client_map = HashMap::<_, (_, Vec<&'a SubstateId>)>::with_capacity(substate_ids.len());
+        for substate_id in substate_ids {
+            let shard_group = SubstateAddress::from_substate_id(substate_id, 0)
+                .to_shard_group(NumPreshards::current(), num_committees);
+            if let Some((_, substates_mut)) = client_map.get_mut(&shard_group) {
+                substates_mut.push(substate_id);
+                continue;
+            }
+            let member = self
+                .committee_provider
+                .get_random_committee_member(epoch, Some(shard_group), Default::default())
+                .await?;
+            let client = self.validator_node_client_factory.create_client(&member.address);
+            client_map.insert(shard_group, (client, vec![substate_id]));
+        }
+        Ok(client_map)
+    }
+
+    pub async fn fetch_and_cache_substates(
+        &self,
+        substate_ids: &[SubstateId],
+    ) -> Result<HashMap<SubstateId, Substate>, IndexerError> {
+        let epoch = self.committee_provider.current_epoch().await?;
+        let num_committees = self.committee_provider.get_num_committees(epoch).await?;
+        let client_map = self.build_vn_client_map(substate_ids, epoch, num_committees).await?;
+
+        let mut results = HashMap::with_capacity(substate_ids.len());
+        for (shard_group, (mut client, substate_ids)) in client_map {
+            debug!(target: LOG_TARGET, "Fetching {} substates from shard group {}", substate_ids.len(), shard_group);
+            for batch in substate_ids.chunks(50) {
+                let resp = client.get_substates_batch(batch).await.map_err(|e| {
+                    IndexerError::ValidatorNodeClientError(format!(
+                        "Failed to get substate batch for shard group {}: {}",
+                        shard_group, e
+                    ))
+                })?;
+                for (substate_id, substate) in &resp {
+                    let substate_result = SubstateResult::Up {
+                        substate: Box::new(substate.clone()),
+                    };
+                    let entry = SubstateCacheEntryRef {
+                        version: substate.version(),
+                        substate_result: &substate_result,
+                        cached_at: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs(),
+                    };
+                    self.substate_cache.write(substate_id, entry).await?;
+                }
+                results.extend(resp);
+            }
         }
         Ok(results)
     }

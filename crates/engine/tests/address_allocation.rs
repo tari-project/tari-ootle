@@ -2,10 +2,11 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine::runtime::TransactionCommitError;
-use tari_engine_types::indexed_value::IndexedValue;
+use tari_engine_types::{component::derive_component_address_from_public_key, indexed_value::IndexedValue};
+use tari_ootle_transaction::{args, Transaction};
+use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::models::{ComponentAddress, ResourceAddress};
-use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
-use tari_transaction::{args, builder::CallFromWorkspace, Transaction};
+use tari_template_test_tooling::{support::assert_error::assert_reject_reason, xtr_faucet_component, TemplateTest};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -163,7 +164,7 @@ fn it_allows_calls_to_component_using_the_allocated_address() {
                 Workspace("my_addr"),
                 Workspace("my_res")
             ])
-            .call_method(CallFromWorkspace::new("my_addr"), "get_resource_address", args![])
+            .call_method("my_addr", "get_resource_address", args![])
             .build_and_seal(test.secret_key()),
         vec![],
     );
@@ -176,4 +177,27 @@ fn it_allows_calls_to_component_using_the_allocated_address() {
 
     let addr = result.expect_return::<ResourceAddress>(3);
     assert_eq!(addr, actual_resx);
+}
+
+#[test]
+fn it_allows_calls_to_component_using_a_component_on_the_workspace() {
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/address_allocation"]);
+
+    let expected_account_addr =
+        derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &test.to_public_key_bytes());
+
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_method(xtr_faucet_component(), "take", args![1000])
+            .put_last_instruction_output_on_workspace("bucket")
+            .create_account(test.to_public_key_bytes())
+            // Put the created account address on the workspace, and
+            .put_last_instruction_output_on_workspace("account")
+            // use it to call deposit
+            .call_method("account", "deposit", args![Workspace("bucket")])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    let _account = test.read_only_state_store().get_account(expected_account_addr).unwrap();
 }

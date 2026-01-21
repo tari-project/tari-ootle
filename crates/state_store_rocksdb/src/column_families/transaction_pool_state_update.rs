@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use tari_consensus_types::{BlockId, Decision};
 use tari_ootle_common_types::{Epoch, NodeHeight};
 use tari_ootle_storage::consensus_models::{Evidence, LeaderFee, TransactionPoolRecord, TransactionPoolStage};
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 
 use crate::{
     codecs::{BlockIdCodec, BytesCodec, DefaultCodec, EpochCodec, KeyPrefix, NumberCodec, TransactionIdCodec},

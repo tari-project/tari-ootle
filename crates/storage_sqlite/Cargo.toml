@@ -11,7 +11,6 @@ tari_common_types = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_utilities = { workspace = true }
 tari_ootle_storage = { workspace = true }
-tari_engine_types = { workspace = true }
 tari_template_lib = { workspace = true }
 
 diesel = { workspace = true, default-features = false, features = ["sqlite", "time"] }
@@ -22,5 +21,6 @@ serde_json = { workspace = true }
 serde = { workspace = true, default-features = true }
 
 [dev-dependencies]
+ootle_byte_type = { workspace = true, features = ["crypto"] }
 rand = { workspace = true }
 tari_crypto = { workspace = true }

@@ -27,13 +27,13 @@ use tari_ootle_storage::{
     Ordering,
     StorageError,
 };
+use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_ootle_wallet_sdk::models::UtxoStateUpdateSet;
 use tari_template_lib::{
     models::{ResourceAddress, UtxoId},
     prelude::RistrettoPublicKeyBytes,
     types::{crypto::UtxoTag, Amount, TemplateAddress},
 };
-use tari_transaction::{Transaction, TransactionId};
 
 use crate::{
     network_state_sync::{EventFilter, SyncProgress},

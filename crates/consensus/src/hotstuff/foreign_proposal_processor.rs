@@ -29,8 +29,8 @@ use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
 };
+use tari_ootle_transaction::TransactionId;
 use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
-use tari_transaction::TransactionId;
 
 use crate::{
     hotstuff::{

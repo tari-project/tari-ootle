@@ -1,13 +1,14 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use ootle_byte_type::ToByteType;
 use rand::rngs::OsRng;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-use tari_engine_types::{component::derive_component_address_from_public_key, ToByteType};
+use tari_engine_types::component::derive_component_address_from_public_key;
 use tari_ootle_common_types::{Network, SubstateRequirement};
+use tari_ootle_transaction::{args, Transaction};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS};
-use tari_transaction::{args, Transaction};
 
 pub fn builder(network: Network) -> impl Fn(u64) -> Transaction {
     move |_: u64| -> Transaction {

@@ -3,22 +3,22 @@
 
 use std::iter;
 
+use ootle_byte_type::ToByteType;
 use rand::random;
-use tari_engine::transaction::TransactionError;
+use tari_engine::transaction::TransactionErrorKind;
 use tari_engine_types::{
     commit_result::{RejectReason, TransactionResult},
     hashing::hash_template_code,
     limits,
     published_template::{PublishedTemplateAddress, TemplateBlob},
     substate::{SubstateId, SubstateValue},
-    ToByteType,
 };
+use tari_ootle_transaction::Transaction;
 use tari_template_test_tooling::{
     compile::compile_template,
     support::assert_error::assert_reject_reason,
     TemplateTest,
 };
-use tari_transaction::Transaction;
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -65,6 +65,7 @@ fn publish_template_invalid_binary() {
     let result = test.execute_expect_failure(
         Transaction::builder_localnet()
             .pay_fee_from_component(account_address, 200_000)
+            // Main intent instruction #1
             .publish_template(vec![1, 2, 3].try_into().unwrap())
             .build_and_seal(&account_key),
         vec![owner_proof],
@@ -73,7 +74,7 @@ fn publish_template_invalid_binary() {
     assert!(matches!(result, RejectReason::ExecutionFailure(_)));
 
     if let RejectReason::ExecutionFailure(error) = result {
-        assert!(error.starts_with("Load template error:"));
+        assert!(error.starts_with("At instruction #1: Load template error:"));
     }
 }
 
@@ -92,7 +93,7 @@ fn publish_template_too_big_binary() {
         vec![owner_proof],
     );
 
-    assert_reject_reason(reason, TransactionError::WasmBinaryTooBig {
+    assert_reject_reason(reason, TransactionErrorKind::WasmBinaryTooBig {
         size: wasm_binary_size,
         max: limits::ENGINE_LIMITS.max_template_binary_size_bytes,
     });

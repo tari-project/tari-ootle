@@ -1,19 +1,20 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use ootle_byte_type::ToByteType;
 use tari_engine::{
     runtime::{NativeAction, RuntimeError},
-    transaction::TransactionError,
+    transaction::TransactionErrorKind,
 };
-use tari_engine_types::{commit_result::RejectReason, indexed_value::IndexedValue, ToByteType};
+use tari_engine_types::{commit_result::RejectReason, indexed_value::IndexedValue};
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
+use tari_ootle_transaction::{args, Transaction};
 use tari_template_lib::{
     args::CallAction,
     auth::OwnerRule,
     models::{ComponentAddress, VaultId},
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
-use tari_transaction::{args, Transaction};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -203,7 +204,7 @@ fn it_fails_when_a_migration_panics() {
 
     assert_reject_reason(
         reason,
-        RejectReason::ExecutionFailure("Panic! Intentional panic during migration".to_string()),
+        RejectReason::ExecutionFailure("At instruction #1: Panic! Intentional panic during migration".to_string()),
     );
 }
 
@@ -281,7 +282,7 @@ fn it_disallows_calling_the_migration_function_directly() {
         vec![],
     );
 
-    assert_reject_reason(reason, TransactionError::CannotCallMigrationFunctionDirectly {
+    assert_reject_reason(reason, TransactionErrorKind::CannotCallMigrationFunctionDirectly {
         name: "migrate_v1_to_v2".to_string(),
     });
 }

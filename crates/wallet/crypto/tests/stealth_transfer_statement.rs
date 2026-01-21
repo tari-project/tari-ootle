@@ -8,7 +8,7 @@ use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_engine_types::{stealth, ToByteType};
+use tari_engine_types::stealth;
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
 use tari_ootle_wallet_crypto::{
     confidential,
@@ -30,6 +30,7 @@ fn it_create_a_valid_revealed_only_proof() {
 }
 
 mod stealth_tests {
+    use ootle_byte_type::ToByteType;
     use tari_template_lib::models::SpendCondition;
 
     use super::*;

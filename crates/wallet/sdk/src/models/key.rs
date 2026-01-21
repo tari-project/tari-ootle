@@ -11,7 +11,7 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
 use tari_ootle_address::RistrettoOotleAddress;
-use tari_ootle_common_types::Signable;
+use tari_ootle_transaction::Signable;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]

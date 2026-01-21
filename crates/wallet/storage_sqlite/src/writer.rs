@@ -34,6 +34,7 @@ use tari_ootle_common_types::{
     StateVersion,
     VersionedSubstateIdRef,
 };
+use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_ootle_wallet_sdk::{
     models::{
         AccountUpdate,
@@ -65,7 +66,6 @@ use tari_template_lib::{
         TemplateAddress,
     },
 };
-use tari_transaction::{Transaction, TransactionId};
 use tari_utilities::hex::Hex;
 use time::PrimitiveDateTime;
 use webauthn_rs::prelude::Passkey;

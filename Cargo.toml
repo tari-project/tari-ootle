@@ -41,11 +41,14 @@ members = [
     "crates/transaction_manifest",
     "crates/transaction",
     "crates/validator_node_rpc",
+    "crates/wallet/ootle-rs",
     "crates/wallet/crypto",
     "crates/wallet/sdk",
     "crates/wallet/sdk_services",
     "crates/wallet/storage_sqlite",
     "crates/ootle_address",
+    "crates/ootle_serde",
+    "crates/ootle_byte_type",
     "integration_tests",
     "networking/core",
     "networking/swarm",
@@ -99,7 +102,9 @@ tari_template_lib = { path = "crates/template_lib" }
 tari_template_lib_types = { version = "0.14.0", path = "crates/template_lib_types", default-features = false }
 tari_template_macros = { version = "0.14.0", path = "crates/template_macros" }
 tari_template_test_tooling = { path = "crates/template_test_tooling" }
-tari_transaction = { path = "crates/transaction" }
+tari_ootle_transaction = { path = "crates/transaction" }
+ootle_byte_type = { path = "crates/ootle_byte_type", version = "0.1.0" }
+ootle_serde = { path = "crates/ootle_serde", version = "0.1.0" }
 tari_transaction_manifest = { path = "crates/transaction_manifest" }
 tari_validator_node_rpc = { path = "crates/validator_node_rpc" }
 sqlite_message_logger = { path = "networking/sqlite_message_logger" }
@@ -143,7 +148,7 @@ anyhow = "1.0.100"
 async-graphql = "7.0.17"
 async-graphql-axum = "7.0.17"
 async-semaphore = "1.2.1"
-async-trait = "0.1.74"
+async-trait = "0.1.89"
 asynchronous-codec = "0.7.0"
 axum = "0.8"
 axum-extra = "0.10.1"
@@ -227,6 +232,7 @@ thiserror = "2.0.17"
 time = "0.3.15"
 tokio = { version = "1.49.0", default-features = false }
 tokio-stream = "0.1.17"
+async-stream = "0.3.6"
 tokio-util = "0.7.16"
 tonic = "0.13.1"
 tower = "0.5"

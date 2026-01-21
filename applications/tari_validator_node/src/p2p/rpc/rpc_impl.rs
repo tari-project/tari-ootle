@@ -29,6 +29,7 @@ use log::*;
 use tari_bor::encode;
 use tari_consensus::hotstuff::ConsensusCurrentState;
 use tari_consensus_types::BlockId;
+use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_ootle_common_types::{
     displayable::Displayable,
@@ -47,6 +48,8 @@ use tari_ootle_p2p::{
         GetCheckpointsResponse,
         GetSubstateRequest,
         GetSubstateResponse,
+        GetSubstatesBatchRequest,
+        GetSubstatesBatchResponse,
         GetTransactionResultRequest,
         GetTransactionResultResponse,
         PayloadResultStatus,
@@ -61,8 +64,8 @@ use tari_ootle_storage::{
     consensus_models::{Block, EpochCheckpoint, SubstateRecord, SubstateValueFilterFlags, TransactionRecord},
     StateStore,
 };
+use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
-use tari_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::{rpc_service::ValidatorNodeRpcService, STATE_SYNC_MAX_BATCH_SIZE};
 use tokio::{sync::mpsc, task};
 
@@ -449,6 +452,74 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             )
             .run(),
         );
+
+        Ok(Streaming::new(receiver))
+    }
+
+    async fn get_substate_batch(
+        &self,
+        req: Request<GetSubstatesBatchRequest>,
+    ) -> Result<Streaming<GetSubstatesBatchResponse>, RpcStatus> {
+        const MAX_REQUESTS: usize = 50;
+        let req = req.into_message();
+
+        if req.substate_ids.len() > MAX_REQUESTS {
+            return Err(RpcStatus::bad_request("Cannot request more than 100 substates at once"));
+        }
+
+        debug!(
+            target: LOG_TARGET,
+            "Querying {} substate(s) from the state store", req.substate_ids.len()
+        );
+        let ids = req
+            .substate_ids
+            .iter()
+            .map(|x| SubstateId::from_bytes(x))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| RpcStatus::bad_request(format!("Invalid substate ID: {e}")))?;
+
+        let (sender, receiver) = mpsc::channel(req.substate_ids.len());
+
+        let store = self.state_store.clone();
+        let responses = task::spawn_blocking(move || {
+            // TODO: we should use a snapshot - will need to refactor the state store to support this, by abstracting
+            // the .cf(X) call and implementing read only transaction for all implementors of this trait
+            let (substates, missing) = store
+                .with_read_tx(|tx| SubstateRecord::get_any_max_version(tx, &ids))
+                .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+
+            if !missing.is_empty() {
+                debug!(
+                    target: LOG_TARGET,
+                    "{} requested substate(s) not found: {}",
+                    missing.len(),
+                    missing.display()
+                );
+            }
+
+            Ok::<_, RpcStatus>(substates.into_iter().map(|substate| proto::consensus::Substate {
+                substate_id: substate.substate_id().to_bytes(),
+                version: substate.version(),
+                substate: substate.substate_value().map(|v| v.to_bytes()).unwrap_or_default(),
+                created: Some(substate.created().into()),
+                destroyed: substate.destroyed().map(Into::into),
+            }))
+        })
+        .await
+        .map_err(RpcStatus::log_internal_error(LOG_TARGET))??;
+
+        task::spawn(async move {
+            for resp in responses {
+                if sender
+                    .send(Ok(GetSubstatesBatchResponse { substate: Some(resp) }))
+                    .await
+                    .is_err()
+                {
+                    warn!(target: LOG_TARGET, "Receiver dropped the stream, stopping substate batch response stream");
+                    break;
+                }
+            }
+        });
 
         Ok(Streaming::new(receiver))
     }

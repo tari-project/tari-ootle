@@ -1,0 +1,279 @@
+//   Copyright 2026 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Weak,
+};
+
+use tari_indexer_client::{rest_api_client::IndexerRestApiClient, types::GetSubstatesRequest};
+use tari_ootle_common_types::{
+    engine_types::{
+        indexed_value::IndexedValueError,
+        substate::{SubstateId, SubstateValue},
+        template_lib_models::ComponentAddress,
+    },
+    substate_type::SubstateType,
+    SubstateRequirement,
+};
+use tari_ootle_transaction::UnsignedTransaction;
+use tracing::debug;
+
+use crate::{macros::_macro_exports::ResourceAddress, provider::WantInput};
+
+const LOG_TARGET: &str = "ootle_billon::wallet::provider::input_resolver";
+
+#[derive(Debug, thiserror::Error)]
+pub enum TransactionInputResolverError {
+    #[error("Failed to resolve transaction input: {0}")]
+    IndexerClientError(#[from] tari_indexer_client::error::IndexerRestClientError),
+    #[error("Indexer client has been dropped")]
+    IndexerClientDropped,
+    #[error("Indexed value error: {0}")]
+    IndexedValueError(#[from] IndexedValueError),
+    #[error("Required substate {substate_id} not found: {details}")]
+    RequiredSubstateNotFound { substate_id: SubstateId, details: String },
+    #[error("Unexpected substate type. Expected: {expected}, Found: {found}")]
+    UnexpectedSubstateType {
+        expected: SubstateType,
+        found: SubstateType,
+    },
+}
+
+pub struct TransactionInputResolver {
+    client: Weak<IndexerRestApiClient>,
+    cache: HashMap<SubstateId, Option<SubstateValue>>,
+}
+
+impl TransactionInputResolver {
+    pub fn new(client: Weak<IndexerRestApiClient>) -> Self {
+        Self {
+            client,
+            cache: HashMap::new(),
+        }
+    }
+
+    pub async fn resolve_inputs(
+        &mut self,
+        tx_mut: &mut UnsignedTransaction,
+        want_list: &HashSet<WantInput>,
+    ) -> Result<(), TransactionInputResolverError> {
+        let Some(client) = self.client.upgrade() else {
+            return Err(TransactionInputResolverError::IndexerClientDropped);
+        };
+
+        let mut wants = want_list.iter().map(|i| (i, false)).collect::<HashMap<_, _>>();
+
+        let mut substates_to_cache = Vec::new();
+        let mut num_unsatisfied = want_list.len();
+        loop {
+            for (want, is_satisfied) in &mut wants {
+                if *is_satisfied {
+                    continue;
+                }
+
+                if self.resolve_want_input(want, tx_mut, &mut substates_to_cache)? {
+                    *is_satisfied = true;
+                    num_unsatisfied -= 1;
+                }
+            }
+
+            // Cheaper than `wants.iter().all(|(_, s)| **s)`
+            if num_unsatisfied == 0 {
+                break;
+            }
+
+            // Populate the cache and then do another pass
+            self.cache_substates(&mut substates_to_cache, &client).await?;
+        }
+
+        Ok(())
+    }
+
+    fn resolve_want_input(
+        &mut self,
+        want: &WantInput,
+        tx_mut: &mut UnsignedTransaction,
+        substates_to_cache: &mut Vec<SubstateId>,
+    ) -> Result<bool, TransactionInputResolverError> {
+        match want {
+            WantInput::VaultForResource {
+                component_address,
+                resource_address,
+                required,
+            } => self.resolve_vault_for_resource(
+                tx_mut,
+                substates_to_cache,
+                component_address,
+                resource_address,
+                *required,
+            ),
+            WantInput::SubstateIfExists { substate_id } => {
+                self.resolve_substate_if_exists(tx_mut, substates_to_cache, substate_id)
+            },
+        }
+    }
+
+    fn resolve_substate_if_exists(
+        &mut self,
+        tx_mut: &mut UnsignedTransaction,
+        substates_to_cache: &mut Vec<SubstateId>,
+        substate_id: &SubstateId,
+    ) -> Result<bool, TransactionInputResolverError> {
+        match self.cache.get(substate_id) {
+            Some(Some(_)) => {
+                tx_mut.add_input(SubstateRequirement::unversioned(substate_id.clone()));
+                Ok(true)
+            },
+            // This InputWant is optional by definition.
+            Some(None) => Ok(true),
+            None => {
+                debug!(
+                    target: LOG_TARGET,
+                    "Will try to cache substate {} to satisfy SubstateIfExists",
+                    substate_id
+                );
+                substates_to_cache.push(substate_id.clone());
+                Ok(false)
+            },
+        }
+    }
+
+    fn resolve_vault_for_resource(
+        &mut self,
+        tx_mut: &mut UnsignedTransaction,
+        substates_to_cache: &mut Vec<SubstateId>,
+        component_address: &ComponentAddress,
+        resource_address: &ResourceAddress,
+        required: bool,
+    ) -> Result<bool, TransactionInputResolverError> {
+        let mut is_satisfied = false;
+        let component_substate_id = SubstateId::Component(*component_address);
+        match self.cache.get(&component_substate_id) {
+            Some(Some(SubstateValue::Component(data))) => {
+                let component_state = data.body.to_indexed_well_known_types()?;
+                debug!(
+                    target: LOG_TARGET,
+                    "Checking {} vault(s) for resource {} in component {}",
+                    component_state.vault_ids().len(),
+                    resource_address,
+                    component_address
+                );
+                let mut have_all_vaults = true;
+                for vault_id in component_state
+                    .vault_ids()
+                    .iter()
+                    .map(|vault_id| SubstateId::Vault(*vault_id))
+                {
+                    match self.cache.get(&vault_id) {
+                        Some(Some(vault)) => {
+                            let vault = vault.as_vault().ok_or_else(|| {
+                                TransactionInputResolverError::UnexpectedSubstateType {
+                                    expected: SubstateType::Vault,
+                                    found: SubstateType::from(vault),
+                                }
+                            })?;
+                            if vault.resource_address() == resource_address {
+                                // Found the vault for the specified resource
+                                tx_mut.add_input(SubstateRequirement::unversioned(vault_id));
+                                is_satisfied = true;
+                            }
+                        },
+                        Some(None) => {
+                            // Continue looking at other vaults
+                        },
+                        None => {
+                            have_all_vaults = false;
+                            // We'll need to find the vault for the specified resource
+                            debug!(
+                                target: LOG_TARGET,
+                                "Will try to cache vault substate {} to satisfy vault for resource {}",
+                                vault_id,
+                                resource_address
+                            );
+                            substates_to_cache.push(vault_id);
+                        },
+                    }
+                }
+
+                if !is_satisfied && have_all_vaults {
+                    if required {
+                        // Error if we didn't satisfy the want after checking all vaults
+                        return Err(TransactionInputResolverError::RequiredSubstateNotFound {
+                            substate_id: component_substate_id,
+                            details: format!(
+                                "Vault for resource {resource_address} in component {component_address} does not exist"
+                            ),
+                        });
+                    } else {
+                        // Not required, so we're satisfied even though we didn't find it
+                        is_satisfied = true;
+                    }
+                } else {
+                    // Need to cache more vaults
+                }
+            },
+            Some(Some(found)) => {
+                // Should never happen
+                return Err(TransactionInputResolverError::UnexpectedSubstateType {
+                    expected: SubstateType::Component,
+                    found: SubstateType::from(found),
+                });
+            },
+            Some(None) if required => {
+                return Err(TransactionInputResolverError::RequiredSubstateNotFound {
+                    substate_id: component_substate_id,
+                    details: "Component does not exist".to_string(),
+                });
+            },
+            Some(None) => {
+                // Substate not found but not required
+                is_satisfied = true;
+            },
+            None => {
+                debug!(
+                    target: LOG_TARGET,
+                    "Will try to cache component substate {} to satisfy vault for resource {}",
+                    component_address,
+                    resource_address
+                );
+                substates_to_cache.push(SubstateId::Component(*component_address));
+            },
+        }
+        Ok(is_satisfied)
+    }
+
+    async fn cache_substates(
+        &mut self,
+        substates_to_cache: &mut Vec<SubstateId>,
+        client: &IndexerRestApiClient,
+    ) -> Result<(), TransactionInputResolverError> {
+        for batch in substates_to_cache.chunks(20) {
+            let requests = batch.to_vec();
+            let resp = client
+                .fetch_substates(GetSubstatesRequest {
+                    requests: requests
+                        .try_into()
+                        .expect("number of substates drained should be <= request maximum"),
+                    cached_only: false,
+                })
+                .await?;
+
+            self.cache.extend(
+                resp.substates
+                    .into_iter()
+                    .map(|(id, substate)| (id, Some(substate.into_substate_value()))),
+            );
+            // Add any not found substates to the cache as None (not found)
+            for id in batch {
+                if !self.cache.contains_key(id) {
+                    self.cache.insert(id.clone(), None);
+                }
+            }
+        }
+
+        substates_to_cache.clear();
+
+        Ok(())
+    }
+}

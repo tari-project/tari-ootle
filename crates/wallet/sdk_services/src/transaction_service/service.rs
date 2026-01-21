@@ -6,6 +6,7 @@ use std::{sync::Arc, time::Duration};
 use log::*;
 use tari_engine_types::commit_result::ExecuteResult;
 use tari_ootle_common_types::{optional::IsNotFoundError, response_status::TransactionStatusResponseError};
+use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_ootle_wallet_sdk::{
     models::{
         NewAccountData,
@@ -21,7 +22,6 @@ use tari_ootle_wallet_sdk::{
     WalletSdkSpec,
 };
 use tari_shutdown::ShutdownSignal;
-use tari_transaction::{Transaction, TransactionId};
 use tokio::{
     sync::{mpsc, watch, Semaphore},
     time,
@@ -142,6 +142,7 @@ where
                             .send(finalize.map(|finalize| ExecuteResult {
                                 finalize,
                                 execution_time: finalized_transaction.execution_time.unwrap_or_default(),
+                                execute_epoch: None,
                             }))
                             .map_err(|_| TransactionServiceError::ServiceShutdown)?;
                     },

@@ -25,8 +25,9 @@ tari_sidechain = { workspace = true }
 tari_state_store_rocksdb = { workspace = true }
 tari_state_tree = { workspace = true }
 tari_template_lib = { workspace = true, features = ["borsh"] }
-tari_transaction = { workspace = true }
+tari_ootle_transaction = { workspace = true }
 tari_consensus_types = { workspace = true }
+ootle_byte_type = { workspace = true }
 
 log = { workspace = true }
 serde = { workspace = true, default-features = true }

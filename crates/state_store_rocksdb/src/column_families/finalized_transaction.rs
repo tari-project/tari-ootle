@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use tari_ootle_storage::time::PrimitiveDateTime;
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 
 use crate::{
     codecs::{DefaultCodec, KeyPrefix, TransactionIdCodec},

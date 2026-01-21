@@ -8,7 +8,7 @@ use tari_template_abi::rust::{
     str::FromStr,
 };
 
-use crate::{crypto::InvalidByteLengthError, hex::fixed_bytes_from_hex, serde_helpers, Hash, HashParseError};
+use crate::{crypto::InvalidByteLengthError, hex::fixed_bytes_from_hex, serde_helpers, Hash, KeyParseError};
 
 /// A Ristretto public key byte contents
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, Serialize, Deserialize)]
@@ -41,7 +41,7 @@ impl RistrettoPublicKeyBytes {
         Ok(RistrettoPublicKeyBytes(key))
     }
 
-    pub fn from_hex(hex: &str) -> Result<Self, HashParseError> {
+    pub fn from_hex(hex: &str) -> Result<Self, KeyParseError> {
         let bytes = fixed_bytes_from_hex(hex)?;
         Ok(Self(bytes))
     }
@@ -98,7 +98,7 @@ impl Deref for RistrettoPublicKeyBytes {
 }
 
 impl FromStr for RistrettoPublicKeyBytes {
-    type Err = HashParseError;
+    type Err = KeyParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let bytes = fixed_bytes_from_hex(s)?;

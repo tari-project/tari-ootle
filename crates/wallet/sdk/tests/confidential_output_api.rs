@@ -3,8 +3,9 @@
 
 mod support;
 
+use ootle_byte_type::ToByteType;
 use tari_crypto::commitment::HomomorphicCommitmentFactory;
-use tari_engine_types::{crypto::get_commitment_factory, substate::SubstateDiff, ToByteType};
+use tari_engine_types::{crypto::get_commitment_factory, substate::SubstateDiff};
 use tari_ootle_wallet_sdk::{
     models::{ConfidentialOutputModel, KeyBranch, KeyId, OutputStatus},
     storage::{ReadableWalletStore, WalletStoreReader},

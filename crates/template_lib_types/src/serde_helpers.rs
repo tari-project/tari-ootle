@@ -74,7 +74,7 @@ impl<'a> Visitor<'a> for BytesVisitor<'a> {
     type Value = BytesCow<'a>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("bytes (in template_lib)")
+        formatter.write_str("bytes (ByteVisitor in template_lib_types)")
     }
 
     fn visit_borrowed_bytes<E>(self, v: &'a [u8]) -> Result<Self::Value, E>

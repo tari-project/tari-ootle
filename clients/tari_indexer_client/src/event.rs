@@ -3,7 +3,7 @@
 
 use tari_engine_types::transaction_receipt::FinalizeOutcome;
 use tari_ootle_common_types::Epoch;
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 
 #[derive(Debug, Clone)]
 pub enum IndexerEvent {

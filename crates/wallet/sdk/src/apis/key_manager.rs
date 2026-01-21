@@ -1,6 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use ootle_byte_type::FromByteType;
 use rand::rngs::OsRng;
 use tari_common_types::seeds::cipher_seed;
 use tari_crypto::{
@@ -8,14 +9,14 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
     tari_utilities::ByteArray,
 };
-use tari_engine_types::FromByteType;
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
+    signature::SignatureOutput,
     Epoch,
     Network,
-    Signable,
 };
+use tari_ootle_transaction::Signable;
 use tari_ootle_wallet_crypto::encryption::{decrypt_with_password, encrypt_with_password, CipherError};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 
@@ -24,7 +25,7 @@ use crate::{
         password_manager::{PasswordManagerApi, PasswordManagerApiError},
         stealth_crypto::StealthCryptoApi,
     },
-    key_managers::{SignatureOutput, WalletKeyStore},
+    key_managers::WalletKeyStore,
     models::{
         DerivedKeyId,
         DerivedKeyIndex,
@@ -349,22 +350,30 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
         Ok(epoch)
     }
 
-    pub fn sign_with_stealth_key<T: Signable<C>, C>(
+    pub fn sign_with_stealth_key<T, C>(
         &self,
         key_id: &StealthUtxoSpendKeyId,
         context: C,
         item: &T,
-    ) -> Result<SignatureOutput, KeyManagerApiError> {
+    ) -> Result<T::Signature, KeyManagerApiError>
+    where
+        T: Signable<C>,
+        T::Signature: From<SignatureOutput>,
+    {
         let stealth_secret = self.generate_stealth_owner_key(key_id.account_key_id, &key_id.public_nonce)?;
         self.sign_with_explicit_key(&stealth_secret, context, item)
     }
 
-    pub fn sign_with_context<T: Signable<C>, C>(
+    pub fn sign_with_context<T, C>(
         &self,
         key_id: KeyId,
         context: C,
         item: &T,
-    ) -> Result<SignatureOutput, KeyManagerApiError> {
+    ) -> Result<T::Signature, KeyManagerApiError>
+    where
+        T: Signable<C>,
+        T::Signature: From<SignatureOutput>,
+    {
         match &key_id {
             // Use the key store implementation to sign with derived keys
             KeyId::Derived { key_branch, index } => {
@@ -372,7 +381,7 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
                     .key_store()
                     .sign(key_branch.as_str(), *index, context, item)
                     .map_err(KeyManagerApiError::key_store_error)?;
-                Ok(output)
+                Ok(output.into())
             },
             _ => {
                 let key = self.get_key(key_id)?;
@@ -381,16 +390,20 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
         }
     }
 
-    pub fn sign_with_explicit_key<T: Signable<C>, C>(
+    pub fn sign_with_explicit_key<T, C>(
         &self,
         secret_key: &RistrettoSecretKey,
         context: C,
         item: &T,
-    ) -> Result<SignatureOutput, KeyManagerApiError> {
+    ) -> Result<T::Signature, KeyManagerApiError>
+    where
+        T: Signable<C>,
+        T::Signature: From<SignatureOutput>,
+    {
         let signature = RistrettoSchnorr::sign(secret_key, item.to_signing_message(context), &mut OsRng)
             .expect("RistrettoSchnorr::sign is infallible as it internally hashes the message into canonical form");
         let public_key = RistrettoPublicKey::from_secret_key(secret_key);
-        Ok(SignatureOutput { public_key, signature })
+        Ok(SignatureOutput { public_key, signature }.into())
     }
 }
 

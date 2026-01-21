@@ -1,22 +1,31 @@
-//   Copyright 2023 The Tari Project
+//   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tari_bor::json_encoding::{CborValueJsonSerializeWrapper, CiboruimValueDeserializeFixWrapper};
 
+use crate::visitor::BytesVisitor;
+
 pub fn serialize<S: Serializer>(v: &tari_bor::Value, s: S) -> Result<S::Ok, S::Error> {
     if s.is_human_readable() {
         CborValueJsonSerializeWrapper(v).serialize(s)
     } else {
-        // This is to support bincode - unfortunately, when using CBOR, it will be represented as
-        // Value::Bytes instead of the cbor representation. NOTE: this increases fees (see
-        // FeeModule::on_before_finalize) Other solutions include:
-        // - switching to cbor4ii, implementing to_value and from_value and a serializer that supports bincode
-        // - adding a derived Serialize/Deserialize trait to ciborium::Value that encodes the enum directly
-        // - storing a Vec<u8> and incurring the extra encode/decode steps (basically what this does)
-        let vec = tari_bor::encode(v).map_err(serde::ser::Error::custom)?;
-        vec.serialize(s)
-        // v.serialize(s)
+        #[cfg(feature = "bincode-compat")]
+        {
+            // This is to support bincode since the default ciborium serde implementation uses deserialize_any instead
+            // of serializing the cbor::Value enum directly
+            // - unfortunately, when using CBOR, Value::Bytes will be used instead of the actual CBOR representation.
+            // NOTE: this increases fees (see FeeModule::on_before_finalize)
+            // Other solutions include:
+            // - switching to cbor4ii, implementing to_value and from_value and a serializer that supports
+            //   deserialize_any
+            // - wrapper type for ciborium::Value that implements a "standard" Serialize/Deserialize on the Value enum
+            // - storing a Vec<u8> and incurring the extra encode/decode steps (what this does)
+            let vec = tari_bor::encode(v).map_err(serde::ser::Error::custom)?;
+            s.serialize_bytes(&vec)
+        }
+        #[cfg(not(feature = "bincode-compat"))]
+        v.serialize(s)
     }
 }
 
@@ -26,9 +35,8 @@ where D: Deserializer<'de> {
         let wrapper = CiboruimValueDeserializeFixWrapper::deserialize(d)?;
         Ok(wrapper.0)
     } else {
-        let vec = Vec::<u8>::deserialize(d)?;
-        tari_bor::decode_exact(&vec).map_err(serde::de::Error::custom)
-        // tari_bor::Value::deserialize(d)
+        let bytes = d.deserialize_byte_buf(BytesVisitor::new())?;
+        tari_bor::decode_exact(bytes.as_ref()).map_err(serde::de::Error::custom)
     }
 }
 
@@ -37,9 +45,7 @@ mod tests {
     use tari_bor::cbor;
     use tari_template_lib::{models::ResourceAddress, types::ObjectKey};
 
-    use super::*;
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     struct Test {
         #[serde(with = "super")]
         value: tari_bor::Value,

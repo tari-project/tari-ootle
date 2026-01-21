@@ -24,13 +24,13 @@ use std::{collections::HashMap, fs, str::FromStr};
 
 use tari_bor::cbor;
 use tari_engine_types::substate::SubstateId;
+use tari_ootle_transaction::{call_args, Instruction};
 use tari_template_lib::{
     constants::XTR,
     models::ComponentAddress,
     prelude::RistrettoPublicKeyBytes,
     types::{ObjectKey, TemplateAddress},
 };
-use tari_transaction::{call_args, Instruction};
 use tari_transaction_manifest::{parse_manifest, ManifestInstructions};
 
 #[test]

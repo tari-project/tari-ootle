@@ -4,11 +4,11 @@
 use std::fmt;
 
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_ootle_common_types::{IntoSigned, Signable};
+use tari_ootle_common_types::signature::SignatureOutput;
+use tari_ootle_transaction::{IntoSigned, Signable};
 
 use crate::{
     apis::key_manager::{KeyManagerApi, KeyManagerApiError},
-    key_managers::SignatureOutput,
     models::{KeyId, StealthUtxoSpendKeyId},
     spec::KeyStoreError,
     storage::WalletStorageError,
@@ -37,8 +37,11 @@ impl<'a, TSpec: WalletSdkSpec> SignerApi<'a, TSpec, ()> {
 }
 
 impl<'a, TSpec: WalletSdkSpec, Ctx: Copy> SignerApi<'a, TSpec, Ctx> {
-    pub fn generate_signature<T>(&self, key_id: KeyId, item: &T) -> Result<SignatureOutput, SignerApiError<TSpec>>
-    where T: Signable<Ctx> {
+    pub fn generate_signature<T>(&self, key_id: KeyId, item: &T) -> Result<T::Signature, SignerApiError<TSpec>>
+    where
+        T: Signable<Ctx>,
+        T::Signature: From<SignatureOutput>,
+    {
         let output = self.key_manager.sign_with_context(key_id, self.context, item)?;
         Ok(output)
     }
@@ -47,18 +50,22 @@ impl<'a, TSpec: WalletSdkSpec, Ctx: Copy> SignerApi<'a, TSpec, Ctx> {
         &self,
         key_id: &StealthUtxoSpendKeyId,
         item: &T,
-    ) -> Result<SignatureOutput, SignerApiError<TSpec>>
+    ) -> Result<T::Signature, SignerApiError<TSpec>>
     where
         T: Signable<Ctx>,
+        T::Signature: From<SignatureOutput>,
     {
         let output = self.key_manager.sign_with_stealth_key(key_id, self.context, item)?;
         Ok(output)
     }
 
     pub fn sign<T>(&self, key_id: KeyId, item: T) -> Result<T::SignedOutput, SignerApiError<TSpec>>
-    where T: IntoSigned<Ctx> {
-        let output = self.generate_signature(key_id, &item)?;
-        let output = item.into_signed(output.public_key, output.signature);
+    where
+        T: IntoSigned<Ctx>,
+        <T as Signable<Ctx>>::Signature: From<SignatureOutput>,
+    {
+        let sig = self.generate_signature(key_id, &item)?;
+        let output = item.into_signed(sig);
         Ok(output)
     }
 
@@ -69,9 +76,10 @@ impl<'a, TSpec: WalletSdkSpec, Ctx: Copy> SignerApi<'a, TSpec, Ctx> {
     ) -> Result<T::SignedOutput, SignerApiError<TSpec>>
     where
         T: IntoSigned<Ctx>,
+        <T as Signable<Ctx>>::Signature: From<SignatureOutput>,
     {
-        let output = self.generate_stealth_key_signature(key_id, &item)?;
-        let output = item.into_signed(output.public_key, output.signature);
+        let sig = self.generate_stealth_key_signature(key_id, &item)?;
+        let output = item.into_signed(sig);
         Ok(output)
     }
 
@@ -82,11 +90,12 @@ impl<'a, TSpec: WalletSdkSpec, Ctx: Copy> SignerApi<'a, TSpec, Ctx> {
     ) -> Result<T::SignedOutput, SignerApiError<TSpec>>
     where
         T: IntoSigned<Ctx>,
+        <T as Signable<Ctx>>::Signature: From<SignatureOutput>,
     {
-        let output = self
+        let sig = self
             .key_manager
             .sign_with_explicit_key(secret_key, self.context, &item)?;
-        let output = item.into_signed(output.public_key, output.signature);
+        let output = item.into_signed(sig);
         Ok(output)
     }
 }

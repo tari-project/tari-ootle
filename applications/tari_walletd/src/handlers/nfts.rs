@@ -6,20 +6,20 @@ use std::{collections::HashSet, slice};
 use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
 use log::{info, warn};
+use ootle_byte_type::ToByteType;
 use tari_engine_types::{
     component::derive_component_address_from_public_key,
     json_cbor::convert_json_to_cbor,
     substate::SubstateId,
-    ToByteType,
 };
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
+use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::apis::substate::ValidatorScanResult;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS},
     models::{ComponentAddress, ResourceAddress},
 };
-use tari_transaction::args;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{
@@ -316,9 +316,8 @@ pub async fn handle_transfer(
         let finalize = execute_result.finalize;
         return Ok(TransferNftResponse {
             transaction_id,
-            // TODO: this could cause a crash, change api to use u64
-            fee: finalize.fee_receipt.total_fees_paid,
-            fee_refunded: finalize.fee_receipt.total_fee_payment - finalize.fee_receipt.total_fees_paid,
+            fee: finalize.fee_receipt.total_fees_paid(),
+            fee_refunded: finalize.fee_receipt.total_fee_payment() - finalize.fee_receipt.total_fees_paid(),
             result: finalize,
         });
     }

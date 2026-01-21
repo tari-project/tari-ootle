@@ -3,28 +3,28 @@
 
 use std::fmt;
 
-use crate::HashParseError;
+use crate::KeyParseError;
 
-pub fn fixed_bytes_from_hex<const L: usize>(s: &str) -> Result<[u8; L], HashParseError> {
+pub fn fixed_bytes_from_hex<const L: usize>(s: &str) -> Result<[u8; L], KeyParseError> {
     if s.len() != L * 2 {
-        return Err(HashParseError);
+        return Err(KeyParseError);
     }
 
     let mut bytes = [0u8; L];
     for (i, h) in bytes.iter_mut().enumerate() {
-        *h = u8::from_str_radix(&s[2 * i..2 * (i + 1)], 16).map_err(|_| HashParseError)?;
+        *h = u8::from_str_radix(&s[2 * i..2 * (i + 1)], 16).map_err(|_| KeyParseError)?;
     }
     Ok(bytes)
 }
 
-pub fn bytes_from_hex(s: &str) -> Result<Vec<u8>, HashParseError> {
+pub fn bytes_from_hex(s: &str) -> Result<Vec<u8>, KeyParseError> {
     if !s.len().is_multiple_of(2) {
-        return Err(HashParseError);
+        return Err(KeyParseError);
     }
 
     let mut bytes = Vec::with_capacity(s.len() / 2);
     for i in (0..s.len()).step_by(2) {
-        let byte = u8::from_str_radix(&s[i..i + 2], 16).map_err(|_| HashParseError)?;
+        let byte = u8::from_str_radix(&s[i..i + 2], 16).map_err(|_| KeyParseError)?;
         bytes.push(byte);
     }
     Ok(bytes)

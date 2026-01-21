@@ -37,3 +37,15 @@ impl From<&str> for NamedComponentCall {
         Self::Workspace(CallFromWorkspace::new(name))
     }
 }
+
+impl From<String> for NamedComponentCall {
+    fn from(name: String) -> Self {
+        Self::Workspace(CallFromWorkspace::new(name))
+    }
+}
+
+impl From<Box<str>> for NamedComponentCall {
+    fn from(name: Box<str>) -> Self {
+        Self::Workspace(CallFromWorkspace::new(name))
+    }
+}

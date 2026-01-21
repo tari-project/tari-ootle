@@ -34,7 +34,6 @@ pub mod graphql;
 mod http_ui;
 mod rest_api;
 
-mod event;
 mod event_manager;
 #[cfg(feature = "metrics")]
 mod metrics;

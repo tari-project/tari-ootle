@@ -7,6 +7,7 @@ use tari_engine_types::{
     commit_result::{ExecuteResult, RejectReason},
     limits,
 };
+use tari_ootle_transaction::{args, call_args, Instruction, Transaction};
 use tari_template_lib::{
     models::{ComponentAddress, ResourceAddress},
     types::{Amount, TemplateAddress},
@@ -15,7 +16,6 @@ use tari_template_test_tooling::{
     support::assert_error::{assert_access_denied_for_action, assert_reject_reason},
     TemplateTest,
 };
-use tari_transaction::{args, call_args, Instruction, Transaction};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 const TEMPLATE_NAME: &str = "CrossTemplate";

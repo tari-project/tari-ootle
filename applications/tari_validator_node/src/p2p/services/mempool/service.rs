@@ -30,7 +30,7 @@ use tari_networking::NetworkingHandle;
 use tari_ootle_common_types::{optional::Optional, PeerAddress, ShardGroup};
 use tari_ootle_p2p::{NewTransactionMessage, TariMessage, TariMessagingSpec};
 use tari_ootle_storage::{consensus_models::TransactionRecord, StateStore, StateStoreReadTransaction};
-use tari_transaction::{Transaction, TransactionId};
+use tari_ootle_transaction::{Transaction, TransactionId};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 #[cfg(feature = "metrics")]

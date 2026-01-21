@@ -10,7 +10,7 @@ use indexmap::IndexMap;
 use log::{info, warn};
 use tari_epoch_manager::{EpochManagerError, EpochManagerReader};
 use tari_ootle_common_types::{displayable::Displayable, NodeAddressable, NumPreshards, ShardGroup, SubstateAddress};
-use tari_transaction::{Transaction, TransactionId};
+use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::{
     client::{ValidatorNodeClientFactory, ValidatorNodeRpcClient},
     ValidatorNodeRpcClientError,

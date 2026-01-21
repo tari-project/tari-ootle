@@ -1,6 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+mod error;
 pub mod named_args;
 mod named_component_call;
 mod named_resource_ref;
@@ -9,17 +10,18 @@ mod tests;
 mod workspace_ids;
 
 pub use named_component_call::*;
-use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey};
+use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::{
     confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
+    indexed_value::IndexedValue,
     published_template::TemplateBlob,
     substate::SubstateId,
-    ToByteType,
     ValidatorFeePoolAddress,
 };
-use tari_ootle_common_types::{Epoch, IntoSigned, Signable, SubstateRequirement};
+use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib::{
     auth::OwnerRule,
+    constants::XTR,
     models::{ResourceAddress, StealthTransferStatement},
     prelude::AccessRules,
     types::{crypto::RistrettoPublicKeyBytes, Amount, FunctionName, TemplateAddress},
@@ -29,7 +31,8 @@ use crate::{
     args,
     args::{InstructionArg, WorkspaceOffsetId},
     builder::{
-        named_args::{parse_workspace_key, BuilderWorkspaceKey, NamedArg, ParseWorkspaceKeyError},
+        error::BuilderError,
+        named_args::{parse_workspace_key, BuilderWorkspaceKey, NamedArg},
         named_resource_ref::NamedResourceRef,
         workspace_ids::WorkspaceIds,
     },
@@ -38,8 +41,10 @@ use crate::{
     AllocatableAddressType,
     ComponentReference,
     Instruction,
+    IntoSigned,
     MigrateFunction,
     ResourceAddressRef,
+    Signable,
     Transaction,
     TransactionSignature,
     UnsealedTransactionV1,
@@ -56,6 +61,7 @@ pub struct TransactionBuilder<D = MainIntent> {
     workspace_ids: WorkspaceIds,
     fee_instruction_builder: Option<Box<TransactionBuilder<FeeIntent>>>,
     _discriminator: std::marker::PhantomData<D>,
+    fill_inputs: bool,
 }
 
 impl TransactionBuilder<MainIntent> {
@@ -66,6 +72,7 @@ impl TransactionBuilder<MainIntent> {
             workspace_ids: WorkspaceIds::new(),
             fee_instruction_builder: Some(Box::new(Self::new_fee_builder(network))),
             _discriminator: std::marker::PhantomData,
+            fill_inputs: false,
         }
     }
 
@@ -76,12 +83,8 @@ impl TransactionBuilder<MainIntent> {
             unsigned_transaction,
             workspace_ids: WorkspaceIds::new(),
             _discriminator: std::marker::PhantomData,
+            fill_inputs: false,
         }
-    }
-
-    pub fn for_network<N: Into<u8>>(mut self, network: N) -> Self {
-        self.unsigned_transaction.set_network(network);
-        self
     }
 
     fn new_fee_builder<N: Into<u8>>(network: N) -> TransactionBuilder<FeeIntent> {
@@ -90,6 +93,7 @@ impl TransactionBuilder<MainIntent> {
             workspace_ids: WorkspaceIds::new(),
             fee_instruction_builder: None,
             _discriminator: std::marker::PhantomData,
+            fill_inputs: false,
         }
     }
 
@@ -136,7 +140,11 @@ impl TransactionBuilder<MainIntent> {
         })
     }
 
-    pub fn with_fee_instructions<I: IntoIterator<Item = Instruction>>(self, instructions: I) -> Self {
+    pub fn with_fee_instructions<I>(self, instructions: I) -> Self
+    where
+        I: IntoIterator<Item = Instruction>,
+        I::IntoIter: ExactSizeIterator,
+    {
         self.with_fee_instructions_builder(|builder| builder.with_instructions(instructions))
     }
 
@@ -192,21 +200,6 @@ impl TransactionBuilder<MainIntent> {
         })
     }
 
-    /// Add an input to use in the transaction
-    pub fn add_input<I: Into<SubstateRequirement>>(mut self, input_object: I) -> Self {
-        self.unsigned_transaction.inputs_mut().insert(input_object.into());
-        self
-    }
-
-    pub fn with_inputs<I: IntoIterator<Item = SubstateRequirement>>(mut self, inputs: I) -> Self {
-        self.unsigned_transaction = self.unsigned_transaction.with_inputs(inputs);
-        self
-    }
-
-    pub fn with_unversioned_inputs<I: IntoIterator<Item = S>, S: Into<SubstateId>>(self, inputs: I) -> Self {
-        self.with_inputs(inputs.into_iter().map(|input| SubstateRequirement::unversioned(input)))
-    }
-
     pub fn with_min_epoch(mut self, min_epoch: Option<Epoch>) -> Self {
         self.unsigned_transaction.set_min_epoch(min_epoch);
         self
@@ -227,15 +220,19 @@ impl TransactionBuilder<MainIntent> {
         unsigned.add_signature(signature)
     }
 
-    pub fn add_signature(self, signature: TransactionSignature) -> UnsealedTransactionV1 {
-        self.build_unsigned_transaction().add_signature(signature)
+    pub fn with_signatures(self, signatures: Vec<TransactionSignature>) -> UnsealedTransactionV1 {
+        self.build_unsigned_transaction().with_signatures(signatures)
     }
 
+    /// Moves the fee instructions from the fee builder into the unsigned transaction.
     fn apply_fee_instructions(&mut self) {
-        let fee_builder = self
+        let mut fee_builder = self
             .fee_instruction_builder
             .take()
             .expect("Fee instruction builder is None");
+        self.unsigned_transaction
+            .inputs_mut()
+            .extend(fee_builder.unsigned_transaction.inputs_mut().drain(..));
         self.unsigned_transaction
             .fee_instructions_mut()
             .extend(fee_builder.unsigned_transaction.into_instructions());
@@ -244,6 +241,11 @@ impl TransactionBuilder<MainIntent> {
     pub fn finish(mut self) -> UnsealedTransactionV1 {
         self.apply_fee_instructions();
         self.unsigned_transaction.finish()
+    }
+
+    /// Returns the instructions in the transaction. WARNING: Fee instructions are discarded.
+    pub fn into_instructions(self) -> Vec<Instruction> {
+        self.unsigned_transaction.into_instructions()
     }
 
     pub fn build_and_seal(self, secret_key: &RistrettoSecretKey) -> Transaction {
@@ -317,6 +319,31 @@ impl TransactionBuilder<FeeIntent> {
 }
 
 impl<D> TransactionBuilder<D> {
+    pub fn next_workspace_id(&self) -> args::WorkspaceId {
+        self.workspace_ids.next_id()
+    }
+
+    pub fn with_auto_fill_inputs(mut self) -> Self {
+        self.fill_inputs = true;
+        if let Some(ref mut builder_mut) = self.fee_instruction_builder {
+            builder_mut.fill_inputs = true;
+        }
+        self
+    }
+
+    pub fn without_auto_fill_inputs(mut self) -> Self {
+        self.fill_inputs = false;
+        if let Some(ref mut builder_mut) = self.fee_instruction_builder {
+            builder_mut.fill_inputs = false;
+        }
+        self
+    }
+
+    pub fn for_network<N: Into<u8>>(mut self, network: N) -> Self {
+        self.unsigned_transaction.set_network(network);
+        self
+    }
+
     pub fn then<F: FnOnce(Self) -> Self>(self, f: F) -> Self {
         f(self)
     }
@@ -333,7 +360,7 @@ impl<D> TransactionBuilder<D> {
             owner_public_key,
             owner_rule: None,
             access_rules: None,
-            workspace_id: None,
+            bucket_workspace_id: None,
         })
     }
 
@@ -350,23 +377,23 @@ impl<D> TransactionBuilder<D> {
             owner_public_key,
             owner_rule: None,
             access_rules: None,
-            workspace_id: Some(workspace_id),
+            bucket_workspace_id: Some(workspace_id),
         })
     }
 
-    pub fn create_account_with_custom_rules<T: Into<BuilderWorkspaceKey>>(
+    pub fn create_account_custom<T: Into<BuilderWorkspaceKey>>(
         self,
         public_key_address: RistrettoPublicKeyBytes,
         owner_rule: Option<OwnerRule>,
         access_rules: Option<AccessRules>,
-        workspace_id: Option<T>,
+        bucket_workspace_id: Option<T>,
     ) -> Self {
-        let workspace_id = workspace_id.map(|id| self.get_workspace_offset_id_from_named_arg(id));
+        let bucket_workspace_id = bucket_workspace_id.map(|id| self.get_workspace_offset_id_from_named_arg(id));
         self.add_instruction(Instruction::CreateAccount {
             owner_public_key: public_key_address,
             owner_rule,
             access_rules,
-            workspace_id,
+            bucket_workspace_id,
         })
     }
 
@@ -402,6 +429,30 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
+    fn add_input_for_component_ref(&mut self, component_ref: &ComponentReference) {
+        if self.fill_inputs {
+            if let Some(address) = component_ref.address() {
+                self.unsigned_transaction.inputs_mut().insert((*address).into());
+            }
+        }
+    }
+
+    fn add_input_for_resource_ref(&mut self, resource_ref: &ResourceAddressRef) {
+        if self.fill_inputs {
+            if let ResourceAddressRef::Address(address) = resource_ref {
+                self.add_resource_input(*address);
+            }
+        }
+    }
+
+    fn add_resource_input(&mut self, resource: ResourceAddress) -> &mut Self {
+        // XTR is implicit
+        if self.fill_inputs && resource != XTR {
+            self.unsigned_transaction.inputs_mut().insert(resource.into());
+        }
+        self
+    }
+
     pub fn stealth_transfer<R: Into<NamedResourceRef>>(self, resource: R, statement: StealthTransferStatement) -> Self {
         self.stealth_transfer_with_opt_bucket(resource, statement, None::<String>)
     }
@@ -416,12 +467,13 @@ impl<D> TransactionBuilder<D> {
     }
 
     pub fn stealth_transfer_with_opt_bucket<B: Into<String>, R: Into<NamedResourceRef>>(
-        self,
+        mut self,
         resource: R,
         statement: StealthTransferStatement,
         bucket: Option<B>,
     ) -> Self {
         let resource_address = self.resolve_resource_ref(resource.into());
+        self.add_input_for_resource_ref(&resource_address);
         let revealed_input_bucket = bucket.map(|s| self.get_workspace_offset_id_from_named_arg(s));
         self.add_instruction(Instruction::StealthTransfer {
             resource_address_ref: resource_address,
@@ -455,12 +507,14 @@ impl<D> TransactionBuilder<D> {
     }
 
     pub fn assert_bucket_contains<T: AsRef<str>, A: Into<Amount>>(
-        self,
+        mut self,
         label: T,
         resource_address: ResourceAddress,
         min_amount: A,
     ) -> Self {
         let key = self.get_workspace_offset_id_from_named_arg(label.as_ref());
+        self.add_resource_input(resource_address);
+
         self.add_instruction(Instruction::AssertBucketContains {
             key,
             resource_address,
@@ -481,13 +535,17 @@ impl<D> TransactionBuilder<D> {
     }
 
     pub fn claim_validator_fees(self, address: ValidatorFeePoolAddress) -> Self {
-        self.add_instruction(Instruction::ClaimValidatorFees { address })
+        self.then(|b| if b.fill_inputs { b.add_input(address) } else { b })
+            .add_instruction(Instruction::ClaimValidatorFees { address })
     }
 
-    pub fn create_proof<A: Into<ComponentReference>>(self, account: A, resource_addr: ResourceAddress) -> Self {
+    pub fn create_proof<A: Into<ComponentReference>>(mut self, account: A, resource_addr: ResourceAddress) -> Self {
+        let component_ref = account.into();
+        self.add_input_for_component_ref(&component_ref);
+        self.add_resource_input(resource_addr);
         // We may want to make this a native instruction
         self.add_instruction(Instruction::CallMethod {
-            call: account.into(),
+            call: component_ref,
             method: "create_proof_for_resource"
                 .try_into()
                 .expect("Method name is longer than the limit"),
@@ -496,12 +554,33 @@ impl<D> TransactionBuilder<D> {
     }
 
     pub fn add_instruction(mut self, instruction: Instruction) -> Self {
+        let id = instruction.allocated_workspace_id();
+        if let Some(id) = id {
+            // + 1 because the current id counter is the next available id
+            let next_id = id.checked_add(1).expect("Workspace ID overflow");
+            if next_id > self.workspace_ids.next_id() {
+                self.workspace_ids.set_next_id(next_id);
+            }
+        }
+        self.add_inputs_for_instruction(&instruction);
         self.unsigned_transaction.instructions_mut().push(instruction);
         self
     }
 
-    pub fn with_instructions<I: IntoIterator<Item = Instruction>>(mut self, instructions: I) -> Self {
-        self.unsigned_transaction.instructions_mut().extend(instructions);
+    /// Adds multiple instructions to the transaction.
+    /// NOTE: the instruction args are not resolved here, so any workspace references must resolved manually by the
+    /// caller and cannot be referenced in subsequent instructions.
+    /// Instructions which allocate workspace IDs will update the internal workspace ID counter accordingly.
+    pub fn with_instructions<I>(mut self, instructions: I) -> Self
+    where
+        I: IntoIterator<Item = Instruction>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        let iter = instructions.into_iter();
+        self.unsigned_transaction.instructions_mut().reserve(iter.len());
+        for instruction in iter {
+            self = self.add_instruction(instruction)
+        }
         self
     }
 
@@ -517,6 +596,21 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
+    /// Add an input to use in the transaction
+    pub fn add_input<I: Into<SubstateRequirement>>(mut self, input_object: I) -> Self {
+        self.unsigned_transaction.inputs_mut().insert(input_object.into());
+        self
+    }
+
+    pub fn with_inputs<I: IntoIterator<Item = SubstateRequirement>>(mut self, inputs: I) -> Self {
+        self.unsigned_transaction = self.unsigned_transaction.with_inputs(inputs);
+        self
+    }
+
+    pub fn with_unversioned_inputs<I: IntoIterator<Item = S>, S: Into<SubstateId>>(self, inputs: I) -> Self {
+        self.with_inputs(inputs.into_iter().map(|input| SubstateRequirement::unversioned(input)))
+    }
+
     /// Pre-allocate a resource address. The allocated address is added to the workspace and can be used in subsequent
     /// instructions.
     pub fn allocate_resource_address<T: Into<String>>(mut self, workspace_id: T) -> Self {
@@ -527,6 +621,65 @@ impl<D> TransactionBuilder<D> {
             allocatable_type: AllocatableAddressType::Resource,
             workspace_id,
         })
+    }
+
+    fn add_inputs_for_instruction(&mut self, instruction: &Instruction) {
+        if !self.fill_inputs {
+            return;
+        }
+
+        match instruction {
+            Instruction::CallFunction { args, .. } => {
+                for arg in args {
+                    if let InstructionArg::Literal(bytes) = arg {
+                        if let Ok(indexed) = IndexedValue::from_raw(bytes) {
+                            self.unsigned_transaction
+                                .inputs_mut()
+                                .extend(indexed.referenced_substates().map(SubstateRequirement::unversioned));
+                        }
+                    }
+                }
+            },
+            Instruction::CallMethod { call, args, .. } => {
+                self.add_input_for_component_ref(call);
+                for arg in args {
+                    if let InstructionArg::Literal(bytes) = arg {
+                        if let Ok(indexed) = IndexedValue::from_raw(bytes) {
+                            self.unsigned_transaction
+                                .inputs_mut()
+                                .extend(indexed.referenced_substates().map(SubstateRequirement::unversioned));
+                        }
+                    }
+                }
+            },
+            Instruction::StealthTransfer {
+                resource_address_ref, ..
+            } => {
+                self.add_input_for_resource_ref(resource_address_ref);
+            },
+            Instruction::ClaimValidatorFees { address } => {
+                self.unsigned_transaction.inputs_mut().insert((*address).into());
+            },
+            Instruction::AssertBucketContains { resource_address, .. } => {
+                if *resource_address != XTR {
+                    self.unsigned_transaction
+                        .inputs_mut()
+                        .insert((*resource_address).into());
+                }
+            },
+            Instruction::UpdateComponentTemplate { component, .. } => {
+                self.add_input_for_component_ref(component);
+            },
+            Instruction::CreateAccount { .. } |
+            Instruction::PutLastInstructionOutputOnWorkspace { .. } |
+            Instruction::EmitLog { .. } |
+            Instruction::ClaimBurn { .. } |
+            Instruction::DropAllProofsInWorkspace |
+            Instruction::TakeFromBucket { .. } |
+            Instruction::PublishTemplate { .. } |
+            Instruction::AllocateAddress { .. } |
+            Instruction::PayFee { .. } => {},
+        }
     }
 
     fn resolve_call(&self, call: NamedComponentCall) -> ComponentReference {
@@ -554,18 +707,19 @@ impl<D> TransactionBuilder<D> {
     }
 
     /// Maps named arguments to the template_lib workspace or literal args.
-    fn resolve_args(&self, args: Vec<NamedArg>) -> Result<Vec<InstructionArg>, ParseWorkspaceKeyError> {
+    fn resolve_args(&self, args: Vec<NamedArg>) -> Result<Vec<InstructionArg>, BuilderError> {
         args.into_iter().map(|arg| self.resolve_arg(arg)).collect()
     }
 
-    fn resolve_arg(&self, arg: NamedArg) -> Result<InstructionArg, ParseWorkspaceKeyError> {
+    fn resolve_arg(&self, arg: NamedArg) -> Result<InstructionArg, BuilderError> {
         match arg {
             NamedArg::Literal(bytes) => Ok(InstructionArg::Literal(bytes.into())),
             NamedArg::Workspace(key) => {
                 let parsed = parse_workspace_key(key)?;
-                let id = self.workspace_ids.get(parsed.name.as_ref()).unwrap_or_else(|| {
-                    panic!("Workspace key '{}' not found", parsed.name);
-                });
+                let id = self
+                    .workspace_ids
+                    .get(parsed.name.as_ref())
+                    .ok_or(BuilderError::WorkspaceKeyNotFound(parsed.name))?;
                 Ok(InstructionArg::Workspace(
                     WorkspaceOffsetId::new(id).with_offset_opt(parsed.offset),
                 ))
@@ -584,6 +738,7 @@ impl<D> TransactionBuilder<D> {
 
 impl Signable<&RistrettoPublicKeyBytes> for TransactionBuilder<MainIntent> {
     type MessageOutput = [u8; 64];
+    type Signature = TransactionSignature;
 
     fn to_signing_message(&self, sealed_signer: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
         self.unsigned_transaction.to_signing_message(sealed_signer)
@@ -593,8 +748,7 @@ impl Signable<&RistrettoPublicKeyBytes> for TransactionBuilder<MainIntent> {
 impl IntoSigned<&RistrettoPublicKeyBytes> for TransactionBuilder<MainIntent> {
     type SignedOutput = UnsealedTransactionV1;
 
-    fn into_signed(self, public_key: RistrettoPublicKey, signature: RistrettoSchnorr) -> Self::SignedOutput {
-        self.finish()
-            .add_signature(public_key.to_byte_type(), signature.to_byte_type())
+    fn into_signed(self, sig: TransactionSignature) -> Self::SignedOutput {
+        self.finish().add_signature(sig)
     }
 }

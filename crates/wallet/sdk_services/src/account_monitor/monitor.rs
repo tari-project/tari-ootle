@@ -6,6 +6,7 @@ use std::{collections::HashMap, time::Duration};
 use log::*;
 use tari_engine_types::{indexed_value::IndexedValueError, resource::Resource};
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
+use tari_ootle_transaction::TransactionId;
 use tari_ootle_wallet_sdk::{
     apis::{
         accounts::AccountsApiError,
@@ -22,7 +23,6 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib::{models::ResourceAddress, prelude::ComponentAddress};
-use tari_transaction::TransactionId;
 use tokio::{
     sync::{broadcast, mpsc},
     time,

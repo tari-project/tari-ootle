@@ -26,11 +26,11 @@ use anyhow::{anyhow, Context};
 use libp2p::identity;
 use log::warn;
 use minotari_app_utilities::identity_management;
+use ootle_byte_type::ToByteType;
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common::configuration::bootstrap::{grpc_default_port, ApplicationType};
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_engine_types::ToByteType;
 use tari_epoch_manager::service::{EpochManagerConfig, EpochManagerHandle};
 use tari_epoch_oracles::{
     base_layer::{
@@ -44,6 +44,7 @@ use tari_epoch_oracles::{
     store::EpochOracleStore,
     EpochOracle,
 };
+use tari_indexer_client::event::IndexerEvent;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_ootle_app_utilities::{
     claim_burn_proof_verifier::TariClaimBurnProofVerifier,
@@ -65,7 +66,6 @@ use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
 use crate::{
     dry_run::processor::DryRunTransactionProcessor,
-    event::IndexerEvent,
     network_client::TariNetworkClient,
     network_state_sync,
     network_state_sync::NetworkWideStateSyncConfig,
@@ -248,6 +248,7 @@ pub async fn spawn_services(
     // changed by comms during initialization when using tor.
     save_identities(config, &keypair)?;
     Ok(Services {
+        network: config.network,
         keypair,
         networking,
         epoch_manager,
@@ -263,6 +264,7 @@ pub async fn spawn_services(
 }
 
 pub struct Services {
+    pub network: Network,
     pub keypair: RistrettoKeypair,
     pub networking: NetworkingHandle<TariMessagingSpec>,
     pub epoch_manager: EpochManagerHandle<PeerAddress>,

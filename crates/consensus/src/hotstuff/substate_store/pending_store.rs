@@ -25,7 +25,7 @@ use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
 };
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 
 use super::error::SubstateStoreError;
 use crate::{

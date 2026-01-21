@@ -7,7 +7,7 @@ use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::ProposalCertificate;
 use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateDiff};
-use tari_transaction::{Transaction, TransactionId};
+use tari_ootle_transaction::{Transaction, TransactionId};
 use time::PrimitiveDateTime;
 
 use crate::models::NewAccountData;

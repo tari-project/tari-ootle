@@ -1,4 +1,4 @@
-//   Copyright 2025 The Tari Project
+//   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
 pub mod seconds {
@@ -23,7 +23,7 @@ pub mod optional_seconds {
     //! Helper module for serialising configuration variables from `Duration` to integers representing seconds and back.
     //! Use this converter by employing
     //! ```ignore
-    //! use tari_engine_types::serde_with::duration::optional_seconds;
+    //! use ootle_serde::duration::optional_seconds;
     //! ...
     //! #[serde(with="optional_seconds")]
     //! pub my_var: Option<Duration>

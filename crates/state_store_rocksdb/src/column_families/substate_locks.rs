@@ -27,7 +27,7 @@ use tari_consensus_types::BlockId;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{NodeHeight, SubstateLockType};
 use tari_ootle_storage::consensus_models::SubstateLock;
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 
 use crate::{
     codecs::{

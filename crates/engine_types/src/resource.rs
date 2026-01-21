@@ -22,6 +22,7 @@
 
 use std::borrow::Cow;
 
+use ootle_byte_type::FromByteType;
 use serde::{Deserialize, Serialize};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArrayError};
 use tari_template_lib::{
@@ -30,8 +31,6 @@ use tari_template_lib::{
     resource::TOKEN_SYMBOL,
     types::{crypto::RistrettoPublicKeyBytes, Amount, ResourceType},
 };
-
-use crate::ConvertFromByteType;
 
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -133,7 +132,7 @@ impl Resource {
     /// or returning an error if the view key is not a canonical compressed representation of a Ristretto public key.
     pub fn to_view_key_public_key(&self) -> Result<Option<RistrettoPublicKey>, ByteArrayError> {
         match self.view_key.as_ref() {
-            Some(view_key) => RistrettoPublicKey::convert_from_byte_type(view_key).map(Some),
+            Some(view_key) => view_key.try_from_byte_type().map(Some),
             None => Ok(None),
         }
     }

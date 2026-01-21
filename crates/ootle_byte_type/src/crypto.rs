@@ -1,4 +1,4 @@
-//   Copyright 2025 The Tari Project
+//   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_crypto::{
@@ -8,42 +8,15 @@ use tari_crypto::{
     tari_utilities,
     tari_utilities::ByteArray,
 };
-use tari_template_lib::{
-    prelude::Scalar32Bytes,
-    types::crypto::{
-        CommitmentSignatureBytes,
-        PedersenCommitmentBytes,
-        RistrettoPublicKeyBytes,
-        SchnorrSignatureBytes,
-    },
+use tari_template_lib_types::crypto::{
+    CommitmentSignatureBytes,
+    PedersenCommitmentBytes,
+    RistrettoPublicKeyBytes,
+    Scalar32Bytes,
+    SchnorrSignatureBytes,
 };
 
-/// Defines a conversion from a type to its light-weight byte representation.
-pub trait ToByteType {
-    type ByteType;
-    fn to_byte_type(&self) -> Self::ByteType;
-}
-
-pub trait ConvertFromByteType<T> {
-    type Error;
-
-    fn convert_from_byte_type(bytes: &T) -> Result<Self, Self::Error>
-    where Self: Sized;
-}
-
-pub trait FromByteType<T>: Sized {
-    type Error;
-
-    fn try_from_byte_type(&self) -> Result<T, Self::Error>;
-}
-
-impl<T: ConvertFromByteType<B>, B> FromByteType<T> for B {
-    type Error = T::Error;
-
-    fn try_from_byte_type(&self) -> Result<T, Self::Error> {
-        T::convert_from_byte_type(self)
-    }
-}
+use crate::{ConvertFromByteType, ToByteType};
 
 impl ToByteType for RistrettoPublicKey {
     type ByteType = RistrettoPublicKeyBytes;
@@ -126,13 +99,5 @@ impl ConvertFromByteType<CommitmentSignatureBytes> for CommitmentSignature<Ristr
         let signature = RistrettoSecretKey::from_canonical_bytes(bytes.u().as_bytes())?;
         let v = RistrettoSecretKey::from_canonical_bytes(bytes.v().as_bytes())?;
         Ok(CommitmentSignature::new(public_nonce, signature, v))
-    }
-}
-
-impl<T: ToByteType> ToByteType for Option<T> {
-    type ByteType = Option<T::ByteType>;
-
-    fn to_byte_type(&self) -> Self::ByteType {
-        self.as_ref().map(|v| v.to_byte_type())
     }
 }

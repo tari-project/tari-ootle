@@ -3,7 +3,7 @@
 
 use tari_ootle_common_types::NodeHeight;
 use tari_ootle_storage::consensus_models::ValidBlock;
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 
 use crate::{hotstuff::HotStuffError, messages::HotstuffMessage};
 

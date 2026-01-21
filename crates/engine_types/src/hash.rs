@@ -11,14 +11,12 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tari_template_lib::types::hex::write_hex_fmt;
 
-use crate::serde_with;
-
 /// Representation of a 64-byte hash value
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Serialize, Deserialize, borsh::BorshSerialize)]
 #[serde(transparent)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Hash64(
-    #[serde(with = "serde_with::hex")]
+    #[serde(with = "ootle_serde::hex")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     [u8; Self::LENGTH],
 );

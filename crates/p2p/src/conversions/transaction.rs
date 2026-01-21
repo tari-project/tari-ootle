@@ -23,7 +23,7 @@
 use std::convert::{TryFrom, TryInto};
 
 use anyhow::anyhow;
-use tari_transaction::Transaction;
+use tari_ootle_transaction::Transaction;
 
 use crate::{
     encoding::{decode_from_slice, encode_to_vec},

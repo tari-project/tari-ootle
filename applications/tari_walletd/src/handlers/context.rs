@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use axum_extra::headers::authorization::Bearer;
+use tari_ootle_transaction::{Transaction, TransactionBuilder};
 use tari_ootle_wallet_sdk::models::WalletEvent;
 use tari_ootle_wallet_sdk_services::{
     account_monitor::AccountMonitorHandle,
@@ -10,7 +11,6 @@ use tari_ootle_wallet_sdk_services::{
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_shutdown::ShutdownSignal;
-use tari_transaction::{Transaction, TransactionBuilder};
 use tari_wallet_daemon_client::permissions::JrpcPermission;
 use webauthn_rs::Webauthn;
 

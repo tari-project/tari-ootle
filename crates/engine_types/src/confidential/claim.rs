@@ -10,8 +10,6 @@ use tari_template_lib::{
     types::EncryptedData,
 };
 
-use crate::serde_with;
-
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct MinotariBurnClaimProof {
@@ -49,11 +47,11 @@ pub struct ClaimBurnOutputData {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct EncodedMerkleProof {
-    #[serde(with = "serde_with::base64")]
+    #[serde(with = "ootle_serde::base64")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[borsh(serialize_with = "serialize_bytes")]
     pub block_hash: FixedHash,
-    #[serde(with = "serde_with::base64")]
+    #[serde(with = "ootle_serde::base64")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[borsh(serialize_with = "serialize_bytes")]
     pub encoded_merkle_proof: bounded_vec::BoundedVec<u8, 1, 4096>,

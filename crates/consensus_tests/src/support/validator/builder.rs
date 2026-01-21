@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use ootle_byte_type::ToByteType;
 use serde::Serialize;
 use tari_common_types::types::PrivateKey;
 use tari_consensus::{
@@ -13,10 +14,7 @@ use tari_consensus::{
     traits::hooks::NoopHooks,
 };
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-use tari_engine_types::{
-    substate::{SubstateId, SubstateValue},
-    ToByteType,
-};
+use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_ootle_common_types::{Epoch, NodeAddressable, ShardGroup, SubstateAddress, VersionedSubstateIdRef};
 use tari_ootle_storage::{
     consensus_models::{SubstateRecord, SubstateTransition, SubstateUpdateBatch, TransactionPool},

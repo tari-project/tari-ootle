@@ -7,12 +7,10 @@ use axum::{
 };
 use futures::Stream;
 use log::info;
+use tari_indexer_client::event::IndexerEvent;
 use tokio_stream::StreamExt;
 
-use crate::{
-    event::IndexerEvent,
-    rest_api::{context::HandlerContext, handlers::HandlerResult},
-};
+use crate::rest_api::{context::HandlerContext, handlers::HandlerResult};
 
 const LOG_TARGET: &str = "tari::indexer::rest_api::handlers::events";
 

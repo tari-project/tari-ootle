@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use tari_engine::runtime::{ActionIdent, LockError, RuntimeError};
+use tari_ootle_transaction::{args, Transaction};
 use tari_template_lib::{
     args::ComponentAction,
     auth::{
@@ -25,7 +26,6 @@ use tari_template_test_tooling::{
     },
     TemplateTest,
 };
-use tari_transaction::{args, Transaction};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 

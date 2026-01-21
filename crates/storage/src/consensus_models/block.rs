@@ -41,9 +41,9 @@ use tari_ootle_common_types::{
     VersionedSubstateId,
     VersionedSubstateIdRef,
 };
+use tari_ootle_transaction::TransactionId;
 use tari_state_tree::{compute_proof_for_hashes, SparseMerkleProofExt, StateTreeError, TreeHash, Version};
 use tari_template_lib::{prelude::SchnorrSignatureBytes, types::crypto::RistrettoPublicKeyBytes};
-use tari_transaction::TransactionId;
 use time::PrimitiveDateTime;
 
 use super::{

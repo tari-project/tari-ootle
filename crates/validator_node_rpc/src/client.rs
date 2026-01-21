@@ -1,15 +1,16 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, convert::TryInto, future::Future, sync::Arc, time::Duration};
+use std::{collections::HashMap, convert::TryInto, future, future::Future, sync::Arc, time::Duration};
 
 use anyhow::anyhow;
+use futures::{StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use tari_bor::decode;
 use tari_consensus_types::Decision;
 use tari_engine_types::{
     commit_result::ExecuteResult,
-    substate::{Substate, SubstateValue},
+    substate::{Substate, SubstateId, SubstateValue},
 };
 use tari_networking::{MessageSpec, NetworkingHandle, PeerId};
 use tari_ootle_common_types::{NodeAddressable, SubstateRequirementRef, ToPeerId};
@@ -19,7 +20,7 @@ use tari_ootle_p2p::{
     TariMessagingSpec,
 };
 use tari_ootle_storage::time::{PrimitiveDateTime, UtcDateTime};
-use tari_transaction::{Transaction, TransactionId};
+use tari_ootle_transaction::{Transaction, TransactionId};
 use tokio::sync::RwLock;
 
 use crate::{rpc_service, ValidatorNodeRpcClientError};
@@ -44,6 +45,11 @@ pub trait ValidatorNodeRpcClient<TAddr: NodeAddressable>: Send + Sync {
         &mut self,
         substate_req: SubstateRequirementRef<'_>,
     ) -> impl Future<Output = Result<SubstateResult, ValidatorNodeRpcClientError>> + Send;
+
+    fn get_substates_batch(
+        &mut self,
+        substate_reqs: &[&SubstateId],
+    ) -> impl Future<Output = Result<HashMap<SubstateId, Substate>, ValidatorNodeRpcClientError>> + Send;
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -222,6 +228,36 @@ impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClien
             SubstateStatus::Down => Ok(SubstateResult::Down { version: resp.version }),
             SubstateStatus::DoesNotExist => Ok(SubstateResult::DoesNotExist),
         }
+    }
+
+    async fn get_substates_batch(
+        &mut self,
+        substate_reqs: &[&SubstateId],
+    ) -> Result<HashMap<SubstateId, Substate>, ValidatorNodeRpcClientError> {
+        let mut conn = self.client_connection().await?;
+        // NOTE: current maximum is 50 substates per request
+        let stream = conn
+            .get_substate_batch(proto::rpc::GetSubstatesBatchRequest {
+                substate_ids: substate_reqs.iter().map(|id| id.to_bytes()).collect(),
+            })
+            .await?;
+
+        // For simplicity, we'll collect the stream instead of returning a decoded stream
+        stream
+            .map_err(ValidatorNodeRpcClientError::from)
+            .map_ok(|resp| resp.substate)
+            .filter_map(|res| future::ready(res.transpose()))
+            .and_then(|substate| async move {
+                let version = substate.version;
+                let value = SubstateValue::from_bytes(&substate.substate)
+                    .map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!("{}", e)))?;
+                let substate_id = SubstateId::from_bytes(&substate.substate_id)
+                    .map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!("{}", e)))?;
+
+                Ok::<_, ValidatorNodeRpcClientError>((substate_id, Substate::new(version, value)))
+            })
+            .try_collect()
+            .await
     }
 }
 

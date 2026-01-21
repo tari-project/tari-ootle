@@ -22,7 +22,7 @@
 
 use tari_ootle_common_types::SubstateAddress;
 use tari_ootle_storage::consensus_models::SubstatePledge;
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 
 use crate::{
     codecs::{DefaultCodec, FixedBytesCodec, KeyPrefix, TransactionIdCodec},

@@ -3,6 +3,7 @@
 
 use std::{collections::BTreeMap, mem};
 
+use ootle_byte_type::ToByteType;
 use serde::{Deserialize, Serialize};
 use tari_crypto::{
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey},
@@ -22,7 +23,7 @@ use tari_template_lib::{
     types::{crypto::PedersenCommitmentBytes, Amount, ResourceType},
 };
 
-use crate::{confidential, crypto::PrivateOutput, substate::SubstateId, ToByteType};
+use crate::{confidential, crypto::PrivateOutput, substate::SubstateId};
 
 /// Instances of a single resource kept in Buckets and Vaults
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]

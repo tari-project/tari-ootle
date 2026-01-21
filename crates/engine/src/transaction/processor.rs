@@ -36,6 +36,16 @@ use tari_engine_types::{
     virtual_substate::VirtualSubstates,
 };
 use tari_ootle_common_types::{optional::Optional, services::template_provider::TemplateProvider};
+use tari_ootle_transaction::{
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
+    call_arg,
+    call_args,
+    AllocatableAddressType,
+    ComponentReference,
+    Instruction,
+    MigrateFunction,
+    ResourceAddressRef,
+};
 use tari_template_abi::{FunctionDef, Type};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
@@ -45,16 +55,6 @@ use tari_template_lib::{
     models::{Bucket, ComponentAddress, NonFungibleAddress, StealthTransferStatement},
     prelude::STEALTH_TARI_RESOURCE_ADDRESS,
     types::{crypto::RistrettoPublicKeyBytes, Amount, TemplateAddress},
-};
-use tari_transaction::{
-    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
-    call_arg,
-    call_args,
-    AllocatableAddressType,
-    ComponentReference,
-    Instruction,
-    MigrateFunction,
-    ResourceAddressRef,
 };
 
 use crate::{
@@ -74,7 +74,7 @@ use crate::{
     state_store::memory::ReadOnlyMemoryStateStore,
     template::LoadedTemplate,
     traits::{ClaimProofVerifier, Invokable},
-    transaction::TransactionError,
+    transaction::{error::TransactionErrorKind, TransactionError},
     wasm::{WasmModule, WasmProcess},
 };
 
@@ -126,6 +126,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
             claim_burn_proof_verifier,
         } = self;
 
+        let execute_epoch = virtual_substates.current_epoch();
+
         let initial_auth_scope = AuthorizationScope::new(auth_params.initial_ownership_proofs);
         let mut initial_call_scope = CallScope::new();
         initial_call_scope.set_auth_scope(initial_auth_scope);
@@ -153,7 +155,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
         let transaction_signer_public_key =
             executable
                 .main_signer()
-                .ok_or_else(|| TransactionError::InvariantError {
+                .ok_or_else(|| TransactionErrorKind::InvariantError {
                     details: "Transaction must have at least one authorized signature".to_string(),
                 })?;
 
@@ -180,11 +182,12 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
                 // Checkpoint the tracker state after the fee instructions have been executed in case of transaction
                 // failure.
                 if let Err(err) = runtime.interface_mut().checkpoint_fee_intent() {
-                    let mut finalize = FinalizeResult::new_rejected(transaction_hash, err.to_reject_reason());
+                    let mut finalize = FinalizeResult::new_rejected(transaction_hash, err.to_reject_reason(None));
                     finalize.execution_results = execution_results;
                     return Ok(ExecuteResult {
                         finalize,
                         execution_time: timer.elapsed(),
+                        execute_epoch,
                     });
                 }
                 execution_results
@@ -199,6 +202,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
                 return Ok(ExecuteResult {
                     finalize: FinalizeResult::new_rejected(transaction_hash, err.to_reject_reason()),
                     execution_time: timer.elapsed(),
+                    execute_epoch,
                 });
             },
         };
@@ -218,6 +222,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
                 Ok(ExecuteResult {
                     finalize,
                     execution_time: timer.elapsed(),
+                    execute_epoch,
                 })
             },
             // This can happen e.g if you have dangling buckets after running the instructions
@@ -230,6 +235,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
                 Ok(ExecuteResult {
                     finalize,
                     execution_time: timer.elapsed(),
+                    execute_epoch,
                 })
             },
         }
@@ -242,7 +248,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
     ) -> (Runtime, Result<Vec<InstructionResult>, TransactionError>) {
         let result: Result<_, _> = instructions
             .into_iter()
-            .map(|instruction| Self::process_instruction(template_provider, &mut runtime, instruction))
+            .enumerate()
+            .map(|(idx, instruction)| {
+                Self::process_instruction(template_provider, &mut runtime, instruction)
+                    .map_err(|e| TransactionError::new(idx + 1, e))
+            })
             .collect();
 
         let result = result.and_then(|result| {
@@ -259,14 +269,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
         template_provider: &TTemplateProvider,
         runtime: &mut Runtime,
         instruction: Instruction,
-    ) -> Result<InstructionResult, TransactionError> {
+    ) -> Result<InstructionResult, TransactionErrorKind> {
         debug!(target: LOG_TARGET, "instruction = {:?}", instruction);
         match instruction {
             Instruction::CreateAccount {
                 owner_public_key: public_key_address,
                 owner_rule,
                 access_rules,
-                workspace_id,
+                bucket_workspace_id: workspace_id,
             } => Self::create_account(
                 template_provider,
                 runtime,
@@ -369,16 +379,16 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
         component: ComponentReference,
         new_template: TemplateAddress,
         migrate: Option<MigrateFunction>,
-    ) -> Result<InstructionResult, TransactionError> {
+    ) -> Result<InstructionResult, TransactionErrorKind> {
         let (component_address, component) = runtime.interface_mut().load_component(component)?;
 
         let template = template_provider
             .get_template(&new_template)
-            .map_err(|e| TransactionError::FailedToLoadTemplate {
+            .map_err(|e| TransactionErrorKind::FailedToLoadTemplate {
                 address: new_template,
                 details: e.to_string(),
             })?
-            .ok_or(TransactionError::TemplateNotFound { address: new_template })?;
+            .ok_or(TransactionErrorKind::TemplateNotFound { address: new_template })?;
 
         runtime
             .interface_mut()
@@ -405,14 +415,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
                     .template_def()
                     .get_function(&f.name)
                     .cloned()
-                    .ok_or_else(|| TransactionError::FunctionNotFound {
+                    .ok_or_else(|| TransactionErrorKind::FunctionNotFound {
                         name: f.name.to_string(),
                     })
                     .and_then(|f| {
                         if f.is_migration {
                             Ok(f)
                         } else {
-                            Err(TransactionError::NotAMigrationFunction { name: f.name })
+                            Err(TransactionErrorKind::NotAMigrationFunction { name: f.name })
                         }
                     })
             })
@@ -458,7 +468,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
         runtime: &mut Runtime,
         statement: StealthTransferStatement,
         revealed_funds_bucket: Option<WorkspaceOffsetId>,
-    ) -> Result<InstructionResult, TransactionError> {
+    ) -> Result<InstructionResult, TransactionErrorKind> {
         let revealed_funds_bucket = revealed_funds_bucket
             .map(|id| {
                 runtime.interface().resolve_workspace_id(&id).and_then(|r| {
@@ -478,7 +488,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
         resource_address: ResourceAddressRef,
         statement: StealthTransferStatement,
         revealed_funds_bucket: Option<WorkspaceOffsetId>,
-    ) -> Result<InstructionResult, TransactionError> {
+    ) -> Result<InstructionResult, TransactionErrorKind> {
         let revealed_funds_bucket = revealed_funds_bucket
             .map(|id| {
                 runtime.interface().resolve_workspace_id(&id).and_then(|r| {
@@ -499,14 +509,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
         Ok(InstructionResult::empty())
     }
 
-    fn put_output_on_workspace_with_name(runtime: &mut Runtime, key: WorkspaceId) -> Result<(), TransactionError> {
+    fn put_output_on_workspace_with_name(runtime: &mut Runtime, key: WorkspaceId) -> Result<(), TransactionErrorKind> {
         runtime
             .interface_mut()
             .workspace_invoke(WorkspaceAction::PutLastInstructionOutput, invoke_args![key].into())?;
         Ok(())
     }
 
-    fn drop_all_proofs_in_workspace(runtime: &mut Runtime) -> Result<(), TransactionError> {
+    fn drop_all_proofs_in_workspace(runtime: &mut Runtime) -> Result<(), TransactionErrorKind> {
         runtime
             .interface_mut()
             .workspace_invoke(WorkspaceAction::DropAllProofs, invoke_args![].into())?;
@@ -518,7 +528,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
         runtime: &mut Runtime,
         substate_type: AllocatableAddressType,
         workspace_id: WorkspaceId,
-    ) -> Result<InstructionResult, TransactionError> {
+    ) -> Result<InstructionResult, TransactionErrorKind> {
         let entity_id = runtime.interface().next_entity_id()?;
         let result = runtime
             .interface_mut()
@@ -541,11 +551,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
     }
 
     /// Load, validate template binary and adds it to TemplateProvider.
-    fn publish_template(runtime: &mut Runtime, binary: TemplateBlob) -> Result<InstructionResult, TransactionError> {
+    fn publish_template(
+        runtime: &mut Runtime,
+        binary: TemplateBlob,
+    ) -> Result<InstructionResult, TransactionErrorKind> {
         if binary.len() > limits::ENGINE_LIMITS.max_template_binary_size_bytes {
             // Technically, not possible, but this check is kept in to make a test pass, and potentially for additional
             // safety.
-            return Err(TransactionError::WasmBinaryTooBig {
+            return Err(TransactionErrorKind::WasmBinaryTooBig {
                 size: binary.len(),
                 max: limits::ENGINE_LIMITS.max_template_binary_size_bytes,
             });
@@ -566,14 +579,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
         owner_rule: Option<OwnerRule>,
         access_rules: Option<ComponentAccessRules>,
         workspace_id: Option<WorkspaceOffsetId>,
-    ) -> Result<InstructionResult, TransactionError> {
+    ) -> Result<InstructionResult, TransactionErrorKind> {
         let template = template_provider
             .get_template(&ACCOUNT_TEMPLATE_ADDRESS)
-            .map_err(|e| TransactionError::FailedToLoadTemplate {
+            .map_err(|e| TransactionErrorKind::FailedToLoadTemplate {
                 address: ACCOUNT_TEMPLATE_ADDRESS,
                 details: e.to_string(),
             })?
-            .ok_or(TransactionError::TemplateNotFound {
+            .ok_or(TransactionErrorKind::TemplateNotFound {
                 address: ACCOUNT_TEMPLATE_ADDRESS,
             })?;
 
@@ -590,7 +603,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
 
                 // Ensure that the existing component is indeed an Account
                 if component.template_address != ACCOUNT_TEMPLATE_ADDRESS {
-                    return Err(TransactionError::InvalidCreateAccount {
+                    return Err(TransactionErrorKind::InvalidCreateAccount {
                         component_address: account_address,
                         details: format!(
                             "A component already exists at the derived account address {}, but it is not an Account \
@@ -601,7 +614,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
                 }
 
                 if owner_rule.is_some() || access_rules.is_some() {
-                    return Err(TransactionError::InvalidCreateAccount {
+                    return Err(TransactionErrorKind::InvalidCreateAccount {
                         component_address: account_address,
                         details: "Cannot specify owner_rule or access_rules when an account already exists at the \
                                   derived address"
@@ -621,19 +634,19 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
                     )?;
                 }
 
-                Ok(InstructionResult {
-                    indexed: IndexedValue::from_type(&account_address)?,
-                    return_type: Type::Other {
-                        name: "ComponentAddress".to_string(),
-                    },
-                })
+                // The instruction output is always the ComponentAddress
+                runtime
+                    .interface_mut()
+                    .set_last_instruction_output(IndexedValue::from_type(&account_address)?)?;
+
+                Ok(InstructionResult::empty())
             },
             None => {
                 let function_def = template
                     .template_def()
                     .get_function(ACCOUNT_CONSTRUCTOR_FUNCTION)
                     .cloned()
-                    .ok_or_else(|| TransactionError::FunctionNotFound {
+                    .ok_or_else(|| TransactionErrorKind::FunctionNotFound {
                         name: ACCOUNT_CONSTRUCTOR_FUNCTION.to_string(),
                     })?;
 
@@ -671,7 +684,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
                 runtime.interface_mut().validate_return_value(&result.indexed)?;
                 runtime.interface_mut().pop_call_frame()?;
 
-                Ok(result)
+                Ok(InstructionResult::empty())
             },
         }
     }
@@ -682,14 +695,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
         template_address: &TemplateAddress,
         function: &str,
         args: Vec<InstructionArg>,
-    ) -> Result<InstructionResult, TransactionError> {
+    ) -> Result<InstructionResult, TransactionErrorKind> {
         let template = template_provider
             .get_template(template_address)
-            .map_err(|e| TransactionError::FailedToLoadTemplate {
+            .map_err(|e| TransactionErrorKind::FailedToLoadTemplate {
                 address: *template_address,
                 details: e.to_string(),
             })?
-            .ok_or_else(|| TransactionError::TemplateNotFound {
+            .ok_or_else(|| TransactionErrorKind::TemplateNotFound {
                 address: *template_address,
             })?;
 
@@ -698,13 +711,13 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
             .track_template_loaded(template_address, template.code_size())?;
 
         let function_def = template.template_def().get_function(function).cloned().ok_or_else(|| {
-            TransactionError::FunctionNotFound {
+            TransactionErrorKind::FunctionNotFound {
                 name: function.to_string(),
             }
         })?;
 
         if function_def.is_migration {
-            return Err(TransactionError::CannotCallMigrationFunctionDirectly {
+            return Err(TransactionErrorKind::CannotCallMigrationFunctionDirectly {
                 name: function_def.name,
             });
         }
@@ -737,17 +750,17 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
         call: ComponentReference,
         method: &str,
         args: Vec<InstructionArg>,
-    ) -> Result<InstructionResult, TransactionError> {
+    ) -> Result<InstructionResult, TransactionErrorKind> {
         let (component_address, component) = runtime.interface_mut().load_component(call)?;
         let template_address = component.template_address;
 
         let template = template_provider
             .get_template(&template_address)
-            .map_err(|e| TransactionError::FailedToLoadTemplate {
+            .map_err(|e| TransactionErrorKind::FailedToLoadTemplate {
                 address: template_address,
                 details: e.to_string(),
             })?
-            .ok_or(TransactionError::TemplateNotFound {
+            .ok_or(TransactionErrorKind::TemplateNotFound {
                 address: template_address,
             })?;
 
@@ -765,15 +778,15 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
         component: &ComponentHeader,
         method: &str,
         args: Vec<InstructionArg>,
-    ) -> Result<InstructionResult, TransactionError> {
+    ) -> Result<InstructionResult, TransactionErrorKind> {
         let function_def = template.template_def().get_function(method).cloned().ok_or_else(|| {
-            TransactionError::FunctionNotFound {
+            TransactionErrorKind::FunctionNotFound {
                 name: method.to_string(),
             }
         })?;
 
         if function_def.is_migration {
-            return Err(TransactionError::CannotCallMigrationFunctionDirectly {
+            return Err(TransactionErrorKind::CannotCallMigrationFunctionDirectly {
                 name: function_def.name,
             });
         }
@@ -821,7 +834,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
         runtime: Runtime,
         function_def: FunctionDef,
         args: Vec<tari_bor::Value>,
-    ) -> Result<InstructionResult, TransactionError> {
+    ) -> Result<InstructionResult, TransactionErrorKind> {
         let result = match module {
             LoadedTemplate::Wasm(loaded) => {
                 let mut store = loaded.create_store();

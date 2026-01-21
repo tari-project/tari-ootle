@@ -18,13 +18,13 @@ use tari_ootle_common_types::{
     Epoch,
     StateVersion,
 };
+use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
 use tari_template_abi::TemplateDef;
 use tari_template_lib::{
     models::{ResourceAddress, UtxoId},
     prelude::{RistrettoPublicKeyBytes, TemplateAddress},
     types::crypto::UtxoTag,
 };
-use tari_transaction::{Transaction, TransactionId};
 use time::PrimitiveDateTime;
 
 use crate::models::UtxoUpdatePayload;
@@ -50,6 +50,10 @@ pub trait WalletNetworkInterface {
     fn submit_transaction(
         &self,
         transaction: Transaction,
+    ) -> impl Future<Output = Result<TransactionId, Self::Error>> + Send;
+    fn submit_transaction_envelope(
+        &self,
+        transaction: TransactionEnvelope,
     ) -> impl Future<Output = Result<TransactionId, Self::Error>> + Send;
 
     fn submit_dry_run_transaction(

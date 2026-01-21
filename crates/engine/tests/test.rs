@@ -32,6 +32,7 @@ use tari_engine_types::{
     virtual_substate::{VirtualSubstate, VirtualSubstateId},
 };
 use tari_ootle_common_types::substate_type::SubstateType;
+use tari_ootle_transaction::{args, call_args, Transaction};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     constants::XTR,
@@ -43,7 +44,6 @@ use tari_template_test_tooling::{
     support::assert_error::assert_reject_reason,
     TemplateTest,
 };
-use tari_transaction::{args, call_args, Transaction};
 use tari_transaction_manifest::ManifestValue;
 use tari_utilities::hex::to_hex;
 use wasmer::ExportError;
@@ -65,7 +65,6 @@ fn test_state() {
     let component_address1: ComponentAddress = template_test.call_function("State", "new", call_args![], vec![]);
     template_test.assert_calls(&[
         "workspace_invoke",
-        "emit_log",
         "component_invoke",
         "set_last_instruction_output",
         "finalize",
@@ -253,7 +252,8 @@ fn test_engine_errors() {
     assert_reject_reason(
         reason,
         RejectReason::SubstateNotFound(
-            "resource_7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b not found".to_string(),
+            "At instruction #1: resource_7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b not found"
+                .to_string(),
         ),
     );
 }
@@ -349,7 +349,7 @@ fn test_errors_on_infinite_loop() {
 }
 
 mod errors {
-    use tari_transaction::Instruction;
+    use tari_ootle_transaction::Instruction;
 
     use super::*;
 
@@ -370,10 +370,7 @@ mod errors {
             .unwrap();
         match result.finalize.result.any_reject().unwrap() {
             RejectReason::ExecutionFailure(message) => {
-                assert_eq!(
-                    message,
-                    "Panic! This error message should be included in the execution result"
-                );
+                assert!(message.contains("Panic! This error message should be included in the execution result"));
             },
             reason => panic!("Unexpected transaction reject reason: {}", reason),
         }
@@ -399,7 +396,7 @@ mod errors {
         match result.finalize.result.any_reject().unwrap() {
             RejectReason::ExecutionFailure(message) => {
                 assert!(
-                    message.starts_with(
+                    message.contains(
                         "Panic! failed to decode argument at position 0 \
                          (tari_template_lib_types::amount::amount::Amount) for function 'please_pass_invalid_args':"
                     ),
@@ -432,8 +429,8 @@ mod consensus {
 }
 
 mod fungible {
+    use tari_ootle_transaction::Instruction;
     use tari_template_lib::types::Amount;
-    use tari_transaction::Instruction;
 
     use super::*;
 

@@ -2,14 +2,12 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use borsh::BorshSerialize;
+use ootle_byte_type::ToByteType;
 use tari_bor::{Deserialize, Serialize};
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
 use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, EncryptedData};
 
-use crate::{
-    crypto::{ElgamalVerifiableBalance, ElgamalVerifiableBalanceBytes},
-    ToByteType,
-};
+use crate::crypto::{ElgamalVerifiableBalance, ElgamalVerifiableBalanceBytes};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]

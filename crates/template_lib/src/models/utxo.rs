@@ -9,8 +9,7 @@ use tari_template_abi::rust::{
 };
 use tari_template_lib_types::{
     crypto::PedersenCommitmentBytes,
-    from_hex_to_array,
-    hex::write_hex_fmt,
+    hex::{fixed_bytes_from_hex, write_hex_fmt},
     serde_helpers,
     KeyParseError,
 };
@@ -88,7 +87,7 @@ impl UtxoId {
     }
 
     pub fn from_hex(hex: &str) -> Result<Self, KeyParseError> {
-        from_hex_to_array(hex).map(Self::from_array)
+        fixed_bytes_from_hex(hex).map(Self::from_array)
     }
 
     pub fn into_commitment_bytes(self) -> PedersenCommitmentBytes {

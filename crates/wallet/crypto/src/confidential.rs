@@ -1,8 +1,9 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use ootle_byte_type::ToByteType;
 use tari_crypto::{ristretto::RistrettoSecretKey, tari_utilities::ByteArray};
-use tari_engine_types::{crypto::commit_u64_amount, ToByteType};
+use tari_engine_types::crypto::commit_u64_amount;
 use tari_template_lib::{
     models::{ConfidentialOutputStatement, ConfidentialWithdrawProof, UnspentOutput},
     types::{crypto::RistrettoPublicKeyBytes, Amount},

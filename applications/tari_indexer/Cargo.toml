@@ -14,14 +14,13 @@ tari_bor = { workspace = true }
 tari_common = { workspace = true }
 tari_common_types = { workspace = true }
 tari_consensus = { workspace = true }
-tari_consensus_types = { workspace = true }
 tari_template_builtin = { workspace = true }
 tari_crypto = { workspace = true }
 tari_engine = { workspace = true }
 tari_engine_types = { workspace = true }
-tari_epoch_manager = { workspace = true }
+tari_epoch_manager = { workspace = true, features = ["service"] }
 tari_epoch_oracles = { workspace = true, features = ["base_layer"] }
-tari_indexer_client = { workspace = true, default-features = false, features = ["utoipa"] }
+tari_indexer_client = { workspace = true, default-features = false, features = ["utoipa", "eth_types"] }
 tari_indexer_lib = { workspace = true }
 tari_networking = { workspace = true }
 tari_ootle_app_utilities = { workspace = true }
@@ -32,9 +31,10 @@ tari_ootle_storage_sqlite = { workspace = true }
 tari_rpc_framework = { workspace = true }
 tari_shutdown = { workspace = true }
 tari_template_lib = { workspace = true }
-tari_transaction = { workspace = true }
+tari_ootle_transaction = { workspace = true }
 tari_validator_node_rpc = { workspace = true }
 tari_ootle_wallet_sdk = { workspace = true }
+ootle_byte_type = { workspace = true, features = ["crypto"] }
 
 anyhow = { workspace = true }
 axum = { workspace = true, features = ["query", "matched-path"] }
@@ -79,7 +79,7 @@ tokio = { workspace = true, features = [
 ] }
 tokio-stream = { workspace = true }
 tower = { workspace = true, features = ["limit"] }
-tower-http = { workspace = true, features = ["default", "cors", "limit"] }
+tower-http = { workspace = true, features = ["default", "cors", "limit", "trace"] }
 url = { workspace = true, features = ["serde"] }
 cacache = { version = "13.1.0", default-features = false, features = ["mmap", "tokio-runtime"] }
 prometheus-client = { workspace = true, optional = true }

@@ -10,6 +10,7 @@
     "type": "git",
     "url": "git+https://github.com/tari-project/tari-ootle.git"
   },
+  "private": false,
   "publishConfig": {
     "access": "public"
   },
@@ -25,6 +26,7 @@
   ],
   "author": "",
   "license": "ISC",
+  "packageManager": "pnpm@10.28.0",
   "dependencies": {
     "@tari-project/ootle-ts-bindings": "workspace:^"
   },

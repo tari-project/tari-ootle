@@ -3,9 +3,7 @@
   "version": "1.23.2",
   "private": false,
   "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org/",
-    "provenance": true
+    "access": "public"
   },
   "description": "TypeScript types synchronized to the Tari Ootle Rust codebase",
   "homepage": "https://github.com/tari-project/tari-ootle#readme",
@@ -30,6 +28,7 @@
   ],
   "author": "",
   "license": "ISC",
+  "packageManager": "pnpm@10.28.0",
   "dependencies": {
     "bech32": "^2.0.0"
   },

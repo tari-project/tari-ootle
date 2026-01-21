@@ -64,20 +64,22 @@ Navigate to http://127.0.0.1:5100 to create an account, claim test tokens and st
 
 ## Running a Small Ootle Network Locally (Localnet)
 
-NOTE: This repo is heavily under development, so these instructions may change without notice.
+NOTE: This repository is under heavy development. We'll try to keep instructions up to date, but they may become outdated. 
 
 Confirm you have installed all the prerequisites listed in the **Prerequisites** section (Rust, Node.js, npm, linux
 dependencies)
 
 The easiest way to test out the Ootle is to use the `tari_swarm_daemon`. This will spin up all necessary MinoTari and
-Ootle applications for a localnet.
+Ootle applications for a _localnet_ network.
 
-Clone both the tari and tari-ootle repositories in the same folder:
+Clone both the `tari` and `tari-ootle` repositories in the same folder:
 
 ```shell
 mkdir <containerfolder>
 cd <containerfolder>
 git clone https://github.com/tari-project/tari.git
+# Checkout the tag on the L1 repo that is recently tested. Check the workspace Cargo.toml in this repo for the correct tag if this one is outdated.
+cd tari && git checkout v5.2.0-pre.5 && cd ..
 git clone https://github.com/tari-project/tari-ootle.git ootle
 ```
 

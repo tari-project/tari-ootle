@@ -464,7 +464,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         let req = req.into_message();
 
         if req.substate_ids.len() > MAX_REQUESTS {
-            return Err(RpcStatus::bad_request("Cannot request more than 100 substates at once"));
+            return Err(RpcStatus::bad_request("Cannot request more than 50 substates at once"));
         }
 
         debug!(

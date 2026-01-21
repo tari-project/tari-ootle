@@ -7281,6 +7281,7 @@ name = "ootle_serde"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "bincode 2.0.1",
  "hex",
  "serde",
  "serde_json",

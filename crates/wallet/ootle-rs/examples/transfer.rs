@@ -84,8 +84,8 @@ async fn main() {
     println!("Faucet funds received: {}", outcome);
 
     // Then we'll send it to some other addresses.
-    let recipient1 = address!("otl_loc_17mxrwzhjd5ch5h4u973yzg8dh2l9xy277zutlmvq2cjcggae9qma4866483wpajqdrsnmywfx8hth3jsje0htxhd99pxxndcfsyasnglh9x08");
-    let recipient2 = address!("otl_loc_1rthcge0aneewp46pjj5a6tgg4806e7epkg32lkkgm0d4k6q6evs03cldjwrevnc46cu899w8kuud9h58k4n4en3z3f2rtrzspcsrgkgyp7xxd");
+    let recipient1 = address!("otl_loc_1sf0y0v7zgf62mqckytcg8esgm75ae9hfdhcdnhc6942caex2dqz350dlu824h8tj4thm3xnny77z26j3qrhquklguq0q7vawp8k4gcguz2j4c");
+    let recipient2 = address!("otl_loc_1a2dcf306wgm4ce088fn9hqetxg434gesqvs3e37p2awfhrj8mp22ptu8l8xg3kddh8arzypyy3526extyqy0fheeckrl9ha0zm9rwysjvvch7");
     // Send some XTR to another address. You can replace XTR with any other fungible token resource address.
     let xtr_token = XTR; // resource_address!("resource_deadbeaf");
 

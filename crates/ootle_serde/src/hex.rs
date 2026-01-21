@@ -27,7 +27,7 @@ where
         let bytes = hex::decode(&*hex).map_err(serde::de::Error::custom)?;
         T::try_from(&bytes).map_err(|e| {
             serde::de::Error::custom(format!(
-                "Failed to convert bytes to {}: {e}",
+                "Failed to convert hex bytes to {}: {e}",
                 std::any::type_name::<T>()
             ))
         })?
@@ -35,7 +35,7 @@ where
         let bytes = d.deserialize_byte_buf(BytesVisitor::new())?;
         T::try_from(bytes.as_ref()).map_err(|e| {
             serde::de::Error::custom(format!(
-                "Failed to convert bytes to {}: {e}",
+                "Failed to convert hex bytes to {}: {e}",
                 std::any::type_name::<T>()
             ))
         })?
@@ -56,7 +56,7 @@ where
         let bytes = hex::decode(&*hex).map_err(serde::de::Error::custom)?;
         T::try_from(bytes).map_err(|e| {
             serde::de::Error::custom(format!(
-                "Failed to convert bytes to {}: {e}",
+                "Failed to convert hex bytes to {}: {e}",
                 std::any::type_name::<T>()
             ))
         })?
@@ -64,7 +64,7 @@ where
         let bytes = d.deserialize_byte_buf(BytesVisitor::new())?;
         T::try_from(bytes.into()).map_err(|e| {
             serde::de::Error::custom(format!(
-                "Failed to convert bytes to {}: {e}",
+                "Failed to convert hex bytes to {}: {e}",
                 std::any::type_name::<T>()
             ))
         })?
@@ -115,7 +115,7 @@ pub mod option {
             .transpose()
             .map_err(|e| {
                 serde::de::Error::custom(format!(
-                    "Failed to convert bytes to {}: {e}",
+                    "Failed to convert hex bytes to {}: {e}",
                     std::any::type_name::<T>()
                 ))
             })?;
@@ -126,6 +126,7 @@ pub mod option {
 #[cfg(test)]
 mod tests {
     use serde::Serialize;
+    use tari_template_lib::types::Hash;
 
     use super::*;
 
@@ -135,6 +136,8 @@ mod tests {
         fixed: [u8; 32],
         #[serde(with = "super")]
         vec: Vec<u8>,
+        #[serde(with = "super")]
+        hash: Hash,
     }
 
     // Test it
@@ -143,10 +146,12 @@ mod tests {
         let data = TestCase {
             fixed: [1; 32],
             vec: vec![5; 100],
+            hash: Hash::from_array([2; 32]),
         };
         let serialized = serde_json::to_vec(&data).unwrap();
         let deserialized: TestCase = serde_json::from_slice(&serialized).unwrap();
         assert_eq!(data.fixed, deserialized.fixed);
         assert_eq!(data.vec, deserialized.vec);
+        assert_eq!(data.hash, deserialized.hash);
     }
 }

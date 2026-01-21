@@ -4,22 +4,22 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tari_bor::json_encoding::{CborValueJsonSerializeWrapper, CiboruimValueDeserializeFixWrapper};
 
-use crate::visitor::BytesVisitor;
-
 pub fn serialize<S: Serializer>(v: &tari_bor::Value, s: S) -> Result<S::Ok, S::Error> {
     if s.is_human_readable() {
+        // This uses a wrapper type to serialize the CBOR value to a JSON-compatible format
+        // We cannot use this wrapper for non-human-readable formats because then the resulting CBOR would be would not
+        // be valid CBOR binary data
         CborValueJsonSerializeWrapper(v).serialize(s)
     } else {
         #[cfg(feature = "bincode-compat")]
         {
             // This is to support bincode since the default ciborium serde implementation uses deserialize_any instead
-            // of serializing the cbor::Value enum directly
+            // // of serializing the cbor::Value enum directly
             // - unfortunately, when using CBOR, Value::Bytes will be used instead of the actual CBOR representation.
             // NOTE: this increases fees (see FeeModule::on_before_finalize)
             // Other solutions include:
             // - switching to cbor4ii, implementing to_value and from_value and a serializer that supports
             //   deserialize_any
-            // - wrapper type for ciborium::Value that implements a "standard" Serialize/Deserialize on the Value enum
             // - storing a Vec<u8> and incurring the extra encode/decode steps (what this does)
             let vec = tari_bor::encode(v).map_err(serde::ser::Error::custom)?;
             s.serialize_bytes(&vec)
@@ -35,8 +35,14 @@ where D: Deserializer<'de> {
         let wrapper = CiboruimValueDeserializeFixWrapper::deserialize(d)?;
         Ok(wrapper.0)
     } else {
-        let bytes = d.deserialize_byte_buf(BytesVisitor::new())?;
-        tari_bor::decode_exact(bytes.as_ref()).map_err(serde::de::Error::custom)
+        #[cfg(feature = "bincode-compat")]
+        {
+            use crate::visitor::BytesVisitor;
+            let bytes = d.deserialize_byte_buf(BytesVisitor::new())?;
+            tari_bor::decode_exact(bytes.as_ref()).map_err(serde::de::Error::custom)
+        }
+        #[cfg(not(feature = "bincode-compat"))]
+        tari_bor::Value::deserialize(d)
     }
 }
 
@@ -93,5 +99,28 @@ mod tests {
 
         let json2 = tari_bor::encode(&t).unwrap();
         assert_eq!(bytes, json2);
+    }
+
+    #[test]
+    #[cfg(feature = "bincode-compat")]
+    fn decode_encode_bincode() {
+        let addr = ResourceAddress::new([1u8; ObjectKey::LENGTH].into());
+        let test = Test {
+            value: cbor!({
+                "code" => 415,
+                "message" => addr,
+                "continue" => false,
+                "array" => [1, 2, 3, 4, 5],
+                "extra" => { "numbers" => [8.2341e+4, 0.251425] },
+            })
+            .unwrap(),
+        };
+
+        let bytes = bincode::serde::encode_to_vec(&test, bincode::config::standard()).unwrap();
+        let (t, _) = bincode::serde::decode_from_slice::<Test, _>(&bytes, bincode::config::standard()).unwrap();
+        assert_eq!(test, t);
+
+        let bytes2 = bincode::serde::encode_to_vec(&t, bincode::config::standard()).unwrap();
+        assert_eq!(bytes, bytes2);
     }
 }

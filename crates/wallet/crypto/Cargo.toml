@@ -26,7 +26,6 @@ thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 zeroize = { workspace = true, features = ["simd"] }
 memmap2 = { version = "0.9.9", optional = true }
-log = { workspace=true}
 
 [dev-dependencies]
 serde_json = { workspace = true }

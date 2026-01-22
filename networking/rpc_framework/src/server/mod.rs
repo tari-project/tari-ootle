@@ -43,14 +43,12 @@ use std::{
     future::Future,
     io,
     io::ErrorKind,
-    pin::Pin,
     sync::Arc,
-    task::Poll,
     time::{Duration, Instant},
 };
 
 use bytes::Bytes;
-use futures::{future, stream::FuturesUnordered, SinkExt, Stream, StreamExt};
+use futures::{stream::FuturesUnordered, SinkExt, StreamExt};
 use libp2p::{PeerId, StreamProtocol};
 use libp2p_substream::{ProtocolEvent, ProtocolNotification};
 use log::*;
@@ -726,47 +724,29 @@ where TSvc: Service<Request<Bytes>, Response = Response<Body>, Error = RpcStatus
                 self.logging_context_string.clone(),
                 request_id,
                 "message read",
-                stream.next(),
+                time::timeout(deadline, stream.next()),
             );
-            let timeout = time::sleep(deadline);
 
-            tokio::select! {
-                // Check if the client interrupted the outgoing stream
-                Err(err) = self.check_interruptions() => {
-                    match err {
-                        err @ RpcServerError::ClientInterruptedStream => {
-                            debug!(target: LOG_TARGET, "Stream was interrupted by client: {}", err);
-                            break;
-                        },
-                        err => {
-                            error!(target: LOG_TARGET, "Stream was interrupted: {}", err);
-                            return Err(err);
-                        },
-                    }
+            let result = next_item.await;
+            match result {
+                Ok(Some(msg)) => {
+                    #[cfg(feature = "metrics")]
+                    metrics::outbound_response_bytes(&self.peer_id, &self.protocol).observe(msg.len() as f64);
+                    debug!(
+                        target: LOG_TARGET,
+                        "({}) Sending body len = {}",
+                        self.logging_context_string,
+                        msg.len()
+                    );
+
+                    self.framed.send(msg).await?;
                 },
-                msg = next_item => {
-                     match msg {
-                         Some(msg) => {
-                            #[cfg(feature = "metrics")]
-                            metrics::outbound_response_bytes(&self.peer_id, &self.protocol).observe(msg.len() as f64);
-                            debug!(
-                                target: LOG_TARGET,
-                                "({}) Sending body len = {}",
-                                self.logging_context_string,
-                                msg.len()
-                            );
-
-                            self.framed.send(msg).await?;
-                        },
-                        None => {
-                            debug!(target: LOG_TARGET, "{} Request complete", self.logging_context_string,);
-                            break;
-                        },
-                    }
+                Ok(None) => {
+                    debug!(target: LOG_TARGET, "{} Request complete", self.logging_context_string,);
+                    break;
                 },
-
-                _ = timeout => {
-                     debug!(
+                Err(_) => {
+                    debug!(
                         target: LOG_TARGET,
                         "({}) Failed to return result within client deadline ({:.0?})",
                         self.logging_context_string,
@@ -781,64 +761,10 @@ where TSvc: Service<Request<Bytes>, Response = Response<Body>, Error = RpcStatus
                     )
                     .inc();
                     break;
-                }
-            } // end select!
+                },
+            }
         } // end loop
         Ok(())
-    }
-
-    async fn check_interruptions(&mut self) -> Result<(), RpcServerError> {
-        let check = future::poll_fn(|cx| match Pin::new(&mut self.framed).poll_next(cx) {
-            Poll::Ready(Some(Ok(mut msg))) => {
-                let decoded_msg = match proto::RpcRequest::decode(&mut msg) {
-                    Ok(msg) => msg,
-                    Err(err) => {
-                        error!(target: LOG_TARGET, "Client send MALFORMED response: {}", err);
-                        return Poll::Ready(Some(RpcServerError::UnexpectedIncomingMessageMalformed));
-                    },
-                };
-                let u8_bits = match u8::try_from(decoded_msg.flags) {
-                    Ok(bits) => bits,
-                    Err(err) => {
-                        error!(target: LOG_TARGET, "Client send MALFORMED flags: {}", err);
-                        return Poll::Ready(Some(RpcServerError::ProtocolError(format!(
-                            "invalid message flag: must be less than {}",
-                            u8::MAX
-                        ))));
-                    },
-                };
-
-                let msg_flags = match RpcMessageFlags::from_bits(u8_bits) {
-                    Some(flags) => flags,
-                    None => {
-                        error!(target: LOG_TARGET, "Client send MALFORMED flags: {}", u8_bits);
-                        return Poll::Ready(Some(RpcServerError::ProtocolError(format!(
-                            "invalid message flag, does not match any flags ({})",
-                            u8_bits
-                        ))));
-                    },
-                };
-                if msg_flags.is_fin() {
-                    Poll::Ready(Some(RpcServerError::ClientInterruptedStream))
-                } else {
-                    Poll::Ready(Some(RpcServerError::UnexpectedIncomingMessage(format!(
-                        "flags={:?}, method={}, req_id={}",
-                        decoded_msg.flags(),
-                        decoded_msg.method,
-                        decoded_msg.request_id
-                    ))))
-                }
-            },
-            Poll::Ready(Some(Err(err))) if err.kind() == io::ErrorKind::WouldBlock => Poll::Ready(None),
-            Poll::Ready(Some(Err(err))) => Poll::Ready(Some(RpcServerError::from(err))),
-            Poll::Ready(None) => Poll::Ready(Some(RpcServerError::StreamClosedByRemote)),
-            Poll::Pending => Poll::Ready(None),
-        })
-        .await;
-        match check {
-            Some(err) => Err(err),
-            None => Ok(()),
-        }
     }
 }
 

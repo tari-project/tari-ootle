@@ -132,7 +132,7 @@ impl RpcClient {
     pub async fn request_response<T, R, M>(&mut self, request: T, method: M) -> Result<R, RpcError>
     where
         T: prost::Message,
-        R: prost::Message + Default + std::fmt::Debug,
+        R: prost::Message + Default + fmt::Debug,
         M: Into<RpcMethod>,
     {
         let req_bytes = request.encode_to_vec();
@@ -695,7 +695,8 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin + Send
             let resp_result = match resp_result {
                 Some(r) => r,
                 None => {
-                    self.premature_close(request_id, method).await?;
+                    // The consumer has dropped the receiver before all responses are received.
+                    // Closing
                     break;
                 },
             };
@@ -723,12 +724,13 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin + Send
                 Err(RpcError::ReplyTimeout) => {
                     debug!(
                         target: LOG_TARGET,
-                        "Request {} (method={}) timed out", request_id, method,
+                        "Request {} (method={}) timed out (resp_closed={})", request_id, method, response_tx.is_closed()
                     );
                     #[cfg(feature = "metrics")]
                     metrics::client_timeouts(&self.peer_id, &self.protocol_id).inc();
                     if response_tx.is_closed() {
-                        self.premature_close(request_id, method).await?;
+                        // The consumer has dropped the receiver before all responses are received.
+                        // We have timed out on the response but since we've closed, we just exit
                     } else {
                         let _result = response_tx.send(Err(RpcStatus::timed_out("Response timed out"))).await;
                     }
@@ -750,10 +752,9 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin + Send
             match Self::convert_to_result(resp) {
                 Ok(Ok(resp)) => {
                     let is_finished = resp.is_finished();
-                    // The consumer may drop the receiver before all responses are received.
-                    // We handle this by sending a 'FIN' message to the server.
+                    // If the consumer drops the receiver, we can stop sending responses.
                     if response_tx.is_closed() {
-                        self.premature_close(request_id, method).await?;
+                        // We have timed out on the response but since we've closed, we just exit
                         break;
                     } else {
                         let _result = response_tx.send(Ok(resp)).await;
@@ -784,29 +785,6 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin + Send
             }
         }
 
-        Ok(())
-    }
-
-    async fn premature_close(&mut self, request_id: u16, method: u32) -> Result<(), RpcError> {
-        warn!(
-            target: LOG_TARGET,
-            "(peer={}) Response receiver was dropped before the response/stream could complete for protocol {}, \
-             interrupting the stream. ",
-            self.peer_id,
-            self.protocol_name()
-        );
-        let req = proto::RpcRequest {
-            request_id: u32::from(request_id),
-            method,
-            flags: RpcMessageFlags::FIN.bits().into(),
-            deadline: self.config.deadline.map(|d| d.as_secs()).unwrap_or(0),
-            ..Default::default()
-        };
-
-        // If we cannot set FIN quickly, just exit
-        if let Ok(res) = time::timeout(Duration::from_secs(2), self.send_request(req)).await {
-            res?;
-        }
         Ok(())
     }
 

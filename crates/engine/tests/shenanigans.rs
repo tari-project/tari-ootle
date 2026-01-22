@@ -10,9 +10,7 @@ use tari_engine_types::{
 use tari_ootle_transaction::{args, Transaction};
 use tari_template_lib::{
     args::VaultAction,
-    constants::XTR,
-    models::ComponentAddress,
-    types::{Amount, ResourceType},
+    types::{constants::XTR, Amount, ComponentAddress, ResourceType},
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 

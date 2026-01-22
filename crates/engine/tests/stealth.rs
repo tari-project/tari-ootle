@@ -17,9 +17,9 @@ use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::
 use tari_ootle_transaction::{args, call_args, Transaction};
 use tari_template_lib::{
     auth::AccessRule,
-    models::{ComponentAddress, ResourceAddress, SpendCondition, UtxoAddress, UtxoId},
-    prelude::PedersenCommitmentBytes,
+    models::SpendCondition,
     rule,
+    types::{crypto::PedersenCommitmentBytes, ComponentAddress, ResourceAddress, UtxoAddress, UtxoId},
 };
 use tari_template_test_tooling::{
     support::{

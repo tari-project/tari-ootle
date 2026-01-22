@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_indexer_client::types::{ListTemplatesRequest, ListTemplatesResponse};
-use tari_template_lib::types::TemplateAddress;
+use tari_template_lib_types::TemplateAddress;
 
 use crate::cli::CommonArgs;
 

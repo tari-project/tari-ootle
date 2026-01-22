@@ -12,7 +12,7 @@ use tari_template_lib::{
         RestrictedAccessRule,
         RuleRequirement,
     },
-    models::NonFungibleAddress,
+    types::NonFungibleAddress,
 };
 
 use crate::runtime::{working_state::WorkingState, ActionIdent, AuthorizationScope, RuntimeError};

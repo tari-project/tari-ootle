@@ -6,7 +6,7 @@ use std::fmt::{Display, Formatter};
 use tari_bor::{Deserialize, Serialize};
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::Epoch;
-use tari_template_lib::{models::ComponentAddress, prelude::RistrettoPublicKeyBytes};
+use tari_template_lib::{prelude::RistrettoPublicKeyBytes, types::ComponentAddress};
 
 use crate::models::KeyId;
 

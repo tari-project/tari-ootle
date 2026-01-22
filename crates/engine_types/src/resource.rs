@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArrayError};
 use tari_template_lib::{
     auth::{AuthHook, OwnerRule, Ownership, ResourceAccessRules},
-    models::Metadata,
+    prelude::Metadata,
     resource::TOKEN_SYMBOL,
     types::{crypto::RistrettoPublicKeyBytes, Amount, ResourceType},
 };

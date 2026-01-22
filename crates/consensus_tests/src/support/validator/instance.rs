@@ -13,7 +13,7 @@ use tari_ootle_storage::{
     StateStoreReadTransaction,
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::{
     sync::{broadcast, mpsc, watch},
     task::JoinHandle,

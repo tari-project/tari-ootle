@@ -11,7 +11,6 @@ use tari_consensus::traits::{BlockTransactionExecutor, BlockTransactionExecutorE
 use tari_engine::state_store::{memory::MemoryStateStore, new_memory_store, StateWriter};
 use tari_engine_types::{
     substate::{Substate, SubstateId},
-    transaction_receipt::TransactionReceiptAddress,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
 use tari_ootle_common_types::{
@@ -27,7 +26,7 @@ use tari_ootle_storage::{
     StateStore,
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
-use tari_template_lib::prelude::XTR;
+use tari_template_lib_types::{constants::XTR, TransactionReceiptAddress};
 
 use crate::support::{create_execution_result_for_transaction, executions_store::TestExecutionSpecStore, TestAddress};
 

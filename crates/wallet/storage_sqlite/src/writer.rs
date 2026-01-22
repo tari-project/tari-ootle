@@ -57,14 +57,17 @@ use tari_ootle_wallet_sdk::{
     },
     storage::{CommittableStore, WalletEventStoreWriter, WalletStorageError, WalletStoreReader, WalletStoreWriter},
 };
-use tari_template_lib::{
-    models::{ComponentAddress, NonFungibleId, ResourceAddress, UtxoAddress, UtxoId, VaultId},
-    types::{
-        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
-        Amount,
-        EncryptedData,
-        TemplateAddress,
-    },
+use tari_template_lib_types::{
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
+    Amount,
+    ComponentAddress,
+    EncryptedData,
+    NonFungibleId,
+    ResourceAddress,
+    TemplateAddress,
+    UtxoAddress,
+    UtxoId,
+    VaultId,
 };
 use tari_utilities::hex::Hex;
 use time::PrimitiveDateTime;

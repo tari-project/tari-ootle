@@ -5,9 +5,9 @@ use std::collections::HashMap;
 
 use tari_bor::{Deserialize, Serialize};
 use tari_ootle_common_types::{shard::Shard, Epoch, StateVersion};
-use tari_template_lib::{
-    models::UtxoId,
-    types::crypto::{RistrettoPublicKeyBytes, UtxoTag},
+use tari_template_lib::types::{
+    crypto::{RistrettoPublicKeyBytes, UtxoTag},
+    UtxoId,
 };
 
 #[derive(Debug, Clone)]

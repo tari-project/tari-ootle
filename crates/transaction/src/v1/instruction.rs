@@ -8,15 +8,22 @@ use tari_engine_types::{
     confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
     limits,
     published_template::TemplateBlob,
-    ValidatorFeePoolAddress,
 };
 use tari_ootle_common_types::displayable::Displayable;
 use tari_template_lib::{
     args::LogLevel,
     auth::OwnerRule,
-    models::{ResourceAddress, StealthTransferStatement},
-    prelude::{AccessRules, Amount},
-    types::{crypto::RistrettoPublicKeyBytes, FunctionName, MaxString, TemplateAddress},
+    models::StealthTransferStatement,
+    prelude::AccessRules,
+    types::{
+        crypto::RistrettoPublicKeyBytes,
+        Amount,
+        FunctionName,
+        MaxString,
+        ResourceAddress,
+        TemplateAddress,
+        ValidatorFeePoolAddress,
+    },
 };
 
 use crate::{
@@ -300,7 +307,7 @@ impl Display for MigrateFunction {
 
 #[cfg(test)]
 mod tests {
-    use tari_template_lib::constants::XTR;
+    use tari_template_lib::types::constants::XTR;
 
     use super::*;
     use crate::call_args;

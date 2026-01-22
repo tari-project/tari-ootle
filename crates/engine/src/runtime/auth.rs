@@ -4,7 +4,10 @@
 use std::{fmt::Display, sync::Arc};
 
 use indexmap::IndexSet;
-use tari_template_lib::models::{NonFungibleAddress, ProofId, ResourceAddress};
+use tari_template_lib::{
+    models::ProofId,
+    types::{NonFungibleAddress, ResourceAddress},
+};
 
 #[derive(Debug, Clone)]
 pub struct AuthParams {

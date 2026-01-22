@@ -11,16 +11,17 @@ use tari_crypto::{
 };
 use tari_template_abi::rust::collections::BTreeSet;
 use tari_template_lib::{
-    models::{
-        ConfidentialOutputStatement,
-        ConfidentialWithdrawProof,
+    models::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
+    prelude::RistrettoPublicKeyBytes,
+    types::{
+        crypto::PedersenCommitmentBytes,
+        Amount,
         NonFungibleAddress,
         NonFungibleId,
         ResourceAddress,
+        ResourceType,
         UtxoId,
     },
-    prelude::RistrettoPublicKeyBytes,
-    types::{crypto::PedersenCommitmentBytes, Amount, ResourceType},
 };
 
 use crate::{confidential, crypto::PrivateOutput, substate::SubstateId};

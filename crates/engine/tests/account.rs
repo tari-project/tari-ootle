@@ -6,7 +6,11 @@ use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine::runtime::{ActionIdent, RuntimeError};
 use tari_ootle_transaction::{args, call_args, Instruction, Transaction};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::{constants::XTR, models::ComponentAddress, prelude::AccessRules, rule, types::Amount};
+use tari_template_lib::{
+    prelude::AccessRules,
+    rule,
+    types::{constants::XTR, Amount, ComponentAddress},
+};
 use tari_template_test_tooling::{
     support::assert_error::{assert_access_denied_for_action, assert_reject_reason},
     xtr_faucet_component,

@@ -38,7 +38,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_transaction::TransactionId;
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, StateTreePayload, Version};
-use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use time::PrimitiveDateTime;
 
 use crate::{

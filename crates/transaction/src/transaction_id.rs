@@ -8,12 +8,12 @@ use std::{
 
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
-use tari_engine_types::transaction_receipt::TransactionReceiptAddress;
 use tari_ootle_common_types::{SubstateAddress, ToSubstateAddress};
 use tari_template_lib::types::{
     hex::{fixed_bytes_from_hex, write_hex_fmt},
     Hash,
     KeyParseError,
+    TransactionReceiptAddress,
 };
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, Default, BorshSerialize)]

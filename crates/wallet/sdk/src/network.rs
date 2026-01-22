@@ -20,10 +20,11 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
 use tari_template_abi::TemplateDef;
-use tari_template_lib::{
-    models::{ResourceAddress, UtxoId},
-    prelude::{RistrettoPublicKeyBytes, TemplateAddress},
-    types::crypto::UtxoTag,
+use tari_template_lib::types::{
+    crypto::{RistrettoPublicKeyBytes, UtxoTag},
+    ResourceAddress,
+    TemplateAddress,
+    UtxoId,
 };
 use time::PrimitiveDateTime;
 

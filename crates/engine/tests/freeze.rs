@@ -7,8 +7,7 @@ use tari_engine::runtime::RuntimeError;
 use tari_ootle_transaction::{args, Transaction};
 use tari_template_lib::{
     args::VaultFreezeFlag,
-    models::{ResourceAddress, VaultId},
-    prelude::ComponentAddress,
+    types::{ComponentAddress, ResourceAddress, VaultId},
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 

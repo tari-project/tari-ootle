@@ -55,7 +55,10 @@ macro_rules! arg {
         $crate::builder::named_args::NamedArg::from_type(&$arg).unwrap()
     };
     (Amount($arg:expr)) => {
-        $crate::builder::named_args::NamedArg::from_type(&::tari_template_lib::types::Amount::from($arg)).unwrap()
+        $crate::builder::named_args::NamedArg::from_type(&$crate::builder::named_args::__macro_exports::Amount::from(
+            $arg,
+        ))
+        .unwrap()
     };
 
     ($arg:expr) => {
@@ -106,7 +109,24 @@ macro_rules! __args_inner {
     (@ { $this:ident } $(,)?) => { };
 }
 
-/// Utility macro for building multiple instruction arguments
+/// Utility macro for building multiple Ootle transaction instruction arguments.
+///
+/// Examples
+/// ```ignore
+/// let args = args![]; // Empty
+/// let args = args![42, "bar"]; // literal arguments
+///
+/// // Workspace arguments are resolved at runtime.
+/// let args = args![Workspace("foo"), 42, "bar"];
+///
+/// // Any data type that implements `serde::Serialize` can be used as a literal argument.
+/// let args = args![MyStruct { field1: 42, field2: "hello".to_string() }];
+/// ```
+///
+/// Note that some types may be "coerced" into the template function type during deserialization. For example, integer
+/// literals may be deserialized into any compatible integer type (e.g., `u8`, `i32`, `u64`, `Amount`, etc.). The
+/// mechanism for this varies but it usually simply that types have the same CBOR representation. However, Amount
+/// type for instance, explicitly supports deserialization from integer/string/Amount byte literals.
 #[macro_export]
 macro_rules! args {
     () => (Vec::new());
@@ -134,6 +154,10 @@ macro_rules! args {
         $crate::__args_inner!(@ { args } Literal($args),);
         args
     }};
+}
+
+pub mod __macro_exports {
+    pub use tari_template_lib::types::Amount;
 }
 
 // This is a workaround for a false positive for `clippy::vec_init_then_push` with this macro. We cannot ignore this

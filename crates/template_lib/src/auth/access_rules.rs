@@ -3,9 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use tari_template_abi::rust::collections::BTreeMap;
-use tari_template_lib_types::TemplateAddress;
-
-use crate::models::{ComponentAddress, NonFungibleAddress, ResourceAddress};
+use tari_template_lib_types::{ComponentAddress, NonFungibleAddress, ResourceAddress, TemplateAddress};
 
 /// Represents the types of possible access control rules over a component method or resource
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -336,12 +334,12 @@ impl Default for ResourceAccessRules {
 /// // Deny all access
 /// let deny_all_rule = rule!(deny_all);
 /// // Restricted access to a specific resource
-/// let resource_address = tari_template_lib::models::ResourceAddress::new(
+/// let resource_address = tari_template_lib::types::ResourceAddress::new(
 ///     tari_template_lib::types::ObjectKey::default(),
 /// );
 /// let resource_rule = rule!(resource(resource_address));
 /// // Restricted access to a component
-/// let component_address = tari_template_lib::models::ComponentAddress::new(
+/// let component_address = tari_template_lib::types::ComponentAddress::new(
 ///     tari_template_lib::types::ObjectKey::default(),
 /// );
 /// let component_rule = rule!(component(component_address));
@@ -349,7 +347,7 @@ impl Default for ResourceAccessRules {
 /// let template_address = tari_template_lib::types::TemplateAddress::default();
 /// let template_rule = rule!(template(template_address));
 /// // Restricted access to a non-fungible token
-/// let non_fungible_address = tari_template_lib::models::NonFungibleAddress::from_public_key(
+/// let non_fungible_address = tari_template_lib::types::NonFungibleAddress::from_public_key(
 ///     tari_template_lib::types::crypto::RistrettoPublicKeyBytes::default(),
 /// );
 /// let non_fungible_rule = rule!(non_fungible(non_fungible_address));
@@ -413,7 +411,7 @@ macro_rules! __rule_requirement {
         $crate::auth::RuleRequirement::NonFungibleAddress($x)
     };
     (public_key($x: expr)) => {
-        $crate::auth::RuleRequirement::NonFungibleAddress($crate::models::NonFungibleAddress::from_public_key($x))
+        $crate::auth::RuleRequirement::NonFungibleAddress($crate::types::NonFungibleAddress::from_public_key($x))
     };
     (component($x: expr)) => {
         $crate::auth::RuleRequirement::ScopedToComponent($x)

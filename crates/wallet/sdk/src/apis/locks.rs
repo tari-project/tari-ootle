@@ -6,7 +6,7 @@ use std::time::Duration;
 use tari_engine_types::substate::SubstateDiff;
 use tari_ootle_common_types::optional::IsNotFoundError;
 use tari_ootle_transaction::TransactionId;
-use tari_template_lib::{models::VaultId, prelude::Amount};
+use tari_template_lib::types::{Amount, VaultId};
 
 use crate::{
     models::{WalletLockDropGuard, WalletLockId},

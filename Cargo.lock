@@ -1704,7 +1704,7 @@ dependencies = [
  "tari_sidechain",
  "tari_state_store_rocksdb",
  "tari_state_tree",
- "tari_template_lib",
+ "tari_template_lib_types",
  "tempfile",
  "tokio",
 ]
@@ -4871,7 +4871,7 @@ dependencies = [
  "tari_shutdown",
  "tari_sidechain",
  "tari_template_builtin",
- "tari_template_lib",
+ "tari_template_lib_types",
  "tari_template_test_tooling",
  "tari_transaction_components",
  "tari_transaction_manifest",
@@ -10959,7 +10959,7 @@ dependencies = [
  "tari_rpc_framework",
  "tari_shutdown",
  "tari_template_builtin",
- "tari_template_lib",
+ "tari_template_lib_types",
  "tari_validator_node_rpc",
  "thiserror 2.0.17",
  "time",
@@ -11247,6 +11247,7 @@ dependencies = [
  "tari_sidechain",
  "tari_state_tree",
  "tari_template_lib",
+ "tari_template_lib_types",
  "thiserror 2.0.17",
  "time",
  "ts-rs",
@@ -11410,7 +11411,7 @@ dependencies = [
  "tari_shutdown",
  "tari_template_abi",
  "tari_template_builtin",
- "tari_template_lib",
+ "tari_template_lib_types",
  "thiserror 2.0.17",
  "time",
  "tokio",
@@ -11435,7 +11436,7 @@ dependencies = [
  "tari_ootle_common_types",
  "tari_ootle_transaction",
  "tari_ootle_wallet_sdk",
- "tari_template_lib",
+ "tari_template_lib_types",
  "tari_utilities",
  "time",
  "webauthn-rs",
@@ -11679,7 +11680,7 @@ dependencies = [
  "tari_engine_types",
  "tari_jellyfish",
  "tari_ootle_common_types",
- "tari_template_lib",
+ "tari_template_lib_types",
  "thiserror 2.0.17",
 ]
 
@@ -11768,6 +11769,7 @@ dependencies = [
  "tari_engine_types",
  "tari_ootle_transaction",
  "tari_template_lib",
+ "tari_template_lib_types",
  "tari_template_test_tooling",
 ]
 
@@ -12144,7 +12146,7 @@ dependencies = [
  "tari_ootle_wallet_sdk",
  "tari_ootle_wallet_sdk_services",
  "tari_ootle_wallet_storage_sqlite",
- "tari_template_lib",
+ "tari_template_lib_types",
  "time",
  "tokio",
  "url",
@@ -12824,7 +12826,7 @@ dependencies = [
  "tari_ootle_common_types",
  "tari_ootle_transaction",
  "tari_ootle_wallet_sdk",
- "tari_template_lib",
+ "tari_template_lib_types",
  "tari_wallet_daemon_client",
  "tokio",
 ]
@@ -12846,7 +12848,7 @@ dependencies = [
  "tari_ootle_common_types",
  "tari_ootle_transaction",
  "tari_template_builtin",
- "tari_template_lib",
+ "tari_template_lib_types",
  "tari_transaction_manifest",
 ]
 

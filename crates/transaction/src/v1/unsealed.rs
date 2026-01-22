@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::{indexed_value::IndexedValueError, substate::SubstateId};
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
-use tari_template_lib::{models::ComponentAddress, types::crypto::RistrettoPublicKeyBytes};
+use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, ComponentAddress};
 
 use crate::{
     signable::Signable,

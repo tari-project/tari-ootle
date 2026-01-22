@@ -23,8 +23,9 @@
 //! A wrapper for engine calls related to events
 
 use tari_template_abi::{call_engine, EngineOp};
+use tari_template_lib_types::Metadata;
 
-use crate::{args::EmitEventArg, models::Metadata};
+use crate::args::EmitEventArg;
 
 /// Requests the engine to emit an event that will be permanently recorded in the transaction result
 pub fn emit_event<T: Into<String>, P: Into<Metadata>>(topic: T, payload: P) {

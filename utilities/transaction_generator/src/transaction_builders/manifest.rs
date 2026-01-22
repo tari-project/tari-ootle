@@ -6,7 +6,7 @@ use std::{collections::HashMap, fs, path::Path};
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_ootle_common_types::Network;
 use tari_ootle_transaction::Transaction;
-use tari_template_lib::types::TemplateAddress;
+use tari_template_lib_types::TemplateAddress;
 use tari_transaction_manifest::ManifestValue;
 
 use crate::BoxedTransactionBuilder;

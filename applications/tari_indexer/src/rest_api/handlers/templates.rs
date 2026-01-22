@@ -15,7 +15,7 @@ use tari_indexer_client::types::{
 };
 use tari_ootle_common_types::optional::Optional;
 use tari_ootle_storage::global::TemplateStatus;
-use tari_template_lib::types::TemplateAddress;
+use tari_template_lib_types::TemplateAddress;
 
 use crate::{
     rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult},

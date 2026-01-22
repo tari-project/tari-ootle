@@ -7,7 +7,7 @@ use syn::{parse2, Lit};
 use tari_bor::{BorError, Serialize};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_transaction::{args::InstructionArg, call_arg};
-use tari_template_lib::{models::NonFungibleId, to_value};
+use tari_template_lib::{to_value, types::NonFungibleId};
 
 use crate::error::ManifestError;
 
@@ -129,7 +129,7 @@ pub struct ManifestParseError(String);
 
 #[cfg(test)]
 mod tests {
-    use tari_template_lib::models::{ComponentAddress, ResourceAddress, VaultId};
+    use tari_template_lib::types::{ComponentAddress, ResourceAddress, VaultId};
 
     use super::*;
 

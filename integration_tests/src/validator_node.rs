@@ -40,7 +40,7 @@ use tari_ootle_common_types::{
     Network,
 };
 use tari_shutdown::Shutdown;
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_validator_node::{run_validator_node, ApplicationConfig, ValidatorNodeConfig};
 use tari_validator_node_client::{
     types::{LayerOneTransactionParams, PrepareLayerOneTransactionRequest},

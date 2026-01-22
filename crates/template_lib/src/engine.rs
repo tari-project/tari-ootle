@@ -23,12 +23,13 @@
 use serde::Serialize;
 use tari_bor::to_value;
 use tari_template_abi::{call_engine, EngineOp};
+use tari_template_lib_types::ComponentAddress;
 
 use crate::{
     args::{ComponentAction, ComponentInvokeArg, ComponentRef, CreateComponentArg, EmitLogArg, InvokeResult, LogLevel},
     auth::OwnerRule,
     component::ComponentManager,
-    models::{ComponentAddress, ComponentAddressAllocation},
+    models::ComponentAddressAllocation,
     prelude::ComponentAccessRules,
 };
 

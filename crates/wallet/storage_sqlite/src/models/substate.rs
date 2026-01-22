@@ -7,7 +7,7 @@ use diesel::{Identifiable, Queryable};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::VersionedSubstateId;
 use tari_ootle_wallet_sdk::{models::SubstateModel, storage::WalletStorageError};
-use tari_template_lib::types::Hash;
+use tari_template_lib_types::Hash;
 use time::PrimitiveDateTime;
 
 use crate::{schema::substates, serialization::deserialize_json};

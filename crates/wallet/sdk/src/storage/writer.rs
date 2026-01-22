@@ -9,9 +9,16 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{shard::Shard, Epoch, StateVersion, VersionedSubstateIdRef};
 use tari_ootle_transaction::{Transaction, TransactionId};
-use tari_template_lib::{
-    models::{ComponentAddress, NonFungibleId, ResourceAddress, UtxoAddress, UtxoId, VaultId},
-    prelude::{crypto::UtxoTag, Amount, PedersenCommitmentBytes, RistrettoPublicKeyBytes, TemplateAddress},
+use tari_template_lib::types::{
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
+    Amount,
+    ComponentAddress,
+    NonFungibleId,
+    ResourceAddress,
+    TemplateAddress,
+    UtxoAddress,
+    UtxoId,
+    VaultId,
 };
 use webauthn_rs::prelude::Passkey;
 

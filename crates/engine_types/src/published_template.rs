@@ -7,10 +7,16 @@ use std::{
     str::FromStr,
 };
 
-use tari_bor::{BorTag, Deserialize, Serialize};
-use tari_template_lib::{
-    models::{address_prefixes, BinaryTag},
-    types::{crypto::RistrettoPublicKeyBytes, Hash, KeyParseError, MaxBytes, ObjectKey, TemplateAddress},
+use tari_bor::{BorTag, Deserialize, Serialize, Tagged};
+use tari_template_lib::types::{
+    address_prefixes,
+    crypto::RistrettoPublicKeyBytes,
+    BinaryTag,
+    Hash,
+    KeyParseError,
+    MaxBytes,
+    ObjectKey,
+    TemplateAddress,
 };
 
 use crate::{
@@ -36,6 +42,10 @@ const TAG: u64 = BinaryTag::TemplateAddress.as_u64();
 )]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PublishedTemplateAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
+
+impl Tagged for PublishedTemplateAddress {
+    const TAG: u64 = TAG;
+}
 
 impl PublishedTemplateAddress {
     pub const fn from_hash(hash: Hash) -> Self {

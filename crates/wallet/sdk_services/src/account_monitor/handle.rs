@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_lib::models::{ComponentAddress, ResourceAddress};
+use tari_template_lib_types::{ComponentAddress, ResourceAddress};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{account_monitor::monitor::AccountMonitorError, Reply};

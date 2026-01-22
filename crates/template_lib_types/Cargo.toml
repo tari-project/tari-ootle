@@ -11,13 +11,15 @@ license.workspace = true
 default = ["std"]
 std = ["serde/std", "tari_template_abi/std", "borsh?/std", "num-integer?/std"]
 extra-arith = ["bnum/numtraits", "dep:num-integer"]
-borsh = ["dep:borsh", "bnum/borsh"]
-ts = ["ts-rs"]
+borsh = ["dep:borsh", "bnum/borsh", "tari_bor/borsh"]
+ts = ["ts-rs", "tari_template_abi/ts", "tari_bor/ts"]
 # This feature removes the ability to deserialize Amounts as an integer/string (using deserialize_any), as formats like bincode do not support this.
+# DO NOT USE if authoring contracts/templates as this will force transactions to convert integers to Amounts in instruction calls to your template.
 bincode-compat = []
 
 [dependencies]
 tari_template_abi = { workspace = true, default-features = false }
+tari_bor = { workspace = true }
 
 bnum = { workspace = true }
 num-integer = { workspace = true, optional = true, default-features = false }
@@ -27,7 +29,6 @@ serde = { workspace = true, default-features = false, features = ["derive"] }
 ts-rs = { workspace = true, optional = true }
 
 [dev-dependencies]
-tari_bor = { workspace = true }
 serde_json = { workspace = true }
 bincode = { workspace = true, features = ["serde"] }
 tari_crypto = { workspace = true, features = ["borsh"] }

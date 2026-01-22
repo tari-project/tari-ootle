@@ -6,7 +6,7 @@ use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_template_lib::{models::ResourceAddress, types::ObjectKey};
+use tari_template_lib::types::{ObjectKey, ResourceAddress};
 
 pub fn random_keypair() -> (RistrettoSecretKey, RistrettoPublicKey) {
     let secret_key = random_key();

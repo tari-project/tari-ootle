@@ -29,9 +29,12 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
     models::SpendCondition,
-    types::{Amount, ResourceType},
+    types::{
+        constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
+        Amount,
+        ResourceType,
+    },
 };
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,

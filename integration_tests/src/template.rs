@@ -13,7 +13,7 @@ use minotari_app_grpc::tari_rpc::{
 };
 use tari_engine::wasm::WasmModule;
 use tari_engine_types::hashing::hash_template_code;
-use tari_template_lib::types::TemplateAddress;
+use tari_template_lib_types::TemplateAddress;
 use tari_template_test_tooling::compile::compile_template;
 use tari_wallet_daemon_client::{
     types::{PublishTemplateRequest, TransactionWaitResultRequest},

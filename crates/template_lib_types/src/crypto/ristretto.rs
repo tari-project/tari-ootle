@@ -8,7 +8,7 @@ use tari_template_abi::rust::{
     str::FromStr,
 };
 
-use crate::{crypto::InvalidByteLengthError, hex::fixed_bytes_from_hex, serde_helpers, Hash, KeyParseError};
+use crate::{crypto::InvalidByteLengthError, hex::fixed_bytes_from_hex, serde_helpers, KeyParseError};
 
 /// A Ristretto public key byte contents
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, Serialize, Deserialize)]
@@ -58,8 +58,8 @@ impl RistrettoPublicKeyBytes {
         self.0
     }
 
-    pub const fn as_hash(&self) -> Hash {
-        Hash::from_array(self.0)
+    pub const fn as_hash(&self) -> crate::Hash {
+        crate::Hash::from_array(self.0)
     }
 }
 

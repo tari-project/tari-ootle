@@ -9,8 +9,7 @@ use tari_ootle_common_types::Network;
 use tari_ootle_wallet_crypto::memo::Memo;
 use tari_template_lib::{
     auth::AccessRule,
-    models::{NonFungibleAddress, ResourceAddress},
-    prelude::Amount,
+    types::{Amount, NonFungibleAddress, ResourceAddress},
 };
 
 use crate::apis::{

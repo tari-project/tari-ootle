@@ -6,10 +6,12 @@ use std::fmt::Display;
 use indexmap::IndexSet;
 use tari_engine_types::{indexed_value::IndexedWellKnownTypes, lock::LockId, substate::SubstateId};
 use tari_template_lib::{
-    constants::XTR,
     models::{BucketId, ProofId},
-    prelude::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
-    types::{EntityId, TemplateAddress},
+    types::{
+        constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, XTR},
+        EntityId,
+        TemplateAddress,
+    },
 };
 
 use crate::runtime::{

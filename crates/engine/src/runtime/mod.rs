@@ -60,7 +60,6 @@ use tari_engine_types::{
     indexed_value::IndexedValue,
     lock::LockFlag,
     published_template::TemplateBlob,
-    ValidatorFeePoolAddress,
 };
 use tari_ootle_transaction::{
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
@@ -91,8 +90,16 @@ use tari_template_lib::{
         VaultAction,
         WorkspaceAction,
     },
-    models::{BucketId, ComponentAddress, Metadata, NonFungibleAddress, StealthTransferStatement, VaultRef},
-    types::{engine_args::SignatureAction, EntityId, TemplateAddress},
+    models::{BucketId, StealthTransferStatement, VaultRef},
+    types::{
+        engine_args::SignatureAction,
+        ComponentAddress,
+        EntityId,
+        Metadata,
+        NonFungibleAddress,
+        TemplateAddress,
+        ValidatorFeePoolAddress,
+    },
 };
 pub use tracker::StateTracker;
 

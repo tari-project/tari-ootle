@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_wallet_sdk::{models::ConfidentialOutputModel, storage::WalletStorageError};
-use tari_template_lib::types::{
+use tari_template_lib_types::{
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     EncryptedData,
 };

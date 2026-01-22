@@ -5,7 +5,7 @@ use tari_engine::runtime::TransactionCommitError;
 use tari_engine_types::{component::derive_component_address_from_public_key, indexed_value::IndexedValue};
 use tari_ootle_transaction::{args, Transaction};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::models::{ComponentAddress, ResourceAddress};
+use tari_template_lib::types::{ComponentAddress, ResourceAddress};
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, xtr_faucet_component, TemplateTest};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");

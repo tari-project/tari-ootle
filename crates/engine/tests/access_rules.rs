@@ -15,8 +15,8 @@ use tari_template_lib::{
         ResourceAuthAction,
         RestrictedAccessRule,
     },
-    models::{ComponentAddress, Metadata, NonFungibleId, ResourceAddress, VaultId},
     rule,
+    types::{ComponentAddress, Metadata, NonFungibleId, ResourceAddress, VaultId},
 };
 use tari_template_test_tooling::{
     support::assert_error::{

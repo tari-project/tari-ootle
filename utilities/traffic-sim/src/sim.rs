@@ -26,12 +26,7 @@ use tari_ootle_wallet_sdk::{
     crypto::memo::Memo,
     models::{AccountWithAddress, KeyBranch},
 };
-use tari_template_lib::{
-    constants::XTR,
-    metadata,
-    models::{ComponentAddress, ResourceAddress, UtxoId},
-    types::{amount, Amount},
-};
+use tari_template_lib_types::{amount, constants::XTR, metadata, Amount, ComponentAddress, ResourceAddress, UtxoId};
 use tari_wallet_daemon_client::{
     types::{
         AccountsAssociateStealthResourceRequest,

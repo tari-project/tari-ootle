@@ -7,7 +7,7 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-tari_template_lib = { workspace = true }
+tari_template_lib_types = { workspace = true }
 
 [dev-dependencies]
 tari_template_test_tooling = { workspace = true }

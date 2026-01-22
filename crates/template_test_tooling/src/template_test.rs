@@ -44,11 +44,14 @@ use tari_ootle_transaction::{
     TransactionBuilder,
 };
 use tari_template_builtin::all_builtin_templates;
-use tari_template_lib::{
+use tari_template_lib::types::{
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS},
-    models::{ComponentAddress, NonFungibleAddress, ResourceAddress},
-    prelude::RistrettoPublicKeyBytes,
-    types::{Amount, TemplateAddress},
+    crypto::RistrettoPublicKeyBytes,
+    Amount,
+    ComponentAddress,
+    NonFungibleAddress,
+    ResourceAddress,
+    TemplateAddress,
 };
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 

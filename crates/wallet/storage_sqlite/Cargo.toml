@@ -12,7 +12,7 @@ tari_bor = { workspace = true, features = ["json_encoding"] }
 tari_ootle_common_types = { workspace = true }
 tari_ootle_wallet_sdk = { workspace = true }
 tari_engine_types = { workspace = true }
-tari_template_lib = { workspace = true }
+tari_template_lib_types = { workspace = true }
 tari_ootle_transaction = { workspace = true }
 tari_utilities = { workspace = true }
 

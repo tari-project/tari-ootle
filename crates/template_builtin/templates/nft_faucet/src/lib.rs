@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_template_lib::{constants::NFT_FAUCET_RESOURCE_ADDRESS, prelude::*};
+use tari_template_lib::{prelude::*, types::constants::NFT_FAUCET_RESOURCE_ADDRESS};
 
 #[template]
 mod template {

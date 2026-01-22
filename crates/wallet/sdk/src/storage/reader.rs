@@ -6,9 +6,14 @@ use std::collections::{HashMap, HashSet};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, StateVersion};
 use tari_ootle_transaction::TransactionId;
-use tari_template_lib::{
-    models::{ComponentAddress, NonFungibleId, ResourceAddress, VaultId},
-    prelude::{PedersenCommitmentBytes, ResourceType, RistrettoPublicKeyBytes, TemplateAddress},
+use tari_template_lib::types::{
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    ComponentAddress,
+    NonFungibleId,
+    ResourceAddress,
+    ResourceType,
+    TemplateAddress,
+    VaultId,
 };
 use webauthn_rs::prelude::Passkey;
 

@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use log::LevelFilter;
 use tari_ootle_common_types::engine_types::published_template::PublishedTemplateAddress;
-use tari_template_lib::models::{ResourceAddress, UtxoId};
+use tari_template_lib_types::{ResourceAddress, UtxoId};
 
 use crate::{
     coin::Coin,

@@ -49,7 +49,7 @@ where D: Deserializer<'de> {
 #[cfg(test)]
 mod tests {
     use tari_bor::cbor;
-    use tari_template_lib::{models::ResourceAddress, types::ObjectKey};
+    use tari_template_lib::types::{ObjectKey, ResourceAddress};
 
     #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     struct Test {

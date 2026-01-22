@@ -12,7 +12,7 @@ use tari_engine_types::{
     Utxo,
 };
 use tari_ootle_common_types::optional::Optional;
-use tari_template_lib::models::{ComponentAddress, UtxoAddress, VaultId};
+use tari_template_lib::types::{ComponentAddress, UtxoAddress, VaultId};
 
 use crate::{
     runtime::{

@@ -13,10 +13,14 @@ use tari_ootle_common_types::{
     Network,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::{
-    models::{ComponentAddress, ResourceAddress, VaultId},
-    prelude::{ResourceType, RistrettoPublicKeyBytes, XTR},
-    types::Amount,
+use tari_template_lib::types::{
+    constants::XTR,
+    crypto::RistrettoPublicKeyBytes,
+    Amount,
+    ComponentAddress,
+    ResourceAddress,
+    ResourceType,
+    VaultId,
 };
 
 use crate::{

@@ -114,7 +114,7 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst) -> Expr {
                 }
                 stmts.extend([
                         parse_quote! {
-                            let component_address = from_value::<::tari_template_lib::models::ComponentAddress>(&call_info.args[#i])
+                            let component_address = from_value::<::tari_template_lib::types::ComponentAddress>(&call_info.args[#i])
                                 .unwrap_or_else(|e| panic!("failed to decode component instance for function '{}': {}",  #func_name, e));
                         },
                         parse_quote! {
@@ -130,7 +130,7 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst) -> Expr {
                 if i == 0 && ast.is_migration {
                     stmts.extend([
                             parse_quote! {
-                                let component_address = from_value::<::tari_template_lib::models::ComponentAddress>(&call_info.args[0])
+                                let component_address = from_value::<::tari_template_lib::types::ComponentAddress>(&call_info.args[0])
                                     .unwrap_or_else(|e| panic!("failed to decode component instance for function '{}': {}",  #func_name, e));
                             },
                             parse_quote! {

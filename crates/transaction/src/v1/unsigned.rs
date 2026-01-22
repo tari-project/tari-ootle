@@ -10,11 +10,7 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
-use tari_template_lib::{
-    constants::XTR,
-    models::{ComponentAddress, UtxoAddress},
-    prelude::RistrettoPublicKeyBytes,
-};
+use tari_template_lib::types::{constants::XTR, crypto::RistrettoPublicKeyBytes, ComponentAddress, UtxoAddress};
 
 use crate::{
     builder::TransactionBuilder,

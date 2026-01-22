@@ -12,16 +12,8 @@ use tari_ootle_common_types::{displayable::Displayable, optional::Optional, Netw
 use tari_ootle_transaction::{args, Transaction, UnsignedTransaction};
 use tari_ootle_wallet_crypto::memo::Memo;
 use tari_template_lib::{
-    constants::XTR,
-    models::{
-        Account as BuiltinAccount,
-        ComponentAddress,
-        ResourceAddress,
-        StealthTransferStatement,
-        StealthUnspentOutput,
-        UtxoAddress,
-    },
-    types::Amount,
+    models::{Account as BuiltinAccount, StealthTransferStatement, StealthUnspentOutput},
+    types::{constants::XTR, Amount, ComponentAddress, ResourceAddress, UtxoAddress},
 };
 use tokio::{sync::Semaphore, task::block_in_place};
 

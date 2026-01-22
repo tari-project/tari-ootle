@@ -5,7 +5,7 @@ use std::{collections::HashMap, convert::Infallible, sync::Arc};
 
 use tari_engine::template::LoadedTemplate;
 use tari_ootle_common_types::services::template_provider::TemplateProvider;
-use tari_template_lib::prelude::TemplateAddress;
+use tari_template_lib_types::TemplateAddress;
 
 #[derive(Debug, Clone)]
 pub struct Package {

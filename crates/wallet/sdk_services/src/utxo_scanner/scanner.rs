@@ -6,7 +6,7 @@ use tari_ootle_wallet_sdk::{
     WalletSdk,
     WalletSdkSpec,
 };
-use tari_template_lib::models::ResourceAddress;
+use tari_template_lib_types::ResourceAddress;
 
 use crate::{
     notify::Notify,

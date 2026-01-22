@@ -4,10 +4,12 @@
 use std::str::FromStr;
 
 use tari_ootle_wallet_crypto::memo::Memo;
-use tari_template_lib::{
-    models::VaultId,
-    prelude::{ComponentAddress, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    types::{Amount, EncryptedData},
+use tari_template_lib::types::{
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    Amount,
+    ComponentAddress,
+    EncryptedData,
+    VaultId,
 };
 
 use crate::models::{KeyId, WalletLockId};

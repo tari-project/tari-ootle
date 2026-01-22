@@ -16,8 +16,8 @@ use tari_crypto::tari_utilities::{
     hex::{from_hex, Hex},
     ByteArray,
 };
-use tari_engine_types::{substate::SubstateId, transaction_receipt::TransactionReceiptAddress};
-use tari_template_lib_types::ObjectKey;
+use tari_engine_types::substate::SubstateId;
+use tari_template_lib_types::{ObjectKey, TransactionReceiptAddress};
 
 use crate::{shard::Shard, uint::U256, NumPreshards, ShardGroup};
 

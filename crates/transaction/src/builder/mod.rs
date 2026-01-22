@@ -16,15 +16,21 @@ use tari_engine_types::{
     indexed_value::IndexedValue,
     published_template::TemplateBlob,
     substate::SubstateId,
-    ValidatorFeePoolAddress,
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib::{
     auth::OwnerRule,
-    constants::XTR,
-    models::{ResourceAddress, StealthTransferStatement},
+    models::StealthTransferStatement,
     prelude::AccessRules,
-    types::{crypto::RistrettoPublicKeyBytes, Amount, FunctionName, TemplateAddress},
+    types::{
+        constants::XTR,
+        crypto::RistrettoPublicKeyBytes,
+        Amount,
+        FunctionName,
+        ResourceAddress,
+        TemplateAddress,
+        ValidatorFeePoolAddress,
+    },
 };
 
 use crate::{

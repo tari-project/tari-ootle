@@ -4,13 +4,14 @@
 use serde::{Deserialize, Serialize};
 use tari_bor::from_value;
 use tari_template_abi::rust::collections::BTreeMap;
+use tari_template_lib_types::ResourceAddress;
 
-use crate::models::{ResourceAddress, Vault};
+use crate::models::Vault;
 
 /// Represents an account containing multiple vaults, each identified by a resource address.
 /// Accounts can be decoded in templates by using as follows:
 /// ```ignore,rust
-/// use tari_template_lib::models::Account;
+/// use tari_template_lib::types::Account;
 /// let component_state = cbor!(); // .. get state e.g. by using caller.component_state() in a auth hook
 /// let account = Account::from_value(&component_state)?;
 /// ```

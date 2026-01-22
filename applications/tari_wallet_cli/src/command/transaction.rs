@@ -52,10 +52,16 @@ use tari_ootle_transaction::{
 };
 use tari_ootle_wallet_sdk::{apis::confidential_transfer::UtxoInputSelection, crypto::memo::Memo};
 use tari_template_lib::{
-    constants::STEALTH_TARI_RESOURCE_ADDRESS,
-    models::{BucketId, NonFungibleAddress, NonFungibleId},
-    prelude::{ResourceAddress, RistrettoPublicKeyBytes},
-    types::{Amount, TemplateAddress},
+    models::BucketId,
+    types::{
+        constants::STEALTH_TARI_RESOURCE_ADDRESS,
+        crypto::RistrettoPublicKeyBytes,
+        Amount,
+        NonFungibleAddress,
+        NonFungibleId,
+        ResourceAddress,
+        TemplateAddress,
+    },
 };
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 use tari_wallet_daemon_client::{

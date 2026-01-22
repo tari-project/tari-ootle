@@ -10,7 +10,7 @@ use std::{
 use indexmap::IndexMap;
 use log::*;
 use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock};
-use tari_engine_types::{substate::SubstateId, template_lib_models::ClaimedOutputTombstoneAddress};
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{displayable::Displayable, optional::Optional, shard::Shard, NodeHeight, ShardGroup};
 use tari_ootle_storage::{
     consensus_models::{
@@ -39,7 +39,7 @@ use tari_ootle_storage::{
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_sidechain::QuorumDecision;
-use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, ClaimedOutputTombstoneAddress};
 
 use crate::{hotstuff::transaction_manager::TransactionLockConflicts, tracing::TraceTimer};
 

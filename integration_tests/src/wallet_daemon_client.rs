@@ -35,11 +35,7 @@ use tari_ootle_wallet_sdk::{
     },
     models::{Account, AccountWithAddress, NonFungibleToken},
 };
-use tari_template_lib::{
-    prelude::{ResourceAddress, RistrettoPublicKeyBytes},
-    resource::TOKEN_SYMBOL,
-    types::Amount,
-};
+use tari_template_lib_types::{constants::TOKEN_SYMBOL, crypto::RistrettoPublicKeyBytes, Amount, ResourceAddress};
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 use tari_wallet_daemon_client::{
     error::WalletDaemonClientError,

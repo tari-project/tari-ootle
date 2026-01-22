@@ -14,10 +14,7 @@ use tari_ootle_common_types::{
     VersionedSubstateIdRef,
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
-use tari_template_lib::{
-    constants::XTR,
-    prelude::{ComponentAddress, RistrettoPublicKeyBytes},
-};
+use tari_template_lib::types::{constants::XTR, crypto::RistrettoPublicKeyBytes, ComponentAddress};
 
 use crate::{
     models::{NewAccountData, TransactionStatus, WalletLockId, WalletTransaction, WalletTransactionUpdate},

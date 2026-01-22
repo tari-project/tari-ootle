@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use tari_bor::json_encoding::CiboruimValueDeserializeFixWrapper;
 use tari_ootle_wallet_sdk::storage::WalletStorageError;
-use tari_template_lib::models::{NonFungibleId, ResourceAddress, VaultId};
+use tari_template_lib_types::{NonFungibleId, ResourceAddress, VaultId};
 use time::PrimitiveDateTime;
 
 use crate::schema::non_fungible_tokens;

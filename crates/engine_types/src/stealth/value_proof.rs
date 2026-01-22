@@ -7,12 +7,12 @@ use tari_crypto::{
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
 use tari_template_lib::{
-    models::UtxoId,
     prelude::{
         crypto::{StealthValueProof, ValueKnowledgeProof},
         Amount,
         PedersenCommitmentBytes,
     },
+    types::UtxoId,
 };
 
 use crate::{

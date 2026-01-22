@@ -14,11 +14,12 @@ use tari_engine_types::{
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_ootle_transaction::{args, call_args, Transaction};
 use tari_template_lib::{
-    models::{Account, ComponentAddress},
+    models::Account,
     prelude::ConfidentialOutputStatement,
     types::{
         crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
         Amount,
+        ComponentAddress,
     },
 };
 use tari_template_test_tooling::{

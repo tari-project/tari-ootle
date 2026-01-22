@@ -13,7 +13,7 @@ use std::{
 use log::*;
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::{BlockId, Decision, LeafBlock};
-use tari_engine_types::{substate::SubstateId, transaction_receipt::TransactionReceiptAddress};
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{
     committee::CommitteeInfo,
     displayable::Displayable,
@@ -25,6 +25,7 @@ use tari_ootle_common_types::{
     SubstateLockType,
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
+use tari_template_lib_types::TransactionReceiptAddress;
 
 use crate::{
     consensus_models::{

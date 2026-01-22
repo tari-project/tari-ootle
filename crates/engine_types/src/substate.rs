@@ -32,18 +32,22 @@ use serde::{Deserialize, Serialize};
 use tari_bor::{decode, decode_exact, encode, BorError};
 use tari_common_types::types::FixedHash;
 use tari_template_lib::{
-    constants::STEALTH_TARI_RESOURCE_ADDRESS,
-    models::{
+    prelude::STEALTH_TARI_RESOURCE_ADDRESS,
+    types::{
         address_prefixes,
+        constants::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
         ClaimedOutputTombstoneAddress,
         ComponentAddress,
+        Hash,
         NonFungibleAddress,
+        ObjectKey,
         ResourceAddress,
+        TemplateAddress,
+        TransactionReceiptAddress,
         UtxoAddress,
+        ValidatorFeePoolAddress,
         VaultId,
     },
-    prelude::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
-    types::{Hash, ObjectKey, TemplateAddress},
 };
 
 use crate::{
@@ -53,11 +57,10 @@ use crate::{
     non_fungible::NonFungibleContainer,
     published_template::{PublishedTemplate, PublishedTemplateAddress},
     resource::Resource,
-    transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
+    transaction_receipt::TransactionReceipt,
     utxo::Utxo,
     vault::Vault,
     ValidatorFeePool,
-    ValidatorFeePoolAddress,
     ValidatorFeeWithdrawal,
 };
 
@@ -473,17 +476,17 @@ impl TryFrom<SubstateId> for PublishedTemplateAddress {
 }
 
 impl Display for SubstateId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            SubstateId::Component(addr) => fmt::Display::fmt(addr, f),
-            SubstateId::Resource(addr) => fmt::Display::fmt(addr, f),
-            SubstateId::Vault(addr) => fmt::Display::fmt(addr, f),
-            SubstateId::NonFungible(addr) => fmt::Display::fmt(addr, f),
-            SubstateId::ClaimedOutputTombstone(addr) => fmt::Display::fmt(addr, f),
-            SubstateId::TransactionReceipt(addr) => fmt::Display::fmt(addr, f),
-            SubstateId::Template(addr) => fmt::Display::fmt(addr, f),
-            SubstateId::ValidatorFeePool(addr) => fmt::Display::fmt(addr, f),
-            SubstateId::Utxo(addr) => fmt::Display::fmt(addr, f),
+            SubstateId::Component(addr) => Display::fmt(addr, f),
+            SubstateId::Resource(addr) => Display::fmt(addr, f),
+            SubstateId::Vault(addr) => Display::fmt(addr, f),
+            SubstateId::NonFungible(addr) => Display::fmt(addr, f),
+            SubstateId::ClaimedOutputTombstone(addr) => Display::fmt(addr, f),
+            SubstateId::TransactionReceipt(addr) => Display::fmt(addr, f),
+            SubstateId::Template(addr) => Display::fmt(addr, f),
+            SubstateId::ValidatorFeePool(addr) => Display::fmt(addr, f),
+            SubstateId::Utxo(addr) => Display::fmt(addr, f),
         }
     }
 }

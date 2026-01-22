@@ -23,7 +23,7 @@
 use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
-use tari_template_lib::{models::Metadata, types::TemplateAddress};
+use tari_template_lib::types::{Metadata, TemplateAddress};
 
 use crate::substate::SubstateId;
 

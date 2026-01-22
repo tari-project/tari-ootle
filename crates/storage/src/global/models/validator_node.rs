@@ -14,7 +14,7 @@ use tari_ootle_common_types::{
     SubstateAddress,
     VotePower,
 };
-use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidatorNode<TAddr> {

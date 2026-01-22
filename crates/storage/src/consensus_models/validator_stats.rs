@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::BlockId;
 use tari_ootle_common_types::Epoch;
-use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 

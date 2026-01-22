@@ -23,9 +23,13 @@ use tari_ootle_wallet_crypto::{
     WalletCryptoError,
 };
 use tari_template_lib::{
-    models::{ConfidentialOutputStatement, ResourceAddress, StealthTransferStatement},
-    prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes},
-    types::{crypto::UtxoTag, Amount, EncryptedData},
+    models::{ConfidentialOutputStatement, StealthTransferStatement},
+    types::{
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes, UtxoTag},
+        Amount,
+        EncryptedData,
+        ResourceAddress,
+    },
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet::sdk::stealth_crypto";

@@ -24,7 +24,7 @@ use tari_ootle_wallet_sdk::{
     WalletSdk,
     WalletSdkSpec,
 };
-use tari_template_lib::models::{ComponentAddress, ResourceAddress, UtxoAddress};
+use tari_template_lib_types::{ComponentAddress, ResourceAddress, UtxoAddress};
 
 use crate::{notify::Notify, utxo_scanner::StealthScannerApiError};
 

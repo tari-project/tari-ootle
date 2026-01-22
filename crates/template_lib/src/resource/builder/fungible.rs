@@ -1,14 +1,19 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_lib_types::ResourceType;
+use tari_template_lib_types::{
+    constants::{DEFAULT_DIVISIBILITY, IMAGE_URL, TOKEN_SYMBOL},
+    ComponentAddress,
+    Metadata,
+    ResourceAddress,
+    ResourceType,
+};
 
-use super::{IMAGE_URL, TOKEN_SYMBOL};
 use crate::{
     args::MintArg,
     auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
-    models::{Bucket, ComponentAddress, Metadata, ResourceAddress, ResourceAddressAllocation},
-    resource::{ResourceManager, DEFAULT_DIVISIBILITY},
+    models::{Bucket, ResourceAddressAllocation},
+    resource::ResourceManager,
     types::Amount,
 };
 /// A builder for creating fungible resources (tokens) inside templates.
@@ -298,7 +303,7 @@ impl FungibleResourceBuilder {
     /// # Examples
     /// ```rust, ignore
     /// use tari_template_lib::resource::builder::ResourceBuilder;
-    /// use tari_template_lib::models::Metadata;
+    /// use tari_template_lib::types::Metadata;
     /// let metadata = Metadata::from([
     ///     ("Type", "NFT"),
     ///     ("Creator", "Tari Project"),

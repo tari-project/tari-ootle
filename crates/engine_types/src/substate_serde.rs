@@ -8,20 +8,17 @@
 
 use std::{borrow::Cow, fmt, fmt::Formatter, marker::PhantomData, str::FromStr};
 
-use tari_template_lib::models::{
+use tari_template_lib::types::{
     ClaimedOutputTombstoneAddress,
     ComponentAddress,
     NonFungibleAddress,
     ResourceAddress,
+    TransactionReceiptAddress,
+    ValidatorFeePoolAddress,
     VaultId,
 };
 
-use crate::{
-    published_template::PublishedTemplateAddress,
-    substate::SubstateId,
-    transaction_receipt::TransactionReceiptAddress,
-    ValidatorFeePoolAddress,
-};
+use crate::{published_template::PublishedTemplateAddress, substate::SubstateId};
 
 impl serde::Serialize for SubstateId {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -236,10 +233,7 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
 
 #[cfg(test)]
 mod tests {
-    use tari_template_lib::{
-        models::{NonFungibleId, UtxoAddress, UtxoId},
-        types::{Hash, ObjectKey},
-    };
+    use tari_template_lib::types::{Hash, NonFungibleId, ObjectKey, UtxoAddress, UtxoId};
 
     use super::*;
 

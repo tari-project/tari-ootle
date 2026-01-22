@@ -7,7 +7,7 @@ use futures::StreamExt;
 use log::*;
 use tari_engine_types::{
     substate::{SubstateId, SubstateValue},
-    transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
+    transaction_receipt::TransactionReceipt,
 };
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerEvent, EpochManagerReader};
 use tari_indexer_client::event::{IndexerEvent, NewEpochEvent, TransactionFinalizedEvent};
@@ -29,7 +29,7 @@ use tari_ootle_storage::{
 use tari_ootle_transaction::TransactionId;
 use tari_rpc_framework::__macro_reexports::future::Either;
 use tari_shutdown::ShutdownSignal;
-use tari_template_lib::prelude::Amount;
+use tari_template_lib_types::{Amount, TransactionReceiptAddress};
 use tokio::{sync::broadcast, time};
 
 use crate::{

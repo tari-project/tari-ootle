@@ -4,10 +4,11 @@
 //! Context definitions related to the caller of an instruction
 
 use tari_template_abi::{call_engine, EngineOp};
+use tari_template_lib_types::ComponentAddress;
 
 use crate::{
     args::{AddressAllocationInvokeArg, CallerContextAction, CallerContextInvokeArg, InvokeResult},
-    models::{ComponentAddress, ComponentAddressAllocation, ResourceAddressAllocation},
+    models::{ComponentAddressAllocation, ResourceAddressAllocation},
     types::crypto::RistrettoPublicKeyBytes,
 };
 

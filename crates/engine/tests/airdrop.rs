@@ -5,7 +5,7 @@ use ootle_byte_type::ToByteType;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_ootle_transaction::{args, call_args, Transaction};
-use tari_template_lib::{models::ComponentAddress, types::Amount};
+use tari_template_lib::types::{Amount, ComponentAddress};
 use tari_template_test_tooling::TemplateTest;
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");

@@ -7,14 +7,15 @@ use tari_template_abi::rust::{
     fmt::{Display, Formatter},
     str::FromStr,
 };
-use tari_template_lib_types::{
+
+use super::{BinaryTag, ResourceAddress};
+use crate::{
+    address_prefixes,
     crypto::PedersenCommitmentBytes,
     hex::{fixed_bytes_from_hex, write_hex_fmt},
     serde_helpers,
     KeyParseError,
 };
-
-use crate::models::{address_prefixes, BinaryTag, ResourceAddress};
 
 const TAG: u64 = BinaryTag::Utxo.as_u64();
 

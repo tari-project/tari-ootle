@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_common_types::optional::IsNotFoundError;
-use tari_template_lib::{models::ResourceAddress, types::Amount};
+use tari_template_lib::types::{Amount, ResourceAddress};
 
 use crate::{
     apis::{

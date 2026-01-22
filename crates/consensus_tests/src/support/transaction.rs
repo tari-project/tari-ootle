@@ -11,13 +11,14 @@ use tari_engine_types::{
     fees::{FeeBreakdown, FeeReceiptBuilder},
     published_template::PublishedTemplate,
     substate::{Substate, SubstateDiff, SubstateId},
-    transaction_receipt::{FinalizeOutcome, TransactionReceipt, TransactionReceiptAddress},
+    transaction_receipt::{FinalizeOutcome, TransactionReceipt},
     ValidatorFeePool,
     ValidatorFeeWithdrawal,
 };
 use tari_ootle_common_types::{LockIntent, SubstateRequirement};
 use tari_ootle_storage::consensus_models::{TransactionRecord, VersionedSubstateIdLockIntent};
 use tari_ootle_transaction::{args, Transaction};
+use tari_template_lib_types::TransactionReceiptAddress;
 
 use crate::support::{committee_number_to_shard_group, helpers::random_substate_in_shard_group, TEST_NUM_PRESHARDS};
 

@@ -16,9 +16,10 @@ use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::apis::substate::ValidatorScanResult;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::{
+use tari_template_lib::types::{
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS},
-    models::{ComponentAddress, ResourceAddress},
+    ComponentAddress,
+    ResourceAddress,
 };
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,

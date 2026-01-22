@@ -1,8 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use chacha20poly1305::{aead::generic_array::GenericArray, Key};
-use digest::FixedOutput;
+use chacha20poly1305::Key;
 use tari_crypto::{
     dhke::DiffieHellmanSharedSecret,
     keys::{PublicKey, SecretKey},
@@ -34,13 +33,15 @@ pub fn encrypted_data_dh_kdf_aead(
     public_key: &RistrettoPublicKey,
 ) -> RistrettoSecretKey {
     let shared_secret = dh(public_key, private_key);
-    let mut aead_key = SafeKey64::from(SafeArray::default());
-    // Must match base layer burn
-    encrypted_data_hasher()
-        .chain(shared_secret.as_bytes())
-        .finalize_into(GenericArray::from_mut_slice(aead_key.reveal_mut()));
 
-    RistrettoSecretKey::from_uniform_bytes(aead_key.reveal()).unwrap()
+    RistrettoSecretKey::from_uniform_bytes(
+        // Must match base layer burn
+        encrypted_data_hasher()
+            .chain(shared_secret.as_bytes())
+            .finalize()
+            .as_ref(),
+    )
+    .unwrap()
 }
 
 /// Generate a decryption key for the owner key from a private key and nonce

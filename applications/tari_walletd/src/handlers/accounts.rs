@@ -459,11 +459,27 @@ pub async fn handle_claim_burn(
         .burn_public_key
         .try_from_byte_type()
         .map_err(|e| invalid_params("claim_proof.reciprocal_claim_public_key", Some(e)))?;
+
+    if reciprocal_claim_public_key_expanded != claim_public_key {
+        warn!(
+            target: LOG_TARGET,
+            "⚠️ The provided reciprocal claim public key ({}) does not match the derived claim public key ({}). The claim will likely fail.",
+            reciprocal_claim_public_key_expanded,
+            claim_public_key
+        );
+    }
+
+    // Get the sender_offset_public_key and use it to create a DH with the claim_nonce_key
+    let sender_offset_pub_key: RistrettoPublicKey = claim_proof
+        .sender_offset_public_key
+        .try_from_byte_type()
+        .map_err(|e| invalid_params("claim_proof.sender_offset_public_key", Some(e)))?;
+
     let decrypted = sdk.stealth_crypto_api().decrypt_value_and_mask(
         &claimed_encrypted_data,
         &claim_proof.commitment,
         claim_nonce_key.secret(),
-        &reciprocal_claim_public_key_expanded,
+        &sender_offset_pub_key,
         true,
     )?;
 

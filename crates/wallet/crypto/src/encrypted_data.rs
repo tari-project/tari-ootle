@@ -32,10 +32,10 @@ pub fn unblind_output(
     output_commitment: &PedersenCommitmentBytes,
     output_encrypted_value: &EncryptedData,
     claim_secret: &RistrettoSecretKey,
-    reciprocal_public_key: &RistrettoPublicKey,
+    sender_offset_public_key: &RistrettoPublicKey,
     skip_memo: bool,
 ) -> Result<DecryptedData, WalletCryptoError> {
-    let encryption_key = kdfs::encrypted_data_dh_kdf_aead(claim_secret, reciprocal_public_key);
+    let encryption_key = kdfs::encrypted_data_dh_kdf_aead(claim_secret, sender_offset_public_key);
 
     let decrypted = decrypt_data(&encryption_key, output_commitment, output_encrypted_value, skip_memo)?;
     let commitment = decrypted.to_commitment();

@@ -37,7 +37,7 @@ use tari_transaction_components::{
     MicroMinotari,
 };
 
-use crate::TariWorld;
+use crate::{cucumber_log, TariWorld};
 
 type BaseNodeClient = BaseNodeGrpcClient<tonic::transport::Channel>;
 
@@ -74,11 +74,12 @@ pub async fn mine_blocks(world: &mut TariWorld, miner_name: String, num_blocks: 
     )
     .unwrap();
 
-    for _ in 0..num_blocks {
+    for i in 0..num_blocks {
         mine_block(world, &payment_address, &mut base_client).await;
         // Makes less likely that base layer will fail with
         // "Sparse Merkle Tree error: A duplicate key was found when trying to insert"
         tokio::time::sleep(Duration::from_millis(100)).await;
+        cucumber_log!("Mined block {} of {}", i + 1, num_blocks);
     }
 }
 

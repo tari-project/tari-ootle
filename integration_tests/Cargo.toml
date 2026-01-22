@@ -44,12 +44,12 @@ tari_ootle_wallet_sdk = { workspace = true }
 ootle_byte_type = { workspace = true }
 
 # Minotari
-minotari_console_wallet = { git = "https://github.com/tari-project/tari.git", tag = "v5.2.0-pre.5" }
-minotari_node = { git = "https://github.com/tari-project/tari.git", tag = "v5.2.0-pre.5" }
-minotari_wallet = { git = "https://github.com/tari-project/tari.git", tag = "v5.2.0-pre.5" }
-tari_comms = { git = "https://github.com/tari-project/tari.git", tag = "v5.2.0-pre.5" }
-tari_comms_dht = { git = "https://github.com/tari-project/tari.git", tag = "v5.2.0-pre.5" }
-tari_p2p = { git = "https://github.com/tari-project/tari.git", tag = "v5.2.0-pre.5" }
+minotari_console_wallet = { workspace = true }
+minotari_node = { workspace = true }
+minotari_wallet = { workspace = true }
+tari_comms = { workspace = true }
+tari_comms_dht = { workspace = true }
+tari_p2p = { workspace = true }
 
 anyhow = { workspace = true }
 config = { workspace = true }
@@ -58,6 +58,7 @@ cucumber = { version = "0.21.1", features = [
     "libtest",
     "output-junit",
 ] }
+hex = { workspace = true }
 httpmock = { version = "0.8.0-alpha.1", features = ["remote"] }
 indexmap = { workspace = true }
 multiaddr = { workspace = true }

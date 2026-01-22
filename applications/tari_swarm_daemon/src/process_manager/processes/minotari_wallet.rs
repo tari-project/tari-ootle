@@ -4,7 +4,7 @@
 use std::{fs::File, path::PathBuf};
 
 use anyhow::anyhow;
-use minotari_node_grpc_client::grpc;
+use minotari_node_grpc_client::grpc::{self, RevalidateRequest};
 use minotari_wallet_grpc_client::WalletGrpcClient;
 use serde::Serialize;
 use tari_crypto::tari_utilities::ByteArray;
@@ -108,9 +108,13 @@ impl MinoTariWalletProcess {
                         .map_err(|e| anyhow!("sig parse error {e}"))?,
                 );
 
-                let reciprocal_claim_public_key =
-                    RistrettoPublicKeyBytes::from_bytes(&claim_proof.reciprocal_claim_public_key)
-                        .map_err(|e| anyhow!("reciprocal_claim_public_key parse error {e}"))?;
+                let reciprocal_claim_public_key = RistrettoPublicKeyBytes::from_bytes(&claim_proof.claim_public_key)
+                    .map_err(|e| anyhow!("reciprocal_claim_public_key parse error {e}"))?;
+
+                let sender_offset_public_key =
+                    RistrettoPublicKeyBytes::from_bytes(&claim_proof.sender_offset_public_key)
+                        .map_err(|e| anyhow!("sender_offset_public_key parse error {e}"))?;
+
                 let kernel = resp.kernel.ok_or_else(|| anyhow!("No kernel in response"))?;
                 let kernel = AbridgedTransactionKernel {
                     version: kernel.version as u8,
@@ -162,6 +166,7 @@ impl MinoTariWalletProcess {
                         },
                         kernel,
                         value,
+                        sender_offset_public_key,
                     },
                     owner_nonce_key_index: nonce_key_index,
                     encrypted_data: EncryptedData::try_from(resp.encrypted_data)
@@ -189,7 +194,12 @@ impl MinoTariWalletProcess {
 
     pub async fn revalidate_all_transactions(&self) -> anyhow::Result<()> {
         let mut client = self.connect_client().await?;
-        client.revalidate_all_transactions(grpc::RevalidateRequest {}).await?;
+        client
+            .revalidate_all_transactions(RevalidateRequest {
+                transaction_mode: 1, // Full mode
+                output_mode: 1,      // Full mode
+            })
+            .await?;
         Ok(())
     }
 

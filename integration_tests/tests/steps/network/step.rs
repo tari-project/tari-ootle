@@ -18,7 +18,7 @@ use crate::{
     TariWorld,
 };
 
-async fn create_network(world: &mut TariWorld, spec: NetworkSpec) {
+async fn create_network(world: &mut TariWorld, step: &Step, spec: NetworkSpec) {
     spawn_base_node(world, spec.base_node.name.clone()).await;
     spawn_minotari_wallet(world, spec.minotari_wallet.name.clone(), spec.base_node.name.clone()).await;
     register_miner_process(
@@ -77,31 +77,38 @@ async fn create_network(world: &mut TariWorld, spec: NetworkSpec) {
     }
 
     let num_blocks = 10 + spec.validators.len() as u64;
-    miner::miner_mines_new_blocks(world, spec.miner.name.clone(), num_blocks).await;
+    miner::miner_mines_new_blocks(world, step, spec.miner.name.clone(), num_blocks).await;
     integration_tests::cucumber_log!("Mined {num_blocks} blocks");
-    wallet::check_balance(world, spec.minotari_wallet.name.clone(), 20, "T".to_string()).await;
+    wallet::check_balance(world, step, spec.minotari_wallet.name.clone(), 20, "T".to_string()).await;
 
     for vn_spec in &spec.validators {
-        validator_node::send_vn_registration(world, vn_spec.name().to_string(), spec.minotari_wallet.name.clone())
-            .await;
-        integration_tests::cucumber_log!("Validator node {} sent registration", vn_spec.name());
+        validator_node::send_vn_registration(
+            world,
+            step,
+            vn_spec.name().to_string(),
+            spec.minotari_wallet.name.clone(),
+        )
+        .await;
+        let vn_name = vn_spec.name().to_string();
+        integration_tests::cucumber_log!("Validator node {} sent registration", vn_name);
     }
 
     let scan_height = 20 + num_blocks;
     let blocks_to_mine = 20 + world.consensus_constants.base_layer_confirmations;
-    miner::miner_mines_new_blocks(world, spec.miner.name.clone(), blocks_to_mine).await;
+    miner::miner_mines_new_blocks(world, step, spec.miner.name.clone(), blocks_to_mine).await;
     integration_tests::cucumber_log!("Mined {blocks_to_mine} blocks");
-    indexer::indexer_has_scanned_to_at_least_height(world, spec.indexer.name.clone(), scan_height).await;
+    indexer::indexer_has_scanned_to_at_least_height(world, step, spec.indexer.name.clone(), scan_height).await;
     integration_tests::cucumber_log!("Indexer has scanned up to or past height {}", scan_height);
 
     for vn_spec in &spec.validators {
-        validator_node::assert_vn_is_registered(world, vn_spec.name().to_string()).await;
-        integration_tests::cucumber_log!("Validator node {} is registered", vn_spec.name());
+        let vn_name = vn_spec.name().to_string();
+        validator_node::assert_vn_is_registered(world, step, vn_name.clone()).await;
+
+        integration_tests::cucumber_log!("Validator node {} is registered", vn_name);
         world
             .get_validator_node(vn_spec.name())
             .wait_for_consensus_to_start()
             .await;
-        integration_tests::cucumber_log!("Validator node {} consensus started", vn_spec.name());
     }
 }
 
@@ -113,14 +120,14 @@ async fn start_a_network_with_spec(world: &mut TariWorld, step: &Step) {
         spec = serde_yaml::from_str::<NetworkSpec>(spec_toml).expect("Failed to parse network spec");
     }
 
-    create_network(world, spec).await;
+    create_network(world, step, spec).await;
 }
 
 #[given(expr = "a network with registered validator {word} and wallet daemon {word}")]
-async fn start_a_network(world: &mut TariWorld, vn_name: String, walletd_name: String) {
+async fn start_a_network(world: &mut TariWorld, step: &Step, vn_name: String, walletd_name: String) {
     let mut spec = NetworkSpec::default();
     spec.validators[0].node.name = vn_name.clone();
     spec.walletds[0].node.name = walletd_name.clone();
 
-    create_network(world, spec).await;
+    create_network(world, step, spec).await;
 }

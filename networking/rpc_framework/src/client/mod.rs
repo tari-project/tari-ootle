@@ -752,8 +752,7 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin + Send
             match Self::convert_to_result(resp) {
                 Ok(Ok(resp)) => {
                     let is_finished = resp.is_finished();
-                    // The consumer may drop the receiver before all responses are received.
-                    // We handle this by sending a 'FIN' message to the server.
+                    // If the consumer drops the receiver, we can stop sending responses.
                     if response_tx.is_closed() {
                         // We have timed out on the response but since we've closed, we just exit
                         break;

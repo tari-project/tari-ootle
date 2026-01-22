@@ -37,7 +37,6 @@ import type {
   VNGetIdentityResponse,
   GetMempoolStatsResponse,
   GetNetworkCommitteeResponse,
-  GetRecentTransactionsResponse,
   GetShardKeyRequest,
   GetShardKeyResponse,
   GetStateRequest,

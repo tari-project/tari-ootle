@@ -45,9 +45,6 @@ function ValidatorNode() {
         setError("API error, please check the developer console");
       });
   }, []);
-  useEffect(() => {
-    // getRecentTransactions();
-  }, []);
   if (error !== "") {
     return <div className="error">{error}</div>;
   }

@@ -5,6 +5,7 @@ import type { ClaimBurnOutputData } from "./ClaimBurnOutputData";
 import type { ComponentAccessRules } from "./ComponentAccessRules";
 import type { ComponentReference } from "./ComponentReference";
 import type { Hash } from "./Hash";
+import type { InstructionArg } from "./InstructionArg";
 import type { LogLevel } from "./LogLevel";
 import type { MigrateFunction } from "./MigrateFunction";
 import type { MinotariBurnClaimProof } from "./MinotariBurnClaimProof";
@@ -22,11 +23,11 @@ export type Instruction =
         owner_public_key: RistrettoPublicKeyBytes;
         owner_rule: OwnerRule | null;
         access_rules: ComponentAccessRules | null;
-        workspace_id: WorkspaceOffsetId | null;
+        bucket_workspace_id: WorkspaceOffsetId | null;
       };
     }
-  | { CallFunction: { address: Hash; function: string; args: Array<any> } }
-  | { CallMethod: { call: ComponentReference; method: string; args: Array<any> } }
+  | { CallFunction: { address: Hash; function: string; args: Array<InstructionArg> } }
+  | { CallMethod: { call: ComponentReference; method: string; args: Array<InstructionArg> } }
   | { PutLastInstructionOutputOnWorkspace: { key: number } }
   | { EmitLog: { level: LogLevel; message: string } }
   | { ClaimBurn: { claim: MinotariBurnClaimProof; output_data: ClaimBurnOutputData } }

@@ -134,6 +134,7 @@ export * from "./types/TemplateDef";
 export * from "./types/TemplateDefV1";
 export * from "./types/TimeoutCertificate";
 export * from "./types/TransactionAtom";
+export * from "./types/TransactionEnvelope";
 export * from "./types/TransactionExecution";
 export * from "./types/TransactionId";
 export * from "./types/TransactionPoolRecord";

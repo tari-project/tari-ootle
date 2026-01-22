@@ -10,10 +10,9 @@ use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, Decision};
-use tari_engine_types::serde_with;
 use tari_ootle_common_types::{hashing::command_hasher, Epoch, ShardGroup};
+use tari_ootle_transaction::TransactionId;
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
-use tari_transaction::TransactionId;
 
 use super::{ForeignProposalAtom, LeaderFee, TransactionRecord};
 use crate::{
@@ -240,7 +239,7 @@ impl Display for Command {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
 pub struct EvictNodeAtom {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "serde_with::hex")]
+    #[serde(with = "ootle_serde::hex")]
     pub public_key: RistrettoPublicKeyBytes,
 }
 

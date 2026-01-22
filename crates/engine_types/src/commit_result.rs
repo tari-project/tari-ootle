@@ -46,15 +46,20 @@ use crate::{
 pub struct ExecuteResult {
     /// The finalized result to commit. If the fee transaction succeeds but the transaction fails, this will be accept.
     pub finalize: FinalizeResult,
+    /// The time taken to execute the transaction (excluding finalization).
     #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number}"))]
     pub execution_time: Duration,
+    /// The epoch during which the transaction was executed. This may be None if consensus aborted before being able to
+    /// lock to an epoch.
+    pub execute_epoch: Option<u64>,
 }
 
 impl ExecuteResult {
-    pub fn new_rejected(transaction_hash: Hash, reason: RejectReason) -> Self {
+    pub fn new_rejected(transaction_hash: Hash, reason: RejectReason, execute_epoch: Option<u64>) -> Self {
         Self {
             finalize: FinalizeResult::new_rejected(transaction_hash, reason),
             execution_time: Duration::default(),
+            execute_epoch,
         }
     }
 

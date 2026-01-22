@@ -22,7 +22,6 @@ use tari_consensus_types::{
     ToSignatureMessage,
 };
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
-use tari_engine_types::serde_with;
 use tari_ootle_common_types::{hashing, Epoch, ExtraData, Network, NodeHeight, NumPreshards, ShardGroup};
 use tari_sidechain::{BlockHeaderHashFields, BlockHeaderHashFieldsV1};
 use tari_state_tree::{compute_merkle_root_for_hashes, TreeHash};
@@ -58,11 +57,11 @@ pub struct BlockHeader {
     total_leader_fee: u64,
     /// A Merkle root hash committing to all state after this block has been applied.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "serde_with::hex")]
+    #[serde(with = "ootle_serde::hex")]
     state_merkle_root: FixedHash,
     /// A Merkle root hash committing to commands in this block. It is zero if the block has no commands.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "serde_with::hex")]
+    #[serde(with = "ootle_serde::hex")]
     command_merkle_root: FixedHash,
     /// Proposer signature that signs the Block ID
     signature: Option<SchnorrSignatureBytes>,
@@ -73,7 +72,7 @@ pub struct BlockHeader {
     /// The epoch hash is a hash given by the epoch oracle. E.g. the base layer epoch oracle gives the first block hash
     /// of the epoch.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "serde_with::hex")]
+    #[serde(with = "ootle_serde::hex")]
     epoch_hash: FixedHash,
     /// Accumulated data for the shard group up to and including this block.
     accumulated_data: ShardGroupAccumulatedData,

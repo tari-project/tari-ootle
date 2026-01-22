@@ -5,6 +5,7 @@ use std::fmt::Display;
 
 use blake2::{digest::consts::U32, Blake2b};
 use log::*;
+use ootle_byte_type::ConvertFromByteType;
 use tari_common_types::types::{CompressedCommitment, CompressedPublicKey, CompressedSignature, FixedHash};
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
@@ -12,7 +13,7 @@ use tari_crypto::{
     tari_utilities::ByteArray,
 };
 use tari_engine::traits::ClaimProofVerifier;
-use tari_engine_types::{confidential::MinotariBurnClaimProof, crypto::get_commitment_factory, ConvertFromByteType};
+use tari_engine_types::{confidential::MinotariBurnClaimProof, crypto::get_commitment_factory};
 use tari_hashing::{hashers::KernelMmrHasherBlake256, TransactionHashDomain};
 use tari_mmr::common::LeafIndex;
 use tari_ootle_common_types::{

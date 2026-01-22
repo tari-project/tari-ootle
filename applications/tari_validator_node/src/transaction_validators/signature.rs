@@ -3,7 +3,7 @@
 
 use log::warn;
 use tari_engine::executables::Executable;
-use tari_transaction::Transaction;
+use tari_ootle_transaction::Transaction;
 
 use crate::{transaction_validators::TransactionValidationError, validator::Validator};
 

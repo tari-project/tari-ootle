@@ -2,6 +2,7 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
+use ootle_byte_type::ConvertFromByteType;
 use tari_crypto::{
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey},
     tari_utilities::ByteArrayError,
@@ -13,7 +14,6 @@ use crate::{
     resource_container::ResourceError,
     stealth,
     stealth::ValidatedStealthOutput,
-    ConvertFromByteType,
 };
 
 const LOG_TARGET: &str = "tari::engine_types::stealth::transfer";

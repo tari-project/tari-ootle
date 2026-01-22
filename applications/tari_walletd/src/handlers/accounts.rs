@@ -7,16 +7,16 @@ use anyhow::{anyhow, Context};
 use axum_extra::headers::authorization::Bearer;
 use indexmap::{IndexMap, IndexSet};
 use log::*;
+use ootle_byte_type::{FromByteType, ToByteType};
 use rand::rngs::OsRng;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
     component::derive_component_address_from_public_key,
     confidential::ClaimBurnOutputData,
     substate::SubstateId,
-    FromByteType,
-    ToByteType,
 };
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
+use tari_ootle_transaction::args;
 use tari_ootle_wallet_crypto::{memo::Memo, OutputWitness, SecretStealthOutputStatement, StealthInputWitness};
 use tari_ootle_wallet_sdk::{
     apis::{
@@ -33,7 +33,6 @@ use tari_template_lib::{
     models::SpendCondition,
     types::{Amount, ResourceType},
 };
-use tari_transaction::args;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{
@@ -637,17 +636,9 @@ pub async fn handle_create_free_test_coins(
             fee_builder
                 .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![amount])
                 .put_last_instruction_output_on_workspace("faucet_funds")
-                .then(|builder| {
-                    if account.is_confirmed_on_chain() {
-                        builder.call_method(*account.component_address(), "deposit", args![Workspace(
-                            "faucet_funds"
-                        )])
-                    } else {
-                        // If the account is not on-chain yet, we create it
-                        builder.create_account_with_bucket(*account.address.account_public_key(), "faucet_funds")
-                    }
-                })
-                .call_method(*account.component_address(), "pay_fee", args![max_fee])
+                .create_account_with_bucket(*account.address.account_public_key(), "faucet_funds")
+                .put_last_instruction_output_on_workspace("new_account")
+                .call_method("new_account", "pay_fee", args![max_fee])
         })
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .finish();

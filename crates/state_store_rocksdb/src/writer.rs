@@ -87,9 +87,9 @@ use tari_ootle_storage::{
     StateStoreWriteTransaction,
     StorageError,
 };
+use tari_ootle_transaction::TransactionId;
 use tari_state_tree::{Child, Nibble, Node, NodeKey, NodeType, StaleTreeNode, StateTreePayload, Version};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
-use tari_transaction::TransactionId;
 
 use crate::{
     cf_api::{CfContext, DbContext},

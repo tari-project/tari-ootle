@@ -7,7 +7,7 @@ use std::{
     thread,
 };
 
-use tari_transaction::Transaction;
+use tari_ootle_transaction::Transaction;
 
 pub fn read_transactions<R: Read + Seek + Send + 'static>(
     mut reader: R,

@@ -1,0 +1,27 @@
+[package]
+name = "ootle_serde"
+version = "0.1.0"
+description = "serde utilities for Tari Ootle"
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_bor = { workspace = true, optional = true, features = ["std", "json_encoding"] }
+
+serde = { workspace = true }
+base64 = { workspace = true, optional = true }
+hex = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tari_template_lib = { workspace = true }
+bincode = { workspace = true, features = ["serde"] }
+
+[features]
+default = ["hex", "cbor"]
+hex = ["dep:hex"]
+cbor = ["dep:tari_bor"]
+base64 = ["dep:base64"]
+bincode-compat = ["tari_template_lib/bincode-compat"]

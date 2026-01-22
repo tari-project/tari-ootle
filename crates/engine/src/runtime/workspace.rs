@@ -8,8 +8,8 @@ use std::{
 
 use tari_bor::Value;
 use tari_engine_types::indexed_value::{IndexedValue, IndexedValueError};
+use tari_ootle_transaction::args::{WorkspaceId, WorkspaceOffsetId};
 use tari_template_lib::models::ProofId;
-use tari_transaction::args::{WorkspaceId, WorkspaceOffsetId};
 
 use crate::runtime::RuntimeError;
 

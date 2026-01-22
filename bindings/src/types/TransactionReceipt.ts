@@ -13,4 +13,5 @@ export type TransactionReceipt = {
   events: Array<Event>;
   logs: Array<LogEntry>;
   fee_receipt: FeeReceipt;
+  epoch: bigint;
 };

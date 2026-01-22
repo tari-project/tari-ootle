@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::SubstateLockType;
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct LockConflict {

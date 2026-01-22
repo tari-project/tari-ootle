@@ -27,6 +27,7 @@ use tari_consensus_types::ValidatorSignatureBytes;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{Epoch, SubstateAddress, SubstateRequirement, SubstateRequirementRef};
+use tari_ootle_transaction::TransactionSignature;
 use tari_template_lib::{
     prelude::{
         crypto::CommitmentSignatureBytes,
@@ -37,7 +38,6 @@ use tari_template_lib::{
     },
     types::Amount,
 };
-use tari_transaction::TransactionSignature;
 
 use crate::{proto, proto::common::OptionalVersion};
 

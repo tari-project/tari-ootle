@@ -3,11 +3,11 @@
 
 use std::{collections::HashMap, convert::Infallible, future::Future, str::FromStr};
 
+use ootle_byte_type::ToByteType;
 use tari_crypto::tari_utilities::SafePassword;
 use tari_engine_types::{
     crypto::commit_amount_checked,
     substate::{Substate, SubstateId},
-    ToByteType,
     Utxo,
 };
 use tari_ootle_common_types::{
@@ -18,6 +18,7 @@ use tari_ootle_common_types::{
     Network,
     StateVersion,
 };
+use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
 use tari_ootle_wallet_sdk::{
     cipher_seed::CipherSeedRestore,
     local_key_store::LocalKeyStore,
@@ -45,7 +46,6 @@ use tari_template_lib::{
     prelude::{Amount, PedersenCommitmentBytes, ResourceType, TemplateAddress},
     types::EncryptedData,
 };
-use tari_transaction::{Transaction, TransactionId};
 
 pub struct TestSdkSpec;
 
@@ -192,6 +192,13 @@ impl WalletNetworkInterface for PanicNetworkInterface {
 
     #[allow(clippy::diverging_sub_expression)]
     async fn submit_transaction(&self, _transaction: Transaction) -> Result<TransactionId, Self::Error> {
+        panic!("PanicNetworkInterface called")
+    }
+
+    async fn submit_transaction_envelope(
+        &self,
+        _transaction: TransactionEnvelope,
+    ) -> Result<TransactionId, Self::Error> {
         panic!("PanicNetworkInterface called")
     }
 

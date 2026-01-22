@@ -6,8 +6,6 @@
 import type {
   GetEpochManagerStatsResponse,
   GetNetworkSyncStateResponse, GetNonFungiblesRequest, GetNonFungiblesResponse,
-  GetRecentTransactionsRequest,
-  GetRecentTransactionsResponse,
   GetResourceResponse,
   ResourceAddress,
   GetSubstatesRequest,

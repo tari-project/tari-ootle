@@ -12,6 +12,7 @@ use tari_engine_types::{
     vault::Vault,
 };
 use tari_ootle_common_types::optional::Optional;
+use tari_ootle_transaction::TransactionId;
 use tari_ootle_wallet_sdk::{
     apis::substate::ValidatorScanResult,
     models::{AccountChangedEvent, AccountCreatedEvent, AccountUpdate, NewAccountData, NonFungibleToken, WalletEvent},
@@ -24,7 +25,6 @@ use tari_template_lib::{
     prelude::{ComponentAddress, NonFungibleId, ResourceAddress},
     resource::TOKEN_SYMBOL,
 };
-use tari_transaction::TransactionId;
 
 use crate::{account_monitor::monitor::AccountMonitorError, notify::Notify};
 

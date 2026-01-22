@@ -16,7 +16,7 @@ use tari_ootle_common_types::{
     NumPreshards,
     ToSubstateAddress,
 };
-use tari_transaction::{Transaction, TransactionId};
+use tari_ootle_transaction::{Transaction, TransactionId};
 use time::PrimitiveDateTime;
 
 use crate::{

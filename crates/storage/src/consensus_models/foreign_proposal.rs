@@ -13,9 +13,9 @@ use serde::{Deserialize, Serialize};
 use tari_consensus_types::{BlockId, LeafBlock};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_ootle_common_types::{committee::CommitteeInfo, Epoch, NodeHeight, ShardGroup};
+use tari_ootle_transaction::TransactionId;
 use tari_sidechain::QuorumCertificate;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
-use tari_transaction::TransactionId;
 
 use super::{BlockPledge, Command, CommandOrHash, CommandsCommitProof};
 use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};

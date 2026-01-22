@@ -4,7 +4,7 @@
 use tari_indexer_lib::error::IndexerError;
 use tari_ootle_common_types::optional::IsNotFoundError;
 use tari_ootle_storage::StorageError;
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 
 use crate::network_client::NetworkClientError;
 

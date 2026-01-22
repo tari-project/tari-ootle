@@ -127,13 +127,16 @@ impl Event {
 
 impl Display for Event {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "event: substate_id ")?;
+        if let Some(substate_id) = &self.substate_id {
+            write!(f, "{}, ", substate_id)?;
+        } else {
+            write!(f, "None, ")?;
+        }
         write!(
             f,
-            "event: substate_id {:?}, template_address {}, topic {} and payload {}",
-            self.substate_id.as_ref().map(|e| e.to_string()),
-            self.template_address,
-            self.topic,
-            self.payload
+            "template_address {}, topic {} and payload {}",
+            self.template_address, self.topic, self.payload
         )
     }
 }

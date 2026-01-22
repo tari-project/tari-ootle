@@ -1,17 +1,18 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use ootle_byte_type::ToByteType;
 use rand::rngs::OsRng;
 use tari_crypto::{
     keys::PublicKey as _,
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
-use tari_engine_types::ToByteType;
 use tari_ootle_common_types::{
     crypto::create_key_pair_from_seed,
     substate_type::SubstateType,
     RistrettoSchnorrBlake2bVerifier,
 };
+use tari_ootle_transaction::{args, Transaction};
 use tari_template_lib::{
     models::ComponentAddress,
     prelude::PublicKey,
@@ -25,7 +26,6 @@ use tari_template_test_tooling::{
     support::{assert_error::assert_reject_reason, stealth, stealth::NO_INPUTS},
     TemplateTest,
 };
-use tari_transaction::{args, Transaction};
 
 const TEMPLATE_PATHS: &[&str] = &["tests/templates/signature"];
 const TEMPLATE_NAME: &str = "SignatureTest";

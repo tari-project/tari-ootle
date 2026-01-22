@@ -2,6 +2,7 @@
 //  SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
+use ootle_byte_type::ToByteType;
 use tari_consensus_types::{
     HighPc,
     LastSentNewView,
@@ -12,7 +13,6 @@ use tari_consensus_types::{
     TimeoutVoteMessage,
     ValidatorSignatureBytes,
 };
-use tari_engine_types::ToByteType;
 use tari_ootle_common_types::{committee::Committee, displayable::Displayable, optional::Optional, Epoch, NodeHeight};
 use tari_ootle_storage::{consensus_models::BookkeepingModel, StateStore};
 

@@ -26,7 +26,6 @@ use serde::{Deserialize, Serialize};
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult},
     confidential::MinotariBurnClaimProof,
-    serde_with,
     substate::{Substate, SubstateId},
     ValidatorFeePoolAddress,
 };
@@ -38,6 +37,7 @@ use tari_ootle_common_types::{
     SubstateAddress,
     SubstateRequirement,
 };
+use tari_ootle_transaction::{Instruction, Transaction, TransactionId, UnsignedTransaction};
 use tari_ootle_wallet_sdk::{
     apis::{
         confidential_transfer::UtxoInputSelection,
@@ -73,7 +73,6 @@ use tari_template_lib::{
     prelude::{ComponentAddress, ConfidentialWithdrawProof, ResourceType, RistrettoPublicKeyBytes},
     types::{crypto::PedersenCommitmentBytes, Amount, EncryptedData, TemplateAddress},
 };
-use tari_transaction::{Instruction, Transaction, TransactionId, UnsignedTransaction};
 use time::PrimitiveDateTime;
 use webauthn_rs_proto::{
     PublicKeyCredential,
@@ -174,7 +173,7 @@ pub struct TransactionSubmitManifestResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct PublishTemplateRequest {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "serde_with::base64")]
+    #[serde(with = "ootle_serde::base64")]
     pub binary: Vec<u8>,
     #[serde(deserialize_with = "opt_string_or_struct")]
     pub fee_account: Option<ComponentAddressOrName>,
@@ -841,7 +840,7 @@ pub struct NetworkInfo {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct SubstatesListRequest {
-    #[serde(default, deserialize_with = "serde_with::string::option::deserialize")]
+    #[serde(default, deserialize_with = "ootle_serde::string::option::deserialize")]
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     pub filter_by_template: Option<TemplateAddress>,
     pub filter_by_type: Option<SubstateType>,

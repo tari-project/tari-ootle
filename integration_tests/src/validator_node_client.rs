@@ -10,9 +10,9 @@ use tari_engine_types::{
     substate::{SubstateDiff, SubstateId},
 };
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
+use tari_ootle_transaction::{builder::TransactionBuilder, Transaction};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{models::NonFungibleId, types::TemplateAddress};
-use tari_transaction::{builder::TransactionBuilder, Transaction};
 use tari_transaction_components::key_manager::{SecretTransactionKeyManagerInterface, TariKeyId};
 use tari_validator_node_client::{
     types::{GetTransactionResultRequest, SubmitTransactionRequest, SubmitTransactionResponse},
@@ -336,8 +336,8 @@ async fn submit_and_wait_for_result(
 }
 
 /// Parses a string argument into a NamedArg for transaction building
-pub fn parse_arg(s: &str) -> Result<tari_transaction::builder::named_args::NamedArg, String> {
-    use tari_transaction::arg;
+pub fn parse_arg(s: &str) -> Result<tari_ootle_transaction::builder::named_args::NamedArg, String> {
+    use tari_ootle_transaction::arg;
 
     // Try parsing as primitives first
     if let Ok(v) = s.parse::<bool>() {

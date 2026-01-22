@@ -8,7 +8,7 @@ use tari_consensus_types::Decision;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
     component::{ComponentBody, ComponentHeader},
-    fees::{FeeBreakdown, FeeReceipt},
+    fees::{FeeBreakdown, FeeReceiptBuilder},
     published_template::PublishedTemplate,
     substate::{Substate, SubstateDiff, SubstateId},
     transaction_receipt::{FinalizeOutcome, TransactionReceipt, TransactionReceiptAddress},
@@ -17,7 +17,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{LockIntent, SubstateRequirement};
 use tari_ootle_storage::consensus_models::{TransactionRecord, VersionedSubstateIdLockIntent};
-use tari_transaction::{args, Transaction};
+use tari_ootle_transaction::{args, Transaction};
 
 use crate::support::{committee_number_to_shard_group, helpers::random_substate_in_shard_group, TEST_NUM_PRESHARDS};
 
@@ -111,12 +111,14 @@ pub fn create_execution_result_for_transaction(
                 fee_withdrawals: Default::default(),
                 events: Default::default(),
                 logs: Default::default(),
-                fee_receipt: FeeReceipt {
+                fee_receipt: FeeReceiptBuilder {
                     total_fee_payment: fee,
                     total_fees_paid: fee,
                     total_fee_overcharge: 0,
                     cost_breakdown: FeeBreakdown::default(),
-                },
+                }
+                .build(),
+                epoch: 0,
             }),
         );
 
@@ -135,14 +137,16 @@ pub fn create_execution_result_for_transaction(
             vec![],
             vec![],
             result,
-            FeeReceipt {
+            FeeReceiptBuilder {
                 total_fee_payment: fee,
                 total_fees_paid: fee,
                 total_fee_overcharge: 0,
                 cost_breakdown: FeeBreakdown::default(),
-            },
+            }
+            .build(),
         ),
         execution_time: Duration::from_secs(0),
+        execute_epoch: None,
     }
 }
 

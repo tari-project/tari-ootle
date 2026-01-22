@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use lazy_static::lazy_static;
+use ootle_byte_type::FromByteType;
 use tari_common_types::types::CommitmentFactory;
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
@@ -10,7 +11,7 @@ use tari_crypto::{
 };
 use tari_template_lib::{prelude::SchnorrSignatureBytes, types::Amount};
 
-use crate::{hashing::EngineSchnorrSignature, FromByteType};
+use crate::hashing::EngineSchnorrSignature;
 
 // TODO RistrettoSecretKey should provide a constant ZERO
 pub const ZERO_SECRET_KEY: RistrettoSecretKey = unsafe { std::mem::transmute([0u8; 32]) };

@@ -7,9 +7,9 @@ use std::{
 };
 
 use libp2p_identity::PeerId;
+use ootle_byte_type::ToByteType;
 use serde::{de::DeserializeOwned, Serialize};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::ToByteType;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 pub trait NodeAddressable:

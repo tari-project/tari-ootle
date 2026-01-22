@@ -36,6 +36,7 @@ use tari_ootle_common_types::{
     Epoch,
     StateVersion,
 };
+use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
 use tari_ootle_wallet_sdk::{
     models::{EndOfShard, StartOfShard, UtxoBurnt, UtxoSpent, UtxoUnspent, UtxoUpdatePayload, WalletUtxoUpdate},
     network::{
@@ -51,7 +52,7 @@ use tari_template_lib::{
     prelude::RistrettoPublicKeyBytes,
     types::{crypto::UtxoTag, TemplateAddress},
 };
-use tari_transaction::{Transaction, TransactionId};
+use time::{OffsetDateTime, PrimitiveDateTime};
 use url::ParseError;
 
 const INVALID_REQUEST_CODE: i64 = 400;
@@ -92,7 +93,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
         version: Option<u32>,
         local_search_only: bool,
     ) -> Result<SubstateQueryResult, Self::Error> {
-        let mut client = self.get_client()?;
+        let client = self.get_client()?;
         let result = client
             .get_substate(substate_id, GetSubstateRequest {
                 version,
@@ -106,7 +107,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
     }
 
     async fn get_substates(&self, substate_ids: Vec<SubstateId>) -> Result<HashMap<SubstateId, Substate>, Self::Error> {
-        let mut client = self.get_client()?;
+        let client = self.get_client()?;
         let resp = client
             .fetch_substates(GetSubstatesRequest {
                 requests: substate_ids.try_into().map_err(|_| {
@@ -114,6 +115,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
                         details: "Too many substate IDs requested".to_string(),
                     })
                 })?,
+                cached_only: false,
             })
             .await?;
 
@@ -121,7 +123,15 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
     }
 
     async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, Self::Error> {
-        let mut client = self.get_client()?;
+        let transaction = TransactionEnvelope::encode(transaction)?;
+        self.submit_transaction_envelope(transaction).await
+    }
+
+    async fn submit_transaction_envelope(
+        &self,
+        transaction: TransactionEnvelope,
+    ) -> Result<TransactionId, Self::Error> {
+        let client = self.get_client()?;
         let result = client
             .submit_transaction(SubmitTransactionRequest { transaction })
             .await?;
@@ -141,14 +151,23 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
             ));
         }
 
-        let mut client = self.get_client()?;
+        let client = self.get_client()?;
         let resp = client
-            .submit_transaction_dry_run(SubmitTransactionRequest { transaction })
+            .submit_transaction_dry_run(SubmitTransactionRequest {
+                transaction: TransactionEnvelope::encode(transaction)?,
+            })
             .await?;
 
         Ok(TransactionQueryResult {
             transaction_id: resp.transaction_id,
-            result: convert_indexer_result_to_wallet_result(resp.result),
+            // TODO: clean this up
+            result: TransactionFinalizedResult::Finalized {
+                final_decision: (&resp.result.finalize.result).into(),
+                execution_time: resp.result.execution_time,
+                execution_result: Some(Box::new(resp.result)),
+                finalized_time: now(),
+                abort_details: None,
+            },
         })
     }
 
@@ -156,7 +175,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
         &self,
         transaction_id: TransactionId,
     ) -> Result<TransactionQueryResult, Self::Error> {
-        let mut client = self.get_client()?;
+        let client = self.get_client()?;
         let resp = client
             .get_transaction_result(GetTransactionResultRequest { transaction_id })
             .await?;
@@ -171,7 +190,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
         &self,
         template_address: TemplateAddress,
     ) -> Result<tari_template_abi::TemplateDef, Self::Error> {
-        let mut client = self.get_client()?;
+        let client = self.get_client()?;
         let resp = client.get_template_definition(template_address).await?;
         Ok(resp.definition)
     }
@@ -183,7 +202,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
         shard_state_versions: Vec<(Shard, StateVersion)>,
         unspent_only: bool,
     ) -> Result<UtxoUpdateStream<Self::Error>, Self::Error> {
-        let mut client = self.get_client()?;
+        let client = self.get_client()?;
         let stream = client
             .stream_utxo_updates_protobuf(GetUtxoUpdatesRequest {
                 from_epoch,
@@ -254,7 +273,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
         resource_address: ResourceAddress,
         tag_and_nonce_pairs: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
     ) -> Result<Vec<(UtxoId, Utxo)>, Self::Error> {
-        let mut client = self.get_client()?;
+        let client = self.get_client()?;
         // TODO: Given the potential size of substates protobuf, json + hex encoding may be too inefficient. Consider
         // supporting the application/x-protobuf content type in the indexer REST API.
         let resp = client
@@ -267,7 +286,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
     }
 
     async fn wait_until_ready(&self) -> Result<(), Self::Error> {
-        let mut client = self.get_client()?;
+        let client = self.get_client()?;
         client.wait_until_ready().await?;
         Ok(())
     }
@@ -281,6 +300,11 @@ pub enum IndexerRestApiNetworkInterfaceError {
     IndexerParseError(#[from] ParseError),
     #[error("Stream decode error: {0}")]
     StreamDecodeError(anyhow::Error),
+    #[error("Transaction encode error: {source}")]
+    EncodeError {
+        #[from]
+        source: tari_bor::BorError,
+    },
 }
 
 impl IsNotFoundError for IndexerRestApiNetworkInterfaceError {
@@ -336,6 +360,9 @@ impl TransactionStatusResponseError for IndexerRestApiNetworkInterfaceError {
             IndexerRestApiNetworkInterfaceError::StreamDecodeError(e) => ResponseErrorStatus::InternalError {
                 message: format!("Indexer stream decode error: {e}"),
             },
+            IndexerRestApiNetworkInterfaceError::EncodeError { source } => ResponseErrorStatus::InternalError {
+                message: format!("Transaction encode error: {source}"),
+            },
         }
     }
 
@@ -365,4 +392,9 @@ fn convert_indexer_result_to_wallet_result(result: IndexerTransactionFinalizedRe
             abort_details,
         },
     }
+}
+
+fn now() -> PrimitiveDateTime {
+    let now = OffsetDateTime::now_utc();
+    PrimitiveDateTime::new(now.date(), now.time())
 }

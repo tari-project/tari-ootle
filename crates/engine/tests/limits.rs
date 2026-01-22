@@ -1,10 +1,11 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::commit_result::RejectReason;
+use tari_engine::wasm::WasmExecutionError;
+use tari_engine_types::limits;
+use tari_ootle_transaction::{args, Transaction};
 use tari_template_lib::types::bytes::Bytes;
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
-use tari_transaction::{args, Transaction};
 
 const TEMPLATE_PATHS: &[&str] = &["tests/templates/limits"];
 const TEMPLATE_NAME: &str = "PushItToTheLimit";
@@ -29,10 +30,9 @@ fn practical_limit() {
         vec![],
     );
 
-    assert_reject_reason(
-        reason,
-        RejectReason::ExecutionFailure("Engine call size limit".to_string()),
-    )
+    assert_reject_reason(reason, WasmExecutionError::CallSizeLimitExceeded {
+        limit: limits::ENGINE_LIMITS.max_call_size,
+    });
 }
 
 // TODO: add tests for other limits

@@ -7,14 +7,14 @@ use axum_extra::headers::authorization::Bearer;
 use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use futures::{future, future::Either};
 use log::*;
-use tari_engine_types::ToByteType;
+use ootle_byte_type::ToByteType;
 use tari_ootle_common_types::{optional::Optional, response_status::ResponseErrorStatus, Epoch, Network};
+use tari_ootle_transaction::{args, Transaction};
 use tari_ootle_wallet_sdk::{
     apis::{config::ConfigKey, transaction::TransactionApiError},
     models::WalletEvent,
 };
 use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceError;
-use tari_transaction::{args, Transaction};
 use tari_transaction_manifest::parse_manifest;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,

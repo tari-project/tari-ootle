@@ -20,8 +20,7 @@ mod template {
                 amount,
                 FAUCET_MAX
             );
-            debug!("Withdrawing {} coins from faucet", amount);
-            emit_event("take", [("amount", amount.to_string())]);
+            emit_event("take", metadata!["amount" => amount.to_string()]);
             self.vault.withdraw(amount)
         }
 
@@ -44,10 +43,9 @@ mod template {
                 balance_proof,
             };
 
-            debug!("Withdrawing {} coins from faucet into confidential output", amount);
-            emit_event("take", [
-                ("amount", amount.to_string()),
-                ("confidential", "true".to_string()),
+            emit_event("take", metadata![
+                "amount" => amount.to_string(),
+                "confidential" => "true".to_string()
             ]);
 
             self.vault

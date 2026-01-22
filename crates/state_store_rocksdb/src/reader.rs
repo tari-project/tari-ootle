@@ -91,9 +91,9 @@ use tari_ootle_storage::{
     StateStoreReadTransaction,
     StorageError,
 };
+use tari_ootle_transaction::TransactionId;
 use tari_state_tree::{Node, NodeKey, StateTreePayload, Version};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
-use tari_transaction::TransactionId;
 
 use crate::{
     cf_api::DbContext,
@@ -1386,7 +1386,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let (lower, _) = iter.size_hint();
         let mut substates = Vec::with_capacity(lower);
         for substate_id in iter {
-            let head = index_cf.get(substate_id, OPERATION)?;
+            let Some(head) = index_cf.get(substate_id, OPERATION).optional()? else {
+                debug!(
+                    target: LOG_TARGET,
+                    "{OPERATION}: substate_id {} not found in head index",
+                    substate_id
+                );
+                continue;
+            };
             let address = SubstateAddress::from_substate_id(substate_id, head.version);
             let substate = cf.get(&address, OPERATION)?;
             substates.push(substate);

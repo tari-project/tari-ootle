@@ -22,7 +22,7 @@
 
 use tari_consensus_types::BlockId;
 use tari_ootle_storage::consensus_models::ForeignParkedProposal;
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 
 use crate::{
     codecs::{BlockIdCodec, DefaultCodec, KeyPrefix, TransactionIdCodec, UnitCodec},

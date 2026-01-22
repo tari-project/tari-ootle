@@ -27,9 +27,9 @@ use std::{
 };
 
 use multiaddr::Multiaddr;
+use ootle_byte_type::FromByteType;
 use reqwest::Url;
 use tari_common::configuration::{CommonConfig, StringList};
-use tari_engine_types::FromByteType;
 use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleConfig,
     keypair::create_new_keypair,

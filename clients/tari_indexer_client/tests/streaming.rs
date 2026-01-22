@@ -8,7 +8,7 @@ use tari_ootle_common_types::{Epoch, NumPreshards, StateVersion};
 #[tokio::test]
 #[ignore = "Requires a running indexer listening on a specific port"]
 async fn dev_test() {
-    let mut client = IndexerRestApiClient::connect("http://localhost:12017").unwrap();
+    let client = IndexerRestApiClient::connect("http://localhost:12017").unwrap();
     let mut stream = client
         .stream_utxo_updates_protobuf(GetUtxoUpdatesRequest {
             from_epoch: Epoch::zero(),

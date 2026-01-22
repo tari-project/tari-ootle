@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_common_types::Network;
-use tari_transaction::TransactionBuilder;
+use tari_ootle_transaction::TransactionBuilder;
 
 pub fn transaction_builder() -> TransactionBuilder {
     TransactionBuilder::new(Network::LocalNet)

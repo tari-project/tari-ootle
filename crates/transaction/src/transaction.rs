@@ -303,12 +303,12 @@ impl Display for Transaction {
 
 #[cfg(test)]
 mod tests {
+    use ootle_byte_type::ToByteType;
     use rand::rngs::OsRng;
     use tari_crypto::{
         keys::{PublicKey as _, SecretKey},
         ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     };
-    use tari_engine_types::ToByteType;
     use tari_ootle_common_types::crypto::create_key_pair;
     use tari_template_lib::{prelude::Bytes, types::TemplateAddress};
 
@@ -348,6 +348,11 @@ mod tests {
         let subject = create_transaction().build_and_seal(&k);
         let encoded = tari_bor::encode(&subject).unwrap();
         let _decoded = tari_bor::decode::<Transaction>(&encoded).unwrap();
+
+        // bincode
+        let encoded = bincode::serde::encode_to_vec(&subject, bincode::config::standard()).unwrap();
+        let _decoded =
+            bincode::serde::decode_from_slice::<Transaction, _>(&encoded, bincode::config::standard()).unwrap();
     }
 
     #[test]

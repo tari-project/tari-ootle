@@ -21,7 +21,7 @@ macro_rules! create_hash_type {
         )]
         #[serde(transparent)]
         $(#[$meta])*
-        pub struct $name(#[serde(with = "::tari_engine_types::serde_with::hex")] ::tari_common_types::types::FixedHash);
+        pub struct $name(#[serde(with = "::ootle_serde::hex")] ::tari_common_types::types::FixedHash);
 
         impl $name {
             /// Represents a zero/null hash.

@@ -4,8 +4,8 @@
 use std::{fmt, fmt::Display, io, str::FromStr};
 
 use bech32::{Bech32m, Hrp};
+use ootle_byte_type::{ConvertFromByteType, FromByteType, ToByteType};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::{ConvertFromByteType, FromByteType, ToByteType};
 use tari_ootle_common_types::{Network, NetworkParseError};
 use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, InvalidByteLengthError};
 
@@ -14,7 +14,7 @@ use crate::{
     pay_ref::PayRef,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, type = "string"))]
 pub struct OotleAddress {
     network: Network,

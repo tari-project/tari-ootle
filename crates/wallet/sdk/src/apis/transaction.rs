@@ -13,11 +13,11 @@ use tari_ootle_common_types::{
     response_status::{ResponseErrorStatus, TransactionStatusResponseError},
     VersionedSubstateIdRef,
 };
+use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_template_lib::{
     constants::XTR,
     prelude::{ComponentAddress, RistrettoPublicKeyBytes},
 };
-use tari_transaction::{Transaction, TransactionId};
 
 use crate::{
     models::{NewAccountData, TransactionStatus, WalletLockId, WalletTransaction, WalletTransactionUpdate},

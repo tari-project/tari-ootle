@@ -2,9 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
+use ootle_byte_type::ConvertFromByteType;
 use tari_consensus_types::{SignedMessage, ToSignatureMessage, ValidatorSchnorrSignature};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::ConvertFromByteType;
 
 const LOG_TARGET: &str = "tari::consensus::signer_service";
 

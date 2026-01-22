@@ -2,18 +2,16 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use diesel::{Connection, SqliteConnection};
+use ootle_byte_type::ToByteType;
 use rand::rngs::OsRng;
 use tari_common_types::types::FixedHash;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-use tari_engine_types::ToByteType;
 use tari_ootle_common_types::{Epoch, NumPreshards, PeerAddress, ShardGroup, SubstateAddress, VotePower};
 use tari_ootle_storage::global::{GlobalDb, ValidatorNodeDb};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_utilities::ByteArray;
 
 fn create_db() -> GlobalDb<SqliteGlobalDbAdapter<PeerAddress>> {
-    // std::fs::remove_file("/tmp/tmptmp.db").ok();
-    // let conn = SqliteConnection::establish("file:///tmp/tmptmp.db").unwrap();
     let conn = SqliteConnection::establish(":memory:").unwrap();
     let db = GlobalDb::new(SqliteGlobalDbAdapter::new(conn));
     db.adapter().migrate().unwrap();

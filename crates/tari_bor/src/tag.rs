@@ -6,8 +6,44 @@ use core::ops::{Deref, DerefMut};
 use ciborium::tag::Required;
 use serde::{de, ser, Deserialize, Serialize};
 
+pub trait MaybeTagged {
+    fn maybe_tag(&self) -> Option<u64>;
+
+    fn is_tag_of<T: Tagged>(&self) -> bool {
+        self.maybe_tag() == Some(T::TAG)
+    }
+
+    fn tag_matches<T: MaybeTagged>(&self, tagged: &T) -> bool {
+        self.maybe_tag().is_some_and(|t| Some(t) == tagged.maybe_tag())
+    }
+}
+
+pub trait Tagged {
+    const TAG: u64;
+
+    fn is_tag_of<T: Tagged>() -> bool {
+        T::TAG == Self::TAG
+    }
+}
+
+impl<T: Tagged> MaybeTagged for T {
+    fn maybe_tag(&self) -> Option<u64> {
+        Some(T::TAG)
+    }
+}
+
+impl MaybeTagged for crate::Value {
+    fn maybe_tag(&self) -> Option<u64> {
+        self.as_tag().map(|(t, _)| t)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BorTag<T, const TAG: u64>(Required<T, TAG>);
+
+impl<T, const TAG: u64> Tagged for BorTag<T, TAG> {
+    const TAG: u64 = TAG;
+}
 
 impl<T, const TAG: u64> BorTag<T, TAG> {
     pub const fn new(t: T) -> Self {

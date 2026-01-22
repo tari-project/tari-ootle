@@ -1,6 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use ootle_byte_type::ToByteType;
 use tari_common_types::types::FixedHash;
 use tari_consensus::hotstuff::{
     calculate_dummy_blocks,
@@ -8,7 +9,6 @@ use tari_consensus::hotstuff::{
     calculate_last_dummy_block,
 };
 use tari_consensus_types::ShardGroupAccumulatedData;
-use tari_engine_types::ToByteType;
 use tari_ootle_common_types::{
     committee::{Committee, CommitteeMember},
     crypto::create_key_pair_from_seed,

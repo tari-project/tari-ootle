@@ -7,10 +7,11 @@ use axum::{
     http,
     response::{IntoResponse, Response},
 };
-use tari_engine_types::ToByteType;
+use ootle_byte_type::ToByteType;
 use tari_epoch_manager::service::EpochManagerHandle;
+use tari_indexer_client::event::IndexerEvent;
 use tari_networking::NetworkingHandle;
-use tari_ootle_common_types::PeerAddress;
+use tari_ootle_common_types::{Network, PeerAddress};
 use tari_ootle_p2p::TariMessagingSpec;
 use tari_ootle_storage::global::GlobalDb;
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
@@ -21,7 +22,6 @@ use tokio::sync::broadcast;
 use crate::{
     bootstrap::Services,
     dry_run::processor::DryRunTransactionProcessor,
-    event::IndexerEvent,
     notify::Subscriber,
     rest_api::cache::HttpCacheConfig,
     storage_sqlite::SqliteIndexerStore,
@@ -41,6 +41,7 @@ impl HandlerContext {
         Self {
             inner: Arc::new(InnerContext {
                 cache_control_enabled: true,
+                network: services.network,
                 read_only_store: ReadOnlyStore::new(services.store.clone()),
                 global_db: services.global_db.clone(),
                 epoch_manager: services.epoch_manager.clone(),
@@ -57,6 +58,10 @@ impl HandlerContext {
 
     pub fn global_db(&self) -> &GlobalDb<SqliteGlobalDbAdapter<PeerAddress>> {
         &self.inner.global_db
+    }
+
+    pub fn network(&self) -> Network {
+        self.inner.network
     }
 
     pub fn epoch_manager(&self) -> &EpochManagerHandle<PeerAddress> {
@@ -118,6 +123,7 @@ impl HandlerContext {
 
 struct InnerContext {
     cache_control_enabled: bool,
+    network: Network,
     global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     networking: NetworkingHandle<TariMessagingSpec>,

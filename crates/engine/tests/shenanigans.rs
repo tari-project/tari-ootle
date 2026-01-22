@@ -7,6 +7,7 @@ use tari_engine_types::{
     indexed_value::IndexedWellKnownTypes,
     resource_container::ResourceError,
 };
+use tari_ootle_transaction::{args, Transaction};
 use tari_template_lib::{
     args::VaultAction,
     constants::XTR,
@@ -14,7 +15,6 @@ use tari_template_lib::{
     types::{Amount, ResourceType},
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
-use tari_transaction::{args, Transaction};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 const TEMPLATE_NAME: &str = "Shenanigans";
@@ -114,7 +114,7 @@ fn it_rejects_unknown_substate_ids() {
     assert_reject_reason(
         reason,
         RejectReason::SubstateNotFound(
-            "Template referenced substate but it was not found: \
+            "At instruction #1: Template referenced substate but it was not found: \
              resource_abababababababababababababababababababababababababababababababab"
                 .to_string(),
         ),

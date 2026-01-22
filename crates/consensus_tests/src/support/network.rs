@@ -12,8 +12,8 @@ use log::info;
 use tari_consensus::messages::HotstuffMessage;
 use tari_ootle_common_types::ShardGroup;
 use tari_ootle_storage::consensus_models::TransactionRecord;
+use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_shutdown::ShutdownSignal;
-use tari_transaction::{Transaction, TransactionId};
 use tokio::{
     sync::{
         mpsc::{self},

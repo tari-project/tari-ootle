@@ -64,7 +64,7 @@ pub struct SubstateResponse {
 
 #[derive(Debug, Clone)]
 pub struct SubstateManager {
-    cached_substates:
+    cache_manager:
         CachedSubstateManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SubstateFileCache>,
     substate_store: SqliteIndexerStore,
 }
@@ -83,16 +83,16 @@ impl SubstateManager {
         );
 
         Self {
-            cached_substates,
+            cache_manager: cached_substates,
             substate_store,
         }
     }
 
     #[cfg(feature = "metrics")]
     pub fn with_metrics(self, registry_mut: &mut prometheus_client::registry::Registry) -> Self {
-        let cached_substates = self.cached_substates.with_metrics(registry_mut);
+        let cached_substates = self.cache_manager.with_metrics(registry_mut);
         Self {
-            cached_substates,
+            cache_manager: cached_substates,
             substate_store: self.substate_store,
         }
     }
@@ -194,7 +194,7 @@ impl SubstateManager {
                 continue;
             }
             let substate_result = self
-                .cached_substates
+                .cache_manager
                 .get_substate(req.substate_id(), req.version())
                 .await?;
             if let Some(substate) = substate_result.into_up() {
@@ -220,7 +220,7 @@ impl SubstateManager {
         }
 
         let cached = self
-            .cached_substates
+            .cache_manager
             .get_cached_substates(substate_set.into_iter())
             .await?;
         for (id, substate) in cached {
@@ -234,6 +234,14 @@ impl SubstateManager {
         }
 
         Ok(substates)
+    }
+
+    pub async fn fetch_and_cache_substates(
+        &self,
+        substate_ids: &[SubstateId],
+    ) -> Result<HashMap<SubstateId, Substate>, SubstateManagerError> {
+        let result = self.cache_manager.fetch_and_cache_substates(substate_ids).await?;
+        Ok(result)
     }
 
     fn get_substate_from_db(

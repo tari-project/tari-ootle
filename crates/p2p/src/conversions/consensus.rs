@@ -78,8 +78,8 @@ use tari_ootle_storage::{
         TransactionAtom,
     },
 };
+use tari_ootle_transaction::TransactionId;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
-use tari_transaction::TransactionId;
 
 use crate::{
     encoding::{decode_from_slice, encode_to_vec},
@@ -958,7 +958,7 @@ impl From<SubstateRecord> for proto::consensus::Substate {
             substate: value.substate_value.as_ref().map(|s| s.to_bytes()).unwrap_or_default(),
 
             created: Some(value.created().into()),
-            destroyed: value.destroyed.map(Into::into),
+            destroyed: value.destroyed().map(Into::into),
         }
     }
 }
@@ -1004,8 +1004,8 @@ impl TryFrom<proto::consensus::SubstateDestroyedMetadata> for SubstateDestroyed 
     }
 }
 
-impl From<SubstateDestroyed> for proto::consensus::SubstateDestroyedMetadata {
-    fn from(value: SubstateDestroyed) -> Self {
+impl From<&SubstateDestroyed> for proto::consensus::SubstateDestroyedMetadata {
+    fn from(value: &SubstateDestroyed) -> Self {
         Self {
             at_epoch: Some(value.at_epoch.into()),
             at_state_version: value.at_state_version,

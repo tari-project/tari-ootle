@@ -25,7 +25,6 @@ use tari_template_lib::{
 
 use crate::{
     published_template::PublishedTemplateAddress,
-    serde_with,
     substate::SubstateId,
     transaction_receipt::TransactionReceiptAddress,
     ValidatorFeePoolAddress,
@@ -37,7 +36,7 @@ const MAX_VISITOR_DEPTH: usize = 50;
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct IndexedValue {
     indexed: IndexedWellKnownTypes,
-    #[serde(with = "serde_with::cbor_value")]
+    #[serde(with = "ootle_serde::cbor_value")]
     #[cfg_attr(feature = "ts", ts(type = "any"))]
     value: tari_bor::Value,
 }

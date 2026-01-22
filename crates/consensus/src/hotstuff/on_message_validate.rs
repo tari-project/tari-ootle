@@ -23,7 +23,7 @@ use tari_ootle_storage::{
     StateStore,
     StateStoreWriteTransaction,
 };
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 use tokio::sync::broadcast;
 
 use super::config::HotstuffConfig;

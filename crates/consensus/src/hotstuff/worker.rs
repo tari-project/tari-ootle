@@ -34,9 +34,9 @@ use tari_ootle_storage::{
     },
     StateStore,
 };
+use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
-use tari_transaction::{Transaction, TransactionId};
 use tokio::{
     sync::{broadcast, mpsc},
     time,

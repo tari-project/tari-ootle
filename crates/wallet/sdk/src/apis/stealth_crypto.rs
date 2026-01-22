@@ -2,11 +2,12 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
+use ootle_byte_type::ConvertFromByteType;
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
-use tari_engine_types::{crypto::get_commitment_factory, ConvertFromByteType};
+use tari_engine_types::crypto::get_commitment_factory;
 use tari_ootle_common_types::{base_layer_hashing::ownership_proof_hasher64, Network};
 use tari_ootle_wallet_crypto::{
     confidential,

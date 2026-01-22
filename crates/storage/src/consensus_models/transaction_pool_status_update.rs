@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::{Decision, LeafBlock};
 use tari_ootle_common_types::Epoch;
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 
 use crate::{
     consensus_models::{Evidence, LeaderFee, TransactionPoolRecord, TransactionPoolStage},

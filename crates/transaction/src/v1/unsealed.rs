@@ -5,18 +5,16 @@ use std::collections::HashSet;
 
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
-use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey};
-use tari_engine_types::{indexed_value::IndexedValueError, substate::SubstateId, ToByteType};
-use tari_ootle_common_types::{Epoch, IntoSigned, Signable, SubstateRequirement};
-use tari_template_lib::{
-    models::ComponentAddress,
-    prelude::SchnorrSignatureBytes,
-    types::crypto::RistrettoPublicKeyBytes,
-};
+use tari_crypto::ristretto::RistrettoSecretKey;
+use tari_engine_types::{indexed_value::IndexedValueError, substate::SubstateId};
+use tari_ootle_common_types::{Epoch, SubstateRequirement};
+use tari_template_lib::{models::ComponentAddress, types::crypto::RistrettoPublicKeyBytes};
 
 use crate::{
+    signable::Signable,
     v1::{signature::TransactionSignature, transaction::TransactionV1, unsigned::UnsignedTransactionV1},
     Instruction,
+    IntoSigned,
     Transaction,
     TransactionSealSignature,
 };
@@ -56,18 +54,18 @@ impl UnsealedTransactionV1 {
         TransactionV1::new(self, signature).into()
     }
 
+    pub fn seal_with_signature(self, signature: TransactionSealSignature) -> Transaction {
+        self.set_seal_signature(signature)
+    }
+
     pub fn add_signer(mut self, seal_signer: &RistrettoPublicKeyBytes, secret: &RistrettoSecretKey) -> Self {
         let sig = TransactionSignature::sign_v1(secret, seal_signer, &self.transaction);
         self.signatures.push(sig);
         self
     }
 
-    pub(crate) fn add_signature(
-        mut self,
-        public_key: RistrettoPublicKeyBytes,
-        signature: SchnorrSignatureBytes,
-    ) -> Self {
-        self.signatures.push(TransactionSignature::new(public_key, signature));
+    pub(crate) fn add_signature(mut self, signature: TransactionSignature) -> Self {
+        self.signatures.push(signature);
         self
     }
 
@@ -92,7 +90,7 @@ impl UnsealedTransactionV1 {
     }
 
     pub fn verify_all_signatures(&self, seal_signer: &RistrettoPublicKeyBytes) -> bool {
-        if self.signatures.is_empty() {
+        if self.signatures().is_empty() {
             return true;
         }
 
@@ -139,6 +137,7 @@ impl UnsealedTransactionV1 {
 
 impl Signable for UnsealedTransactionV1 {
     type MessageOutput = [u8; 64];
+    type Signature = TransactionSealSignature;
 
     fn to_signing_message(&self, _context: ()) -> Self::MessageOutput {
         TransactionSealSignature::create_message(self)
@@ -147,6 +146,7 @@ impl Signable for UnsealedTransactionV1 {
 
 impl Signable<&RistrettoPublicKeyBytes> for UnsealedTransactionV1 {
     type MessageOutput = [u8; 64];
+    type Signature = TransactionSignature;
 
     fn to_signing_message(&self, context: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
         TransactionSignature::create_message_v1(1, context, &self.transaction)
@@ -156,18 +156,15 @@ impl Signable<&RistrettoPublicKeyBytes> for UnsealedTransactionV1 {
 impl IntoSigned for UnsealedTransactionV1 {
     type SignedOutput = Transaction;
 
-    fn into_signed(self, public_key: RistrettoPublicKey, signature: RistrettoSchnorr) -> Self::SignedOutput {
-        self.set_seal_signature(TransactionSealSignature::new(
-            public_key.to_byte_type(),
-            signature.to_byte_type(),
-        ))
+    fn into_signed(self, sig: TransactionSealSignature) -> Self::SignedOutput {
+        self.set_seal_signature(sig)
     }
 }
 
 impl IntoSigned<&RistrettoPublicKeyBytes> for UnsealedTransactionV1 {
     type SignedOutput = Self;
 
-    fn into_signed(self, public_key: RistrettoPublicKey, signature: RistrettoSchnorr) -> Self::SignedOutput {
-        self.add_signature(public_key.to_byte_type(), signature.to_byte_type())
+    fn into_signed(self, sig: TransactionSignature) -> Self::SignedOutput {
+        self.add_signature(sig)
     }
 }

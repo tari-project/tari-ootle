@@ -283,7 +283,7 @@ where TSpec: WalletSdkSpec<KeyStore = LocalKeyStore>
         let cipher_seed = CipherSeed::random();
         let encrypted_cipher_seed = cipher_seed.encipher(Some(password))?;
         self.config_api().set(ConfigKey::CipherSeed, &encrypted_cipher_seed)?;
-        self.key_store.set_cipher_seed(Arc::new(cipher_seed));
+        self.key_store.set_cipher_seed(cipher_seed);
         Ok(())
     }
 
@@ -294,7 +294,7 @@ where TSpec: WalletSdkSpec<KeyStore = LocalKeyStore>
         let cipher_seed = CipherSeed::from_mnemonic(seed_words, None)?;
         let encrypted_cipher_seed = cipher_seed.encipher(Some(password))?;
         self.config_api().set(ConfigKey::CipherSeed, &encrypted_cipher_seed)?;
-        self.key_store.set_cipher_seed(Arc::new(cipher_seed));
+        self.key_store.set_cipher_seed(cipher_seed);
         Ok(())
     }
 

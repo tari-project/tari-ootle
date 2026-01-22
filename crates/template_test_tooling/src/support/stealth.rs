@@ -3,15 +3,13 @@
 
 use std::iter;
 
+use ootle_byte_type::ToByteType;
 use rand::rngs::OsRng;
 use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
-use tari_engine_types::{
-    crypto::{commit_amount, messages},
-    ToByteType,
-};
+use tari_engine_types::crypto::{commit_amount, messages};
 use tari_ootle_wallet_crypto::{
     stealth,
     MaskAndValue,

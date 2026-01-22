@@ -36,9 +36,9 @@ use tari_ootle_common_types::{
     ToSubstateAddress,
     VersionedSubstateIdRef,
 };
+use tari_ootle_transaction::TransactionId;
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, StateTreePayload, Version};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
-use tari_transaction::TransactionId;
 use time::PrimitiveDateTime;
 
 use crate::{
@@ -83,6 +83,11 @@ pub trait StateStore {
     type WriteTransaction<'a>: StateStoreWriteTransaction<Addr = Self::Addr> + Deref<Target = Self::ReadTransaction<'a>>
     where Self: 'a;
 
+    type Snapshot<'a>
+    where Self: 'a;
+
+    fn snapshot(&self) -> Self::Snapshot<'_>;
+
     fn create_read_tx(&self) -> Result<Self::ReadTransaction<'_>, StorageError>;
     fn create_write_tx(&self) -> Result<Self::WriteTransaction<'_>, StorageError>;
 
@@ -107,6 +112,13 @@ pub trait StateStore {
     where E: From<StorageError> {
         let tx = self.create_read_tx()?;
         let ret = f(&tx)?;
+        Ok(ret)
+    }
+
+    fn with_snapshot<F: FnOnce(&Self::Snapshot<'_>) -> Result<R, E>, R, E>(&self, f: F) -> Result<R, E>
+    where E: From<StorageError> {
+        let snapshot = self.snapshot();
+        let ret = f(&snapshot)?;
         Ok(ret)
     }
 }

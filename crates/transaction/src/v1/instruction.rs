@@ -8,7 +8,6 @@ use tari_engine_types::{
     confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
     limits,
     published_template::TemplateBlob,
-    serde_with,
     ValidatorFeePoolAddress,
 };
 use tari_ootle_common_types::displayable::Displayable;
@@ -34,14 +33,14 @@ pub enum Instruction {
         owner_public_key: RistrettoPublicKeyBytes,
         owner_rule: Option<OwnerRule>,
         access_rules: Option<AccessRules>,
-        workspace_id: Option<WorkspaceOffsetId>,
+        bucket_workspace_id: Option<WorkspaceOffsetId>,
     },
     CallFunction {
         address: TemplateAddress,
         #[cfg_attr(feature = "ts", ts(type = "string"))]
         function: FunctionName,
-        #[serde(deserialize_with = "crate::special_json_arg_syntax::json_deserialize")]
-        #[cfg_attr(feature = "ts", ts(type = "Array<any>"))]
+        // #[serde(deserialize_with = "crate::special_json_arg_syntax::json_deserialize")]
+        // #[cfg_attr(feature = "ts", ts(type = "Array<any>"))]
         args: Vec<InstructionArg>,
     },
     CallMethod {
@@ -50,9 +49,9 @@ pub enum Instruction {
         method: FunctionName,
         // TODO: remove this as it causes tricky issues that are hard to track down (typically Signature errors).
         // Rather have clients provide raw arguments using CBOR.
-        #[serde(deserialize_with = "crate::special_json_arg_syntax::json_deserialize")]
+        // #[serde(deserialize_with = "crate::special_json_arg_syntax::json_deserialize")]
         // Argument parser takes an array of strings as input
-        #[cfg_attr(feature = "ts", ts(type = "Array<any>"))]
+        // #[cfg_attr(feature = "ts", ts(type = "Array<any>"))]
         args: Vec<InstructionArg>,
     },
     PutLastInstructionOutputOnWorkspace {
@@ -83,7 +82,7 @@ pub enum Instruction {
     },
     PublishTemplate {
         #[cfg_attr(feature = "ts", ts(type = "string"))]
-        #[serde(with = "serde_with::base64")]
+        #[serde(with = "ootle_serde::base64")]
         binary: TemplateBlob,
     },
     AllocateAddress {
@@ -131,6 +130,16 @@ impl Instruction {
     pub fn is_pay_fee(&self) -> bool {
         matches!(self, Self::PayFee { .. })
     }
+
+    pub fn allocated_workspace_id(&self) -> Option<WorkspaceId> {
+        // These instructions allocate addresses a workspace ID
+        match self {
+            Self::PutLastInstructionOutputOnWorkspace { key } => Some(*key),
+            Self::TakeFromBucket { output_bucket, .. } => Some(*output_bucket),
+            Self::AllocateAddress { workspace_id, .. } => Some(*workspace_id),
+            _ => None,
+        }
+    }
 }
 
 impl Display for Instruction {
@@ -141,7 +150,7 @@ impl Display for Instruction {
                 owner_public_key: public_key_address,
                 owner_rule,
                 access_rules,
-                workspace_id,
+                bucket_workspace_id: workspace_id,
             } => {
                 write!(
                     f,
@@ -291,16 +300,22 @@ impl Display for MigrateFunction {
 
 #[cfg(test)]
 mod tests {
+    use tari_template_lib::constants::XTR;
+
     use super::*;
     use crate::call_args;
 
-    #[test]
-    fn decode_encode() {
-        let instruction = Instruction::CallFunction {
+    fn make_sample() -> Instruction {
+        Instruction::CallFunction {
             address: Default::default(),
             function: "test".try_into().unwrap(),
-            args: call_args![("A", "B"), 123u64, true, vec![1, 2, 3]],
-        };
+            args: call_args![("A", "B"), 123u64, true, vec![1, 2, 3], XTR],
+        }
+    }
+
+    #[test]
+    fn decode_encode_json() {
+        let instruction = make_sample();
         let json = serde_json::to_string(&instruction).unwrap();
         let decoded: Instruction = serde_json::from_str(&json).unwrap();
         assert_eq!(instruction, decoded);
@@ -310,6 +325,15 @@ mod tests {
         };
         let json = serde_json::to_string(&instruction).unwrap();
         let decoded: Instruction = serde_json::from_str(&json).unwrap();
+        assert_eq!(instruction, decoded);
+    }
+
+    #[test]
+    fn decode_encode_bincode() {
+        let instruction = make_sample();
+        let encoded = bincode::serde::encode_to_vec(&instruction, bincode::config::standard()).unwrap();
+        let (decoded, _): (Instruction, usize) =
+            bincode::serde::decode_from_slice(&encoded, bincode::config::standard()).unwrap();
         assert_eq!(instruction, decoded);
     }
 }

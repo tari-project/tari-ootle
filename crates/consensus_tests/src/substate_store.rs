@@ -279,8 +279,8 @@ fn new_substate_value(seed: u8) -> SubstateValue {
     .into()
 }
 
-fn tx_id(seed: u8) -> tari_transaction::TransactionId {
-    [seed; tari_transaction::TransactionId::byte_size()].into()
+fn tx_id(seed: u8) -> tari_ootle_transaction::TransactionId {
+    [seed; tari_ootle_transaction::TransactionId::byte_size()].into()
 }
 
 fn assert_substate_eq(a: Substate, b: Substate) {

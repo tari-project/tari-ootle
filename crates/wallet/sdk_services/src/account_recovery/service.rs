@@ -4,8 +4,9 @@
 use std::time::Duration;
 
 use log::*;
+use ootle_byte_type::ToByteType;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-use tari_engine_types::{component::derive_component_address_from_public_key, ToByteType};
+use tari_engine_types::component::derive_component_address_from_public_key;
 use tari_ootle_common_types::{
     displayable::Displayable,
     optional::{IsNotFoundError, Optional},

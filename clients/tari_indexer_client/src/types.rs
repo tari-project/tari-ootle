@@ -11,7 +11,6 @@ use tari_consensus_types::Decision;
 use tari_engine_types::{
     commit_result::ExecuteResult,
     resource::Resource,
-    serde_with,
     substate::{Substate, SubstateId, SubstateValue},
     template_lib_models::{NonFungibleAddress, ResourceAddress, UtxoId},
     transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
@@ -21,11 +20,13 @@ use tari_ootle_common_types::{
     shard::Shard,
     substate_type::SubstateType,
     Epoch,
+    Network,
     NumPreshards,
     ShardGroup,
     StateVersion,
 };
 use tari_ootle_storage::{time::PrimitiveDateTime, Ordering};
+use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
 use tari_ootle_wallet_sdk::models::UtxoUpdateSet;
 use tari_template_abi::TemplateDef;
 use tari_template_lib_types::{
@@ -33,7 +34,6 @@ use tari_template_lib_types::{
     Amount,
     TemplateAddress,
 };
-use tari_transaction::{Transaction, TransactionId};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
@@ -63,7 +63,7 @@ pub struct ListSubstateItem {
     pub timestamp: PrimitiveDateTime,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -90,8 +90,13 @@ pub struct GetSubstateResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 pub struct GetSubstatesRequest {
     // Note that we may permit less than 50 in the handler, but this is the max we'll deserialize for DoS mitigation
+    /// The list of substate IDs to fetch
     #[cfg_attr(feature = "ts", ts(as = "Vec<SubstateId>"))]
     pub requests: BoundedVec<SubstateId, 1, 50>,
+    /// If true, only search local storage for the substates. This may result in substates not being found even if they
+    /// exist. Otherwise, the indexer will attempt to fetch substates from validator nodes across various shard groups
+    /// which may result in more failures.
+    pub cached_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,7 +130,7 @@ pub struct InspectSubstateResponse {
     )
 )]
 pub struct SubmitTransactionRequest {
-    pub transaction: Transaction,
+    pub transaction: TransactionEnvelope,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -154,7 +159,7 @@ pub struct SubmitTransactionResponse {
 )]
 pub struct SubmitTransactionDryRunResponse {
     pub transaction_id: TransactionId,
-    pub result: IndexerTransactionFinalizedResult,
+    pub result: ExecuteResult,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,7 +180,7 @@ pub struct TemplateMetadata {
     pub name: String,
     pub address: TemplateAddress,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "serde_with::hex")]
+    #[serde(with = "ootle_serde::hex")]
     pub binary_sha: FixedHash,
     pub author_public_key: RistrettoPublicKeyBytes,
     pub code_size: usize,
@@ -331,7 +336,7 @@ pub struct GetEpochManagerStatsResponse {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub current_block_height: u64,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "serde_with::hex")]
+    #[serde(with = "ootle_serde::hex")]
     pub current_block_hash: FixedHash,
 }
 
@@ -430,6 +435,14 @@ pub struct ListUtxosRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 pub struct ListUtxosResponse {
     pub utxos: Vec<(UtxoId, Utxo)>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+pub struct GetNetworkInfoResponse {
+    pub network: Network,
+    pub network_byte: u8,
+    pub epoch: Epoch,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

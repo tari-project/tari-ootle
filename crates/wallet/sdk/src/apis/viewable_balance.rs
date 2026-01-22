@@ -3,11 +3,9 @@
 
 use std::ops::RangeInclusive;
 
+use ootle_byte_type::ConvertFromByteType;
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_engine_types::{
-    crypto::{ElgamalVerifiableBalance, ElgamalVerifiableBalanceBytes, ValueLookupTable},
-    ConvertFromByteType,
-};
+use tari_engine_types::crypto::{ElgamalVerifiableBalance, ElgamalVerifiableBalanceBytes, ValueLookupTable};
 use tari_ootle_wallet_crypto::WalletCryptoError;
 
 #[derive(Debug, Clone)]

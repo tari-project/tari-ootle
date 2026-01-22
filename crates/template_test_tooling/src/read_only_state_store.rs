@@ -12,6 +12,7 @@ use tari_engine_types::{
     vault::Vault,
     Utxo,
 };
+use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     models::{Account, ComponentAddress, ResourceAddress, UtxoAddress, VaultId},
     types::TemplateAddress,
@@ -50,6 +51,22 @@ impl<'a> ReadOnlyStateStore<'a> {
     pub fn get_account(&self, account_address: ComponentAddress) -> Result<Account, StateStoreError> {
         let account = self.get_component(account_address)?;
         Account::from_value(account.state()).map_err(|e| StateStoreError::CustomStr(e.to_string()))
+    }
+
+    pub fn all_accounts(&self) -> Result<HashMap<ComponentAddress, Account>, StateStoreError> {
+        let mut accounts = HashMap::new();
+        self.with_substates(|id, substate| {
+            if let SubstateId::Component(component_address) = id {
+                if let Some(component) = substate.substate_value().as_component() {
+                    if component.template_address == ACCOUNT_TEMPLATE_ADDRESS {
+                        if let Ok(account) = Account::from_value(component.state()) {
+                            accounts.insert(*component_address, account);
+                        }
+                    }
+                }
+            }
+        })?;
+        Ok(accounts)
     }
 
     pub fn get_vaults_for_account(

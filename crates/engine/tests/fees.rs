@@ -2,9 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::commit_result::RejectReason;
+use tari_ootle_transaction::{args, call_args, Transaction};
 use tari_template_lib::{constants::STEALTH_TARI_RESOURCE_ADDRESS, models::ComponentAddress, types::Amount};
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, xtr_faucet_component, TemplateTest};
-use tari_transaction::{args, call_args, Transaction};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -196,10 +196,12 @@ fn fail_partial_paid_fees() {
             // These instructions should not be applied
             .call_method(account2, "withdraw", args![
                     STEALTH_TARI_RESOURCE_ADDRESS,
-                    Amount(500)
+                    Amount(1000)
                 ])
             .put_last_instruction_output_on_workspace("bucket")
+            .take_from_bucket("bucket", 500, "bucket2")
             .call_method(account, "deposit", args![Workspace("bucket")])
+            .call_method(account, "deposit", args![Workspace("bucket2")])
             .build_and_seal(&private_key),
         vec![owner_token, owner_token2],
     );

@@ -1,7 +1,9 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::{crypto::commit_amount, vault::Vault, ToByteType};
+use ootle_byte_type::ToByteType;
+use tari_engine_types::{crypto::commit_amount, vault::Vault};
+use tari_ootle_transaction::{args, Transaction};
 use tari_template_lib::{
     prelude::{ComponentAddress, ResourceType},
     types::Amount,
@@ -10,7 +12,6 @@ use tari_template_test_tooling::{
     support::confidential::{generate_confidential_output_statement, generate_withdraw_proof_with_inputs},
     TemplateTest,
 };
-use tari_transaction::{args, Transaction};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 

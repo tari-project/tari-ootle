@@ -14,9 +14,9 @@ use tari_ootle_storage::{
     },
     StorageError,
 };
+use tari_ootle_transaction::TransactionId;
 use tari_state_tree::StateTreeError;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
-use tari_transaction::TransactionId;
 use tokio::task::JoinError;
 
 use crate::{

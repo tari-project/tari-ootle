@@ -12,8 +12,8 @@ use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
 };
+use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
-use tari_transaction::{Transaction, TransactionId};
 use tokio::{
     sync::{broadcast, mpsc, watch},
     task::JoinHandle,

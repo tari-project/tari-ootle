@@ -48,10 +48,10 @@ use tari_ootle_storage::{
     time::PrimitiveDateTime,
     Ordering,
 };
+use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_sidechain::QuorumDecision;
 use tari_template_abi::ArgDef;
 use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
-use tari_transaction::{Transaction, TransactionId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(

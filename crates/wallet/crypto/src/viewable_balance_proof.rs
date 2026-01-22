@@ -2,15 +2,13 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use chacha20poly1305::aead::OsRng;
+use ootle_byte_type::ToByteType;
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
     keys::{PublicKey, SecretKey},
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
-use tari_engine_types::{
-    crypto::{get_commitment_factory, messages},
-    ToByteType,
-};
+use tari_engine_types::crypto::{get_commitment_factory, messages};
 use tari_template_lib::{
     models::{ViewableBalanceProof, ViewableBalanceProofChallengeFields},
     prelude::Scalar32Bytes,

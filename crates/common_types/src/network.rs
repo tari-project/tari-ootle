@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 
 /// Represents the available Tari networks. The variants and assigned byte needs to match the L1 network enum.
 #[repr(u8)]
-#[derive(Clone, Debug, PartialEq, Eq, Copy, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Copy, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "lowercase")]
 pub enum Network {
@@ -72,6 +72,12 @@ impl Network {
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to parse network: {0}")]
 pub struct NetworkParseError(String);
+
+impl NetworkParseError {
+    pub fn new<T: Into<String>>(msg: T) -> Self {
+        Self(msg.into())
+    }
+}
 
 impl FromStr for Network {
     type Err = NetworkParseError;

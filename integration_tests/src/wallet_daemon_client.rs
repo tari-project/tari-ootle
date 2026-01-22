@@ -27,6 +27,7 @@ use serde_json::json;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
+use tari_ootle_transaction::UnsignedTransaction;
 use tari_ootle_wallet_sdk::{
     apis::{
         confidential_transfer::UtxoInputSelection,
@@ -39,7 +40,6 @@ use tari_template_lib::{
     resource::TOKEN_SYMBOL,
     types::Amount,
 };
-use tari_transaction::UnsignedTransaction;
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 use tari_wallet_daemon_client::{
     error::WalletDaemonClientError,

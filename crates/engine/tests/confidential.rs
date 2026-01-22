@@ -12,6 +12,7 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::substate_type::SubstateType;
+use tari_ootle_transaction::{args, call_args, Transaction};
 use tari_template_lib::{
     models::{Account, ComponentAddress},
     prelude::ConfidentialOutputStatement,
@@ -34,7 +35,6 @@ use tari_template_test_tooling::{
     },
     TemplateTest,
 };
-use tari_transaction::{args, call_args, Transaction};
 use tari_transaction_manifest::ManifestValue;
 use tari_utilities::ByteArray;
 

@@ -119,7 +119,7 @@ pub async fn fetch_substates(
 ) -> HandlerResult<Json<GetSubstatesResponse>> {
     const MAX_REQUESTS: usize = 20;
 
-    let GetSubstatesRequest { requests } = req;
+    let GetSubstatesRequest { requests, cached_only } = req;
 
     if requests.len() > MAX_REQUESTS {
         return Err(ErrorResponse::bad_request(format!(
@@ -127,11 +127,21 @@ pub async fn fetch_substates(
         )));
     }
 
+    if cached_only {
+        let substates = context
+            .substate_manager()
+            .get_cached_substates(requests.as_slice())
+            .await
+            .map_err(|e| ErrorResponse::internal_error(format!("Error getting substate: {}", e)))?;
+
+        return Ok(Json(GetSubstatesResponse { substates }));
+    }
+
     let substates = context
         .substate_manager()
-        .get_cached_substates(requests.as_slice())
+        .fetch_and_cache_substates(requests.as_slice())
         .await
-        .map_err(|e| ErrorResponse::internal_error(format!("Error getting substate: {}", e)))?;
+        .map_err(|e| ErrorResponse::internal_error(format!("Error getting substates: {}", e)))?;
 
     Ok(Json(GetSubstatesResponse { substates }))
 }

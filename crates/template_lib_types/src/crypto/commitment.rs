@@ -12,7 +12,7 @@ use crate::{
     hex::fixed_bytes_from_hex,
     serde_helpers,
     Hash,
-    HashParseError,
+    KeyParseError,
 };
 
 /// A Pedersen Commitment byte contents
@@ -56,7 +56,7 @@ impl PedersenCommitmentBytes {
         Ok(PedersenCommitmentBytes(key))
     }
 
-    pub fn from_hex(hex: &str) -> Result<Self, HashParseError> {
+    pub fn from_hex(hex: &str) -> Result<Self, KeyParseError> {
         let bytes = fixed_bytes_from_hex(hex)?;
         Ok(Self(bytes))
     }

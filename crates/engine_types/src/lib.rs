@@ -2,7 +2,6 @@
 //  SPDX-License-Identifier: BSD-3-Clause
 
 pub mod bucket;
-pub mod byte_types;
 pub mod commit_result;
 pub mod component;
 pub mod confidential;
@@ -19,7 +18,6 @@ pub mod non_fungible;
 pub mod proof;
 pub mod resource;
 pub mod resource_container;
-pub mod serde_with;
 pub mod stealth;
 pub mod substate;
 pub mod transaction_receipt;
@@ -39,7 +37,6 @@ mod substate_serde;
 mod utxo;
 mod validator_fee;
 
-pub use byte_types::*;
 pub use hash::*;
 pub use template::{calculate_template_binary_hash, parse_template_address};
 pub use utxo::*;

@@ -12,6 +12,7 @@ use std::{
 };
 
 use anyhow::anyhow;
+use ootle_byte_type::ToByteType;
 use serde::de::DeserializeOwned;
 use tari_crypto::{
     keys::PublicKey as _,
@@ -29,27 +30,25 @@ use tari_engine::{
 };
 use tari_engine_types::{
     commit_result::{ExecuteResult, RejectReason},
-    component::derive_component_address_from_public_key,
     indexed_value::IndexedWellKnownTypes,
     substate::{SubstateDiff, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
-    ToByteType,
 };
 use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType, SubstateRequirement};
-use tari_template_builtin::{all_builtin_templates, ACCOUNT_TEMPLATE_ADDRESS};
-use tari_template_lib::{
-    constants::{NFT_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS},
-    models::{ComponentAddress, NonFungibleAddress, ResourceAddress},
-    prelude::RistrettoPublicKeyBytes,
-    types::{Amount, TemplateAddress},
-};
-use tari_transaction::{
+use tari_ootle_transaction::{
     args,
     args::InstructionArg,
     builder::{named_args::BuilderWorkspaceKey, MainIntent},
     Instruction,
     Transaction,
     TransactionBuilder,
+};
+use tari_template_builtin::all_builtin_templates;
+use tari_template_lib::{
+    constants::{NFT_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS},
+    models::{ComponentAddress, NonFungibleAddress, ResourceAddress},
+    prelude::RistrettoPublicKeyBytes,
+    types::{Amount, TemplateAddress},
 };
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 
@@ -59,6 +58,7 @@ use crate::{
         initialize_builtin_faucet_state,
         initialize_builtin_nft_faucet_state,
     },
+    helpers::derive_account_address_from_public_key,
     mocks::AlwaysPassesProofVerifier,
     read_only_state_store::ReadOnlyStateStore,
     template_spec::TemplateSpec,
@@ -288,6 +288,7 @@ impl TemplateTest {
         &self.secret_key
     }
 
+    #[track_caller]
     pub fn assert_calls(&self, expected: &[&'static str]) {
         let calls = self.track_calls.get();
         assert_eq!(calls, expected);
@@ -337,33 +338,21 @@ impl TemplateTest {
     }
 
     #[track_caller]
-    pub fn create_account<T>(
+    pub fn create_account(
         &mut self,
         owner_public_key: RistrettoPublicKeyBytes,
         workspace_id: Option<BuilderWorkspaceKey>,
         proofs: Vec<NonFungibleAddress>,
-    ) -> T
-    where
-        T: DeserializeOwned,
-    {
+    ) -> ComponentAddress {
         let result = self
             .build_and_execute(
-                Transaction::builder_localnet().create_account_with_custom_rules(
-                    owner_public_key,
-                    None,
-                    None,
-                    workspace_id,
-                ),
+                Transaction::builder_localnet().create_account_custom(owner_public_key, None, None, workspace_id),
                 proofs,
             )
             .unwrap_success();
-        result
-            .finalize
-            .execution_results
-            .first()
-            .expect("single instruction without execution result")
-            .decode()
-            .unwrap()
+        let diff = result.finalize.accept().expect("create account failed");
+        let component = diff.up_iter().find_map(|(id, _)| id.as_component_address()).unwrap();
+        component
     }
 
     #[track_caller]
@@ -457,14 +446,6 @@ impl TemplateTest {
         (component, owner_proof, secret_key)
     }
 
-    #[deprecated(
-        since = "0.1.0",
-        note = "Please use create_funded_account instead. This method will be removed."
-    )]
-    pub fn create_owned_account(&mut self) -> (ComponentAddress, NonFungibleAddress, RistrettoSecretKey) {
-        self.create_funded_account()
-    }
-
     #[track_caller]
     pub fn create_funded_account(&mut self) -> (ComponentAddress, NonFungibleAddress, RistrettoSecretKey) {
         let (owner_proof, public_key, secret_key) = self.create_owner_proof();
@@ -481,8 +462,7 @@ impl TemplateTest {
             vec![owner_proof.clone()],
         );
 
-        let account_address =
-            derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &public_key.to_byte_type());
+        let account_address = derive_account_address_from_public_key(&public_key.to_byte_type());
 
         self.enable_fees = old_fail_fees;
         (account_address, owner_proof, secret_key)
@@ -501,22 +481,17 @@ impl TemplateTest {
         let (owner_proof, public_key, secret_key) = self.create_owner_proof();
         let old_fail_fees = self.enable_fees;
         self.enable_fees = false;
-        let result = self.execute_expect_success(
+        let public_key_bytes = public_key.to_byte_type();
+        self.execute_expect_success(
             Transaction::builder_localnet()
                 .call_method(xtr_faucet_component(), "take", args![amount.into()])
                 .put_last_instruction_output_on_workspace("bucket")
-                .create_account_with_bucket(public_key.to_byte_type(), "bucket")
+                .create_account_with_bucket(public_key_bytes, "bucket")
                 .build_and_seal(&secret_key),
             vec![owner_proof.clone()],
         );
 
-        let component = result
-            .finalize
-            .execution_results
-            .get(2)
-            .expect("instruction at 2 no execution result")
-            .decode::<ComponentAddress>()
-            .unwrap();
+        let component = derive_account_address_from_public_key(&public_key_bytes);
 
         self.enable_fees = old_fail_fees;
         (component, owner_proof, secret_key, public_key)
@@ -646,7 +621,7 @@ impl TemplateTest {
             eprintln!("Paid: {}", fee.total_fees_paid());
             eprintln!("Refund: {}", fee.total_refunded());
             eprintln!("Unpaid: {}", fee.unpaid_debt());
-            for (source, amount) in fee.cost_breakdown.iter() {
+            for (source, amount) in fee.fee_breakdown().iter() {
                 eprintln!("- {:?} {}", source, amount);
             }
         }

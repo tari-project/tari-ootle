@@ -27,6 +27,7 @@ use futures::{future, FutureExt};
 use libp2p::identity;
 use log::*;
 use minotari_app_utilities::identity_management;
+use ootle_byte_type::ToByteType;
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common::{
     configuration::bootstrap::{grpc_default_port, ApplicationType},
@@ -36,7 +37,6 @@ use tari_consensus::consensus_constants::ConsensusConstants;
 #[cfg(not(feature = "metrics"))]
 use tari_consensus::traits::hooks::NoopHooks;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_engine_types::ToByteType;
 use tari_epoch_manager::{
     service::{EpochManagerConfig, EpochManagerHandle},
     EpochManagerReader,
@@ -68,10 +68,10 @@ use tari_ootle_common_types::{services::template_provider::TemplateProvider, Net
 use tari_ootle_p2p::TariMessagingSpec;
 use tari_ootle_storage::{global::GlobalDb, StateStore};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
+use tari_ootle_transaction::Transaction;
 use tari_rpc_framework::RpcServer;
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_rocksdb::DatabaseOptions;
-use tari_transaction::Transaction;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 use tokio::{
     sync::{broadcast, mpsc},
@@ -171,7 +171,7 @@ pub async fn spawn_services(
                     .expect("Failed to parse listener address"),
             ],
             swarm: SwarmConfig {
-                protocol_version: format!("/tari/{}/0.0.1", config.network).parse().unwrap(),
+                protocol_version: format!("/tari/{}/0.0.1", config.network).parse()?,
                 user_agent: "/tari/validator/0.0.1".to_string(),
                 enable_mdns: config.validator_node.p2p.enable_mdns,
                 enable_relay: true,

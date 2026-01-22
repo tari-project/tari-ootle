@@ -11,9 +11,9 @@ use tari_epoch_manager::service::EpochManagerHandle;
 use tari_ootle_app_utilities::transaction_executor::TariTransactionProcessor;
 use tari_ootle_common_types::{Network, PeerAddress};
 use tari_ootle_storage::consensus_models::TransactionPool;
+use tari_ootle_transaction::Transaction;
 use tari_rpc_state_sync::RpcStateSyncClientProtocol;
 use tari_shutdown::ShutdownSignal;
-use tari_transaction::Transaction;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 use tokio::{
     sync::{broadcast, mpsc, watch},

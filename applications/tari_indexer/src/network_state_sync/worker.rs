@@ -10,6 +10,7 @@ use tari_engine_types::{
     transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
 };
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerEvent, EpochManagerReader};
+use tari_indexer_client::event::{IndexerEvent, NewEpochEvent, TransactionFinalizedEvent};
 use tari_networking::NetworkingHandle;
 use tari_ootle_common_types::{
     optional::Optional,
@@ -25,14 +26,13 @@ use tari_ootle_storage::{
     consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof, SubstateValueFilterFlags},
     StorageError,
 };
+use tari_ootle_transaction::TransactionId;
 use tari_rpc_framework::__macro_reexports::future::Either;
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib::prelude::Amount;
-use tari_transaction::TransactionId;
 use tokio::{sync::broadcast, time};
 
 use crate::{
-    event::{IndexerEvent, NewEpochEvent, TransactionFinalizedEvent},
     network_state_sync::{
         committee_client::{ValidatorCommitteeRpcPool, ValidatorRpcSession},
         config::NetworkWideStateSyncConfig,

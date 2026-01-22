@@ -25,7 +25,7 @@ pub(crate) mod error;
 use tari_epoch_manager::EpochManagerReader;
 use tari_indexer_client::types::TransactionEntry;
 use tari_ootle_common_types::{optional::Optional, NodeAddressable, ToSubstateAddress};
-use tari_transaction::{Transaction, TransactionId};
+use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::client::{TransactionResultStatus, ValidatorNodeClientFactory, ValidatorNodeRpcClient};
 
 use crate::{

@@ -1,29 +1,11 @@
-//   Copyright 2022. The Tari Project
-//
-//   Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
-//   following conditions are met:
-//
-//   1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following
-//   disclaimer.
-//
-//   2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
-//   following disclaimer in the documentation and/or other materials provided with the distribution.
-//
-//   3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote
-//   products derived from this software without specific prior written permission.
-//
-//   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
-//   INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-//   DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-//   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-//   SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-//   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
-//   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//   Copyright 2026 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
 
 use std::borrow::Cow;
 
 use serde::{Deserialize, Deserializer, Serializer};
-use tari_template_lib::types::serde_helpers::BytesVisitor;
+
+use crate::visitor::BytesVisitor;
 
 pub fn serialize<S: Serializer, T: AsRef<[u8]>>(v: &T, s: S) -> Result<S::Ok, S::Error> {
     if s.is_human_readable() {
@@ -45,7 +27,7 @@ where
         let bytes = hex::decode(&*hex).map_err(serde::de::Error::custom)?;
         T::try_from(&bytes).map_err(|e| {
             serde::de::Error::custom(format!(
-                "Failed to convert bytes to {}: {e}",
+                "Failed to convert hex bytes to {}: {e}",
                 std::any::type_name::<T>()
             ))
         })?
@@ -53,7 +35,7 @@ where
         let bytes = d.deserialize_byte_buf(BytesVisitor::new())?;
         T::try_from(bytes.as_ref()).map_err(|e| {
             serde::de::Error::custom(format!(
-                "Failed to convert bytes to {}: {e}",
+                "Failed to convert hex bytes to {}: {e}",
                 std::any::type_name::<T>()
             ))
         })?
@@ -74,7 +56,7 @@ where
         let bytes = hex::decode(&*hex).map_err(serde::de::Error::custom)?;
         T::try_from(bytes).map_err(|e| {
             serde::de::Error::custom(format!(
-                "Failed to convert bytes to {}: {e}",
+                "Failed to convert hex bytes to {}: {e}",
                 std::any::type_name::<T>()
             ))
         })?
@@ -82,7 +64,7 @@ where
         let bytes = d.deserialize_byte_buf(BytesVisitor::new())?;
         T::try_from(bytes.into()).map_err(|e| {
             serde::de::Error::custom(format!(
-                "Failed to convert bytes to {}: {e}",
+                "Failed to convert hex bytes to {}: {e}",
                 std::any::type_name::<T>()
             ))
         })?
@@ -133,7 +115,7 @@ pub mod option {
             .transpose()
             .map_err(|e| {
                 serde::de::Error::custom(format!(
-                    "Failed to convert bytes to {}: {e}",
+                    "Failed to convert hex bytes to {}: {e}",
                     std::any::type_name::<T>()
                 ))
             })?;
@@ -144,6 +126,7 @@ pub mod option {
 #[cfg(test)]
 mod tests {
     use serde::Serialize;
+    use tari_template_lib::types::Hash;
 
     use super::*;
 
@@ -153,6 +136,8 @@ mod tests {
         fixed: [u8; 32],
         #[serde(with = "super")]
         vec: Vec<u8>,
+        #[serde(with = "super")]
+        hash: Hash,
     }
 
     // Test it
@@ -161,10 +146,12 @@ mod tests {
         let data = TestCase {
             fixed: [1; 32],
             vec: vec![5; 100],
+            hash: Hash::from_array([2; 32]),
         };
         let serialized = serde_json::to_vec(&data).unwrap();
         let deserialized: TestCase = serde_json::from_slice(&serialized).unwrap();
         assert_eq!(data.fixed, deserialized.fixed);
         assert_eq!(data.vec, deserialized.vec);
+        assert_eq!(data.hash, deserialized.hash);
     }
 }

@@ -3,12 +3,8 @@
 
 use std::collections::HashSet;
 
-use tari_engine_types::{
-    component::derive_component_address_from_public_key,
-    indexed_value::IndexedWellKnownTypes,
-    FromByteType,
-    ToByteType,
-};
+use ootle_byte_type::{FromByteType, ToByteType};
+use tari_engine_types::{component::derive_component_address_from_public_key, indexed_value::IndexedWellKnownTypes};
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
@@ -91,7 +87,7 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         account_address: WalletOotleAddressWithKeyIds,
     ) -> Result<AccountWithAddress, AccountsApiError> {
         let account_public_key = account_address.address.account_key().to_byte_type();
-        let account_component_address = derive_account_address_from_public_key(&account_public_key);
+        let account_component_address = self.derive_account_address_from_public_key(&account_public_key);
 
         let birthday_epoch = self.epoch_birthday.calculate_current_epoch();
 

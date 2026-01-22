@@ -14,7 +14,7 @@ use tari_ootle_storage::{
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
 };
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 
 use crate::helpers::{
     commit_chain,

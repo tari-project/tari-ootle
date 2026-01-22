@@ -81,6 +81,7 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
                     return Ok(());
                 },
                 Err(err) => {
+                    error!(target: LOG_TARGET, "🌍 Error fetching state transitions: {}", err);
                     self.send(Err(RpcStatus::log_internal_error(LOG_TARGET)(err))).await?;
                     return Err(());
                 },

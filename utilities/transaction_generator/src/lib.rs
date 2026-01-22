@@ -8,4 +8,4 @@ mod transaction_writer;
 pub use transaction_reader::*;
 pub use transaction_writer::*;
 
-pub type BoxedTransactionBuilder = Box<dyn Fn(u64) -> tari_transaction::Transaction + Send + Sync + 'static>;
+pub type BoxedTransactionBuilder = Box<dyn Fn(u64) -> tari_ootle_transaction::Transaction + Send + Sync + 'static>;

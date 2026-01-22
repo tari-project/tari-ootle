@@ -6,7 +6,6 @@ use std::fmt::Display;
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
-use tari_engine_types::serde_with;
 use tari_ootle_common_types::{hashing::quorum_certificate_id_hasher, Epoch, NodeHeight, ShardGroup};
 use tari_sidechain::QuorumDecision;
 
@@ -21,7 +20,7 @@ use crate::{
 pub struct ProposalCertificate {
     height: NodeHeight,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "serde_with::hex")]
+    #[serde(with = "ootle_serde::hex")]
     header_hash: FixedHash,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     parent_id: BlockId,

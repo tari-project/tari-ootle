@@ -6,8 +6,8 @@ use blake2::{
     Blake2b,
     Digest,
 };
+use ootle_byte_type::{ConvertFromByteType, FromByteType, ToByteType};
 use tari_crypto::ristretto::RistrettoSchnorr;
-use tari_engine_types::{ConvertFromByteType, FromByteType, ToByteType};
 use tari_template_lib_types::crypto::{PublicKey, RistrettoPublicKeyBytes, SignaturePayload};
 
 pub trait GetVerifier {
@@ -86,7 +86,6 @@ mod tests {
         keys::PublicKey as _,
         ristretto::{RistrettoPublicKey, RistrettoSchnorr},
     };
-    use tari_engine_types::ToByteType;
 
     use super::*;
 

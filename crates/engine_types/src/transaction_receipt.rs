@@ -19,7 +19,6 @@ use crate::{
     events::Event,
     fees::FeeReceipt,
     logs::LogEntry,
-    serde_with,
     substate::{hash_substate, SubstateDiff, SubstateId},
     ValidatorFeeWithdrawal,
 };
@@ -92,6 +91,8 @@ pub struct TransactionReceipt {
     pub events: Box<[Event]>,
     pub logs: Box<[LogEntry]>,
     pub fee_receipt: FeeReceipt,
+    #[serde(default)]
+    pub epoch: u64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, borsh::BorshSerialize)]
@@ -99,6 +100,16 @@ pub struct TransactionReceipt {
 pub enum FinalizeOutcome {
     Commit,
     FeeIntentCommit,
+}
+
+impl FinalizeOutcome {
+    pub fn is_commit(&self) -> bool {
+        matches!(self, FinalizeOutcome::Commit)
+    }
+
+    pub fn is_fee_intent_commit(&self) -> bool {
+        matches!(self, FinalizeOutcome::FeeIntentCommit)
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, borsh::BorshSerialize)]
@@ -128,6 +139,6 @@ pub struct UpSubstate {
     pub substate_id: SubstateId,
     pub version: u32,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "serde_with::hex")]
+    #[serde(with = "ootle_serde::hex")]
     pub value_hash: FixedHash,
 }

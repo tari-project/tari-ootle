@@ -26,3 +26,5 @@ pub mod rpc_service;
 pub use error::ValidatorNodeRpcClientError;
 
 pub const STATE_SYNC_MAX_BATCH_SIZE: usize = 100;
+
+pub use tari_ootle_p2p as p2p;

@@ -7,8 +7,8 @@ use anyhow::anyhow;
 use libp2p_identity as identity;
 use libp2p_identity::PeerId;
 use multiaddr::Multiaddr;
+use ootle_byte_type::ToByteType;
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::hex::Hex};
-use tari_engine_types::ToByteType;
 use tari_ootle_common_types::displayable::Displayable;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 

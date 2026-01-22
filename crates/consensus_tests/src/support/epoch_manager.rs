@@ -7,10 +7,10 @@ use std::{
     time::Instant,
 };
 
+use ootle_byte_type::ToByteType;
 use rand::seq::IteratorRandom;
 use tari_common_types::types::FixedHash;
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::ToByteType;
 use tari_epoch_manager::{EpochManagerError, EpochManagerEvent, EpochManagerReader};
 use tari_ootle_common_types::{
     committee::{Committee, CommitteeInfo},

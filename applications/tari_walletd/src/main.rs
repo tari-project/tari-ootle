@@ -24,10 +24,10 @@ use std::{fs, panic, process};
 
 use anyhow::Context;
 use log::*;
+use ootle_byte_type::ToByteType;
 use serde_json::json;
 use tari_common::initialize_logging;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_engine_types::ToByteType;
 use tari_ootle_app_utilities::configuration::load_configuration;
 use tari_ootle_wallet_sdk::{cipher_seed::CipherSeedRestore, models::KeyBranch};
 use tari_ootle_walletd::{

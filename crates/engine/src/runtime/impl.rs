@@ -23,7 +23,7 @@
 use std::sync::{atomic, atomic::AtomicPtr, Arc};
 
 use log::{warn, *};
-use tari_bor::decode_exact;
+use tari_bor::{decode_exact, MaybeTagged};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason},
@@ -49,6 +49,12 @@ use tari_engine_types::{
     ValidatorFeePoolAddress,
 };
 use tari_ootle_common_types::{services::template_provider::TemplateProvider, GetVerifier};
+use tari_ootle_transaction::{
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
+    AllocatableAddressType,
+    ComponentReference,
+    ResourceAddressRef,
+};
 use tari_template_abi::{TemplateDef, Type};
 use tari_template_builtin::{is_builtin_template_address, ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
@@ -124,12 +130,6 @@ use tari_template_lib::{
         ResourceInfo,
         TemplateAddress,
     },
-};
-use tari_transaction::{
-    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
-    AllocatableAddressType,
-    ComponentReference,
-    ResourceAddressRef,
 };
 
 use super::{working_state::WorkingState, ActionIdent, Runtime, RuntimeEvent};
@@ -507,27 +507,46 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         id,
                         existing_ids: state_mut.workspace().all_ids_iter().collect(),
                     })?;
-                let allocation_id: ComponentAddressAllocation =
+
+                // If the value is a ComponentAddress, use it directly. If it's an integer, treat it as an allocation
+                // ID.
+                let address = if value.is_tag_of::<ComponentAddress>() {
                     tari_bor::from_value(value).map_err(|e| RuntimeError::InvalidArgument {
                         argument: "ComponentCall::FromWorkspace",
-                        reason: format!(
-                            "Item on workspace at key '{id}' is not a valid ComponentAddressAllocation: {e}",
-                        ),
-                    })?;
-                let substate_id = state_mut.get_used_address(allocation_id.id())?;
-                let address = match substate_id {
-                    SubstateId::Component(addr) => addr,
-                    substate_id => {
-                        let substate_type = tari_ootle_common_types::substate_type::SubstateType::from(&substate_id);
-                        return Err(RuntimeError::InvalidArgument {
-                            argument: "ComponentCall::Allocation",
+                        reason: format!("Item on workspace at key '{id}' is not a valid ComponentAddress: {e}",),
+                    })?
+                } else if value.is_tag_of::<ComponentAddressAllocation>() {
+                    let allocation_id: ComponentAddressAllocation =
+                        tari_bor::from_value(value).map_err(|e| RuntimeError::InvalidArgument {
+                            argument: "ComponentCall::FromWorkspace",
                             reason: format!(
-                                "Invalid attempt to load component with an address allocation ID ({}) with substate \
-                                 type {substate_type}",
-                                allocation_id.id()
+                                "Item on workspace at key '{id}' is not a valid ComponentAddressAllocation: {e}",
                             ),
-                        });
-                    },
+                        })?;
+                    let substate_id = state_mut.get_substate_id_from_used_address_allocation(allocation_id.id())?;
+                    match substate_id {
+                        SubstateId::Component(addr) => addr,
+                        substate_id => {
+                            let substate_type =
+                                tari_ootle_common_types::substate_type::SubstateType::from(&substate_id);
+                            return Err(RuntimeError::InvalidArgument {
+                                argument: "ComponentCall::Allocation",
+                                reason: format!(
+                                    "Invalid attempt to load component with an address allocation ID ({}) with \
+                                     substate type {substate_type}",
+                                    allocation_id.id()
+                                ),
+                            });
+                        },
+                    }
+                } else {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "ComponentCall::FromWorkspace",
+                        reason: format!(
+                            "Item on workspace at key '{id}' is not a valid ComponentAddress or \
+                             ComponentAddressAllocation",
+                        ),
+                    });
                 };
                 state_mut
                     .load_and_cache_component(&address)

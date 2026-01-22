@@ -62,6 +62,12 @@ use tari_engine_types::{
     published_template::TemplateBlob,
     ValidatorFeePoolAddress,
 };
+use tari_ootle_transaction::{
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
+    AllocatableAddressType,
+    ComponentReference,
+    ResourceAddressRef,
+};
 use tari_template_lib::{
     args::{
         AddressAllocationInvokeArg,
@@ -87,12 +93,6 @@ use tari_template_lib::{
     },
     models::{BucketId, ComponentAddress, Metadata, NonFungibleAddress, StealthTransferStatement, VaultRef},
     types::{engine_args::SignatureAction, EntityId, TemplateAddress},
-};
-use tari_transaction::{
-    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
-    AllocatableAddressType,
-    ComponentReference,
-    ResourceAddressRef,
 };
 pub use tracker::StateTracker;
 
@@ -246,9 +246,10 @@ pub struct Runtime {
     interface: NonNull<Box<dyn RuntimeInterface>>,
 }
 
-// SAFETY: We promise that we will not access this concurrently,
-// satisfying the Sync requirement manually.
+// SAFETY: The Runtime is strictly only used on a single thread. We implement Sync and Send manually to satify wasmer,
+// which tries to account for multithreaded usage.
 unsafe impl Sync for Runtime {}
+// SAFETY: The Runtime is strictly only used on a single thread
 unsafe impl Send for Runtime {}
 
 impl Runtime {

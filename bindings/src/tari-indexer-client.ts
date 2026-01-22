@@ -3,6 +3,7 @@
 
 export * from "./types/tari-indexer-client/IndexerSubmitTransactionResponse";
 export * from "./types/tari-indexer-client/GetTransactionReceiptResponse";
+export * from "./types/tari-indexer-client/GetNetworkInfoResponse";
 export * from "./types/tari-indexer-client/TemplateMetadata";
 export * from "./types/tari-indexer-client/GetUtxoUpdatesRequest";
 export * from "./types/tari-indexer-client/ListSubstatesResponse";

@@ -5,8 +5,7 @@ use std::collections::HashMap;
 
 use futures::StreamExt;
 use log::{debug, info, trace, warn};
-use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::ConvertFromByteType;
+use ootle_byte_type::FromByteType;
 use tari_ootle_common_types::{optional::Optional, shard::Shard, Network, NumPreshards, StateVersion};
 use tari_ootle_wallet_sdk::{
     models::{
@@ -260,7 +259,7 @@ where TSpec: WalletSdkSpec
     }
 
     fn check_if_tag_matches(&self, unspent: &UtxoUnspent) -> Result<bool, StealthScannerApiError> {
-        let Ok(public_nonce) = RistrettoPublicKey::convert_from_byte_type(&unspent.public_nonce).inspect_err(|e| {
+        let Ok(public_nonce) = unspent.public_nonce.try_from_byte_type().inspect_err(|e| {
             warn!(
                 target: LOG_TARGET,
                 "⚠️ Received a malformed public nonce while syncing output: {}. Ignoring output.",

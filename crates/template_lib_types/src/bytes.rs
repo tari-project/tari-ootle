@@ -5,14 +5,17 @@ use tari_template_abi::rust::ops::{Deref, DerefMut};
 
 use crate::serde_helpers::BytesVisitor;
 
-/// A wrapper around `Vec<u8>` that serializes to and from bytes efficiently.
-/// Unfortunately, due to some factors (impl serde for Vec<T>, no specialization) ciborium will represent bytes as
-/// `Array(vec![Integer(u8), ....])` instead of `Bytes(vec![u8, ...])`. which results in a significant bloat in size.
-/// This wrapper uses of the `Bytes` variant in ciborium (similar to `serde_as(as = "Bytes")`).
+/// A wrapper around a byte buffer that implements efficient serde serialisation.
+///
+/// Unfortunately, because we cannot implement a specialized version of serde::Serialize (impl serde::Serialize for
+/// Vec<u8>) ciborium will represent bytes as `Array(vec![Integer(u8), ....])` instead of `Bytes(vec![u8, ...])`. which
+/// results in a significant size overhead. This wrapper uses the `Value::Bytes` variant (similar to `serde_as(as =
+/// "Bytes")`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 #[serde(transparent)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, type = "Uint8Array"))]
+#[cfg_attr(feature = "std", derive(Hash))]
 pub struct Bytes(#[serde(with = "self")] Box<[u8]>);
 
 impl Bytes {
@@ -83,4 +86,19 @@ where
 {
     let bytes = d.deserialize_byte_buf(BytesVisitor::new())?;
     Ok(bytes.into_owned().into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encode_decode_cbor() {
+        let original = Bytes::from_vec(vec![1, 2, 3, 4, 5]);
+        let val = tari_bor::to_value(&original).unwrap();
+        let arr = val.as_bytes().expect("Expected bytes");
+        let deserialized: Bytes = tari_bor::from_value(&val).unwrap();
+        assert_eq!(original, deserialized);
+        assert_eq!(arr, original.as_slice());
+    }
 }

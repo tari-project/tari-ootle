@@ -27,7 +27,7 @@ use tari_networking::NetworkingHandle;
 use tari_ootle_common_types::PeerAddress;
 use tari_ootle_p2p::TariMessagingSpec;
 use tari_ootle_storage::StateStore;
-use tari_transaction::Transaction;
+use tari_ootle_transaction::Transaction;
 use tokio::{sync::mpsc, task, task::JoinHandle};
 
 #[cfg(feature = "metrics")]

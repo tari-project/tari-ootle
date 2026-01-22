@@ -41,14 +41,7 @@ use tari_engine_types::{
 };
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{Epoch, SubstateAddress, SubstateRequirement};
-use tari_ootle_wallet_sdk::{apis::confidential_transfer::UtxoInputSelection, crypto::memo::Memo};
-use tari_template_lib::{
-    constants::STEALTH_TARI_RESOURCE_ADDRESS,
-    models::{BucketId, NonFungibleAddress, NonFungibleId},
-    prelude::{ResourceAddress, RistrettoPublicKeyBytes},
-    types::{Amount, TemplateAddress},
-};
-use tari_transaction::{
+use tari_ootle_transaction::{
     args,
     args::InstructionArg,
     call_arg,
@@ -56,6 +49,13 @@ use tari_transaction::{
     Transaction,
     TransactionId,
     UnsignedTransaction,
+};
+use tari_ootle_wallet_sdk::{apis::confidential_transfer::UtxoInputSelection, crypto::memo::Memo};
+use tari_template_lib::{
+    constants::STEALTH_TARI_RESOURCE_ADDRESS,
+    models::{BucketId, NonFungibleAddress, NonFungibleId},
+    prelude::{ResourceAddress, RistrettoPublicKeyBytes},
+    types::{Amount, TemplateAddress},
 };
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 use tari_wallet_daemon_client::{

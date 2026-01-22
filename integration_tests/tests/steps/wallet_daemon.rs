@@ -7,12 +7,12 @@ use cucumber::{then, when};
 use integration_tests::{claim_proof::CucumberClaimProof, util::transaction_builder, wallet_daemon_client, TariWorld};
 use rand::{rngs::OsRng, Rng};
 use tari_engine_types::commit_result::FinalizeResult;
+use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::models::KeyBranch;
 use tari_template_lib::{
     constants::XTR,
     types::{bytes::Bytes, crypto::PedersenCommitmentBytes, Amount},
 };
-use tari_transaction::args;
 use tari_transaction_components::{
     tari_amount::T,
     transaction_components::{memo_field::TxType, MemoField},
@@ -144,7 +144,7 @@ async fn when_i_run_up_fees(world: &mut TariWorld, amount: u64, wallet_daemon_na
             panic!("Transaction failed: {}", reason);
         }
 
-        fees_total += wait_resp.result.as_ref().unwrap().fee_receipt.total_fees_paid;
+        fees_total += wait_resp.result.as_ref().unwrap().fee_receipt.total_fees_paid();
         if fees_total >= amount {
             integration_tests::cucumber_log!("Reached target of {} fees", fees_total);
             break;

@@ -4,15 +4,16 @@
 use std::collections::HashMap;
 
 use log::info;
-use tari_engine_types::{indexed_value::decode_value_at_path, ToByteType};
+use ootle_byte_type::ToByteType;
+use tari_engine_types::indexed_value::decode_value_at_path;
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
+use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::models::Account;
 use tari_template_lib::{
     models::{ComponentAddress, VaultId},
     prelude::{ResourceAddress, ResourceType, XTR},
     types::Amount,
 };
-use tari_transaction::args;
 
 use crate::{faucet::Faucet, runner::Runner, timer::TraceTimer};
 

@@ -6,10 +6,7 @@ use std::{collections::HashSet, fmt, fmt::Display};
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::LeafBlock;
-use tari_engine_types::{
-    serde_with,
-    substate::{hash_substate, Substate, SubstateId, SubstateValue},
-};
+use tari_engine_types::substate::{hash_substate, Substate, SubstateId, SubstateValue};
 use tari_ootle_common_types::{
     displayable::Displayable,
     shard::Shard,
@@ -19,8 +16,8 @@ use tari_ootle_common_types::{
     VersionedSubstateId,
     VersionedSubstateIdRef,
 };
+use tari_ootle_transaction::TransactionId;
 use tari_state_tree::{SubstateTreeChange, Version};
-use tari_transaction::TransactionId;
 
 use crate::{
     consensus_models::{substate_update_batch::SubstateUpdateBatch, SubstateLock, SubstateTransition},
@@ -36,7 +33,7 @@ pub struct SubstateRecord {
     pub version: u32,
     pub substate_value: Option<SubstateValue>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "serde_with::hex")]
+    #[serde(with = "ootle_serde::hex")]
     pub state_hash: FixedHash,
     pub created: SubstateCreated,
     pub destroyed: Option<SubstateDestroyed>,

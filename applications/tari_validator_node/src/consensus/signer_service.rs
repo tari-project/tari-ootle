@@ -1,11 +1,11 @@
 //    Copyright 2023 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
+use ootle_byte_type::ConvertFromByteType;
 use rand::rngs::OsRng;
 use tari_consensus::traits::{ValidatorSignatureVerifierService, ValidatorSignerService};
 use tari_consensus_types::{SignedMessage, ToSignatureMessage, ValidatorSchnorrSignature};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::ConvertFromByteType;
 use tari_ootle_app_utilities::keypair::RistrettoKeypair;
 
 #[derive(Debug, Clone)]

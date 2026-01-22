@@ -14,12 +14,13 @@ use chacha20poly1305::{
     XNonce,
 };
 use digest::FixedOutput;
+use ootle_byte_type::ToByteType;
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
     hashing::DomainSeparatedHasher,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_engine_types::{crypto::get_commitment_factory, ToByteType};
+use tari_engine_types::crypto::get_commitment_factory;
 use tari_hashing::TransactionSecureNonceKdfDomain;
 use tari_template_lib::types::{crypto::PedersenCommitmentBytes, EncryptedData};
 use tari_utilities::{safe_array::SafeArray, ByteArray};
@@ -220,7 +221,7 @@ fn decrypt_inner(
 mod tests {
 
     use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
-    use tari_engine_types::{crypto::get_commitment_factory, ToByteType};
+    use tari_engine_types::crypto::get_commitment_factory;
 
     use super::*;
 

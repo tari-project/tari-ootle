@@ -16,11 +16,13 @@ tari_ootle_common_types = { workspace = true }
 tari_ootle_wallet_crypto = { workspace = true, features = ["serde"] }
 tari_template_builtin = { workspace = true }
 tari_consensus_types = { workspace = true }
-tari_transaction = { workspace = true }
+tari_ootle_transaction = { workspace = true }
 tari_template_lib = { workspace = true }
 tari_template_abi = { workspace = true }
 tari_ootle_address = { workspace = true, features = ["serde"] }
 tari_hashing = { workspace = true }
+ootle_serde = { workspace = true }
+ootle_byte_type = { workspace = true }
 
 anyhow = { workspace = true }
 blake2 = { workspace = true }
@@ -51,7 +53,7 @@ ts = [
     "tari_engine_types/ts",
     "tari_template_abi/ts",
     "tari_template_lib/ts",
-    "tari_transaction/ts",
+    "tari_ootle_transaction/ts",
     "tari_ootle_wallet_crypto/ts",
     "tari_consensus_types/ts"
 ]

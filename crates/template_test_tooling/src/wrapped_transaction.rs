@@ -5,12 +5,12 @@ use tari_engine::executables::{Executable, Instructions, WeightedExecutable};
 use tari_ootle_common_types::SubstateRequirement;
 
 pub struct WrappedTransaction {
-    transaction: tari_transaction::Transaction,
+    transaction: tari_ootle_transaction::Transaction,
     inputs: Vec<SubstateRequirement>,
 }
 
 impl WrappedTransaction {
-    pub fn new(transaction: tari_transaction::Transaction) -> Self {
+    pub fn new(transaction: tari_ootle_transaction::Transaction) -> Self {
         Self {
             transaction,
             inputs: vec![],
@@ -24,7 +24,7 @@ impl WrappedTransaction {
 }
 
 impl Executable for WrappedTransaction {
-    fn to_id(&self) -> tari_transaction::TransactionId {
+    fn to_id(&self) -> tari_ootle_transaction::TransactionId {
         self.transaction.calculate_id()
     }
 
@@ -50,7 +50,7 @@ impl Executable for WrappedTransaction {
 }
 
 impl WeightedExecutable for WrappedTransaction {
-    fn calculate_weight(&self) -> tari_transaction::TransactionWeight {
+    fn calculate_weight(&self) -> tari_ootle_transaction::TransactionWeight {
         self.transaction.calculate_weight()
     }
 }

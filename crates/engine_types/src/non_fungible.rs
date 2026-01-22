@@ -4,8 +4,6 @@
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tari_bor::BorError;
 
-use crate::serde_with;
-
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct NonFungibleContainer(Option<NonFungible>);
@@ -40,11 +38,11 @@ impl NonFungibleContainer {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct NonFungible {
     #[cfg_attr(feature = "ts", ts(type = "any"))]
-    #[serde(with = "serde_with::cbor_value")]
+    #[serde(with = "ootle_serde::cbor_value")]
     #[borsh(serialize_with = "crate::borsh::serialize_cbor_value")]
     data: tari_bor::Value,
     #[cfg_attr(feature = "ts", ts(type = "any"))]
-    #[serde(with = "serde_with::cbor_value")]
+    #[serde(with = "ootle_serde::cbor_value")]
     #[borsh(serialize_with = "crate::borsh::serialize_cbor_value")]
     mutable_data: tari_bor::Value,
 }

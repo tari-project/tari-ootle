@@ -5,7 +5,7 @@ use std::ops::Deref;
 
 use axum::{response::Response, Extension, Json};
 use libp2p::swarm::dial_opts::PeerCondition;
-use tari_engine_types::FromByteType;
+use ootle_byte_type::FromByteType;
 use tari_indexer_client::{
     types,
     types::{
@@ -13,6 +13,7 @@ use tari_indexer_client::{
         AddPeerResponse,
         ConnectionDirection,
         GetConnectionsResponse,
+        GetNetworkInfoResponse,
         GetNetworkSyncStateResponse,
         NetworkDescription,
         SyncProgress,
@@ -22,6 +23,19 @@ use tari_networking::{is_supported_multiaddr, DialOpts, NetworkingService};
 use tari_ootle_common_types::{optional::Optional, public_key_to_peer_id};
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
+
+#[utoipa::path(get, path = "/network", description = "Get network info")]
+pub async fn get(Extension(context): Extension<HandlerContext>) -> HandlerResult<Json<GetNetworkInfoResponse>> {
+    let epoch = context.epoch_manager().get_current_epoch();
+    let network = context.network();
+
+    let response = GetNetworkInfoResponse {
+        epoch,
+        network_byte: network.as_byte(),
+        network,
+    };
+    Ok(Json(response))
+}
 
 #[utoipa::path(get, path = "/network/stats", description = "Get network sync stats")]
 pub async fn get_network_sync_stats(

@@ -22,8 +22,9 @@
 
 pub mod args;
 pub mod builder;
+mod envelope;
 mod hashing;
-mod special_json_arg_syntax;
+mod signable;
 mod transaction;
 mod transaction_id;
 mod unsigned_transaction;
@@ -31,6 +32,8 @@ mod v1;
 mod weight;
 
 pub use builder::TransactionBuilder;
+pub use envelope::*;
+pub use signable::*;
 pub use transaction::*;
 pub use transaction_id::*;
 pub use unsigned_transaction::*;

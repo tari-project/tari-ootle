@@ -37,9 +37,9 @@ use tari_ootle_storage::{
     StateStoreWriteTransaction,
     StorageError,
 };
+use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_sidechain::QuorumDecision;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
-use tari_transaction::{Transaction, TransactionId};
 
 use crate::{hotstuff::transaction_manager::TransactionLockConflicts, tracing::TraceTimer};
 

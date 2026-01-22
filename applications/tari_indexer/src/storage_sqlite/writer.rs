@@ -13,7 +13,7 @@ use tari_ootle_storage::{
     StorageError,
 };
 use tari_ootle_storage_sqlite::SqliteTransaction;
-use tari_transaction::Transaction;
+use tari_ootle_transaction::Transaction;
 
 use crate::{
     diesel::ExpressionMethods,

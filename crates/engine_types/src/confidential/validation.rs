@@ -1,6 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use ootle_byte_type::{ConvertFromByteType, FromByteType};
 use tari_crypto::{
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey},
     tari_utilities::ByteArray,
@@ -10,8 +11,6 @@ use tari_template_lib::{models::ConfidentialOutputStatement, types::Amount};
 use crate::{
     crypto::{range_proof::validate_bullet_proof, validate_elgamal_verifiable_balance_proof, ValidatedPrivateOutput},
     resource_container::ResourceError,
-    ConvertFromByteType,
-    FromByteType,
 };
 
 #[derive(Debug)]

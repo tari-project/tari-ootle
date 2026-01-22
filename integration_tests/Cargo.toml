@@ -35,12 +35,13 @@ tari_engine = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_indexer_client = { workspace = true, features = ["client"] }
 tari_template_lib = { workspace = true }
-tari_transaction = { workspace = true }
+tari_ootle_transaction = { workspace = true }
 tari_validator_node_client = { workspace = true }
 tari_wallet_daemon_client = { workspace = true }
 tari_base_node_client = { workspace = true }
 tari_transaction_manifest = { workspace = true }
 tari_ootle_wallet_sdk = { workspace = true }
+ootle_byte_type = { workspace = true }
 
 # Minotari
 minotari_console_wallet = { git = "https://github.com/tari-project/tari.git", tag = "v5.2.0-pre.5" }

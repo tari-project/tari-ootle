@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use prometheus_client::{metrics::counter::Counter, registry::Registry};
-use tari_transaction::{Transaction, TransactionId};
+use tari_ootle_transaction::{Transaction, TransactionId};
 
 use crate::metrics::CollectorRegister;
 

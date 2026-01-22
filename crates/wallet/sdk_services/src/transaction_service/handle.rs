@@ -2,8 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::commit_result::ExecuteResult;
+use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_ootle_wallet_sdk::models::{NewAccountData, WalletLockId};
-use tari_transaction::{Transaction, TransactionId};
 use tokio::sync::{mpsc, oneshot};
 
 use super::TransactionServiceError;

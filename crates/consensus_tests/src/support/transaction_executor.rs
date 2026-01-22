@@ -26,8 +26,8 @@ use tari_ootle_storage::{
     consensus_models::{TransactionExecution, VersionedSubstateIdLockIntent},
     StateStore,
 };
+use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_template_lib::prelude::XTR;
-use tari_transaction::{Transaction, TransactionId};
 
 use crate::support::{create_execution_result_for_transaction, executions_store::TestExecutionSpecStore, TestAddress};
 

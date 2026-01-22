@@ -24,7 +24,7 @@ use tari_ootle_common_types::{
     SubstateAddress,
     SubstateLockType,
 };
-use tari_transaction::{Transaction, TransactionId};
+use tari_ootle_transaction::{Transaction, TransactionId};
 
 use crate::{
     consensus_models::{

@@ -24,8 +24,8 @@ use std::{collections::HashMap, str::FromStr};
 
 use proc_macro2::TokenStream;
 use syn::parse2;
+use tari_ootle_transaction::Instruction;
 use tari_template_lib::types::TemplateAddress;
-use tari_transaction::Instruction;
 
 use self::ast::ManifestAst;
 pub use crate::value::ManifestValue;

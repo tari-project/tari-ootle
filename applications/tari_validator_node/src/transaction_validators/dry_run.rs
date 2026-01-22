@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use log::warn;
-use tari_transaction::Transaction;
+use tari_ootle_transaction::Transaction;
 
 use crate::{transaction_validators::TransactionValidationError, validator::Validator};
 
@@ -33,14 +33,14 @@ impl Validator<Transaction> for TransactionDryRunValidator {
 mod tests {
     use indexmap::IndexSet;
     use tari_ootle_common_types::Network;
-    use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
-    use tari_transaction::{
+    use tari_ootle_transaction::{
         Transaction,
         TransactionSealSignature,
         TransactionSignature,
         UnsealedTransactionV1,
         UnsignedTransactionV1,
     };
+    use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
     use crate::{
         transaction_validators::{TransactionDryRunValidator, TransactionValidationError},

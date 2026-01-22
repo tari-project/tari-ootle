@@ -265,3 +265,13 @@ message SyncTemplatesResponse {
 }
 
 message GetChainSummary {}
+
+message GetSubstatesBatchRequest {
+  // Encoded SubstateIds
+  repeated bytes substate_ids = 1;
+}
+
+// Streaming response
+message GetSubstatesBatchResponse {
+  tari.ootle.consensus.Substate substate = 1;
+}

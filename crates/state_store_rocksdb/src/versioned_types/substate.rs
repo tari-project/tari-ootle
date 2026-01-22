@@ -34,3 +34,56 @@ impl From<SubstateRecord> for VersionedSubstateRecord {
         Self::V1(record)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tari_bor::Value;
+    use tari_common_types::types::FixedHash;
+    use tari_engine_types::{
+        component::{ComponentBody, ComponentHeader},
+        substate::SubstateValue,
+    };
+    use tari_ootle_common_types::{shard::Shard, Epoch};
+    use tari_ootle_storage::consensus_models::{SubstateCreated, SubstateDestroyed};
+    use tari_utilities::hex::Hex;
+
+    use super::*;
+    use crate::codecs::{DbCodec, DefaultCodec};
+
+    #[test]
+    fn encode_decode() {
+        let codec = DefaultCodec::new();
+        let original = SubstateRecord {
+            substate_id: "component_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                .parse()
+                .unwrap(),
+            version: 0,
+            substate_value: Some(SubstateValue::Component(ComponentHeader {
+                template_address: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                    .parse()
+                    .unwrap(),
+                module_name: "blah".to_string(),
+                owner_key: None,
+                owner_rule: Default::default(),
+                access_rules: Default::default(),
+                entity_id: Default::default(),
+                body: ComponentBody { state: Value::Null },
+            })),
+            state_hash: FixedHash::from_hex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+                .unwrap(),
+            created: SubstateCreated {
+                at_epoch: Epoch(123),
+                in_shard: Shard::first(),
+                at_state_version: 2,
+            },
+            destroyed: Some(SubstateDestroyed {
+                at_epoch: Epoch(456),
+                at_state_version: 5,
+            }),
+        };
+        let versioned: VersionedSubstateRecord = original.into();
+        let encoded = codec.encode(&versioned).expect("Encoding failed");
+        let decoded: VersionedSubstateRecord = codec.decode(&encoded).expect("Decoding failed");
+        let _latest: LatestSubstateRecord = decoded.into_latest();
+    }
+}

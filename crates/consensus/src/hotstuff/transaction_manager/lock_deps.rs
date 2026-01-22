@@ -4,7 +4,7 @@
 use indexmap::IndexMap;
 use tari_consensus_types::BlockId;
 use tari_ootle_storage::{consensus_models::LockConflict, StateStoreWriteTransaction, StorageError};
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 
 pub struct TransactionLockConflicts {
     conflicts: IndexMap<TransactionId, Vec<LockConflict>>,

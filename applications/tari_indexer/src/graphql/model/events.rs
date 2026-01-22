@@ -27,7 +27,7 @@ use log::*;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::displayable::Displayable;
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 
 use crate::event_manager::EventManager;
 

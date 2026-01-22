@@ -3,8 +3,10 @@
 
 use std::{collections::HashSet, fmt::Display};
 
-use tari_engine_types::{component::derive_component_address_from_public_key, ToByteType};
+use ootle_byte_type::ToByteType;
+use tari_engine_types::component::derive_component_address_from_public_key;
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
+use tari_ootle_transaction::TransactionId;
 use tari_ootle_wallet_sdk::{
     apis::accounts::{AccountsApi, AccountsApiError},
     models::{AccountWithAddress, DerivedKeyIndex, TransactionFinalizedEvent, WalletEvent},
@@ -13,7 +15,6 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::models::ComponentAddress;
-use tari_transaction::TransactionId;
 use tari_wallet_daemon_client::ComponentAddressOrName;
 use tokio::sync::broadcast;
 

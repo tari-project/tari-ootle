@@ -60,7 +60,7 @@ impl Hash {
     }
 
     pub fn from_hex(s: &str) -> Result<Self, HashParseError> {
-        let hash = fixed_bytes_from_hex(s)?;
+        let hash = fixed_bytes_from_hex(s).map_err(|_| HashParseError)?;
         Ok(Hash(hash))
     }
 

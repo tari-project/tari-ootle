@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::commit_result::ExecuteResult;
+use tari_ootle_transaction::{args, Transaction};
 use tari_template_lib::{
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS},
     models::{ComponentAddress, NonFungibleAddress},
@@ -9,7 +10,6 @@ use tari_template_lib::{
     resource::TOKEN_SYMBOL,
 };
 use tari_template_test_tooling::TemplateTest;
-use tari_transaction::{args, Transaction};
 
 #[test]
 fn basic_nft_mint() {

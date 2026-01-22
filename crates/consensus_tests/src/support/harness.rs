@@ -11,13 +11,14 @@ use std::{
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
 use itertools::Itertools;
 use log::info;
+use ootle_byte_type::ToByteType;
 use tari_consensus::{
     consensus_constants::ConsensusConstants,
     hotstuff::{HotstuffConfig, HotstuffEvent},
 };
 use tari_consensus_types::{BlockId, Decision};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::{substate::SubstateId, ToByteType};
+use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     committee::{Committee, CommitteeMember},
@@ -39,12 +40,12 @@ use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
 };
+use tari_ootle_transaction::TransactionId;
 use tari_shutdown::{Shutdown, ShutdownSignal};
 use tari_state_store_rocksdb::column_families::{
     finalized_transaction::FinalizedTransactionLinkCf,
     transaction::TransactionCf,
 };
-use tari_transaction::TransactionId;
 use tokio::{sync::broadcast, task, time::sleep};
 
 use super::{

@@ -1,11 +1,12 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::{substate::SubstateId, ToByteType};
+use ootle_byte_type::ToByteType;
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::substate_type::SubstateType;
+use tari_ootle_transaction::{args, call_args, Transaction};
 use tari_template_lib::{models::ComponentAddress, types::Amount};
 use tari_template_test_tooling::TemplateTest;
-use tari_transaction::{args, call_args, Transaction};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -18,45 +19,42 @@ fn setup() -> (TemplateTest, ComponentAddress, SubstateId) {
 
 #[test]
 fn airdrop() {
-    let (mut template_test, airdrop, airdrop_resx) = setup();
+    let (mut test, airdrop, airdrop_resx) = setup();
 
-    let total_supply: Amount =
-        template_test.call_method(airdrop, "total_supply", call_args![], vec![template_test.owner_proof()]);
+    let total_supply: Amount = test.call_method(airdrop, "total_supply", call_args![], vec![test.owner_proof()]);
     assert_eq!(total_supply, Amount::from(100));
 
     let builder = Transaction::builder_localnet().then(|builder| {
         // Create 50 accounts
         (0..50).fold(builder, |builder, _| {
-            let (_, owner_public_key, _) = template_test.create_owner_proof();
+            let (_, owner_public_key, _) = test.create_owner_proof();
             builder.create_account(owner_public_key.to_byte_type())
         })
     });
 
-    let result = template_test
-        .build_and_execute(builder, vec![template_test.owner_proof()])
+    test.build_and_execute(builder, vec![test.owner_proof()])
         .unwrap_success();
 
-    let addresses = result
-        .finalize
-        .execution_results
-        .iter()
-        .map(|r| r.decode::<ComponentAddress>().unwrap())
+    let addresses = test
+        .read_only_state_store()
+        .all_accounts()
+        .unwrap()
+        .into_keys()
         .collect::<Vec<_>>();
 
-    template_test.call_method::<()>(airdrop, "open_airdrop", call_args![], vec![template_test.owner_proof()]);
+    test.call_method::<()>(airdrop, "open_airdrop", call_args![], vec![test.owner_proof()]);
 
-    template_test
-        .build_and_execute(
-            Transaction::builder_localnet().then(|builder| {
-                addresses.iter().fold(builder, |builder, addr| {
-                    builder.call_method(airdrop, "add_recipient", args![addr])
-                })
-            }),
-            vec![template_test.owner_proof()],
-        )
-        .unwrap_success();
+    test.build_and_execute(
+        Transaction::builder_localnet().then(|builder| {
+            addresses.iter().fold(builder, |builder, addr| {
+                builder.call_method(airdrop, "add_recipient", args![addr])
+            })
+        }),
+        vec![test.owner_proof()],
+    )
+    .unwrap_success();
 
-    let result = template_test.build_and_execute(
+    let result = test.build_and_execute(
         Transaction::builder_localnet().then(|builder| {
             addresses.iter().fold(builder, |builder, addr| {
                 builder
@@ -66,7 +64,7 @@ fn airdrop() {
                     .call_method(*addr, "balance", args![airdrop_resx.as_resource_address().unwrap()])
             })
         }),
-        vec![template_test.owner_proof()],
+        vec![test.owner_proof()],
     );
     result.expect_success();
 

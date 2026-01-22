@@ -2,12 +2,12 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_address::RistrettoOotleAddress;
+use tari_ootle_transaction::UnsignedTransaction;
 use tari_ootle_wallet_crypto::{memo::Memo, StealthInputWitness};
 use tari_template_lib::{
     models::{ComponentAddress, VaultId},
     prelude::Amount,
 };
-use tari_transaction::UnsignedTransaction;
 
 use crate::{
     apis::stealth_transfer::PayTo,

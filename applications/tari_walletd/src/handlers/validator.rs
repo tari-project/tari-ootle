@@ -7,10 +7,11 @@ use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
 use either::Either;
 use log::*;
-use tari_engine_types::{substate::SubstateId, ToByteType};
+use ootle_byte_type::ToByteType;
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{derive_fee_pool_address, SubstateAddress, SubstateRequirement};
+use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId};
-use tari_transaction::args;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{
@@ -189,7 +190,7 @@ pub async fn handle_claim_validator_fees(
             fee: transaction
                 .finalize
                 .as_ref()
-                .map(|f| f.fee_receipt.total_fees_paid)
+                .map(|f| f.fee_receipt.total_fees_paid())
                 .unwrap_or_default(),
             result: transaction
                 .finalize

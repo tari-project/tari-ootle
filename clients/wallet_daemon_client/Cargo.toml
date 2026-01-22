@@ -10,12 +10,13 @@ license.workspace = true
 [dependencies]
 tari_ootle_common_types = { workspace = true }
 tari_engine_types = { workspace = true }
-tari_transaction = { workspace = true }
+tari_ootle_transaction = { workspace = true }
 tari_ootle_wallet_sdk = { workspace = true }
 # TODO: Ideally we should not have to include the WASM template lib, we should perhaps extract the address types into a separate crate (e.g. template_types)
 tari_template_lib = { workspace = true }
 tari_template_abi = { workspace = true }
 tari_ootle_address = { workspace = true, features = ["serde"] }
+ootle_serde = { workspace = true, features = ["base64"] }
 
 time = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }

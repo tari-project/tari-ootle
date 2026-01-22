@@ -38,6 +38,7 @@ use tari_ootle_storage::{
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
 };
+use tari_ootle_transaction::TransactionId;
 use tari_sidechain::{CommitProofElement, QuorumDecision, SidechainBlockCommitProof, SidechainBlockHeader};
 use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
 use tari_state_tree::Version;
@@ -47,7 +48,6 @@ use tari_template_lib::{
     prelude::{ComponentAccessRules, SchnorrSignatureBytes, TemplateAddress},
     types::{ComponentKey, EntityId, ObjectKey},
 };
-use tari_transaction::TransactionId;
 use tari_utilities::epoch_time::EpochTime;
 use tempfile::TempDir;
 

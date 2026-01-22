@@ -2,6 +2,7 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use indexmap::IndexSet;
+use ootle_byte_type::{ConvertFromByteType, FromByteType, ToByteType};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use tari_crypto::{
@@ -10,8 +11,7 @@ use tari_crypto::{
     tari_utilities,
     tari_utilities::ByteArray,
 };
-use tari_engine_types::{ConvertFromByteType, FromByteType, ToByteType};
-use tari_ootle_common_types::{Epoch, SubstateRequirement};
+use tari_ootle_common_types::{signature::SignatureOutput, Epoch, SubstateRequirement};
 use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
 use crate::{
@@ -74,6 +74,15 @@ impl TransactionSealSignature {
             .chain(&transaction.schema_version())
             .chain(transaction)
             .result()
+    }
+}
+
+impl From<SignatureOutput> for TransactionSealSignature {
+    fn from(output: SignatureOutput) -> Self {
+        Self {
+            public_key: output.public_key.to_byte_type(),
+            signature: output.signature.to_byte_type(),
+        }
     }
 }
 
@@ -145,6 +154,15 @@ impl TransactionSignature {
             .chain(seal_signer)
             .chain(&signature_fields)
             .result()
+    }
+}
+
+impl From<SignatureOutput> for TransactionSignature {
+    fn from(output: SignatureOutput) -> Self {
+        Self {
+            public_key: output.public_key.to_byte_type(),
+            signature: output.signature.to_byte_type(),
+        }
     }
 }
 

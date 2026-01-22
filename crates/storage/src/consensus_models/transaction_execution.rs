@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tari_consensus_types::{BlockId, Decision, LeafBlock};
 use tari_engine_types::commit_result::{ExecuteResult, RejectReason};
 use tari_ootle_common_types::{NodeHeight, NumPreshards};
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 use time::PrimitiveDateTime;
 
 use crate::{
@@ -40,7 +40,7 @@ impl TransactionExecution {
 
     pub fn abort(transaction_id: &TransactionId, reject_reason: RejectReason) -> Self {
         Self {
-            result: ExecuteResult::new_rejected(transaction_id.as_hash(), reject_reason),
+            result: ExecuteResult::new_rejected(transaction_id.as_hash(), reject_reason, None),
             resolved_inputs: Vec::new(),
             resulting_outputs: Vec::new(),
         }

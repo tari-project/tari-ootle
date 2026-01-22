@@ -25,8 +25,6 @@ pub enum NamedArg {
 
 impl NamedArg {
     pub fn literal(value: tari_bor::Value) -> Result<Self, tari_bor::BorError> {
-        // TODO: Unfortunately, CBOR value does not serialize consistently in JSON so we have to use the byte encoded
-        // form for now.
         Ok(Self::Literal(encode(&value)?))
     }
 
@@ -36,20 +34,6 @@ impl NamedArg {
 
     pub fn workspace<T: Into<BuilderWorkspaceKey>>(key: T) -> Self {
         Self::Workspace(key.into())
-    }
-
-    pub fn as_literal_bytes(&self) -> Option<&[u8]> {
-        match self {
-            Self::Workspace(_) => None,
-            Self::Literal(bytes) => Some(bytes),
-        }
-    }
-
-    pub fn into_literal_bytes(self) -> Option<Vec<u8>> {
-        match self {
-            Self::Workspace(_) => None,
-            Self::Literal(bytes) => Some(bytes),
-        }
     }
 }
 

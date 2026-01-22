@@ -17,6 +17,7 @@ use tari_ootle_common_types::{
     optional::Optional,
     Network,
 };
+use tari_ootle_transaction::{args, Transaction};
 use tari_ootle_wallet_sdk::{
     apis::{
         confidential_transfer::UtxoInputSelection,
@@ -31,7 +32,6 @@ use tari_template_lib::{
     models::{ComponentAddress, ResourceAddress, UtxoId},
     types::{amount, Amount},
 };
-use tari_transaction::{args, Transaction};
 use tari_wallet_daemon_client::{
     types::{
         AccountsAssociateStealthResourceRequest,
@@ -611,7 +611,7 @@ impl TrafficSim {
         specific_id: Option<UtxoId>,
         csv_out: Option<P>,
     ) -> anyhow::Result<()> {
-        let mut indexer = self.connect_indexer_client().await?;
+        let indexer = self.connect_indexer_client().await?;
 
         let resource = indexer
             .get_substate(&resource_address.into(), GetSubstateRequest {

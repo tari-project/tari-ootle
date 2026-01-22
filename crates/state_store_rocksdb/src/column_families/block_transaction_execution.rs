@@ -4,7 +4,7 @@
 use tari_consensus_types::BlockId;
 use tari_ootle_common_types::NodeHeight;
 use tari_ootle_storage::consensus_models::BlockTransactionExecution;
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 
 use crate::{
     codecs::{BlockIdCodec, DefaultVersionedCodec, KeyPrefix, NumberCodec, TransactionIdCodec, UnitCodec},

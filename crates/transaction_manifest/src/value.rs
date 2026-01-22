@@ -6,8 +6,8 @@ use std::str::FromStr;
 use syn::{parse2, Lit};
 use tari_bor::{BorError, Serialize};
 use tari_engine_types::substate::SubstateId;
+use tari_ootle_transaction::{args::InstructionArg, call_arg};
 use tari_template_lib::{models::NonFungibleId, to_value};
-use tari_transaction::{args::InstructionArg, call_arg};
 
 use crate::error::ManifestError;
 

@@ -4,10 +4,12 @@
 use std::{cmp, time::Duration};
 
 use log::*;
+use ootle_byte_type::{ConvertFromByteType, FromByteType};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::{substate::SubstateId, ConvertFromByteType, FromByteType};
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_address::{OotleAddress, RistrettoOotleAddress};
 use tari_ootle_common_types::{displayable::Displayable, optional::Optional, Network, SubstateRequirement};
+use tari_ootle_transaction::{args, Transaction, UnsignedTransaction};
 use tari_ootle_wallet_crypto::memo::Memo;
 use tari_template_lib::{
     constants::XTR,
@@ -21,7 +23,6 @@ use tari_template_lib::{
     },
     types::Amount,
 };
-use tari_transaction::{args, Transaction, UnsignedTransaction};
 use tokio::{sync::Semaphore, task::block_in_place};
 
 use super::{

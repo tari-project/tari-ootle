@@ -8,7 +8,7 @@ use tari_ootle_storage::{
     consensus_models::{TransactionPool, TransactionRecord},
     StateStore,
 };
-use tari_transaction::TransactionId;
+use tari_ootle_transaction::TransactionId;
 use tokio::sync::mpsc;
 
 use crate::{

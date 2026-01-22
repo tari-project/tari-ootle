@@ -3,9 +3,10 @@
 
 //! A collection of convenient constant values
 
-use tari_template_lib_types::ObjectKey;
-
-use crate::models::{ComponentAddress, ResourceAddress, VaultId};
+use crate::{
+    substates::{ComponentAddress, ResourceAddress, VaultId},
+    ObjectKey,
+};
 // TODO: These addresses are set pretty arbitrarily.
 
 /// Resource address for all public identity-based non-fungible tokens.
@@ -45,3 +46,12 @@ pub const NFT_FAUCET_COMPONENT_ADDRESS: ComponentAddress = ComponentAddress::new
 pub const NFT_FAUCET_RESOURCE_ADDRESS: ResourceAddress = ResourceAddress::new(ObjectKey::from_array([
     0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
 ]));
+
+/// Metadata key used as convention to represent the symbol (a.k.a. ticker) of a token. Meant as a shorthand,
+/// user-friendly identification of the underlying token
+pub const TOKEN_SYMBOL: &str = "SYMBOL";
+/// Metadata key used as convention to represent the image URL of a token. Meant to be used in user interfaces
+/// to display the token's logo or image
+pub const IMAGE_URL: &str = "IMAGE_URL";
+/// Default divisibility for fungible resources (8)
+pub const DEFAULT_DIVISIBILITY: u8 = 8;

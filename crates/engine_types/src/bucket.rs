@@ -25,8 +25,8 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_template_lib::{
-    models::{BucketId, ConfidentialWithdrawProof, NonFungibleId, ResourceAddress},
-    types::{Amount, ResourceType},
+    models::{BucketId, ConfidentialWithdrawProof},
+    types::{Amount, NonFungibleId, ResourceAddress, ResourceType},
 };
 
 use crate::{

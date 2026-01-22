@@ -261,7 +261,10 @@ impl Display for SubstatePledge {
 mod tests {
 
     use tari_engine_types::component::{ComponentBody, ComponentHeader};
-    use tari_template_lib::{auth::ComponentAccessRules, models::ComponentAddress, types::EntityId};
+    use tari_template_lib::{
+        auth::ComponentAccessRules,
+        types::{ComponentAddress, EntityId},
+    };
 
     use super::*;
 

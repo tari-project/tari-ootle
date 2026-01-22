@@ -6,10 +6,7 @@ use std::str::FromStr;
 use diesel::{Identifiable, Queryable};
 use tari_engine_types::resource::Resource;
 use tari_ootle_wallet_sdk::storage::WalletStorageError;
-use tari_template_lib::{
-    models::ResourceAddress,
-    types::{Amount, ResourceType},
-};
+use tari_template_lib_types::{Amount, ResourceAddress, ResourceType};
 use time::PrimitiveDateTime;
 
 use crate::{

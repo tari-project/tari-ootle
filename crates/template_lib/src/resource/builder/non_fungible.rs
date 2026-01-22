@@ -3,13 +3,19 @@
 
 use serde::Serialize;
 use tari_bor::to_value;
-use tari_template_lib_types::ResourceType;
+use tari_template_lib_types::{
+    constants::{IMAGE_URL, TOKEN_SYMBOL},
+    ComponentAddress,
+    Metadata,
+    NonFungibleId,
+    ResourceAddress,
+    ResourceType,
+};
 
-use super::{IMAGE_URL, TOKEN_SYMBOL};
 use crate::{
     args::MintArg,
     auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
-    models::{Bucket, ComponentAddress, Metadata, NonFungibleId, ResourceAddress, ResourceAddressAllocation},
+    models::{Bucket, ResourceAddressAllocation},
     resource::ResourceManager,
 };
 

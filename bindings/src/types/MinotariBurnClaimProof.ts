@@ -15,4 +15,5 @@ export type MinotariBurnClaimProof = {
   encoded_merkle_proof: EncodedMerkleProof;
   kernel: AbridgedTransactionKernel;
   value: bigint;
+  sender_offset_public_key: RistrettoPublicKeyBytes;
 };

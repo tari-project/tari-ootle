@@ -43,7 +43,15 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use tari_bor::to_value;
 use tari_template_abi::{call_engine, rust::collections::BTreeMap, EngineOp};
-use tari_template_lib_types::{crypto::StealthValueProof, ResourceInfo};
+use tari_template_lib_types::{
+    crypto::StealthValueProof,
+    Metadata,
+    NonFungibleId,
+    ResourceAddress,
+    ResourceInfo,
+    UtxoId,
+    VaultId,
+};
 
 use crate::{
     args::{
@@ -69,14 +77,9 @@ use crate::{
         Bucket,
         BucketId,
         ConfidentialOutputStatement,
-        Metadata,
         NonFungible,
-        NonFungibleId,
-        ResourceAddress,
         ResourceAddressAllocation,
         StealthTransferStatement,
-        UtxoId,
-        VaultId,
     },
     prelude::{AuthHook, ResourceType},
     types::{
@@ -875,7 +878,7 @@ impl ResourceManager {
     /// # Example
     ///
     /// ```rust,ignore
-    /// # use tari_template_lib::models::NonFungibleId;
+    /// # use tari_template_lib::types::NonFungibleId;
     /// # use tari_template_lib::prelude::ResourceManager;
     ///
     /// #[derive(serde::Serialize)]

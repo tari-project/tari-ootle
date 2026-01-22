@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_lib::models::{NonFungibleId, ResourceAddress, VaultId};
+use tari_template_lib::types::{NonFungibleId, ResourceAddress, VaultId};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]

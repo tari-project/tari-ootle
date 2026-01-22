@@ -22,7 +22,7 @@ use tari_ootle_wallet_sdk::{
     WalletSdkSpec,
 };
 use tari_shutdown::ShutdownSignal;
-use tari_template_lib::{models::ResourceAddress, prelude::ComponentAddress};
+use tari_template_lib_types::{ComponentAddress, ResourceAddress};
 use tokio::{
     sync::{broadcast, mpsc},
     time,

@@ -23,7 +23,7 @@ use tari_ootle_wallet_sdk::{
     WalletSdk,
     WalletSdkSpec,
 };
-use tari_template_lib::models::{ComponentAddress, ResourceAddress, UtxoAddress, UtxoId};
+use tari_template_lib_types::{ComponentAddress, ResourceAddress, UtxoAddress, UtxoId};
 use tokio::sync::watch;
 
 use crate::{notify::Notify, utxo_scanner::StealthScannerApiError};

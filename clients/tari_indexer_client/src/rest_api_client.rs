@@ -3,12 +3,8 @@
 
 use reqwest::{header, header::HeaderMap, IntoUrl, Url};
 use serde::{de::DeserializeOwned, Serialize};
-use tari_engine_types::{
-    substate::SubstateId,
-    template_lib_models::ResourceAddress,
-    transaction_receipt::TransactionReceiptAddress,
-};
-use tari_template_lib_types::TemplateAddress;
+use tari_engine_types::substate::SubstateId;
+use tari_template_lib_types::{ResourceAddress, TemplateAddress, TransactionReceiptAddress};
 
 use crate::{
     error::IndexerRestClientError,

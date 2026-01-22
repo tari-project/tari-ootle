@@ -296,7 +296,7 @@ overflow-checks = true
 #tari_jellyfish = { git = "https://github.com/account/tari.git", branch = "my-branch" }
 
 # Uncomment this to use local paths instead of git dependencies
-# # [patch."https://github.com/tari-project/tari.git"]
+# [patch."https://github.com/tari-project/tari.git"]
 # minotari_app_grpc = { path = "../tari/applications/minotari_app_grpc" }
 # minotari_wallet_grpc_client = { path = "../tari/clients/rust/wallet_grpc_client" }
 # minotari_node_grpc_client = { path = "../tari/clients/rust/base_node_grpc_client" }

@@ -43,10 +43,8 @@ use tari_sidechain::{CommitProofElement, QuorumDecision, SidechainBlockCommitPro
 use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
 use tari_state_tree::Version;
 use tari_template_lib::{
-    auth::OwnerRule,
-    models::ComponentAddress,
-    prelude::{ComponentAccessRules, SchnorrSignatureBytes, TemplateAddress},
-    types::{ComponentKey, EntityId, ObjectKey},
+    auth::{ComponentAccessRules, OwnerRule},
+    types::{crypto::SchnorrSignatureBytes, ComponentAddress, ComponentKey, EntityId, ObjectKey, TemplateAddress},
 };
 use tari_utilities::epoch_time::EpochTime;
 use tempfile::TempDir;

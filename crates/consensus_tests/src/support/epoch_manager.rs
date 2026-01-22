@@ -22,7 +22,7 @@ use tari_ootle_common_types::{
     VotePower,
 };
 use tari_ootle_storage::{global::models::ValidatorNode, StorageError};
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::{broadcast, Mutex, MutexGuard};
 
 use crate::support::{

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use tari_engine_types::resource::Resource;
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
-use tari_template_lib::{models::ResourceAddress, types::ResourceType};
+use tari_template_lib::types::{ResourceAddress, ResourceType};
 use thiserror::Error;
 
 use crate::storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter};

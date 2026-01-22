@@ -4,10 +4,7 @@
 use std::collections::HashSet;
 
 use tari_ootle_common_types::optional::IsNotFoundError;
-use tari_template_lib::{
-    models::{ResourceAddress, VaultId},
-    prelude::{ComponentAddress, NonFungibleId},
-};
+use tari_template_lib::types::{ComponentAddress, NonFungibleId, ResourceAddress, VaultId};
 use thiserror::Error;
 
 use crate::{

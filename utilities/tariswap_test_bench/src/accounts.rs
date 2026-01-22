@@ -9,9 +9,9 @@ use tari_engine_types::indexed_value::IndexedWellKnownTypes;
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::models::{Account, KeyBranch, KeyId};
-use tari_template_lib::{
+use tari_template_lib_types::{
     constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
-    prelude::ResourceType,
+    ResourceType,
 };
 
 use crate::{faucet::Faucet, runner::Runner};

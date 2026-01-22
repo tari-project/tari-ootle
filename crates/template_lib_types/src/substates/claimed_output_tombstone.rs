@@ -8,9 +8,9 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tari_bor::BorTag;
-use tari_template_lib_types::{crypto::PedersenCommitmentBytes, KeyParseError, ObjectKey};
 
-use crate::models::{address_prefixes, BinaryTag};
+use super::BinaryTag;
+use crate::{address_prefixes, crypto::PedersenCommitmentBytes, KeyParseError, ObjectKey};
 
 const TAG: u64 = BinaryTag::ClaimedOutputTombstoneAddress.as_u64();
 

@@ -14,8 +14,8 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement, SubstateRequirementRef};
 use tari_template_lib::{
-    constants::XTR,
-    models::{ComponentAddress, StealthTransferStatement},
+    models::StealthTransferStatement,
+    types::{constants::XTR, ComponentAddress},
 };
 
 use crate::{

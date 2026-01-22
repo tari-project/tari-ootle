@@ -5,11 +5,7 @@ use std::collections::BTreeMap;
 
 use ootle_byte_type::ToByteType;
 use tari_ootle_transaction::{args, Transaction};
-use tari_template_lib::{
-    models::{NonFungibleId, ResourceAddress, VaultId},
-    prelude::ComponentAddress,
-    types::Amount,
-};
+use tari_template_lib::types::{Amount, ComponentAddress, NonFungibleId, ResourceAddress, VaultId};
 use tari_template_test_tooling::{
     support::confidential::{generate_confidential_output_statement, generate_withdraw_proof},
     TemplateTest,

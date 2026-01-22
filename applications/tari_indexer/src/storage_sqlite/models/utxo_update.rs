@@ -4,7 +4,7 @@
 use tari_bor::{Deserialize, Serialize};
 use tari_engine_types::UtxoOutput;
 use tari_ootle_common_types::{shard::Shard, StateVersion};
-use tari_template_lib::models::UtxoAddress;
+use tari_template_lib_types::UtxoAddress;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum UtxoUpdateRecord {

@@ -26,10 +26,16 @@ use tari_template_abi::rust::{
     fmt::{Display, Formatter},
     str::FromStr,
 };
-use tari_template_lib_types::{EntityId, KeyParseError, ObjectKey};
 
-use super::{address_prefixes, BinaryTag};
-use crate::{newtype_struct_serde_impl, prelude::STEALTH_TARI_RESOURCE_ADDRESS};
+use super::BinaryTag;
+use crate::{
+    address_prefixes,
+    constants::STEALTH_TARI_RESOURCE_ADDRESS,
+    newtype_struct_serde_impl,
+    EntityId,
+    KeyParseError,
+    ObjectKey,
+};
 
 const TAG: u64 = BinaryTag::ResourceAddress.as_u64();
 

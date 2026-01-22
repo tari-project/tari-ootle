@@ -21,31 +21,17 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use serde::{Deserialize, Serialize};
-use tari_bor::BorTag;
 use tari_template_abi::{
     call_engine,
     rust::{
         collections::BTreeSet,
         fmt,
         fmt::{Display, Formatter},
-        str::FromStr,
     },
     EngineOp,
 };
-use tari_template_lib_types::{EntityId, KeyParseError, ObjectKey};
+use tari_template_lib_types::{NonFungibleId, ResourceAddress, VaultId};
 
-use super::{
-    address_prefixes,
-    BinaryTag,
-    Bucket,
-    ConfidentialWithdrawProof,
-    NonFungible,
-    NonFungibleId,
-    Proof,
-    ProofAuth,
-    ResourceAddress,
-    StealthTransferStatement,
-};
 use crate::{
     args::{
         InvokeResult,
@@ -56,75 +42,10 @@ use crate::{
         VaultInvokeArg,
         VaultWithdrawArg,
     },
-    newtype_struct_serde_impl,
+    models::{Bucket, ConfidentialWithdrawProof, NonFungible, Proof, ProofAuth, StealthTransferStatement},
     resource::ResourceManager,
     types::{Amount, ResourceType},
 };
-
-const TAG: u64 = BinaryTag::VaultId as u64;
-
-/// A vault's unique identification in the Tari network
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
-pub struct VaultId(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
-
-impl VaultId {
-    pub const fn new(key: ObjectKey) -> Self {
-        Self(BorTag::new(key))
-    }
-
-    pub fn from_hex(hex: &str) -> Result<Self, KeyParseError> {
-        let key = ObjectKey::from_hex(hex)?;
-        Ok(Self::new(key))
-    }
-
-    pub const fn as_object_key(&self) -> &ObjectKey {
-        self.0.inner()
-    }
-
-    pub fn entity_id(&self) -> EntityId {
-        self.0.inner().as_entity_id()
-    }
-}
-
-impl From<ObjectKey> for VaultId {
-    fn from(key: ObjectKey) -> Self {
-        Self::new(key)
-    }
-}
-
-impl Display for VaultId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}_{}", address_prefixes::VAULT, *self.0)
-    }
-}
-
-impl AsRef<[u8]> for VaultId {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-}
-
-impl FromStr for VaultId {
-    type Err = KeyParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s = s.strip_prefix("vault_").unwrap_or(s);
-        Self::from_hex(s)
-    }
-}
-
-impl TryFrom<&[u8]> for VaultId {
-    type Error = KeyParseError;
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        let key = ObjectKey::try_from(value)?;
-        Ok(Self::new(key))
-    }
-}
-
-newtype_struct_serde_impl!(VaultId, BorTag<ObjectKey, TAG>);
 
 /// Encapsulates all the ways that a vault can be referenced
 #[derive(Clone, Debug, Serialize, Deserialize)]

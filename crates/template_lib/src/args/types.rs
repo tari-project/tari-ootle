@@ -26,7 +26,18 @@ use tari_template_abi::rust::{
     fmt::{Display, Formatter},
     str::FromStr,
 };
-use tari_template_lib_types::{bytes::Bytes, crypto::StealthValueProof, ResourceType};
+use tari_template_lib_types::{
+    bytes::Bytes,
+    crypto::StealthValueProof,
+    ComponentAddress,
+    Metadata,
+    NonFungibleAddress,
+    NonFungibleId,
+    ResourceAddress,
+    ResourceType,
+    UtxoId,
+    VaultId,
+};
 
 use crate::{
     args::freeze_flags::VaultFreezeFlags,
@@ -34,18 +45,11 @@ use crate::{
     models::{
         AddressAllocationId,
         BucketId,
-        ComponentAddress,
         ComponentAddressAllocation,
         ConfidentialWithdrawProof,
-        Metadata,
-        NonFungibleAddress,
-        NonFungibleId,
         ProofId,
-        ResourceAddress,
         ResourceAddressAllocation,
         StealthTransferStatement,
-        UtxoId,
-        VaultId,
         VaultRef,
     },
     prelude::{ComponentAccessRules, ConfidentialOutputStatement, TemplateAddress},

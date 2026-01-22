@@ -30,24 +30,23 @@ use tari_engine_types::{
     lock::LockId,
     resource_container::ResourceError,
     substate::SubstateId,
-    transaction_receipt::TransactionReceiptAddress,
     virtual_substate::VirtualSubstateId,
 };
 use tari_ootle_common_types::{displayable::Displayable, optional::IsNotFoundError};
 use tari_ootle_transaction::args::{WorkspaceId, WorkspaceOffsetId};
 use tari_template_lib::{
     args::{CallAction, VaultFreezeFlag},
-    models::{
-        AddressAllocationId,
-        BucketId,
+    models::{AddressAllocationId, BucketId, ProofId},
+    types::{
+        Amount,
         ClaimedOutputTombstoneAddress,
         ComponentAddress,
         NonFungibleId,
-        ProofId,
         ResourceAddress,
+        TemplateAddress,
+        TransactionReceiptAddress,
         VaultId,
     },
-    types::{Amount, TemplateAddress},
 };
 
 use super::workspace::WorkspaceError;

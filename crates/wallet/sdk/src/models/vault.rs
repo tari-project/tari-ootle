@@ -1,10 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_lib::{
-    models::{ComponentAddress, ResourceAddress, VaultId},
-    types::{Amount, ResourceType},
-};
+use tari_template_lib::types::{Amount, ComponentAddress, ResourceAddress, ResourceType, VaultId};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VaultModel {

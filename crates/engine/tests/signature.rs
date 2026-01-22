@@ -13,14 +13,11 @@ use tari_ootle_common_types::{
     RistrettoSchnorrBlake2bVerifier,
 };
 use tari_ootle_transaction::{args, Transaction};
-use tari_template_lib::{
-    models::ComponentAddress,
-    prelude::PublicKey,
-    types::{
-        amount,
-        crypto::{NoSignatureDomain, Signature},
-        Amount,
-    },
+use tari_template_lib::types::{
+    amount,
+    crypto::{NoSignatureDomain, PublicKey, Signature},
+    Amount,
+    ComponentAddress,
 };
 use tari_template_test_tooling::{
     support::{assert_error::assert_reject_reason, stealth, stealth::NO_INPUTS},

@@ -7,7 +7,7 @@ use tari_common_types::types::FixedHash;
 use tari_engine::{abi::TemplateDef, template::LoadedTemplate};
 use tari_ootle_common_types::Epoch;
 use tari_ootle_storage::{global::DbTemplate, StorageError};
-use tari_template_lib::{prelude::RistrettoPublicKeyBytes, types::TemplateAddress};
+use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TemplateMetadata {

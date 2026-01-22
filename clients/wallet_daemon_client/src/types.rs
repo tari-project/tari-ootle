@@ -27,7 +27,6 @@ use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult},
     confidential::MinotariBurnClaimProof,
     substate::{Substate, SubstateId},
-    ValidatorFeePoolAddress,
 };
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{
@@ -60,18 +59,20 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_template_abi::{FunctionDef, TemplateDef};
 use tari_template_lib::{
-    models::{
-        ConfidentialOutputStatement,
+    models::{ConfidentialOutputStatement, SpendCondition, StealthTransferStatement},
+    prelude::{ComponentAddress, ConfidentialWithdrawProof, ResourceType, RistrettoPublicKeyBytes},
+    types::{
+        crypto::PedersenCommitmentBytes,
+        Amount,
+        EncryptedData,
         NonFungibleId,
         ResourceAddress,
-        SpendCondition,
-        StealthTransferStatement,
+        TemplateAddress,
         UtxoAddress,
         UtxoId,
+        ValidatorFeePoolAddress,
         VaultId,
     },
-    prelude::{ComponentAddress, ConfidentialWithdrawProof, ResourceType, RistrettoPublicKeyBytes},
-    types::{crypto::PedersenCommitmentBytes, Amount, EncryptedData, TemplateAddress},
 };
 use time::PrimitiveDateTime;
 use webauthn_rs_proto::{

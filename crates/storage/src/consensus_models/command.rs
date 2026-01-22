@@ -12,7 +12,7 @@ use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, Decision};
 use tari_ootle_common_types::{hashing::command_hasher, Epoch, ShardGroup};
 use tari_ootle_transaction::TransactionId;
-use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use super::{ForeignProposalAtom, LeaderFee, TransactionRecord};
 use crate::{

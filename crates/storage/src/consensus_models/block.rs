@@ -25,7 +25,6 @@ use tari_consensus_types::{
     ShardGroupAccumulatedData,
     TimeoutCertificate,
 };
-use tari_engine_types::transaction_receipt::TransactionReceiptAddress;
 use tari_ootle_common_types::{
     committee::CommitteeInfo,
     displayable::Displayable,
@@ -43,7 +42,10 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_transaction::TransactionId;
 use tari_state_tree::{compute_proof_for_hashes, SparseMerkleProofExt, StateTreeError, TreeHash, Version};
-use tari_template_lib::{prelude::SchnorrSignatureBytes, types::crypto::RistrettoPublicKeyBytes};
+use tari_template_lib_types::{
+    crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes},
+    TransactionReceiptAddress,
+};
 use time::PrimitiveDateTime;
 
 use super::{

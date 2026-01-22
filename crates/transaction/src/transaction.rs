@@ -22,10 +22,7 @@ use tari_ootle_common_types::{
     ToSubstateAddress,
     VersionedSubstateId,
 };
-use tari_template_lib::{
-    models::{ClaimedOutputTombstoneAddress, ComponentAddress},
-    prelude::TemplateAddress,
-};
+use tari_template_lib::types::{ClaimedOutputTombstoneAddress, ComponentAddress, TemplateAddress};
 
 use crate::{
     builder::TransactionBuilder,

@@ -40,12 +40,11 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::StorageError;
 use tari_ootle_wallet_sdk::models::UtxoStateUpdateSet;
-use tari_template_lib::{
-    models::{ResourceAddress, UtxoId},
-    types::{
-        crypto::{RistrettoPublicKeyBytes, UtxoTag},
-        TemplateAddress,
-    },
+use tari_template_lib_types::{
+    crypto::{RistrettoPublicKeyBytes, UtxoTag},
+    ResourceAddress,
+    TemplateAddress,
+    UtxoId,
 };
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 

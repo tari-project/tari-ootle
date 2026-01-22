@@ -23,13 +23,12 @@
 use serde::{de::DeserializeOwned, Serialize};
 use tari_bor::{from_value, to_value};
 use tari_template_abi::{call_engine, EngineOp};
-use tari_template_lib_types::{bytes::Bytes, TemplateAddress};
+use tari_template_lib_types::{bytes::Bytes, ComponentAddress, TemplateAddress};
 
 use crate::{
     args::{CallAction, CallInvokeArg, CallMethodArg, ComponentAction, ComponentInvokeArg, ComponentRef, InvokeResult},
     auth::ComponentAccessRules,
     caller_context::CallerContext,
-    models::ComponentAddress,
 };
 
 /// Utility for managing components inside templates

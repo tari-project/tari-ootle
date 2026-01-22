@@ -6,7 +6,7 @@ use std::ops::{Deref, DerefMut};
 use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
 use log::{debug, info, warn};
 use serde::Serialize;
-use tari_engine_types::transaction_receipt::{TransactionReceipt, TransactionReceiptAddress};
+use tari_engine_types::transaction_receipt::TransactionReceipt;
 use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, StateVersion};
 use tari_ootle_storage::{
     consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof},
@@ -14,6 +14,7 @@ use tari_ootle_storage::{
 };
 use tari_ootle_storage_sqlite::SqliteTransaction;
 use tari_ootle_transaction::Transaction;
+use tari_template_lib_types::TransactionReceiptAddress;
 
 use crate::{
     diesel::ExpressionMethods,

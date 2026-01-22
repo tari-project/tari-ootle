@@ -33,7 +33,7 @@ use tari_ootle_common_types::{
     SubstateAddress,
     VotePower,
 };
-use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
+use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 
 use super::{BlockHeaderModel, EpochData, TemplateStatus};
 use crate::{

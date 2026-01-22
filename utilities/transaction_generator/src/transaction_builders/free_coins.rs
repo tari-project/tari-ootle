@@ -8,7 +8,7 @@ use tari_engine_types::component::derive_component_address_from_public_key;
 use tari_ootle_common_types::{Network, SubstateRequirement};
 use tari_ootle_transaction::{args, Transaction};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS};
+use tari_template_lib_types::constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS};
 
 pub fn builder(network: Network) -> impl Fn(u64) -> Transaction {
     move |_: u64| -> Transaction {

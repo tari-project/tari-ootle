@@ -4,9 +4,18 @@
 use std::sync::{atomic, atomic::AtomicU32};
 
 use tari_template_lib::{
-    models::{BucketId, ComponentAddress, ProofId, ResourceAddress, VaultId},
+    models::{BucketId, ProofId},
     prelude::TemplateAddress,
-    types::{crypto::RistrettoPublicKeyBytes, ComponentKey, EntityId, Hash, ObjectKey},
+    types::{
+        crypto::RistrettoPublicKeyBytes,
+        ComponentAddress,
+        ComponentKey,
+        EntityId,
+        Hash,
+        ObjectKey,
+        ResourceAddress,
+        VaultId,
+    },
 };
 
 use crate::{

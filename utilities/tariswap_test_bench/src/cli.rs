@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
-use tari_template_lib::types::TemplateAddress;
+use tari_template_lib_types::TemplateAddress;
 use url::Url;
 
 #[derive(Parser, Debug)]

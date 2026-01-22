@@ -34,7 +34,6 @@ use tari_engine_types::{
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
     Utxo,
     UtxoOutput,
-    ValidatorFeePoolAddress,
     ValidatorFeeWithdrawal,
 };
 use tari_ootle_common_types::{optional::Optional, Epoch};
@@ -42,22 +41,22 @@ use tari_ootle_transaction::ResourceAddressRef;
 use tari_template_lib::{
     args::{MintArg, ResourceDiscriminator, VaultFreezeFlags},
     auth::ResourceAuthAction,
-    constants::STEALTH_TARI_RESOURCE_ADDRESS,
-    models::{
-        AddressAllocationId,
-        BucketId,
+    models::{AddressAllocationId, BucketId, ProofId, SpendCondition, StealthInput, StealthTransferStatement},
+    prelude::{AuthHookCaller, ResourceAddressAllocation, PUBLIC_IDENTITY_RESOURCE_ADDRESS},
+    types::{
+        constants::STEALTH_TARI_RESOURCE_ADDRESS,
+        metadata,
+        Amount,
         ComponentAddress,
+        EntityId,
+        Hash,
         NonFungibleAddress,
-        ProofId,
         ResourceAddress,
-        SpendCondition,
-        StealthInput,
-        StealthTransferStatement,
+        TemplateAddress,
         UtxoAddress,
+        ValidatorFeePoolAddress,
         VaultId,
     },
-    prelude::{AuthHookCaller, ResourceAddressAllocation, PUBLIC_IDENTITY_RESOURCE_ADDRESS},
-    types::{Amount, EntityId, Hash, TemplateAddress},
 };
 
 use super::workspace::Workspace;
@@ -254,7 +253,9 @@ impl WorkingState {
             template_address,
             "component",
             "updated",
-            tari_template_lib::models::Metadata::from([("module_name".to_string(), module_name)]),
+            metadata!(
+                "module_name" => module_name,
+            ),
         ))?;
 
         Ok(())
@@ -705,7 +706,7 @@ impl WorkingState {
                 template_address,
                 "vault",
                 "unfrozen",
-                tari_template_lib::models::Metadata::default(),
+                metadata!(),
             )
         } else {
             Event::std(

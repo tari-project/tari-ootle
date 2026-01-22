@@ -25,6 +25,8 @@ pub mod fungible;
 pub mod non_fungible;
 pub mod stealth;
 
+pub use tari_template_lib_types::constants::{DEFAULT_DIVISIBILITY, IMAGE_URL, TOKEN_SYMBOL};
+
 use crate::resource::{
     builder::{
         confidential::ConfidentialResourceBuilder,
@@ -33,15 +35,6 @@ use crate::resource::{
     },
     stealth::StealthResourceBuilder,
 };
-
-/// Metadata key used as convention to represent the symbol (a.k.a. ticker) of a token. Meant as a shorthand,
-/// user-friendly identification of the underlying token
-pub const TOKEN_SYMBOL: &str = "SYMBOL";
-/// Metadata key used as convention to represent the image URL of a token. Meant to be used in user interfaces
-/// to display the token's logo or image
-pub const IMAGE_URL: &str = "IMAGE_URL";
-/// Default divisibility for fungible resources (8)
-pub const DEFAULT_DIVISIBILITY: u8 = 8;
 
 /// Utility for building resources inside templates
 pub struct ResourceBuilder {}

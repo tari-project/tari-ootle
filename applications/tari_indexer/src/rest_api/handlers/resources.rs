@@ -7,7 +7,7 @@ use axum::{extract::Path, Extension, Json};
 use tari_engine_types::substate::SubstateId;
 use tari_indexer_client::types::GetResourceResponse;
 use tari_ootle_common_types::SubstateRequirementRef;
-use tari_template_lib::{constants::XTR, models::ResourceAddress};
+use tari_template_lib_types::{constants::XTR, ResourceAddress};
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
 

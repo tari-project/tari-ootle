@@ -17,7 +17,7 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_ootle_wallet_sdk_services::indexer_rest_api::IndexerRestApiNetworkInterface;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
-use tari_template_lib::types::TemplateAddress;
+use tari_template_lib_types::TemplateAddress;
 use tokio::time::sleep;
 use url::Url;
 

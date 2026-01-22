@@ -38,9 +38,7 @@ mod utxo;
 mod validator_fee;
 
 pub use hash::*;
-pub use template::{calculate_template_binary_hash, parse_template_address};
+pub use tari_template_lib::types::parse_template_address;
+pub use template::calculate_template_binary_hash;
 pub use utxo::*;
 pub use validator_fee::*;
-pub mod template_lib_models {
-    pub use tari_template_lib::models::*;
-}

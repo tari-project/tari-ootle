@@ -6,12 +6,10 @@ use tari_ootle_wallet_sdk::{
     models::{StealthOutputInfo, StealthOutputModel},
     storage::WalletStorageError,
 };
-use tari_template_lib::{
-    models::ComponentAddress,
-    types::{
-        crypto::{RistrettoPublicKeyBytes, UtxoTag},
-        EncryptedData,
-    },
+use tari_template_lib_types::{
+    crypto::{RistrettoPublicKeyBytes, UtxoTag},
+    ComponentAddress,
+    EncryptedData,
 };
 use time::PrimitiveDateTime;
 

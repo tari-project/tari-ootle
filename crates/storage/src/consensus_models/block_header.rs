@@ -25,7 +25,7 @@ use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_ootle_common_types::{hashing, Epoch, ExtraData, Network, NodeHeight, NumPreshards, ShardGroup};
 use tari_sidechain::{BlockHeaderHashFields, BlockHeaderHashFieldsV1};
 use tari_state_tree::{compute_merkle_root_for_hashes, TreeHash};
-use tari_template_lib::{prelude::SchnorrSignatureBytes, types::crypto::RistrettoPublicKeyBytes};
+use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
 use super::{BlockError, Command};
 

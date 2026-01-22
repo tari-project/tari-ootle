@@ -12,7 +12,7 @@ use tari_ootle_transaction::{args, Transaction};
 use tari_template_lib::{
     args::CallAction,
     auth::OwnerRule,
-    models::{ComponentAddress, VaultId},
+    types::{ComponentAddress, VaultId},
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 

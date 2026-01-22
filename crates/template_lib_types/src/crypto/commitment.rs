@@ -11,7 +11,6 @@ use crate::{
     crypto::{InvalidByteLengthError, RistrettoPublicKeyBytes},
     hex::fixed_bytes_from_hex,
     serde_helpers,
-    Hash,
     KeyParseError,
 };
 
@@ -69,8 +68,8 @@ impl PedersenCommitmentBytes {
         self.0
     }
 
-    pub const fn as_hash(&self) -> Hash {
-        Hash::from_array(self.0)
+    pub const fn as_hash(&self) -> crate::Hash {
+        crate::Hash::from_array(self.0)
     }
 }
 

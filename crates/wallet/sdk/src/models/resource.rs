@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::resource::Resource;
-use tari_template_lib::models::ResourceAddress;
+use tari_template_lib::types::ResourceAddress;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResourceModel {

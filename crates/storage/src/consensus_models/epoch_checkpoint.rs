@@ -18,7 +18,7 @@ use tari_state_tree::{
     Version,
     SPARSE_MERKLE_PLACEHOLDER_HASH,
 };
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 

@@ -25,7 +25,7 @@ use tari_ootle_storage::{
 };
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_rocksdb::DatabaseOptions;
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tempfile::TempDir;
 use tokio::sync::{broadcast, mpsc, watch};
 

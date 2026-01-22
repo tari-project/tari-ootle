@@ -3,11 +3,11 @@
 
 use tari_engine_types::commit_result::ExecuteResult;
 use tari_ootle_transaction::{args, Transaction};
-use tari_template_lib::{
-    constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS},
-    models::{ComponentAddress, NonFungibleAddress},
-    prelude::Metadata,
-    resource::TOKEN_SYMBOL,
+use tari_template_lib::types::{
+    constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS, TOKEN_SYMBOL},
+    ComponentAddress,
+    Metadata,
+    NonFungibleAddress,
 };
 use tari_template_test_tooling::TemplateTest;
 

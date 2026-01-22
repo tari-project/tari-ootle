@@ -5,7 +5,8 @@ use std::{borrow::Borrow, fmt::Display, str::FromStr};
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
-use tari_engine_types::{substate::SubstateId, transaction_receipt::TransactionReceiptAddress};
+use tari_engine_types::substate::SubstateId;
+use tari_template_lib_types::TransactionReceiptAddress;
 
 use crate::{displayable::Displayable, shard::Shard, NumPreshards, ShardGroup, SubstateAddress, ToSubstateAddress};
 
@@ -512,8 +513,7 @@ mod tests {
     use std::hash::{DefaultHasher, Hash, Hasher};
 
     use indexmap::IndexSet;
-    use tari_template_lib::models::ComponentAddress;
-    use tari_template_lib_types::ObjectKey;
+    use tari_template_lib_types::{ComponentAddress, ObjectKey};
 
     use super::*;
 

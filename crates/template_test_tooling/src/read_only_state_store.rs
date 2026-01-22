@@ -14,8 +14,8 @@ use tari_engine_types::{
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    models::{Account, ComponentAddress, ResourceAddress, UtxoAddress, VaultId},
-    types::TemplateAddress,
+    models::Account,
+    types::{ComponentAddress, ResourceAddress, TemplateAddress, UtxoAddress, VaultId},
 };
 
 pub struct ReadOnlyStateStore<'a> {

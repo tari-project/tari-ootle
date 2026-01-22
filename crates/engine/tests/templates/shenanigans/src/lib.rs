@@ -169,7 +169,7 @@ mod template {
             stolen.withdraw_all()
         }
 
-        pub fn empty_state_on_component(&self, address: tari_template_lib::models::ComponentAddress) {
+        pub fn empty_state_on_component(&self, address: ComponentAddress) {
             ComponentManager::get(address).set_state(());
         }
 

@@ -8,10 +8,7 @@ use tari_engine_types::{
     limits,
 };
 use tari_ootle_transaction::{args, call_args, Instruction, Transaction};
-use tari_template_lib::{
-    models::{ComponentAddress, ResourceAddress},
-    types::{Amount, TemplateAddress},
-};
+use tari_template_lib::types::{Amount, ComponentAddress, ResourceAddress, TemplateAddress};
 use tari_template_test_tooling::{
     support::assert_error::{assert_access_denied_for_action, assert_reject_reason},
     TemplateTest,

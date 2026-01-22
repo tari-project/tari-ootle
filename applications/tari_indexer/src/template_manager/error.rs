@@ -28,7 +28,7 @@ use tari_epoch_manager::EpochManagerError;
 use tari_ootle_common_types::{displayable::Displayable, optional::IsNotFoundError};
 use tari_ootle_storage::{global::TemplateStatus, StorageError};
 use tari_ootle_storage_sqlite::error::SqliteStorageError;
-use tari_template_lib::types::TemplateAddress;
+use tari_template_lib_types::TemplateAddress;
 use tari_validator_node_rpc::ValidatorNodeRpcClientError;
 use thiserror::Error;
 

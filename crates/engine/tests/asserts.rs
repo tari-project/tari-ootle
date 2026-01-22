@@ -6,11 +6,7 @@ use std::vec;
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine::runtime::{AssertError, RuntimeError};
 use tari_ootle_transaction::{args, args::WorkspaceOffsetId, call_args, Instruction, Transaction};
-use tari_template_lib::{
-    models::{ComponentAddress, NonFungibleAddress, ResourceAddress},
-    prelude::XTR,
-    types::Amount,
-};
+use tari_template_lib::types::{constants::XTR, Amount, ComponentAddress, NonFungibleAddress, ResourceAddress};
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");

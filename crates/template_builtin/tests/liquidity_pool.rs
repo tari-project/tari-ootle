@@ -6,8 +6,7 @@ use std::collections::HashMap;
 use tari_ootle_transaction::{args, Transaction};
 use tari_template_lib::{
     auth::{AccessRule, OwnerRule},
-    constants::XTR,
-    metadata,
+    types::{constants::XTR, metadata},
 };
 use tari_template_test_tooling::TemplateTest;
 

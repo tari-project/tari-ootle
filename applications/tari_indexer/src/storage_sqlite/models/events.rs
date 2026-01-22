@@ -26,7 +26,7 @@ use std::convert::TryFrom;
 use diesel::sql_types::{Nullable, Text};
 use serde::{Deserialize, Serialize};
 use tari_ootle_storage::time::PrimitiveDateTime;
-use tari_template_lib::types::Hash;
+use tari_template_lib_types::Hash;
 
 use crate::storage_sqlite::schema::*;
 

@@ -47,10 +47,11 @@ use tari_ootle_wallet_sdk::{
         WalletNetworkInterface,
     },
 };
-use tari_template_lib::{
-    models::{ResourceAddress, UtxoId},
-    prelude::RistrettoPublicKeyBytes,
-    types::{crypto::UtxoTag, TemplateAddress},
+use tari_template_lib_types::{
+    crypto::{RistrettoPublicKeyBytes, UtxoTag},
+    ResourceAddress,
+    TemplateAddress,
+    UtxoId,
 };
 use time::{OffsetDateTime, PrimitiveDateTime};
 use url::ParseError;

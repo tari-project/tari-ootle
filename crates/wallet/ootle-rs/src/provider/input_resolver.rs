@@ -11,12 +11,12 @@ use tari_ootle_common_types::{
     engine_types::{
         indexed_value::IndexedValueError,
         substate::{SubstateId, SubstateValue},
-        template_lib_models::ComponentAddress,
     },
     substate_type::SubstateType,
     SubstateRequirement,
 };
 use tari_ootle_transaction::UnsignedTransaction;
+use tari_template_lib_types::ComponentAddress;
 use tracing::debug;
 
 use crate::{macros::_macro_exports::ResourceAddress, provider::WantInput};

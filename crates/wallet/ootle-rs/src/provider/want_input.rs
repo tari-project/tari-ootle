@@ -1,10 +1,8 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_ootle_common_types::engine_types::{
-    substate::SubstateId,
-    template_lib_models::{ComponentAddress, ResourceAddress},
-};
+use tari_ootle_common_types::engine_types::substate::SubstateId;
+use tari_template_lib_types::{ComponentAddress, ResourceAddress};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum WantInput {

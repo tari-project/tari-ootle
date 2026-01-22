@@ -33,10 +33,7 @@ use tari_ootle_storage::{
     StateStore,
 };
 use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
-use tari_template_lib::{
-    models::ComponentAddress,
-    types::{EntityId, ObjectKey},
-};
+use tari_template_lib_types::{ComponentAddress, EntityId, ObjectKey};
 use tempfile::TempDir;
 
 use crate::support::{logging::setup_logger, TEST_NUM_PRESHARDS};

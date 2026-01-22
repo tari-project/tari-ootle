@@ -8,7 +8,7 @@ use tari_crypto::tari_utilities::ByteArray;
 use tari_ootle_common_types::VotePower;
 use tari_sidechain::{CommitProofElement, SidechainBlockCommitProof, SidechainProofValidationError};
 use tari_state_tree::{compute_merkle_root_for_hashes, StateTreeError, TreeHash};
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::consensus_models::Command;
 

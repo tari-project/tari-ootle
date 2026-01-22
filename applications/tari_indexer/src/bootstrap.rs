@@ -61,7 +61,7 @@ use tari_ootle_p2p::TariMessagingSpec;
 use tari_ootle_storage::global::GlobalDb;
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_shutdown::ShutdownSignal;
-use tari_template_lib::{prelude::RistrettoPublicKeyBytes, types::Amount};
+use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, Amount};
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
 use crate::{

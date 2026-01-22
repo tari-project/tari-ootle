@@ -7,13 +7,13 @@ use axum::{
     Extension,
     Json,
 };
-use tari_engine_types::transaction_receipt::TransactionReceiptAddress;
 use tari_indexer_client::types::{
     GetTransactionReceiptResponse,
     ListTransactionReceiptsRequest,
     ListTransactionReceiptsResponse,
 };
 use tari_ootle_common_types::optional::Optional;
+use tari_template_lib_types::TransactionReceiptAddress;
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
 

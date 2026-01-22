@@ -5,7 +5,7 @@ mod transaction;
 
 use tari_ootle_common_types::SubstateRequirementRef;
 use tari_ootle_transaction::{Instruction, TransactionId, TransactionWeight};
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 pub struct Instructions {
     pub fee: Vec<Instruction>,

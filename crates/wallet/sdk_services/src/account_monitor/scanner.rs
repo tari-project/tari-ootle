@@ -20,10 +20,13 @@ use tari_ootle_wallet_sdk::{
     WalletSdkSpec,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::{
-    models::{NonFungibleAddress, VaultId},
-    prelude::{ComponentAddress, NonFungibleId, ResourceAddress},
-    resource::TOKEN_SYMBOL,
+use tari_template_lib_types::{
+    constants::TOKEN_SYMBOL,
+    ComponentAddress,
+    NonFungibleAddress,
+    NonFungibleId,
+    ResourceAddress,
+    VaultId,
 };
 
 use crate::{account_monitor::monitor::AccountMonitorError, notify::Notify};

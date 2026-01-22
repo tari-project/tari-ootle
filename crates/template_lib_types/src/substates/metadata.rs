@@ -144,7 +144,7 @@ impl Display for Metadata {
 /// # Example
 ///
 /// ```rust
-/// # use tari_template_lib::metadata;
+/// # use tari_template_lib_types::metadata;
 /// metadata!(
 ///   "name" => "My NFT",
 ///   "description" => "This is my first NFT",
@@ -155,7 +155,7 @@ impl Display for Metadata {
 macro_rules! metadata {
     ($($key:expr => $value:expr),* $(,)?) => {
         {
-            let mut metadata = $crate::models::Metadata::new();
+            let mut metadata = $crate::Metadata::new();
             $(
                 metadata.insert($key, $value);
             )*

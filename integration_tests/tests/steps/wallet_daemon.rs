@@ -16,10 +16,7 @@ use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::models::KeyBranch;
-use tari_template_lib::{
-    constants::XTR,
-    types::{bytes::Bytes, crypto::PedersenCommitmentBytes, Amount},
-};
+use tari_template_lib_types::{bytes::Bytes, constants::XTR, crypto::PedersenCommitmentBytes, Amount};
 use tari_transaction_components::{
     tari_amount::T,
     transaction_components::{memo_field::TxType, MemoField},

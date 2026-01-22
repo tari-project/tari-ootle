@@ -26,10 +26,7 @@ use std::{
 };
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tari_template_lib::{
-    models::{ComponentAddress, ResourceAddress},
-    types::{Hash, TemplateAddress},
-};
+use tari_template_lib::types::{ComponentAddress, Hash, ResourceAddress, TemplateAddress};
 
 use crate::{
     events::Event,

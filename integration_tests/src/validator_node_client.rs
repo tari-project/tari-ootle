@@ -12,7 +12,7 @@ use tari_engine_types::{
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
 use tari_ootle_transaction::{builder::TransactionBuilder, Transaction};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::{models::NonFungibleId, types::TemplateAddress};
+use tari_template_lib_types::{NonFungibleId, TemplateAddress};
 use tari_transaction_components::key_manager::{SecretTransactionKeyManagerInterface, TariKeyId};
 use tari_validator_node_client::{
     types::{GetTransactionResultRequest, SubmitTransactionRequest, SubmitTransactionResponse},

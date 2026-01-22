@@ -27,9 +27,8 @@ use tari_ootle_wallet_crypto::{
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     auth::AccessRule,
-    models::{ComponentAddress, ResourceAddress, SpendCondition, StealthTransferStatement, UtxoAddress},
-    prelude::PedersenCommitmentBytes,
-    types::{Amount, EncryptedData},
+    models::{SpendCondition, StealthTransferStatement},
+    types::{crypto::PedersenCommitmentBytes, Amount, ComponentAddress, EncryptedData, ResourceAddress, UtxoAddress},
 };
 
 use crate::{

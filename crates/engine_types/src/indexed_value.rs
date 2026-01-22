@@ -6,29 +6,24 @@ use std::{any::type_name, collections::BTreeMap, ops::ControlFlow};
 use serde::{Deserialize, Serialize};
 use tari_bor::{decode, BorError, FromTagAndValue, ValueVisitor};
 use tari_template_lib::{
-    models::{
+    models::{BucketId, ComponentAddressAllocation, ProofId, ResourceAddressAllocation},
+    prelude::{ComponentAddress, Metadata, NonFungibleAddress},
+    types::{
         BinaryTag,
-        BucketId,
         ClaimedOutputTombstoneAddress,
-        ComponentAddressAllocation,
+        Hash,
         NonFungibleAddressContents,
-        ProofId,
+        ObjectKey,
         ResourceAddress,
-        ResourceAddressAllocation,
+        TransactionReceiptAddress,
         UtxoAddress,
         UtxoAddressContents,
+        ValidatorFeePoolAddress,
         VaultId,
     },
-    prelude::{ComponentAddress, Metadata, NonFungibleAddress},
-    types::{Hash, ObjectKey},
 };
 
-use crate::{
-    published_template::PublishedTemplateAddress,
-    substate::SubstateId,
-    transaction_receipt::TransactionReceiptAddress,
-    ValidatorFeePoolAddress,
-};
+use crate::{published_template::PublishedTemplateAddress, substate::SubstateId};
 
 const MAX_VISITOR_DEPTH: usize = 50;
 
@@ -560,7 +555,7 @@ impl ValueVisitor<WellKnownTariValue> for IndexedValueVisitor {
 #[derive(Debug, thiserror::Error)]
 pub enum IndexedValueError {
     #[error("Bor error: {0}")]
-    BorError(#[from] tari_bor::BorError),
+    BorError(#[from] BorError),
     #[error("Invalid tag: {0}")]
     InvalidTag(u64),
     #[error("{0}")]
@@ -610,7 +605,7 @@ mod tests {
 
     use rand::{rngs::OsRng, RngCore};
     use tari_bor::cbor;
-    use tari_template_lib::models::NonFungibleId;
+    use tari_template_lib::types::NonFungibleId;
 
     use super::*;
     use crate::hashing::{hasher32, EngineHashDomainLabel};

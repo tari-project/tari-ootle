@@ -26,12 +26,9 @@ use std::{
 };
 
 use tari_bor::{BorTag, Tagged};
-use tari_template_lib_types::{EntityId, KeyParseError, ObjectKey};
 
-use crate::{
-    models::{address_prefixes, BinaryTag},
-    newtype_struct_serde_impl,
-};
+use super::BinaryTag;
+use crate::{address_prefixes, newtype_struct_serde_impl, EntityId, KeyParseError, ObjectKey};
 
 const TAG: u64 = BinaryTag::ComponentAddress.as_u64();
 

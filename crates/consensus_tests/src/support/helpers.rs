@@ -14,10 +14,7 @@ use tari_engine_types::{
     substate::{SubstateId, SubstateValue},
 };
 use tari_ootle_common_types::{NumPreshards, ShardGroup, SubstateAddress};
-use tari_template_lib::{
-    models::ComponentAddress,
-    types::{ComponentKey, EntityId, ObjectKey},
-};
+use tari_template_lib_types::{ComponentAddress, ComponentKey, EntityId, ObjectKey};
 
 use crate::support::TestAddress;
 

@@ -17,7 +17,7 @@ use tari_ootle_common_types::{
     VersionedSubstateId,
     VersionedSubstateIdRef,
 };
-use tari_template_lib::{constants::XTR, models::ResourceAddress, types::TemplateAddress};
+use tari_template_lib::types::{constants::XTR, ResourceAddress, TemplateAddress};
 
 use crate::{
     models::SubstateModel,

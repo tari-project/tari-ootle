@@ -90,8 +90,7 @@ impl<'a> DbCodec<VersionedSubstateIdRef<'a>> for SubstateIdCodec {
 mod tests {
     use tari_common_types::types::FixedHash;
     use tari_consensus_types::BlockId;
-    use tari_engine_types::template_lib_models::ComponentAddress;
-    use tari_template_lib_types::ObjectKey;
+    use tari_template_lib_types::{ComponentAddress, ObjectKey};
 
     use super::*;
     use crate::{

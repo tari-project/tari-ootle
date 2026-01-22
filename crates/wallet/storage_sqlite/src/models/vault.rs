@@ -6,10 +6,7 @@ use std::str::FromStr;
 use bigdecimal::{BigDecimal, ToPrimitive};
 use diesel::{Identifiable, Queryable};
 use tari_ootle_wallet_sdk::storage::WalletStorageError;
-use tari_template_lib::{
-    models::{ComponentAddress, ResourceAddress, VaultId},
-    types::{Amount, ResourceType},
-};
+use tari_template_lib_types::{Amount, ComponentAddress, ResourceAddress, ResourceType, VaultId};
 use time::PrimitiveDateTime;
 
 use crate::schema::vaults;

@@ -1,14 +1,20 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_lib_types::{Amount, ResourceType};
+use tari_template_lib_types::{
+    constants::{DEFAULT_DIVISIBILITY, IMAGE_URL, TOKEN_SYMBOL},
+    Amount,
+    ComponentAddress,
+    Metadata,
+    ResourceAddress,
+    ResourceType,
+};
 
-use super::{IMAGE_URL, TOKEN_SYMBOL};
 use crate::{
     args::MintArg,
     auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
-    models::{Bucket, ComponentAddress, Metadata, ResourceAddress, ResourceAddressAllocation},
-    resource::{ResourceManager, DEFAULT_DIVISIBILITY},
+    models::{Bucket, ResourceAddressAllocation},
+    resource::ResourceManager,
     types::crypto::RistrettoPublicKeyBytes,
 };
 

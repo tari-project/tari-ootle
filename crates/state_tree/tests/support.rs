@@ -12,7 +12,7 @@ use tari_state_tree::{
     StateTreePayload,
     SubstateTreeChange,
 };
-use tari_template_lib::{models::ComponentAddress, types::ObjectKey};
+use tari_template_lib_types::{ComponentAddress, ObjectKey};
 
 pub fn make_value(seed: u8) -> VersionedSubstateId {
     VersionedSubstateId::new(

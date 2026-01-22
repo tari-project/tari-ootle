@@ -25,40 +25,24 @@
 
 mod account;
 mod address_allocation;
-pub mod address_prefixes;
-mod binary_tag;
 mod bucket;
-mod claimed_output_tombstone;
-mod component;
 mod confidential_proof;
-#[macro_use]
-mod metadata;
 mod non_fungible;
 mod proof;
-mod resource;
 mod signature_verifier;
 mod stealth;
-mod system;
 mod unspent_output;
-mod utxo;
 mod vault;
 mod viewable_balance;
 
 pub use account::*;
 pub use address_allocation::*;
-pub use binary_tag::*;
 pub use bucket::*;
-pub use claimed_output_tombstone::*;
-pub use component::*;
 pub use confidential_proof::*;
-pub use metadata::*;
 pub use non_fungible::*;
 pub use proof::*;
-pub use resource::ResourceAddress;
 pub use signature_verifier::*;
 pub use stealth::*;
-pub use system::*;
 pub use unspent_output::*;
-pub use utxo::*;
 pub use vault::*;
 pub use viewable_balance::*;

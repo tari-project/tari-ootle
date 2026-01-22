@@ -6,6 +6,7 @@ mod amount;
 #[macro_use]
 pub mod crypto;
 pub mod bytes;
+pub mod constants;
 mod encrypted_data;
 pub mod engine_args;
 mod entity_id;
@@ -16,8 +17,12 @@ mod max_bytes;
 mod max_string;
 mod max_vec;
 mod misc;
+mod newtype_serde_macros;
 mod resource_type;
 pub mod serde_helpers;
+#[macro_use]
+mod substates;
+pub mod address_prefixes;
 
 pub use amount::*;
 pub use encrypted_data::*;
@@ -29,6 +34,4 @@ pub use max_string::MaxString;
 pub use max_vec::*;
 pub use misc::*;
 pub use resource_type::*;
-
-/// The address of a Template
-pub type TemplateAddress = Hash;
+pub use substates::*;

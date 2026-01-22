@@ -9,7 +9,7 @@ use indexmap::IndexMap;
 use log::{info, warn};
 use tari_engine_types::crypto::ValueLookupTable;
 use tari_ootle_wallet_crypto::{GenerateValueLookup, MMapValueLookup};
-use tari_template_lib::models::UtxoAddress;
+use tari_template_lib::types::UtxoAddress;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{

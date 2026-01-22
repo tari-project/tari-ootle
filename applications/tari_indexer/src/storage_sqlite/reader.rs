@@ -19,7 +19,7 @@ use serde::de::DeserializeOwned;
 use tari_engine_types::{
     events::Event,
     substate::{Substate, SubstateId, SubstateValue},
-    transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
+    transaction_receipt::TransactionReceipt,
     Utxo,
 };
 use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate, TransactionEntry};
@@ -35,10 +35,13 @@ use tari_ootle_storage::{time::PrimitiveDateTime, Ordering, StorageError};
 use tari_ootle_storage_sqlite::SqliteTransaction;
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_ootle_wallet_sdk::models::UtxoStateUpdateSet;
-use tari_template_lib::{
-    models::{ResourceAddress, UtxoId},
-    prelude::{RistrettoPublicKeyBytes, TemplateAddress},
-    types::{crypto::UtxoTag, Hash},
+use tari_template_lib_types::{
+    crypto::{RistrettoPublicKeyBytes, UtxoTag},
+    Hash,
+    ResourceAddress,
+    TemplateAddress,
+    TransactionReceiptAddress,
+    UtxoId,
 };
 
 use crate::{

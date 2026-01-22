@@ -13,7 +13,7 @@ use tari_ootle_storage::{
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
 };
-use tari_template_lib::{models::ComponentAddress, types::ObjectKey};
+use tari_template_lib::types::{ComponentAddress, ObjectKey};
 
 use crate::helpers::num_preshards;
 

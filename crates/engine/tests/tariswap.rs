@@ -3,11 +3,7 @@
 
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_ootle_transaction::{args, call_args, Instruction, Transaction};
-use tari_template_lib::{
-    models::ComponentAddress,
-    prelude::{NonFungibleAddress, ResourceAddress},
-    types::{Amount, FunctionName},
-};
+use tari_template_lib::types::{Amount, ComponentAddress, FunctionName, NonFungibleAddress, ResourceAddress};
 use tari_template_test_tooling::TemplateTest;
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");

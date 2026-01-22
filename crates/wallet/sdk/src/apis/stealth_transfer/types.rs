@@ -4,10 +4,7 @@
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_transaction::UnsignedTransaction;
 use tari_ootle_wallet_crypto::{memo::Memo, StealthInputWitness};
-use tari_template_lib::{
-    models::{ComponentAddress, VaultId},
-    prelude::Amount,
-};
+use tari_template_lib::types::{Amount, ComponentAddress, VaultId};
 
 use crate::{
     apis::stealth_transfer::PayTo,

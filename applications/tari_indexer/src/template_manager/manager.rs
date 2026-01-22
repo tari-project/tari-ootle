@@ -51,7 +51,7 @@ use tari_template_builtin::{
     NFT_FAUCET_TEMPLATE_ADDRESS,
     XTR_FAUCET_TEMPLATE_ADDRESS,
 };
-use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
+use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 
 use super::{LoadedTemplateWithMetadata, Template, TemplateCode, TemplateMetadata};
 use crate::{substate_manager::SubstateManager, template_manager::error::TemplateManagerError};

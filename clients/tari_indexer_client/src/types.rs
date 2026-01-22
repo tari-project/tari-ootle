@@ -12,8 +12,7 @@ use tari_engine_types::{
     commit_result::ExecuteResult,
     resource::Resource,
     substate::{Substate, SubstateId, SubstateValue},
-    template_lib_models::{NonFungibleAddress, ResourceAddress, UtxoId},
-    transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
+    transaction_receipt::TransactionReceipt,
     Utxo,
 };
 use tari_ootle_common_types::{
@@ -32,7 +31,11 @@ use tari_template_abi::TemplateDef;
 use tari_template_lib_types::{
     crypto::{RistrettoPublicKeyBytes, UtxoTag},
     Amount,
+    NonFungibleAddress,
+    ResourceAddress,
     TemplateAddress,
+    TransactionReceiptAddress,
+    UtxoId,
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

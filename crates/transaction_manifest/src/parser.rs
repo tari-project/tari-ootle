@@ -32,9 +32,7 @@ use tari_engine_types::{json_cbor::convert_json_to_cbor, substate::SubstateId};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     args::LogLevel,
-    constants::XTR,
-    models::{Metadata, NonFungibleId},
-    types::{hex::bytes_from_hex, Amount, TemplateAddress},
+    types::{constants::XTR, hex::bytes_from_hex, Amount, Metadata, NonFungibleId, TemplateAddress},
 };
 
 use crate::error::ManifestError;

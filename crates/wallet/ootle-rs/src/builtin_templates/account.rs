@@ -3,9 +3,9 @@
 
 use std::collections::HashSet;
 
-use tari_ootle_common_types::{engine_types::template_lib_models::ResourceAddress, SubstateRequirement};
+use tari_ootle_common_types::SubstateRequirement;
 use tari_ootle_transaction::{args, TransactionBuilder, UnsignedTransaction};
-use tari_template_lib_types::Amount;
+use tari_template_lib_types::{Amount, ResourceAddress};
 
 use crate::{
     builtin_templates::traits::InvokeBuilder,

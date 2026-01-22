@@ -23,10 +23,7 @@
 use std::error::Error;
 
 use tari_engine_types::{commit_result::RejectReason, indexed_value::IndexedValueError};
-use tari_template_lib::{
-    models::ComponentAddress,
-    types::{HashParseError, TemplateAddress},
-};
+use tari_template_lib::types::{ComponentAddress, HashParseError, TemplateAddress};
 
 use crate::{runtime::RuntimeError, template::TemplateLoaderError, wasm::WasmExecutionError};
 

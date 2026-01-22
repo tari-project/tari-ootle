@@ -52,9 +52,15 @@ use tari_template_lib::{
     args::{AllocateAddressResult, BucketAction, BucketGetAmountArg, BucketRef, WorkspaceAction},
     auth::{ComponentAccessRules, OwnerRule},
     invoke_args,
-    models::{Bucket, ComponentAddress, NonFungibleAddress, StealthTransferStatement},
-    prelude::STEALTH_TARI_RESOURCE_ADDRESS,
-    types::{crypto::RistrettoPublicKeyBytes, Amount, TemplateAddress},
+    models::{Bucket, StealthTransferStatement},
+    types::{
+        constants::STEALTH_TARI_RESOURCE_ADDRESS,
+        crypto::RistrettoPublicKeyBytes,
+        Amount,
+        ComponentAddress,
+        NonFungibleAddress,
+        TemplateAddress,
+    },
 };
 
 use crate::{

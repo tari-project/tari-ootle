@@ -5,7 +5,7 @@ use tari_engine_types::{
     fees::{FeeBreakdown, FeeSource},
     resource_container::ResourceContainer,
 };
-use tari_template_lib::{models::VaultId, prelude::XTR};
+use tari_template_lib::types::{constants::XTR, VaultId};
 
 use crate::runtime::RuntimeError;
 

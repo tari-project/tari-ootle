@@ -5,7 +5,7 @@ use std::{fmt, fmt::Display, ops::Deref};
 
 use tari_consensus_types::{BlockId, ProposalCertificate};
 use tari_ootle_common_types::{Epoch, NodeHeight};
-use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{consensus_models::Block, StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 

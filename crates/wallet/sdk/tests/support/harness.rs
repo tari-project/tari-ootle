@@ -40,11 +40,17 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_abi::TemplateDef;
-use tari_template_lib::{
+use tari_template_lib::types::{
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
-    models::{ComponentAddress, ResourceAddress, UtxoId, VaultId},
-    prelude::{Amount, PedersenCommitmentBytes, ResourceType, TemplateAddress},
-    types::EncryptedData,
+    crypto::PedersenCommitmentBytes,
+    Amount,
+    ComponentAddress,
+    EncryptedData,
+    ResourceAddress,
+    ResourceType,
+    TemplateAddress,
+    UtxoId,
+    VaultId,
 };
 
 pub struct TestSdkSpec;

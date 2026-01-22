@@ -9,5 +9,5 @@ macro_rules! resource_address {
 }
 
 pub mod _macro_exports {
-    pub use tari_ootle_common_types::engine_types::template_lib_models::ResourceAddress;
+    pub use tari_template_lib_types::ResourceAddress;
 }

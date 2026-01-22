@@ -11,7 +11,7 @@ use std::{
 use futures_bounded::PushError;
 use log::{info, warn};
 use tari_ootle_wallet_sdk::{models::WalletEvent, WalletSdk, WalletSdkSpec};
-use tari_template_lib::{models::ComponentAddress, prelude::ResourceAddress};
+use tari_template_lib_types::{ComponentAddress, ResourceAddress};
 use tokio::{
     sync::{mpsc, watch},
     task::JoinHandle,

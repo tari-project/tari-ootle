@@ -51,10 +51,14 @@ use tari_ootle_wallet_sdk::{
     },
     storage::{TagAndPublicNoncePair, WalletStorageError, WalletStoreReader},
 };
-use tari_template_lib::{
-    models::{ResourceAddress, VaultId},
-    prelude::{ComponentAddress, NonFungibleId, PedersenCommitmentBytes, ResourceType, RistrettoPublicKeyBytes},
-    types::{crypto::UtxoTag, TemplateAddress},
+use tari_template_lib_types::{
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
+    ComponentAddress,
+    NonFungibleId,
+    ResourceAddress,
+    ResourceType,
+    TemplateAddress,
+    VaultId,
 };
 use webauthn_rs::prelude::Passkey;
 

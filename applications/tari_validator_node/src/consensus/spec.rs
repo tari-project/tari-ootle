@@ -4,6 +4,7 @@
 #[cfg(not(feature = "metrics"))]
 use tari_consensus::traits::hooks::NoopHooks;
 use tari_consensus::traits::ConsensusSpec;
+use tari_engine::state_store::memory::ReadOnlyMemoryStateStore;
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_ootle_app_utilities::transaction_executor::TariTransactionProcessor;
 use tari_ootle_common_types::PeerAddress;
@@ -26,7 +27,8 @@ use crate::{
 };
 
 pub type ValidatorNodeStateStore = tari_state_store_rocksdb::RocksDbStateStore<PeerAddress>;
-pub type ValidatorTransactionProcessor = TariTransactionProcessor<StateStoreTemplateProvider<ValidatorNodeStateStore>>;
+pub type ValidatorTransactionProcessor =
+    TariTransactionProcessor<ReadOnlyMemoryStateStore, StateStoreTemplateProvider<ValidatorNodeStateStore>>;
 #[derive(Clone)]
 pub struct TariConsensusSpec;
 

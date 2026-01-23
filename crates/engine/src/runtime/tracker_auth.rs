@@ -15,14 +15,17 @@ use tari_template_lib::{
     types::NonFungibleAddress,
 };
 
-use crate::runtime::{working_state::WorkingState, ActionIdent, AuthorizationScope, RuntimeError};
+use crate::{
+    runtime::{working_state::WorkingState, ActionIdent, AuthorizationScope, RuntimeError},
+    state_store::StateReader,
+};
 
-pub struct Authorization<'a> {
-    state: &'a WorkingState,
+pub struct Authorization<'a, TStore> {
+    state: &'a WorkingState<TStore>,
 }
 
-impl<'a> Authorization<'a> {
-    pub(super) fn new(state: &'a WorkingState) -> Self {
+impl<'a, TStore: StateReader> Authorization<'a, TStore> {
+    pub(super) fn new(state: &'a WorkingState<TStore>) -> Self {
         Self { state }
     }
 
@@ -106,8 +109,8 @@ impl<'a> Authorization<'a> {
     }
 }
 
-fn check_ownership(
-    state: &WorkingState,
+fn check_ownership<TStore: StateReader>(
+    state: &WorkingState<TStore>,
     scope: &AuthorizationScope,
     ownership: Ownership<'_>,
 ) -> Result<bool, RuntimeError> {
@@ -136,8 +139,8 @@ fn check_ownership(
     }
 }
 
-fn check_access_rule(
-    state: &WorkingState,
+fn check_access_rule<TStore: StateReader>(
+    state: &WorkingState<TStore>,
     scope: &AuthorizationScope,
     rule: &AccessRule,
 ) -> Result<bool, RuntimeError> {
@@ -148,8 +151,8 @@ fn check_access_rule(
     }
 }
 
-fn check_restricted_access_rule(
-    state: &WorkingState,
+fn check_restricted_access_rule<TStore: StateReader>(
+    state: &WorkingState<TStore>,
     scope: &AuthorizationScope,
     rule: &RestrictedAccessRule,
 ) -> Result<bool, RuntimeError> {
@@ -174,8 +177,8 @@ fn check_restricted_access_rule(
     }
 }
 
-fn check_require_rule(
-    state: &WorkingState,
+fn check_require_rule<TStore: StateReader>(
+    state: &WorkingState<TStore>,
     scope: &AuthorizationScope,
     rule: &RequireRule,
 ) -> Result<bool, RuntimeError> {
@@ -215,8 +218,8 @@ fn check_require_rule(
     }
 }
 
-fn check_requirement(
-    state: &WorkingState,
+fn check_requirement<TStore: StateReader>(
+    state: &WorkingState<TStore>,
     scope: &AuthorizationScope,
     requirement: &RuleRequirement,
 ) -> Result<bool, RuntimeError> {

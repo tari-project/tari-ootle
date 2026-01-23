@@ -8,7 +8,6 @@ use tari_consensus::{
     traits::ConsensusSpec,
 };
 use tari_epoch_manager::service::EpochManagerHandle;
-use tari_ootle_app_utilities::transaction_executor::TariTransactionProcessor;
 use tari_ootle_common_types::{Network, PeerAddress};
 use tari_ootle_storage::consensus_models::TransactionPool;
 use tari_ootle_transaction::Transaction;
@@ -44,9 +43,8 @@ use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 
 use crate::{
     config::ConsensusConfig,
-    consensus::spec::ValidatorNodeStateStore,
+    consensus::spec::{ValidatorNodeStateStore, ValidatorTransactionProcessor},
     p2p::NopLogger,
-    state_store_template_provider::StateStoreTemplateProvider,
 };
 
 pub type ConsensusTransactionValidator = BoxedValidator<ValidationContext, Transaction, TransactionValidationError>;
@@ -64,10 +62,7 @@ pub async fn spawn(
     client_factory: TariValidatorNodeRpcClientFactory,
     hooks: <TariConsensusSpec as ConsensusSpec>::Hooks,
     shutdown_signal: ShutdownSignal,
-    transaction_executor: TarBlockTransactionExecutor<
-        TariTransactionProcessor<StateStoreTemplateProvider<ValidatorNodeStateStore>>,
-        ConsensusTransactionValidator,
-    >,
+    transaction_executor: TarBlockTransactionExecutor<ValidatorTransactionProcessor, ConsensusTransactionValidator>,
     tx_hotstuff_events: broadcast::Sender<HotstuffEvent>,
     consensus_constants: ConsensusConstants,
 ) -> (JoinHandle<Result<(), anyhow::Error>>, ConsensusHandle) {

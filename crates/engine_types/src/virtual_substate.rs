@@ -4,7 +4,8 @@
 use std::{
     collections::HashMap,
     fmt::{Display, Formatter},
-    ops::{Deref, DerefMut},
+    ops::Deref,
+    sync::Arc,
 };
 
 use serde::{Deserialize, Serialize};
@@ -27,16 +28,12 @@ pub enum VirtualSubstate {
     CurrentEpoch(u64),
 }
 
-// Developer note: this struct has two non-functional purposes:
-// 1. so that we do not have to type out the HashMap type in many places, and
-// 2. so that the clippy::mutable_key_type annotation is not needed in many places
-
-/// Virtual substate collection
+/// Read-only Virtual substate collection. THis collection is cheap to clone.
 #[derive(Debug, Clone, Default)]
-pub struct VirtualSubstates(HashMap<VirtualSubstateId, VirtualSubstate>);
+pub struct VirtualSubstates(Arc<HashMap<VirtualSubstateId, VirtualSubstate>>);
 
 impl VirtualSubstates {
-    pub fn new() -> Self {
+    pub fn empty() -> Self {
         Self::default()
     }
 
@@ -45,10 +42,6 @@ impl VirtualSubstates {
             Some(VirtualSubstate::CurrentEpoch(epoch)) => Some(*epoch),
             _ => None,
         }
-    }
-
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self(HashMap::with_capacity(capacity))
     }
 }
 
@@ -60,23 +53,14 @@ impl Deref for VirtualSubstates {
     }
 }
 
-impl DerefMut for VirtualSubstates {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl IntoIterator for VirtualSubstates {
-    type IntoIter = <HashMap<VirtualSubstateId, VirtualSubstate> as IntoIterator>::IntoIter;
-    type Item = <HashMap<VirtualSubstateId, VirtualSubstate> as IntoIterator>::Item;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
 impl FromIterator<(VirtualSubstateId, VirtualSubstate)> for VirtualSubstates {
     fn from_iter<T: IntoIterator<Item = (VirtualSubstateId, VirtualSubstate)>>(iter: T) -> Self {
-        Self(iter.into_iter().collect())
+        Self(Arc::new(iter.into_iter().collect()))
+    }
+}
+
+impl From<HashMap<VirtualSubstateId, VirtualSubstate>> for VirtualSubstates {
+    fn from(map: HashMap<VirtualSubstateId, VirtualSubstate>) -> Self {
+        Self(Arc::new(map))
     }
 }

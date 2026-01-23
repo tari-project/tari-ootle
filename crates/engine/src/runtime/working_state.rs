@@ -75,13 +75,13 @@ use crate::{
         RuntimeError,
         TransactionCommitError,
     },
-    state_store::memory::ReadOnlyMemoryStateStore,
+    state_store::StateReader,
 };
 
 const LOG_TARGET: &str = "dan::engine::runtime::working_state";
 
 #[derive(Debug, Clone)]
-pub(super) struct WorkingState {
+pub(super) struct WorkingState<TStore> {
     transaction_hash: Hash,
     events: Vec<Event>,
     logs: Vec<LogEntry>,
@@ -92,7 +92,7 @@ pub(super) struct WorkingState {
     proofs: HashMap<ProofId, Proof>,
     object_ids: ObjectIds,
 
-    store: WorkingStateStore,
+    store: WorkingStateStore<TStore>,
 
     virtual_substates: VirtualSubstates,
     validator_fee_withdrawals: Vec<ValidatorFeeWithdrawal>,
@@ -105,9 +105,9 @@ pub(super) struct WorkingState {
     fee_state: FeeState,
 }
 
-impl WorkingState {
+impl<TStore: StateReader> WorkingState<TStore> {
     pub fn new(
-        state_store: ReadOnlyMemoryStateStore,
+        state_store: TStore,
         virtual_substates: VirtualSubstates,
         initial_call_scope: CallScope,
         transaction_hash: Hash,
@@ -987,7 +987,7 @@ impl WorkingState {
         Ok(())
     }
 
-    pub fn authorization(&self) -> Authorization<'_> {
+    pub fn authorization(&self) -> Authorization<'_, TStore> {
         Authorization::new(self)
     }
 
@@ -1154,16 +1154,6 @@ impl WorkingState {
 
     pub fn base_call_scope(&self) -> &CallScope {
         &self.initial_call_scope
-    }
-
-    pub fn take_state(&mut self) -> Self {
-        let new_state = WorkingState::new(
-            self.store.state_store().clone(),
-            VirtualSubstates::new(),
-            CallScope::new(),
-            self.transaction_hash,
-        );
-        mem::replace(self, new_state)
     }
 
     pub fn workspace(&self) -> &Workspace {
@@ -1463,7 +1453,7 @@ impl WorkingState {
         Ok(substate_diff)
     }
 
-    pub fn store(&self) -> &WorkingStateStore {
+    pub fn store(&self) -> &WorkingStateStore<TStore> {
         &self.store
     }
 

@@ -105,7 +105,7 @@ pub use tracker::StateTracker;
 
 use crate::runtime::{locking::LockedSubstate, scope::PushCallFrame};
 
-pub trait RuntimeInterface: Send + Sync {
+pub trait RuntimeInterface {
     fn next_entity_id(&self) -> Result<EntityId, RuntimeError>;
     fn emit_event(&mut self, topic: String, payload: Metadata) -> Result<(), RuntimeError>;
 

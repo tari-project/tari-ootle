@@ -5,7 +5,11 @@ use std::{collections::HashMap, sync::Arc};
 
 use log::info;
 use tari_consensus::traits::{BlockTransactionExecutor, BlockTransactionExecutorError};
-use tari_engine::state_store::{memory::MemoryStateStore, new_memory_store, StateWriter};
+use tari_engine::state_store::{
+    memory::{MemoryStateStore, ReadOnlyMemoryStateStore},
+    new_memory_store,
+    StateWriter,
+};
 use tari_engine_types::{
     substate::Substate,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
@@ -28,7 +32,9 @@ pub struct TarBlockTransactionExecutor<TExecutor, TValidator> {
     validator: Arc<TValidator>,
 }
 
-impl<TExecutor: TransactionExecutor, TValidator> TarBlockTransactionExecutor<TExecutor, TValidator> {
+impl<TExecutor: TransactionExecutor<ReadOnlyMemoryStateStore>, TValidator>
+    TarBlockTransactionExecutor<TExecutor, TValidator>
+{
     pub fn new(executor: TExecutor, validator: TValidator) -> Self {
         Self {
             executor,
@@ -54,7 +60,7 @@ impl<TExecutor, TStateStore, TValidator> BlockTransactionExecutor<TStateStore>
     for TarBlockTransactionExecutor<TExecutor, TValidator>
 where
     TStateStore: StateStore,
-    TExecutor: TransactionExecutor,
+    TExecutor: TransactionExecutor<ReadOnlyMemoryStateStore>,
     for<'a> TValidator: Validator<Transaction, Context = ValidationContext, Error = TransactionValidationError>,
 {
     fn validate(
@@ -83,11 +89,10 @@ where
         let mut state_db = new_memory_store();
         Self::add_substates_to_memory_db(resolved_inputs, &mut state_db)?;
 
-        let mut virtual_substates = VirtualSubstates::new();
-        virtual_substates.insert(
+        let virtual_substates = VirtualSubstates::from_iter([(
             VirtualSubstateId::CurrentEpoch,
             VirtualSubstate::CurrentEpoch(current_epoch.as_u64()),
-        );
+        )]);
 
         // Execute the transaction and get the result
         let exec_output = self

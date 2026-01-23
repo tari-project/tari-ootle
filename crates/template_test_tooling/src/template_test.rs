@@ -23,7 +23,10 @@ use tari_engine::{
     executables::Executable,
     fees::{FeeModule, FeeTable},
     runtime::{AuthParams, RuntimeModule},
-    state_store::{memory::MemoryStateStore, StateWriter},
+    state_store::{
+        memory::{MemoryStateStore, ReadOnlyMemoryStateStore},
+        StateWriter,
+    },
     template::LoadedTemplate,
     transaction::{TransactionError, TransactionProcessor},
     wasm::LoadedWasmTemplate,
@@ -32,7 +35,7 @@ use tari_engine_types::{
     commit_result::{ExecuteResult, RejectReason},
     indexed_value::IndexedWellKnownTypes,
     substate::{SubstateDiff, SubstateId},
-    virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
+    virtual_substate::{VirtualSubstate, VirtualSubstateId},
 };
 use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType, SubstateRequirement};
 use tari_ootle_transaction::{
@@ -88,7 +91,7 @@ pub struct TemplateTest {
     state_store: MemoryStateStore,
     enable_fees: bool,
     fee_table: FeeTable,
-    virtual_substates: VirtualSubstates,
+    virtual_substates: HashMap<VirtualSubstateId, VirtualSubstate>,
     key_seed: u8,
     auto_add_proofs_from_signers: bool,
 }
@@ -181,8 +184,8 @@ impl TemplateTest {
             }
         }
 
-        let mut virtual_substates = VirtualSubstates::new();
-        virtual_substates.insert(VirtualSubstateId::CurrentEpoch, VirtualSubstate::CurrentEpoch(0));
+        let virtual_substates =
+            HashMap::from_iter([(VirtualSubstateId::CurrentEpoch, VirtualSubstate::CurrentEpoch(0))]);
 
         Self {
             package: Arc::new(package),
@@ -575,7 +578,7 @@ impl TemplateTest {
         transaction: Transaction,
         mut proofs: Vec<NonFungibleAddress>,
     ) -> Result<ExecuteResult, TransactionError> {
-        let mut modules: Vec<Box<dyn RuntimeModule>> = Vec::with_capacity(2);
+        let mut modules: Vec<Box<dyn RuntimeModule<ReadOnlyMemoryStateStore>>> = Vec::with_capacity(2);
 
         modules.push(Box::new(self.track_calls.clone()));
 
@@ -599,7 +602,7 @@ impl TemplateTest {
             self.package.clone(),
             self.state_store.clone().into_read_only(),
             auth_params,
-            self.virtual_substates.clone(),
+            self.virtual_substates.clone().into(),
             Arc::from(modules.into_boxed_slice()),
             Arc::new(AlwaysPassesProofVerifier),
         );
@@ -752,8 +755,7 @@ impl TemplateTest {
             &manifest,
             variables.into_iter().map(|(a, b)| (a.to_string(), b)).collect(),
             Default::default(),
-        )
-        .unwrap();
+        )?;
         self.execute_and_commit(instructions.instructions, proofs)
     }
 

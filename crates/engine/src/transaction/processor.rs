@@ -77,7 +77,7 @@ use crate::{
         RuntimeModule,
         StateTracker,
     },
-    state_store::memory::ReadOnlyMemoryStateStore,
+    state_store::StateReader,
     template::LoadedTemplate,
     traits::{ClaimProofVerifier, Invokable},
     transaction::{error::TransactionErrorKind, TransactionError},
@@ -88,24 +88,28 @@ const LOG_TARGET: &str = "tari::ootle::engine::instruction_processor";
 const ACCOUNT_CONSTRUCTOR_FUNCTION: &str = "create";
 const ACCOUNT_DEPOSIT_METHOD: &str = "deposit";
 
-pub type ModulesCollection = Arc<[Box<dyn RuntimeModule>]>;
+pub type ModulesCollection<TStore> = Arc<[Box<dyn RuntimeModule<TStore>>]>;
 
-pub struct TransactionProcessor<TTemplateProvider> {
+pub struct TransactionProcessor<TStore, TTemplateProvider> {
     template_provider: Arc<TTemplateProvider>,
-    state_db: ReadOnlyMemoryStateStore,
+    state_db: TStore,
     auth_params: AuthParams,
     virtual_substates: VirtualSubstates,
-    modules: ModulesCollection,
+    modules: ModulesCollection<TStore>,
     claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
 }
 
-impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> TransactionProcessor<TTemplateProvider> {
+impl<TStore, TTemplateProvider> TransactionProcessor<TStore, TTemplateProvider>
+where
+    TStore: StateReader + Clone + 'static,
+    TTemplateProvider: TemplateProvider<Template = LoadedTemplate>,
+{
     pub fn new(
         template_provider: Arc<TTemplateProvider>,
-        state_db: ReadOnlyMemoryStateStore,
+        state_db: TStore,
         auth_params: AuthParams,
         virtual_substates: VirtualSubstates,
-        modules: ModulesCollection,
+        modules: ModulesCollection<TStore>,
         claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
     ) -> Self {
         Self {

@@ -142,6 +142,7 @@ use crate::{
         RuntimeError,
         RuntimeInterface,
     },
+    state_store::StateReader,
     template::LoadedTemplate,
     traits::ClaimProofVerifier,
     transaction::{ModulesCollection, TransactionProcessor},
@@ -149,25 +150,27 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::engine::runtime::impl";
 
-pub struct RuntimeInterfaceImpl<TTemplateProvider> {
-    tracker: StateTracker,
+pub struct RuntimeInterfaceImpl<TStore, TTemplateProvider> {
+    tracker: StateTracker<TStore>,
     template_provider: Arc<TTemplateProvider>,
     entity_id_provider: EntityIdProvider,
     seal_signer_public_key: RistrettoPublicKeyBytes,
-    modules: ModulesCollection,
+    modules: ModulesCollection<TStore>,
     claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
     /// A pointer to the runtime that is set after initialization to allow for cross-template calls.
     /// This is using an atomic pointer simply to make RuntimeInterfaceImpl Send + Sync to satisfy wasmer trait bounds.
     runtime_pointer: Option<AtomicPtr<Box<dyn RuntimeInterface>>>,
 }
 
-impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInterfaceImpl<TTemplateProvider> {
+impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<Template = LoadedTemplate>>
+    RuntimeInterfaceImpl<TStore, TTemplateProvider>
+{
     pub fn initialize(
-        tracker: StateTracker,
+        tracker: StateTracker<TStore>,
         template_provider: Arc<TTemplateProvider>,
         signer_public_key: RistrettoPublicKeyBytes,
         entity_id_provider: EntityIdProvider,
-        modules: ModulesCollection,
+        modules: ModulesCollection<TStore>,
         claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
     ) -> Result<Self, RuntimeError> {
         let mut runtime = Self {
@@ -256,7 +259,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         action: &str,
         substate_id: T,
         payload: Metadata,
-        state_mut: &mut WorkingState,
+        state_mut: &mut WorkingState<TStore>,
     ) -> Result<(), RuntimeError> {
         let (&template_address, _) = state_mut.current_template()?;
         let event = Event::std(Some(substate_id.into()), template_address, object_name, action, payload);
@@ -340,7 +343,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     ) -> Result<InstructionResult, RuntimeError> {
         let mut call_runtime = self.get_call_runtime();
 
-        TransactionProcessor::call_method(
+        TransactionProcessor::<TStore, _>::call_method(
             &*self.template_provider,
             &mut call_runtime,
             component_address.into(),
@@ -362,7 +365,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     ) -> Result<InstructionResult, RuntimeError> {
         let mut call_runtime = self.get_call_runtime();
 
-        TransactionProcessor::call_function(
+        TransactionProcessor::<TStore, _>::call_function(
             &*self.template_provider,
             &mut call_runtime,
             template_address,
@@ -436,8 +439,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     }
 }
 
-impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInterface
-    for RuntimeInterfaceImpl<TTemplateProvider>
+impl<TStore, TTemplateProvider> RuntimeInterface for RuntimeInterfaceImpl<TStore, TTemplateProvider>
+where
+    TStore: StateReader + Clone + 'static,
+    TTemplateProvider: TemplateProvider<Template = LoadedTemplate>,
 {
     fn next_entity_id(&self) -> Result<EntityId, RuntimeError> {
         let id = self.entity_id_provider.next_entity_id()?;

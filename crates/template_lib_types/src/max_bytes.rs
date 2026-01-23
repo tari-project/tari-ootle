@@ -10,15 +10,13 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
-pub struct MaxBytes<const N: usize> {
-    bytes: Box<[u8]>,
-}
+pub struct MaxBytes<const N: usize>(Box<[u8]>);
 
 impl<const N: usize> Deref for MaxBytes<N> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
-        &self.bytes
+        &self.0
     }
 }
 
@@ -28,7 +26,7 @@ impl<const N: usize> MaxBytes<N> {
     }
 
     pub fn empty() -> Self {
-        Self { bytes: Box::new([]) }
+        Self(Box::new([]))
     }
 
     /// Constructs a new `MaxBytes<N>` if the length of the input is less than or equal to `N`.
@@ -36,7 +34,7 @@ impl<const N: usize> MaxBytes<N> {
     pub fn new_checked(bytes: impl Into<Box<[u8]>>) -> Option<Self> {
         let bytes = bytes.into();
         if bytes.len() <= N {
-            Some(Self { bytes })
+            Some(Self(bytes))
         } else {
             None
         }
@@ -49,11 +47,11 @@ impl<const N: usize> MaxBytes<N> {
     /// # Safety
     /// The caller must ensure that the length of `bytes` is less than or equal to `N`.
     pub unsafe fn new_unchecked(bytes: impl Into<Box<[u8]>>) -> Self {
-        Self { bytes: bytes.into() }
+        Self(bytes.into())
     }
 
     pub fn into_bytes(self) -> Box<[u8]> {
-        self.bytes
+        self.0
     }
 
     pub fn into_vec(self) -> Vec<u8> {
@@ -61,20 +59,20 @@ impl<const N: usize> MaxBytes<N> {
     }
 
     pub fn as_slice(&self) -> &[u8] {
-        &self.bytes
+        &self.0
     }
 }
 
 impl<const N: usize> AsRef<[u8]> for MaxBytes<N> {
     fn as_ref(&self) -> &[u8] {
-        &self.bytes
+        &self.0
     }
 }
 
 impl<const N: usize> DerefMut for MaxBytes<N> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         // Mutable but not resizeable
-        &mut self.bytes
+        &mut self.0
     }
 }
 
@@ -110,10 +108,10 @@ impl<const N: usize> serde::Serialize for MaxBytes<N> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where S: serde::Serializer {
         if serializer.is_human_readable() {
-            let hex = bytes_to_hex(&self.bytes);
+            let hex = bytes_to_hex(self.as_slice());
             serializer.serialize_str(&hex)
         } else {
-            serializer.serialize_bytes(&self.bytes)
+            serializer.serialize_bytes(self.as_slice())
         }
     }
 }
@@ -198,9 +196,7 @@ mod tests {
             let err: serde_json::Error = serde_json::from_str::<MaxBytes<5>>(json).unwrap_err();
             assert!(err.to_string().contains("byte array length exceeds maximum"));
 
-            let bytes = MaxBytes::<5> {
-                bytes: vec![1; 6].into_boxed_slice(),
-            };
+            let bytes = MaxBytes::<5>(vec![1; 6].into_boxed_slice());
             let serialized = tari_bor::encode(&bytes).unwrap();
             let err = tari_bor::decode::<MaxBytes<5>>(&serialized).unwrap_err();
             assert!(err.to_string().contains("byte array length exceeds maximum"));

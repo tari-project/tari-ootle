@@ -15,11 +15,15 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType};
 use tari_ootle_transaction::{args, call_args, Transaction};
-use tari_template_lib::{
-    auth::AccessRule,
-    models::SpendCondition,
+use tari_template_lib::types::{
+    crypto::PedersenCommitmentBytes,
     rule,
-    types::{crypto::PedersenCommitmentBytes, ComponentAddress, ResourceAddress, UtxoAddress, UtxoId},
+    stealth::SpendCondition,
+    AccessRule,
+    ComponentAddress,
+    ResourceAddress,
+    UtxoAddress,
+    UtxoId,
 };
 use tari_template_test_tooling::{
     support::{

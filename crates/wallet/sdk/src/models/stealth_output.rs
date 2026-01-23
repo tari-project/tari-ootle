@@ -3,9 +3,8 @@
 
 use tari_ootle_wallet_crypto::memo::Memo;
 use tari_template_lib::{
-    models::SpendCondition,
     prelude::{PedersenCommitmentBytes, ResourceAddress, RistrettoPublicKeyBytes},
-    types::{crypto::UtxoTag, Amount, ComponentAddress, EncryptedData, UtxoAddress},
+    types::{crypto::UtxoTag, stealth::SpendCondition, Amount, ComponentAddress, EncryptedData, UtxoAddress},
 };
 
 use crate::models::{KeyId, OutputStatus, WalletLockId};

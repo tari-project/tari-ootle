@@ -2,14 +2,11 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Serialize};
-use tari_template_lib_types::crypto::RangeProofBytes;
 
 use crate::{
-    models::unspent_output::UnspentOutput,
-    types::{
-        crypto::{BalanceProofSignature, PedersenCommitmentBytes},
-        Amount,
-    },
+    crypto::{BalanceProofSignature, PedersenCommitmentBytes, RangeProofBytes},
+    stealth::UnspentOutput,
+    Amount,
 };
 
 /// A statement for confidential and revealed outputs. A statement must contain either confidential outputs or non-zero

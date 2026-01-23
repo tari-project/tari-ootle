@@ -23,9 +23,15 @@
 use serde::{Deserialize, Serialize};
 use tari_bor::BorTag;
 use tari_template_abi::{call_engine, rust::fmt, EngineOp};
-use tari_template_lib_types::{BinaryTag, NonFungibleId, ResourceAddress};
+use tari_template_lib_types::{
+    confidential::ConfidentialWithdrawProof,
+    stealth::StealthTransferStatement,
+    BinaryTag,
+    NonFungibleId,
+    ResourceAddress,
+};
 
-use super::{ConfidentialWithdrawProof, NonFungible, Proof, StealthTransferStatement};
+use super::{NonFungible, Proof};
 use crate::{
     args::{BucketAction, BucketGetAmountArg, BucketInvokeArg, BucketRef, InvokeResult},
     resource::ResourceManager,

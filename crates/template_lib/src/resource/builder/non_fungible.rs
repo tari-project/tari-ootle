@@ -4,6 +4,7 @@
 use serde::Serialize;
 use tari_bor::to_value;
 use tari_template_lib_types::{
+    access_rules::ResourceAccessRules,
     constants::{IMAGE_URL, TOKEN_SYMBOL},
     ComponentAddress,
     Metadata,
@@ -14,9 +15,9 @@ use tari_template_lib_types::{
 
 use crate::{
     args::MintArg,
-    auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
     models::{Bucket, ResourceAddressAllocation},
     resource::ResourceManager,
+    types::{AccessRule, AuthHook, OwnerRule},
 };
 
 /// Utility for building non-fungible resources inside templates

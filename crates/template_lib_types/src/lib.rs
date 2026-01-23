@@ -22,16 +22,24 @@ mod resource_type;
 pub mod serde_helpers;
 #[macro_use]
 mod substates;
+pub mod access_rules;
 pub mod address_prefixes;
+mod auth_hook;
+pub mod confidential;
+mod owner_rule;
+pub mod stealth;
 
+pub use access_rules::AccessRule;
 pub use amount::*;
+pub use auth_hook::*;
 pub use encrypted_data::*;
 pub use entity_id::*;
 pub use error::*;
 pub use hash::*;
-pub use max_bytes::MaxBytes;
-pub use max_string::MaxString;
+pub use max_bytes::*;
+pub use max_string::*;
 pub use max_vec::*;
 pub use misc::*;
+pub use owner_rule::*;
 pub use resource_type::*;
 pub use substates::*;

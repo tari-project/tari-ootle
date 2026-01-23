@@ -7,7 +7,7 @@ use tari_crypto::{
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey},
     tari_utilities::ByteArrayError,
 };
-use tari_template_lib::{models::StealthTransferStatement, types::Amount};
+use tari_template_lib::{prelude::StealthTransferStatement, types::Amount};
 
 use crate::{
     crypto::{commit_amount_checked, messages, try_decode_to_signature},

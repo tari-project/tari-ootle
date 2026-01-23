@@ -26,14 +26,13 @@ use serde::{Deserialize, Serialize};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_template_lib::{
     args::VaultFreezeFlags,
-    models::ConfidentialWithdrawProof,
-    prelude::ResourceAddress,
+    prelude::{ConfidentialWithdrawProof, ResourceAddress},
     types::{crypto::PedersenCommitmentBytes, Amount, NonFungibleId, ResourceType, VaultId},
 };
 
 use crate::{
     bucket::Bucket,
-    crypto::PrivateOutput,
+    crypto::OutputBody,
     proof::{ContainerRef, LockedResource, Proof},
     resource_container::{ResourceContainer, ResourceError},
 };
@@ -115,7 +114,7 @@ impl Vault {
         self.resource_container.get_commitment_count()
     }
 
-    pub fn get_confidential_commitments(&self) -> Option<&BTreeMap<PedersenCommitmentBytes, PrivateOutput>> {
+    pub fn get_confidential_commitments(&self) -> Option<&BTreeMap<PedersenCommitmentBytes, OutputBody>> {
         self.resource_container.get_confidential_commitments()
     }
 

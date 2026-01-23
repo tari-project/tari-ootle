@@ -22,7 +22,7 @@ use tari_crypto::{
 };
 use tari_engine_types::crypto::get_commitment_factory;
 use tari_hashing::TransactionSecureNonceKdfDomain;
-use tari_template_lib::types::{crypto::PedersenCommitmentBytes, EncryptedData};
+use tari_template_lib_types::{crypto::PedersenCommitmentBytes, EncryptedData};
 use tari_utilities::{safe_array::SafeArray, ByteArray};
 use zeroize::{Zeroize, Zeroizing};
 

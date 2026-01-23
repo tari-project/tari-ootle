@@ -8,7 +8,7 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
 use tari_ootle_common_types::{base_layer_hashing::encrypted_data_hasher, Network};
-use tari_template_lib::types::{crypto::UtxoTag, ResourceAddress};
+use tari_template_lib_types::{crypto::UtxoTag, ResourceAddress};
 use tari_utilities::{hidden_type, safe_array::SafeArray, Hidden};
 use zeroize::Zeroize;
 

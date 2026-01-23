@@ -3,10 +3,7 @@
 
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey};
 use tari_engine_types::crypto::commit_u64_amount;
-use tari_template_lib::{
-    models::SpendCondition,
-    types::{crypto::UtxoTag, EncryptedData},
-};
+use tari_template_lib_types::{crypto::UtxoTag, stealth::SpendCondition, EncryptedData};
 
 use crate::memo::Memo;
 

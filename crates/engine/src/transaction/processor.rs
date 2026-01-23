@@ -50,15 +50,17 @@ use tari_template_abi::{FunctionDef, Type};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     args::{AllocateAddressResult, BucketAction, BucketGetAmountArg, BucketRef, WorkspaceAction},
-    auth::{ComponentAccessRules, OwnerRule},
     invoke_args,
-    models::{Bucket, StealthTransferStatement},
+    models::Bucket,
+    prelude::StealthTransferStatement,
     types::{
+        access_rules::ComponentAccessRules,
         constants::STEALTH_TARI_RESOURCE_ADDRESS,
         crypto::RistrettoPublicKeyBytes,
         Amount,
         ComponentAddress,
         NonFungibleAddress,
+        OwnerRule,
         TemplateAddress,
     },
 };

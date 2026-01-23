@@ -19,14 +19,13 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib::{
-    auth::OwnerRule,
-    models::StealthTransferStatement,
-    prelude::AccessRules,
+    prelude::{AccessRules, StealthTransferStatement},
     types::{
         constants::XTR,
         crypto::RistrettoPublicKeyBytes,
         Amount,
         FunctionName,
+        OwnerRule,
         ResourceAddress,
         TemplateAddress,
         ValidatorFeePoolAddress,

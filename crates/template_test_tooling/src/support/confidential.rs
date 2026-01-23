@@ -9,9 +9,10 @@ use tari_crypto::{
 };
 use tari_engine_types::crypto::commit_amount_checked;
 use tari_ootle_wallet_crypto::{confidential, MaskAndValue, OutputWitness};
-use tari_template_lib::{
-    models::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
-    types::{Amount, EncryptedData},
+use tari_template_lib::types::{
+    confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
+    Amount,
+    EncryptedData,
 };
 
 pub fn generate_confidential_output_statement(

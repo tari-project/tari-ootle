@@ -2,7 +2,8 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use tari_bor::{Deserialize, Serialize};
-use tari_template_lib_types::crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes};
+
+use crate::crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes};
 
 /// ### Verifiable encryption
 ///

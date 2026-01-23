@@ -44,9 +44,14 @@ use serde::{Deserialize, Serialize};
 use tari_bor::to_value;
 use tari_template_abi::{call_engine, rust::collections::BTreeMap, EngineOp};
 use tari_template_lib_types::{
+    access_rules::ResourceAccessRules,
+    confidential::ConfidentialOutputStatement,
     crypto::StealthValueProof,
+    stealth::StealthTransferStatement,
+    AuthHook,
     Metadata,
     NonFungibleId,
+    OwnerRule,
     ResourceAddress,
     ResourceInfo,
     UtxoId,
@@ -72,16 +77,8 @@ use crate::{
         StealthTransferResourceArg,
         VaultFreezeFlags,
     },
-    auth::{OwnerRule, ResourceAccessRules},
-    models::{
-        Bucket,
-        BucketId,
-        ConfidentialOutputStatement,
-        NonFungible,
-        ResourceAddressAllocation,
-        StealthTransferStatement,
-    },
-    prelude::{AuthHook, ResourceType},
+    models::{Bucket, BucketId, NonFungible, ResourceAddressAllocation},
+    prelude::ResourceType,
     types::{
         crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
         Amount,

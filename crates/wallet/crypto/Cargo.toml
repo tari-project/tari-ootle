@@ -9,7 +9,7 @@ license.workspace = true
 [dependencies]
 tari_engine_types = { workspace = true }
 tari_ootle_common_types = { workspace = true }
-tari_template_lib = { workspace = true, features = ["std"] }
+tari_template_lib_types = { workspace = true, features = ["std"] }
 tari_crypto = { workspace = true }
 tari_hashing = { workspace = true }
 tari_utilities = { workspace = true }
@@ -30,6 +30,7 @@ memmap2 = { version = "0.9.9", optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+tari_bor = { workspace = true }
 
 [features]
 default = []

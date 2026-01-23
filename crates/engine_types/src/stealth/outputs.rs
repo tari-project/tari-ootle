@@ -4,28 +4,28 @@
 use ootle_byte_type::ConvertFromByteType;
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
 use tari_template_lib::{
-    models::{SpendCondition, StealthOutputsStatement},
-    types::crypto::UtxoTag,
+    prelude::StealthOutputsStatement,
+    types::{crypto::UtxoTag, stealth::SpendCondition},
 };
 
 use crate::{
-    crypto::{range_proof::validate_bullet_proof, validate_elgamal_verifiable_balance_proof, ValidatedPrivateOutput},
+    crypto::{range_proof::validate_bullet_proof, validate_elgamal_verifiable_balance_proof, ValidateOutputBody},
     resource_container::ResourceError,
     UtxoOutput,
 };
 
 #[derive(Debug, Clone)]
 pub struct ValidatedStealthOutput {
-    pub output: ValidatedPrivateOutput,
+    pub output: ValidateOutputBody,
     pub spend_condition: SpendCondition,
     pub tag: UtxoTag,
 }
 
 impl ValidatedStealthOutput {
-    pub fn to_utxo_output(&self) -> UtxoOutput {
+    pub fn into_utxo_output(self) -> UtxoOutput {
         UtxoOutput {
-            spend_condition: self.spend_condition.clone(),
-            output: self.output.to_private_output(),
+            spend_condition: self.spend_condition,
+            output: self.output.into_output_body(),
             tag: self.tag,
         }
     }
@@ -63,7 +63,7 @@ pub fn validate_stealth_outputs_statement(
                     view_key,
                     output.viewable_balance_proof.as_ref(),
                 )?;
-                let output = ValidatedPrivateOutput {
+                let output = ValidateOutputBody {
                     commitment: output_commitment,
                     public_nonce: output_public_nonce,
                     encrypted_data: output.encrypted_data.clone(),

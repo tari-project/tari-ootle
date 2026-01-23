@@ -11,7 +11,7 @@ use crate::crypto::{ElgamalVerifiableBalance, ElgamalVerifiableBalanceBytes};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct PrivateOutput {
+pub struct OutputBody {
     pub public_nonce: RistrettoPublicKeyBytes,
     pub encrypted_data: EncryptedData,
     #[cfg_attr(feature = "ts", ts(type = "number | bigint"))]
@@ -20,7 +20,7 @@ pub struct PrivateOutput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ValidatedPrivateOutput {
+pub struct ValidateOutputBody {
     pub commitment: PedersenCommitment,
     pub public_nonce: RistrettoPublicKey,
     pub encrypted_data: EncryptedData,
@@ -28,11 +28,11 @@ pub struct ValidatedPrivateOutput {
     pub viewable_balance: Option<ElgamalVerifiableBalance>,
 }
 
-impl ValidatedPrivateOutput {
-    pub fn to_private_output(&self) -> PrivateOutput {
-        PrivateOutput {
+impl ValidateOutputBody {
+    pub fn into_output_body(self) -> OutputBody {
+        OutputBody {
             public_nonce: self.public_nonce.to_byte_type(),
-            encrypted_data: self.encrypted_data.clone(),
+            encrypted_data: self.encrypted_data,
             minimum_value_promise: self.minimum_value_promise,
             viewable_balance: self.viewable_balance.as_ref().map(|b| b.to_byte_type()),
         }

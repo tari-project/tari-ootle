@@ -28,13 +28,11 @@ use tari_ootle_wallet_sdk::{
     models::{KeyBranch, KeyId, NewAccountData, StealthUtxoSpendKeyId, TransactionSubmittedEvent},
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::{
-    models::SpendCondition,
-    types::{
-        constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
-        Amount,
-        ResourceType,
-    },
+use tari_template_lib_types::{
+    constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
+    stealth::SpendCondition,
+    Amount,
+    ResourceType,
 };
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,

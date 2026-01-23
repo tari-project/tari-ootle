@@ -11,8 +11,7 @@ use tari_ootle_common_types::crypto::create_key_pair_from_seed;
 use tari_ootle_transaction::{args, Transaction};
 use tari_template_lib::{
     args::CallAction,
-    auth::OwnerRule,
-    types::{ComponentAddress, VaultId},
+    types::{ComponentAddress, OwnerRule, VaultId},
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 

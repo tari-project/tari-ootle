@@ -8,7 +8,7 @@ use tari_crypto::{
     ristretto::{bulletproofs_plus::RistrettoAggregatedPublicStatement, pedersen::PedersenCommitment},
     tari_utilities::ByteArray,
 };
-use tari_template_lib::{models::UnspentOutput, types::crypto::RangeProofBytes};
+use tari_template_lib::types::{crypto::RangeProofBytes, stealth::UnspentOutput};
 
 use crate::{
     crypto::{get_static_range_proof_service, MAX_LAZY_BP_AGG_FACTORS},

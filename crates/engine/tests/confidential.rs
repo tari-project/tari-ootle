@@ -7,7 +7,7 @@ use rand::rngs::OsRng;
 use tari_common_types::types::PrivateKey;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
-    crypto::{ElgamalVerifiableBalance, PrivateOutput, ValueLookupTable},
+    crypto::{ElgamalVerifiableBalance, OutputBody, ValueLookupTable},
     resource_container::ResourceError,
     substate::SubstateId,
 };
@@ -470,7 +470,7 @@ fn mint_revealed_with_invalid_proof() {
 }
 
 pub fn try_brute_force_confidential_balance<I, TValueLookup>(
-    utxos: &BTreeMap<PedersenCommitmentBytes, PrivateOutput>,
+    utxos: &BTreeMap<PedersenCommitmentBytes, OutputBody>,
     secret_view_key: &PrivateKey,
     value_range: I,
     value_lookup: &mut TValueLookup,

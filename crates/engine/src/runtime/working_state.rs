@@ -40,13 +40,14 @@ use tari_ootle_common_types::{optional::Optional, Epoch};
 use tari_ootle_transaction::ResourceAddressRef;
 use tari_template_lib::{
     args::{MintArg, ResourceDiscriminator, VaultFreezeFlags},
-    auth::ResourceAuthAction,
-    models::{AddressAllocationId, BucketId, ProofId, SpendCondition, StealthInput, StealthTransferStatement},
-    prelude::{AuthHookCaller, ResourceAddressAllocation, PUBLIC_IDENTITY_RESOURCE_ADDRESS},
+    models::{AddressAllocationId, BucketId, ProofId, ResourceAddressAllocation},
+    prelude::ResourceAuthAction,
     types::{
-        constants::STEALTH_TARI_RESOURCE_ADDRESS,
+        constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS},
         metadata,
+        stealth::{SpendCondition, StealthInput, StealthTransferStatement},
         Amount,
+        AuthHookCaller,
         ComponentAddress,
         EntityId,
         Hash,
@@ -1580,7 +1581,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
 
         for output in valid_transfer.outputs {
             let address = UtxoAddress::new(resource_address, output.output.commitment.to_byte_type().into());
-            let value = Utxo::new(output.to_utxo_output());
+            let value = Utxo::new(output.into_utxo_output());
             self.new_substate(address, value)?;
         }
 

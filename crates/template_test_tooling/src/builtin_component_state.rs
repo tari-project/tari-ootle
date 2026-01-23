@@ -12,25 +12,24 @@ use tari_engine_types::{
     vault::Vault,
 };
 use tari_template_builtin::{NFT_FAUCET_TEMPLATE_ADDRESS, XTR_FAUCET_TEMPLATE_ADDRESS};
-use tari_template_lib::{
-    auth::{ComponentAccessRules, OwnerRule, ResourceAccessRules},
-    rule,
-    types::{
-        constants::{
-            NFT_FAUCET_COMPONENT_ADDRESS,
-            NFT_FAUCET_RESOURCE_ADDRESS,
-            PUBLIC_IDENTITY_RESOURCE_ADDRESS,
-            STEALTH_TARI_RESOURCE_ADDRESS,
-            TOKEN_SYMBOL,
-            XTR_FAUCET_VAULT_ADDRESS,
-        },
-        crypto::RistrettoPublicKeyBytes,
-        metadata,
-        Amount,
-        EntityId,
-        Metadata,
-        ResourceType,
+use tari_template_lib::types::{
+    access_rules::{ComponentAccessRules, ResourceAccessRules},
+    constants::{
+        NFT_FAUCET_COMPONENT_ADDRESS,
+        NFT_FAUCET_RESOURCE_ADDRESS,
+        PUBLIC_IDENTITY_RESOURCE_ADDRESS,
+        STEALTH_TARI_RESOURCE_ADDRESS,
+        TOKEN_SYMBOL,
+        XTR_FAUCET_VAULT_ADDRESS,
     },
+    crypto::RistrettoPublicKeyBytes,
+    metadata,
+    rule,
+    Amount,
+    EntityId,
+    Metadata,
+    OwnerRule,
+    ResourceType,
 };
 
 use crate::{template_test::test_nft_faucet_component, xtr_faucet_component};

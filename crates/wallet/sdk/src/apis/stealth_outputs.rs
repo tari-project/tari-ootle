@@ -25,10 +25,15 @@ use tari_ootle_wallet_crypto::{
     StealthInputWitness,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::{
-    auth::AccessRule,
-    models::{SpendCondition, StealthTransferStatement},
-    types::{crypto::PedersenCommitmentBytes, Amount, ComponentAddress, EncryptedData, ResourceAddress, UtxoAddress},
+use tari_template_lib::types::{
+    access_rules::AccessRule,
+    crypto::PedersenCommitmentBytes,
+    stealth::{SpendCondition, StealthTransferStatement},
+    Amount,
+    ComponentAddress,
+    EncryptedData,
+    ResourceAddress,
+    UtxoAddress,
 };
 
 use crate::{

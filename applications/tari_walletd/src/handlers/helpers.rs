@@ -14,7 +14,7 @@ use tari_ootle_wallet_sdk::{
     WalletSdkSpec,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::types::ComponentAddress;
+use tari_template_lib_types::ComponentAddress;
 use tari_wallet_daemon_client::ComponentAddressOrName;
 use tokio::sync::broadcast;
 

@@ -5,7 +5,7 @@ use std::fmt::{Display, Formatter};
 
 use tari_template_lib::{
     args::{ComponentAction, VaultAction},
-    auth::ResourceAuthAction,
+    prelude::ResourceAuthAction,
     types::ComponentAddress,
 };
 

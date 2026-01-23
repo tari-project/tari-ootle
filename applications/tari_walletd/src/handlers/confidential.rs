@@ -15,7 +15,7 @@ use tari_engine_types::crypto::{get_commitment_factory, ValueLookupTable};
 use tari_ootle_common_types::{displayable::Displayable, optional::Optional};
 use tari_ootle_wallet_crypto::{GenerateValueLookup, MMapValueLookup, OutputWitness};
 use tari_ootle_wallet_sdk::models::{ConfidentialOutputModel, KeyBranch, OutputStatus};
-use tari_template_lib::types::Amount;
+use tari_template_lib_types::Amount;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{

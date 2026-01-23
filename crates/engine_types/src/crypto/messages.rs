@@ -3,9 +3,8 @@
 
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
 use tari_template_lib::{
-    models::{StealthInputsStatement, StealthOutputsStatement, ViewableBalanceProofChallengeFields},
-    prelude::PedersenCommitmentBytes,
-    types::Amount,
+    prelude::{PedersenCommitmentBytes, StealthInputsStatement, StealthOutputsStatement},
+    types::{stealth::ViewableBalanceProofChallengeFields, Amount},
 };
 
 use crate::{

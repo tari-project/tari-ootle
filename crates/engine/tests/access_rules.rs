@@ -6,17 +6,23 @@ use tari_engine::runtime::{ActionIdent, LockError, RuntimeError};
 use tari_ootle_transaction::{args, Transaction};
 use tari_template_lib::{
     args::ComponentAction,
-    auth::{
+    types::{
+        access_rules::{
+            ComponentAccessRules,
+            RequireRule,
+            ResourceAccessRules,
+            ResourceAuthAction,
+            RestrictedAccessRule,
+        },
+        rule,
         AccessRule,
-        ComponentAccessRules,
+        ComponentAddress,
+        Metadata,
+        NonFungibleId,
         OwnerRule,
-        RequireRule,
-        ResourceAccessRules,
-        ResourceAuthAction,
-        RestrictedAccessRule,
+        ResourceAddress,
+        VaultId,
     },
-    rule,
-    types::{ComponentAddress, Metadata, NonFungibleId, ResourceAddress, VaultId},
 };
 use tari_template_test_tooling::{
     support::assert_error::{

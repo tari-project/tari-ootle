@@ -1,9 +1,11 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
+//! Access control rules for template-related data like component methods and resources
 
 use serde::{Deserialize, Serialize};
 use tari_template_abi::rust::collections::BTreeMap;
-use tari_template_lib_types::{ComponentAddress, NonFungibleAddress, ResourceAddress, TemplateAddress};
+
+use crate::{ComponentAddress, NonFungibleAddress, ResourceAddress, TemplateAddress};
 
 /// Represents the types of possible access control rules over a component method or resource
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -363,61 +365,61 @@ impl Default for ResourceAccessRules {
 #[macro_export]
 macro_rules! rule {
     (allow_all) => {
-        $crate::auth::AccessRule::AllowAll
+        $crate::access_rules::AccessRule::AllowAll
     };
     (deny_all) => {
-        $crate::auth::AccessRule::DenyAll
+        $crate::access_rules::AccessRule::DenyAll
     };
     ($($tail:tt)*) => {
-        $crate::auth::AccessRule::Restricted($crate::__restricted_access_rule!($($tail)*))
+        $crate::access_rules::AccessRule::Restricted($crate::__restricted_access_rule!($($tail)*))
     };
 }
 
 #[macro_export]
 macro_rules! __restricted_access_rule {
     (any_of($($tail:tt)*)) => {
-        $crate::auth::RestrictedAccessRule::AnyOf($crate::__build_vec!(@ {__restricted_access_rule} $($tail)*).into_boxed_slice())
+        $crate::access_rules::RestrictedAccessRule::AnyOf($crate::__build_vec!(@ {__restricted_access_rule} $($tail)*).into_boxed_slice())
     };
     (all_of($($tail:tt)*)) => {
-        $crate::auth::RestrictedAccessRule::AllOf($crate::__build_vec!(@ {__restricted_access_rule} $($tail)*).into_boxed_slice())
+        $crate::access_rules::RestrictedAccessRule::AllOf($crate::__build_vec!(@ {__restricted_access_rule} $($tail)*).into_boxed_slice())
     };
     ($a:ident($($tail:tt)*)) => {
-        $crate::auth::RestrictedAccessRule::Require($crate::__require_rule!($a($($tail)*)))
+        $crate::access_rules::RestrictedAccessRule::Require($crate::__require_rule!($a($($tail)*)))
     };
 }
 
 #[macro_export]
 macro_rules! __require_rule {
     (any_of($($tail:tt)*)) => {
-        $crate::auth::RequireRule::AnyOf($crate::__build_vec!(@ {__rule_requirement} $($tail)*).into_boxed_slice())
+        $crate::access_rules::RequireRule::AnyOf($crate::__build_vec!(@ {__rule_requirement} $($tail)*).into_boxed_slice())
     };
     (all_of($($tail:tt)*)) => {
-        $crate::auth::RequireRule::AllOf($crate::__build_vec!(@ {__rule_requirement} $($tail)*).into_boxed_slice())
+        $crate::access_rules::RequireRule::AllOf($crate::__build_vec!(@ {__rule_requirement} $($tail)*).into_boxed_slice())
     };
     (m_of_n($n:literal, $($tail:tt)*)) => {
-        $crate::auth::RequireRule::MOfN($n, $crate::__build_vec!(@ {__rule_requirement} $($tail)*).into_boxed_slice())
+        $crate::access_rules::RequireRule::MOfN($n, $crate::__build_vec!(@ {__rule_requirement} $($tail)*).into_boxed_slice())
     };
     ($a:ident($b:expr)) => {
-        $crate::auth::RequireRule::Require($crate::__rule_requirement!($a($b)))
+        $crate::access_rules::RequireRule::Require($crate::__rule_requirement!($a($b)))
     };
 }
 
 #[macro_export]
 macro_rules! __rule_requirement {
     (resource($x: expr)) => {
-        $crate::auth::RuleRequirement::Resource($x)
+        $crate::access_rules::RuleRequirement::Resource($x)
     };
     (non_fungible($x: expr)) => {
-        $crate::auth::RuleRequirement::NonFungibleAddress($x)
+        $crate::access_rules::RuleRequirement::NonFungibleAddress($x)
     };
     (public_key($x: expr)) => {
-        $crate::auth::RuleRequirement::NonFungibleAddress($crate::types::NonFungibleAddress::from_public_key($x))
+        $crate::access_rules::RuleRequirement::NonFungibleAddress($crate::NonFungibleAddress::from_public_key($x))
     };
     (component($x: expr)) => {
-        $crate::auth::RuleRequirement::ScopedToComponent($x)
+        $crate::access_rules::RuleRequirement::ScopedToComponent($x)
     };
     (template($x: expr)) => {
-        $crate::auth::RuleRequirement::ScopedToTemplate($x)
+        $crate::access_rules::RuleRequirement::ScopedToTemplate($x)
     };
 }
 
@@ -441,20 +443,35 @@ macro_rules! __build_vec {
 #[macro_export]
 macro_rules! __build_vec_inner {
     (@ { $this:ident, $item_fn:ident } $a:ident($e:expr), $($tail:tt)*) => {
-        $crate::args::__push(&mut $this, $crate::$item_fn!($a($e)));
+        $crate::access_rules::__push(&mut $this, $crate::$item_fn!($a($e)));
         $crate::__build_vec_inner!(@ {$this, $item_fn } $($tail)*);
     };
     (@ { $this:ident, $item_fn:ident } $a:ident($e:expr) $(,)*) => {
-        $crate::args::__push(&mut $this, $crate::$item_fn!($a($e)));
+        $crate::access_rules::__push(&mut $this, $crate::$item_fn!($a($e)));
     };
+}
+
+/// Low-level macro used for counting characters in the encoding of arguments. Not intended for general usage
+#[macro_export]
+macro_rules! __expr_counter {
+    () => (0usize);
+    ( $x:expr $(,)? ) => (1usize);
+    ( $x:expr, $($next:tt)* ) => (1usize + $crate::__expr_counter!($($next)*));
+}
+
+// This is a workaround for a false positive for `clippy::vec_init_then_push` with this macro. We cannot ignore this
+// lint as expression attrs are experimental.
+#[allow(clippy::inline_always)]
+#[inline(always)]
+#[doc(hidden)]
+pub fn __push<T>(v: &mut Vec<T>, arg: T) {
+    v.push(arg);
 }
 
 #[cfg(test)]
 mod tests {
-    use tari_template_lib_types::ObjectKey;
-
     use super::*;
-    use crate::types::crypto::RistrettoPublicKeyBytes;
+    use crate::{crypto::RistrettoPublicKeyBytes, ObjectKey};
 
     #[test]
     fn it_builds_correct_access_rules() {

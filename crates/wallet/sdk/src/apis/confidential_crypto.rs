@@ -15,8 +15,7 @@ use tari_ootle_wallet_crypto::{
     WalletCryptoError,
 };
 use tari_template_lib::{
-    models::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
-    prelude::PedersenCommitmentBytes,
+    prelude::{ConfidentialOutputStatement, ConfidentialWithdrawProof, PedersenCommitmentBytes},
     types::{Amount, EncryptedData},
 };
 

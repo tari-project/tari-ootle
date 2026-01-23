@@ -4,7 +4,7 @@
 use log::*;
 use ootle_byte_type::{ConvertFromByteType, ToByteType};
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
-use tari_engine_types::crypto::PrivateOutput;
+use tari_engine_types::crypto::OutputBody;
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 use tari_ootle_wallet_crypto::{kdfs, MaskAndValue};
 use tari_template_lib::types::{crypto::PedersenCommitmentBytes, Amount, VaultId};
@@ -176,7 +176,7 @@ where TSpec: WalletSdkSpec
 
     pub fn verify_and_update_confidential_outputs<
         'i,
-        I: IntoIterator<Item = (&'i PedersenCommitmentBytes, &'i PrivateOutput)>,
+        I: IntoIterator<Item = (&'i PedersenCommitmentBytes, &'i OutputBody)>,
     >(
         &self,
         account: &Account,
@@ -228,7 +228,7 @@ where TSpec: WalletSdkSpec
         key: &WalletSecretKey,
         vault_id: VaultId,
         commitment: PedersenCommitmentBytes,
-        output: &PrivateOutput,
+        output: &OutputBody,
     ) -> Result<ConfidentialOutputModel, ConfidentialOutputsApiError> {
         // Validate the commitment is well-formed.
         let _output_commitment = PedersenCommitment::convert_from_byte_type(&commitment).map_err(|e| {

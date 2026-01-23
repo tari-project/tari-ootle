@@ -26,23 +26,15 @@
 mod account;
 mod address_allocation;
 mod bucket;
-mod confidential_proof;
 mod non_fungible;
 mod proof;
 mod signature_verifier;
-mod stealth;
-mod unspent_output;
 mod vault;
-mod viewable_balance;
 
 pub use account::*;
 pub use address_allocation::*;
 pub use bucket::*;
-pub use confidential_proof::*;
 pub use non_fungible::*;
 pub use proof::*;
 pub use signature_verifier::*;
-pub use stealth::*;
-pub use unspent_output::*;
 pub use vault::*;
-pub use viewable_balance::*;

@@ -6,11 +6,7 @@ use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine::runtime::{ActionIdent, RuntimeError};
 use tari_ootle_transaction::{args, call_args, Instruction, Transaction};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::{
-    prelude::AccessRules,
-    rule,
-    types::{constants::XTR, Amount, ComponentAddress},
-};
+use tari_template_lib::types::{access_rules::ComponentAccessRules, constants::XTR, rule, Amount, ComponentAddress};
 use tari_template_test_tooling::{
     support::assert_error::{assert_access_denied_for_action, assert_reject_reason},
     xtr_faucet_component,
@@ -284,7 +280,7 @@ fn custom_access_rules() {
     // First we create a account with a custom rule that anyone can withdraw
     let (owner_proof, public_key, secret_key) = test.create_owner_proof();
 
-    let access_rules = AccessRules::new()
+    let access_rules = ComponentAccessRules::new()
         .add_method_rule("balance", rule!(allow_all))
         .add_method_rule("get_balances", rule!(allow_all))
         .add_method_rule("deposit", rule!(allow_all))

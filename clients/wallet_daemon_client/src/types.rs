@@ -58,21 +58,21 @@ use tari_ootle_wallet_sdk::{
     },
 };
 use tari_template_abi::{FunctionDef, TemplateDef};
-use tari_template_lib::{
-    models::{ConfidentialOutputStatement, SpendCondition, StealthTransferStatement},
-    prelude::{ComponentAddress, ConfidentialWithdrawProof, ResourceType, RistrettoPublicKeyBytes},
-    types::{
-        crypto::PedersenCommitmentBytes,
-        Amount,
-        EncryptedData,
-        NonFungibleId,
-        ResourceAddress,
-        TemplateAddress,
-        UtxoAddress,
-        UtxoId,
-        ValidatorFeePoolAddress,
-        VaultId,
-    },
+use tari_template_lib::types::{
+    confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    stealth::{SpendCondition, StealthTransferStatement},
+    Amount,
+    ComponentAddress,
+    EncryptedData,
+    NonFungibleId,
+    ResourceAddress,
+    ResourceType,
+    TemplateAddress,
+    UtxoAddress,
+    UtxoId,
+    ValidatorFeePoolAddress,
+    VaultId,
 };
 use time::PrimitiveDateTime;
 use webauthn_rs_proto::{

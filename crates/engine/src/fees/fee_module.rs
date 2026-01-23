@@ -5,7 +5,10 @@ use tari_bor::{encode_into_writer, ByteCounter};
 use tari_engine_types::fees::FeeSource;
 
 use super::FeeTable;
-use crate::runtime::{RuntimeEvent, RuntimeModule, RuntimeModuleError, StateTracker};
+use crate::{
+    runtime::{RuntimeEvent, RuntimeModule, RuntimeModuleError, StateTracker},
+    state_store::StateReader,
+};
 
 pub struct FeeModule {
     initial_cost: u64,
@@ -21,8 +24,8 @@ impl FeeModule {
     }
 }
 
-impl RuntimeModule for FeeModule {
-    fn on_initialize(&self, track: &mut StateTracker) -> Result<(), RuntimeModuleError> {
+impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
+    fn on_initialize(&self, track: &mut StateTracker<TStore>) -> Result<(), RuntimeModuleError> {
         track.add_fee_charge(FeeSource::Initial, self.initial_cost);
         let transaction_weight = track.get_transaction_weight();
         let transaction_weight_cost = transaction_weight.as_u64() * self.fee_table.per_transaction_weight_cost();
@@ -31,12 +34,16 @@ impl RuntimeModule for FeeModule {
         Ok(())
     }
 
-    fn on_runtime_call(&self, track: &mut StateTracker, _call: &'static str) -> Result<(), RuntimeModuleError> {
+    fn on_runtime_call(&self, track: &mut StateTracker<TStore>, _call: &'static str) -> Result<(), RuntimeModuleError> {
         track.add_fee_charge(FeeSource::RuntimeCall, self.fee_table.per_module_call_cost());
         Ok(())
     }
 
-    fn on_template_loaded(&self, track: &mut StateTracker, bytes_loaded: usize) -> Result<(), RuntimeModuleError> {
+    fn on_template_loaded(
+        &self,
+        track: &mut StateTracker<TStore>,
+        bytes_loaded: usize,
+    ) -> Result<(), RuntimeModuleError> {
         const TEMPLATE_BYTES_LOADED_COST_DIVISOR: u64 = 3000; // 3 KB = 1 cost unit
         let template_load_cost_unit =
             u64::try_from(bytes_loaded).unwrap_or(u64::MAX) / TEMPLATE_BYTES_LOADED_COST_DIVISOR;
@@ -51,7 +58,7 @@ impl RuntimeModule for FeeModule {
         Ok(())
     }
 
-    fn on_before_finalize(&self, track: &mut StateTracker) -> Result<(), RuntimeModuleError> {
+    fn on_before_finalize(&self, track: &mut StateTracker<TStore>) -> Result<(), RuntimeModuleError> {
         let total_storage = track.with_substates_to_persist(|changes| {
             let mut counter = ByteCounter::new();
             for substate in changes.values() {
@@ -83,7 +90,11 @@ impl RuntimeModule for FeeModule {
         Ok(())
     }
 
-    fn on_runtime_event(&self, track: &mut StateTracker, call: &RuntimeEvent) -> Result<(), RuntimeModuleError> {
+    fn on_runtime_event(
+        &self,
+        track: &mut StateTracker<TStore>,
+        call: &RuntimeEvent,
+    ) -> Result<(), RuntimeModuleError> {
         match call {
             RuntimeEvent::SignatureVerified => {
                 track.add_fee_charge(

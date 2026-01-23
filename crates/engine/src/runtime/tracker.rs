@@ -51,28 +51,33 @@ use crate::{
         workspace::Workspace,
         RuntimeError,
     },
-    state_store::memory::ReadOnlyMemoryStateStore,
+    state_store::StateReader,
 };
 
 const LOG_TARGET: &str = "tari::ootle::engine::runtime::state_tracker";
 
 #[derive(Debug)]
-pub struct StateTracker {
-    working_state: WorkingState,
-    fee_checkpoint: Option<WorkingState>,
+pub struct StateTracker<TStore> {
+    working_state: Option<WorkingState<TStore>>,
+    fee_checkpoint: Option<WorkingState<TStore>>,
     transaction_weight: TransactionWeight,
 }
 
-impl StateTracker {
+impl<TStore: StateReader> StateTracker<TStore> {
     pub fn new(
-        state_store: ReadOnlyMemoryStateStore,
+        state_store: TStore,
         virtual_substates: VirtualSubstates,
         initial_call_scope: CallScope,
         transaction_hash: Hash,
         transaction_weight: TransactionWeight,
     ) -> Self {
         Self {
-            working_state: WorkingState::new(state_store, virtual_substates, initial_call_scope, transaction_hash),
+            working_state: Some(WorkingState::new(
+                state_store,
+                virtual_substates,
+                initial_call_scope,
+                transaction_hash,
+            )),
             fee_checkpoint: None,
             transaction_weight,
         }
@@ -314,17 +319,7 @@ impl StateTracker {
         Ok(finalized)
     }
 
-    pub fn fee_checkpoint(&mut self) -> Result<(), RuntimeError> {
-        let state = self.read_with(|state| {
-            // Check that the checkpoint is in a valid state
-            state.validate_finalized().map(|_| state.clone())
-        })?;
-
-        self.fee_checkpoint = Some(state.clone());
-        Ok(())
-    }
-
-    fn take_fee_checkpoint(&mut self) -> Option<WorkingState> {
+    fn take_fee_checkpoint(&mut self) -> Option<WorkingState<TStore>> {
         let mut fee_cp = self.fee_checkpoint.take()?;
         // Preserve fee state across resets so that we can charge for fees incurred during execution before the
         // failure
@@ -334,8 +329,8 @@ impl StateTracker {
         Some(fee_cp)
     }
 
-    fn take_working_state(&mut self) -> WorkingState {
-        self.write_with(|current_state| current_state.take_state())
+    fn take_working_state(&mut self) -> WorkingState<TStore> {
+        self.working_state.take().expect("Working state has been taken")
     }
 
     pub fn with_substates_to_persist<F: FnMut(&IndexMap<SubstateId, SubstateValue>) -> R, R>(&mut self, mut f: F) -> R {
@@ -358,15 +353,27 @@ impl StateTracker {
         self.read_with(|state| state.fee_state().total_charges())
     }
 
-    pub(super) fn read_with<R, F: FnOnce(&WorkingState) -> R>(&self, f: F) -> R {
-        f(&self.working_state)
+    pub(super) fn read_with<R, F: FnOnce(&WorkingState<TStore>) -> R>(&self, f: F) -> R {
+        f(self.working_state.as_ref().expect("Working state has been taken"))
     }
 
-    pub(super) fn write_with<R, F: FnOnce(&mut WorkingState) -> R>(&mut self, f: F) -> R {
-        f(&mut self.working_state)
+    pub(super) fn write_with<R, F: FnOnce(&mut WorkingState<TStore>) -> R>(&mut self, f: F) -> R {
+        f(self.working_state.as_mut().expect("Working state has been taken"))
     }
 
     pub(super) fn is_fee_intent_checkpointed(&self) -> bool {
         self.fee_checkpoint.is_some()
+    }
+}
+
+impl<TStore: StateReader + Clone> StateTracker<TStore> {
+    pub fn fee_checkpoint(&mut self) -> Result<(), RuntimeError> {
+        let state = self.read_with(|state| {
+            // Check that the checkpoint is in a valid state
+            state.validate_finalized().map(|_| state.clone())
+        })?;
+
+        self.fee_checkpoint = Some(state);
+        Ok(())
     }
 }

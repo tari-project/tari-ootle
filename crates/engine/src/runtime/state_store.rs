@@ -19,11 +19,11 @@ use crate::{
         locking::{LockError, LockedSubstates},
         RuntimeError,
     },
-    state_store::{memory::ReadOnlyMemoryStateStore, StateReader},
+    state_store::StateReader,
 };
 
 #[derive(Debug, Clone)]
-pub struct WorkingStateStore {
+pub struct WorkingStateStore<TStore> {
     // This must be ordered deterministically since we use this to create the substate diff
     /// New and mutates substates are placed into this map.
     new_substates: IndexMap<SubstateId, SubstateValue>,
@@ -35,11 +35,11 @@ pub struct WorkingStateStore {
 
     downed_utxos: IndexSet<UtxoAddress>,
     /// The underlying state store that is used to load substates that are not in the working state maps.
-    state_store: ReadOnlyMemoryStateStore,
+    state_store: TStore,
 }
 
-impl WorkingStateStore {
-    pub fn new(state_store: ReadOnlyMemoryStateStore) -> Self {
+impl<TStore: StateReader> WorkingStateStore<TStore> {
+    pub fn new(state_store: TStore) -> Self {
         Self {
             new_substates: IndexMap::new(),
             loaded_substates: HashMap::new(),
@@ -82,19 +82,19 @@ impl WorkingStateStore {
     ) -> Result<Option<R>, RuntimeError> {
         let lock = self.locked_substates.get(lock_id, LockFlag::Write)?;
         if let Some(mut substate) = self.loaded_substates.remove(lock.substate_id()) {
-            match callback(lock.substate_id(), substate.substate_value_mut())? {
+            return match callback(lock.substate_id(), substate.substate_value_mut())? {
                 Some(ret) => {
                     self.new_substates
                         .insert(lock.substate_id().clone(), substate.into_substate_value());
-                    return Ok(Some(ret));
+                    Ok(Some(ret))
                 },
                 None => {
                     // It is undefined (i.e. a bug) to mutate the state and return None from the callback.
                     // We do not explicitly assert this however for performance reasons.
                     self.loaded_substates.insert(lock.substate_id().clone(), substate);
-                    return Ok(None);
+                    Ok(None)
                 },
-            }
+            };
         }
 
         let substate_mut =
@@ -210,10 +210,6 @@ impl WorkingStateStore {
             .iter()
             .filter(|(address, _)| address.is_vault())
             .map(|(addr, vault)| (addr.as_vault_id().unwrap(), vault.as_vault().unwrap()))
-    }
-
-    pub(super) fn state_store(&self) -> &ReadOnlyMemoryStateStore {
-        &self.state_store
     }
 
     /// Loads and caches the component address. No lock is required for this operation.

@@ -26,8 +26,12 @@ impl TrackCallsModule {
     }
 }
 
-impl RuntimeModule for TrackCallsModule {
-    fn on_runtime_call(&self, _tracker: &mut StateTracker, call: &'static str) -> Result<(), RuntimeModuleError> {
+impl<TStore> RuntimeModule<TStore> for TrackCallsModule {
+    fn on_runtime_call(
+        &self,
+        _tracker: &mut StateTracker<TStore>,
+        call: &'static str,
+    ) -> Result<(), RuntimeModuleError> {
         self.calls.write().unwrap().push(call);
         Ok(())
     }

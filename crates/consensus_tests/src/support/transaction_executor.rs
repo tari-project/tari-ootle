@@ -9,10 +9,7 @@ use std::{
 
 use tari_consensus::traits::{BlockTransactionExecutor, BlockTransactionExecutorError};
 use tari_engine::state_store::{memory::MemoryStateStore, new_memory_store, StateWriter};
-use tari_engine_types::{
-    substate::{Substate, SubstateId},
-    virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
-};
+use tari_engine_types::substate::{Substate, SubstateId};
 use tari_ootle_common_types::{
     displayable::Displayable,
     Epoch,
@@ -97,12 +94,6 @@ impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBloc
         // Create a memory db with all the input substates, needed for the transaction execution
         let mut state_db = new_memory_store();
         Self::add_substates_to_memory_db(resolved_inputs, &mut state_db)?;
-
-        let mut virtual_substates = VirtualSubstates::new();
-        virtual_substates.insert(
-            VirtualSubstateId::CurrentEpoch,
-            VirtualSubstate::CurrentEpoch(current_epoch.as_u64()),
-        );
 
         let spec = self.store.get(&id).unwrap_or_else(|| {
             panic!(

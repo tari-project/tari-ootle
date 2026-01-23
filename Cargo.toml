@@ -119,27 +119,27 @@ tari_wallet_daemon_client = { path = "clients/wallet_daemon_client" }
 transaction_generator = { path = "utilities/transaction_generator" }
 
 # external minotari/tari dependencies
-minotari_app_grpc = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
-minotari_app_utilities = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
-minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
-minotari_wallet_grpc_client = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
-tari_common = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
-tari_common_sqlite = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
-tari_common_types = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
-tari_hashing = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
-tari_jellyfish = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
-tari_metrics = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
-tari_mmr = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
-tari_node_components = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
-tari_shutdown = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
-tari_sidechain = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
-tari_transaction_components = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
-minotari_console_wallet = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
-minotari_node = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
-minotari_wallet = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
-tari_comms = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
-tari_comms_dht = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
-tari_p2p = { git = "https://github.com/tari-project/tari.git", rev = "f42e14ddac360db0bda56eff43e6c7e00167fb10" }
+minotari_app_grpc = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
+minotari_app_utilities = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
+minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
+minotari_wallet_grpc_client = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
+tari_common = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
+tari_common_sqlite = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
+tari_common_types = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
+tari_hashing = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
+tari_jellyfish = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
+tari_metrics = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
+tari_mmr = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
+tari_node_components = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
+tari_shutdown = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
+tari_sidechain = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
+tari_transaction_components = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
+minotari_console_wallet = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
+minotari_node = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
+minotari_wallet = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
+tari_comms = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
+tari_comms_dht = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
+tari_p2p = { git = "https://github.com/tari-project/tari.git", rev = "71c73ccfc47258f9451ae3250897d07241ce3e48" }
 
 tari_crypto = "0.22.0"
 tari_utilities = "0.8.0"

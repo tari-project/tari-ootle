@@ -3,8 +3,8 @@
 
 use ootle_byte_type::ToByteType;
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_template_lib::{
-    models::{
+use tari_template_lib_types::{
+    stealth::{
         StealthInput,
         StealthInputsStatement,
         StealthOutputsStatement,
@@ -12,7 +12,7 @@ use tari_template_lib::{
         StealthUnspentOutput,
         UnspentOutput,
     },
-    types::Amount,
+    Amount,
 };
 
 use crate::{
@@ -144,10 +144,11 @@ mod tests {
     use rand::rngs::OsRng;
     use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
     use tari_engine_types::stealth::validate_stealth_outputs_statement;
-    use tari_template_lib::{
-        models::SpendCondition,
-        prelude::RistrettoPublicKeyBytes,
-        types::{crypto::UtxoTag, Amount, EncryptedData},
+    use tari_template_lib_types::{
+        crypto::{RistrettoPublicKeyBytes, UtxoTag},
+        stealth::SpendCondition,
+        Amount,
+        EncryptedData,
     };
 
     use super::*;

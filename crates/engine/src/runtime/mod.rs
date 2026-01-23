@@ -90,7 +90,8 @@ use tari_template_lib::{
         VaultAction,
         WorkspaceAction,
     },
-    models::{BucketId, StealthTransferStatement, VaultRef},
+    models::{BucketId, VaultRef},
+    prelude::StealthTransferStatement,
     types::{
         engine_args::SignatureAction,
         ComponentAddress,

@@ -13,7 +13,7 @@ use tari_crypto::{
     tari_utilities,
     tari_utilities::ByteArray,
 };
-use tari_template_lib::{models::ViewableBalanceProof, types::crypto::RistrettoPublicKeyBytes};
+use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, stealth::ViewableBalanceProof};
 
 use crate::{
     crypto::{get_commitment_factory, messages, value_lookup_table::ValueLookupTable},
@@ -97,7 +97,7 @@ pub fn validate_elgamal_verifiable_balance_proof(
     let e = &RistrettoSecretKey::from_uniform_bytes(&messages::viewable_balance_proof64(
         commitment,
         view_key,
-        proof.as_challenge_fields(),
+        proof.as_challenge_fields()
     ))
         // TODO: it would be better if from_uniform_bytes took a [u8; 64]
         .expect("INVARIANT VIOLATION: RistrettoSecretKey::from_uniform_bytes and hash output length mismatch");
@@ -365,8 +365,8 @@ mod tests {
                     let (nonce_sk, nonce_pk) = RistrettoPublicKey::random_keypair(&mut OsRng);
                     let rp = nonce_sk * view_sk;
                     ElgamalVerifiableBalance {
-                        encrypted: (RistrettoPublicKey::from_secret_key(&rp) +
-                            RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(v))),
+                        encrypted: RistrettoPublicKey::from_secret_key(&rp) +
+                            RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(v)),
                         public_nonce: nonce_pk,
                     }
                 })

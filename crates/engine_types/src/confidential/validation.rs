@@ -6,17 +6,17 @@ use tari_crypto::{
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey},
     tari_utilities::ByteArray,
 };
-use tari_template_lib::{models::ConfidentialOutputStatement, types::Amount};
+use tari_template_lib::{prelude::ConfidentialOutputStatement, types::Amount};
 
 use crate::{
-    crypto::{range_proof::validate_bullet_proof, validate_elgamal_verifiable_balance_proof, ValidatedPrivateOutput},
+    crypto::{range_proof::validate_bullet_proof, validate_elgamal_verifiable_balance_proof, ValidateOutputBody},
     resource_container::ResourceError,
 };
 
 #[derive(Debug)]
 pub struct ValidatedConfidentialProof {
-    pub output: Option<ValidatedPrivateOutput>,
-    pub change_output: Option<ValidatedPrivateOutput>,
+    pub output: Option<ValidateOutputBody>,
+    pub change_output: Option<ValidateOutputBody>,
     pub output_revealed_amount: Amount,
     pub change_revealed_amount: Amount,
 }
@@ -54,7 +54,7 @@ pub fn validate_confidential_statement(
                 statement.viewable_balance_proof.as_ref(),
             )?;
 
-            Ok::<_, ResourceError>(ValidatedPrivateOutput {
+            Ok::<_, ResourceError>(ValidateOutputBody {
                 commitment: output_commitment,
                 public_nonce: output_public_nonce,
                 encrypted_data: statement.encrypted_data.clone(),
@@ -84,7 +84,7 @@ pub fn validate_confidential_statement(
             let viewable_balance =
                 validate_elgamal_verifiable_balance_proof(&commitment, view_key, stmt.viewable_balance_proof.as_ref())?;
 
-            Ok(ValidatedPrivateOutput {
+            Ok(ValidateOutputBody {
                 commitment,
                 public_nonce: stealth_public_nonce,
                 encrypted_data: stmt.encrypted_data.clone(),

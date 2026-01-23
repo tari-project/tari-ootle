@@ -7,10 +7,7 @@ use tari_engine_types::crypto::MAX_LAZY_BP_AGG_FACTORS;
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::Network;
 use tari_ootle_wallet_crypto::memo::Memo;
-use tari_template_lib::{
-    auth::AccessRule,
-    types::{Amount, NonFungibleAddress, ResourceAddress},
-};
+use tari_template_lib::types::{AccessRule, Amount, NonFungibleAddress, ResourceAddress};
 
 use crate::apis::{
     confidential_transfer::UtxoInputSelection,

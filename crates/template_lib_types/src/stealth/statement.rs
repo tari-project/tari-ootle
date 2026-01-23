@@ -2,12 +2,12 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Serialize};
-use tari_template_lib_types::{
+
+use super::StealthUnspentOutput;
+use crate::{
     crypto::{BalanceProofSignature, PedersenCommitmentBytes, RangeProofBytes},
     Amount,
 };
-
-use crate::models::StealthUnspentOutput;
 
 /// A statement for stealth outputs. A statement must contain confidential outputs
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

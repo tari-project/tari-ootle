@@ -2,7 +2,7 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::limits::StealthLimits;
-use tari_template_lib::models::{StealthOutputsStatement, StealthTransferStatement};
+use tari_template_lib::types::stealth::{StealthOutputsStatement, StealthTransferStatement};
 
 use crate::runtime::error::ArgumentValidationError;
 

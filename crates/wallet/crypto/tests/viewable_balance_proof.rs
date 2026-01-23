@@ -10,10 +10,7 @@ use tari_crypto::{
 };
 use tari_engine_types::crypto::validate_elgamal_verifiable_balance_proof;
 use tari_ootle_wallet_crypto::{confidential, GenerateValueLookup, OutputWitness};
-use tari_template_lib::{
-    template_dependencies::{decode_exact, encode_with_len},
-    types::{Amount, EncryptedData},
-};
+use tari_template_lib_types::{Amount, EncryptedData};
 use tari_utilities::ByteArray;
 
 fn create_output_statement(value: u64, view_key: &RistrettoPublicKey) -> OutputWitness {
@@ -111,7 +108,7 @@ fn serialize_deserialize() {
     let deser_proof = serde_json::from_str(&json).unwrap();
     assert_eq!(proof, deser_proof);
 
-    let cbor = encode_with_len(&proof);
-    let deser_proof = decode_exact(&cbor[4..]).unwrap();
+    let cbor = tari_bor::encode_with_len(&proof);
+    let deser_proof = tari_bor::decode_exact(&cbor[4..]).unwrap();
     assert_eq!(proof, deser_proof);
 }

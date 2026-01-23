@@ -42,9 +42,15 @@ use tari_ootle_transaction::TransactionId;
 use tari_sidechain::{CommitProofElement, QuorumDecision, SidechainBlockCommitProof, SidechainBlockHeader};
 use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
 use tari_state_tree::Version;
-use tari_template_lib::{
-    auth::{ComponentAccessRules, OwnerRule},
-    types::{crypto::SchnorrSignatureBytes, ComponentAddress, ComponentKey, EntityId, ObjectKey, TemplateAddress},
+use tari_template_lib::types::{
+    access_rules::ComponentAccessRules,
+    crypto::SchnorrSignatureBytes,
+    ComponentAddress,
+    ComponentKey,
+    EntityId,
+    ObjectKey,
+    OwnerRule,
+    TemplateAddress,
 };
 use tari_utilities::epoch_time::EpochTime;
 use tempfile::TempDir;

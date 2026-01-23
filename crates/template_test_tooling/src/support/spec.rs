@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_wallet_crypto::MaskAndValue;
-use tari_template_lib::models::SpendCondition;
+use tari_template_lib::types::stealth::SpendCondition;
 
 pub struct OutputSpec {
     value: u64,

@@ -18,10 +18,10 @@ use tari_ootle_wallet_crypto::{
     StealthInputWitness,
 };
 use tari_template_lib::{
-    models::{SpendCondition, StealthOutputsStatement, StealthTransferStatement},
-    prelude::{crypto::ValueKnowledgeProof, RistrettoPublicKeyBytes},
+    prelude::StealthTransferStatement,
     types::{
-        crypto::{StealthValueProof, UtxoTag},
+        crypto::{RistrettoPublicKeyBytes, StealthValueProof, UtxoTag, ValueKnowledgeProof},
+        stealth::{SpendCondition, StealthOutputsStatement},
         Amount,
         EncryptedData,
     },

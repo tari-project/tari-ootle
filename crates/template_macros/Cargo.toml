@@ -2,7 +2,7 @@
 name = "tari_template_macros"
 description = "Tari template macro"
 # This crate has an independent version from the rest of the crates so that general releases don't always break previous templates.
-version = "0.14.0"
+version = "0.15.0"
 edition.workspace = true
 authors.workspace = true
 repository.workspace = true

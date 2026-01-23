@@ -2,17 +2,19 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_template_lib::{
-    auth::{
-        AccessRule,
+    auth::Ownership,
+    types::{
+        access_rules::{
+            AccessRule,
+            RequireRule,
+            ResourceAccessRules,
+            ResourceAuthAction,
+            RestrictedAccessRule,
+            RuleRequirement,
+        },
+        NonFungibleAddress,
         OwnerRule,
-        Ownership,
-        RequireRule,
-        ResourceAccessRules,
-        ResourceAuthAction,
-        RestrictedAccessRule,
-        RuleRequirement,
     },
-    types::NonFungibleAddress,
 };
 
 use crate::{

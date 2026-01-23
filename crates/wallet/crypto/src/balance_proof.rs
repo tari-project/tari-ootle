@@ -8,9 +8,10 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
 use tari_engine_types::{crypto::messages, hashing::EngineSchnorrSignature};
-use tari_template_lib::{
-    models::{StealthInputsStatement, StealthOutputsStatement},
-    prelude::{Amount, BalanceProofSignature},
+use tari_template_lib_types::{
+    crypto::BalanceProofSignature,
+    stealth::{StealthInputsStatement, StealthOutputsStatement},
+    Amount,
 };
 
 pub(crate) fn generate_confidential_balance_proof(

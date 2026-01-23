@@ -13,7 +13,7 @@ use tari_crypto::{
     },
 };
 use tari_engine_types::crypto::{get_static_range_proof_service, MAX_LAZY_BP_AGG_FACTORS};
-use tari_template_lib::types::crypto::RangeProofBytes;
+use tari_template_lib_types::crypto::RangeProofBytes;
 
 use crate::OutputWitness;
 

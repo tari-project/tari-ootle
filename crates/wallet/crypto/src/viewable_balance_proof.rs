@@ -9,9 +9,9 @@ use tari_crypto::{
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
 use tari_engine_types::crypto::{get_commitment_factory, messages};
-use tari_template_lib::{
-    models::{ViewableBalanceProof, ViewableBalanceProofChallengeFields},
-    prelude::Scalar32Bytes,
+use tari_template_lib_types::{
+    crypto::Scalar32Bytes,
+    stealth::{ViewableBalanceProof, ViewableBalanceProofChallengeFields},
 };
 use tari_utilities::ByteArray;
 

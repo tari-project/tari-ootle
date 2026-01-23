@@ -31,23 +31,22 @@ use tari_ootle_storage::{
     StorageError,
 };
 use tari_state_tree::Version;
-use tari_template_lib::{
-    auth::{ComponentAccessRules, OwnerRule, ResourceAccessRules},
-    rule,
-    types::{
-        constants::{
-            NFT_FAUCET_COMPONENT_ADDRESS,
-            NFT_FAUCET_RESOURCE_ADDRESS,
-            PUBLIC_IDENTITY_RESOURCE_ADDRESS,
-            STEALTH_TARI_RESOURCE_ADDRESS,
-            TOKEN_SYMBOL,
-            XTR_FAUCET_COMPONENT_ADDRESS,
-            XTR_FAUCET_VAULT_ADDRESS,
-        },
-        EntityId,
-        Metadata,
-        ResourceType,
+use tari_template_lib::types::{
+    access_rules::{ComponentAccessRules, ResourceAccessRules},
+    constants::{
+        NFT_FAUCET_COMPONENT_ADDRESS,
+        NFT_FAUCET_RESOURCE_ADDRESS,
+        PUBLIC_IDENTITY_RESOURCE_ADDRESS,
+        STEALTH_TARI_RESOURCE_ADDRESS,
+        TOKEN_SYMBOL,
+        XTR_FAUCET_COMPONENT_ADDRESS,
+        XTR_FAUCET_VAULT_ADDRESS,
     },
+    rule,
+    EntityId,
+    Metadata,
+    OwnerRule,
+    ResourceType,
 };
 
 const INITIAL_STATE_VERSION: Version = 0;

@@ -30,7 +30,13 @@ use tari_template_abi::{
     },
     EngineOp,
 };
-use tari_template_lib_types::{NonFungibleId, ResourceAddress, VaultId};
+use tari_template_lib_types::{
+    confidential::ConfidentialWithdrawProof,
+    stealth::StealthTransferStatement,
+    NonFungibleId,
+    ResourceAddress,
+    VaultId,
+};
 
 use crate::{
     args::{
@@ -42,7 +48,7 @@ use crate::{
         VaultInvokeArg,
         VaultWithdrawArg,
     },
-    models::{Bucket, ConfidentialWithdrawProof, NonFungible, Proof, ProofAuth, StealthTransferStatement},
+    models::{Bucket, NonFungible, Proof, ProofAuth},
     resource::ResourceManager,
     types::{Amount, ResourceType},
 };

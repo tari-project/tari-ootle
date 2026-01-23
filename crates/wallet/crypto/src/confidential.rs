@@ -4,9 +4,11 @@
 use ootle_byte_type::ToByteType;
 use tari_crypto::{ristretto::RistrettoSecretKey, tari_utilities::ByteArray};
 use tari_engine_types::crypto::commit_u64_amount;
-use tari_template_lib::{
-    models::{ConfidentialOutputStatement, ConfidentialWithdrawProof, UnspentOutput},
-    types::{crypto::RistrettoPublicKeyBytes, Amount},
+use tari_template_lib_types::{
+    confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
+    crypto::RistrettoPublicKeyBytes,
+    stealth::UnspentOutput,
+    Amount,
 };
 
 use crate::{
@@ -132,7 +134,7 @@ mod tests {
     use rand::rngs::OsRng;
     use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
     use tari_engine_types::confidential::validate_confidential_statement;
-    use tari_template_lib::types::EncryptedData;
+    use tari_template_lib_types::EncryptedData;
 
     use super::*;
 

@@ -27,12 +27,17 @@ use tari_template_abi::rust::{
     str::FromStr,
 };
 use tari_template_lib_types::{
+    access_rules::ResourceAccessRules,
     bytes::Bytes,
+    confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     crypto::StealthValueProof,
+    stealth::StealthTransferStatement,
+    AuthHook,
     ComponentAddress,
     Metadata,
     NonFungibleAddress,
     NonFungibleId,
+    OwnerRule,
     ResourceAddress,
     ResourceType,
     UtxoId,
@@ -41,18 +46,8 @@ use tari_template_lib_types::{
 
 use crate::{
     args::freeze_flags::VaultFreezeFlags,
-    auth::{AuthHook, OwnerRule, ResourceAccessRules},
-    models::{
-        AddressAllocationId,
-        BucketId,
-        ComponentAddressAllocation,
-        ConfidentialWithdrawProof,
-        ProofId,
-        ResourceAddressAllocation,
-        StealthTransferStatement,
-        VaultRef,
-    },
-    prelude::{ComponentAccessRules, ConfidentialOutputStatement, TemplateAddress},
+    models::{AddressAllocationId, BucketId, ComponentAddressAllocation, ProofId, ResourceAddressAllocation, VaultRef},
+    prelude::{ComponentAccessRules, TemplateAddress},
     template::BuiltinTemplate,
     types::{
         crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},

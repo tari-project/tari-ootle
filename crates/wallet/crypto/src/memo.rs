@@ -3,7 +3,7 @@
 
 use std::{cmp, fmt::Display, io};
 
-use tari_template_lib::types::{hex::write_hex_fmt, MaxBytes, MaxString};
+use tari_template_lib_types::{hex::write_hex_fmt, MaxBytes, MaxString};
 
 /// These are selected to be out of range of the Minotari memo field tags
 /// See:
@@ -338,7 +338,7 @@ fn split_len_prefixed(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
 
 #[cfg(test)]
 mod tests {
-    use tari_template_lib::types::EncryptedData;
+    use tari_template_lib_types::EncryptedData;
 
     use super::*;
 

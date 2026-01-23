@@ -2,20 +2,22 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_template_lib_types::{
+    access_rules::{AccessRule, ResourceAccessRules},
     constants::{DEFAULT_DIVISIBILITY, IMAGE_URL, TOKEN_SYMBOL},
+    crypto::RistrettoPublicKeyBytes,
     Amount,
+    AuthHook,
     ComponentAddress,
     Metadata,
+    OwnerRule,
     ResourceAddress,
     ResourceType,
 };
 
 use crate::{
     args::MintArg,
-    auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
     models::{Bucket, ResourceAddressAllocation},
     resource::ResourceManager,
-    types::crypto::RistrettoPublicKeyBytes,
 };
 
 /// Implements the builder pattern for Confidential resources.

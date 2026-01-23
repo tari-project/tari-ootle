@@ -5,8 +5,8 @@ use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
 use tari_template_lib::{
-    auth::{OwnerRule, Ownership},
-    types::{constants::XTR, crypto::RistrettoPublicKeyBytes, Amount, ValidatorFeePoolAddress},
+    auth::Ownership,
+    types::{constants::XTR, crypto::RistrettoPublicKeyBytes, Amount, OwnerRule, ValidatorFeePoolAddress},
 };
 
 use crate::resource_container::{ResourceContainer, ResourceError};

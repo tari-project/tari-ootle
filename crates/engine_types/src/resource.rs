@@ -26,10 +26,17 @@ use ootle_byte_type::FromByteType;
 use serde::{Deserialize, Serialize};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArrayError};
 use tari_template_lib::{
-    auth::{AuthHook, OwnerRule, Ownership, ResourceAccessRules},
-    prelude::Metadata,
+    auth::Ownership,
     resource::TOKEN_SYMBOL,
-    types::{crypto::RistrettoPublicKeyBytes, Amount, ResourceType},
+    types::{
+        access_rules::ResourceAccessRules,
+        crypto::RistrettoPublicKeyBytes,
+        Amount,
+        AuthHook,
+        Metadata,
+        OwnerRule,
+        ResourceType,
+    },
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]

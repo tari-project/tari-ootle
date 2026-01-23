@@ -2,16 +2,18 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_template_lib_types::{
+    access_rules::{AccessRule, ResourceAccessRules},
     constants::{DEFAULT_DIVISIBILITY, IMAGE_URL, TOKEN_SYMBOL},
+    AuthHook,
     ComponentAddress,
     Metadata,
+    OwnerRule,
     ResourceAddress,
     ResourceType,
 };
 
 use crate::{
     args::MintArg,
-    auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
     models::{Bucket, ResourceAddressAllocation},
     resource::ResourceManager,
     types::Amount,

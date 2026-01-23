@@ -11,8 +11,7 @@ use tari_crypto::{
 };
 use tari_template_abi::rust::collections::BTreeSet;
 use tari_template_lib::{
-    models::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
-    prelude::RistrettoPublicKeyBytes,
+    prelude::{ConfidentialOutputStatement, ConfidentialWithdrawProof, RistrettoPublicKeyBytes},
     types::{
         crypto::PedersenCommitmentBytes,
         Amount,
@@ -24,7 +23,7 @@ use tari_template_lib::{
     },
 };
 
-use crate::{confidential, crypto::PrivateOutput, substate::SubstateId};
+use crate::{confidential, crypto::OutputBody, substate::SubstateId};
 
 /// Instances of a single resource kept in Buckets and Vaults
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
@@ -42,9 +41,9 @@ pub enum ResourceContainer {
     },
     Confidential {
         address: ResourceAddress,
-        commitments: BTreeMap<PedersenCommitmentBytes, PrivateOutput>,
+        commitments: BTreeMap<PedersenCommitmentBytes, OutputBody>,
         revealed_amount: Amount,
-        locked_commitments: BTreeMap<PedersenCommitmentBytes, PrivateOutput>,
+        locked_commitments: BTreeMap<PedersenCommitmentBytes, OutputBody>,
         locked_revealed_amount: Amount,
     },
     Stealth {
@@ -73,7 +72,7 @@ impl ResourceContainer {
         }
     }
 
-    pub fn confidential<I: IntoIterator<Item = (PedersenCommitmentBytes, PrivateOutput)>>(
+    pub fn confidential<I: IntoIterator<Item = (PedersenCommitmentBytes, OutputBody)>>(
         address: ResourceAddress,
         commitment: I,
         revealed_amount: Amount,
@@ -126,7 +125,7 @@ impl ResourceContainer {
             commitments: validated_proof
                 .output
                 .into_iter()
-                .map(|o| (o.commitment.to_byte_type(), o.to_private_output()))
+                .map(|o| (o.commitment.to_byte_type(), o.into_output_body()))
                 .collect(),
             revealed_amount: validated_proof.output_revealed_amount,
             locked_commitments: BTreeMap::new(),
@@ -457,7 +456,7 @@ impl ResourceContainer {
 
                 if let Some(change) = validated_proof.change_output {
                     if commitments
-                        .insert(change.commitment.to_byte_type(), change.to_private_output())
+                        .insert(change.commitment.to_byte_type(), change.into_output_body())
                         .is_some()
                     {
                         return Err(ResourceError::InvariantError(
@@ -482,7 +481,7 @@ impl ResourceContainer {
                     *self.resource_address(),
                     validated_proof
                         .output
-                        .map(|o| (o.commitment.to_byte_type(), o.to_private_output())),
+                        .map(|o| (o.commitment.to_byte_type(), o.into_output_body())),
                     validated_proof.output_revealed_amount,
                 ))
             },
@@ -542,14 +541,14 @@ impl ResourceContainer {
     }
 
     /// Returns all confidential commitments. If the resource is not confidential, None is returned.
-    pub fn get_confidential_commitments(&self) -> Option<&BTreeMap<PedersenCommitmentBytes, PrivateOutput>> {
+    pub fn get_confidential_commitments(&self) -> Option<&BTreeMap<PedersenCommitmentBytes, OutputBody>> {
         match self {
             Self::Fungible { .. } | Self::NonFungible { .. } | Self::Stealth { .. } => None,
             Self::Confidential { commitments, .. } => Some(commitments),
         }
     }
 
-    pub fn into_confidential_commitments(self) -> Option<BTreeMap<PedersenCommitmentBytes, PrivateOutput>> {
+    pub fn into_confidential_commitments(self) -> Option<BTreeMap<PedersenCommitmentBytes, OutputBody>> {
         match self {
             Self::Fungible { .. } | Self::NonFungible { .. } | Self::Stealth { .. } => None,
             Self::Confidential { commitments, .. } => Some(commitments),

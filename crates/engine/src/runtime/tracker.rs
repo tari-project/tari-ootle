@@ -38,9 +38,9 @@ use tari_engine_types::{
 use tari_ootle_common_types::Epoch;
 use tari_ootle_transaction::TransactionWeight;
 use tari_template_lib::{
-    auth::{ComponentAccessRules, OwnerRule},
     models::ComponentAddressAllocation,
-    types::{crypto::RistrettoPublicKeyBytes, ComponentAddress, Hash, Metadata, TemplateAddress},
+    prelude::ComponentAccessRules,
+    types::{crypto::RistrettoPublicKeyBytes, ComponentAddress, Hash, Metadata, OwnerRule, TemplateAddress},
 };
 
 use crate::{

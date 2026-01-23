@@ -2,12 +2,12 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use tari_bor::{Deserialize, Serialize};
-use tari_template_lib::{
-    models::SpendCondition,
-    types::crypto::{RistrettoPublicKeyBytes, UtxoTag},
+use tari_template_lib::types::{
+    crypto::{RistrettoPublicKeyBytes, UtxoTag},
+    stealth::SpendCondition,
 };
 
-use crate::crypto::PrivateOutput;
+use crate::crypto::OutputBody;
 
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -19,7 +19,7 @@ pub struct Utxo {
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UtxoOutput {
-    pub output: PrivateOutput,
+    pub output: OutputBody,
     pub spend_condition: SpendCondition,
     pub tag: UtxoTag,
 }

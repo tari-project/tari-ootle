@@ -3,10 +3,9 @@
 
 use std::marker::PhantomData;
 
-use tari_template_lib_types::ComponentAddress;
+use tari_template_lib_types::{access_rules::ComponentAccessRules, ComponentAddress, OwnerRule};
 
 use crate::{
-    auth::{ComponentAccessRules, OwnerRule},
     caller_context::CallerContext,
     engine,
     models::ComponentAddressAllocation,

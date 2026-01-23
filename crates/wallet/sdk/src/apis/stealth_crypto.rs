@@ -23,7 +23,7 @@ use tari_ootle_wallet_crypto::{
     WalletCryptoError,
 };
 use tari_template_lib::{
-    models::{ConfidentialOutputStatement, StealthTransferStatement},
+    prelude::{ConfidentialOutputStatement, StealthTransferStatement},
     types::{
         crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes, UtxoTag},
         Amount,

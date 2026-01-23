@@ -3,20 +3,20 @@
 
 use tari_common_types::types::PrivateKey;
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
-use tari_template_lib::{models::ConfidentialWithdrawProof, types::Amount};
+use tari_template_lib::{prelude::ConfidentialWithdrawProof, types::Amount};
 
 use super::validate_confidential_statement;
 use crate::{
-    crypto::{commit_amount, messages, try_decode_to_signature, ValidatedPrivateOutput},
+    crypto::{commit_amount, messages, try_decode_to_signature, ValidateOutputBody},
     resource_container::ResourceError,
 };
 
 #[derive(Debug, Clone)]
 pub struct ValidatedConfidentialWithdrawProof {
     /// Optional confidential output of the withdraw. This will be created as a new output commitment.
-    pub output: Option<ValidatedPrivateOutput>,
+    pub output: Option<ValidateOutputBody>,
     /// Optional confidential change output of the withdraw. This will replace any inputs used.
-    pub change_output: Option<ValidatedPrivateOutput>,
+    pub change_output: Option<ValidateOutputBody>,
     /// Amount of revealed value to use as an input.
     pub input_revealed_amount: Amount,
     /// Amount of revealed value to include in the revealed value of the output

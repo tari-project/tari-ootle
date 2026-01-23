@@ -12,14 +12,14 @@ use tari_engine_types::{
 use tari_ootle_common_types::displayable::Displayable;
 use tari_template_lib::{
     args::LogLevel,
-    auth::OwnerRule,
-    models::StealthTransferStatement,
-    prelude::AccessRules,
     types::{
+        access_rules::ComponentAccessRules,
         crypto::RistrettoPublicKeyBytes,
+        stealth::StealthTransferStatement,
         Amount,
         FunctionName,
         MaxString,
+        OwnerRule,
         ResourceAddress,
         TemplateAddress,
         ValidatorFeePoolAddress,
@@ -39,7 +39,7 @@ pub enum Instruction {
     CreateAccount {
         owner_public_key: RistrettoPublicKeyBytes,
         owner_rule: Option<OwnerRule>,
-        access_rules: Option<AccessRules>,
+        access_rules: Option<ComponentAccessRules>,
         bucket_workspace_id: Option<WorkspaceOffsetId>,
     },
     CallFunction {

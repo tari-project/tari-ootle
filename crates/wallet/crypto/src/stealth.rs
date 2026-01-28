@@ -18,10 +18,10 @@ use tari_template_lib_types::{
 use crate::{
     balance_proof::generate_stealth_balance_proof_signature,
     bullet_proof::generate_extended_bullet_proof,
-    error::ConfidentialProofError,
-    viewable_balance_proof::create_viewable_balance_proof,
-    SecretStealthOutputStatement,
+    error::StealthProofError,
+    viewable_balance_proof::generate_elgamal_viewable_balance_proof,
     StealthInputWitness,
+    StealthOutputWitness,
     WalletCryptoError,
 };
 
@@ -34,7 +34,7 @@ pub fn create_transfer_statement<'a, Inputs, Outputs>(
 where
     Inputs: IntoIterator<Item = StealthInputWitness>,
     Inputs::IntoIter: ExactSizeIterator,
-    Outputs: IntoIterator<Item = &'a SecretStealthOutputStatement> + Clone,
+    Outputs: IntoIterator<Item = &'a StealthOutputWitness> + Clone,
     Outputs::IntoIter: ExactSizeIterator,
 {
     if revealed_input_amount.is_negative() {
@@ -76,16 +76,15 @@ where
         revealed_amount: revealed_input_amount,
     };
 
-    let balance_proof = if num_outputs == 0 && num_inputs == 0 {
-        None
-    } else {
-        Some(generate_stealth_balance_proof_signature(
+    let requires_balance_proof = num_inputs > 0 || num_outputs > 0;
+    let balance_proof = requires_balance_proof.then(|| {
+        generate_stealth_balance_proof_signature(
             &agg_input_mask,
             &agg_output_mask,
             &inputs_statement,
             &outputs_statement,
-        ))
-    };
+        )
+    });
 
     Ok(StealthTransferStatement {
         inputs_statement: StealthInputsStatement {
@@ -97,10 +96,10 @@ where
     })
 }
 
-pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a SecretStealthOutputStatement> + Clone>(
+pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a StealthOutputWitness> + Clone>(
     output_statements: Outputs,
     revealed_output_amount: Amount,
-) -> Result<StealthOutputsStatement, ConfidentialProofError> {
+) -> Result<StealthOutputsStatement, StealthProofError> {
     let outputs = output_statements
         .clone()
         .into_iter()
@@ -117,12 +116,12 @@ pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a SecretSteal
                     .as_ref()
                     .map(|view_key| {
                         let amount = unblinded_stmt.amount;
-                        create_viewable_balance_proof(&unblinded_stmt.mask, amount, &commitment, view_key)
+                        generate_elgamal_viewable_balance_proof(&unblinded_stmt.mask, amount, &commitment, view_key)
                     })
                     .transpose()?,
             };
 
-            Ok::<_, ConfidentialProofError>(StealthUnspentOutput {
+            Ok::<_, StealthProofError>(StealthUnspentOutput {
                 output,
                 spend_condition: output_stmt.spend_condition.clone(),
                 tag: output_stmt.tag,
@@ -157,7 +156,7 @@ mod tests {
     fn create_valid_proof(amount: u64, minimum_value_promise: u64) -> StealthOutputsStatement {
         let mask = RistrettoSecretKey::random(&mut OsRng);
         create_outputs_statement(
-            &[SecretStealthOutputStatement {
+            &[StealthOutputWitness {
                 witness: OutputWitness {
                     amount,
                     minimum_value_promise,

@@ -4,7 +4,7 @@
 use bnum::BUint;
 use newtype_ops::newtype_ops;
 use serde::ser::Error;
-use tari_template_abi::rust::{cmp, fmt, fmt::Debug, iter::Sum, str::FromStr, write};
+use tari_template_abi::rust::{cmp, fmt, fmt::Debug, iter::Sum, ops, str::FromStr, write};
 
 use crate::{impl_from, partial_eq_impl, partial_ord_impl};
 
@@ -424,6 +424,38 @@ impl Default for Amount {
 
 newtype_ops! { [Amount] {add sub mul div rem neg} {:=} Self Self }
 newtype_ops! { [Amount] {add sub mul div rem neg} {:=} &Self &Self }
+
+impl ops::Add<u64> for Amount {
+    type Output = Self;
+
+    fn add(self, other: u64) -> Self::Output {
+        self + Amount::from_u64(other)
+    }
+}
+
+impl ops::Sub<u64> for Amount {
+    type Output = Self;
+
+    fn sub(self, other: u64) -> Self::Output {
+        self - Amount::from_u64(other)
+    }
+}
+
+impl ops::Mul<u64> for Amount {
+    type Output = Self;
+
+    fn mul(self, other: u64) -> Self::Output {
+        self * Amount::from_u64(other)
+    }
+}
+
+impl ops::Div<u64> for Amount {
+    type Output = Self;
+
+    fn div(self, other: u64) -> Self::Output {
+        self / Amount::from_u64(other)
+    }
+}
 
 impl_from!(Amount, u8);
 impl_from!(Amount, i8);

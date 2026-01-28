@@ -215,7 +215,7 @@ impl TransactionWatcherHandle {
         Self { tx_requests }
     }
 
-    pub async fn watch_transaction(&self, tx_id: TransactionId, timeout: Duration) -> PendingTransaction {
+    pub async fn watch_transaction(&self, tx_id: TransactionId, timeout: Duration) -> PendingTransactionOutcome {
         let (tx_reply, rx_reply) = oneshot::channel();
         let request = TxWatchRequest {
             tx_id,
@@ -226,21 +226,21 @@ impl TransactionWatcherHandle {
             .send(request)
             .await
             .expect("TransactionWatcher not alive");
-        PendingTransaction {
+        PendingTransactionOutcome {
             tx_id,
             outcome_rx: rx_reply,
         }
     }
 }
 
-pub struct PendingTransactionHandle {
+pub struct PendingTransaction {
     watcher: TransactionWatcherHandle,
     client: Weak<IndexerRestApiClient>,
     tx_id: TransactionId,
     default_timeout: Duration,
 }
 
-impl PendingTransactionHandle {
+impl PendingTransaction {
     pub fn new(watcher: TransactionWatcherHandle, client: Weak<IndexerRestApiClient>, tx_id: TransactionId) -> Self {
         const DEFAULT_TX_TIMEOUT: Duration = Duration::from_secs(30);
         Self {
@@ -260,7 +260,7 @@ impl PendingTransactionHandle {
         self.tx_id
     }
 
-    pub async fn register(&self, timeout: Duration) -> Result<PendingTransaction, PendingTransactionError> {
+    pub async fn register(&self, timeout: Duration) -> Result<PendingTransactionOutcome, PendingTransactionError> {
         let pending = self.watcher.watch_transaction(self.tx_id, timeout).await;
         Ok(pending)
     }
@@ -413,12 +413,12 @@ impl PendingTransactionHandle {
     }
 }
 
-pub struct PendingTransaction {
+pub struct PendingTransactionOutcome {
     tx_id: TransactionId,
     outcome_rx: oneshot::Receiver<Result<FinalizeOutcome, PendingTransactionError>>,
 }
 
-impl Future for PendingTransaction {
+impl Future for PendingTransactionOutcome {
     type Output = Result<FinalizeOutcome, PendingTransactionError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -428,7 +428,7 @@ impl Future for PendingTransaction {
     }
 }
 
-impl PendingTransaction {
+impl PendingTransactionOutcome {
     pub fn tx_id(&self) -> TransactionId {
         self.tx_id
     }

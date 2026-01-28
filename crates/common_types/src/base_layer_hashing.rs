@@ -14,9 +14,13 @@ fn confidential_hasher64(network: Network, label: &'static str) -> TariBaseLayer
     TariBaseLayerHasher64::new_with_label(&format!("{}.n{}", label, network.as_byte()))
 }
 
-type WalletOutputEncryptionKeysDomainHasher = DomainSeparatedHasher<Blake2b<U64>, WalletOutputEncryptionKeysDomain>;
+pub type WalletOutputEncryptionKeysDomainHasher = DomainSeparatedHasher<Blake2b<U64>, WalletOutputEncryptionKeysDomain>;
 
+/// Hasher for encrypting wallet output data.
 pub fn encrypted_data_hasher() -> WalletOutputEncryptionKeysDomainHasher {
+    // This is identical to the base layer hasher to allow burn outputs to be decrypted.
+    // TODO: this isn't strictly necessary, separate hashers could be used for L1/L2 which *hand wavy* could be more
+    // secure.
     WalletOutputEncryptionKeysDomainHasher::new_with_label("")
 }
 

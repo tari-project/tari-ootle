@@ -4,7 +4,7 @@
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
 use tari_template_lib::{
     prelude::{PedersenCommitmentBytes, StealthInputsStatement, StealthOutputsStatement},
-    types::{stealth::ViewableBalanceProofChallengeFields, Amount},
+    types::{stealth::ViewableBalanceProofMessageFields, Amount},
 };
 
 use crate::{
@@ -30,7 +30,7 @@ pub fn confidential_withdraw64(
 pub fn viewable_balance_proof64(
     commitment: &PedersenCommitment,
     view_key: &RistrettoPublicKey,
-    challenge_fields: ViewableBalanceProofChallengeFields<'_>,
+    challenge_fields: ViewableBalanceProofMessageFields<'_>,
 ) -> Hash64 {
     engine_hasher64(EngineHashDomainLabel::ViewableBalanceProof)
         .chain(commitment)

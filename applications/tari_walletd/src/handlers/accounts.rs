@@ -17,7 +17,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
 use tari_ootle_transaction::args;
-use tari_ootle_wallet_crypto::{memo::Memo, OutputWitness, SecretStealthOutputStatement, StealthInputWitness};
+use tari_ootle_wallet_crypto::{memo::Memo, OutputWitness, StealthInputWitness, StealthOutputWitness};
 use tari_ootle_wallet_sdk::{
     apis::{
         confidential_transfer::ConfidentialTransferParams,
@@ -435,14 +435,14 @@ pub async fn handle_claim_burn(
     let claim_nonce_key = sdk
         .key_manager_api()
         .get_key(KeyId::derived(KeyBranch::Nonce, owner_nonce_key_index))?;
-    let claim_public_key = claim_nonce_key.to_public_key();
+    let claim_public_key = claim_nonce_key.to_public_key().to_byte_type();
 
     if !sdk.stealth_crypto_api().validate_burn_claim_ownership_proof(
         network,
         &claim_proof.ownership_proof,
         &claim_proof.commitment,
         claim_proof.value,
-        &claim_public_key.to_byte_type(),
+        &claim_public_key,
     ) {
         return Err(invalid_params(
             "claim_proof.ownership_proof",
@@ -456,16 +456,11 @@ pub async fn handle_claim_burn(
         claim_public_key
     );
 
-    let reciprocal_claim_public_key_expanded = claim_proof
-        .burn_public_key
-        .try_from_byte_type()
-        .map_err(|e| invalid_params("claim_proof.reciprocal_claim_public_key", Some(e)))?;
-
-    if reciprocal_claim_public_key_expanded != claim_public_key {
+    if claim_proof.burn_public_key != claim_public_key {
         warn!(
             target: LOG_TARGET,
             "⚠️ The provided reciprocal claim public key ({}) does not match the derived claim public key ({}). The claim will likely fail.",
-            reciprocal_claim_public_key_expanded,
+            claim_proof.burn_public_key,
             claim_public_key
         );
     }
@@ -476,7 +471,7 @@ pub async fn handle_claim_burn(
         .try_from_byte_type()
         .map_err(|e| invalid_params("claim_proof.sender_offset_public_key", Some(e)))?;
 
-    let decrypted = sdk.stealth_crypto_api().decrypt_value_and_mask(
+    let decrypted = sdk.stealth_crypto_api().decrypt_utxo_data(
         &claimed_encrypted_data,
         &claim_proof.commitment,
         claim_nonce_key.secret(),
@@ -524,7 +519,7 @@ pub async fn handle_claim_burn(
         sdk.stealth_crypto_api()
             .derive_stealth_owner_public_key(network, &account_owner_public_key, &nonce);
 
-    let output_statement = SecretStealthOutputStatement {
+    let output_witness = StealthOutputWitness {
         witness: OutputWitness {
             amount: final_amount,
             mask: mask.key,
@@ -540,15 +535,13 @@ pub async fn handle_claim_burn(
     // Package the secrets required to spend the claimed output
     let input = StealthInputWitness {
         mask_and_value: decrypted.into_mask_and_value(),
-        public_nonce: reciprocal_claim_public_key_expanded,
     };
 
     let pay_fee_and_mint_output = sdk.stealth_crypto_api().generate_transfer_statement(
         iter::once(input),
         0,
-        iter::once(&output_statement),
+        iter::once(&output_witness),
         max_fee,
-        // public_signer_key.public_key.to_byte_type(),
     )?;
     // We'll create an output with the same encrypted data that was used on L1 burn. Note that this is not strictly
     // necessary. The engine will create the output with whatever you give it, so we could reencrypt.

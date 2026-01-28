@@ -24,7 +24,7 @@ impl OutputWitness {
 }
 
 #[derive(Debug, Clone)]
-pub struct SecretStealthOutputStatement {
+pub struct StealthOutputWitness {
     pub witness: OutputWitness,
     pub spend_condition: SpendCondition,
     pub tag: UtxoTag,
@@ -77,5 +77,4 @@ impl DecryptedData {
 #[derive(Debug, Clone)]
 pub struct StealthInputWitness {
     pub mask_and_value: MaskAndValue,
-    pub public_nonce: RistrettoPublicKey,
 }

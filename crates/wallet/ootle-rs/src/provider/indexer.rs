@@ -2,13 +2,13 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::{Arc, OnceLock, Weak},
 };
 
 use tari_indexer_client::{
     rest_api_client::IndexerRestApiClient,
-    types::{GetSubstateRequest, SubmitTransactionRequest},
+    types::{GetSubstateRequest, GetSubstatesRequest, SubmitTransactionRequest},
 };
 use tari_ootle_common_types::{
     engine_types::{
@@ -17,9 +17,9 @@ use tari_ootle_common_types::{
     },
     optional::Optional,
     Epoch,
+    Network,
 };
 use tari_ootle_transaction::{Transaction, TransactionEnvelope, UnsignedTransaction};
-use tari_ootle_wallet_sdk::Network;
 use tracing::debug;
 
 use crate::{
@@ -27,13 +27,15 @@ use crate::{
         input_resolver::TransactionInputResolver,
         tx_stream::{EventStream, Paused},
         tx_watcher::TransactionWatcherHandle,
-        PendingTransactionHandle,
+        PendingTransaction,
         Provider,
+        ProviderError,
         ProviderResult,
         TransactionWatcher,
+        WalletProvider,
         WantInput,
     },
-    wallet::OotleWallet,
+    wallet::NetworkWallet,
     Address,
 };
 
@@ -55,17 +57,17 @@ impl<Wallet> IndexerProvider<Wallet> {
         }
     }
 
-    pub fn wallet(&self) -> &Wallet {
-        &self.wallet
-    }
-
-    pub fn wallet_mut(&mut self) -> &mut Wallet {
-        &mut self.wallet
-    }
-
     pub async fn get_network(&self) -> ProviderResult<Network> {
         let resp = self.client.get_network_info().await?;
         Ok(resp.network)
+    }
+
+    pub async fn fetch_substate<T: Into<SubstateId>>(&self, substate_id: T) -> ProviderResult<Substate> {
+        let resp = self
+            .client
+            .get_substate(&substate_id.into(), GetSubstateRequest::default())
+            .await?;
+        Ok(Substate::new(resp.version, resp.substate))
     }
 
     pub async fn get_epoch(&self) -> ProviderResult<Epoch> {
@@ -83,32 +85,33 @@ impl<Wallet> IndexerProvider<Wallet> {
     }
 }
 
-impl IndexerProvider<OotleWallet> {
-    pub async fn send_dry_run(&self, transaction: UnsignedTransaction) -> ProviderResult<ExecuteResult> {
-        let transaction = transaction.with_dry_run(true);
-        // Sign the transaction - TODO: use invalid signatures for fee estimation since they are not validated anyway
-        let mut signatures = vec![];
-        for signer in self.wallet().additional_signers() {
-            let sig = self.wallet().authorize_transaction(signer, &transaction).await?;
-            signatures.push(sig.into_signature());
-        }
-        let transaction = self
-            .wallet()
-            .sign_transaction(transaction.with_signatures(signatures))
-            .await?;
+impl<Wallet: NetworkWallet + Send + Sync> IndexerProvider<Wallet> {
+    pub async fn sign_and_send_dry_run(&self, unsigned: UnsignedTransaction) -> ProviderResult<ExecuteResult> {
+        self.sign_and_send_dry_run_with(self.wallet(), unsigned).await
+    }
 
+    pub async fn sign_and_send_dry_run_with<W: NetworkWallet>(
+        &self,
+        wallet: &W,
+        unsigned: UnsignedTransaction,
+    ) -> ProviderResult<ExecuteResult> {
+        let unsigned = unsigned.with_dry_run(true);
+        let transaction = wallet.sign_transaction(unsigned).await?;
         debug!("Submitting dry-run transaction: {}", transaction.calculate_id());
+        self.send_dry_run(transaction).await
+    }
 
+    pub async fn send_dry_run(&self, tx: Transaction) -> ProviderResult<ExecuteResult> {
         let resp = self
             .client
             .submit_transaction_dry_run(SubmitTransactionRequest {
-                transaction: TransactionEnvelope::encode(transaction)?,
+                transaction: TransactionEnvelope::encode(tx)?,
             })
             .await?;
         Ok(resp.result)
     }
 
-    pub async fn send_transaction(&mut self, transaction: Transaction) -> ProviderResult<PendingTransactionHandle> {
+    pub async fn send_transaction(&mut self, transaction: Transaction) -> ProviderResult<PendingTransaction> {
         debug!("Sending transaction: {}", transaction.calculate_id());
         let envelope = TransactionEnvelope::encode(transaction)?;
         self.send_transaction_envelope(envelope).await
@@ -117,7 +120,7 @@ impl IndexerProvider<OotleWallet> {
     pub async fn send_transaction_envelope(
         &mut self,
         transaction: TransactionEnvelope,
-    ) -> ProviderResult<PendingTransactionHandle> {
+    ) -> ProviderResult<PendingTransaction> {
         // Start the tx watcher if not already started
         let watcher = self.get_tx_watcher().clone();
 
@@ -125,7 +128,7 @@ impl IndexerProvider<OotleWallet> {
             .client
             .submit_transaction(SubmitTransactionRequest { transaction })
             .await?;
-        Ok(PendingTransactionHandle::new(
+        Ok(PendingTransaction::new(
             watcher,
             self.weak_client(),
             resp.transaction_id,
@@ -142,7 +145,7 @@ impl IndexerProvider<OotleWallet> {
     }
 }
 
-impl Provider for IndexerProvider<OotleWallet> {
+impl<Wallet: NetworkWallet + Send + Sync> Provider for IndexerProvider<Wallet> {
     type Client = IndexerRestApiClient;
 
     fn network(&self) -> Network {
@@ -154,7 +157,7 @@ impl Provider for IndexerProvider<OotleWallet> {
     }
 
     fn default_signer_address(&self) -> &Address {
-        self.wallet.default_signer_address()
+        self.wallet.default_address()
     }
 
     async fn resolve_input_want_list(
@@ -166,5 +169,40 @@ impl Provider for IndexerProvider<OotleWallet> {
             .resolve_inputs(&mut transaction, want_list)
             .await?;
         Ok(transaction)
+    }
+
+    async fn fetch_substates<I: IntoIterator<Item = SubstateId> + Send>(
+        &self,
+        substate_ids: I,
+    ) -> ProviderResult<HashMap<SubstateId, Substate>> {
+        let substate_ids = substate_ids.into_iter().collect::<Vec<_>>();
+        if substate_ids.is_empty() {
+            // The request API will not allow us to send an empty list, so we short-circuit here
+            return Ok(HashMap::new());
+        }
+
+        let resp = self
+            .client
+            .fetch_substates(GetSubstatesRequest {
+                requests: substate_ids
+                    .try_into()
+                    .map_err(|_| ProviderError::other("Too many substates requested in single request"))?,
+                cached_only: false,
+            })
+            .await?;
+
+        Ok(resp.substates)
+    }
+}
+
+impl<Wallet: NetworkWallet + Send + Sync> WalletProvider for IndexerProvider<Wallet> {
+    type Wallet = Wallet;
+
+    fn wallet(&self) -> &Self::Wallet {
+        &self.wallet
+    }
+
+    fn wallet_mut(&mut self) -> &mut Self::Wallet {
+        &mut self.wallet
     }
 }

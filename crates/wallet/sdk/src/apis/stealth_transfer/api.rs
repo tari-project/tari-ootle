@@ -10,7 +10,7 @@ use tari_engine_types::substate::SubstateId;
 use tari_ootle_address::{OotleAddress, RistrettoOotleAddress};
 use tari_ootle_common_types::{displayable::Displayable, optional::Optional, Network, SubstateRequirement};
 use tari_ootle_transaction::{args, Transaction, UnsignedTransaction};
-use tari_ootle_wallet_crypto::memo::Memo;
+use tari_ootle_wallet_crypto::{memo::Memo, pay_to::PayTo};
 use tari_template_lib::{
     models::Account as BuiltinAccount,
     prelude::StealthTransferStatement,
@@ -23,7 +23,6 @@ use super::{
     params::StealthTransferParams,
     types::{InputsToSpend, StealthOutputToCreate, StealthTransferOutput},
     BadgeUsage,
-    PayTo,
 };
 use crate::{
     apis::{
@@ -269,17 +268,11 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
     fn lock_fee_inputs<A: Into<Amount>>(
         &self,
         lock_id: WalletLockId,
-        owner_account: &AccountWithAddress,
+        owner_account_address: &ComponentAddress,
         max_fee: A,
         input_selection: UtxoInputSelection,
     ) -> Result<InputsToSpend, StealthTransferApiError> {
-        self.lock_inputs_for_transfer(
-            lock_id,
-            owner_account.account().component_address(),
-            XTR,
-            max_fee.into(),
-            input_selection,
-        )
+        self.lock_inputs_for_transfer(lock_id, owner_account_address, XTR, max_fee.into(), input_selection)
     }
 
     #[allow(clippy::too_many_lines)]
@@ -345,8 +338,12 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             let lock = self.locks_api.create_lock_with_timeout(Duration::from_secs(5 * 60))?;
 
             // Lock up funds for fees and transfer
-            let fee_inputs_to_spend =
-                self.lock_fee_inputs(lock.id(), &owner_account, params.max_fee, params.fee_input_selection)?;
+            let fee_inputs_to_spend = self.lock_fee_inputs(
+                lock.id(),
+                owner_account.component_address(),
+                params.max_fee,
+                params.fee_input_selection,
+            )?;
 
             debug!(
                 target: LOG_TARGET,
@@ -377,8 +374,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             })
             .filter(|o| o.amount > 0);
 
-            // Figure out which signing key to use - if there are no revealed funds, which necessitate using an account
-            // withdraw auth signature, then we can use a nonce key.
+            // Figure out which signing key to use - if there are revealed funds, we need to use an account
+            // withdraw auth signature, otherwise we can use a "throw-away" and private nonce.
             let must_sign_with_account_key = fee_inputs_to_spend.revealed.is_positive();
             let signing_key_id = if must_sign_with_account_key {
                 account_key_id
@@ -430,18 +427,16 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             // Signing key for main transfer intent
             let must_sign_with_account_key = !params.badge_usage.is_none() || inputs_to_spend.revealed.is_positive();
             let signing_key_id = if must_sign_with_account_key {
-                account_key_id
+                Some(account_key_id)
             } else {
-                self.key_manager_api.next_derived_key_id(KeyBranch::Nonce)?.into()
+                None
             };
 
             // No need to add another signature if the fee signer is the same as the main signer
-            let main_intent_signer = if fee_signer.key_id() == signing_key_id {
-                None
-            } else {
-                let required_signer = self.key_manager_api.get_public_key(signing_key_id)?;
-                Some(required_signer)
-            };
+            let main_intent_signer = signing_key_id
+                .filter(|key_id| *key_id != fee_signer.key_id())
+                .map(|key_id| self.key_manager_api.get_public_key(key_id))
+                .transpose()?;
 
             // If we're spending from the owner account, add the inputs
             if inputs_to_spend.revealed.is_positive() || fee_inputs_to_spend.revealed.is_positive() {
@@ -795,7 +790,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 }
             })
             .with_inputs(inputs)
-            .build_unsigned_transaction();
+            .build_unsigned();
 
         Ok(transaction)
     }

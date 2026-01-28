@@ -25,6 +25,36 @@ pub struct TransactionReceipt {
     pub epoch: u64,
 }
 
+impl TransactionReceipt {
+    pub fn outcome(&self) -> &FinalizeOutcome {
+        &self.outcome
+    }
+
+    pub fn diff_summary(&self) -> &DiffSummary {
+        &self.diff_summary
+    }
+
+    pub fn fee_withdrawals(&self) -> &[ValidatorFeeWithdrawal] {
+        &self.fee_withdrawals
+    }
+
+    pub fn logs(&self) -> &[LogEntry] {
+        &self.logs
+    }
+
+    pub fn events(&self) -> &[Event] {
+        &self.events
+    }
+
+    pub fn fee_receipt(&self) -> &FeeReceipt {
+        &self.fee_receipt
+    }
+
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum FinalizeOutcome {

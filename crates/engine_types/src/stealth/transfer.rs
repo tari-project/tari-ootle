@@ -24,7 +24,7 @@ pub struct ValidatedStealthTransfer {
     pub revealed_output_amount: Amount,
 }
 
-pub fn validate_transfer_balance(
+pub fn validate_transfer(
     transfer: &StealthTransferStatement,
     view_key: Option<&RistrettoPublicKey>,
 ) -> Result<ValidatedStealthTransfer, ResourceError> {

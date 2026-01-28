@@ -11,7 +11,7 @@ pub(crate) const HRP_IGOR: Hrp = Hrp::parse_unchecked("otl_igr_");
 pub(crate) const HRP_NEXTNET: Hrp = Hrp::parse_unchecked("otl_nxt_");
 pub(crate) const HRP_STAGENET: Hrp = Hrp::parse_unchecked("otl_stg_");
 
-pub fn hrp_from_network(network: Network) -> Hrp {
+pub const fn hrp_from_network(network: Network) -> Hrp {
     match network {
         Network::MainNet => HRP_MAINNET,
         Network::LocalNet => HRP_LOCALNET,

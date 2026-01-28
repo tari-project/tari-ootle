@@ -2275,7 +2275,7 @@ dependencies = [
  "rand_core 0.6.4",
  "serdect 0.3.0",
  "sha3",
- "signature",
+ "signature 2.2.0",
  "subtle",
  "zeroize",
 ]
@@ -2985,7 +2985,7 @@ dependencies = [
  "pkcs8",
  "rfc6979",
  "sha2",
- "signature",
+ "signature 2.2.0",
  "zeroize",
 ]
 
@@ -3074,7 +3074,7 @@ dependencies = [
  "digest",
  "elliptic-curve",
  "rfc6979",
- "signature",
+ "signature 2.2.0",
  "spki",
 ]
 
@@ -3085,7 +3085,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
 dependencies = [
  "pkcs8",
- "signature",
+ "signature 2.2.0",
 ]
 
 [[package]]
@@ -5114,7 +5114,7 @@ dependencies = [
  "elliptic-curve",
  "once_cell",
  "sha2",
- "signature",
+ "signature 2.2.0",
 ]
 
 [[package]]
@@ -7269,20 +7269,20 @@ dependencies = [
  "async-trait",
  "env_logger",
  "futures 0.3.31",
- "hex",
+ "indexmap 2.13.0",
  "ootle_byte_type",
- "ootle_serde",
  "rand 0.8.5",
  "serde",
  "serde_json",
+ "signature 3.0.0-rc.8",
  "tari_bor",
- "tari_common_types",
  "tari_crypto",
  "tari_indexer_client",
  "tari_ootle_address",
  "tari_ootle_common_types",
  "tari_ootle_transaction",
- "tari_ootle_wallet_sdk",
+ "tari_ootle_wallet_crypto",
+ "tari_template_builtin",
  "tari_template_lib_types",
  "thiserror 2.0.17",
  "tokio",
@@ -7707,7 +7707,7 @@ dependencies = [
  "aes-gcm",
  "aes-kw",
  "argon2 0.5.3",
- "base64 0.21.7",
+ "base64 0.22.1",
  "bitfields",
  "block-padding",
  "blowfish",
@@ -7758,7 +7758,7 @@ dependencies = [
  "sha1-checked",
  "sha2",
  "sha3",
- "signature",
+ "signature 2.2.0",
  "smallvec 1.15.1",
  "snafu 0.8.9",
  "twofish",
@@ -8930,7 +8930,7 @@ dependencies = [
  "pkcs1",
  "pkcs8",
  "rand_core 0.6.4",
- "signature",
+ "signature 2.2.0",
  "spki",
  "subtle",
  "zeroize",
@@ -9817,6 +9817,12 @@ dependencies = [
  "digest",
  "rand_core 0.6.4",
 ]
+
+[[package]]
+name = "signature"
+version = "3.0.0-rc.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c04b70a14ee5f15e2e0c785a5fdb2e9a51138dfe13ba3cf8eab037a9e60b1879"
 
 [[package]]
 name = "simd-adler32"
@@ -11332,9 +11338,11 @@ version = "0.17.0"
 dependencies = [
  "argon2 0.5.3",
  "blake2",
+ "borsh",
  "chacha20poly1305",
  "crc32fast",
  "digest",
+ "log",
  "memmap2 0.9.9",
  "ootle_byte_type",
  "rand 0.8.5",
@@ -11358,7 +11366,6 @@ name = "tari_ootle_wallet_sdk"
 version = "0.17.0"
 dependencies = [
  "anyhow",
- "blake2",
  "digest",
  "futures 0.3.31",
  "keyring",
@@ -11373,7 +11380,6 @@ dependencies = [
  "tari_consensus_types",
  "tari_crypto",
  "tari_engine_types",
- "tari_hashing",
  "tari_ootle_address",
  "tari_ootle_common_types",
  "tari_ootle_transaction",
@@ -11767,6 +11773,7 @@ dependencies = [
 name = "tari_template_builtin"
 version = "0.17.0"
 dependencies = [
+ "tari_engine",
  "tari_engine_types",
  "tari_ootle_transaction",
  "tari_template_lib",

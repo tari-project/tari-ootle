@@ -15,8 +15,8 @@ use tari_ootle_wallet_crypto::{
     stealth::create_transfer_statement,
     MaskAndValue,
     OutputWitness,
-    SecretStealthOutputStatement,
     StealthInputWitness,
+    StealthOutputWitness,
 };
 use tari_template_lib_types::{crypto::UtxoTag, Amount, EncryptedData};
 
@@ -39,7 +39,7 @@ mod stealth_tests {
     fn it_errors_for_noop_transfer() {
         let statement =
             create_transfer_statement(iter::empty(), Amount::zero(), iter::empty(), Amount::zero()).unwrap();
-        stealth::validate_transfer_balance(&statement, None).unwrap_err();
+        stealth::validate_transfer(&statement, None).unwrap_err();
     }
 
     #[test]
@@ -58,7 +58,7 @@ mod stealth_tests {
         )
         .unwrap();
 
-        stealth::validate_transfer_balance(&statement, None).unwrap();
+        stealth::validate_transfer(&statement, None).unwrap();
     }
 
     #[test]
@@ -77,7 +77,7 @@ mod stealth_tests {
         )
         .unwrap();
 
-        stealth::validate_transfer_balance(&statement, None).unwrap();
+        stealth::validate_transfer(&statement, None).unwrap();
     }
 
     #[test]
@@ -91,7 +91,7 @@ mod stealth_tests {
             revealed_output_amount,
         )
         .unwrap();
-        stealth::validate_transfer_balance(&statement, None).unwrap();
+        stealth::validate_transfer(&statement, None).unwrap();
 
         let revealed_input_amount = Amount::from(6000);
         let revealed_output_amount = Amount::from(5999);
@@ -102,23 +102,22 @@ mod stealth_tests {
             revealed_output_amount,
         )
         .unwrap();
-        stealth::validate_transfer_balance(&statement, None).unwrap_err(); // Invalid, output is less than input
+        stealth::validate_transfer(&statement, None).unwrap_err(); // Invalid, output is less than input
     }
 
     fn make_input_statements(amounts: &[(u8, u64)]) -> Vec<StealthInputWitness> {
         amounts
             .iter()
             .map(|&(seed, amount)| {
-                let (mask, public_key) = create_key_pair_from_seed(seed);
+                let (mask, _) = create_key_pair_from_seed(seed);
                 StealthInputWitness {
                     mask_and_value: MaskAndValue::new(amount, mask.clone()),
-                    public_nonce: public_key,
                 }
             })
             .collect()
     }
 
-    fn make_output_statements(amounts: &[u64]) -> Vec<SecretStealthOutputStatement> {
+    fn make_output_statements(amounts: &[u64]) -> Vec<StealthOutputWitness> {
         amounts
             .iter()
             .filter(|amount| **amount > 0)
@@ -139,7 +138,7 @@ mod stealth_tests {
                     encrypted_data: EncryptedData::empty(),
                 };
 
-                SecretStealthOutputStatement {
+                StealthOutputWitness {
                     witness: statement,
                     spend_condition: SpendCondition::Signed(output_owner_public_key.to_byte_type()),
                     tag: UtxoTag::new(0),

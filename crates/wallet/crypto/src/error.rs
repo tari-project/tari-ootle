@@ -5,7 +5,7 @@ use chacha20poly1305::aead;
 use tari_crypto::errors::RangeProofError;
 
 #[derive(Debug, thiserror::Error)]
-pub enum ConfidentialProofError {
+pub enum StealthProofError {
     #[error("Range proof error: {0}")]
     RangeProof(RangeProofError),
     #[error("Aead error")]
@@ -14,13 +14,13 @@ pub enum ConfidentialProofError {
     NegativeAmount,
 }
 
-impl From<aead::Error> for ConfidentialProofError {
+impl From<aead::Error> for StealthProofError {
     fn from(_value: aead::Error) -> Self {
         Self::AeadError
     }
 }
 
-impl From<RangeProofError> for ConfidentialProofError {
+impl From<RangeProofError> for StealthProofError {
     fn from(value: RangeProofError) -> Self {
         Self::RangeProof(value)
     }
@@ -28,8 +28,8 @@ impl From<RangeProofError> for ConfidentialProofError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum WalletCryptoError {
-    #[error("Confidential proof error: {0}")]
-    ConfidentialProof(#[from] ConfidentialProofError),
+    #[error("Stealth proof error: {0}")]
+    StealthProofError(#[from] StealthProofError),
     #[error("Failed to decrypt data: {details}")]
     FailedDecryptData { details: String },
     #[error("Failed to encrypt data: {details}")]

@@ -44,5 +44,6 @@ export type Instruction =
         revealed_input_bucket: WorkspaceOffsetId | null;
       };
     }
-  | { PayFee: { statement: StealthTransferStatement; revealed_input_bucket: WorkspaceOffsetId | null } }
+  | { PayFeeStealth: { statement: StealthTransferStatement; revealed_input_bucket: WorkspaceOffsetId | null } }
+  | { PayFeeFromBucket: { bucket: WorkspaceOffsetId } }
   | { UpdateComponentTemplate: { component: ComponentReference; migrate: MigrateFunction | null; new_template: Hash } };

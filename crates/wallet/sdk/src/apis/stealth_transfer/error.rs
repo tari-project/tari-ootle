@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_common_types::optional::IsNotFoundError;
+use tari_ootle_wallet_crypto::StealthCryptoApiError;
 use tari_template_lib::types::{Amount, ResourceAddress};
 
 use crate::{
@@ -10,7 +11,6 @@ use crate::{
         config::ConfigApiError,
         key_manager::KeyManagerApiError,
         locks::LocksApiError,
-        stealth_crypto::StealthCryptoApiError,
         stealth_outputs::StealthOutputsApiError,
         substate::SubstateApiError,
     },

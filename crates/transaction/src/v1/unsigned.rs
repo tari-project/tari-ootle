@@ -12,14 +12,7 @@ use tari_engine_types::{
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib::types::{constants::XTR, crypto::RistrettoPublicKeyBytes, ComponentAddress, UtxoAddress};
 
-use crate::{
-    builder::TransactionBuilder,
-    ComponentReference,
-    Instruction,
-    ResourceAddressRef,
-    Signable,
-    TransactionSignature,
-};
+use crate::{ComponentReference, Instruction, ResourceAddressRef, Signable, TransactionSignature};
 
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -37,10 +30,6 @@ pub struct UnsignedTransactionV1 {
 }
 
 impl UnsignedTransactionV1 {
-    pub fn builder<N: Into<u8>>(network: N) -> TransactionBuilder {
-        TransactionBuilder::new(network)
-    }
-
     pub(crate) fn new_default<N: Into<u8>>(network: N) -> Self {
         Self {
             network: network.into(),
@@ -73,6 +62,10 @@ impl UnsignedTransactionV1 {
             is_seal_signer_authorized: true,
             dry_run,
         }
+    }
+
+    pub const fn schema_version(&self) -> u16 {
+        1
     }
 
     pub fn set_network<N: Into<u8>>(&mut self, network: N) -> &mut Self {
@@ -172,7 +165,7 @@ impl UnsignedTransactionV1 {
                             .map(SubstateId::Utxo),
                     );
                 },
-                Instruction::PayFee { statement, .. } => {
+                Instruction::PayFeeStealth { statement, .. } => {
                     substates.insert(SubstateId::Resource(XTR));
                     substates.extend(
                         statement
@@ -213,6 +206,6 @@ impl Signable<&RistrettoPublicKeyBytes> for UnsignedTransactionV1 {
     type Signature = TransactionSignature;
 
     fn to_signing_message(&self, seal_signer: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
-        TransactionSignature::create_message_v1(1, seal_signer, self)
+        TransactionSignature::create_message_v1(seal_signer, self)
     }
 }

@@ -276,7 +276,7 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
         );
     }
 
-    let transaction = builder.build_unsigned_transaction();
+    let transaction = builder.build_unsigned();
     summarize_transaction(&transaction);
 
     if common.dry_run {
@@ -344,7 +344,7 @@ async fn handle_submit_manifest(
         .with_min_epoch(common.min_epoch.map(Epoch))
         .with_max_epoch(common.max_epoch.map(Epoch));
 
-    let transaction = builder.build_unsigned_transaction();
+    let transaction = builder.build_unsigned();
     summarize_transaction(&transaction);
 
     if common.dry_run {

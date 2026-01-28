@@ -18,6 +18,11 @@ const TEMPLATE_BUILTINS: &[&str] = &[
 ];
 
 fn main() -> Result<(), Box<dyn Error>> {
+    // If templates feature is disabled, do nothing
+    if env::var("CARGO_FEATURE_TEMPLATES").is_err() {
+        return Ok(());
+    }
+
     // Rebuild templates if abi or lib changes (only if they exist in the build context)
     if Path::new("../template_abi").exists() {
         println!("cargo:rerun-if-changed=../template_abi");

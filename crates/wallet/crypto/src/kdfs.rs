@@ -12,13 +12,16 @@ use tari_template_lib_types::{crypto::UtxoTag, ResourceAddress};
 use tari_utilities::{hidden_type, safe_array::SafeArray, Hidden};
 use zeroize::Zeroize;
 
-use crate::hashers::{stealth_output_tag_hasher64, stealth_owner_hasher64};
+use crate::{
+    hashers::{stealth_output_tag_hasher64, stealth_owner_hasher64, KdfHasher},
+    safe_key::SafeAeadKey,
+};
 
 pub(crate) const AEAD_KEY_LEN: usize = size_of::<Key>();
 
 // Type for hiding aead key encryption
 hidden_type!(EncryptedDataKey, SafeArray<u8, AEAD_KEY_LEN>);
-hidden_type!(SafeKey64, SafeArray<u8, 64>);
+pub type SafeKey64 = SafeAeadKey<64>;
 
 fn dh(
     public_key: &RistrettoPublicKey,
@@ -32,19 +35,27 @@ pub fn encrypted_data_dh_kdf_aead(
     private_key: &RistrettoSecretKey,
     public_key: &RistrettoPublicKey,
 ) -> RistrettoSecretKey {
-    let shared_secret = dh(public_key, private_key);
-
-    RistrettoSecretKey::from_uniform_bytes(
-        // Must match base layer burn
-        encrypted_data_hasher()
-            .chain(shared_secret.as_bytes())
-            .finalize()
-            .as_ref(),
-    )
-    .unwrap()
+    // Must match base layer burn
+    let hasher = encrypted_data_hasher();
+    dh_kdf_aead(hasher, private_key, public_key)
 }
 
-/// Generate a decryption key for the owner key from a private key and nonce
+/// Generate a Diffie-Hellman secret key `H(DH(s1, s2*G))`
+pub fn dh_kdf_aead<H>(
+    hasher: H,
+    private_key: &RistrettoSecretKey,
+    public_key: &RistrettoPublicKey,
+) -> RistrettoSecretKey
+where
+    H: KdfHasher<[u8]>,
+    H::HashOutput: AsRef<[u8]>,
+{
+    let shared_secret = dh(public_key, private_key);
+    let hash = hasher.kdf_digest(shared_secret.as_bytes());
+    RistrettoSecretKey::from_uniform_bytes(hash.as_ref()).unwrap()
+}
+
+/// Generate a secret key for the owner key from a private key and nonce
 pub fn owner_stealth_dh_secret(
     network: Network,
     private_key: &RistrettoSecretKey,
@@ -61,13 +72,8 @@ fn stealth_owner_dh(
     public_key: &RistrettoPublicKey,
     secret_nonce: &RistrettoSecretKey,
 ) -> RistrettoSecretKey {
-    let shared_secret = dh(public_key, secret_nonce);
-    let result = stealth_owner_hasher64(network)
-        .chain(shared_secret.as_bytes())
-        .finalize();
-
-    RistrettoSecretKey::from_uniform_bytes(result.as_ref())
-        .expect("key length != RistrettoSecretKey::WIDE_REDUCTION_LEN")
+    let hasher = stealth_owner_hasher64(network);
+    dh_kdf_aead(hasher, secret_nonce, public_key)
 }
 
 pub fn owner_stealth_dh_stealth_address(

@@ -45,6 +45,7 @@ mod locking;
 pub mod scope;
 pub use locking::{LockError, LockState};
 mod address_allocation;
+mod pay_fee;
 mod state_store;
 mod tracker_auth;
 mod validation;
@@ -53,6 +54,7 @@ mod workspace;
 
 use std::{fmt::Debug, ptr::NonNull};
 
+pub use pay_fee::PayFee;
 use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason},
     component::ComponentHeader,
@@ -227,11 +229,7 @@ pub trait RuntimeInterface {
         revealed_funds_bucket: Option<BucketId>,
     ) -> Result<Option<BucketId>, RuntimeError>;
 
-    fn pay_fee(
-        &mut self,
-        statement: StealthTransferStatement,
-        revealed_funds_bucket: Option<BucketId>,
-    ) -> Result<(), RuntimeError>;
+    fn pay_fee(&mut self, pay_fee: PayFee) -> Result<(), RuntimeError>;
 
     fn track_template_loaded(
         &mut self,

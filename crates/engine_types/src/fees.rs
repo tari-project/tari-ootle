@@ -83,6 +83,8 @@ impl FeeReceipt {
     pub fn total_refunded(&self) -> u64 {
         self.total_fee_payment
             .checked_sub(self.total_fees_charged())
+            // Minus overcharge (funds that cannot be refunded)
+            .and_then(|v| v.checked_sub(self.total_fee_overcharge))
             .unwrap_or_default()
     }
 
@@ -111,6 +113,12 @@ impl FeeReceipt {
     /// Returns true if the total fees charged is less than or equal to the total fees paid, otherwise false
     pub fn is_paid_in_full(&self) -> bool {
         self.unpaid_debt() == 0
+    }
+
+    /// The amount of non-refundable fees which the user overpaid. Fees cannot be refunded when paying purely with a
+    /// stealth reveal (since we do not know the account/vault to refund).
+    pub fn total_fee_overcharge(&self) -> u64 {
+        self.total_fee_overcharge
     }
 }
 

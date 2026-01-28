@@ -49,8 +49,8 @@ pub struct ViewableBalanceProof {
 }
 
 impl ViewableBalanceProof {
-    pub fn as_challenge_fields(&self) -> ViewableBalanceProofChallengeFields<'_> {
-        ViewableBalanceProofChallengeFields {
+    pub fn as_challenge_fields(&self) -> ViewableBalanceProofMessageFields<'_> {
+        ViewableBalanceProofMessageFields {
             elgamal_encrypted: &self.elgamal_encrypted,
             elgamal_public_nonce: &self.elgamal_public_nonce,
             c_prime: &self.c_prime,
@@ -62,7 +62,7 @@ impl ViewableBalanceProof {
 
 #[derive(Clone, Copy)]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
-pub struct ViewableBalanceProofChallengeFields<'a> {
+pub struct ViewableBalanceProofMessageFields<'a> {
     pub elgamal_encrypted: &'a RistrettoPublicKeyBytes,
     pub elgamal_public_nonce: &'a RistrettoPublicKeyBytes,
     pub c_prime: &'a PedersenCommitmentBytes,

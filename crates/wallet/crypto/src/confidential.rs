@@ -14,8 +14,8 @@ use tari_template_lib_types::{
 use crate::{
     balance_proof::generate_confidential_balance_proof,
     bullet_proof::generate_extended_bullet_proof,
-    error::ConfidentialProofError,
-    viewable_balance_proof::create_viewable_balance_proof,
+    error::StealthProofError,
+    viewable_balance_proof::generate_elgamal_viewable_balance_proof,
     MaskAndValue,
     OutputWitness,
     WalletCryptoError,
@@ -75,10 +75,10 @@ pub fn create_output_statement(
     output_revealed_amount: Amount,
     change_statement: Option<&OutputWitness>,
     change_revealed_amount: Amount,
-) -> Result<ConfidentialOutputStatement, ConfidentialProofError> {
+) -> Result<ConfidentialOutputStatement, StealthProofError> {
     let proof_change_statement = change_statement
         .as_ref()
-        .map(|stmt| -> Result<_, ConfidentialProofError> {
+        .map(|stmt| -> Result<_, StealthProofError> {
             let change_commitment = stmt.to_commitment();
             Ok(UnspentOutput {
                 commitment: change_commitment.to_byte_type(),
@@ -90,7 +90,7 @@ pub fn create_output_statement(
                     .resource_view_key
                     .as_ref()
                     .map(|view_key| {
-                        create_viewable_balance_proof(&stmt.mask, stmt.amount, &change_commitment, view_key)
+                        generate_elgamal_viewable_balance_proof(&stmt.mask, stmt.amount, &change_commitment, view_key)
                     })
                     .transpose()?,
             })
@@ -102,7 +102,7 @@ pub fn create_output_statement(
         .as_ref()
         .map(|stmt| {
             let commitment = stmt.to_commitment();
-            Ok::<_, ConfidentialProofError>(UnspentOutput {
+            Ok::<_, StealthProofError>(UnspentOutput {
                 commitment: commitment.to_byte_type(),
                 sender_public_nonce: stmt.sender_public_nonce.to_byte_type(),
                 encrypted_data: stmt.encrypted_data.clone(),
@@ -111,7 +111,12 @@ pub fn create_output_statement(
                     .resource_view_key
                     .as_ref()
                     .map(|view_key| {
-                        create_viewable_balance_proof(&stmt.mask, confidential_output_value, &commitment, view_key)
+                        generate_elgamal_viewable_balance_proof(
+                            &stmt.mask,
+                            confidential_output_value,
+                            &commitment,
+                            view_key,
+                        )
                     })
                     .transpose()?,
             })

@@ -87,7 +87,7 @@ impl WasmModule {
             ));
         }
 
-        let template = env.load_abi(&mut store, &instance)?;
+        let template = env.load_template_def(&mut store, &instance)?;
         let main_fn = format!("{}_main", template.template_name());
 
         WasmProcess::validate_template_tari_version(&template)?;

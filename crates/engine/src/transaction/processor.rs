@@ -72,6 +72,7 @@ use crate::{
         AuthParams,
         AuthorizationScope,
         NativeAction,
+        PayFee,
         Runtime,
         RuntimeError,
         RuntimeInterface,
@@ -373,10 +374,11 @@ where
                 statement,
                 revealed_input_bucket,
             } => Self::stealth_transfer(runtime, resource_address, statement, revealed_input_bucket),
-            Instruction::PayFee {
+            Instruction::PayFeeStealth {
                 statement,
                 revealed_input_bucket,
-            } => Self::pay_fee(runtime, statement, revealed_input_bucket),
+            } => Self::pay_fee_stealth(runtime, statement, revealed_input_bucket),
+            Instruction::PayFeeFromBucket { bucket } => Self::pay_fee_from_bucket(runtime, bucket),
             Instruction::UpdateComponentTemplate {
                 component,
                 migrate,
@@ -476,22 +478,23 @@ where
         Ok(InstructionResult::empty())
     }
 
-    fn pay_fee(
+    fn pay_fee_stealth(
         runtime: &mut Runtime,
         statement: StealthTransferStatement,
         revealed_funds_bucket: Option<WorkspaceOffsetId>,
     ) -> Result<InstructionResult, TransactionErrorKind> {
-        let revealed_funds_bucket = revealed_funds_bucket
-            .map(|id| {
-                runtime.interface().resolve_workspace_id(&id).and_then(|r| {
-                    tari_bor::from_value(&r).map_err(|e| RuntimeError::InvalidArgument {
-                        argument: "revealed_funds_bucket",
-                        reason: format!("Expected workspace id {id} to be a BucketId: {e}"),
-                    })
-                })
-            })
-            .transpose()?;
-        runtime.interface_mut().pay_fee(statement, revealed_funds_bucket)?;
+        runtime.interface_mut().pay_fee(PayFee::FromStealth {
+            statement,
+            input_bucket: revealed_funds_bucket,
+        })?;
+        Ok(InstructionResult::empty())
+    }
+
+    fn pay_fee_from_bucket(
+        runtime: &mut Runtime,
+        bucket: WorkspaceOffsetId,
+    ) -> Result<InstructionResult, TransactionErrorKind> {
+        runtime.interface_mut().pay_fee(PayFee::FromBucket { bucket })?;
         Ok(InstructionResult::empty())
     }
 

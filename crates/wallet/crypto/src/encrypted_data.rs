@@ -18,7 +18,7 @@ use ootle_byte_type::ToByteType;
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
     hashing::DomainSeparatedHasher,
-    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    ristretto::RistrettoSecretKey,
 };
 use tari_engine_types::crypto::get_commitment_factory;
 use tari_hashing::TransactionSecureNonceKdfDomain;
@@ -26,18 +26,15 @@ use tari_template_lib_types::{crypto::PedersenCommitmentBytes, EncryptedData};
 use tari_utilities::{safe_array::SafeArray, ByteArray};
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::{kdfs, kdfs::EncryptedDataKey, memo::Memo, DecryptedData, MaskAndValue, WalletCryptoError};
+use crate::{kdfs::EncryptedDataKey, memo::Memo, DecryptedData, MaskAndValue, WalletCryptoError};
 
 pub fn unblind_output(
     output_commitment: &PedersenCommitmentBytes,
     output_encrypted_value: &EncryptedData,
-    claim_secret: &RistrettoSecretKey,
-    sender_offset_public_key: &RistrettoPublicKey,
+    encryption_key: &RistrettoSecretKey,
     skip_memo: bool,
 ) -> Result<DecryptedData, WalletCryptoError> {
-    let encryption_key = kdfs::encrypted_data_dh_kdf_aead(claim_secret, sender_offset_public_key);
-
-    let decrypted = decrypt_data(&encryption_key, output_commitment, output_encrypted_value, skip_memo)?;
+    let decrypted = decrypt_data(encryption_key, output_commitment, output_encrypted_value, skip_memo)?;
     let commitment = decrypted.to_commitment();
     if output_commitment.as_bytes() == commitment.as_bytes() {
         Ok(decrypted)

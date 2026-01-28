@@ -7,6 +7,7 @@ use super::StealthUnspentOutput;
 use crate::{
     crypto::{BalanceProofSignature, PedersenCommitmentBytes, RangeProofBytes},
     Amount,
+    UtxoAddress,
 };
 
 /// A statement for stealth outputs. A statement must contain confidential outputs
@@ -42,6 +43,29 @@ impl StealthOutputsStatement {
 pub struct StealthInput {
     /// The commitment of the unspent output being spent
     pub commitment: PedersenCommitmentBytes,
+}
+
+impl StealthInput {
+    pub fn new(commitment: PedersenCommitmentBytes) -> Self {
+        Self { commitment }
+    }
+}
+
+impl From<&UtxoAddress> for StealthInput {
+    fn from(address: &UtxoAddress) -> Self {
+        address.id().into_commitment_bytes().into()
+    }
+}
+
+impl From<PedersenCommitmentBytes> for StealthInput {
+    fn from(commitment: PedersenCommitmentBytes) -> Self {
+        Self { commitment }
+    }
+}
+impl From<&PedersenCommitmentBytes> for StealthInput {
+    fn from(commitment: &PedersenCommitmentBytes) -> Self {
+        (*commitment).into()
+    }
 }
 
 /// A statement for stealth outputs. A statement must contain confidential outputs
@@ -100,5 +124,13 @@ impl StealthTransferStatement {
 
     pub fn revealed_output_amount(&self) -> Amount {
         self.outputs_statement.revealed_output_amount
+    }
+
+    pub fn stealth_outputs(&self) -> &[StealthUnspentOutput] {
+        &self.outputs_statement.outputs
+    }
+
+    pub fn stealth_inputs(&self) -> &[StealthInput] {
+        &self.inputs_statement.inputs
     }
 }

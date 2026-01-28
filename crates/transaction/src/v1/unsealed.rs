@@ -46,7 +46,7 @@ impl UnsealedTransactionV1 {
             self.transaction.is_seal_signer_authorized = true;
         }
 
-        let sig = TransactionSealSignature::sign(secret, &self);
+        let sig = TransactionSealSignature::sign_v1(secret, &self);
         self.set_seal_signature(sig)
     }
 
@@ -140,7 +140,7 @@ impl Signable for UnsealedTransactionV1 {
     type Signature = TransactionSealSignature;
 
     fn to_signing_message(&self, _context: ()) -> Self::MessageOutput {
-        TransactionSealSignature::create_message(self)
+        TransactionSealSignature::create_message_v1(self)
     }
 }
 
@@ -149,7 +149,7 @@ impl Signable<&RistrettoPublicKeyBytes> for UnsealedTransactionV1 {
     type Signature = TransactionSignature;
 
     fn to_signing_message(&self, context: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
-        TransactionSignature::create_message_v1(1, context, &self.transaction)
+        TransactionSignature::create_message_v1(context, &self.transaction)
     }
 }
 

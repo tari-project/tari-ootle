@@ -14,6 +14,6 @@ pub enum WantInput {
         resource_address: ResourceAddress,
         required: bool,
     },
-    /// Adds a substate as an input if it exists. If it does not exist, it is simply ignored.
-    SubstateIfExists { substate_id: SubstateId },
+    /// Adds a substate as an input. If required is false, the resolver only add the input if it was found.
+    SpecificSubstate { substate_id: SubstateId, required: bool },
 }

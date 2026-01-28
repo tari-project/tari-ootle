@@ -43,6 +43,12 @@ pub struct StealthUnspentOutput {
     pub tag: UtxoTag,
 }
 
+impl StealthUnspentOutput {
+    pub fn commitment(&self) -> &PedersenCommitmentBytes {
+        &self.output.commitment
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]

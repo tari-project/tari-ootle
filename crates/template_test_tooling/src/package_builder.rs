@@ -15,7 +15,6 @@ use tari_engine::{
 };
 use tari_engine_types::hashing::hash_template_code;
 use tari_ootle_common_types::services::template_provider::TemplateProvider;
-use tari_template_builtin::get_template_builtin;
 use tari_template_lib::types::TemplateAddress;
 use thiserror::Error;
 
@@ -100,14 +99,14 @@ impl PackageBuilder {
         self
     }
 
-    pub fn add_builtin_template(&mut self, address: TemplateAddress) -> &mut Self {
-        let wasm = get_template_builtin(&address);
-        self.add_template_from_code(address, wasm)
-    }
-
-    pub fn add_template_from_code(&mut self, address: TemplateAddress, wasm: impl Into<Box<[u8]>>) -> &mut Self {
-        let template = WasmModule::from_code(wasm).load_template().unwrap();
-        self.add_loaded_template(address, template)
+    pub fn add_template_from_code(
+        &mut self,
+        address: TemplateAddress,
+        wasm: impl Into<Box<[u8]>>,
+    ) -> Result<&mut Self, TemplateLoaderError> {
+        let template = WasmModule::from_code(wasm).load_template()?;
+        self.add_loaded_template(address, template);
+        Ok(self)
     }
 
     pub fn build(&mut self) -> Package {

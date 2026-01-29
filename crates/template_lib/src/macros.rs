@@ -12,7 +12,7 @@ macro_rules! debug {
         $crate::macros::call_debug($fmt)
     };
     ($fmt:expr, $($args:tt)*) => {
-        $crate::macros::call_debug($crate::template_dependencies::rust::format!($fmt, $($args)*))
+        $crate::macros::call_debug($crate::template_macro_deps::rust::format!($fmt, $($args)*))
     };
 }
 
@@ -20,10 +20,10 @@ macro_rules! debug {
 #[macro_export]
 macro_rules! log {
     ($lvl:expr, $fmt:expr) => {
-        $crate::engine().emit_log($lvl, $crate::template_dependencies::rust::format!($fmt))
+        $crate::engine().emit_log($lvl, $crate::template_macro_deps::rust::format!($fmt))
     };
     ($lvl:expr, $fmt:expr, $($args:tt)*) => {
-        $crate::engine().emit_log($lvl, $crate::template_dependencies::rust::format!($fmt, $($args)*))
+        $crate::engine().emit_log($lvl, $crate::template_macro_deps::rust::format!($fmt, $($args)*))
     };
 }
 

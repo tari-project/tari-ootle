@@ -31,10 +31,10 @@ mod abi;
 pub use abi::*;
 
 mod call_info;
-pub use call_info::CallInfo;
+pub use call_info::*;
 
 mod ops;
-pub use ops::EngineOp;
+pub use ops::*;
 
 pub mod rust;
 

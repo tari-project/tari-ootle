@@ -32,7 +32,7 @@ pub trait Invokable<S> {
         &mut self,
         store: &mut S,
         def: &FunctionDef,
-        args: Vec<tari_bor::Value>,
+        args: &[tari_bor::Value],
     ) -> Result<InstructionResult, Self::Error>;
 }
 

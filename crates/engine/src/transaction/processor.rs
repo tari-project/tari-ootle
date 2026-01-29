@@ -23,7 +23,6 @@
 use std::{sync::Arc, time::Instant};
 
 use log::*;
-use tari_bor::to_value;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult},
     component::{derive_component_address_from_public_key, ComponentHeader},
@@ -412,17 +411,7 @@ where
             .interface_mut()
             .lock_component(component_address, LockFlag::Write)?;
 
-        let resolved_args = migrate
-            .as_ref()
-            .map(|f| runtime.interface().resolve_args(None, &f.args))
-            .transpose()?
-            .unwrap_or_default();
-        let arg_scope = resolved_args
-            .iter()
-            .map(IndexedWellKnownTypes::from_value)
-            .collect::<Result<_, _>>()?;
-
-        let function_def = migrate
+        let migration_function = migrate
             .as_ref()
             .map(|f| {
                 template
@@ -444,17 +433,49 @@ where
 
         let component_scope = IndexedWellKnownTypes::from_value(component.state())?;
 
-        runtime
-            .interface_mut()
-            .push_call_frame(PushCallFrame::MigrationContext {
+        let (call_frame, final_args) = if migration_function.is_some() {
+            let resolved_args = migrate
+                .as_ref()
+                .map(|f| {
+                    let component_arg = InstructionArg::from_type(&component_address).map_err(|e| {
+                        // This should never happen
+                        RuntimeError::InvariantError {
+                            function: "update_component_template",
+                            details: format!("Failed to create component arg: {}", e),
+                        }
+                    })?;
+                    runtime.interface().resolve_args(Some(component_arg), &f.args)
+                })
+                .transpose()?
+                .unwrap_or_default();
+
+            let arg_scope = resolved_args
+                .iter()
+                .map(IndexedWellKnownTypes::from_value)
+                .collect::<Result<_, _>>()?;
+
+            let frame = PushCallFrame::MigrationContext {
                 template_address: new_template,
                 module_name: template.template_name().to_string(),
                 component_scope,
                 component_lock,
                 arg_scope: Box::new(arg_scope),
                 entity_id: component.entity_id,
-            })?;
+            };
+            (frame, resolved_args)
+        } else {
+            let frame = PushCallFrame::MigrationContext {
+                template_address: new_template,
+                module_name: template.template_name().to_string(),
+                component_scope,
+                component_lock,
+                arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                entity_id: component.entity_id,
+            };
+            (frame, vec![])
+        };
 
+        runtime.interface_mut().push_call_frame(call_frame)?;
         // This must come after the call frame as that defines the authorization scope
         runtime
             .interface_mut()
@@ -462,14 +483,9 @@ where
 
         runtime.interface_mut().update_component_template(new_template)?;
 
-        if let Some(function_def) = function_def {
+        if let Some(function_def) = migration_function {
             // Migrate function is defined, so we need to call it
-            let mut final_args = Vec::with_capacity(resolved_args.len() + 1);
-            final_args.push(to_value(&component_address)?);
-            final_args.extend(resolved_args);
-
-            let result = Self::invoke_template(template, runtime.clone(), function_def, final_args)?;
-
+            let result = Self::invoke_template(template, runtime.clone(), &function_def, &final_args)?;
             runtime.interface_mut().validate_return_value(&result.indexed)?;
         }
 
@@ -694,7 +710,7 @@ where
                     entity_id: account_address.entity_id(),
                 })?;
 
-                let result = Self::invoke_template(template, runtime.clone(), function_def, resolved_args)?;
+                let result = Self::invoke_template(template, runtime.clone(), &function_def, &resolved_args)?;
 
                 runtime.interface_mut().validate_return_value(&result.indexed)?;
                 runtime.interface_mut().pop_call_frame()?;
@@ -751,7 +767,7 @@ where
 
         runtime.interface_mut().push_call_frame(frame)?;
 
-        let result = Self::invoke_template(template, runtime.clone(), function_def, resolved_args)?;
+        let result = Self::invoke_template(template, runtime.clone(), &function_def, &resolved_args)?;
 
         runtime.interface_mut().validate_return_value(&result.indexed)?;
         runtime.interface_mut().pop_call_frame()?;
@@ -837,7 +853,7 @@ where
         // This must come after the call frame as that defines the authorization scope
         runtime.interface_mut().check_component_access_rules(method)?;
 
-        let result = Self::invoke_template(template, runtime.clone(), function_def, resolved_args)?;
+        let result = Self::invoke_template(template, runtime.clone(), &function_def, &resolved_args)?;
 
         runtime.interface_mut().validate_return_value(&result.indexed)?;
         runtime.interface_mut().pop_call_frame()?;
@@ -847,14 +863,14 @@ where
     fn invoke_template(
         module: LoadedTemplate,
         runtime: Runtime,
-        function_def: FunctionDef,
-        args: Vec<tari_bor::Value>,
+        function_def: &FunctionDef,
+        args: &[tari_bor::Value],
     ) -> Result<InstructionResult, TransactionErrorKind> {
         let result = match module {
             LoadedTemplate::Wasm(loaded) => {
                 let mut store = loaded.create_store();
                 let mut process = WasmProcess::init(&mut store, loaded, runtime)?;
-                process.invoke(&mut store, &function_def, args)?
+                process.invoke(&mut store, function_def, args)?
             },
         };
         Ok(result)

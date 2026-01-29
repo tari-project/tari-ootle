@@ -24,7 +24,7 @@ use log::*;
 use serde::{de::DeserializeOwned, Serialize};
 use tari_bor::{decode_exact, encode_into_writer, encode_with_len_to_writer, encoded_len, encoded_len_with_limit};
 use tari_engine_types::{indexed_value::IndexedValue, instruction_result::InstructionResult, limits};
-use tari_template_abi::{version, CallInfo, EngineOp, FunctionDef, TemplateDef};
+use tari_template_abi::{version, CallInfoRef, EngineOp, FunctionDef, TemplateDef};
 use tari_template_lib::{
     args::{
         AddressAllocationInvokeArg,
@@ -312,10 +312,10 @@ impl Invokable<Store> for WasmProcess {
         &mut self,
         store: &mut Store,
         func_def: &FunctionDef,
-        args: Vec<tari_bor::Value>,
+        args: &[tari_bor::Value],
     ) -> Result<InstructionResult, Self::Error> {
-        let call_info = CallInfo {
-            func_name: func_def.name.clone(),
+        let call_info = CallInfoRef {
+            func_name: &func_def.name,
             args,
         };
 

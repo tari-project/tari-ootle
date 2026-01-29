@@ -35,6 +35,13 @@ impl NamedArg {
     pub fn workspace<T: Into<BuilderWorkspaceKey>>(key: T) -> Self {
         Self::Workspace(key.into())
     }
+
+    pub fn as_literal(&self) -> Option<&[u8]> {
+        match self {
+            NamedArg::Literal(data) => Some(data),
+            _ => None,
+        }
+    }
 }
 
 /// Low-level macro used for counting characters in the encoding of arguments. Not intended for general usage

@@ -35,7 +35,7 @@ pub fn generate_dispatcher(ast: &TemplateAst) -> Result<TokenStream> {
     let output = quote! {
         #[no_mangle]
         pub unsafe extern "C" fn #dispatcher_function_name(call_info: *mut u8, call_info_len: u32) -> *mut u8 {
-            use ::tari_template_lib::template_dependencies::*;
+            use ::tari_template_lib::template_macro_deps::*;
             // include all use statements from the template module here as these may be used in the function arguments.
             #(
                 #[allow(unused_imports)]
@@ -225,8 +225,8 @@ fn replace_self_in_single_value(type_path: &TypePath) -> Option<Stmt> {
         return Some(parse_quote! {
             let rtn = engine().create_component(
                 rtn,
-                ::tari_template_lib::auth::OwnerRule::default(),
-                ::tari_template_lib::auth::ComponentAccessRules::new(),
+                ::tari_template_lib::template_macro_deps::OwnerRule::default(),
+                ::tari_template_lib::template_macro_deps::ComponentAccessRules::new(),
                 None,
             );
         });

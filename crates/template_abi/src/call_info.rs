@@ -29,3 +29,9 @@ pub struct CallInfo {
     pub func_name: String,
     pub args: Vec<tari_bor::Value>,
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CallInfoRef<'a> {
+    pub func_name: &'a str,
+    pub args: &'a [tari_bor::Value],
+}

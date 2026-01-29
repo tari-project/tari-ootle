@@ -66,7 +66,7 @@ pub use tari_template_lib_types as types;
 
 // ---------------------------------------- WASM target exports ------------------------------------------------
 
-pub mod template_dependencies;
+pub mod template_macro_deps;
 
 mod engine;
 pub use engine::engine;

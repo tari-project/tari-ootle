@@ -56,7 +56,7 @@ async fn main() {
         .await
         .unwrap();
 
-    // Get the network (must be the same as the network specified in the builder).
+    // Get the network from the indexer (must be the same as the network specified in the builder).
     let network = provider.get_network().await.unwrap();
     println!("Provider network ID: {network}");
     assert_eq!(network, provider.network());
@@ -107,7 +107,7 @@ async fn main() {
     print_fancy_results("Faucet transfer", &pending_tx).await;
 
     // Then we'll send it to some other address (Feel free to change this to any valid address).
-    let recipient= address!("otl_loc_1z6v600jxl76u3kkmeq3gxehp55rsw6lwf9tpl6rkanzw7htjnf2epn4yqawq2esglu60kdjgesz7398zauhhua7akagc03e2vxpvcnsyevgrw");
+    let recipient= address!("otl_loc_10mc0v2lyy43kldl0ft4c2x5pe7j0ckduv8zej6jgr2z2g9m07fz7gl96ar5wwgu0qu0atmr5tl53ye7n38xr5u7ytlmudq0ruxcau0gge7rxk");
 
     // This builder creates a stealth transfer statement (spend proof). This is added to the transaction later.
     let (transfer, required_signers) = StealthTransfer::new(xtr_token, &provider)

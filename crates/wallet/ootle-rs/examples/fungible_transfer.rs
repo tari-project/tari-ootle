@@ -78,7 +78,7 @@ async fn main() {
     print_fancy_results(&pending_tx).await;
 
     // Then we'll send it to some other addresses.
-    let recipient1 = address!("otl_loc_1z6v600jxl76u3kkmeq3gxehp55rsw6lwf9tpl6rkanzw7htjnf2epn4yqawq2esglu60kdjgesz7398zauhhua7akagc03e2vxpvcnsyevgrw");
+    let recipient1 = address!("otl_loc_10mc0v2lyy43kldl0ft4c2x5pe7j0ckduv8zej6jgr2z2g9m07fz7gl96ar5wwgu0qu0atmr5tl53ye7n38xr5u7ytlmudq0ruxcau0gge7rxk");
     let recipient2 = address!("otl_loc_1y2s6442wau8v72pdrr5h4kntrqppqndqug33dmqv7eqkvx5c7ue2gzrw6v56kzkhnr7l025ye3jt3gmzmunmxy6vpm573fdduw37vcc848dcz");
     // Send some XTR to another address. You can replace XTR with any other fungible token resource address.
     let xtr_token = XTR; // resource_address!("resource_deadbeaf");

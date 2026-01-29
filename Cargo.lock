@@ -11767,6 +11767,7 @@ dependencies = [
  "serde",
  "tari_bor",
  "ts-rs",
+ "xxhash-rust",
 ]
 
 [[package]]

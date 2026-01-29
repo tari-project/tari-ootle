@@ -44,5 +44,8 @@ pub use types::*;
 
 pub mod version;
 
+#[cfg(feature = "func-hasher")]
+pub mod func_hasher;
+
 /// The name of the global export that defines the template definition
 pub const ABI_TEMPLATE_DEF_GLOBAL_NAME: &str = "_ABI_TEMPLATE_DEF";

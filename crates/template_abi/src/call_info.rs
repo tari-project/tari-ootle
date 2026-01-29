@@ -22,16 +22,22 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::rust::{string::String, vec::Vec};
+use crate::rust::boxed::Box;
+
+pub type FunctionIdent = u32;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CallInfo {
-    pub func_name: String,
-    pub args: Vec<tari_bor::Value>,
+    #[serde(rename = "f")]
+    pub func: FunctionIdent,
+    #[serde(rename = "a")]
+    pub args: Box<[tari_bor::Value]>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CallInfoRef<'a> {
-    pub func_name: &'a str,
+    #[serde(rename = "f")]
+    pub func: FunctionIdent,
+    #[serde(rename = "a")]
     pub args: &'a [tari_bor::Value],
 }

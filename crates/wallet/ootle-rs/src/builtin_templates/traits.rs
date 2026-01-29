@@ -4,13 +4,11 @@
 use std::future::Future;
 
 use tari_ootle_common_types::SubstateRequirement;
-use tari_ootle_transaction::{TransactionBuilder, UnsignedTransaction};
+use tari_ootle_transaction::UnsignedTransaction;
 
 use crate::{provider::ProviderError, Address};
 
-pub trait InvokeBuilder {
-    fn builder(&self) -> &TransactionBuilder;
-
+pub trait UnsignedTransactionBuilder {
     fn default_signer_address(&self) -> &Address;
 
     fn add_input<S: Into<SubstateRequirement>>(self, substate_id: S) -> Self;

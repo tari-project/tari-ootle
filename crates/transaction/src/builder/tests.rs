@@ -28,7 +28,7 @@ fn it_converts_workspace_names_to_ids() {
         .call_method(CallFromWorkspace::new("thing3"), "do_something_else", args![Workspace(
             "thing1"
         )])
-        .build_unsigned_transaction();
+        .build_unsigned();
 
     assert_eq!(
         transaction.instructions()[0],

@@ -34,3 +34,4 @@ wasmer-middlewares = { workspace = true }
 tari_template_test_tooling = { workspace = true }
 tari_transaction_manifest = { workspace = true }
 tari_ootle_transaction = { workspace = true }
+tari_template_builtin = { workspace = true, features = ["templates"] }

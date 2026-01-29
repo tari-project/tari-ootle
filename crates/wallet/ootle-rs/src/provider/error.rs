@@ -20,5 +20,19 @@ pub enum ProviderError {
         error: TransactionInputResolverError,
     },
     #[error(transparent)]
-    WalletError(#[from] WalletError),
+    WalletError(WalletError),
+    #[error("Unknown provider error: {0}")]
+    Other(String),
+}
+
+impl<E: Into<WalletError>> From<E> for ProviderError {
+    fn from(err: E) -> Self {
+        ProviderError::WalletError(err.into())
+    }
+}
+
+impl ProviderError {
+    pub fn other<S: Into<String>>(msg: S) -> Self {
+        ProviderError::Other(msg.into())
+    }
 }

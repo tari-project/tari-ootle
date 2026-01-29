@@ -108,24 +108,33 @@ impl TransactionInputResolver {
                 resource_address,
                 *required,
             ),
-            WantInput::SubstateIfExists { substate_id } => {
-                self.resolve_substate_if_exists(tx_mut, substates_to_cache, substate_id)
+            WantInput::SpecificSubstate { substate_id, required } => {
+                self.resolve_specific_substate(tx_mut, substates_to_cache, substate_id, *required)
             },
         }
     }
 
-    fn resolve_substate_if_exists(
+    fn resolve_specific_substate(
         &mut self,
         tx_mut: &mut UnsignedTransaction,
         substates_to_cache: &mut Vec<SubstateId>,
         substate_id: &SubstateId,
+        required: bool,
     ) -> Result<bool, TransactionInputResolverError> {
+        // The specific substate is required, so we add it without checking that it actually exists.
+        // We _could_ first check that it exists and if not error out here, but validators will reject the transaction
+        // in this case anyway, so this saves queries to the indexer (and VNs) in that case. This may be an
+        // incorrect trade-off.
+        if required {
+            tx_mut.add_input(SubstateRequirement::unversioned(substate_id.clone()));
+            return Ok(true);
+        }
+
         match self.cache.get(substate_id) {
             Some(Some(_)) => {
                 tx_mut.add_input(SubstateRequirement::unversioned(substate_id.clone()));
                 Ok(true)
             },
-            // This InputWant is optional by definition.
             Some(None) => Ok(true),
             None => {
                 debug!(

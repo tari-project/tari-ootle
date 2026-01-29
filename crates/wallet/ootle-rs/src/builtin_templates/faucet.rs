@@ -5,11 +5,15 @@ use std::collections::HashSet;
 
 use tari_ootle_common_types::SubstateRequirement;
 use tari_ootle_transaction::{args, TransactionBuilder, UnsignedTransaction};
-use tari_ootle_wallet_sdk::constants::{ONE_XTR, XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS};
-use tari_template_lib_types::Amount;
+use tari_template_lib_types::{
+    constants::{ONE_XTR, XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
+    stealth::StealthTransferStatement,
+    Amount,
+    UtxoAddress,
+};
 
 use crate::{
-    builtin_templates::InvokeBuilder,
+    builtin_templates::UnsignedTransactionBuilder,
     provider::{Provider, ProviderError, WantInput},
     Address,
     ToAccountAddress,
@@ -24,11 +28,7 @@ pub struct FaucetInvokeBuilder<'a, P> {
     account_workspace_name: Option<String>,
 }
 
-impl<'a, P: Provider> InvokeBuilder for FaucetInvokeBuilder<'a, P> {
-    fn builder(&self) -> &TransactionBuilder {
-        &self.builder
-    }
-
+impl<'a, P: Provider> UnsignedTransactionBuilder for FaucetInvokeBuilder<'a, P> {
     fn default_signer_address(&self) -> &Address {
         self.provider.default_signer_address()
     }
@@ -45,7 +45,7 @@ impl<'a, P: Provider> InvokeBuilder for FaucetInvokeBuilder<'a, P> {
             want_list,
             ..
         } = self;
-        let unsigned_tx = builder.build_unsigned_transaction();
+        let unsigned_tx = builder.build_unsigned();
         let unsigned_tx = provider.resolve_input_want_list(unsigned_tx, &want_list).await?;
         Ok(unsigned_tx)
     }
@@ -67,6 +67,11 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
             self.builder = self.builder.pay_fee_from_component(name, amount);
         } else {
             let component_addr = self.default_signer_address().to_account_address();
+            self.want_list.insert(WantInput::VaultForResource {
+                component_address: component_addr,
+                resource_address: XTR,
+                required: true,
+            });
             self.builder = self.builder.pay_fee_from_component(component_addr, amount);
         }
         self
@@ -81,6 +86,59 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
         // NOTE: that the actual maximum is currently 10_000, but we set it to 1_000 here to be conservative.
         const FAUCET_MAX_TAKE_AMOUNT: u64 = 1_000 * ONE_XTR;
         self.take_faucet_funds(FAUCET_MAX_TAKE_AMOUNT)
+    }
+
+    pub fn take_faucet_funds_stealth(
+        mut self,
+        transfer: StealthTransferStatement,
+        pay_revealed_amount_as_fees: bool,
+    ) -> Self {
+        let amount = transfer.inputs_statement.revealed_amount;
+        if !amount.is_positive() {
+            panic!("Transfer amount must be positive");
+        }
+
+        let has_revealed_output = transfer.outputs_statement.revealed_output_amount.is_positive();
+        let workspace_names = has_revealed_output.then(|| {
+            (
+                (!pay_revealed_amount_as_fees).then(|| self.next_workspace_name()),
+                self.next_workspace_name(),
+            )
+        });
+        let recipient_account_pk = *self.default_signer_address().account_public_key();
+
+        // Request all UTXO inputs
+        for input in &transfer.inputs_statement.inputs {
+            self.want_list.insert(WantInput::SpecificSubstate {
+                substate_id: UtxoAddress::new(XTR, input.commitment.into()).into(),
+                required: true,
+            });
+        }
+
+        self.builder = self.builder.with_fee_instructions_builder(|builder| {
+            builder
+                .add_input(XTR_FAUCET_VAULT_ADDRESS)
+                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take_confidential", args![transfer])
+                .then(|builder| {
+                    if let Some((account_ws_name, bucket_name)) = &workspace_names {
+                        if let Some(account_ws_name) = account_ws_name {
+                            builder
+                                .put_last_instruction_output_on_workspace(bucket_name)
+                                // Create the recipient account if it doesn't exist
+                                .create_account_with_bucket(recipient_account_pk, bucket_name)
+                                .put_last_instruction_output_on_workspace(account_ws_name)
+                        } else {
+                            builder
+                                .put_last_instruction_output_on_workspace(bucket_name)
+                                .pay_fee_from_bucket(bucket_name)
+                        }
+                    } else {
+                        builder
+                    }
+                })
+        });
+        self.account_workspace_name = workspace_names.and_then(|(account_ws_name, _)| account_ws_name);
+        self
     }
 
     /// Takes the specified amount of funds from the faucet and deposits them into the default signer's account.
@@ -98,8 +156,9 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
             //     If it doesn't exist, deposit will create it
             required: false,
         });
-        self.want_list.insert(WantInput::SubstateIfExists {
+        self.want_list.insert(WantInput::SpecificSubstate {
             substate_id: recipient_account_addr.into(),
+            required: false,
         });
 
         let account_name = self.next_workspace_name();

@@ -12,12 +12,7 @@ use tari_ootle_common_types::{
     services::template_provider::{TemplateMetadataProvider, TemplateProvider, TemplateProviderMetadata},
     Epoch,
 };
-use tari_template_builtin::{
-    get_template_builtin,
-    ACCOUNT_TEMPLATE_ADDRESS,
-    NFT_FAUCET_TEMPLATE_ADDRESS,
-    XTR_FAUCET_TEMPLATE_ADDRESS,
-};
+use tari_template_builtin::all_builtin_templates;
 use tari_template_lib::prelude::TemplateAddress;
 
 use crate::cmap_semaphore;
@@ -57,11 +52,11 @@ impl<TStore: TemplateProvider<Template = PublishedTemplate>> StateStoreTemplateP
         let cache = mini_moka::sync::Cache::builder()
             .weigher(|_, t: &LoadedTemplate| u32::try_from(t.code_size()).unwrap_or(u32::MAX))
             .max_capacity(config.max_cache_size_bytes())
-            .initial_capacity(3)
+            .initial_capacity(all_builtin_templates().len())
             .build();
 
         // Precache builtins
-        for (addr, code) in Self::get_builtin_templates() {
+        for (addr, code) in all_builtin_templates() {
             cache.insert(
                 *addr,
                 WasmModule::load_template_from_code(code).expect("Built-in template failed to load"),
@@ -73,24 +68,6 @@ impl<TStore: TemplateProvider<Template = PublishedTemplate>> StateStoreTemplateP
             cache,
             cmap_semaphore: cmap_semaphore::ConcurrentMapSemaphore::new(CONCURRENT_ACCESS_LIMIT),
         }
-    }
-
-    fn get_builtin_templates() -> impl Iterator<Item = (&'static TemplateAddress, &'static [u8])> {
-        [
-            (
-                &ACCOUNT_TEMPLATE_ADDRESS,
-                get_template_builtin(&ACCOUNT_TEMPLATE_ADDRESS),
-            ),
-            (
-                &NFT_FAUCET_TEMPLATE_ADDRESS,
-                get_template_builtin(&NFT_FAUCET_TEMPLATE_ADDRESS),
-            ),
-            (
-                &XTR_FAUCET_TEMPLATE_ADDRESS,
-                get_template_builtin(&XTR_FAUCET_TEMPLATE_ADDRESS),
-            ),
-        ]
-        .into_iter()
     }
 }
 

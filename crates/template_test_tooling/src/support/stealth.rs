@@ -10,13 +10,7 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
 use tari_engine_types::crypto::{commit_amount, messages};
-use tari_ootle_wallet_crypto::{
-    stealth,
-    MaskAndValue,
-    OutputWitness,
-    SecretStealthOutputStatement,
-    StealthInputWitness,
-};
+use tari_ootle_wallet_crypto::{stealth, MaskAndValue, OutputWitness, StealthInputWitness, StealthOutputWitness};
 use tari_template_lib::{
     prelude::StealthTransferStatement,
     types::{
@@ -93,7 +87,7 @@ fn generate_stealth_statement_internal(
     let output_statements = output_amounts
         .iter()
         .zip(&masks)
-        .map(|(amount, mask)| SecretStealthOutputStatement {
+        .map(|(amount, mask)| StealthOutputWitness {
             witness: OutputWitness {
                 amount: *amount,
                 mask: mask.clone(),
@@ -209,7 +203,7 @@ where
                 SpendConditionSpec::Specified(cond) => cond.clone(),
             };
 
-            SecretStealthOutputStatement {
+            StealthOutputWitness {
                 witness: statement,
                 spend_condition,
                 tag: UtxoTag::new(0),
@@ -219,10 +213,7 @@ where
 
     let inputs = inputs.into_iter().map(Into::into).map(|input| {
         let mask_and_value = input.mask_and_value().clone();
-        StealthInputWitness {
-            mask_and_value,
-            public_nonce: test_sender_public_nonce(),
-        }
+        StealthInputWitness { mask_and_value }
     });
 
     let transfer = stealth::create_transfer_statement(

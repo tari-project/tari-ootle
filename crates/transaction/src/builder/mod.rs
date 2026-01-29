@@ -42,6 +42,7 @@ use crate::{
         workspace_ids::WorkspaceIds,
     },
     call_args,
+    unsealed::UnsealedTransaction,
     unsigned_transaction::UnsignedTransaction,
     AllocatableAddressType,
     ComponentReference,
@@ -52,7 +53,6 @@ use crate::{
     Signable,
     Transaction,
     TransactionSignature,
-    UnsealedTransactionV1,
 };
 
 #[derive(Debug, Clone)]
@@ -145,6 +145,12 @@ impl TransactionBuilder<MainIntent> {
         })
     }
 
+    /// Pays fees using the specified bucket in the workspace.
+    /// NOTE: fees paid are not refunded, any overpayment is kept as fees by validators.
+    pub fn pay_fee_from_bucket<B: Into<String>>(self, bucket: B) -> Self {
+        self.with_fee_instructions_builder(|builder| builder.pay_fee_from_bucket(bucket))
+    }
+
     pub fn with_fee_instructions<I>(self, instructions: I) -> Self
     where
         I: IntoIterator<Item = Instruction>,
@@ -219,14 +225,14 @@ impl TransactionBuilder<MainIntent> {
         self,
         sealed_signer: &RistrettoPublicKeyBytes,
         secret_key: &RistrettoSecretKey,
-    ) -> UnsealedTransactionV1 {
-        let unsigned = self.build_unsigned_transaction();
+    ) -> UnsealedTransaction {
+        let unsigned = self.build_unsigned();
         let signature = TransactionSignature::sign(secret_key, sealed_signer, &unsigned);
-        unsigned.add_signature(signature)
+        unsigned.add_single_signature(signature)
     }
 
-    pub fn with_signatures(self, signatures: Vec<TransactionSignature>) -> UnsealedTransactionV1 {
-        self.build_unsigned_transaction().with_signatures(signatures)
+    pub fn with_signatures(self, signatures: Vec<TransactionSignature>) -> UnsealedTransaction {
+        self.build_unsigned().with_signatures(signatures)
     }
 
     /// Moves the fee instructions from the fee builder into the unsigned transaction.
@@ -243,7 +249,7 @@ impl TransactionBuilder<MainIntent> {
             .extend(fee_builder.unsigned_transaction.into_instructions());
     }
 
-    pub fn finish(mut self) -> UnsealedTransactionV1 {
+    pub fn finish(mut self) -> UnsealedTransaction {
         self.apply_fee_instructions();
         self.unsigned_transaction.finish()
     }
@@ -267,7 +273,7 @@ impl TransactionBuilder<MainIntent> {
         self
     }
 
-    pub fn build_unsigned_transaction(mut self) -> UnsignedTransaction {
+    pub fn build_unsigned(mut self) -> UnsignedTransaction {
         self.apply_fee_instructions();
         self.unsigned_transaction
     }
@@ -277,7 +283,7 @@ impl TransactionBuilder<FeeIntent> {
     /// Pays fees using a stealth transfer statement. The statement must reveal sufficient funds to cover the fee.
     /// NOTE: fees paid are not refunded, so any overpayment is kept by validators.
     pub fn pay_fee_stealth(self, statement: StealthTransferStatement) -> Self {
-        self.add_instruction(Instruction::PayFee {
+        self.add_instruction(Instruction::PayFeeStealth {
             statement,
             revealed_input_bucket: None,
         })
@@ -316,9 +322,19 @@ impl TransactionBuilder<FeeIntent> {
         input_bucket: Option<B>,
     ) -> Self {
         let revealed_input_bucket = input_bucket.map(|bucket| self.get_workspace_offset_id_from_named_arg(bucket));
-        self.add_instruction(Instruction::PayFee {
+        self.add_instruction(Instruction::PayFeeStealth {
             statement,
             revealed_input_bucket,
+        })
+    }
+
+    /// Pays fees using the specified bucket in the workspace.
+    /// NOTE: fees paid are not refunded, any overpayment is kept as fees by validators.
+    pub fn pay_fee_from_bucket<B: Into<String>>(self, bucket: B) -> Self {
+        let bucket_workspace_id = self.get_workspace_offset_id_from_named_arg(bucket);
+        // TODO: we _could_ support specifying a refund vault
+        self.add_instruction(Instruction::PayFeeFromBucket {
+            bucket: bucket_workspace_id,
         })
     }
 }
@@ -435,24 +451,20 @@ impl<D> TransactionBuilder<D> {
     }
 
     fn add_input_for_component_ref(&mut self, component_ref: &ComponentReference) {
-        if self.fill_inputs {
-            if let Some(address) = component_ref.address() {
-                self.unsigned_transaction.inputs_mut().insert((*address).into());
-            }
+        if let Some(address) = component_ref.address() {
+            self.unsigned_transaction.inputs_mut().insert((*address).into());
         }
     }
 
     fn add_input_for_resource_ref(&mut self, resource_ref: &ResourceAddressRef) {
-        if self.fill_inputs {
-            if let ResourceAddressRef::Address(address) = resource_ref {
-                self.add_resource_input(*address);
-            }
+        if let ResourceAddressRef::Address(address) = resource_ref {
+            self.add_resource_input(*address);
         }
     }
 
     fn add_resource_input(&mut self, resource: ResourceAddress) -> &mut Self {
         // XTR is implicit
-        if self.fill_inputs && resource != XTR {
+        if resource != XTR {
             self.unsigned_transaction.inputs_mut().insert(resource.into());
         }
         self
@@ -472,13 +484,12 @@ impl<D> TransactionBuilder<D> {
     }
 
     pub fn stealth_transfer_with_opt_bucket<B: Into<String>, R: Into<NamedResourceRef>>(
-        mut self,
+        self,
         resource: R,
         statement: StealthTransferStatement,
         bucket: Option<B>,
     ) -> Self {
         let resource_address = self.resolve_resource_ref(resource.into());
-        self.add_input_for_resource_ref(&resource_address);
         let revealed_input_bucket = bucket.map(|s| self.get_workspace_offset_id_from_named_arg(s));
         self.add_instruction(Instruction::StealthTransfer {
             resource_address_ref: resource_address,
@@ -496,11 +507,11 @@ impl<D> TransactionBuilder<D> {
         self.add_instruction(Instruction::PutLastInstructionOutputOnWorkspace { key })
     }
 
-    pub fn take_from_bucket<T: Into<BuilderWorkspaceKey>, A: Into<Amount>>(
+    pub fn take_from_bucket<I: Into<BuilderWorkspaceKey>, A: Into<Amount>, O: Into<BuilderWorkspaceKey>>(
         mut self,
-        label: T,
+        label: I,
         amount: A,
-        output_label: T,
+        output_label: O,
     ) -> Self {
         let key = self.get_workspace_offset_id_from_named_arg(label.into());
         let output_key = self.workspace_ids.insert(output_label.into());
@@ -512,13 +523,12 @@ impl<D> TransactionBuilder<D> {
     }
 
     pub fn assert_bucket_contains<T: AsRef<str>, A: Into<Amount>>(
-        mut self,
+        self,
         label: T,
         resource_address: ResourceAddress,
         min_amount: A,
     ) -> Self {
         let key = self.get_workspace_offset_id_from_named_arg(label.as_ref());
-        self.add_resource_input(resource_address);
 
         self.add_instruction(Instruction::AssertBucketContains {
             key,
@@ -544,10 +554,8 @@ impl<D> TransactionBuilder<D> {
             .add_instruction(Instruction::ClaimValidatorFees { address })
     }
 
-    pub fn create_proof<A: Into<ComponentReference>>(mut self, account: A, resource_addr: ResourceAddress) -> Self {
+    pub fn create_proof<A: Into<ComponentReference>>(self, account: A, resource_addr: ResourceAddress) -> Self {
         let component_ref = account.into();
-        self.add_input_for_component_ref(&component_ref);
-        self.add_resource_input(resource_addr);
         // We may want to make this a native instruction
         self.add_instruction(Instruction::CallMethod {
             call: component_ref,
@@ -660,6 +668,9 @@ impl<D> TransactionBuilder<D> {
             Instruction::StealthTransfer {
                 resource_address_ref, ..
             } => {
+                // NOTE: UTXO inputs may have come from previous instructions, and therefore are not an existing
+                // on-chain substate input. This means the user will have to manually add them as inputs as required.
+
                 self.add_input_for_resource_ref(resource_address_ref);
             },
             Instruction::ClaimValidatorFees { address } => {
@@ -683,7 +694,8 @@ impl<D> TransactionBuilder<D> {
             Instruction::TakeFromBucket { .. } |
             Instruction::PublishTemplate { .. } |
             Instruction::AllocateAddress { .. } |
-            Instruction::PayFee { .. } => {},
+            Instruction::PayFeeStealth { .. } |
+            Instruction::PayFeeFromBucket { .. } => {},
         }
     }
 
@@ -751,7 +763,7 @@ impl Signable<&RistrettoPublicKeyBytes> for TransactionBuilder<MainIntent> {
 }
 
 impl IntoSigned<&RistrettoPublicKeyBytes> for TransactionBuilder<MainIntent> {
-    type SignedOutput = UnsealedTransactionV1;
+    type SignedOutput = UnsealedTransaction;
 
     fn into_signed(self, sig: TransactionSignature) -> Self::SignedOutput {
         self.finish().add_signature(sig)

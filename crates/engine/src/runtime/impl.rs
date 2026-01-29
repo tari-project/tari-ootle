@@ -132,6 +132,7 @@ use crate::{
         engine_args::EngineArgs,
         error::{ArgumentValidationError, AssertError},
         locking::{LockError, LockedSubstate},
+        pay_fee::PayFee,
         scope::PushCallFrame,
         tracker::StateTracker,
         RuntimeError,
@@ -2910,29 +2911,64 @@ where
         })
     }
 
-    fn pay_fee(
-        &mut self,
-        statement: StealthTransferStatement,
-        revealed_funds_bucket: Option<BucketId>,
-    ) -> Result<(), RuntimeError> {
+    fn pay_fee(&mut self, pay_fee: PayFee) -> Result<(), RuntimeError> {
         if self.tracker.is_fee_intent_checkpointed() {
             return Err(RuntimeError::FeePaymentInMainIntent);
         }
 
         self.tracker.write_with(|state_mut| {
-            let Some(container) = state_mut.execute_stealth_transfer(
-                STEALTH_TARI_RESOURCE_ADDRESS.into(),
-                statement,
-                revealed_funds_bucket,
-            )?
-            else {
-                return Err(RuntimeError::NoFeesPaid {
-                    details: "Stealth transfer did not reveal any funds to pay fees".to_string(),
-                });
-            };
-            // No refunds
-            state_mut.pay_fee(container, None)?;
-            Ok(())
+            match pay_fee {
+                PayFee::FromStealth {
+                    statement,
+                    input_bucket,
+                } => {
+                    let input_bucket = input_bucket
+                        .and_then(|workspace_id| state_mut.workspace().get(workspace_id).transpose())
+                        .map(|value| {
+                            value.and_then(|v| {
+                                tari_bor::from_value::<BucketId>(v).map_err(|e| RuntimeError::InvalidArgument {
+                                    argument: "input_bucket",
+                                    reason: format!(
+                                        "PayFee::FromStealth: Expected workspace ID to contain a BucketId: {e}"
+                                    ),
+                                })
+                            })
+                        })
+                        .transpose()?;
+                    let Some(container) = state_mut.execute_stealth_transfer(
+                        STEALTH_TARI_RESOURCE_ADDRESS.into(),
+                        statement,
+                        input_bucket,
+                    )?
+                    else {
+                        return Err(RuntimeError::NoFeesPaid {
+                            details: "Stealth transfer did not reveal any funds to pay fees".to_string(),
+                        });
+                    };
+                    // No refunds
+                    state_mut.pay_fee(container, None)?;
+                    Ok(())
+                },
+                PayFee::FromBucket { bucket } => {
+                    let value = state_mut
+                        .workspace()
+                        .get(bucket)?
+                        .ok_or_else(|| RuntimeError::ItemNotOnWorkspace {
+                            id: bucket,
+                            existing_ids: state_mut.workspace().all_ids_iter().collect(),
+                        })?;
+                    let input_bucket =
+                        tari_bor::from_value::<BucketId>(value).map_err(|e| RuntimeError::InvalidArgument {
+                            argument: "bucket",
+                            reason: format!("PayFee::FromBucket: Expected workspace ID to contain a BucketId: {e}"),
+                        })?;
+                    let bucket = state_mut.take_bucket(input_bucket)?;
+
+                    // No refunds
+                    state_mut.pay_fee(bucket.take_all(), None)?;
+                    Ok(())
+                },
+            }
         })
     }
 

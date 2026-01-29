@@ -32,7 +32,7 @@ pub fn generate_definition(ast: &TemplateAst) -> TokenStream {
     quote! {
         #[allow(non_snake_case)]
         pub mod #template_mod_name {
-            use ::tari_template_lib::template_dependencies::*;
+            use ::tari_template_lib::template_macro_deps::*;
 
             #(#items)*
         }
@@ -70,7 +70,7 @@ mod tests {
         assert_code_eq(output, quote! {
             #[allow(non_snake_case)]
             pub mod Foo_template {
-                use ::tari_template_lib::template_dependencies::*;
+                use ::tari_template_lib::template_macro_deps::*;
                 use std::collections::HashMap as _;
                 #[derive(serde :: Serialize, serde :: Deserialize)]
                 #[serde(crate = "self::serde")]

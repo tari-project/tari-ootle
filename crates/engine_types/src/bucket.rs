@@ -77,6 +77,10 @@ impl Bucket {
         self.resource_container
     }
 
+    pub fn take_all(self) -> ResourceContainer {
+        self.into_resource_container()
+    }
+
     pub fn into_non_fungible_ids(self) -> Option<BTreeSet<NonFungibleId>> {
         self.resource_container.into_non_fungible_ids()
     }

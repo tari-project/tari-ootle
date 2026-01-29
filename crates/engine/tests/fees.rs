@@ -30,7 +30,7 @@ fn deducts_fees_from_payments_and_refunds_the_rest() {
     // Check difference was refunded
     let payment = result.finalize.fee_receipt;
     let new_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
-    assert_eq!(new_balance, orig_balance - payment.total_fees_charged().into());
+    assert_eq!(new_balance, orig_balance - payment.total_fees_charged());
     assert_eq!(payment.total_refunded(), 1000 - payment.total_fees_charged());
     assert!(payment.is_paid_in_full());
 }

@@ -11,8 +11,7 @@ use tari_crypto::{
 };
 use tari_engine_types::crypto::get_commitment_factory;
 use tari_ootle_common_types::Network;
-use tari_ootle_wallet_crypto::memo::Memo;
-use tari_ootle_wallet_sdk::apis::stealth_crypto::StealthCryptoApi;
+use tari_ootle_wallet_crypto::{memo::Memo, StealthCryptoApi};
 
 use crate::support::{random_key, random_keypair, resource_address_from_seed};
 
@@ -88,7 +87,7 @@ mod encrypted_data {
             .unwrap();
         let commitment = get_commitment_factory().commit_value(&mask, amount).to_byte_type();
 
-        let decrypted = api.decrypt_value_and_mask(&data, &commitment, &k2, &p1, false).unwrap();
+        let decrypted = api.decrypt_utxo_data(&data, &commitment, &k2, &p1, false).unwrap();
 
         assert_eq!(decrypted.value(), amount);
         assert_eq!(decrypted.mask().as_bytes(), mask.as_bytes());

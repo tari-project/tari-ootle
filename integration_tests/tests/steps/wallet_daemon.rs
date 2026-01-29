@@ -137,7 +137,7 @@ async fn when_i_run_up_fees(
             .pay_fee_from_component(*account.component_address(), 100_000)
             .call_function(template.address, "new", args![payload])
             .add_input(*account.component_address())
-            .build_unsigned_transaction();
+            .build_unsigned();
 
         let transaction_submit_req = TransactionSubmitRequest {
             transaction,

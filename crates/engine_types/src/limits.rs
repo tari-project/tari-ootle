@@ -16,7 +16,7 @@ pub const WASM_LIMITS: WasmLimits = WasmLimits {
     max_function_arguments: 32,
     max_function_name_length: 256,
     max_functions: 8192,
-    max_memory_pages: 20, // ~1.3MiB
+    max_memory_pages: 20, // ~1.3MiB = 20 * 64KiB
 };
 
 pub struct EngineLimits {
@@ -35,7 +35,7 @@ pub struct EngineLimits {
 pub const ENGINE_LIMITS: EngineLimits = EngineLimits {
     max_substate_outputs: 1000,
     max_substate_size: 2 * 1024 * 1024,  // 2 MiB
-    max_call_size: 1024 * 1024,          // 1 MiB
+    max_call_size: 128 * 1024,           // 128 KiB
     max_internal_call_size: 1024 * 1024, // 1 MiB
     max_logs: 256,
     max_log_size_bytes: 32 * 1024, // 32 KiB

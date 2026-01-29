@@ -8,10 +8,10 @@ use tari_ootle_wallet_crypto::{
     encrypted_data::{decrypt_data, encrypt_data, unblind_output},
     kdfs,
     memo::Memo,
-    ConfidentialProofError,
     DecryptedData,
     MaskAndValue,
     OutputWitness,
+    StealthProofError,
     WalletCryptoError,
 };
 use tari_template_lib::{
@@ -109,13 +109,8 @@ impl ConfidentialCryptoApi {
         reciprocal_public_key: &RistrettoPublicKey,
         skip_memo: bool,
     ) -> Result<DecryptedData, ConfidentialCryptoApiError> {
-        let decrypted = unblind_output(
-            output_commitment,
-            output_encrypted_value,
-            claim_secret,
-            reciprocal_public_key,
-            skip_memo,
-        )?;
+        let encryption_key = kdfs::encrypted_data_dh_kdf_aead(claim_secret, reciprocal_public_key);
+        let decrypted = unblind_output(output_commitment, output_encrypted_value, &encryption_key, skip_memo)?;
         Ok(decrypted)
     }
 }
@@ -125,7 +120,7 @@ pub enum ConfidentialCryptoApiError {
     #[error(transparent)]
     WalletCryptoError(#[from] WalletCryptoError),
     #[error("Confidential proof error: {0}")]
-    ConfidentialProofError(#[from] ConfidentialProofError),
+    ConfidentialProofError(#[from] StealthProofError),
     #[error("Negative amount")]
     NegativeAmount,
 }

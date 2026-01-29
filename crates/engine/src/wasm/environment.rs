@@ -96,7 +96,7 @@ impl<T> WasmEnv<T> {
         self.last_engine_error_mut().take()
     }
 
-    pub(super) fn load_abi<S: AsStoreMut>(
+    pub(super) fn load_template_def<S: AsStoreMut>(
         &self,
         store: &mut S,
         instance: &Instance,

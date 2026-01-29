@@ -1,23 +1,29 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use async_trait::async_trait;
 use ootle_byte_type::ToByteType;
 use rand::{CryptoRng, Rng};
+use signature::{hazmat::PrehashSigner, Keypair};
 use tari_crypto::{
     keys::{PublicKey, SecretKey},
-    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
+use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::Network;
 use tari_ootle_transaction::{
+    Signable,
     TransactionSealSignature,
     TransactionSignature,
     UnsealedTransactionV1,
     UnsignedTransaction,
 };
-use tari_ootle_wallet_sdk::OotleAddress;
+use tari_ootle_wallet_crypto::kdfs;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
+    key_provider::DiffieHellmanKdfKeyProvider,
+    keys::OotleSecretKey,
     signer,
     signer::local_signer::LocalSigner,
     transaction::TransactionSigner,
@@ -25,36 +31,14 @@ use crate::{
     Address,
 };
 
-#[derive(Clone)]
-pub struct OotleSecretKey {
-    account_secret: RistrettoSecretKey,
-    view_only_secret: RistrettoSecretKey,
-}
-
-impl OotleSecretKey {
-    pub fn account_secret(&self) -> &RistrettoSecretKey {
-        &self.account_secret
-    }
-
-    pub fn view_only_secret(&self) -> &RistrettoSecretKey {
-        &self.view_only_secret
-    }
-}
-
 pub type PrivateKeySigner = LocalSigner<OotleSecretKey>;
 
 impl LocalSigner<OotleSecretKey> {
-    pub fn new(network: Network, account_secret: RistrettoSecretKey, view_only_secret: RistrettoSecretKey) -> Self {
-        let account_pk = RistrettoPublicKey::from_secret_key(&account_secret);
-        let view_only_pk = RistrettoPublicKey::from_secret_key(&view_only_secret);
-
-        let address = OotleAddress::new(network, view_only_pk.to_byte_type(), account_pk.to_byte_type());
+    pub fn new(network: Network, secret: OotleSecretKey) -> Self {
+        let address = secret.to_address(network);
         Self {
             address,
-            credentials: OotleSecretKey {
-                account_secret,
-                view_only_secret,
-            },
+            credentials: secret,
         }
     }
 
@@ -64,23 +48,24 @@ impl LocalSigner<OotleSecretKey> {
     }
 
     pub fn random_with<R: Rng + CryptoRng>(network: Network, rng: &mut R) -> Self {
-        let secret = RistrettoSecretKey::random(rng);
-        let view_key = RistrettoSecretKey::random(rng);
-        Self::new(network, secret, view_key)
+        let secret = OotleSecretKey::random_with(rng);
+        Self::new(network, secret)
     }
 }
 
-#[async_trait::async_trait]
-impl TransactionSigner for LocalSigner<OotleSecretKey> {
+#[async_trait]
+impl<C> TransactionSigner for LocalSigner<C>
+where C: PrehashSigner<(RistrettoSchnorr, RistrettoPublicKey)> + Send + Sync
+{
     fn address(&self) -> &Address {
         &self.address
     }
 
     async fn sign_transaction(&self, message: &UnsealedTransactionV1) -> signer::Result<TransactionSealSignature> {
-        Ok(TransactionSealSignature::sign(
-            &self.credentials.account_secret,
-            message,
-        ))
+        let message = message.to_signing_message(());
+        let (signature, public_key) = self.credentials.sign_prehash(&message)?;
+        let sig = TransactionSealSignature::new(public_key.to_byte_type(), signature.to_byte_type());
+        Ok(sig)
     }
 
     async fn sign_authorization(
@@ -88,6 +73,22 @@ impl TransactionSigner for LocalSigner<OotleSecretKey> {
         seal_signer: &RistrettoPublicKeyBytes,
         tx: &UnsignedTransaction,
     ) -> signer::Result<TransactionAuthorization> {
-        Ok(TransactionSignature::sign(&self.credentials.account_secret, seal_signer, tx).into())
+        let message = tx.to_signing_message(seal_signer);
+        let (signature, public_key) = self.credentials.sign_prehash(&message)?;
+        let sig = TransactionSignature::new(public_key.to_byte_type(), signature.to_byte_type());
+        Ok(sig.into())
+    }
+}
+
+#[async_trait]
+impl DiffieHellmanKdfKeyProvider for LocalSigner<OotleSecretKey> {
+    type Error = ();
+    type Key = RistrettoSecretKey;
+
+    async fn create_kdf_dh_key(&self, public_key: &RistrettoPublicKey) -> Result<Self::Key, Self::Error> {
+        Ok(kdfs::encrypted_data_dh_kdf_aead(
+            self.credentials.view_only_secret(),
+            public_key,
+        ))
     }
 }

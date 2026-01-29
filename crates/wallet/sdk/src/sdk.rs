@@ -12,6 +12,7 @@ use tari_common_types::seeds::{
 };
 use tari_crypto::tari_utilities::SafePassword;
 use tari_ootle_common_types::{optional::Optional, Epoch, Network, NetworkParseError};
+use tari_ootle_wallet_crypto::StealthCryptoApi;
 use zeroize::Zeroizing;
 
 use crate::{
@@ -28,7 +29,6 @@ use crate::{
         password_manager::{PasswordManagerApi, PasswordManagerApiError},
         resources::ResourcesApi,
         signer::SignerApi,
-        stealth_crypto::StealthCryptoApi,
         stealth_outputs::StealthOutputsApi,
         stealth_transfer::StealthTransferApi,
         substate::SubstatesApi,

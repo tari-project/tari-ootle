@@ -19,11 +19,8 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_transaction::{args, Transaction};
 use tari_ootle_wallet_sdk::{
-    apis::{
-        confidential_transfer::UtxoInputSelection,
-        stealth_transfer::{PayTo, TransferOutput},
-    },
-    crypto::memo::Memo,
+    apis::{confidential_transfer::UtxoInputSelection, stealth_transfer::TransferOutput},
+    crypto::{memo::Memo, pay_to::PayTo},
     models::{AccountWithAddress, KeyBranch},
 };
 use tari_template_lib_types::{amount, constants::XTR, metadata, Amount, ComponentAddress, ResourceAddress, UtxoId};
@@ -308,7 +305,7 @@ impl TrafficSim {
             ])
             .put_last_instruction_output_on_workspace("admin_badge")
             .call_method(*account.component_address(), "deposit", args![Workspace("admin_badge")])
-            .build_unsigned_transaction();
+            .build_unsigned();
 
         let resp = exchange_wallet
             .client
@@ -478,7 +475,7 @@ impl TrafficSim {
                     "funds",
                 )
                 .drop_all_proofs_in_workspace()
-                .build_unsigned_transaction();
+                .build_unsigned();
 
             let resp = exchange_wallet
                 .client

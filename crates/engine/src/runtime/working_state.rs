@@ -301,7 +301,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
             self.validate_spend_condition(output, input)?;
         }
 
-        let valid_transfer = stealth::validate_transfer_balance(stmt, view_key)?;
+        let valid_transfer = stealth::validate_transfer(stmt, view_key)?;
         Ok(valid_transfer)
     }
 

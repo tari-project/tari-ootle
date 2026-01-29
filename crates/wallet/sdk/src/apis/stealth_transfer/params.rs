@@ -6,8 +6,8 @@ use tari_bor::{Deserialize, Serialize};
 use tari_engine_types::crypto::MAX_LAZY_BP_AGG_FACTORS;
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::Network;
-use tari_ootle_wallet_crypto::memo::Memo;
-use tari_template_lib::types::{AccessRule, Amount, NonFungibleAddress, ResourceAddress};
+use tari_ootle_wallet_crypto::{memo::Memo, pay_to::PayTo};
+use tari_template_lib::types::{Amount, NonFungibleAddress, ResourceAddress};
 
 use crate::apis::{
     confidential_transfer::UtxoInputSelection,
@@ -136,14 +136,6 @@ impl<'a> TryFrom<&'a TransferOutput> for StealthOutputToCreate<'a> {
         })
     }
 }
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub enum PayTo {
-    StealthPublicKey,
-    AccessRule(AccessRule),
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub enum BadgeUsage {

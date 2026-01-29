@@ -3,13 +3,10 @@
 
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_transaction::UnsignedTransaction;
-use tari_ootle_wallet_crypto::{memo::Memo, StealthInputWitness};
+use tari_ootle_wallet_crypto::{memo::Memo, pay_to::PayTo, StealthInputWitness};
 use tari_template_lib::types::{Amount, ComponentAddress, VaultId};
 
-use crate::{
-    apis::stealth_transfer::PayTo,
-    models::{InputSpendData, StealthUtxoSpendKeyId, WalletPublicKey},
-};
+use crate::models::{InputSpendData, StealthUtxoSpendKeyId, WalletPublicKey};
 
 pub struct StealthTransferOutput {
     pub transaction: UnsignedTransaction,

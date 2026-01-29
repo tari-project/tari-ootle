@@ -27,6 +27,7 @@ use tari_template_lib::types::{ClaimedOutputTombstoneAddress, ComponentAddress, 
 use crate::{
     builder::TransactionBuilder,
     transaction_id::TransactionId,
+    unsealed::UnsealedTransaction,
     v1::UnsealedTransactionV1,
     weight::TransactionWeight,
     Instruction,
@@ -53,8 +54,10 @@ impl Transaction {
         TransactionBuilder::new(network)
     }
 
-    pub fn new(unsigned_transaction: UnsealedTransactionV1, seal_signature: TransactionSealSignature) -> Self {
-        Self::V1(TransactionV1::new(unsigned_transaction, seal_signature))
+    pub fn new(transaction: UnsealedTransaction, seal_signature: TransactionSealSignature) -> Self {
+        match transaction {
+            UnsealedTransaction::V1(tx) => Self::V1(TransactionV1::new(tx, seal_signature)),
+        }
     }
 
     pub fn calculate_id(&self) -> TransactionId {

@@ -29,10 +29,8 @@ use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_ootle_transaction::UnsignedTransaction;
 use tari_ootle_wallet_sdk::{
-    apis::{
-        confidential_transfer::UtxoInputSelection,
-        stealth_transfer::{BadgeUsage, PayTo},
-    },
+    apis::{confidential_transfer::UtxoInputSelection, stealth_transfer::BadgeUsage},
+    crypto::pay_to::PayTo,
     models::{Account, AccountWithAddress, NonFungibleToken},
 };
 use tari_template_lib_types::{constants::TOKEN_SYMBOL, crypto::RistrettoPublicKeyBytes, Amount, ResourceAddress};
@@ -449,7 +447,7 @@ pub async fn submit_manifest_with_signing_keys(
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
         .with_inputs(inputs.into_iter().map(|i| i.into_unversioned()))
-        .build_unsigned_transaction();
+        .build_unsigned();
 
     let transaction_submit_req = TransactionSubmitRequest {
         transaction,
@@ -537,7 +535,7 @@ pub async fn submit_manifest(
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
         .with_inputs(inputs)
-        .build_unsigned_transaction();
+        .build_unsigned();
 
     let transaction_submit_req = TransactionSubmitRequest {
         transaction,
@@ -652,7 +650,7 @@ pub async fn create_component(
         .call_function(template_address, function_call, args)
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
-        .build_unsigned_transaction();
+        .build_unsigned();
 
     let transaction_submit_req = TransactionSubmitRequest {
         transaction,
@@ -753,7 +751,7 @@ pub async fn call_component(
         .pay_fee_from_component(account_component_address, 1000)
         .call_method(source_component_address, &function_call, vec![])
         .with_inputs(inputs)
-        .build_unsigned_transaction();
+        .build_unsigned();
 
     let resp = submit_unsigned_tx_and_wait_for_response(client, tx, account, use_unversioned_inputs).await?;
 
@@ -805,7 +803,7 @@ pub async fn concurrent_call_component(
         let tx = transaction_builder()
             .pay_fee_from_component(account_component_address, 1000)
             .call_method(source_component_address, &function_call, vec![])
-            .build_unsigned_transaction();
+            .build_unsigned();
         join_set.spawn(submit_unsigned_tx_and_wait_for_response(clt, tx, acc, true));
     }
 

@@ -28,7 +28,7 @@ impl RistrettoPublicKeyBytes {
         Self([0u8; Self::length()])
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, InvalidByteLengthError> {
+    pub const fn from_bytes(bytes: &[u8]) -> Result<Self, InvalidByteLengthError> {
         if bytes.len() != Self::length() {
             return Err(InvalidByteLengthError {
                 size: bytes.len(),
@@ -38,7 +38,7 @@ impl RistrettoPublicKeyBytes {
 
         let mut key = [0u8; Self::length()];
         key.copy_from_slice(bytes);
-        Ok(RistrettoPublicKeyBytes(key))
+        Ok(Self(key))
     }
 
     pub fn from_hex(hex: &str) -> Result<Self, KeyParseError> {

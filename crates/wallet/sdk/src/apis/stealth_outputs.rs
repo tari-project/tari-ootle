@@ -19,10 +19,13 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_wallet_crypto::{
     memo::Memo,
+    pay_to::PayTo,
     DecryptedData,
     OutputWitness,
-    SecretStealthOutputStatement,
+    StealthCryptoApi,
+    StealthCryptoApiError,
     StealthInputWitness,
+    StealthOutputWitness,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::types::{
@@ -41,8 +44,7 @@ use crate::{
         accounts::AccountsApiError,
         config::{ConfigApi, ConfigApiError},
         key_manager::{KeyManagerApi, KeyManagerApiError},
-        stealth_crypto::{StealthCryptoApi, StealthCryptoApiError},
-        stealth_transfer::{PayTo, StealthOutputToCreate, UnblindedInputToSpend},
+        stealth_transfer::{StealthOutputToCreate, UnblindedInputToSpend},
     },
     models::{
         input_selection,
@@ -300,7 +302,6 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
             inputs_with_masks.push(UnblindedInputToSpend {
                 witness: StealthInputWitness {
                     mask_and_value: decrypted.mask_and_value,
-                    public_nonce: nonce,
                 },
             });
         }
@@ -564,7 +565,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                 "Attempting to unblind output with view key {}",
                 keys.view_only_key.key_id,
             );
-            let unblinded_result = self.crypto_api.decrypt_value_and_mask(
+            let unblinded_result = self.crypto_api.decrypt_utxo_data(
                 &output.output.encrypted_data,
                 &commitment,
                 &keys.view_only_key.secret,
@@ -662,7 +663,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         resource_view_key: Option<RistrettoPublicKey>,
         memo: Option<&Memo>,
         pay_to: PayTo,
-    ) -> Result<SecretStealthOutputStatement, StealthOutputsApiError> {
+    ) -> Result<StealthOutputWitness, StealthOutputsApiError> {
         let mask = self.key_manager_api.next_key(KeyBranch::StealthMask)?;
 
         let (nonce_secret, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
@@ -704,7 +705,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
             resource_address,
         );
 
-        Ok(SecretStealthOutputStatement {
+        Ok(StealthOutputWitness {
             witness,
             spend_condition,
             tag: derived_tag,
@@ -765,7 +766,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         skip_memo: bool,
     ) -> Result<DecryptedData, StealthOutputsApiError> {
         let key = self.key_manager_api.get_key(claim_secret_key_id)?;
-        let decrypted = self.crypto_api.decrypt_value_and_mask(
+        let decrypted = self.crypto_api.decrypt_utxo_data(
             output_encrypted_value,
             output_commitment,
             &key.secret,

@@ -146,7 +146,9 @@ impl TemplateTest {
 
         // Add builtin templates
         for (addr, code) in all_builtin_templates() {
-            builder.add_template_from_code(*addr, *code);
+            builder
+                .add_template_from_code(*addr, *code)
+                .expect("failed to add builtin template");
         }
 
         // Add the faucet template for non-XTR fungible tokens

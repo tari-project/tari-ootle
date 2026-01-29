@@ -88,7 +88,7 @@ pub async fn handle_submit_instruction(
         .pay_fee_from_component(*fee_account.component_address(), req.max_fee)
         .with_min_epoch(req.min_epoch.map(Epoch))
         .with_max_epoch(req.max_epoch.map(Epoch))
-        .build_unsigned_transaction();
+        .build_unsigned();
 
     let request = TransactionSubmitRequest {
         transaction,
@@ -327,7 +327,7 @@ pub async fn handle_submit_manifest(
             }
         })
         .with_instructions(instructions.instructions)
-        .build_unsigned_transaction();
+        .build_unsigned();
 
     // Detect inputs
     let substates = transaction.to_referenced_substates()?.into_iter().collect::<Vec<_>>();
@@ -540,7 +540,7 @@ pub async fn handle_publish_template(
         .transaction_builder()
         .pay_fee_from_component(*fee_account.component_address(), req.max_fee)
         .publish_template(wasm_binary)
-        .build_unsigned_transaction();
+        .build_unsigned();
 
     if req.dry_run {
         let request = TransactionSubmitDryRunRequest {

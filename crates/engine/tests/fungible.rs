@@ -37,7 +37,7 @@ fn it_does_not_overflow_when_minting_a_huge_initial_supply() {
     );
 
     let confidential_vault = get_confidential_vault(&test, component);
-    assert_eq!(confidential_vault.balance(), Amount::MAX - u64::MAX.into());
+    assert_eq!(confidential_vault.balance(), Amount::MAX - u64::MAX);
     let commitment = confidential_vault
         .get_confidential_commitments()
         .unwrap()

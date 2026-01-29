@@ -9,36 +9,36 @@ use tari_crypto::{
 };
 use tari_engine_types::crypto::get_commitment_factory;
 use tari_ootle_common_types::{base_layer_hashing::ownership_proof_hasher64, Network};
-use tari_ootle_wallet_crypto::{
+use tari_template_lib_types::{
+    confidential::ConfidentialOutputStatement,
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes, UtxoTag},
+    stealth::StealthTransferStatement,
+    Amount,
+    EncryptedData,
+    ResourceAddress,
+};
+
+use crate::{
     confidential,
     encrypted_data::{encrypt_data, unblind_output},
     kdfs,
     memo::Memo,
     stealth,
-    ConfidentialProofError,
     DecryptedData,
     OutputWitness,
-    SecretStealthOutputStatement,
     StealthInputWitness,
+    StealthOutputWitness,
+    StealthProofError,
     WalletCryptoError,
-};
-use tari_template_lib::{
-    prelude::{ConfidentialOutputStatement, StealthTransferStatement},
-    types::{
-        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes, UtxoTag},
-        Amount,
-        EncryptedData,
-        ResourceAddress,
-    },
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet::sdk::stealth_crypto";
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct StealthCryptoApi;
 
 impl StealthCryptoApi {
-    pub(crate) const fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
@@ -61,7 +61,7 @@ impl StealthCryptoApi {
         A: Into<Amount>,
         Inputs: IntoIterator<Item = StealthInputWitness>,
         Inputs::IntoIter: ExactSizeIterator,
-        Outputs: IntoIterator<Item = &'a SecretStealthOutputStatement> + Clone,
+        Outputs: IntoIterator<Item = &'a StealthOutputWitness> + Clone,
         Outputs::IntoIter: ExactSizeIterator,
     {
         let stmt = stealth::create_transfer_statement(
@@ -134,7 +134,7 @@ impl StealthCryptoApi {
         Ok(proof)
     }
 
-    pub fn decrypt_value_and_mask(
+    pub fn decrypt_utxo_data(
         &self,
         output_encrypted_value: &EncryptedData,
         output_commitment: &PedersenCommitmentBytes,
@@ -142,13 +142,8 @@ impl StealthCryptoApi {
         sender_offset_public_key: &RistrettoPublicKey,
         skip_memo: bool,
     ) -> Result<DecryptedData, StealthCryptoApiError> {
-        let decrypted = unblind_output(
-            output_commitment,
-            output_encrypted_value,
-            claim_secret,
-            sender_offset_public_key,
-            skip_memo,
-        )?;
+        let encryption_key = kdfs::encrypted_data_dh_kdf_aead(claim_secret, sender_offset_public_key);
+        let decrypted = unblind_output(output_commitment, output_encrypted_value, &encryption_key, skip_memo)?;
         Ok(decrypted)
     }
 
@@ -195,9 +190,7 @@ pub enum StealthCryptoApiError {
     #[error(transparent)]
     WalletCryptoError(#[from] WalletCryptoError),
     #[error("Confidential proof error: {0}")]
-    ConfidentialProofError(#[from] ConfidentialProofError),
-    #[error("Value lookup table error: {details}")]
-    ValueLookupTableError { details: String },
+    ConfidentialProofError(#[from] StealthProofError),
     #[error("Negative amount")]
     NegativeAmount,
 }

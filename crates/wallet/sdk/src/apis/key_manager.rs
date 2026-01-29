@@ -17,14 +17,14 @@ use tari_ootle_common_types::{
     Network,
 };
 use tari_ootle_transaction::Signable;
-use tari_ootle_wallet_crypto::encryption::{decrypt_with_password, encrypt_with_password, CipherError};
+use tari_ootle_wallet_crypto::{
+    encryption::{decrypt_with_password, encrypt_with_password, CipherError},
+    StealthCryptoApi,
+};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 
 use crate::{
-    apis::{
-        password_manager::{PasswordManagerApi, PasswordManagerApiError},
-        stealth_crypto::StealthCryptoApi,
-    },
+    apis::password_manager::{PasswordManagerApi, PasswordManagerApiError},
     key_managers::WalletKeyStore,
     models::{
         DerivedKeyId,

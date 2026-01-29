@@ -79,7 +79,7 @@ impl TransactionV1 {
     }
 
     pub fn verify_all_signatures(&self) -> bool {
-        if !self.seal_signature.verify(&self.body) {
+        if !self.seal_signature.verify_v1(&self.body) {
             debug!(target: LOG_TARGET, "Transaction seal signature is invalid");
             return false;
         }
@@ -204,7 +204,8 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::PublishTemplate { binary } => binary.len() as u64 / BINARY_WEIGHT_DIVISOR,
         Instruction::AllocateAddress { .. } => 1,
         Instruction::StealthTransfer { statement, .. } => calc_stealth_statement_weight(statement),
-        Instruction::PayFee { statement, .. } => calc_stealth_statement_weight(statement),
+        Instruction::PayFeeStealth { statement, .. } => calc_stealth_statement_weight(statement),
+        Instruction::PayFeeFromBucket { .. } => 1,
         Instruction::UpdateComponentTemplate { migrate, .. } => {
             1 + migrate.as_ref().map(|m| calc_args_weight(&m.args)).unwrap_or(0)
         },

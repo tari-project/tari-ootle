@@ -40,9 +40,9 @@ use tari_ootle_transaction::{Instruction, Transaction, TransactionId, UnsignedTr
 use tari_ootle_wallet_sdk::{
     apis::{
         confidential_transfer::UtxoInputSelection,
-        stealth_transfer::{BadgeUsage, PayTo, TransferOutput},
+        stealth_transfer::{BadgeUsage, TransferOutput},
     },
-    crypto::memo::Memo,
+    crypto::{memo::Memo, pay_to::PayTo},
     models::{
         Account,
         AuthoredTemplateModel,

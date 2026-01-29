@@ -10,7 +10,15 @@ use tari_engine_types::{indexed_value::IndexedValueError, substate::SubstateId};
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, ComponentAddress};
 
-use crate::{Instruction, IntoSigned, Signable, TransactionSignature, UnsealedTransactionV1, UnsignedTransactionV1};
+use crate::{
+    unsealed::UnsealedTransaction,
+    Instruction,
+    IntoSigned,
+    Signable,
+    TransactionSignature,
+    UnsealedTransactionV1,
+    UnsignedTransactionV1,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -157,22 +165,23 @@ impl UnsignedTransaction {
         mut self,
         seal_signer: &RistrettoPublicKeyBytes,
         key: &RistrettoSecretKey,
-    ) -> UnsealedTransactionV1 {
+    ) -> UnsealedTransaction {
         match &mut self {
-            Self::V1(tx) => UnsealedTransactionV1::new(tx.clone(), vec![]).add_signer(seal_signer, key),
+            Self::V1(tx) => UnsealedTransactionV1::new(tx.clone(), vec![])
+                .add_signer(seal_signer, key)
+                .into(),
         }
     }
 
-    pub(crate) fn add_signature(mut self, signature: TransactionSignature) -> UnsealedTransactionV1 {
+    pub(crate) fn add_single_signature(mut self, signature: TransactionSignature) -> UnsealedTransaction {
         match &mut self {
-            Self::V1(tx) => UnsealedTransactionV1::new(tx.clone(), vec![signature]),
+            Self::V1(tx) => UnsealedTransactionV1::new(tx.clone(), vec![signature]).into(),
         }
     }
 
-    pub fn with_signatures(self, signatures: Vec<TransactionSignature>) -> UnsealedTransactionV1 {
-        // Obviously this will not work if we have more than one version - dealing with that is left for another time
+    pub fn with_signatures(self, signatures: Vec<TransactionSignature>) -> UnsealedTransaction {
         match self {
-            UnsignedTransaction::V1(tx) => UnsealedTransactionV1::new(tx, signatures),
+            UnsignedTransaction::V1(tx) => UnsealedTransactionV1::new(tx, signatures).into(),
         }
     }
 
@@ -185,7 +194,7 @@ impl UnsignedTransaction {
         self
     }
 
-    pub fn finish(self) -> UnsealedTransactionV1 {
+    pub fn finish(self) -> UnsealedTransaction {
         self.with_signatures(vec![])
     }
 
@@ -214,9 +223,9 @@ impl Signable<&RistrettoPublicKeyBytes> for UnsignedTransaction {
 }
 
 impl IntoSigned<&RistrettoPublicKeyBytes> for UnsignedTransaction {
-    type SignedOutput = UnsealedTransactionV1;
+    type SignedOutput = UnsealedTransaction;
 
     fn into_signed(self, sig: TransactionSignature) -> Self::SignedOutput {
-        self.add_signature(sig)
+        self.add_single_signature(sig)
     }
 }

@@ -101,9 +101,12 @@ pub enum Instruction {
         statement: StealthTransferStatement,
         revealed_input_bucket: Option<WorkspaceOffsetId>,
     },
-    PayFee {
+    PayFeeStealth {
         statement: StealthTransferStatement,
         revealed_input_bucket: Option<WorkspaceOffsetId>,
+    },
+    PayFeeFromBucket {
+        bucket: WorkspaceOffsetId,
     },
     UpdateComponentTemplate {
         component: ComponentReference,
@@ -135,7 +138,7 @@ impl Instruction {
     }
 
     pub fn is_pay_fee(&self) -> bool {
-        matches!(self, Self::PayFee { .. })
+        matches!(self, Self::PayFeeStealth { .. })
     }
 
     pub fn allocated_workspace_id(&self) -> Option<WorkspaceId> {
@@ -258,7 +261,7 @@ impl Display for Instruction {
                     None => write!(f, ", revealed_input_bucket: None }}"),
                 }
             },
-            Self::PayFee {
+            Self::PayFeeStealth {
                 statement,
                 revealed_input_bucket: bucket,
             } => {
@@ -273,6 +276,9 @@ impl Display for Instruction {
                     Some(id) => write!(f, ", revealed_input_bucket: Some({}) }}", id),
                     None => write!(f, ", revealed_input_bucket: None }}"),
                 }
+            },
+            Self::PayFeeFromBucket { bucket } => {
+                write!(f, "PayFeeFromBucket {{ bucket: {} }}", bucket)
             },
             Self::UpdateComponentTemplate {
                 component,

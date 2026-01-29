@@ -5,10 +5,10 @@ use std::collections::HashSet;
 
 use tari_ootle_common_types::SubstateRequirement;
 use tari_ootle_transaction::{args, TransactionBuilder, UnsignedTransaction};
-use tari_template_lib_types::{Amount, ResourceAddress};
+use tari_template_lib_types::{constants::XTR, Amount, ResourceAddress};
 
 use crate::{
-    builtin_templates::traits::InvokeBuilder,
+    builtin_templates::traits::UnsignedTransactionBuilder,
     provider::{Provider, ProviderError, WantInput},
     Address,
     ToAccountAddress,
@@ -22,11 +22,7 @@ pub struct AccountInvokeBuilder<'a, P> {
     want_list: HashSet<WantInput>,
 }
 
-impl<'a, P: Provider> InvokeBuilder for AccountInvokeBuilder<'a, P> {
-    fn builder(&self) -> &TransactionBuilder {
-        &self.builder
-    }
-
+impl<'a, P: Provider> UnsignedTransactionBuilder for AccountInvokeBuilder<'a, P> {
     fn default_signer_address(&self) -> &Address {
         self.provider.default_signer_address()
     }
@@ -43,7 +39,7 @@ impl<'a, P: Provider> InvokeBuilder for AccountInvokeBuilder<'a, P> {
             want_list,
             ..
         } = self;
-        let unsigned_tx = builder.build_unsigned_transaction();
+        let unsigned_tx = builder.build_unsigned();
         let unsigned_tx = provider.resolve_input_want_list(unsigned_tx, &want_list).await?;
         Ok(unsigned_tx)
     }
@@ -61,6 +57,11 @@ impl<'a, P: Provider> AccountInvokeBuilder<'a, P> {
 
     pub fn pay_fee<A: Into<Amount>>(mut self, amount: A) -> Self {
         let component_addr = self.default_signer_address().to_account_address();
+        self.want_list.insert(WantInput::VaultForResource {
+            component_address: component_addr,
+            resource_address: XTR,
+            required: true,
+        });
         self.builder = self.builder.pay_fee_from_component(component_addr, amount);
         self
     }
@@ -89,8 +90,9 @@ impl<'a, P: Provider> AccountInvokeBuilder<'a, P> {
             required: true,
         });
         // We need the substate of the recipient account to deposit into, if it exists
-        self.want_list.insert(WantInput::SubstateIfExists {
+        self.want_list.insert(WantInput::SpecificSubstate {
             substate_id: to_component_addr.into(),
+            required: false,
         });
         // We need the vault to deposit into, if it exists
         self.want_list.insert(WantInput::VaultForResource {

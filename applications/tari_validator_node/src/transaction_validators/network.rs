@@ -69,7 +69,8 @@ mod tests {
                     RistrettoPublicKeyBytes::zero(),
                     SchnorrSignatureBytes::zero(),
                 )],
-            ),
+            )
+            .into(),
             TransactionSealSignature::new(RistrettoPublicKeyBytes::zero(), SchnorrSignatureBytes::zero()),
         )
     }

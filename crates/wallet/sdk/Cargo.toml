@@ -20,12 +20,10 @@ tari_ootle_transaction = { workspace = true }
 tari_template_lib = { workspace = true }
 tari_template_abi = { workspace = true }
 tari_ootle_address = { workspace = true, features = ["serde"] }
-tari_hashing = { workspace = true }
 ootle_serde = { workspace = true }
 ootle_byte_type = { workspace = true }
 
 anyhow = { workspace = true }
-blake2 = { workspace = true }
 digest = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true, default-features = true }

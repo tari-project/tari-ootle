@@ -131,9 +131,11 @@ impl Default for Metadata {
 
 impl Display for Metadata {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Metadata: ")?;
-        for (key, value) in &*self.0 {
-            write!(f, "key = {}, value = {} ", key, value)?;
+        for (i, (key, value)) in self.0.iter().enumerate() {
+            write!(f, "{} = {}", key, value)?;
+            if i < self.0.len() - 1 {
+                write!(f, ", ")?;
+            }
         }
         Ok(())
     }
@@ -169,6 +171,8 @@ macro_rules! metadata {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn metadata_macro() {
         let i = 123;
@@ -183,5 +187,19 @@ mod tests {
         assert_eq!(metadata.get("description"), Some("This is my first NFT"));
         assert_eq!(metadata.get("image"), Some("https://example.com/my-nft.png"));
         assert_eq!(metadata.get("index"), Some("123"));
+    }
+
+    #[test]
+    fn to_str_from_str() {
+        let original_metadata = metadata!(
+            "name" => "My NFT",
+            "description" => "This is my first NFT",
+            "image" => "https://example.com/my-nft.png"
+        );
+
+        let metadata_str = original_metadata.to_string();
+        let parsed_metadata = metadata_str.parse::<Metadata>().unwrap();
+
+        assert_eq!(original_metadata, parsed_metadata);
     }
 }

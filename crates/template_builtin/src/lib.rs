@@ -40,38 +40,14 @@ pub const LIQUIDITY_POOL_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::fr
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
 ]);
 
-pub fn get_template_builtin(address: &TemplateAddress) -> &'static [u8] {
-    try_get_template_builtin(address).unwrap_or_else(|| panic!("Unknown builtin template address {address}"))
-}
-
-pub fn try_get_template_builtin(address: &TemplateAddress) -> Option<&'static [u8]> {
-    all_builtin_templates()
-        .iter()
-        .find(|(a, _)| a == address)
-        .map(|(_, b)| *b)
-}
-
-pub const fn all_builtin_templates() -> &'static [(TemplateAddress, &'static [u8])] {
-    &[
-        (
-            ACCOUNT_TEMPLATE_ADDRESS,
-            include_bytes!("../templates/account/account.wasm"),
-        ),
-        (
-            NFT_FAUCET_TEMPLATE_ADDRESS,
-            include_bytes!("../templates/nft_faucet/nft_faucet.wasm"),
-        ),
-        (
-            XTR_FAUCET_TEMPLATE_ADDRESS,
-            include_bytes!("../templates/faucet/faucet.wasm"),
-        ),
-        (
-            LIQUIDITY_POOL_TEMPLATE_ADDRESS,
-            include_bytes!("../templates/liquidity_pool/liquidity_pool.wasm"),
-        ),
-    ]
-}
-
 pub fn is_builtin_template_address(addr: &TemplateAddress) -> bool {
-    *addr == ACCOUNT_TEMPLATE_ADDRESS || *addr == NFT_FAUCET_TEMPLATE_ADDRESS || *addr == XTR_FAUCET_TEMPLATE_ADDRESS
+    *addr == ACCOUNT_TEMPLATE_ADDRESS ||
+        *addr == NFT_FAUCET_TEMPLATE_ADDRESS ||
+        *addr == XTR_FAUCET_TEMPLATE_ADDRESS ||
+        *addr == LIQUIDITY_POOL_TEMPLATE_ADDRESS
 }
+
+#[cfg(feature = "templates")]
+mod templates;
+#[cfg(feature = "templates")]
+pub use templates::*;

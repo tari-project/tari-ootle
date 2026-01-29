@@ -11,18 +11,18 @@ use tari_crypto::{
 use tari_engine_types::crypto::{get_commitment_factory, messages};
 use tari_template_lib_types::{
     crypto::Scalar32Bytes,
-    stealth::{ViewableBalanceProof, ViewableBalanceProofChallengeFields},
+    stealth::{ViewableBalanceProof, ViewableBalanceProofMessageFields},
 };
 use tari_utilities::ByteArray;
 
-use crate::ConfidentialProofError;
+use crate::StealthProofError;
 
-pub fn create_viewable_balance_proof(
+pub fn generate_elgamal_viewable_balance_proof(
     mask: &RistrettoSecretKey,
     output_amount: u64,
     commitment: &PedersenCommitment,
     view_key: &RistrettoPublicKey,
-) -> Result<ViewableBalanceProof, ConfidentialProofError> {
+) -> Result<ViewableBalanceProof, StealthProofError> {
     let (elgamal_secret_nonce, elgamal_public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
     let r = &elgamal_secret_nonce;
     let output_amount_as_secret = RistrettoSecretKey::from(output_amount);
@@ -49,7 +49,7 @@ pub fn create_viewable_balance_proof(
     let e_prime = e_prime.to_byte_type();
     let r_prime = r_prime.to_byte_type();
 
-    let challenge_fields = ViewableBalanceProofChallengeFields {
+    let message_fields = ViewableBalanceProofMessageFields {
         elgamal_encrypted: &elgamal_encrypted,
         elgamal_public_nonce: &elgamal_public_nonce,
         c_prime: &c_prime,
@@ -57,7 +57,7 @@ pub fn create_viewable_balance_proof(
         r_prime: &r_prime,
     };
 
-    let e = messages::viewable_balance_proof64(commitment, view_key, challenge_fields);
+    let e = messages::viewable_balance_proof64(commitment, view_key, message_fields);
 
     // Generate signatures
     // TODO: sign_raw_uniform should take a [u8; 64] for the challenge so that length mismatches are caught at compile

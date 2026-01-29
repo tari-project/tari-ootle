@@ -1,9 +1,12 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_ootle_transaction::{Transaction, UnsealedTransactionV1, UnsignedTransaction};
+use tari_ootle_transaction::{Transaction, UnsealedTransaction, UnsignedTransaction};
 
-use crate::wallet::{OotleWallet, TransactionAuthorization, WalletResult};
+use crate::{
+    transaction::TransactionSealSigner,
+    wallet::{TransactionAuthorization, WalletResult},
+};
 
 #[derive(Clone, Debug, Default)]
 pub struct Initial;
@@ -31,20 +34,28 @@ impl TransactionRequest<Initial> {
     }
 }
 
-impl TransactionRequest<WithTx> {
+impl<State> TransactionRequest<State> {
     pub fn add_authorization(mut self, auth: TransactionAuthorization) -> Self {
         self.authorizations.push(auth);
         self
     }
 
-    pub fn build_unsealed(self) -> UnsealedTransactionV1 {
+    pub fn with_authorizations<I>(mut self, auths: I) -> Self
+    where I: IntoIterator<Item = TransactionAuthorization> {
+        self.authorizations.extend(auths);
+        self
+    }
+}
+
+impl TransactionRequest<WithTx> {
+    pub fn build_unsealed(self) -> UnsealedTransaction {
         self.state.0.finish()
     }
 
-    pub async fn build(self, wallet: &OotleWallet) -> WalletResult<Transaction> {
+    pub async fn build(self, seal_signer: &dyn TransactionSealSigner) -> WalletResult<Transaction> {
         let builder = self.state.0;
         let unsealed = builder.with_signatures(self.authorizations.into_iter().map(|a| a.into_signature()).collect());
-        let final_tx = wallet.sign_transaction(unsealed).await?;
+        let final_tx = seal_signer.seal_transaction(unsealed).await?;
         Ok(final_tx)
     }
 }

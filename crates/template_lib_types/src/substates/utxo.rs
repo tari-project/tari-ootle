@@ -24,7 +24,7 @@ const TAG: u64 = BinaryTag::Utxo.as_u64();
 pub struct UtxoAddress(BorTag<UtxoAddressContents, TAG>);
 
 impl UtxoAddress {
-    pub fn new(resource_address: ResourceAddress, id: UtxoId) -> Self {
+    pub const fn new(resource_address: ResourceAddress, id: UtxoId) -> Self {
         Self(BorTag::new(UtxoAddressContents { resource_address, id }))
     }
 

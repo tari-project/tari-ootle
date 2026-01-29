@@ -503,7 +503,7 @@ impl ConfidentialTransferParams {
 
 impl ConfidentialTransferParams {
     pub fn total_amount(&self) -> Amount {
-        self.amount + self.max_fee.into()
+        self.amount + self.max_fee
     }
 }
 

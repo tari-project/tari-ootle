@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_template_abi::rust::collections::BTreeMap;
+use tari_template_abi::rust::collections::HashMap;
 use tari_template_lib::prelude::*;
 
 #[template]
@@ -30,7 +30,7 @@ mod tariswap {
 
     // Constant product AMM
     pub struct TariSwapPool {
-        pools: BTreeMap<ResourceAddress, Vault>,
+        pools: HashMap<ResourceAddress, Vault>,
         lp_resource: ResourceAddress,
         fee: u16,
     }
@@ -49,7 +49,7 @@ mod tariswap {
             assert!(valid_fee_range.contains(&fee), "Invalid fee {}", fee);
 
             // create the vaults to store the funds
-            let mut pools = BTreeMap::new();
+            let mut pools = HashMap::new();
             pools.insert(a_addr, Vault::new_empty(a_addr));
             pools.insert(b_addr, Vault::new_empty(b_addr));
 
@@ -92,7 +92,8 @@ mod tariswap {
             // apply the fee to the input bucket
             // so the user will get a lesser amout of tokens than the theoritical (for the gain of the LP holders)
             let input_bucket_balance = input_bucket.amount();
-            let effective_input_balance = input_bucket_balance - (input_bucket_balance * self.fee.into()) / 1000.into();
+            let effective_input_balance =
+                input_bucket_balance - (input_bucket_balance * Amount::from(self.fee)) / 1000u64;
 
             // recalculate the new vault balances for the swap
             // constant product AMM formula is "k = a * b"
@@ -169,8 +170,8 @@ mod tariswap {
             *self.pools.keys().nth(1).unwrap()
         }
 
-        pub fn get_pool_balances(&self) -> BTreeMap<ResourceAddress, Amount> {
-            let mut balances = BTreeMap::new();
+        pub fn get_pool_balances(&self) -> HashMap<ResourceAddress, Amount> {
+            let mut balances = HashMap::new();
 
             for (resource, vault) in &self.pools {
                 balances.insert(*resource, vault.balance());

@@ -108,17 +108,13 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst) -> Expr {
     let mut stmts = vec![];
     let func_name = &ast.name;
 
-    let error_num_args = format!(
-        "Call \"{}\" had unexpected number of args. Got = {{}} expected = {}",
-        func_name, expected_num_args
-    );
+    let error_num_args = format!("Call \"{}\" had unexpected number of args.", func_name);
 
     stmts.push(parse_quote! {
         assert_eq!(
             call_info.args.len(),
             #expected_num_args,
             #error_num_args,
-            call_info.args.len(),
         );
     });
 

@@ -3,6 +3,7 @@
 
 use tari_bor::BorError;
 use tari_engine_types::indexed_value::IndexedValueError;
+use tari_template_abi::version::WasmAbiVersion;
 use wasmer::{ExportError, InstantiationError, MemoryAccessError};
 
 use crate::runtime::RuntimeError;
@@ -61,12 +62,10 @@ pub enum WasmExecutionError {
     },
     #[error("Value visitor error: {0}")]
     ValueVisitorError(#[from] IndexedValueError),
-    #[error("Template version parsing error: {0}")]
-    TemplateVersionParsingError(#[from] semver::Error),
     #[error("Template version {template_version} is incompatible with current engine version {engine_version}")]
     TemplateVersionMismatch {
-        engine_version: String,
-        template_version: String,
+        engine_version: WasmAbiVersion,
+        template_version: WasmAbiVersion,
     },
     #[error("Function '{name}' expected {expected} arguments, but got {actual}")]
     InvalidArgumentCount {

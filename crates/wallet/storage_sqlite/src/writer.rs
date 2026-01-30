@@ -1609,7 +1609,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 authored_templates::author_public_key.eq(serialize_hex(model.author_public_key)),
                 authored_templates::address.eq(serialize_hex(model.address)),
                 authored_templates::name.eq(model.name),
-                authored_templates::tari_version.eq(model.tari_version),
+                authored_templates::abi_version.eq(i32::from(model.abi_version)),
                 authored_templates::functions.eq(serialize_json(&model.functions)?),
             ))
             .execute(self.connection())

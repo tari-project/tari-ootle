@@ -50,7 +50,7 @@ use tari_ootle_storage::{
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_sidechain::QuorumDecision;
-use tari_template_abi::ArgDef;
+use tari_template_abi::{version::WasmAbiVersion, ArgDef};
 use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,7 +88,7 @@ pub struct GetTemplateResponse {
 pub struct TemplateAbi {
     pub template_name: String,
     pub functions: Vec<FunctionDef>,
-    pub version: String,
+    pub version: WasmAbiVersion,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

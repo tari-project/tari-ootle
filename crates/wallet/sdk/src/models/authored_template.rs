@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Serialize};
-use tari_template_abi::{FunctionDef, TemplateDef};
+use tari_template_abi::{version::WasmAbiVersion, FunctionDef, TemplateDef};
 use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -10,7 +10,7 @@ pub struct AuthoredTemplateModel {
     pub author_public_key: RistrettoPublicKeyBytes,
     pub address: TemplateAddress,
     pub name: String,
-    pub tari_version: String,
+    pub abi_version: WasmAbiVersion,
     pub functions: Vec<FunctionDef>,
 }
 
@@ -24,7 +24,7 @@ impl AuthoredTemplateModel {
             author_public_key,
             address: template_address,
             name: template_def.template_name().to_string(),
-            tari_version: template_def.tari_version().to_string(),
+            abi_version: template_def.abi_version(),
             functions: template_def.functions().to_vec(),
         }
     }

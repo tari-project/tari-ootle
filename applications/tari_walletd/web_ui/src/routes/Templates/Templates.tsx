@@ -152,7 +152,7 @@ function Templates() {
                       <TableRow>
                         <TableCell>Address</TableCell>
                         <TableCell>Name</TableCell>
-                        <TableCell>Tari Version</TableCell>
+                        <TableCell>ABI Version</TableCell>
                         <TableCell></TableCell>
                       </TableRow>
                     </TableHead>
@@ -165,7 +165,7 @@ function Templates() {
                                 <CopyAddress address={`template_${template.address}`} />
                               </DataTableCell>
                               <DataTableCell>{template.name}</DataTableCell>
-                              <TableCell>{template.tari_version}</TableCell>
+                              <TableCell>{template.abi_version}</TableCell>
                               <TableCell>
                                 <AccordionIconButton
                                   aria-label="expand row"
@@ -210,11 +210,7 @@ function Templates() {
                                                 <TableRow key={index}>
                                                   <TableCell>{funcDef.name}</TableCell>
                                                   <TableCell>
-                                                    {funcDef.is_mut ? (
-                                                      <SlCheck size={25} color={"green"} />
-                                                    ) : (
-                                                      <SlClose size={25} color={"red"} />
-                                                    )}
+                                                    {funcDef.is_mut ? <SlCheck size={25} /> : <SlClose size={25} />}
                                                   </TableCell>
                                                   <TableCell>
                                                     {funcDef.arguments.length > 0 ? (

@@ -57,7 +57,7 @@ use tari_ootle_wallet_sdk::{
         WalletTransaction,
     },
 };
-use tari_template_abi::{FunctionDef, TemplateDef};
+use tari_template_abi::{version::WasmAbiVersion, FunctionDef, TemplateDef};
 use tari_template_lib::types::{
     confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
@@ -911,18 +911,18 @@ pub struct AuthoredTemplate {
     pub author_public_key: RistrettoPublicKeyBytes,
     pub address: TemplateAddress,
     pub name: String,
-    pub tari_version: String,
+    pub abi_version: WasmAbiVersion,
     pub functions: Vec<FunctionDef>,
 }
 
-impl From<&AuthoredTemplateModel> for AuthoredTemplate {
-    fn from(model: &AuthoredTemplateModel) -> Self {
+impl From<AuthoredTemplateModel> for AuthoredTemplate {
+    fn from(model: AuthoredTemplateModel) -> Self {
         AuthoredTemplate {
             author_public_key: model.author_public_key,
             address: model.address,
-            name: model.name.clone(),
-            tari_version: model.tari_version.clone(),
-            functions: model.functions.clone(),
+            name: model.name,
+            abi_version: model.abi_version,
+            functions: model.functions,
         }
     }
 }

@@ -10801,7 +10801,6 @@ dependencies = [
  "log",
  "ootle_byte_type",
  "rand 0.8.5",
- "semver",
  "serde",
  "tari_bor",
  "tari_common_types",

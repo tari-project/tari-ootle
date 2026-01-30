@@ -33,7 +33,7 @@ diesel::table! {
         author_public_key -> Text,
         address -> Text,
         name -> Text,
-        tari_version -> Text,
+        abi_version -> Integer,
         functions -> Text,
         created_at -> Timestamp,
         updated_at -> Timestamp,

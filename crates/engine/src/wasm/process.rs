@@ -47,7 +47,6 @@ use tari_template_lib::{
 };
 use wasmer::{imports, AsStoreMut, Function, FunctionEnv, FunctionEnvMut, Instance, Store, StoreMut, WasmPtr};
 
-use super::version::are_versions_compatible;
 use crate::{
     runtime::Runtime,
     traits::Invokable,
@@ -70,7 +69,7 @@ pub struct WasmProcess {
 
 impl WasmProcess {
     pub fn init(store: &mut Store, module: LoadedWasmTemplate, state: Runtime) -> Result<Self, WasmExecutionError> {
-        Self::validate_template_tari_version(module.template_def())?;
+        Self::validate_template_abi_version(module.template_def())?;
 
         let mut env = WasmEnv::new(state);
         let fn_env = FunctionEnv::new(store, env.clone());
@@ -294,17 +293,18 @@ impl WasmProcess {
     }
 
     /// Determine if the version of the template_lib crate in the WASM is valid.
-    /// This is just a placeholder that logs the result, as we don't manage version incompatibilities yet
-    pub fn validate_template_tari_version(template_def: &TemplateDef) -> Result<(), WasmExecutionError> {
-        let template_tari_version = template_def.tari_version();
+    pub fn validate_template_abi_version(template_def: &TemplateDef) -> Result<(), WasmExecutionError> {
+        let template_abi_ver = template_def.abi_version();
 
-        if are_versions_compatible(template_tari_version, version::MINIMUM_SUPPORTED_WASM_ABI_VERSION)? {
-            log::debug!(target: LOG_TARGET, "The WASM ABI version (\"{}\") is compatible with the one used in the engine", template_tari_version);
+        // Remove once minimum supported version is > 0
+        #[expect(clippy::absurd_extreme_comparisons)]
+        if template_abi_ver >= version::MINIMUM_SUPPORTED_WASM_ABI_VERSION {
+            log::debug!(target: LOG_TARGET, "The WASM ABI version (\"{}\") is compatible with the one used in the engine", template_abi_ver);
         } else {
-            log::error!(target: LOG_TARGET, "The WASM ABI version (\"{}\") is incompatible with the one used in the engine (\"{}\")", template_tari_version, version::MINIMUM_SUPPORTED_WASM_ABI_VERSION);
+            log::error!(target: LOG_TARGET, "The WASM ABI version (\"{}\") is incompatible with the one used in the engine (\"{}\")", template_abi_ver, version::MINIMUM_SUPPORTED_WASM_ABI_VERSION);
             return Err(WasmExecutionError::TemplateVersionMismatch {
-                engine_version: version::MINIMUM_SUPPORTED_WASM_ABI_VERSION.to_owned(),
-                template_version: template_tari_version.to_owned(),
+                engine_version: version::MINIMUM_SUPPORTED_WASM_ABI_VERSION,
+                template_version: template_abi_ver,
             });
         }
 

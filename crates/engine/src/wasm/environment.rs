@@ -48,6 +48,7 @@ pub struct WasmEnv<T> {
     memory: Option<Memory>,
     state: T,
     mem_alloc: Option<TypedFunction<u32, WasmPtr<u8>>>,
+    // mem_free: Option<TypedFunction<u32, ()>>,
     last_panic: Arc<Mutex<Option<String>>>,
     last_engine_error: Arc<Mutex<Option<RuntimeError>>>,
 }
@@ -58,6 +59,7 @@ impl<T> WasmEnv<T> {
             memory: None,
             state,
             mem_alloc: None,
+            // mem_free: None,
             last_panic: Arc::new(Mutex::new(None)),
             last_engine_error: Arc::new(Mutex::new(None)),
         }
@@ -75,6 +77,15 @@ impl<T> WasmEnv<T> {
 
         Ok(ptr)
     }
+
+    // pub(super) fn free<S: AsStoreMut>(&self, store: &mut S, ptr: WasmPtr<u8>) -> Result<(), WasmExecutionError> {
+    //     let mem_free = self
+    //         .mem_free
+    //         .as_ref()
+    //         .ok_or_else(|| WasmExecutionError::MissingAbiFunction { function: "tari_free" })?;
+    //     mem_free.call(store, ptr.offset())?;
+    //     Ok(())
+    // }
 
     fn last_panic_mut(&self) -> MutexGuard<'_, Option<String>> {
         self.last_panic.lock().expect("last_panic poisoned")
@@ -244,8 +255,13 @@ impl<T> WasmEnv<T> {
         self
     }
 
-    pub fn set_alloc_funcs(&mut self, mem_alloc: TypedFunction<u32, WasmPtr<u8>>) -> &mut Self {
+    pub fn set_alloc_funcs(
+        &mut self,
+        mem_alloc: TypedFunction<u32, WasmPtr<u8>>,
+        // mem_free: TypedFunction<u32, ()>,
+    ) -> &mut Self {
         self.mem_alloc = Some(mem_alloc);
+        // self.mem_free = Some(mem_free);
         self
     }
 }

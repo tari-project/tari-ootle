@@ -54,13 +54,14 @@ pub fn generate_dispatcher(ast: &TemplateAst) -> Result<TokenStream> {
                 panic!("call_info is null");
             }
 
-            let call_data = unsafe { rust::vec::Vec::from_raw_parts(call_info, call_info_len as usize, call_info_len as usize) };
-            let call_info: CallInfo = decode_exact(&call_data).expect("Failed to decode CallArgs");
+            let call_info = unsafe { rust::vec::Vec::from_raw_parts(call_info, call_info_len as usize, call_info_len as usize) };
+            let mut call_info = CallInfo::v1_packed_reader(&call_info);
+            let call_header = call_info.decode_header();
 
             let result;
-            match call_info.func {
+            match call_header.func {
                 #( #function_idents => #function_blocks ),*,
-                _ => panic!("invalid function ident {}", call_info.func),
+                _ => panic!("invalid function ident {}", call_header.func),
             };
 
             wrap_ptr(result)
@@ -104,19 +105,8 @@ fn get_function_blocks(ast: &TemplateAst) -> impl Iterator<Item = Expr> + '_ {
 fn get_function_block(template_ident: &Ident, ast: &FunctionAst) -> Expr {
     let template_mod_name = format_ident!("{}_template", template_ident);
     let mut args: Vec<Expr> = vec![];
-    let expected_num_args = ast.input_types.len();
     let mut stmts = vec![];
     let func_name = &ast.name;
-
-    let error_num_args = format!("Call \"{}\" had unexpected number of args.", func_name);
-
-    stmts.push(parse_quote! {
-        assert_eq!(
-            call_info.args.len(),
-            #expected_num_args,
-            #error_num_args,
-        );
-    });
 
     let error_failed_decode_component =
         format!("failed to decode component instance for function '{}': {{}}", func_name);
@@ -141,17 +131,18 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst) -> Expr {
                     args.push(parse_quote! { &state });
                 }
                 stmts.extend([
-                        parse_quote! {
-                            let component_address = from_value::<::tari_template_lib::types::ComponentAddress>(&call_info.args[#i])
-                                .unwrap_or_else(|e| panic!(#error_failed_decode_component, e));
-                        },
-                        parse_quote! {
-                            let component_manager = engine().component_manager(component_address);
-                        },
-                        parse_quote! {
-                            let mut state = component_manager.get_state::<#template_mod_name::#template_ident>();
-                        },
-                    ]);
+                    parse_quote! { let next_arg = call_info.next_arg_unchecked(); },
+                    parse_quote! {
+                        let component_address = decode_exact::<::tari_template_lib::types::ComponentAddress>(next_arg)
+                            .unwrap_or_else(|e| panic!(#error_failed_decode_component, e));
+                    },
+                    parse_quote! {
+                        let component_manager = engine().component_manager(component_address);
+                    },
+                    parse_quote! {
+                        let mut state = component_manager.get_state::<#template_mod_name::#template_ident>();
+                    },
+                ]);
             },
             // non-self argument
             TypeAst::Typed { type_path, .. } => {
@@ -161,24 +152,28 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst) -> Expr {
                 );
                 if i == 0 && ast.is_migration {
                     stmts.extend([
-                            parse_quote! {
-                                let component_address = from_value::<::tari_template_lib::types::ComponentAddress>(&call_info.args[0])
-                                    .unwrap_or_else(|e| panic!(#error_failed_decode_component, e));
-                            },
-                            parse_quote! {
-                                let component_manager = engine().component_manager(component_address);
-                            },
-                            parse_quote! {
-                                let old_state = component_manager.get_state::<#type_path>();
-                            },
-                        ]);
+                        parse_quote! { let next_arg = call_info.next_arg_unchecked(); },
+                        parse_quote! {
+                            let component_address = decode_exact::<::tari_template_lib::types::ComponentAddress>(next_arg)
+                                .unwrap_or_else(|e| panic!(#error_failed_decode_component, e));
+                        },
+                        parse_quote! {
+                            let component_manager = engine().component_manager(component_address);
+                        },
+                        parse_quote! {
+                            let old_state = component_manager.get_state::<#type_path>();
+                        },
+                    ]);
                     args.push(parse_quote! { old_state });
                 } else {
                     args.push(parse_quote! { #arg_ident });
-                    stmts.push(parse_quote! {
-                        let #arg_ident = from_value::<#type_path>(&call_info.args[#i])
-                            .unwrap_or_else(|e| panic!(#error_failed_decode_arg, e));
-                    })
+                    stmts.extend([
+                        parse_quote! { let next_arg = call_info.next_arg_unchecked(); },
+                        parse_quote! {
+                            let #arg_ident = decode_exact::<#type_path>(next_arg)
+                                .unwrap_or_else(|e| panic!(#error_failed_decode_arg, e));
+                        },
+                    ]);
                 }
             },
             TypeAst::Tuple { type_tuple, .. } => {
@@ -189,10 +184,13 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst) -> Expr {
                     func_name
                 );
                 args.push(parse_quote! { #arg_ident });
-                stmts.push(parse_quote! {
-                    let #arg_ident = from_value::<#type_tuple>(&call_info.args[#i])
-                        .unwrap_or_else(|e| panic!(#error_failed_decode_arg, e));
-                });
+                stmts.extend([
+                    parse_quote! { let next_arg = call_info.next_arg_unchecked(); },
+                    parse_quote! {
+                        let #arg_ident = decode_exact::<#type_tuple>(next_arg)
+                            .unwrap_or_else(|e| panic!(#error_failed_decode_arg, e));
+                    },
+                ]);
             },
         }
     }

@@ -15,6 +15,7 @@ use std::fmt;
 mod tag;
 pub use tag::*;
 
+mod byte_counter;
 mod error;
 #[cfg(all(feature = "std", feature = "json_encoding"))]
 pub mod json_encoding;
@@ -27,13 +28,30 @@ pub use error::BorError;
 pub use serde::{self, de::DeserializeOwned, Deserialize, Serialize};
 pub use walker::*;
 
+pub use crate::byte_counter::ByteCounter;
+
 pub fn encode_with_len<T: Serialize>(val: &T) -> Vec<u8> {
     let mut buf = Vec::with_capacity(512);
     encode_with_len_to_writer(&mut buf, val).expect("Vec<u8> Write impl is infallible");
     buf
 }
 
-pub fn encode_with_len_to_writer<T, W>(mut writer: W, val: &T) -> Result<(), BorError>
+#[cfg(feature = "std")]
+pub fn encode_with_len_to_writer<T, W>(writer: &mut W, val: &T) -> Result<(), BorError>
+where
+    T: Serialize,
+    W: std::io::Write,
+{
+    let len = encoded_len(val)?;
+    writer
+        .write_all(&(len as u32).to_le_bytes())
+        .map_err(|e| BorError::new(format!("{e:?}")))?;
+    encode_into_writer(val, writer)?;
+    Ok(())
+}
+
+#[cfg(not(feature = "std"))]
+pub fn encode_with_len_to_writer<T, W>(writer: &mut W, val: &T) -> Result<(), BorError>
 where
     T: Serialize,
     W: Write,
@@ -47,25 +65,17 @@ where
     Ok(())
 }
 
-#[cfg(not(feature = "std"))]
-pub fn encode_into<T, W>(val: &T, writer: &mut W) -> Result<(), BorError>
+#[cfg(feature = "std")]
+pub fn encode_into_writer<T, W>(val: &T, writer: &mut W) -> Result<(), BorError>
 where
-    W::Error: core::fmt::Debug,
     T: Serialize + ?Sized,
-    W: ciborium_io::Write,
+    W: std::io::Write,
 {
     into_writer(&val, writer).map_err(to_bor_error)
 }
 
-#[cfg(feature = "std")]
-pub fn encode_into_std_writer<T: Serialize + ?Sized, W: std::io::Write>(
-    val: &T,
-    writer: &mut W,
-) -> Result<(), BorError> {
-    into_writer(&val, writer).map_err(to_bor_error)
-}
-
-pub fn encode_into_writer<T, W>(val: &T, writer: W) -> Result<(), BorError>
+#[cfg(not(feature = "std"))]
+pub fn encode_into_writer<T, W>(val: &T, writer: &mut W) -> Result<(), BorError>
 where
     T: Serialize + ?Sized,
     W: Write,
@@ -145,48 +155,4 @@ pub fn decode_len(input: &[u8]) -> Result<usize, BorError> {
 fn to_bor_error<E>(e: E) -> BorError
 where E: fmt::Display {
     BorError::new(e.to_string())
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct ByteCounter {
-    count: usize,
-    limit: Option<usize>,
-}
-
-impl ByteCounter {
-    pub fn new() -> Self {
-        Default::default()
-    }
-
-    pub fn with_limit(limit: usize) -> Self {
-        Self {
-            count: 0,
-            limit: Some(limit),
-        }
-    }
-
-    pub fn get(&self) -> usize {
-        self.count
-    }
-}
-
-#[derive(Debug)]
-pub struct ByteCounterError;
-
-impl Write for &mut ByteCounter {
-    type Error = ByteCounterError;
-
-    fn write_all(&mut self, data: &[u8]) -> Result<(), Self::Error> {
-        self.count = self.count.checked_add(data.len()).ok_or(ByteCounterError)?;
-        if let Some(limit) = self.limit {
-            if self.count > limit {
-                return Err(ByteCounterError);
-            }
-        }
-        Ok(())
-    }
-
-    fn flush(&mut self) -> Result<(), Self::Error> {
-        Ok(())
-    }
 }

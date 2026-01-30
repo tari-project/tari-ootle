@@ -304,7 +304,10 @@ impl SubstateId {
     }
 
     pub fn is_read_only(&self) -> bool {
-        matches!(self, Self::TransactionReceipt(_) | Self::Template(_)) || {
+        matches!(
+            self,
+            Self::TransactionReceipt(_) | Self::Template(_) | Self::ClaimedOutputTombstone(_)
+        ) || {
             let addr = self.as_resource_address();
             addr == Some(STEALTH_TARI_RESOURCE_ADDRESS) || addr == Some(PUBLIC_IDENTITY_RESOURCE_ADDRESS)
         }

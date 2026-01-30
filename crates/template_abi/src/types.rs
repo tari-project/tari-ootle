@@ -22,7 +22,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::rust::{boxed::Box, ops, string::String, vec::Vec};
+use crate::{
+    rust::{boxed::Box, ops, string::String, vec::Vec},
+    version::WasmAbiVersion,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -37,9 +40,9 @@ impl TemplateDef {
         }
     }
 
-    pub fn tari_version(&self) -> &str {
+    pub fn abi_version(&self) -> u16 {
         match self {
-            TemplateDef::V1(def) => def.tari_version.as_str(),
+            TemplateDef::V1(def) => def.abi_version,
         }
     }
 
@@ -60,7 +63,7 @@ impl TemplateDef {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TemplateDefV1 {
     pub template_name: String,
-    pub tari_version: String,
+    pub abi_version: WasmAbiVersion,
     pub functions: Vec<FunctionDef>,
 }
 

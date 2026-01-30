@@ -45,7 +45,7 @@ pub async fn handle_list_owned(
             .template_api()
             .list_authored_templates(&req.author_public_key, req.page, req.page_size)?;
     Ok(TemplatesListAuthoredResponse {
-        templates: templates.iter().map(AuthoredTemplate::from).collect(),
+        templates: templates.into_iter().map(AuthoredTemplate::from).collect(),
         total_templates,
     })
 }

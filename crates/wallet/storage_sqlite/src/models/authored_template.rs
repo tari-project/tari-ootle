@@ -16,7 +16,7 @@ pub struct AuthoredTemplate {
     pub author_public_key: String,
     pub address: String,
     pub name: String,
-    pub tari_version: String,
+    pub abi_version: i32,
     pub functions: String,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
@@ -30,7 +30,14 @@ impl TryFrom<&AuthoredTemplate> for AuthoredTemplateModel {
             author_public_key: deserialize_hex_try_from(&template.author_public_key)?,
             address: deserialize_hex_try_from(template.address.as_str())?,
             name: template.name.clone(),
-            tari_version: template.tari_version.clone(),
+            abi_version: template
+                .abi_version
+                .try_into()
+                .map_err(|e| WalletStorageError::EncodingError {
+                    operation: "AuthoredTemplateModel::try_from",
+                    item: "abi_version",
+                    details: format!("Failed to convert abi_version: {}", e),
+                })?,
             functions: deserialize_json(template.functions.as_str())?,
         })
     }

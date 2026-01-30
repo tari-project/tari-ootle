@@ -90,7 +90,7 @@ impl WasmModule {
         let template = env.load_template_def(&mut store, &instance)?;
         let main_fn = format!("{}_main", template.template_name());
 
-        WasmProcess::validate_template_tari_version(&template)?;
+        WasmProcess::validate_template_abi_version(&template)?;
         validate_instance(&mut store, &instance, &main_fn)?;
         validate_functions(&template)?;
 

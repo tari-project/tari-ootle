@@ -220,7 +220,7 @@ CREATE TABLE authored_templates
     author_public_key TEXT     NOT NULL,
     address           TEXT     NOT NULL,
     name              TEXT     NOT NULL,
-    tari_version      TEXT     NOT NULL,
+    abi_version       INTEGER  NOT NULL,
     functions         TEXT     NOT NULL,
     created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP

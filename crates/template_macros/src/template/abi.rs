@@ -40,7 +40,7 @@ pub fn generate_abi(ast: &TemplateAst) -> Result<TokenStream> {
 
     let template_def = TemplateDef::V1(TemplateDefV1 {
         template_name: template_name_as_str.clone(),
-        tari_version: version::LATEST_TEMPLATE_VERSION.to_owned(),
+        abi_version: version::LATEST_TEMPLATE_VERSION,
         functions: ast
             .get_functions()
             .map(|func| {

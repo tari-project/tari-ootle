@@ -7,6 +7,6 @@ export type AuthoredTemplate = {
   author_public_key: RistrettoPublicKeyBytes;
   address: Hash;
   name: string;
-  tari_version: string;
+  abi_version: number;
   functions: Array<FunctionDef>;
 };

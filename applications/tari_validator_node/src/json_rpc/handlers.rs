@@ -475,7 +475,7 @@ impl JsonRpcHandlers {
                     is_mut: f.is_mut,
                 })
                 .collect(),
-            version: loaded.template_def().tari_version().to_string(),
+            version: loaded.template_def().abi_version(),
         };
 
         Ok(JsonRpcResponse::success(answer_id, GetTemplateResponse {

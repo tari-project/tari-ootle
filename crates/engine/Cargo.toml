@@ -24,7 +24,6 @@ blake2 = { workspace = true }
 log = { workspace = true, features = ["std"] }
 rand = { workspace = true }
 indexmap = { workspace = true }
-semver = { workspace = true }
 serde = { workspace = true, default-features = true }
 thiserror = { workspace = true }
 wasmer = { workspace = true, features = ["cranelift"] }

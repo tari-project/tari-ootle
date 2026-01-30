@@ -36,3 +36,10 @@ impl From<ciborium::value::Error> for BorError {
         Self(value.to_string())
     }
 }
+
+#[cfg(feature = "std")]
+impl From<std::io::Error> for BorError {
+    fn from(value: std::io::Error) -> Self {
+        Self(value.to_string())
+    }
+}

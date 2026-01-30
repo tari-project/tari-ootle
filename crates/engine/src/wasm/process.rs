@@ -22,9 +22,9 @@
 
 use log::*;
 use serde::{de::DeserializeOwned, Serialize};
-use tari_bor::{decode_exact, encode_into_writer, encode_with_len_to_writer, encoded_len, encoded_len_with_limit};
+use tari_bor::{decode_exact, encode_with_len_to_writer, encoded_len, ByteCounter};
 use tari_engine_types::{indexed_value::IndexedValue, instruction_result::InstructionResult, limits};
-use tari_template_abi::{version, CallInfoRef, EngineOp, FunctionDef, TemplateDef};
+use tari_template_abi::{func_hasher::hash_function_name, version, CallInfo, EngineOp, FunctionDef, TemplateDef};
 use tari_template_lib::{
     args::{
         AddressAllocationInvokeArg,
@@ -54,6 +54,7 @@ use crate::{
     wasm::{
         environment::{AllocPtr, WasmEnv},
         error::WasmExecutionError,
+        mem_writer::MemWriter,
         module::MainFunction,
         LoadedWasmTemplate,
     },
@@ -85,6 +86,7 @@ impl WasmProcess {
         let instance = Instance::new(store, module.wasm_module(), &imports)?;
         let memory = instance.exports.get_memory("memory")?.clone();
         let mem_alloc = instance.exports.get_typed_function(store, "tari_alloc")?;
+        // let mem_free = instance.exports.get_typed_function(store, "tari_free")?;
         fn_env
             .as_mut(store)
             .set_memory(memory.clone())
@@ -96,24 +98,29 @@ impl WasmProcess {
         Ok(Self { module, env, instance })
     }
 
-    fn alloc_and_write<T: Serialize, S: AsStoreMut>(
+    fn with_alloc_and_mem_writer<S, F, R>(
         &self,
         store: &mut S,
-        val: &T,
-    ) -> Result<AllocPtr, WasmExecutionError> {
-        let len = encoded_len_with_limit(val, limits::ENGINE_LIMITS.max_call_size).map_err(|_| {
-            WasmExecutionError::CallSizeLimitExceeded {
+        alloc_size: usize,
+        callback: F,
+    ) -> Result<AllocPtr, WasmExecutionError>
+    where
+        S: AsStoreMut,
+        F: for<'m> Fn(&'m mut MemWriter<'_>) -> Result<R, WasmExecutionError>,
+    {
+        if alloc_size > limits::ENGINE_LIMITS.max_call_size {
+            return Err(WasmExecutionError::CallSizeLimitExceeded {
                 limit: limits::ENGINE_LIMITS.max_call_size,
-            }
-        })?;
-        let len = u32::try_from(len).map_err(|_| WasmExecutionError::MemoryAllocationTooLarge)?;
+            });
+        }
+        let len = u32::try_from(alloc_size).map_err(|_| WasmExecutionError::MemoryAllocationTooLarge)?;
 
         let ptr = self.env.alloc(store, len)?;
         if ptr.is_null() {
             return Err(WasmExecutionError::MemoryAllocationFailed);
         }
         let mut writer = self.env.memory_writer(store, ptr)?;
-        encode_into_writer(val, &mut writer)?;
+        callback(&mut writer)?;
 
         Ok(AllocPtr::new(ptr.offset(), len))
     }
@@ -314,72 +321,66 @@ impl Invokable<Store> for WasmProcess {
         func_def: &FunctionDef,
         args: &[tari_bor::Value],
     ) -> Result<InstructionResult, Self::Error> {
-        let call_info = CallInfoRef {
-            func_name: &func_def.name,
-            args,
-        };
-
         let main_name = format!("{}_main", self.module.template_name());
         let func: MainFunction = self.instance.exports.get_typed_function(store, &main_name)?;
+        if func_def.arguments.len() != args.len() {
+            return Err(WasmExecutionError::InvalidArgumentCount {
+                name: func_def.name.clone(),
+                expected: func_def.arguments.len(),
+                actual: args.len(),
+            });
+        }
 
-        let call_info_ptr = self.alloc_and_write(store, &call_info)?;
+        let func_ident = hash_function_name(&func_def.name);
+        let mut counter = ByteCounter::new();
+        CallInfo::encode_v1_packed(&mut counter, func_ident, args)?;
+        let call_info_size = counter.get();
+        let call_info_ptr = self.with_alloc_and_mem_writer(store, call_info_size, |mem_writer| {
+            CallInfo::encode_v1_packed(mem_writer, func_ident, args)?;
+            Ok(())
+        })?;
+
+        // Call the contract entrypoint
         let res = func.call(store, call_info_ptr.as_wasm_ptr(), call_info_ptr.len());
-        // No need to free since the exported function should free the memory by dropping it at the end - however, if it
-        // does not the memory will be freed once the VM is destructed
-        // self.env.as_ref(store).free(store, call_info_ptr)?;
 
-        let ptr = match res {
-            Ok(res) => res,
+        match res {
+            Ok(return_ptr) => {
+                // Read response from memory
+                // SAFETY: WasmProcess is not used concurrently
+                let value = unsafe {
+                    self.env
+                        .with_memory_with_embedded_len(store, return_ptr.offset(), IndexedValue::from_raw)??
+                };
+
+                // Free allocated memory results in an unreachable error. The memory is cleaned up when the template
+                // instance is dropped. TODO: investigate
+                // self.env.free(store, return_ptr)?;
+
+                self.env.state().interface().validate_return_value(&value)?;
+                self.env
+                    .state_mut()
+                    .interface_mut()
+                    .set_last_instruction_output(value.clone())?;
+
+                Ok(InstructionResult {
+                    indexed: value,
+                    return_type: func_def.output.clone(),
+                })
+            },
             Err(err) => {
                 if let Some(err) = self.env.take_last_engine_error() {
                     return Err(WasmExecutionError::RuntimeError(err));
                 }
-                if let Some(mut message) = self.env.take_last_panic_message() {
-                    if message.len() > limits::ENGINE_LIMITS.max_panic_message_size {
-                        let limit = limits::ENGINE_LIMITS.max_panic_message_size;
-                        let mut end = limit;
-                        // Ensure we truncate at a char boundary (to avoid a panic when calling truncate)
-                        while end > 0 && !message.is_char_boundary(end) {
-                            end -= 1;
-                        }
-                        message.truncate(end);
-                        error!(target: LOG_TARGET, "Panic message size limit exceeded: for panic {}", message);
-                        return Err(WasmExecutionError::Panic {
-                            message: format!(
-                                "Panic message size limit of {} bytes exceeded",
-                                limits::ENGINE_LIMITS.max_panic_message_size
-                            ),
-                            runtime_error: err,
-                        });
-                    }
-
+                if let Some(message) = self.env.take_last_panic_message() {
                     return Err(WasmExecutionError::Panic {
                         message,
                         runtime_error: err,
                     });
                 }
                 error!(target: LOG_TARGET, "Error calling function: {}", err);
-                return Err(err.into());
+                Err(err.into())
             },
-        };
-
-        // Read response from memory
-        // SAFETY: WasmProcess is not used concurrently
-        let value = unsafe {
-            self.env
-                .with_memory_with_embedded_len(store, ptr.offset(), IndexedValue::from_raw)??
-        };
-
-        self.env.state().interface().validate_return_value(&value)?;
-        self.env
-            .state_mut()
-            .interface_mut()
-            .set_last_instruction_output(value.clone())?;
-
-        Ok(InstructionResult {
-            indexed: value,
-            return_type: func_def.output.clone(),
-        })
+        }
     }
 }
 
@@ -410,10 +411,26 @@ fn on_panic_handler<T: Send + 'static>(
     // SAFETY: There is no way to call this function concurrently
     unsafe {
         state
-            .with_memory_slice(&mut store, msg_ptr, msg_len as u32, |msg| {
-                let msg = String::from_utf8_lossy(msg);
-                log::error!(target: WASM_DEBUG_LOG_TARGET, "📣 PANIC: ({}:{}) {}", line, col, msg);
-                state.set_last_panic(msg.to_string());
+            .with_memory_slice(&mut store, msg_ptr, msg_len as u32, |msg_bytes| {
+                if msg_bytes.len() > limits::ENGINE_LIMITS.max_panic_message_size {
+                    let Ok(msg) = str::from_utf8(msg_bytes) else {
+                        error!(target: WASM_DEBUG_LOG_TARGET, "📣 PANIC: ({}:{}) <invalid utf8 message>", line, col);
+                        return;
+                    };
+                    log::error!(target: WASM_DEBUG_LOG_TARGET, "📣 PANIC: ({}:{}) {}", line, col, msg);
+                    let limit = limits::ENGINE_LIMITS.max_panic_message_size;
+                    let mut end = limit;
+                    // Ensure we truncate at a char boundary (to avoid a panic when calling truncate)
+                    while end > 0 && !msg.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    error!(target: LOG_TARGET, "Panic message size limit exceeded: for panic {}", msg);
+                    state.set_last_panic(msg[..end].to_string());
+                } else {
+                    let msg = String::from_utf8_lossy(msg_bytes);
+                    log::error!(target: WASM_DEBUG_LOG_TARGET, "📣 PANIC: ({}:{}) {}", line, col, msg);
+                    state.set_last_panic(msg.into_owned());
+                }
             })
             .unwrap_or_else(|err| {
                 log::error!(

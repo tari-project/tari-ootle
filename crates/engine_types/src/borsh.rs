@@ -7,5 +7,5 @@ pub(crate) fn serialize_cbor_value<W: borsh::io::Write>(
     obj: &tari_bor::Value,
     writer: &mut W,
 ) -> Result<(), borsh::io::Error> {
-    tari_bor::encode_into_std_writer(obj, writer).map_err(borsh::io::Error::other)
+    tari_bor::encode_into_writer(obj, writer).map_err(borsh::io::Error::other)
 }

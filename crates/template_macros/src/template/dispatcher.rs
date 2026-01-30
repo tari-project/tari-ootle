@@ -20,15 +20,18 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::collections::HashMap;
+
 use proc_macro2::{Ident, Span, TokenStream};
-use quote::{format_ident, quote};
+use quote::{format_ident, quote, ToTokens};
 use syn::{parse_quote, token::Brace, Block, Expr, ExprBlock, ExprField, Result, Stmt, TypePath, TypeTuple};
+use tari_template_abi::{func_hasher::hash_function_name, FunctionIdent};
 
 use crate::template::ast::{FunctionAst, TemplateAst, TypeAst};
 
 pub fn generate_dispatcher(ast: &TemplateAst) -> Result<TokenStream> {
     let dispatcher_function_name = format_ident!("{}_main", ast.template_name);
-    let function_names = get_function_names(ast);
+    let function_idents = get_function_idents(ast)?;
     let function_blocks = get_function_blocks(ast);
     let uses = &ast.uses;
 
@@ -51,13 +54,14 @@ pub fn generate_dispatcher(ast: &TemplateAst) -> Result<TokenStream> {
                 panic!("call_info is null");
             }
 
-            let call_data = unsafe { rust::vec::Vec::from_raw_parts(call_info, call_info_len as usize, call_info_len as usize) };
-            let call_info: CallInfo = decode_exact(&call_data).expect("Failed to decode CallArgs");
+            let call_info = unsafe { rust::vec::Vec::from_raw_parts(call_info, call_info_len as usize, call_info_len as usize) };
+            let mut call_info = CallInfo::v1_packed_reader(&call_info);
+            let call_header = call_info.decode_header();
 
             let result;
-            match call_info.func_name.as_str() {
-                #( #function_names => #function_blocks ),*,
-                _ => panic!("invalid function name")
+            match call_header.func {
+                #( #function_idents => #function_blocks ),*,
+                _ => panic!("invalid function ident {}", call_header.func),
             };
 
             wrap_ptr(result)
@@ -67,8 +71,29 @@ pub fn generate_dispatcher(ast: &TemplateAst) -> Result<TokenStream> {
     Ok(output)
 }
 
-fn get_function_names(ast: &TemplateAst) -> impl Iterator<Item = &str> + '_ {
-    ast.get_functions().map(|f| f.name.as_str())
+fn get_function_idents(ast: &TemplateAst) -> Result<impl Iterator<Item = FunctionIdent> + '_> {
+    let mut collisions = HashMap::with_capacity(ast.functions.len());
+    // Collect the idents to preserve order
+    let mut idents = Vec::with_capacity(ast.functions.len());
+    for f in ast.get_functions() {
+        let ident = hash_function_name(&f.name);
+        idents.push(ident);
+        if let Some(other) = collisions.insert(ident, &f.name) {
+            // NOTE: if a user has the maximum permitted functions (8192) the chance of collision is ~0.778% (<8 in
+            // 1000) (birthday problem: p(k) = 1 - exp(-k(k-1)/2N) where k is the number of hashes).
+            // Moreover, This check is not strictly necessary as the dispatcher will fail to compile due to duplicate
+            // match arms. This is to provide a clearer error message to the user.
+            return Err(syn::Error::new(
+                Span::call_site(),
+                format!(
+                    "Function name hash collision detected between '{}' and '{}' (hash = {}). Please rename one of \
+                     these functions to avoid the collision.",
+                    other, f.name, ident
+                ),
+            ));
+        }
+    }
+    Ok(idents.into_iter())
 }
 
 fn get_function_blocks(ast: &TemplateAst) -> impl Iterator<Item = Expr> + '_ {
@@ -80,19 +105,12 @@ fn get_function_blocks(ast: &TemplateAst) -> impl Iterator<Item = Expr> + '_ {
 fn get_function_block(template_ident: &Ident, ast: &FunctionAst) -> Expr {
     let template_mod_name = format_ident!("{}_template", template_ident);
     let mut args: Vec<Expr> = vec![];
-    let expected_num_args = ast.input_types.len();
     let mut stmts = vec![];
-    stmts.push(parse_quote! {
-        assert_eq!(
-            call_info.args.len(),
-            #expected_num_args,
-            "Call \"{}\" had unexpected number of args. Got = {} expected = {}",
-            call_info.func_name,
-            call_info.args.len(),
-            #expected_num_args,
-        );
-    });
     let func_name = &ast.name;
+
+    let error_failed_decode_component =
+        format!("failed to decode component instance for function '{}': {{}}", func_name);
+
     let mut is_mutable_call = false;
 
     // encode all arguments of the functions
@@ -113,48 +131,66 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst) -> Expr {
                     args.push(parse_quote! { &state });
                 }
                 stmts.extend([
+                    parse_quote! { let next_arg = call_info.next_arg_unchecked(); },
+                    parse_quote! {
+                        let component_address = decode_exact::<::tari_template_lib::types::ComponentAddress>(next_arg)
+                            .unwrap_or_else(|e| panic!(#error_failed_decode_component, e));
+                    },
+                    parse_quote! {
+                        let component_manager = engine().component_manager(component_address);
+                    },
+                    parse_quote! {
+                        let mut state = component_manager.get_state::<#template_mod_name::#template_ident>();
+                    },
+                ]);
+            },
+            // non-self argument
+            TypeAst::Typed { type_path, .. } => {
+                let error_failed_decode_arg = format!(
+                    "failed to decode argument at position {i} ({}) for function '{func_name}': {{}}",
+                    type_path.to_token_stream(),
+                );
+                if i == 0 && ast.is_migration {
+                    stmts.extend([
+                        parse_quote! { let next_arg = call_info.next_arg_unchecked(); },
                         parse_quote! {
-                            let component_address = from_value::<::tari_template_lib::types::ComponentAddress>(&call_info.args[#i])
-                                .unwrap_or_else(|e| panic!("failed to decode component instance for function '{}': {}",  #func_name, e));
+                            let component_address = decode_exact::<::tari_template_lib::types::ComponentAddress>(next_arg)
+                                .unwrap_or_else(|e| panic!(#error_failed_decode_component, e));
                         },
                         parse_quote! {
                             let component_manager = engine().component_manager(component_address);
                         },
                         parse_quote! {
-                            let mut state = component_manager.get_state::<#template_mod_name::#template_ident>();
+                            let old_state = component_manager.get_state::<#type_path>();
                         },
                     ]);
-            },
-            // non-self argument
-            TypeAst::Typed { type_path, .. } => {
-                if i == 0 && ast.is_migration {
-                    stmts.extend([
-                            parse_quote! {
-                                let component_address = from_value::<::tari_template_lib::types::ComponentAddress>(&call_info.args[0])
-                                    .unwrap_or_else(|e| panic!("failed to decode component instance for function '{}': {}",  #func_name, e));
-                            },
-                            parse_quote! {
-                                let component_manager = engine().component_manager(component_address);
-                            },
-                            parse_quote! {
-                                let old_state = component_manager.get_state::<#type_path>();
-                            },
-                        ]);
                     args.push(parse_quote! { old_state });
                 } else {
                     args.push(parse_quote! { #arg_ident });
-                    stmts.push(parse_quote! {
-                            let #arg_ident = from_value::<#type_path>(&call_info.args[#i])
-                                .unwrap_or_else(|e| panic!("failed to decode argument at position {} ({}) for function '{}': {}", #i, rust::any::type_name::<#type_path>(), #func_name, e));
-                        })
+                    stmts.extend([
+                        parse_quote! { let next_arg = call_info.next_arg_unchecked(); },
+                        parse_quote! {
+                            let #arg_ident = decode_exact::<#type_path>(next_arg)
+                                .unwrap_or_else(|e| panic!(#error_failed_decode_arg, e));
+                        },
+                    ]);
                 }
             },
             TypeAst::Tuple { type_tuple, .. } => {
+                let error_failed_decode_arg = format!(
+                    "failed to decode tuple argument at position {} ({}) for function '{}': {{}}",
+                    i,
+                    type_tuple.to_token_stream(),
+                    func_name
+                );
                 args.push(parse_quote! { #arg_ident });
-                stmts.push(parse_quote! {
-                        let #arg_ident = from_value::<#type_tuple>(&call_info.args[#i])
-                            .unwrap_or_else(|e| panic!("failed to decode tuple argument at position {} for function '{}': {}", #i, #func_name, e));
-                    });
+                stmts.extend([
+                    parse_quote! { let next_arg = call_info.next_arg_unchecked(); },
+                    parse_quote! {
+                        let #arg_ident = decode_exact::<#type_tuple>(next_arg)
+                            .unwrap_or_else(|e| panic!(#error_failed_decode_arg, e));
+                    },
+                ]);
             },
         }
     }

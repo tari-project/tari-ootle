@@ -404,8 +404,8 @@ mod errors {
             RejectReason::ExecutionFailure(message) => {
                 assert!(
                     message.contains(
-                        "Panic! failed to decode argument at position 0 \
-                         (tari_template_lib_types::amount::amount::Amount) for function 'please_pass_invalid_args':"
+                        "Panic! failed to decode argument at position 0 (Amount) for function \
+                         'please_pass_invalid_args':"
                     ),
                     "Got a different error: {}",
                     message

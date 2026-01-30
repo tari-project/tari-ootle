@@ -167,7 +167,7 @@ mod tests {
     fn serialize_deserialize() {
         let hash = Hash64::default();
         let mut buf = Vec::new();
-        tari_bor::encode_into_std_writer(&hash, &mut buf).unwrap();
+        tari_bor::encode_into_writer(&hash, &mut buf).unwrap();
         let val = tari_bor::to_value(&hash).unwrap();
         assert_eq!(val, tari_bor::Value::Bytes(vec![0u8; Hash64::LENGTH]));
         let hash2 = tari_bor::decode(&buf).unwrap();

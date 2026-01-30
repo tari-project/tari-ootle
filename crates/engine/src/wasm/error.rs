@@ -68,6 +68,12 @@ pub enum WasmExecutionError {
         engine_version: String,
         template_version: String,
     },
+    #[error("Function '{name}' expected {expected} arguments, but got {actual}")]
+    InvalidArgumentCount {
+        name: String,
+        expected: usize,
+        actual: usize,
+    },
     #[error("Wasm validation error: {0}")]
     WasmValidationError(#[from] WasmValidationError),
 }

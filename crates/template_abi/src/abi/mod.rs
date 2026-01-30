@@ -73,7 +73,7 @@ pub fn call_debug<T: AsRef<[u8]>>(data: T) {
     unsafe { debug(ptr, len) }
 }
 
-/// Allocates a block of memory of length `len` bytes.
+/// Allocates a length-prefixed block of memory of length `len` + 4 bytes.
 #[no_mangle]
 pub extern "C" fn tari_alloc(len: u32) -> *mut u8 {
     let cap = (len + 4) as usize;
@@ -89,7 +89,7 @@ pub extern "C" fn tari_alloc(len: u32) -> *mut u8 {
 // This is currently not needed as every engine alloc should be freed by the WASM template.
 // Note there is no appropriate way to force this behaviour but since WASM is already sandboxed, any leaked memory is
 // released after execution in any case.
-//
+
 // /// Frees a block of memory allocated by `tari_alloc`.
 // ///
 // /// # Safety

@@ -86,6 +86,19 @@ impl<V: Vote + Display> VoteCollector<V> {
 
         Ok(votes.map(|v| (v, quorum_decision)))
     }
+
+    pub async fn return_votes(&self, votes: Vec<V>) {
+        let mut access_mut = self.store.write().await;
+        for vote in votes {
+            if let Err(err) = access_mut.save_vote(vote) {
+                // To panic or not to panic? That is the question...
+                error!(
+                    target: LOG_TARGET,
+                    "❌: BUG DETECTED: EQUIVOCATION on returned votes should not be possible: {}", err,
+                );
+            }
+        }
+    }
 }
 
 /// Collection of votes indexed by sender leaf hash

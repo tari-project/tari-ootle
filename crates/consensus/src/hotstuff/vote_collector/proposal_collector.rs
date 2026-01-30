@@ -91,9 +91,12 @@ where TConsensusSpec: ConsensusSpec
                 let Some(block) = self.store.with_read_tx(|tx| Block::get(tx, &block_id).optional())? else {
                     warn!(
                         target: LOG_TARGET,
-                        "❓️ Received vote for unknown block {}. Possible race condition where a quorum of votes arrived before the block.",
+                        "❓️ Received QUORUM on unknown block {}. Possible race condition where a quorum of votes arrived before the block.",
                         block_id
                     );
+                    // The vote will be re-processed when the block arrives and WE vote on it, so there is no special
+                    // handling needed
+                    self.vote_collector.return_votes(quorum_votes).await;
                     return Ok(None);
                 };
                 let signatures = quorum_votes.into_iter().map(|vote| vote.signature).collect();

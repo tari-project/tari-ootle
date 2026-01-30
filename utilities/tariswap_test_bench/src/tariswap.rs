@@ -215,6 +215,7 @@ impl Runner {
         amount_b_for_a: Amount,
         faucet: &Faucet,
     ) -> anyhow::Result<()> {
+        const SWAP_FEE: u64 = 1500;
         let primary_account_key = self
             .sdk
             .key_manager_api()
@@ -252,7 +253,7 @@ impl Runner {
                         SubstateRequirement::unversioned(tariswap.lp_resource_address),
                     ])
                     .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
-                    .pay_fee_from_component(account.component_address, 1100)
+                    .pay_fee_from_component(account.component_address, SWAP_FEE)
                     .call_method(tariswap.component_address, "get_pool_balance", args![XTR])
                     .call_method(tariswap.component_address, "get_pool_balance", args![
                         faucet.resource_address,
@@ -323,7 +324,7 @@ impl Runner {
                         SubstateRequirement::unversioned(tariswap.lp_resource_address),
                     ])
                     .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
-                    .pay_fee_from_component(account.component_address, 1100)
+                    .pay_fee_from_component(account.component_address, SWAP_FEE)
                     .call_method(tariswap.component_address, "get_pool_balance", args![XTR])
                     .call_method(tariswap.component_address, "get_pool_balance", args![
                         faucet.resource_address

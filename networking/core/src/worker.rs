@@ -790,7 +790,7 @@ where
                 info!(target: LOG_TARGET, "🌍️ Autonat status changed from {:?} to {:?}", old, new);
             },
             _ => {
-                info!(target: LOG_TARGET, "🌍️ Autonat event: {:?}", event);
+                debug!(target: LOG_TARGET, "🌍️ Autonat event: {:?}", event);
             },
         }
 

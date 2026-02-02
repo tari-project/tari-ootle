@@ -103,7 +103,7 @@ pub struct HotstuffWorker<TConsensusSpec: ConsensusSpec> {
     on_propose: OnPropose<TConsensusSpec>,
     on_sync_request: OnSyncRequest<TConsensusSpec>,
     on_catch_up_sync: OnCatchUpSync<TConsensusSpec>,
-    worker_state: WorkerState,
+    worker_state: WorkerState<TConsensusSpec::Addr>,
 
     state_store: TConsensusSpec::StateStore,
     leader_strategy: TConsensusSpec::LeaderStrategy,
@@ -340,6 +340,8 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             .await?
             .fee_claim_public_key;
 
+        // Assume we need to catch up at startup. If we're already at the latest height, validators will not return
+        // blocks.
         self.request_catch_up_sync(&epoch_state).await?;
 
         let mut periodic_tasks = time::interval(Duration::from_secs(10));
@@ -659,16 +661,22 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
     async fn request_catch_up_sync(
         &mut self,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
-    ) -> Result<(), HotStuffError> {
+    ) -> Result<Option<TConsensusSpec::Addr>, HotStuffError> {
+        let current_addr = self.worker_state.catch_up.as_ref().map(|c| c.from.clone());
+        let committee_size = epoch_state.local_committee().len();
         for member in epoch_state.local_committee().shuffled() {
-            if member.address != self.local_validator_addr {
+            // Exclude self and, if there are more than 2 committee members, exclude the current sync peer
+            if member.address != self.local_validator_addr &&
+                (committee_size <= 2 || Some(&member.address) != current_addr.as_ref())
+            {
                 self.on_catch_up_sync
                     .request_sync(epoch_state.epoch(), member.address.clone())
                     .await?;
-                break;
+                return Ok(Some(member.address.clone()));
             }
         }
-        Ok(())
+        // We're the only committee member
+        Ok(None)
     }
 
     async fn on_failure(&mut self, context: &str, err: &HotStuffError) {
@@ -719,18 +727,31 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         self.on_next_sync_view
             .handle(epoch_state.epoch(), current_height, epoch_state.local_committee())
             .await?;
+
+        self.publish_event(HotstuffEvent::LeaderTimeout { height: current_height });
+
         // If we've gone into 3 leader failures in a row, request a catch up sync
-        if !self.worker_state.is_catching_up() && timeout.is_some_and(|t| t.num_timeouts.is_multiple_of(3)) {
+        if !self.worker_state.is_active_catch_up() && timeout.is_some_and(|t| t.num_timeouts.is_multiple_of(3)) {
             warn!(
                 target: LOG_TARGET,
                 "⚠️ {} Leader timeout count is {}. Requesting catch up sync.",
                 self.local_validator_addr,
                 timeout.as_ref().map(|t| t.num_timeouts).display()
             );
-            self.request_catch_up_sync(epoch_state).await?;
+            let Some(sync_req_from) = self.request_catch_up_sync(epoch_state).await? else {
+                warn!(
+                    target: LOG_TARGET,
+                    "⚠️ {} Cannot request catch up sync as there are no other committee members.",
+                    self.local_validator_addr,
+                );
+                return Ok(());
+            };
+            if let Some(ref mut catch_up) = self.worker_state.catch_up {
+                catch_up.reset_timeout(self.config.catch_up_request_timeout);
+                catch_up.from = sync_req_from;
+            }
         }
 
-        self.publish_event(HotstuffEvent::LeaderTimeout { height: current_height });
         Ok(())
     }
 
@@ -809,6 +830,15 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         if !propose_now && !propose_epoch_end {
             info!(target: LOG_TARGET, "[on_beat] No transactions to propose. Waiting for a timeout.");
             return Ok(());
+        }
+
+        if propose_epoch_end {
+            info!(
+                target: LOG_TARGET,
+                "[on_beat] Preparing to propose epoch end {}->{}.",
+                epoch_state.epoch,
+                self.next_epoch.as_ref().map(|(e, _)| e).display(),
+            );
         }
 
         self.propose_now(
@@ -917,7 +947,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         propose_epoch_end: bool,
     ) -> Result<(), HotStuffError> {
         // If we're catching up, we don't propose
-        if self.worker_state.is_catching_up() {
+        if self.worker_state.is_active_catch_up() {
             info!(
                 target: LOG_TARGET,
                 "⤵️ [propose_now] {} Currently catching up, will not propose at height ({})",
@@ -948,7 +978,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             .state_store
             .with_read_tx(|tx| HighestSeenBlock::get(tx, epoch_state.epoch()))?;
 
-        // Do we need to fill in gaps with dummy blocks?
+        // If there are timeout "gaps", we need to fill them in with dummy blocks
         let mut dummy_block = None;
         let mut propose_high_tc = None;
         if next_height > highest_block.height + NodeHeight(1) {
@@ -1096,17 +1126,16 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             Ok(no_vote) => {
                 if let Some(mut catch_up) = self.worker_state.catch_up.take() {
                     if current_height >= catch_up.expected_batch_height {
-                        if catch_up.set_next_batch(current_height) {
+                        if catch_up.set_next_batch(current_height, self.config.catch_up_request_timeout) {
                             info!(
                                 target: LOG_TARGET,
                                 "⏳ Still catching up... current height: {}, expected up to: {}",
                                 current_height,
                                 catch_up.expected_batch_height,
                             );
-                            // TODO: the sender should probably only send one batch, and we request more
-                            // self.on_catch_up_sync
-                            //     .request_sync(epoch_state.epoch(), catch_up.from.clone())
-                            //     .await?;
+                            self.on_catch_up_sync
+                                .request_sync(epoch_state.epoch(), catch_up.from.clone())
+                                .await?;
                             self.worker_state.catch_up = Some(catch_up);
                         } else {
                             info!(
@@ -1185,7 +1214,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             return Err(err);
         }
 
-        if self.worker_state.is_catching_up() {
+        if self.worker_state.is_active_catch_up() {
             warn!(
                 target: LOG_TARGET,
                 "⏳ Already catching up. Ignoring additional catch up."
@@ -1220,11 +1249,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             .request_sync(local_epoch_state.epoch(), vn.address.clone())
             .await?;
 
-        self.worker_state.catch_up = Some(CatchUp {
-            high_qc: remote_height,
-            // we get batches of 100 blocks which can only justify up to view h + 99
-            expected_batch_height: current_height + NodeHeight(99),
-        });
+        self.worker_state.catch_up = Some(CatchUp::new(
+            remote_height,
+            current_height,
+            self.config.catch_up_request_timeout,
+            vn.address,
+        ));
 
         Ok(())
     }
@@ -1302,27 +1332,60 @@ fn log_err<T>(context: &'static str, result: Result<T, HotStuffError>) -> Result
     result
 }
 
-#[derive(Debug, Default)]
-struct WorkerState {
-    pub catch_up: Option<CatchUp>,
+#[derive(Debug)]
+struct WorkerState<TAddr> {
+    /// Keeps track of the active catch up. This can be None even if a catch-up request was sent. The main use of
+    /// this struct is to track timeouts and expected batch heights i.e. we've received a batch of blocks, and we need
+    /// to request more.
+    pub catch_up: Option<CatchUp<TAddr>>,
     pub has_processed_first_block: bool,
 }
 
-impl WorkerState {
-    pub fn is_catching_up(&self) -> bool {
-        self.catch_up.is_some()
+impl<TAddr> WorkerState<TAddr> {
+    pub fn is_active_catch_up(&self) -> bool {
+        self.catch_up.as_ref().is_some_and(|c| !c.has_timed_out())
+    }
+}
+
+impl<TAddr> Default for WorkerState<TAddr> {
+    fn default() -> Self {
+        Self {
+            catch_up: None,
+            has_processed_first_block: false,
+        }
     }
 }
 
 #[derive(Debug)]
-struct CatchUp {
-    pub high_qc: NodeHeight,
+struct CatchUp<TAddr> {
+    pub remote_height: NodeHeight,
     pub expected_batch_height: NodeHeight,
+    pub timeout_at: Instant,
+    pub from: TAddr,
 }
 
-impl CatchUp {
-    pub fn set_next_batch(&mut self, current_height: NodeHeight) -> bool {
-        self.expected_batch_height = (current_height + NodeHeight(99)).min(self.high_qc);
-        self.expected_batch_height < self.high_qc
+impl<TAddr> CatchUp<TAddr> {
+    pub fn new(remote_height: NodeHeight, current_height: NodeHeight, timeout: Duration, from: TAddr) -> Self {
+        Self {
+            remote_height,
+            // we get batches of 100 blocks which can only justify up to view h + 99
+            expected_batch_height: (current_height + NodeHeight(99)).min(remote_height),
+            timeout_at: Instant::now() + timeout,
+            from,
+        }
+    }
+
+    pub fn set_next_batch(&mut self, current_height: NodeHeight, timeout: Duration) -> bool {
+        self.expected_batch_height = (current_height + NodeHeight(99)).min(self.remote_height);
+        self.reset_timeout(timeout);
+        self.expected_batch_height < self.remote_height
+    }
+
+    pub fn reset_timeout(&mut self, timeout: Duration) {
+        self.timeout_at = Instant::now() + timeout;
+    }
+
+    pub fn has_timed_out(&self) -> bool {
+        Instant::now() >= self.timeout_at
     }
 }

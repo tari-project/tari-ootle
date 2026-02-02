@@ -674,6 +674,7 @@ impl TestBuilder {
                 epoch_gc_interval: Duration::from_secs(1000),
                 enable_eviction_proposal: true,
                 epoch_end_grace_period: Duration::from_secs(1),
+                catch_up_request_timeout: Duration::from_secs(15),
             },
         }
     }

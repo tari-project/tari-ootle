@@ -13,7 +13,7 @@ tari_common_types = { workspace = true }
 tari_crypto = { workspace = true, features = ["borsh"] }
 tari_hashing = { workspace = true }
 tari_template_abi = { workspace = true, features = ["std"] }
-tari_template_lib = { workspace = true, features = ["borsh"] }
+tari_template_lib = { workspace = true, features = ["borsh", "precision"] }
 ootle_serde = { workspace = true, features = ["base64", "bincode-compat"] }
 ootle_byte_type = { workspace = true, features = ["crypto"] }
 

@@ -2,4 +2,4 @@
 import type { AccessRule } from "./AccessRule";
 import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
 
-export type SpendCondition = { "Signed": RistrettoPublicKeyBytes } | { "AccessRule": AccessRule };
+export type SpendCondition = { Signed: RistrettoPublicKeyBytes } | { AccessRule: AccessRule };

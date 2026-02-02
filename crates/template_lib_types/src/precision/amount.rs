@@ -470,6 +470,12 @@ impl_from!(PrecisionAmount, i128);
 impl_from!(PrecisionAmount, usize);
 impl_from!(PrecisionAmount, isize);
 
+impl From<Amount> for PrecisionAmount {
+    fn from(value: Amount) -> Self {
+        value.into_precision_amount()
+    }
+}
+
 impl TryFrom<PrecisionAmount> for Amount {
     type Error = bnum::errors::TryFromIntError;
 
@@ -522,6 +528,18 @@ partial_ord_impl!(PrecisionAmount, u64);
 partial_ord_impl!(PrecisionAmount, i64);
 partial_ord_impl!(PrecisionAmount, u128);
 partial_ord_impl!(PrecisionAmount, i128);
+
+impl PartialEq<Amount> for PrecisionAmount {
+    fn eq(&self, other: &Amount) -> bool {
+        self.eq(&other.to_u128())
+    }
+}
+
+impl PartialOrd<Amount> for PrecisionAmount {
+    fn partial_cmp(&self, other: &Amount) -> Option<cmp::Ordering> {
+        self.partial_cmp(&other.to_u128())
+    }
+}
 
 #[cfg(feature = "borsh")]
 mod borsh_impl {

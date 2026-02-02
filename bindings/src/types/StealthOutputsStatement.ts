@@ -6,18 +6,19 @@ import type { StealthUnspentOutput } from "./StealthUnspentOutput";
 /**
  * A statement for stealth outputs. A statement must contain confidential outputs
  */
-export type StealthOutputsStatement = { 
-/**
- * The stealth outputs that are to be created
- */
-outputs: Array<StealthUnspentOutput>, 
-/**
- * The amount of revealed funds to output. If this is a positive (non-zero) value, a bucket containing the
- * revealed stealth funds is created.
- */
-revealed_output_amount: Amount, 
-/**
- * Bulletproof range proof for the output commitments proving that values are in the range
- * [minimum_value_promise, 2^64)
- */
-agg_range_proof: RangeProofBytes, };
+export type StealthOutputsStatement = {
+  /**
+   * The stealth outputs that are to be created
+   */
+  outputs: Array<StealthUnspentOutput>;
+  /**
+   * The amount of revealed funds to output. If this is a positive (non-zero) value, a bucket containing the
+   * revealed stealth funds is created.
+   */
+  revealed_output_amount: Amount;
+  /**
+   * Bulletproof range proof for the output commitments proving that values are in the range
+   * [minimum_value_promise, 2^64)
+   */
+  agg_range_proof: RangeProofBytes;
+};

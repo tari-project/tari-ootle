@@ -4,4 +4,13 @@ import type { AccessRule } from "./AccessRule";
 /**
  * Information needed to specify access rules to a resource
  */
-export type ResourceAccessRules = { mintable: AccessRule, burnable: AccessRule, recallable: AccessRule, withdrawable: AccessRule, depositable: AccessRule, update_non_fungible_data: AccessRule, update_access_rules: AccessRule, freeze: AccessRule, };
+export type ResourceAccessRules = {
+  mintable: AccessRule;
+  burnable: AccessRule;
+  recallable: AccessRule;
+  withdrawable: AccessRule;
+  depositable: AccessRule;
+  update_non_fungible_data: AccessRule;
+  update_access_rules: AccessRule;
+  freeze: AccessRule;
+};

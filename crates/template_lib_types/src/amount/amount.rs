@@ -86,6 +86,10 @@ impl Amount {
         self.0
     }
 
+    pub const fn to_u128(&self) -> u128 {
+        self.0
+    }
+
     /// Returns the value of this amount + other. Returns `None` if the result underflows or overflows.
     pub const fn checked_add(&self, other: Self) -> Option<Self> {
         // match is because const map operations are not yet stable

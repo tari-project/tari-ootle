@@ -15,16 +15,19 @@ import type { ViewableBalanceProof } from "./ViewableBalanceProof";
  * - **viewable_balance_proof** - an optional verifiable balance proof that must be provided and valid if the view key
  *   is enabled for a resource.
  */
-export type UnspentOutput = { commitment: PedersenCommitmentBytes, 
-/**
- * Public nonce (R) that was used to generate the commitment mask
- */
-sender_public_nonce: RistrettoPublicKeyBytes, 
-/**
- * Encrypted mask and value for the recipient.
- */
-encrypted_data: EncryptedData, minimum_value_promise: number, 
-/**
- * If the view key is enabled for a given resource, this proof MUST be provided, otherwise it MUST NOT.
- */
-viewable_balance_proof: ViewableBalanceProof | null, };
+export type UnspentOutput = {
+  commitment: PedersenCommitmentBytes;
+  /**
+   * Public nonce (R) that was used to generate the commitment mask
+   */
+  sender_public_nonce: RistrettoPublicKeyBytes;
+  /**
+   * Encrypted mask and value for the recipient.
+   */
+  encrypted_data: EncryptedData;
+  minimum_value_promise: number;
+  /**
+   * If the view key is enabled for a given resource, this proof MUST be provided, otherwise it MUST NOT.
+   */
+  viewable_balance_proof: ViewableBalanceProof | null;
+};

@@ -3,4 +3,4 @@ import type { SpendCondition } from "./SpendCondition";
 import type { UnspentOutput } from "./UnspentOutput";
 import type { UtxoTag } from "./UtxoTag";
 
-export type StealthUnspentOutput = { output: UnspentOutput, spend_condition: SpendCondition, tag: UtxoTag, };
+export type StealthUnspentOutput = { output: UnspentOutput; spend_condition: SpendCondition; tag: UtxoTag };

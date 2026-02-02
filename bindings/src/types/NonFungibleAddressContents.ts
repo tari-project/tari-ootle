@@ -5,4 +5,4 @@ import type { ResourceAddress } from "./ResourceAddress";
 /**
  * A NonFungibleId namespaced by a ResourceAddress.
  */
-export type NonFungibleAddressContents = { resource_address: ResourceAddress, id: NonFungibleId, };
+export type NonFungibleAddressContents = { resource_address: ResourceAddress; id: NonFungibleId };

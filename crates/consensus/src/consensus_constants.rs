@@ -26,19 +26,24 @@ use tari_ootle_common_types::{Network, NumPreshards};
 
 #[derive(Clone, Debug)]
 pub struct ConsensusConstants {
+    /// Number of base layer confirmations required before an L1 block is considered unable to re-org.
     pub base_layer_confirmations: u64,
-    pub committee_size: u32,
-    pub max_base_layer_blocks_ahead: u64,
-    pub max_base_layer_blocks_behind: u64,
+    /// The target size of the committee per shard group.
+    pub committee_size_per_shard_group: u32,
+    /// The number of preshards to break up the shard space.
     pub num_preshards: NumPreshards,
+    /// The maximum block time. The pacemaker will trigger a new view if a block is not received within this time +
+    /// delta.
     pub pacemaker_block_time: Duration,
-    /// The number of missed proposals before a SuspendNode command is sent.
+    /// The number of missed proposals before a node will immediately send a NEWVIEW to the next leader when the node
+    /// who missed the proposals is selected as leader.
     pub missed_proposal_suspend_threshold: u64,
-    /// The number of missed proposals before a EvictNode command is sent.
+    /// The number of missed proposals before a EvictNode command is proposed.
     pub missed_proposal_evict_threshold: u64,
-    /// The number of rounds a node must participate in to be eligible for a ResumeNode command. If a peer is offline,
-    /// gets suspended and comes online, their missed proposal count is decremented for each block that they
-    /// participate (vote) in. Once this reaches zero, the node is considered online and will be reinstated.
+    /// The number of rounds a node must participate before their non-participation is reset. If a peer is offline,
+    /// gets suspended and comes online, their missed proposal count (up to a maximum of
+    /// `missed_proposal_recovery_threshold`) is decremented for each block that they participate (vote) in. Once
+    /// this reaches zero, the node is considered stable and out of suspension.
     pub missed_proposal_recovery_threshold: u64,
     /// The maximum number of commands that a block may contain.
     pub max_number_commands_in_block: usize,
@@ -50,9 +55,7 @@ impl ConsensusConstants {
     pub const fn devnet(committee_size: u32) -> Self {
         Self {
             base_layer_confirmations: 3,
-            committee_size,
-            max_base_layer_blocks_ahead: 5,
-            max_base_layer_blocks_behind: 5,
+            committee_size_per_shard_group: committee_size,
             num_preshards: NumPreshards::current(),
             pacemaker_block_time: Duration::from_secs(10),
             missed_proposal_suspend_threshold: 5,
@@ -65,10 +68,8 @@ impl ConsensusConstants {
 
     pub const fn testnet() -> Self {
         Self {
-            base_layer_confirmations: 3,
-            committee_size: 40,
-            max_base_layer_blocks_ahead: 5,
-            max_base_layer_blocks_behind: 5,
+            base_layer_confirmations: 100,
+            committee_size_per_shard_group: 40,
             num_preshards: NumPreshards::current(),
             pacemaker_block_time: Duration::from_secs(10),
             missed_proposal_suspend_threshold: 5,

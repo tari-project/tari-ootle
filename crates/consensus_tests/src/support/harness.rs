@@ -659,9 +659,7 @@ impl TestBuilder {
                 sidechain_id: None,
                 consensus_constants: ConsensusConstants {
                     base_layer_confirmations: 0,
-                    committee_size: 10,
-                    max_base_layer_blocks_ahead: 5,
-                    max_base_layer_blocks_behind: 5,
+                    committee_size_per_shard_group: 10,
                     num_preshards: TEST_NUM_PRESHARDS,
                     pacemaker_block_time: DEFAULT_PACEMAKER_BLOCK_TIME,
                     missed_proposal_suspend_threshold: 5,
@@ -674,6 +672,7 @@ impl TestBuilder {
                 epoch_gc_interval: Duration::from_secs(1000),
                 enable_eviction_proposal: true,
                 epoch_end_grace_period: Duration::from_secs(1),
+                catch_up_request_timeout: Duration::from_secs(15),
             },
         }
     }

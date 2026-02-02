@@ -181,7 +181,7 @@ pub async fn spawn_services(
             num_preshards: consensus_constants.num_preshards,
             base_layer_confirmations: consensus_constants.base_layer_confirmations,
             committee_size: consensus_constants
-                .committee_size
+                .committee_size_per_shard_group
                 .try_into()
                 .context("committee_size must be non-zero")?,
             validator_node_sidechain_id: config.indexer.sidechain_id.as_ref().map(|pk| pk.to_byte_type()),

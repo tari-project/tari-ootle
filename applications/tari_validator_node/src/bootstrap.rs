@@ -230,7 +230,7 @@ pub async fn spawn_services(
     let epoch_manager_config = EpochManagerConfig {
         base_layer_confirmations: consensus_constants.base_layer_confirmations,
         committee_size: consensus_constants
-            .committee_size
+            .committee_size_per_shard_group
             .try_into()
             .context("committee size must be non-zero")?,
         validator_node_sidechain_id: config.validator_node.validator_node_sidechain_id.to_byte_type(),

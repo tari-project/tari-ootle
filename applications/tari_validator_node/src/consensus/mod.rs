@@ -82,7 +82,7 @@ pub async fn spawn(
         // NOTE: This value should be greater than the epoch oracle's scanning interval to avoid leader failure by race
         // condition.
         epoch_end_grace_period: Duration::from_secs(10),
-        catch_up_request_timeout: Duration::from_secs(15),
+        catch_up_request_timeout: Duration::from_secs(20),
     };
 
     let hotstuff_worker = HotstuffWorker::<TariConsensusSpec>::new(

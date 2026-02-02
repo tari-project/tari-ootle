@@ -27,7 +27,7 @@ mod template {
         ) {
             let fungible = ResourceBuilder::public_fungible()
                 .recallable(rule!(allow_all))
-                .initial_supply(1_000_000);
+                .initial_supply(1_000_000u32);
 
             let fungible_resource = fungible.resource_address();
 
@@ -43,7 +43,7 @@ mod template {
 
             let stealth = ResourceBuilder::stealth()
                 .recallable(rule!(allow_all))
-                .initial_supply(1_000_000);
+                .initial_supply(1_000_000u32);
             let stealth_resource = stealth.resource_address();
 
             let component = Component::new(Self {
@@ -65,12 +65,12 @@ mod template {
         }
 
         pub fn withdraw_some(&mut self, confidential: ConfidentialWithdrawProof) -> (Bucket, Bucket, Bucket, Bucket) {
-            let fungible = self.fungible.withdraw(10);
+            let fungible = self.fungible.withdraw(10u32);
             let non_fungible = self
                 .non_fungible
                 .withdraw_non_fungibles([NonFungibleId::from_u32(1), NonFungibleId::from_u32(2)]);
             let confidential = self.confidential.withdraw_confidential(confidential);
-            let stealth = self.stealth.withdraw(10);
+            let stealth = self.stealth.withdraw(10u32);
             (fungible, non_fungible, confidential, stealth)
         }
 

@@ -415,7 +415,8 @@ impl FungibleResourceBuilder {
         address
     }
 
-    /// This builds the resource and returns a bucket containing the initial supply based on the passed [`Amount`].
+    /// This builds the resource and returns a bucket containing the initial supply based on the passed
+    /// [`Amount`].
     ///
     /// # Examples
     /// ```rust, ignore

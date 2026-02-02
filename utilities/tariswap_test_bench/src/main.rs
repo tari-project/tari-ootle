@@ -72,8 +72,8 @@ async fn run(cli: cli::CommonArgs, _args: cli::RunArgs) -> anyhow::Result<()> {
             &tariswaps,
             &primary_account,
             &accounts,
-            1000.into(),
-            100.into(),
+            1000u64.into(),
+            100u64.into(),
             &faucet,
         )
         .await?;
@@ -86,8 +86,8 @@ async fn run(cli: cli::CommonArgs, _args: cli::RunArgs) -> anyhow::Result<()> {
                 &tariswaps,
                 &primary_account,
                 &accounts,
-                1000.into(),
-                100.into(),
+                1000u64.into(),
+                100u64.into(),
                 &faucet,
             )
             .await?;

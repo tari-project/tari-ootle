@@ -93,7 +93,7 @@ fn builtin_vault_events() {
         .expect_success();
 
     // transfer some tokens between accounts
-    let amount = Amount::from(100);
+    let amount = Amount::from(100u64);
     let result = template_test.build_and_execute(
         Transaction::builder_localnet()
             .call_method(sender_address, "withdraw", args![faucet_resource, amount])

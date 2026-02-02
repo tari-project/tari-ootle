@@ -275,7 +275,7 @@ impl TrafficSim {
                     .client
                     .create_free_test_coins(AccountsCreateFreeTestCoinsRequest {
                         account: resp.account.component_address.into(),
-                        amount: 1_000_000_000.into(),
+                        amount: 1_000_000_000u64.into(),
                         max_fee: None,
                     })
                     .await?;
@@ -290,7 +290,7 @@ impl TrafficSim {
 
         let transaction = Transaction::builder_localnet()
             .for_network(exchange_wallet.network.as_byte())
-            .pay_fee_from_component(*account.component_address(), 2000)
+            .pay_fee_from_component(*account.component_address(), 2000u64)
             .call_function(stablecoin_template, "instantiate", args![
                 amount!["10000000000000000000000000000"],
                 "SSC",
@@ -415,7 +415,7 @@ impl TrafficSim {
                 client
                     .create_free_test_coins(AccountsCreateFreeTestCoinsRequest {
                         account: (*account.component_address()).into(),
-                        amount: 1_000_000_000.into(),
+                        amount: 1_000_000_000u64.into(),
                         max_fee: None,
                     })
                     .await?;
@@ -461,7 +461,7 @@ impl TrafficSim {
 
             let transaction = Transaction::builder_localnet()
                 .for_network(wallet.network.as_byte())
-                .pay_fee_from_component(*exchange_account.component_address(), 500)
+                .pay_fee_from_component(*exchange_account.component_address(), 500u64)
                 .call_method(*exchange_account.component_address(), "create_proof_by_amount", args![
                     admin_resource_address,
                     1

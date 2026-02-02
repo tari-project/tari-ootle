@@ -2,4 +2,4 @@
 import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
 import type { Scalar32Bytes } from "./Scalar32Bytes";
 
-export type SchnorrSignatureBytes = { public_nonce: RistrettoPublicKeyBytes; signature: Scalar32Bytes };
+export type SchnorrSignatureBytes = { public_nonce: RistrettoPublicKeyBytes, signature: Scalar32Bytes, };

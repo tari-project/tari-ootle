@@ -30,9 +30,9 @@ pub mod cli;
 pub mod config;
 mod dry_run;
 pub mod graphql;
-#[cfg(feature = "web_ui")]
-mod http_ui;
 mod rest_api;
+#[cfg(feature = "web_ui")]
+mod web_ui;
 
 mod event_manager;
 #[cfg(feature = "metrics")]
@@ -157,11 +157,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
                 })
                 .transpose()?;
 
-            tokio::spawn(http_ui::server::run_http_ui_server(
-                address,
-                public_api_address,
-                public_graphql_url,
-            ));
+            tokio::spawn(web_ui::server::serve(address, public_api_address, public_graphql_url));
         }
     }
     #[cfg(not(feature = "web_ui"))]

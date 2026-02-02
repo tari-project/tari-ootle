@@ -163,7 +163,7 @@ mod tests {
             KeyedInput { key: "B", value: 600 },
             KeyedInput { key: "C", value: 1000 },
         ];
-        let target = 1100;
+        let target = 1100u64;
 
         let result = select(&inputs, target, 1000).unwrap();
         assert_eq!(result.total_value, 1100);
@@ -173,7 +173,7 @@ mod tests {
     #[test]
     fn test_empty_inputs() {
         let inputs: Vec<KeyedInput<&str>> = vec![];
-        let target = 100;
+        let target = 100u64;
 
         let result = select(&inputs, target, 1000);
         assert!(result.is_none());
@@ -182,7 +182,7 @@ mod tests {
     #[test]
     fn test_insufficient_funds() {
         let inputs = vec![KeyedInput { key: "A", value: 100 }, KeyedInput { key: "B", value: 200 }];
-        let target = 500;
+        let target = 500u64;
 
         let result = select(&inputs, target, 1000);
         assert!(result.is_none());
@@ -191,7 +191,7 @@ mod tests {
     #[test]
     fn test_single_input_exact_match() {
         let inputs = vec![KeyedInput { key: "A", value: 1000 }];
-        let target = 1000;
+        let target = 1000u64;
 
         let result = select(&inputs, target, 1000).unwrap();
         assert_eq!(result.total_value, 1000);
@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn test_single_input_overshoot() {
         let inputs = vec![KeyedInput { key: "A", value: 1500 }];
-        let target = 1000;
+        let target = 1000u64;
 
         let result = select(&inputs, target, 1000).unwrap();
         assert_eq!(result.total_value, 1500);
@@ -217,7 +217,7 @@ mod tests {
             KeyedInput { key: "B", value: 500 },
             KeyedInput { key: "C", value: 600 },
         ];
-        let target = 1100;
+        let target = 1100u64;
 
         let result = select(&inputs, target, 1000).unwrap();
         // Should prefer B+C (1100) over A alone (1000 is insufficient)
@@ -233,7 +233,7 @@ mod tests {
             KeyedInput { key: "C", value: 600 },
             KeyedInput { key: "D", value: 200 },
         ];
-        let target = 900;
+        let target = 900u64;
 
         let result = select(&inputs, target, 1000).unwrap();
         assert_eq!(result.total_value, 1000);
@@ -247,7 +247,7 @@ mod tests {
                 value: i as u64 * 100,
             })
             .collect();
-        let target = 1500;
+        let target = 1500u64;
 
         let start = std::time::Instant::now();
         let result = select(&inputs, target, 1000);
@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn test_zero_target() {
         let inputs = vec![KeyedInput { key: "A", value: 100 }, KeyedInput { key: "B", value: 200 }];
-        let target = 0;
+        let target = 0u64;
 
         let result = select(&inputs, target, 1000).unwrap();
         // Should return empty selection since 0 target is already met
@@ -280,7 +280,7 @@ mod tests {
             KeyedInput { key: "B", value: 500 },
             KeyedInput { key: "C", value: 500 },
         ];
-        let target = 1000;
+        let target = 1000u64;
 
         let result = select(&inputs, target, 1000).unwrap();
         assert_eq!(result.total_value, 1000);
@@ -303,7 +303,7 @@ mod tests {
                 value: 500,
             },
         ];
-        let target = 500;
+        let target = 500u64;
 
         let result = select(&inputs, target, 1000).unwrap();
         // Algorithm should find the medium value (500) as exact match
@@ -319,7 +319,7 @@ mod tests {
             KeyedInput { key: "B", value: 400 },
             KeyedInput { key: "C", value: 300 },
         ];
-        let target = 700;
+        let target = 700u64;
 
         let result = select(&inputs, target, 1000).unwrap();
         // Greedy would pick A (800), but optimal is B+C (700)
@@ -336,7 +336,7 @@ mod tests {
             KeyedInput { key: "D", value: 50 },
             KeyedInput { key: "E", value: 400 },
         ];
-        let target = 300;
+        let target = 300u64;
         let max_inputs = 2;
 
         let result = select(&inputs, target, max_inputs).unwrap();
@@ -352,7 +352,7 @@ mod tests {
             KeyedInput { key: "B", value: 100 },
             KeyedInput { key: "C", value: 100 },
         ];
-        let target = 250;
+        let target = 250u64;
         let max_inputs = 2; // Need 3 inputs to reach target, but limited to 2
 
         let result = select(&inputs, target, max_inputs);
@@ -362,7 +362,7 @@ mod tests {
     #[test]
     fn test_max_inputs_limit_zero() {
         let inputs = vec![KeyedInput { key: "A", value: 100 }, KeyedInput { key: "B", value: 200 }];
-        let target = 100;
+        let target = 100u64;
         let max_inputs = 0;
 
         let result = select(&inputs, target, max_inputs);
@@ -377,7 +377,7 @@ mod tests {
             KeyedInput { key: "B", value: 200 },
             KeyedInput { key: "C", value: 200 },
         ];
-        let target = 400;
+        let target = 400u64;
         let max_inputs = 1;
 
         let result = select(&inputs, target, max_inputs).unwrap();
@@ -390,7 +390,7 @@ mod tests {
     #[test]
     fn test_max_inputs_larger_than_available() {
         let inputs = vec![KeyedInput { key: "A", value: 100 }, KeyedInput { key: "B", value: 200 }];
-        let target = 250;
+        let target = 250u64;
         let max_inputs = 10; // More than available inputs
 
         let result = select(&inputs, target, max_inputs).unwrap();

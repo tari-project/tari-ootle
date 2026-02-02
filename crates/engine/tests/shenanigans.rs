@@ -138,7 +138,7 @@ fn it_rejects_references_to_buckets_that_arent_in_scope() {
 
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
-            .call_method(account, "withdraw", args![XTR, Amount(1000)])
+            .call_method(account, "withdraw", args![XTR, 1000])
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(shenanigans, "take_bucket_zero", args![])
             .build_and_seal(&owner_key),
@@ -189,7 +189,7 @@ fn it_prevents_access_to_vault_id_in_component_context() {
 
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
-            .call_method(shenanigans, "take_from_a_vault", args![vault_id, Amount(1000)])
+            .call_method(shenanigans, "take_from_a_vault", args![vault_id, 1000])
             .build_and_seal(test.secret_key()),
         vec![test.owner_proof()],
     );
@@ -250,7 +250,7 @@ fn it_disallows_calls_on_vaults_that_are_not_owned_by_current_component() {
             .call_function(
                 template_addr,
                 "attempt_to_steal_funds_using_cross_template_call",
-                args![vault_id, attacker, Some(Amount::from(1000))],
+                args![vault_id, attacker, Some(Amount::from(1000u64))],
             )
             .build_and_seal(test.secret_key()),
         vec![test.owner_proof()],

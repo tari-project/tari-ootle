@@ -7,8 +7,6 @@ mod macros;
 mod serde;
 
 pub use amount::*;
-// Re-export errors
-pub use bnum::errors::{ParseIntError, TryFromIntError};
 
 pub mod public_macros {
 
@@ -19,7 +17,7 @@ pub mod public_macros {
     /// ```rust,ignore
     /// # use crate::models::{amount, Amount};
     /// const AMOUNT: Amount = amount!("1234567890");
-    /// assert_eq!(AMOUNT, Amount::from(1234567890));
+    /// assert_eq!(AMOUNT, Amount::from(1234567890u64));
     /// const NEGATIVE_AMOUNT: Amount = amount!("-1234567890");
     ///  assert_eq!(NEGATIVE_AMOUNT, Amount::from(-1234567890));
     ///  ```
@@ -35,11 +33,9 @@ pub mod public_macros {
         use crate::amount::Amount;
 
         const POSITIVE: Amount = amount!("1234567890");
-        const NEGATIVE: Amount = amount!("-1234567890");
         #[test]
         fn consts() {
-            assert_eq!(POSITIVE, Amount::from(1234567890));
-            assert_eq!(NEGATIVE, Amount::from(-1234567890));
+            assert_eq!(POSITIVE, Amount::from(1234567890u64));
         }
     }
 }

@@ -73,7 +73,10 @@ fn it_does_not_overflow_when_minting_more_then_amount_max_fungible_tokens() {
     );
 
     let vault = get_fungible_vault(&test, component);
-    assert_eq!(vault.balance(), Amount::from(i64::MAX) * Amount::from(3));
+    assert_eq!(
+        vault.balance(),
+        Amount::try_from(i64::MAX).unwrap() * Amount::from(3u64)
+    );
 }
 
 #[test]

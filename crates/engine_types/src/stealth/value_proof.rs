@@ -114,7 +114,7 @@ mod tests {
     #[test]
     fn it_proves_knowledge_of_the_value() {
         let mask = RistrettoSecretKey::random(&mut OsRng);
-        let value = 100_321_123.into();
+        let value = 100_321_123u128.into();
         let commitment = commit_amount(&mask, value);
         let commitment_bytes = commitment.to_byte_type();
 
@@ -137,7 +137,7 @@ mod tests {
     #[test]
     fn it_fails_if_the_value_differs() {
         let mask = RistrettoSecretKey::random(&mut OsRng);
-        let value = 100_321_123.into();
+        let value = 100_321_123u128.into();
         let commitment = commit_amount(&mask, value);
         let commitment_bytes = commitment.to_byte_type();
 

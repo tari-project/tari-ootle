@@ -231,7 +231,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                     lock_id,
                 )?;
 
-                let revealed_to_spend = spend_amount.saturating_sub_positive(blinded_amount_locked);
+                let revealed_to_spend = spend_amount.saturating_sub(blinded_amount_locked);
 
                 if available_revealed_funds < revealed_to_spend {
                     return Err(StealthTransferApiError::InsufficientFunds {
@@ -355,7 +355,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
 
             let fee_stealth_change_amt = fee_inputs_to_spend
                 .total_stealth_input_amount()
-                .saturating_sub_positive(params.max_fee.into())
+                .saturating_sub(params.max_fee.into())
                 .to_u64_checked()
                 .ok_or_else(|| {
                     StealthTransferApiError::InvariantViolation {

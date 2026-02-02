@@ -106,7 +106,7 @@ mod tests {
     fn homomorphic() {
         let amount1 = Amount::MAX;
         let commitment1 = commit_amount_checked(&Default::default(), amount1).unwrap();
-        let amount2 = Amount::from(1_000);
+        let amount2 = Amount::from_u64(1_000);
         let commitment2 = commit_amount_checked(&Default::default(), amount2).unwrap();
 
         let resulting_commitment = commitment1.as_public_key() - commitment2.as_public_key();
@@ -117,13 +117,8 @@ mod tests {
 
     #[test]
     fn negative() {
-        let amount = Amount::from(-1);
-        assert!(commit_amount_checked(&Default::default(), amount).is_none());
         let amount = Amount::MIN;
         assert!(commit_amount_checked(&Default::default(), amount).is_none());
-
-        let amount = -Amount::from(199999999999999999u128);
-        assert!(convert_amount_to_secret(&amount).is_none());
     }
 
     #[test]
@@ -137,7 +132,7 @@ mod tests {
 
         let v2 = RistrettoSecretKey::from(1000);
         let sub = Amount::from_le_slice((v1 - v2).as_bytes()).unwrap();
-        let expected = amount - Amount::from(1000);
+        let expected = amount - Amount::from_u64(1000);
         assert_eq!(sub, expected);
     }
 }

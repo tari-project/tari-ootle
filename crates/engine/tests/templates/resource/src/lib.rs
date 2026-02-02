@@ -34,12 +34,12 @@ mod template {
 
     impl ResourceTest {
         pub fn new() -> Component<Self> {
-            let fungible = ResourceBuilder::public_fungible().initial_supply(1000);
+            let fungible = ResourceBuilder::public_fungible().initial_supply(1000u32);
             let non_fungible = ResourceBuilder::non_fungible()
                 .initial_supply([NonFungibleId::from_u64(1), NonFungibleId::from_u64(2)]);
             let confidential = ResourceBuilder::confidential()
                 .mintable(rule!(allow_all))
-                .initial_supply(ConfidentialOutputStatement::mint_revealed(1000));
+                .initial_supply(ConfidentialOutputStatement::mint_revealed(1000u32));
 
             Component::new(Self {
                 fungible: Vault::from_bucket(fungible),
@@ -51,8 +51,8 @@ mod template {
         }
 
         pub fn fungible_join(&self) {
-            let b1 = self.fungible.withdraw(10);
-            let b2 = self.fungible.withdraw(900);
+            let b1 = self.fungible.withdraw(10u32);
+            let b2 = self.fungible.withdraw(900u32);
             let joined = b1.join(b2);
             assert_eq!(joined.amount(), 910);
             self.fungible.deposit(joined);
@@ -68,8 +68,8 @@ mod template {
 
         pub fn confidential_join(&self, output: ConfidentialOutputStatement) {
             let commitments = ResourceManager::get(self.confidential.resource_address()).mint_confidential(output);
-            let b1 = self.confidential.withdraw(10);
-            let b2 = self.confidential.withdraw(900);
+            let b1 = self.confidential.withdraw(10u32);
+            let b2 = self.confidential.withdraw(900u32);
             let joined = b1.join(b2);
             let joined = joined.join(commitments);
             assert_eq!(joined.amount(), 910);

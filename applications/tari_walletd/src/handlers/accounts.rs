@@ -1154,7 +1154,7 @@ pub async fn handle_create_stealth_transfer_statement(
                     .input_selection
                     .as_from_bucket()
                     .unwrap_or(Amount::zero())
-                    .checked_add_positive(inputs.as_ref().map(|i| i.revealed).unwrap_or(Amount::zero()))
+                    .checked_add(inputs.as_ref().map(|i| i.revealed).unwrap_or(Amount::zero()))
                     .ok_or_else(|| {
                         invalid_params(
                             "input_revealed_amount",

@@ -26,7 +26,7 @@ impl Runner {
 
         let transaction = self
             .new_transaction_builder()
-            .pay_fee_from_component(in_account.component_address, 1000)
+            .pay_fee_from_component(in_account.component_address, 1000u64)
             .call_function(self.faucet_template, "mint", args![1_000_000_000])
             .with_inputs([
                 SubstateRequirement::unversioned(in_account.component_address),

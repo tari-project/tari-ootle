@@ -55,14 +55,14 @@ impl Vault {
                 }
             })?,
             token_symbol: self.token_symbol,
-            revealed_balance: Amount::from(self.revealed_balance),
+            revealed_balance: Amount::from(self.revealed_balance as u64),
             locked_revealed_balance: Amount::from(
                 locked_revealed_balance
                     .to_u128()
                     // Should be impossible because sqlite is limited to i64
                     .expect("locked more than u128::MAX funds"),
             ),
-            confidential_balance: Amount::from(self.confidential_balance),
+            confidential_balance: Amount::from(self.confidential_balance as u64),
             divisibility: u8::try_from(self.divisibility as u32).map_err(|e| WalletStorageError::DecodingError {
                 operation: "try_into_vault",
                 item: "vault.divisibility",

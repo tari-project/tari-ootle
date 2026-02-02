@@ -91,7 +91,7 @@ use crate::{
 /// ```rust,ignore
 /// use tari_template_lib::resource::manager::ResourceManager;
 /// let resource_manager = ResourceManager::get(my_resource_address);
-/// resource_manager.mint_fungible(Amount(1000));
+/// resource_manager.mint_fungible(1000);
 /// ```
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -629,7 +629,7 @@ impl ResourceManager {
     /// ```rust,ignore
     /// let vault_id = component.get_user_vault("bob");
     /// let bucket = resource_manager.recall_fungible_amount(vault_id, 100);
-    /// assert_eq!(bucket.amount(), Amount(100));
+    /// assert_eq!(bucket.amount(), 100);
     /// ```
     pub fn recall_fungible_amount<A: Into<Amount>>(&self, vault_id: VaultId, amount: A) -> Bucket {
         self.recall_internal(RecallResourceArg {

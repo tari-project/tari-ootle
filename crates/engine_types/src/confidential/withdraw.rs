@@ -42,7 +42,7 @@ pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Pede
     let total_output_revealed_amount = withdraw_proof
         .output_proof
         .output_revealed_amount
-        .checked_add_positive(withdraw_proof.output_proof.change_revealed_amount)
+        .checked_add(withdraw_proof.output_proof.change_revealed_amount)
         .ok_or_else(|| ResourceError::InvalidConfidentialProof {
             details: format!(
                 "Output revealed amount {} + change revealed amount {} cannot be negative",

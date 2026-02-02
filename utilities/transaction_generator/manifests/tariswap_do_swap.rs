@@ -3,7 +3,7 @@
 
 fn fee_main() {
     let in_account = arg!["in_account"];
-    in_account.pay_fee(Amount(1000));
+    in_account.pay_fee(1000);
 }
 
 fn main() {

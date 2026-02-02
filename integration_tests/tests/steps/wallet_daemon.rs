@@ -134,7 +134,7 @@ async fn when_i_run_up_fees(
         let payload = Bytes::from(vec![OsRng.gen::<u8>(); 64 * 1024]);
 
         let transaction = transaction_builder()
-            .pay_fee_from_component(*account.component_address(), 100_000)
+            .pay_fee_from_component(*account.component_address(), 100_000u64)
             .call_function(template.address, "new", args![payload])
             .add_input(*account.component_address())
             .build_unsigned();
@@ -208,11 +208,16 @@ async fn when_i_create_account_via_wallet_daemon_with_free_coins(
     step: &Step,
     account_name: String,
     wallet_daemon_name: String,
-    amount: i64,
+    amount: u64,
 ) {
     cucumber_log!("==== Step: {}", step.value);
-    wallet_daemon_client::create_account_with_free_coins(world, account_name, wallet_daemon_name, amount * 1_000_000)
-        .await;
+    wallet_daemon_client::create_account_with_free_coins(
+        world,
+        account_name,
+        wallet_daemon_name,
+        amount * 1_000_000u64,
+    )
+    .await;
 }
 
 #[when(expr = "I burn {int}T on wallet {word} for wallet daemon {word} into proof {word}")]
@@ -436,7 +441,7 @@ async fn check_account_confidential_balance_is_via_daemon(
 async fn when_transfer_via_wallet_daemon(
     world: &mut TariWorld,
     step: &Step,
-    amount: i32,
+    amount: u32,
     resource_name: String,
     account_name: String,
     dest_account: String,

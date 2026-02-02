@@ -397,7 +397,7 @@ pub fn parse_arg(s: &str) -> Result<tari_ootle_transaction::builder::named_args:
 
     if let Some(("amount", amount)) = s.split_once('_') {
         if let Ok(number) = amount.parse::<i64>() {
-            return Ok(arg!(Amount(number)));
+            return Ok(arg!(number));
         }
     }
 

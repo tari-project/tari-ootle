@@ -58,7 +58,7 @@ mod faucet_template {
 
         pub fn take_free_coins(&mut self) -> Bucket {
             debug!("Withdrawing 1000 coins from faucet");
-            self.vault.withdraw(1000)
+            self.vault.withdraw(1000u64)
         }
 
         pub fn take_free_coins_custom(&mut self, amount: Amount) -> Bucket {
@@ -67,7 +67,7 @@ mod faucet_template {
         }
 
         pub fn burn_coins(&mut self, amount: Amount) {
-            let mut bucket = self.vault.withdraw(amount);
+            let bucket = self.vault.withdraw(amount);
             bucket.burn();
         }
 

@@ -38,7 +38,7 @@ fn basic_faucet_transfer() {
     let result = template_test
         .build_and_execute(
             Transaction::builder_localnet()
-                .call_method(sender_address, "withdraw", args![faucet_resource, Amount(100)])
+                .call_method(sender_address, "withdraw", args![faucet_resource, 100])
                 .put_last_instruction_output_on_workspace("foo_bucket")
                 .call_method(receiver_address, "deposit", args![Workspace("foo_bucket")])
                 .call_method(sender_address, "balance", args![faucet_resource])
@@ -50,7 +50,7 @@ fn basic_faucet_transfer() {
 
     assert_eq!(
         result.finalize.execution_results[3].decode::<Amount>().unwrap(),
-        Amount::from(900)
+        Amount::from(900u64)
     );
     assert_eq!(
         result.finalize.execution_results[4].decode::<Amount>().unwrap(),
@@ -108,7 +108,7 @@ fn withdraw_from_account_prevented() {
 
     let reason = template_test.execute_expect_failure(
         Transaction::builder_localnet()
-            .call_method(source_account, "withdraw", args![faucet_resource, Amount(100)])
+            .call_method(source_account, "withdraw", args![faucet_resource, 100])
             .put_last_instruction_output_on_workspace("stolen_coins")
             .call_method(source_account, "deposit", args![Workspace("stolen_coins")])
             .build_and_seal(&non_owning_key),
@@ -256,8 +256,8 @@ fn gasless() {
 
     test.execute_expect_success(
         Transaction::builder_localnet()
-            .pay_fee_from_component(fee_account, 1000)
-            .call_method(user_account, "withdraw", args![XTR, Amount(100)])
+            .pay_fee_from_component(fee_account, 1000u64)
+            .call_method(user_account, "withdraw", args![XTR, 100])
             .put_last_instruction_output_on_workspace("b")
             .call_method(user2_account, "deposit", args![Workspace("b")])
             .finish()
@@ -315,7 +315,7 @@ fn custom_access_rules() {
     let (user2_account, user2_account_proof, user2_secret_key) = test.create_funded_account();
     test.execute_expect_success(
         Transaction::builder_localnet()
-            .call_method(user_account, "withdraw", args![XTR, Amount(100)])
+            .call_method(user_account, "withdraw", args![XTR, 100])
             .put_last_instruction_output_on_workspace("b")
             .call_method(user2_account, "deposit", args![Workspace("b")])
             .build_and_seal(&user2_secret_key),
@@ -342,9 +342,9 @@ fn take_from_bucket() {
             ])
             .call_method("faucet", "take_free_coins_custom", args![1000])
             .put_last_instruction_output_on_workspace("free_coins")
-            .take_from_bucket("free_coins", 100, "foo_bucket")
+            .take_from_bucket("free_coins", 100u64, "foo_bucket")
             // Take all to test what happens when free_coins is empty (should not fail due to dangling buckets)
-            .take_from_bucket("free_coins", 900, "bar_bucket")
+            .take_from_bucket("free_coins", 900u64, "bar_bucket")
             .call_method(alice, "deposit", args![Workspace("foo_bucket")])
             .call_method(bob, "deposit", args![Workspace("bar_bucket")])
             .build_and_seal(test.secret_key()),

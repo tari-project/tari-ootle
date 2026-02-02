@@ -7,8 +7,4 @@ import type { ResourceAddress } from "./ResourceAddress";
 /**
  * Specifies a requirement for a [RequireRule].
  */
-export type RuleRequirement =
-  | { Resource: ResourceAddress }
-  | { NonFungibleAddress: NonFungibleAddress }
-  | { ScopedToComponent: ComponentAddress }
-  | { ScopedToTemplate: Hash };
+export type RuleRequirement = { "Resource": ResourceAddress } | { "NonFungibleAddress": NonFungibleAddress } | { "ScopedToComponent": ComponentAddress } | { "ScopedToTemplate": Hash };

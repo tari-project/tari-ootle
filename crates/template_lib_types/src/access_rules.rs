@@ -330,27 +330,27 @@ impl Default for ResourceAccessRules {
 /// # Examples:
 ///
 /// ```rust
-/// use tari_template_lib::rule;
+/// use tari_template_lib_types::rule;
 /// // Allow all access
 /// let allow_all_rule = rule!(allow_all);
 /// // Deny all access
 /// let deny_all_rule = rule!(deny_all);
 /// // Restricted access to a specific resource
-/// let resource_address = tari_template_lib::types::ResourceAddress::new(
-///     tari_template_lib::types::ObjectKey::default(),
+/// let resource_address = tari_template_lib_types::ResourceAddress::new(
+///     tari_template_lib_types::ObjectKey::default(),
 /// );
 /// let resource_rule = rule!(resource(resource_address));
 /// // Restricted access to a component
-/// let component_address = tari_template_lib::types::ComponentAddress::new(
-///     tari_template_lib::types::ObjectKey::default(),
+/// let component_address = tari_template_lib_types::ComponentAddress::new(
+///     tari_template_lib_types::ObjectKey::default(),
 /// );
 /// let component_rule = rule!(component(component_address));
 /// // Restricted access to a template
-/// let template_address = tari_template_lib::types::TemplateAddress::default();
+/// let template_address = tari_template_lib_types::TemplateAddress::default();
 /// let template_rule = rule!(template(template_address));
 /// // Restricted access to a non-fungible token
-/// let non_fungible_address = tari_template_lib::types::NonFungibleAddress::from_public_key(
-///     tari_template_lib::types::crypto::RistrettoPublicKeyBytes::default(),
+/// let non_fungible_address = tari_template_lib_types::NonFungibleAddress::from_public_key(
+///     tari_template_lib_types::crypto::RistrettoPublicKeyBytes::default(),
 /// );
 /// let non_fungible_rule = rule!(non_fungible(non_fungible_address));
 /// // Complex rules using `any_of`, `all_of` and `n_of`
@@ -358,8 +358,8 @@ impl Default for ResourceAccessRules {
 ///     component(component_address),
 ///     resource(resource_address)
 /// ));
-/// # let pk1 = tari_template_lib::types::crypto::RistrettoPublicKeyBytes::default();
-/// # let pk2 = tari_template_lib::types::crypto::RistrettoPublicKeyBytes::default();
+/// # let pk1 = tari_template_lib_types::crypto::RistrettoPublicKeyBytes::default();
+/// # let pk2 = tari_template_lib_types::crypto::RistrettoPublicKeyBytes::default();
 /// let n_of_rule = rule!(m_of_n(2, public_key(pk1), public_key(pk2)));
 /// ```
 #[macro_export]

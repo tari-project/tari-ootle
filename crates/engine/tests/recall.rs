@@ -20,7 +20,7 @@ fn it_recalls_all_resource_types() {
     let (account, _, _) = test.create_empty_account();
 
     let (mut initial_supply, mask, _) = generate_confidential_output_statement(1000, None);
-    initial_supply.output_revealed_amount = Amount::from(1000);
+    initial_supply.output_revealed_amount = Amount::from(1000u64);
 
     let result = test.execute_expect_success(
         Transaction::builder_localnet()
@@ -37,7 +37,7 @@ fn it_recalls_all_resource_types() {
         result.finalize.execution_results[0].get_value("$.3").unwrap().unwrap();
     let stealth_resource: ResourceAddress = result.finalize.execution_results[0].get_value("$.4").unwrap().unwrap();
 
-    let withdraw = generate_withdraw_proof(&mask, 10, Some(980), 10);
+    let withdraw = generate_withdraw_proof(&mask, 10, Some(980), 10u64);
     test.execute_expect_success(
         Transaction::builder_localnet()
             .call_method(recall_component, "withdraw_some", args![withdraw.proof])
@@ -57,39 +57,39 @@ fn it_recalls_all_resource_types() {
     let stealth_vault = vaults[&stealth_resource];
 
     let commitment = withdraw
-        .to_commitment_for_output(Amount::from(10))
+        .to_commitment_for_output(Amount::from(10u64))
         .unwrap()
         .to_byte_type();
 
     test.execute_expect_success(
         Transaction::builder_localnet()
-            .call_method(recall_component, "recall_fungible", args![fungible_vault, Amount(6)])
+            .call_method(recall_component, "recall_fungible", args![fungible_vault, 6])
             .call_method(recall_component, "recall_non_fungibles", args![non_fungible_vault, [
                 NonFungibleId::from_u32(1)
             ]])
             .call_method(recall_component, "recall_confidential", args![
                 confidential_vault,
                 [commitment],
-                Amount(4)
+                4
             ])
-            .call_method(recall_component, "recall_stealth", args![stealth_vault, Amount(8)])
+            .call_method(recall_component, "recall_stealth", args![stealth_vault, 8])
             .build_and_seal(test.secret_key()),
         vec![],
     );
 
     let vault = test.read_only_state_store().get_vault(&fungible_vault).unwrap();
     let fungible_balance = vault.balance();
-    assert_eq!(fungible_balance, Amount::from(4));
+    assert_eq!(fungible_balance, Amount::from(4u64));
 
     let vault = test.read_only_state_store().get_vault(&non_fungible_vault).unwrap();
     let non_fungible_balance = vault.balance();
-    assert_eq!(non_fungible_balance, Amount::from(1));
+    assert_eq!(non_fungible_balance, Amount::from(1u64));
 
     let vault = test.read_only_state_store().get_vault(&confidential_vault).unwrap();
     let confidential_balance = vault.balance();
-    assert_eq!(confidential_balance, Amount::from(6));
+    assert_eq!(confidential_balance, Amount::from(6u64));
 
     let vault = test.read_only_state_store().get_vault(&stealth_vault).unwrap();
     let stealth_balance = vault.balance();
-    assert_eq!(stealth_balance, Amount::from(2));
+    assert_eq!(stealth_balance, Amount::from(2u64));
 }

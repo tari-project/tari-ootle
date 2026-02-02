@@ -479,13 +479,13 @@ mod fungible {
 
         assert_eq!(
             result.finalize.execution_results[1].decode::<Amount>().unwrap(),
-            initial_supply - Amount::from(500)
+            initial_supply - Amount::from(500u64)
         );
 
         let result = template_test.build_and_execute(
             Transaction::builder_localnet()
                 .call_method(faucet_component, "burn_coins", args![
-                    initial_supply - Amount::from(500)
+                    initial_supply - Amount::from(500u64)
                 ])
                 .call_method(faucet_component, "total_supply", args![]),
             vec![owner_proof],
@@ -945,7 +945,7 @@ mod emoji_id {
         // initialize the emoji id minter
         let emoji_id_template = test.get_template_address("EmojiIdMinter");
         let max_emoji_id_len = 10_u64;
-        let price = Amount::from(20);
+        let price = Amount::from(20u64);
         let result = test
             .build_and_execute(
                 Transaction::builder_localnet().call_function(emoji_id_template, "new", args![
@@ -1044,7 +1044,7 @@ mod tickets {
         // initialize the ticket seller
         let ticket_template = test.get_template_address("TicketSeller");
         let initial_supply = 10;
-        let price = Amount::from(20);
+        let price = Amount::from(20u64);
         let event_description = "My music festival".to_string();
         let result = test.execute_expect_success(
             Transaction::builder_localnet()
@@ -1068,7 +1068,7 @@ mod tickets {
         // buy a ticket
         test.execute_expect_success(
             Transaction::builder_localnet()
-                .call_method(account_address, "withdraw", args![XTR, Amount(20)])
+                .call_method(account_address, "withdraw", args![XTR, 20])
                 .put_last_instruction_output_on_workspace("payment")
                 .call_method(ticket_seller, "buy_ticket", args![Workspace("payment")])
                 .put_last_instruction_output_on_workspace("nft_bucket")

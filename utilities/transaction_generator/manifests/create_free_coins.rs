@@ -5,10 +5,10 @@
 
 fn fee_main() {
     let owner = arg!["owner"];
-    let free_coins = create_free_coins!(Amount(1000), None);
+    let free_coins = create_free_coins!(1000, None);
     let account = allocate_component_address!();
     Account::create_advanced(owner, free_coins, account);
-    account.pay_fee(Amount(1000));
+    account.pay_fee(1000);
 }
 
 fn main() {}

@@ -71,7 +71,7 @@ mod airdrop_template {
             );
 
             self.claimed_count += 1;
-            self.vault.withdraw(1)
+            self.vault.withdraw(1u32)
         }
 
         pub fn claim_specific(&mut self, address: ComponentAddress, id: NonFungibleId) -> Bucket {

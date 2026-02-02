@@ -112,7 +112,7 @@ pub async fn handle_mint_faucet(
         .transaction_builder()
         .pay_fee_from_component(account.component_address, fee)
         .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![
-            Amount(req.number_to_mint),
+            req.number_to_mint,
             mutable_data
         ])
         .put_last_instruction_output_on_workspace("tokens")

@@ -166,7 +166,7 @@ impl From<Epoch> for proto::common::Epoch {
 
 impl From<proto::common::Amount> for Amount {
     fn from(value: proto::common::Amount) -> Self {
-        let digits = [value.digit1, value.digit2, value.digit3];
+        let digits = [value.digit1, value.digit2];
         Self::from_le_digits(digits)
     }
 }
@@ -177,7 +177,6 @@ impl From<Amount> for proto::common::Amount {
         Self {
             digit1: digits[0],
             digit2: digits[1],
-            digit3: digits[2],
         }
     }
 }

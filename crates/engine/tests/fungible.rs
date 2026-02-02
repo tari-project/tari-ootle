@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use ootle_byte_type::ToByteType;
-use tari_engine_types::{crypto::commit_amount, vault::Vault};
+use tari_engine_types::{crypto::commit_amount_checked, vault::Vault};
 use tari_ootle_transaction::{args, Transaction};
 use tari_template_lib::{
     prelude::{ComponentAddress, ResourceType},
@@ -45,7 +45,7 @@ fn it_does_not_overflow_when_minting_a_huge_initial_supply() {
         .next()
         .copied()
         .unwrap();
-    let expected = commit_amount(&all_to_confidential.output_mask, u64::MAX.into());
+    let expected = commit_amount_checked(&all_to_confidential.output_mask, u64::MAX.into()).unwrap();
     assert_eq!(commitment, expected.to_byte_type());
     assert_eq!(confidential_vault.get_confidential_commitments().unwrap().len(), 1);
 }

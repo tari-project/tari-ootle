@@ -16,7 +16,7 @@ use tari_template_lib::{
 };
 
 use crate::{
-    crypto::{commit_amount, convert_amount_to_secret, messages, ElgamalVerifiableBalanceBytes},
+    crypto::{commit_amount_checked, convert_amount_to_secret, messages, ElgamalVerifiableBalanceBytes},
     resource_container::ResourceError,
 };
 
@@ -42,8 +42,13 @@ pub fn validate_value_proof(
 
     match proof.knowledge_proof {
         ValueKnowledgeProof::Commitment { mask_knowledge_proof } => {
-            let public_mask =
-                commitment.as_public_key() - commit_amount(&RistrettoSecretKey::default(), proof.value).as_public_key();
+            let Some(commit_amount) = commit_amount_checked(&RistrettoSecretKey::default(), proof.value) else {
+                return Err(ResourceError::UtxoBurnFailed {
+                    id: UtxoId::from(*commitment_bytes),
+                    details: "Value proof amount is too large".to_string(),
+                });
+            };
+            let public_mask = commitment.as_public_key() - commit_amount.as_public_key();
 
             let sig: RistrettoSchnorr =
                 mask_knowledge_proof
@@ -88,7 +93,7 @@ pub fn validate_value_proof(
             // E - R.p = v.G
             let check_value = encrypted - reveal_key;
 
-            let value = convert_amount_to_secret(&proof.value).expect("Value is non-negative, conversion must succeed");
+            let value = convert_amount_to_secret(&proof.value);
             let value_g = RistrettoPublicKey::from_secret_key(&value);
             if value_g != check_value {
                 return Err(ResourceError::UtxoBurnFailed {
@@ -115,7 +120,7 @@ mod tests {
     fn it_proves_knowledge_of_the_value() {
         let mask = RistrettoSecretKey::random(&mut OsRng);
         let value = 100_321_123u128.into();
-        let commitment = commit_amount(&mask, value);
+        let commitment = commit_amount_checked(&mask, value).unwrap();
         let commitment_bytes = commitment.to_byte_type();
 
         // Create the proof of knowledge of the value
@@ -138,7 +143,7 @@ mod tests {
     fn it_fails_if_the_value_differs() {
         let mask = RistrettoSecretKey::random(&mut OsRng);
         let value = 100_321_123u128.into();
-        let commitment = commit_amount(&mask, value);
+        let commitment = commit_amount_checked(&mask, value).unwrap();
         let commitment_bytes = commitment.to_byte_type();
 
         let other_value = value + Amount::ONE;

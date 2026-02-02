@@ -9,7 +9,7 @@ use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
-use tari_engine_types::crypto::{commit_amount, messages};
+use tari_engine_types::crypto::{commit_amount_checked, messages};
 use tari_ootle_wallet_crypto::{stealth, MaskAndValue, OutputWitness, StealthInputWitness, StealthOutputWitness};
 use tari_template_lib::{
     prelude::StealthTransferStatement,
@@ -231,8 +231,7 @@ where
 }
 
 pub fn generate_value_proof_mask_knowledge(value: Amount, mask: &RistrettoSecretKey) -> StealthValueProof {
-    assert!(value.is_positive(), "Value must be positive");
-    let commitment = commit_amount(mask, value);
+    let commitment = commit_amount_checked(mask, value).unwrap();
     let commitment_bytes = commitment.to_byte_type();
     let message = messages::value_proof_message(&commitment_bytes, &value);
     let sig = RistrettoSchnorr::sign(mask, message, &mut OsRng).expect("Signing cannot fail");
@@ -246,7 +245,6 @@ pub fn generate_value_proof_mask_knowledge(value: Amount, mask: &RistrettoSecret
 }
 
 pub fn generate_value_proof_elgamal(value: Amount, reveal_key: RistrettoPublicKeyBytes) -> StealthValueProof {
-    assert!(value.is_positive(), "Value must be positive");
     StealthValueProof {
         value,
         knowledge_proof: ValueKnowledgeProof::ElgamalEncrypted { reveal_key },

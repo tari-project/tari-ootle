@@ -6,7 +6,7 @@ use std::{collections::HashMap, convert::Infallible, future::Future, str::FromSt
 use ootle_byte_type::ToByteType;
 use tari_crypto::tari_utilities::SafePassword;
 use tari_engine_types::{
-    crypto::commit_amount_checked,
+    crypto::commit_amount,
     substate::{Substate, SubstateId},
     Utxo,
 };
@@ -131,7 +131,7 @@ impl Test {
         let amount = amount.into();
 
         let outputs_api = self.sdk.confidential_outputs_api();
-        let commitment = commit_amount_checked(&Default::default(), amount)
+        let commitment = commit_amount(&Default::default(), amount)
             .expect("Cannot add unspent output with negative amount")
             .to_byte_type();
         outputs_api

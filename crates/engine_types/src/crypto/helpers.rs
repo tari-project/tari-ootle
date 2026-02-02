@@ -53,18 +53,25 @@ pub fn get_commitment_factory() -> &'static CommitmentFactory {
 }
 
 /// Creates a Pedersen commitment to the given amount using the provided mask.
+/// This construction does not check that the amount is within any specific range for bulletproofs+.
+/// however is still a completely valid Pedersen commitment (256-bit vs 128-bit amount).
+pub fn commit_amount_unchecked(mask: &RistrettoSecretKey, amount: Amount) -> PedersenCommitment {
+    let v = convert_amount_to_secret(&amount);
+    get_commitment_factory().commit(mask, &v)
+}
+
+/// Creates a Pedersen commitment to the given amount using the provided mask.
 ///
 /// # Returns
 ///
 /// Returns `None` if the amount exceeds `u64::MAX`, otherwise returns a `PedersenCommitment`.
 /// This restriction is due to the underlying Bulletproofs+ implementation only supporting 64-bit range proofs.
-pub fn commit_amount_checked(mask: &RistrettoSecretKey, amount: Amount) -> Option<PedersenCommitment> {
+pub fn commit_amount(mask: &RistrettoSecretKey, amount: Amount) -> Option<PedersenCommitment> {
     if amount > u64::MAX {
         return None;
     }
 
-    let v = convert_amount_to_secret(&amount);
-    Some(get_commitment_factory().commit(mask, &v))
+    Some(commit_amount_unchecked(mask, amount))
 }
 
 /// Creates a Pedersen commitment to the given u64 amount using the provided mask.
@@ -91,13 +98,13 @@ mod tests {
     #[test]
     fn homomorphic() {
         let amount1 = Amount::MAX;
-        let commitment1 = commit_amount_checked(&Default::default(), amount1).unwrap();
+        let commitment1 = commit_amount_unchecked(&Default::default(), amount1);
         let amount2 = Amount::from_u64(1_000);
-        let commitment2 = commit_amount_checked(&Default::default(), amount2).unwrap();
+        let commitment2 = commit_amount_unchecked(&Default::default(), amount2);
 
         let resulting_commitment = commitment1.as_public_key() - commitment2.as_public_key();
 
-        let check = commit_amount_checked(&Default::default(), amount1 - amount2).unwrap();
+        let check = commit_amount_unchecked(&Default::default(), amount1 - amount2);
         assert_eq!(resulting_commitment, *check.as_public_key());
     }
 

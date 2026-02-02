@@ -223,9 +223,37 @@ impl Amount {
         Self(n)
     }
 
+    /// Creates an integer value from a slice of bytes in little endian. The value is wrapped in an [`Option`](https://doc.rust-lang.org/core/option/enum.Option.html) as the bytes may represent an integer too large to be represented by the type.
+    ///
+    /// If the length of the slice is shorter than `Self::BYTES`, the slice is padded with zeros or ones at the end so
+    /// that it's length equals `Self::BYTES`.
+    ///
+    /// If the length of the slice is longer than `Self::BYTES`, `None` will be returned, unless the bytes have
+    /// trailing zeros that can be removed until the length of the slice equals `Self::BYTES`.
     pub fn from_le_slice(bytes: &[u8]) -> Option<Self> {
-        let bytes: [u8; Self::BYTE_SIZE] = bytes.try_into().ok()?;
-        Some(Self(u128::from_le_bytes(bytes)))
+        let len = bytes.len();
+
+        if len == 0 {
+            return Some(Self::zero());
+        }
+
+        if len > Self::BYTE_SIZE {
+            // Check for trailing zeros that can be removed
+            let mut trimmed_len = len;
+            while trimmed_len > Self::BYTE_SIZE && bytes[trimmed_len - 1] == 0 {
+                trimmed_len -= 1;
+            }
+            if trimmed_len != Self::BYTE_SIZE {
+                return None;
+            }
+            let mut trimmed_bytes = [0u8; Self::BYTE_SIZE];
+            trimmed_bytes.copy_from_slice(&bytes[..Self::BYTE_SIZE]);
+            return Some(Self(u128::from_le_bytes(trimmed_bytes)));
+        }
+
+        let mut padded_bytes = [0u8; Self::BYTE_SIZE];
+        padded_bytes[..len].copy_from_slice(bytes);
+        Some(Self(u128::from_le_bytes(padded_bytes)))
     }
 
     pub fn to_le_digits(&self) -> [u64; Self::NUM_U64_DIGITS] {
@@ -631,9 +659,6 @@ mod tests {
     }
 
     #[test]
-    fn from_le_slice_converts_correctly() {}
-
-    #[test]
     fn fmt_decimals() {
         let a = Amount::from(123456u64);
         assert_eq!(a.to_decimal_string(0), "123456");
@@ -647,5 +672,43 @@ mod tests {
         // > 57 decimals errors
         let mut s = String::new();
         a.fmt_decimals(&mut s, 39).unwrap_err();
+    }
+
+    mod from_le_slice {
+        use super::*;
+
+        #[test]
+        fn exact_length() {
+            let bytes = [1u8; Amount::BYTE_SIZE];
+            let amount = Amount::from_le_slice(&bytes).unwrap();
+            assert_eq!(amount.to_le_bytes(), bytes);
+        }
+
+        #[test]
+        fn shorter_length() {
+            let bytes = [1u8; 8];
+            let amount = Amount::from_le_slice(&bytes).unwrap();
+            let mut expected_bytes = [0u8; Amount::BYTE_SIZE];
+            expected_bytes[..8].copy_from_slice(&bytes);
+            assert_eq!(amount.to_le_bytes(), expected_bytes);
+            assert_eq!(amount, 0x0101010101010101u64);
+        }
+
+        #[test]
+        fn longer_length_with_trailing_zeros() {
+            let mut bytes = vec![1u8; Amount::BYTE_SIZE - 5];
+            bytes.extend(vec![0u8; 10]);
+            let amount = Amount::from_le_slice(&bytes).unwrap();
+            let mut expected_bytes = [0u8; Amount::BYTE_SIZE];
+            expected_bytes[..(Amount::BYTE_SIZE - 5)].copy_from_slice(&bytes[..(Amount::BYTE_SIZE - 5)]);
+            assert_eq!(amount.to_le_bytes(), expected_bytes);
+        }
+
+        #[test]
+        fn longer_length_without_trailing_zeros() {
+            let bytes = vec![1u8; Amount::BYTE_SIZE + 5];
+            let amount = Amount::from_le_slice(&bytes);
+            assert!(amount.is_none());
+        }
     }
 }

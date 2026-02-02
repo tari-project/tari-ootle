@@ -282,6 +282,16 @@ impl PrecisionAmount {
         Self(out)
     }
 
+    /// Creates an integer value from a slice of bytes in little endian. The value is wrapped in an [`Option`](https://doc.rust-lang.org/core/option/enum.Option.html) as the bytes may represent an integer too large to be represented by the type.
+    ///
+    /// If the length of the slice is shorter than `Self::BYTES`, the slice is padded with zeros or ones at the end so
+    /// that it's length equals `Self::BYTES`. It is padded with ones if the bytes represent a negative integer,
+    /// otherwise it is padded with zeros.
+    ///
+    /// If the length of the slice is longer than `Self::BYTES`, `None` will be returned, unless the bytes represent a
+    /// non-negative integer and trailing zeros from the slice can be removed until the length of the slice equals
+    /// `Self::BYTES`, or if the bytes represent a negative integer and trailing ones from the slice can be removed
+    /// until the length of the slice equals `Self::BYTES`.
     pub fn from_le_slice(bytes: &[u8]) -> Option<Self> {
         I192::from_le_slice(bytes).map(Self)
     }

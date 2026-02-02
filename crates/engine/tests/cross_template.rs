@@ -267,7 +267,7 @@ fn it_does_not_propagate_permissions() {
                 .call_method(components.cross_template_component, "malicious_withdraw", args![
                     victim_account,
                     fungible_resource,
-                    Amount(100)
+                    100
                 ])
                 .build_and_seal(&attacker_key),
             // note that we are actually passing a valid proof of ownership for the victim. In reality, the engine only

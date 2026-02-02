@@ -72,7 +72,7 @@ fn setup(
 fn mint_initial_supply() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let outputs = vec![100, 1000, 10000];
-    let mint = stealth::generate_mint_statement(outputs, 0, None);
+    let mint = stealth::generate_mint_statement(outputs, 0u64, None);
     let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
 
     let resource = test.read_only_state_store().get_resource(&faucet_resx).unwrap();
@@ -83,7 +83,7 @@ fn mint_initial_supply() {
 #[test]
 fn mint_more_later() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let mint = stealth::generate_mint_statement([1200], 0, None);
+    let mint = stealth::generate_mint_statement([1200], 0u64, None);
     let (faucet, faucet_resx) = setup(&mut test, &mint, None);
 
     test.call_method::<()>(faucet, "mint", call_args![11100], vec![]);
@@ -97,7 +97,7 @@ fn mint_more_later() {
 fn basic_transfer() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let outputs = vec![100, 1000, 10000];
-    let mint = stealth::generate_mint_statement(outputs, 0, None);
+    let mint = stealth::generate_mint_statement(outputs, 0u64, None);
     let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
 
     let transfer = stealth::generate_transfer_data(
@@ -105,7 +105,7 @@ fn basic_transfer() {
             mask: mint.output_masks[0].clone(),
             value: 100,
         }],
-        0,
+        0u64,
         Some(100),
         0,
     );
@@ -131,7 +131,7 @@ fn basic_transfer() {
 fn programmatic_transfer() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let outputs = vec![100, 1000, 10000];
-    let mint = stealth::generate_mint_statement(outputs, 100, None);
+    let mint = stealth::generate_mint_statement(outputs, 100u64, None);
     let (faucet, _faucet_resx) = setup(&mut test, &mint, None);
 
     let vault_id = test
@@ -144,7 +144,7 @@ fn programmatic_transfer() {
             mask: mint.output_masks[0].clone(),
             value: 100,
         }],
-        0,
+        0u64,
         Some(75),
         25,
     );
@@ -172,7 +172,7 @@ fn programmatic_transfer() {
 fn transfer_with_revealed_outputs() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let outputs = [100, 1000, 10000];
-    let mint = stealth::generate_mint_statement(outputs, 0, None);
+    let mint = stealth::generate_mint_statement(outputs, 0u64, None);
     let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
     let (account, _proof, _sk) = test.create_empty_account();
 
@@ -181,7 +181,7 @@ fn transfer_with_revealed_outputs() {
             mask: mint.output_masks[1].clone(),
             value: 1000,
         }],
-        0,
+        0u64,
         [100, 200],
         700,
     );
@@ -215,7 +215,7 @@ fn transfer_revealed_between_accounts() {
     let (bob, _proof, _sk) = test.create_empty_account();
 
     let outputs = [100, 1000, 10000];
-    let mint = stealth::generate_mint_statement(outputs, 0, None);
+    let mint = stealth::generate_mint_statement(outputs, 0u64, None);
     let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
 
     let transfer_from_faucet = stealth::generate_transfer_data(
@@ -229,11 +229,11 @@ fn transfer_revealed_between_accounts() {
                 value: 1000,
             },
         ],
-        0,
+        0u64,
         [999, 9901],
         100,
     );
-    let transfer_from_alice_to_bob = stealth::generate_transfer_data(NO_INPUTS, 100, [25, 25, 25], 25);
+    let transfer_from_alice_to_bob = stealth::generate_transfer_data(NO_INPUTS, 100u64, [25, 25, 25], 25);
     let result = test.execute_expect_success(
         Transaction::builder_localnet()
             .stealth_transfer(faucet_resx, transfer_from_faucet.statement)
@@ -272,7 +272,7 @@ fn transfer_revealed_between_accounts() {
 fn transfer_invalid_balance_in_statement() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let outputs = [100, 1000];
-    let mint = stealth::generate_mint_statement(outputs, 0, None);
+    let mint = stealth::generate_mint_statement(outputs, 0u64, None);
     let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
     let (alice, _proof, _sk) = test.create_empty_account();
 
@@ -281,7 +281,7 @@ fn transfer_invalid_balance_in_statement() {
             mask: mint.output_masks[0].clone(),
             value: 100,
         }],
-        0,
+        0u64,
         [99],
         // Try to skim a little (1) off the top
         2,
@@ -306,7 +306,7 @@ fn transfer_invalid_balance_in_statement() {
 fn transfer_fails_if_transaction_is_not_signed_by_utxo_owner() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let outputs = [100, 1000];
-    let mint = stealth::generate_mint_statement(outputs, 0, None);
+    let mint = stealth::generate_mint_statement(outputs, 0u64, None);
     let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
 
     let input = MaskAndValue {
@@ -314,7 +314,7 @@ fn transfer_fails_if_transaction_is_not_signed_by_utxo_owner() {
         value: 100,
     };
     let commitment = input.to_commitment();
-    let transfer_from_faucet = stealth::generate_transfer_data([input], 0, [100], 0);
+    let transfer_from_faucet = stealth::generate_transfer_data([input], 0u64, [100], 0);
 
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
@@ -337,7 +337,7 @@ fn transfer_fails_if_transaction_is_not_signed_by_utxo_owner() {
 fn transfer_invalid_range_proof_in_statement() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let outputs = [100, 1000];
-    let mint = stealth::generate_mint_statement(outputs, 0, None);
+    let mint = stealth::generate_mint_statement(outputs, 0u64, None);
     let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
     let (alice, _proof, _sk) = test.create_empty_account();
 
@@ -346,7 +346,7 @@ fn transfer_invalid_range_proof_in_statement() {
             mask: mint.output_masks[0].clone(),
             value: 100,
         }],
-        0,
+        0u64,
         [99],
         1,
     );
@@ -380,7 +380,7 @@ fn many_outputs_in_one_transfer() {
 
     use tari_engine_types::limits;
     let outputs = [1000];
-    let mint = stealth::generate_mint_statement(outputs, 0, None);
+    let mint = stealth::generate_mint_statement(outputs, 0u64, None);
     let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
 
     let timer = Instant::now();
@@ -395,7 +395,7 @@ fn many_outputs_in_one_transfer() {
             mask: mint.output_masks[0].clone(),
             value: 1000,
         }],
-        0,
+        0u64,
         iter::repeat_n(
             u64::try_from(1000 / limits::STEALTH_LIMITS.max_outputs).unwrap(),
             limits::STEALTH_LIMITS.max_outputs,
@@ -456,7 +456,7 @@ where
 fn mint_with_view_key() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let (view_key_secret, view_key) = RistrettoPublicKey::random_keypair(&mut OsRng);
-    let mint = stealth::generate_mint_statement([1000], 0, Some(&view_key));
+    let mint = stealth::generate_mint_statement([1000], 0u64, Some(&view_key));
     let (_faucet, faucet_resx) = setup(&mut test, &mint, Some(&view_key));
 
     let withdraw_proof = stealth::generate_transfer_data_with_view_key(
@@ -464,7 +464,7 @@ fn mint_with_view_key() {
             mask: mint.output_masks[0].clone(),
             value: 1000,
         }],
-        0,
+        0u64,
         [100, 200, 200, 200, 200, 100],
         0,
         &view_key,
@@ -500,7 +500,7 @@ fn mint_with_view_key() {
 fn freeze_then_attempt_spend() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let outputs = vec![100u64, 1000, 10000];
-    let mint = stealth::generate_mint_statement(outputs.clone(), 0, None);
+    let mint = stealth::generate_mint_statement(outputs.clone(), 0u64, None);
     let (faucet, faucet_resx) = setup(&mut test, &mint, None);
 
     let transfer = stealth::generate_transfer_data(
@@ -514,7 +514,7 @@ fn freeze_then_attempt_spend() {
                 value: 1000,
             },
         ],
-        0,
+        0u64,
         Some(1100),
         0,
     );
@@ -580,7 +580,7 @@ fn freeze_then_attempt_spend() {
 fn burn_then_attempt_spend() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let outputs = vec![100u64, 1000, 10000];
-    let mint = stealth::generate_mint_statement(outputs.clone(), 0, None);
+    let mint = stealth::generate_mint_statement(outputs.clone(), 0u64, None);
     let (faucet, faucet_resx) = setup(&mut test, &mint, None);
 
     let transfer = stealth::generate_transfer_data(
@@ -594,7 +594,7 @@ fn burn_then_attempt_spend() {
                 value: outputs[1],
             },
         ],
-        0,
+        0u64,
         Some(outputs[0] + outputs[1]),
         0,
     );
@@ -657,7 +657,7 @@ fn transfer_restricted_by_access_rules_n_of_m() {
         public_key(pk4)
     ));
     let outputs = vec![(100u64, SpendCondition::AccessRule(rule))];
-    let mint = stealth::generate_mint_statement(outputs.clone(), 0, None);
+    let mint = stealth::generate_mint_statement(outputs.clone(), 0u64, None);
     let (_, faucet_resx) = setup(&mut test, &mint, None);
 
     let transfer = stealth::generate_transfer_data(
@@ -665,7 +665,7 @@ fn transfer_restricted_by_access_rules_n_of_m() {
             mask: mint.output_masks[0].clone(),
             value: outputs[0].0,
         }],
-        0,
+        0u64,
         [10u64, 90u64],
         0,
     );
@@ -712,7 +712,7 @@ fn transfer_restricted_by_access_rules_component_scope() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
 
     let outputs = vec![(100u64, SpendCondition::Signed(test.to_public_key_bytes()))];
-    let mint = stealth::generate_mint_statement(outputs.clone(), 0, None);
+    let mint = stealth::generate_mint_statement(outputs.clone(), 0u64, None);
     let (component, faucet_resx) = setup(&mut test, &mint, None);
 
     let component_scope_rule = rule!(component(component));
@@ -721,7 +721,7 @@ fn transfer_restricted_by_access_rules_component_scope() {
             mask: mint.output_masks[0].clone(),
             value: outputs[0].0,
         }],
-        0,
+        0u64,
         [
             (10u64, SpendCondition::AccessRule(component_scope_rule.clone())),
             (90u64, SpendCondition::AccessRule(component_scope_rule)),
@@ -749,7 +749,7 @@ fn transfer_restricted_by_access_rules_component_scope() {
                 value: 90,
             },
         ],
-        0,
+        0u64,
         [
             // Anyone with the mask and value (i.e. view key) can spend!
             (99u64, SpendCondition::AccessRule(AccessRule::AllowAll)),

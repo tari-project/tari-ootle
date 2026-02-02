@@ -45,7 +45,7 @@ fn it_does_not_overflow_when_minting_a_huge_initial_supply() {
         .next()
         .copied()
         .unwrap();
-    let expected = commit_amount(&all_to_confidential.output_mask, u64::MAX.into());
+    let expected = commit_amount(&all_to_confidential.output_mask, u64::MAX.into()).unwrap();
     assert_eq!(commitment, expected.to_byte_type());
     assert_eq!(confidential_vault.get_confidential_commitments().unwrap().len(), 1);
 }
@@ -73,7 +73,10 @@ fn it_does_not_overflow_when_minting_more_then_amount_max_fungible_tokens() {
     );
 
     let vault = get_fungible_vault(&test, component);
-    assert_eq!(vault.balance(), Amount::from(i64::MAX) * Amount::from(3));
+    assert_eq!(
+        vault.balance(),
+        Amount::try_from(i64::MAX).unwrap() * Amount::from(3u64)
+    );
 }
 
 #[test]

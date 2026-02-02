@@ -182,7 +182,7 @@ where TSpec: WalletSdkSpec
                     .confidential_outputs_api
                     .lock_outputs_until_partial_amount(lock_id, &src_vault.id, spend_amount)?;
 
-                let revealed_to_spend = spend_amount.saturating_sub_positive(amount_locked);
+                let revealed_to_spend = spend_amount.saturating_sub(amount_locked);
 
                 if src_vault.revealed_balance < revealed_to_spend {
                     return Err(ConfidentialTransferApiError::InsufficientFunds);

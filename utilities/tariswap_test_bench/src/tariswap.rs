@@ -35,7 +35,10 @@ impl Runner {
 
         let transaction = self
             .new_transaction_builder()
-            .pay_fee_from_component(in_account.component_address, 1000 * num_tariswaps)
+            .pay_fee_from_component(
+                in_account.component_address,
+                Amount::from_usize(num_tariswaps) * 1000u64,
+            )
             .then(|mut builder| {
                 for _ in 0..num_tariswaps {
                     builder = builder.call_function(self.tariswap_template, "new", args![
@@ -129,7 +132,7 @@ impl Runner {
                         SubstateRequirement::unversioned(faucet.resource_address),
                     ])
                     .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
-                    .pay_fee_from_component(account.component_address, 2000)
+                    .pay_fee_from_component(account.component_address, 2000u64)
                     .call_method(account.component_address, "withdraw", args![XTR, amount_a])
                     .put_last_instruction_output_on_workspace("a")
                     .call_method(account.component_address, "withdraw", args![
@@ -258,10 +261,10 @@ impl Runner {
                     .call_method(tariswap.component_address, "get_pool_balance", args![
                         faucet.resource_address,
                     ])
-                    .call_method(tariswap.component_address, "get_pool_ratio", args![XTR, Amount(1000)])
+                    .call_method(tariswap.component_address, "get_pool_ratio", args![XTR, 1000])
                     .call_method(tariswap.component_address, "get_pool_ratio", args![
                         faucet.resource_address,
-                        Amount(1000)
+                        1000
                     ])
                     .call_method(account.component_address, "withdraw", args![XTR, amount_a_for_b])
                     .put_last_instruction_output_on_workspace("a")
@@ -329,10 +332,10 @@ impl Runner {
                     .call_method(tariswap.component_address, "get_pool_balance", args![
                         faucet.resource_address
                     ])
-                    .call_method(tariswap.component_address, "get_pool_ratio", args![XTR, Amount(1000)])
+                    .call_method(tariswap.component_address, "get_pool_ratio", args![XTR, 1000])
                     .call_method(tariswap.component_address, "get_pool_ratio", args![
                         faucet.resource_address,
-                        Amount(1000)
+                        1000
                     ])
                     .call_method(account.component_address, "withdraw", args![
                         faucet.resource_address,

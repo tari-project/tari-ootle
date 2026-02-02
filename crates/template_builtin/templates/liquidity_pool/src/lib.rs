@@ -117,8 +117,8 @@ mod template {
             assert_ne!(resource_a, resource_b, "The resources must be different");
 
             // contribution amounts
-            let a_amount = bucket_a.amount();
-            let b_amount = bucket_b.amount();
+            let a_amount = bucket_a.amount().into_precision_amount();
+            let b_amount = bucket_b.amount().into_precision_amount();
 
             if a_amount.is_zero() || b_amount.is_zero() {
                 panic!("Cannot contribute zero amount of liquidity");
@@ -128,10 +128,10 @@ mod template {
             let pool_b = self.get_pool_from_resource(resource_b);
 
             // Get the reserves for each pool
-            let reserve_a = self.get_pool_vault(pool_a).balance();
-            let reserve_b = self.get_pool_vault(pool_b).balance();
+            let reserve_a = self.get_pool_vault(pool_a).balance().into_precision_amount();
+            let reserve_b = self.get_pool_vault(pool_b).balance().into_precision_amount();
 
-            let lp_supply = self.lp_total_supply();
+            let lp_supply = self.lp_total_supply().into_precision_amount();
 
             let (lp_mint_amount, a_contribution, b_contribution) = match (
                 lp_supply.is_positive(),
@@ -144,7 +144,7 @@ mod template {
                     // contributions
 
                     (
-                        // TODO: lost of precision
+                        // TODO: possible lost of precision even with 192 bit integer
                         a_amount
                             .checked_mul(b_amount)
                             .and_then(|c1_c2| c1_c2.checked_sqrt())
@@ -209,6 +209,11 @@ mod template {
                     panic!("Inconsistent pool state: non-zero LP supply with zero reserve");
                 },
             };
+
+            // convert back to normal Amount
+            let lp_mint_amount = Amount::try_from(lp_mint_amount).expect("LP mint amount conversion failed");
+            let a_contribution = Amount::try_from(a_contribution).expect("A contribution conversion failed");
+            let b_contribution = Amount::try_from(b_contribution).expect("B contribution conversion failed");
 
             // mint and return the new lp tokens
             let mint_lp_tokens = self.lp_resource.mint_fungible(lp_mint_amount);

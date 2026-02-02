@@ -18,15 +18,15 @@ use crate::support::Test;
 fn outputs_locked_and_released() {
     let test = Test::new();
 
-    let commitment_25 = test.add_unspent_output(25);
-    let commitment_49 = test.add_unspent_output(49);
-    let _commitment_100 = test.add_unspent_output(100);
+    let commitment_25 = test.add_unspent_output(25u64);
+    let commitment_49 = test.add_unspent_output(49u64);
+    let _commitment_100 = test.add_unspent_output(100u64);
 
     let lock_id = test.new_lock().keep_locked();
     let (inputs, total_value) = test
         .sdk()
         .confidential_outputs_api()
-        .lock_outputs_by_amount(lock_id, &Test::test_vault_address(), 50)
+        .lock_outputs_by_amount(lock_id, &Test::test_vault_address(), 50u64)
         .unwrap();
     assert_eq!(total_value, 74);
     assert_eq!(inputs.len(), 2);
@@ -53,16 +53,16 @@ fn outputs_locked_and_released() {
 fn outputs_locked_and_finalized() {
     let test = Test::new();
 
-    let commitment_25 = test.add_unspent_output(25);
-    let commitment_49 = test.add_unspent_output(49);
-    let commitment_100 = test.add_unspent_output(100);
+    let commitment_25 = test.add_unspent_output(25u64);
+    let commitment_49 = test.add_unspent_output(49u64);
+    let commitment_100 = test.add_unspent_output(100u64);
 
     let outputs_api = test.sdk().confidential_outputs_api();
     let locks_api = test.sdk().locks_api();
     let lock_id = test.new_lock().keep_locked();
 
     let (inputs, total_value) = outputs_api
-        .lock_outputs_by_amount(lock_id, &Test::test_vault_address(), 50)
+        .lock_outputs_by_amount(lock_id, &Test::test_vault_address(), 50u64)
         .unwrap();
     assert_eq!(total_value, 74);
     assert_eq!(inputs.len(), 2);
@@ -85,7 +85,7 @@ fn outputs_locked_and_finalized() {
             account_address: Test::test_account_address(),
             vault_id: Test::test_vault_address(),
             commitment: commitment_change,
-            value: 24.into(),
+            value: 24u64.into(),
             sender_public_nonce: None,
             view_only_key_id: KeyId::derived(KeyBranch::ViewOnlyKey, 0),
             owner_key_id: Some(KeyId::derived(KeyBranch::Account, 0)),

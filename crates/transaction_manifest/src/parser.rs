@@ -407,7 +407,7 @@ fn build_arguments(args: Punctuated<Expr, Comma>) -> Result<Vec<ManifestLiteral>
                     ))
                 }
             },
-            // Support for Amount(100) syntax
+            // Support for 100 syntax
             Expr::Call(ExprCall { func, args, .. }) => {
                 if let Expr::Path(ExprPath {
                     path: Path { segments, .. },

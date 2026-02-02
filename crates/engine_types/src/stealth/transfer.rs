@@ -10,7 +10,7 @@ use tari_crypto::{
 use tari_template_lib::{prelude::StealthTransferStatement, types::Amount};
 
 use crate::{
-    crypto::{commit_amount_checked, messages, try_decode_to_signature},
+    crypto::{commit_amount, messages, try_decode_to_signature},
     resource_container::ResourceError,
     stealth,
     stealth::ValidatedStealthOutput,
@@ -88,14 +88,14 @@ pub fn validate_transfer(
 
     // We assume that the input amount is available and only check that the maths is correct. The engine is responsible
     // for checking that the input amount is actually available.
-    let revealed_input_commit = commit_amount_checked(
+    let revealed_input_commit = commit_amount(
         &RistrettoSecretKey::default(),
         transfer.inputs_statement.revealed_amount,
     )
     .ok_or_else(|| ResourceError::InvalidBalanceProof {
         details: "Revealed input amount must be non-negative".to_string(),
     })?;
-    let revealed_output_commit = commit_amount_checked(
+    let revealed_output_commit = commit_amount(
         &RistrettoSecretKey::default(),
         transfer.outputs_statement.revealed_output_amount,
     )

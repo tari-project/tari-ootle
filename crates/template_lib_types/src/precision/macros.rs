@@ -28,10 +28,10 @@ macro_rules! impl_try_from {
 
 #[macro_export]
 macro_rules! partial_eq_impl {
-    ($ty:ty, $other:ty) => {
-        impl PartialEq<$other> for $ty {
-            fn eq(&self, other: &$other) -> bool {
-                let converted: Option<$other> = self.into_inner_value().try_into().ok();
+    ($ty:ty) => {
+        impl PartialEq<$ty> for Amount {
+            fn eq(&self, other: &$ty) -> bool {
+                let converted: Option<$ty> = self.into_inner_value().try_into().ok();
                 converted == Some(*other)
             }
         }
@@ -40,11 +40,11 @@ macro_rules! partial_eq_impl {
 
 #[macro_export]
 macro_rules! partial_ord_impl {
-    ($ty:ty, $other:ty) => {
-        impl PartialOrd<$other> for $ty {
-            fn partial_cmp(&self, other: &$other) -> Option<tari_template_abi::rust::cmp::Ordering> {
+    ($ty:ty) => {
+        impl PartialOrd<$ty> for Amount {
+            fn partial_cmp(&self, other: &$ty) -> Option<tari_template_abi::rust::cmp::Ordering> {
                 use tari_template_abi::rust::cmp;
-                match <$other>::try_from(self.into_inner_value()) {
+                match <$ty>::try_from(self.into_inner_value()) {
                     Ok(value) => value.partial_cmp(other),
                     Err(_) => {
                         if self.is_negative() {

@@ -273,7 +273,7 @@ mod resource_access_rules {
         // Owner can get tokens
         test.execute_expect_success(
             Transaction::builder_localnet()
-                .call_method(component_address, "take_tokens", args![Amount(10)])
+                .call_method(component_address, "take_tokens", args![10])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
                 .build_and_seal(&owner_key),
@@ -293,7 +293,7 @@ mod resource_access_rules {
         // User can get tokens, and deposit them in the owners account (deposit is default allow)
         test.execute_expect_success(
             Transaction::builder_localnet()
-                .call_method(component_address, "take_tokens", args![Amount(10)])
+                .call_method(component_address, "take_tokens", args![10])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
                 .build_and_seal(&user_key),
@@ -407,7 +407,7 @@ mod resource_access_rules {
         // User cannot get the tokens
         let reason = test.execute_expect_failure(
             Transaction::builder_localnet()
-                .call_method(component_address, "take_tokens", args![Amount(10)])
+                .call_method(component_address, "take_tokens", args![10])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
                 .build_and_seal(&user_key),
@@ -443,7 +443,7 @@ mod resource_access_rules {
                 .call_method(component_address, "get_nft_data_using_proof", args![Workspace("proof")])
                 .call_method(component_address, "take_tokens_using_proof", args![
                     Workspace("proof"),
-                    Amount(10)
+                    10
                 ])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
@@ -474,7 +474,7 @@ mod resource_access_rules {
             Transaction::builder_localnet()
                 .call_method(user_account, "create_proof_for_resource", args![badge_resource])
                 .put_last_instruction_output_on_workspace("proof")
-                .call_method(user_account, "withdraw", args![token_resource, Amount(10)])
+                .call_method(user_account, "withdraw", args![token_resource, 10])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
                 .drop_all_proofs_in_workspace()
@@ -521,7 +521,7 @@ mod resource_access_rules {
         // User cannot get the tokens
         let reason = test.execute_expect_failure(
             Transaction::builder_localnet()
-                .call_method(access_rules_component, "take_tokens", args![Amount(10)])
+                .call_method(access_rules_component, "take_tokens", args![10])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
                 .build_and_seal(&user_key),
@@ -543,11 +543,11 @@ mod resource_access_rules {
         // User can take tokens
         test.execute_expect_success(
             Transaction::builder_localnet()
-                .call_method(user_account, "create_proof_by_amount", args![badge_resource, Amount(1)])
+                .call_method(user_account, "create_proof_by_amount", args![badge_resource, 1])
                 .put_last_instruction_output_on_workspace("proof")
                 .call_method(access_rules_component, "take_tokens_using_proof", args![
                     Workspace("proof"),
-                    Amount(10)
+                    10
                 ])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
@@ -601,15 +601,12 @@ mod resource_access_rules {
         // Take some tokens, generate a proof from the bucket (locking them up), and then try withdrawing them
         let reason = test.execute_expect_failure(
             Transaction::builder_localnet()
-                .call_method(component_address, "take_tokens", args![Amount(1000)])
+                .call_method(component_address, "take_tokens", args![1000])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
-                .call_method(owner_account, "create_proof_by_amount", args![
-                    token_resource,
-                    Amount(1000)
-                ])
+                .call_method(owner_account, "create_proof_by_amount", args![token_resource, 1000])
                 .put_last_instruction_output_on_workspace("proof")
-                .call_method(owner_account, "withdraw", args![token_resource, Amount(1000)])
+                .call_method(owner_account, "withdraw", args![token_resource, 1000])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
                 .build_and_seal(&owner_key),
@@ -621,16 +618,13 @@ mod resource_access_rules {
         // Drop the proof before withdraw/deposit
         test.execute_expect_success(
             Transaction::builder_localnet()
-                .call_method(component_address, "take_tokens", args![Amount(1000)])
+                .call_method(component_address, "take_tokens", args![1000])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
-                .call_method(owner_account, "create_proof_by_amount", args![
-                    token_resource,
-                    Amount(1000)
-                ])
+                .call_method(owner_account, "create_proof_by_amount", args![token_resource, 1000])
                 .put_last_instruction_output_on_workspace("proof")
                 .drop_all_proofs_in_workspace()
-                .call_method(owner_account, "withdraw", args![token_resource, Amount(1000)])
+                .call_method(owner_account, "withdraw", args![token_resource, 1000])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
                 .build_and_seal(&owner_key),
@@ -751,7 +745,7 @@ mod resource_access_rules {
         // User cannot get the tokens
         let reason = test.execute_expect_failure(
             Transaction::builder_localnet()
-                .call_method(component_address, "take_tokens", args![Amount(10)])
+                .call_method(component_address, "take_tokens", args![10])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
                 .build_and_seal(&user_key),
@@ -798,7 +792,7 @@ mod resource_access_rules {
                 .call_method(
                     component_address,
                     "take_tokens_using_proof",
-                    args![Workspace("proof"), Amount(10)],
+                    args![Workspace("proof"), 10],
                 )
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
@@ -812,7 +806,7 @@ mod resource_access_rules {
         assert_reject_reason(reason, RuntimeError::InvalidOpDepositLockedBucket {
             // badges is the 1st bucket
             bucket_id: 0.into(),
-            locked_amount: Amount::from(2),
+            locked_amount: Amount::from(2u64),
         });
 
         // User can take tokens, using a proof obtained from a bucket
@@ -840,7 +834,7 @@ mod resource_access_rules {
                 .call_method(
                     component_address,
                     "take_tokens_using_proof",
-                    args![Workspace("proof"), Amount(10)],
+                    args![Workspace("proof"), 10],
                 )
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
@@ -902,7 +896,7 @@ mod resource_access_rules {
         // Minting in a component context will succeed
         test.execute_expect_success(
             Transaction::builder_localnet()
-                .call_method(component_address, "mint_more_tokens", args![Amount(1000)])
+                .call_method(component_address, "mint_more_tokens", args![1000])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
                 .build_and_seal(&owner_key),
@@ -932,7 +926,7 @@ mod resource_access_rules {
 
         test.execute_expect_success(
             Transaction::builder_localnet()
-                .call_method(component_address, "take_tokens", args![Amount(10)])
+                .call_method(component_address, "take_tokens", args![10])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
                 .build_and_seal(&owner_key),
@@ -961,7 +955,7 @@ mod resource_access_rules {
 
         let result = test.execute_expect_failure(
             Transaction::builder_localnet()
-                .call_method(component_address, "take_tokens", args![Amount(10)])
+                .call_method(component_address, "take_tokens", args![10])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
                 .build_and_seal(&owner_key),
@@ -999,7 +993,7 @@ mod resource_access_rules {
 
         let result = test.execute_expect_failure(
             Transaction::builder_localnet()
-                .call_method(component_address, "take_tokens", args![Amount(10)])
+                .call_method(component_address, "take_tokens", args![10])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
                 .build_and_seal(&user_key),
@@ -1037,7 +1031,7 @@ mod resource_access_rules {
 
         let result = test.execute_expect_failure(
             Transaction::builder_localnet()
-                .call_method(component_address, "take_tokens", args![Amount(10)])
+                .call_method(component_address, "take_tokens", args![10])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
                 .build_and_seal(&user_key),
@@ -1089,7 +1083,7 @@ mod resource_access_rules {
 
         let result = test.execute_expect_failure(
             Transaction::builder_localnet()
-                .call_method(component_address, "take_tokens", args![Amount(10)])
+                .call_method(component_address, "take_tokens", args![10])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(state_component, "set", args![1])
                 // The hook should not be able to set the state component to 123

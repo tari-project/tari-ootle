@@ -36,7 +36,7 @@ mod tariswap {
     }
 
     impl TariSwapPool {
-        // Initialises a new pool component for for the pool A - B
+        // Initialises a new pool component for the pool A - B
         // the fees is represented as a per-mil quantity (e.g. "1" represents "0.1%")
         pub fn new(a_addr: ResourceAddress, b_addr: ResourceAddress, fee: u16) -> Component<Self> {
             // check that the resource pair is correct
@@ -67,7 +67,7 @@ mod tariswap {
             .create()
         }
 
-        // swap A tokens for B tokens or viceversa
+        // swap A tokens for B tokens or vice versa
         pub fn swap(&mut self, input_bucket: Bucket, output_resource: ResourceAddress) -> Bucket {
             // check that the parameters are correct
             let input_resource = input_bucket.resource_address();
@@ -139,7 +139,7 @@ mod tariswap {
         }
 
         pub fn remove_liquidity(&mut self, lp_bucket: Bucket) -> (Bucket, Bucket) {
-            assert!(lp_bucket.resource_address() == self.lp_resource, "Invalid LP resource");
+            assert_eq!(lp_bucket.resource_address(), self.lp_resource, "Invalid LP resource");
 
             // get the pool information
             let a_resource = self.get_a_resource();
@@ -192,7 +192,7 @@ mod tariswap {
             let balance = self.get_pool_balance(resource);
 
             if balance == 0 {
-                1.into()
+                Amount::ONE
             } else {
                 amount / balance
             }

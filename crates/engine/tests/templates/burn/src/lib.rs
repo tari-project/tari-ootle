@@ -19,7 +19,7 @@ mod template {
         pub fn new(confidential_supply: ConfidentialOutputStatement) -> Component<Self> {
             let fungible = ResourceBuilder::public_fungible()
                 .burnable(rule!(allow_all))
-                .initial_supply(1_000_000);
+                .initial_supply(1_000_000u32);
 
             let non_fungible = ResourceBuilder::non_fungible()
                 .burnable(rule!(allow_all))
@@ -31,7 +31,7 @@ mod template {
 
             let stealth = ResourceBuilder::stealth()
                 .burnable(rule!(allow_all))
-                .initial_supply(1_000_000);
+                .initial_supply(1_000_000u32);
 
             Component::new(Self {
                 fungible: Vault::from_bucket(fungible),

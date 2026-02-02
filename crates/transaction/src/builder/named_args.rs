@@ -61,12 +61,6 @@ macro_rules! arg {
     (Literal($arg:expr)) => {
         $crate::builder::named_args::NamedArg::from_type(&$arg).unwrap()
     };
-    (Amount($arg:expr)) => {
-        $crate::builder::named_args::NamedArg::from_type(&$crate::builder::named_args::__macro_exports::Amount::from(
-            $arg,
-        ))
-        .unwrap()
-    };
 
     ($arg:expr) => {
         $crate::arg!(Literal($arg))
@@ -93,15 +87,6 @@ macro_rules! __args_inner {
 
     (@ { $this:ident } Literal($e:expr) $(,)?) => {
         $crate::builder::named_args::__push(&mut $this, $crate::arg!(Literal($e)));
-    };
-
-   (@ { $this:ident } Amount($e:expr), $($tail:tt)*) => {
-        $crate::builder::named_args::__push(&mut $this, $crate::arg!(Amount($e)));
-        $crate::__args_inner!(@ { $this } $($tail)*);
-    };
-
-    (@ { $this:ident } Amount($e:expr) $(,)?) => {
-        $crate::builder::named_args::__push(&mut $this, $crate::arg!(Amount($e)));
     };
 
     (@ { $this:ident } $e:expr, $($tail:tt)*) => {

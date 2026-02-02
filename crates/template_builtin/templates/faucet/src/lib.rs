@@ -14,7 +14,6 @@ mod template {
 
     impl XtrFaucet {
         pub fn take(&self, amount: Amount) -> Bucket {
-            assert!(amount.is_positive(), "Amount must be positive");
             assert!(
                 amount <= FAUCET_MAX,
                 "Requested amount {} exceeds faucet max of {}",
@@ -27,7 +26,6 @@ mod template {
 
         pub fn take_confidential(&self, transfer: StealthTransferStatement) -> Option<Bucket> {
             let amount = transfer.inputs_statement.revealed_amount;
-            assert!(amount.is_positive(), "Amount must be positive");
             assert!(
                 amount <= FAUCET_MAX,
                 "Requested amount {} exceeds faucet max of {}",

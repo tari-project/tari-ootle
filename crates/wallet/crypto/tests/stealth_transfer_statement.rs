@@ -22,9 +22,15 @@ use tari_template_lib_types::{crypto::UtxoTag, Amount, EncryptedData};
 
 #[test]
 fn it_create_a_valid_revealed_only_proof() {
-    let proof =
-        confidential::create_withdraw_proof(&[], Amount::from(123), None, Amount::from(123), None, Amount::from(0))
-            .unwrap();
+    let proof = confidential::create_withdraw_proof(
+        &[],
+        Amount::from(123u64),
+        None,
+        Amount::from(123u64),
+        None,
+        Amount::from(0u64),
+    )
+    .unwrap();
 
     assert!(proof.is_revealed_only());
 }
@@ -48,7 +54,7 @@ mod stealth_tests {
         let revealed_input_amount = Amount::zero();
 
         let output_statements = make_output_statements(&[6000]);
-        let revealed_output_amount = Amount::from(0);
+        let revealed_output_amount = Amount::from(0u64);
 
         let statement = create_transfer_statement(
             inputs,
@@ -64,10 +70,10 @@ mod stealth_tests {
     #[test]
     fn it_creates_a_valid_statement_with_revealed() {
         let inputs = make_input_statements(&[(1, 1000), (2, 2000), (3, 3000)]);
-        let revealed_input_amount = Amount::from(6000);
+        let revealed_input_amount = Amount::from(6000u64);
 
         let output_statements = make_output_statements(&[100, 200, 300]);
-        let revealed_output_amount = Amount::from(6000 + 6000 - 100 - 200 - 300);
+        let revealed_output_amount = Amount::from_u64(6000 + 6000 - 100 - 200 - 300);
 
         let statement = create_transfer_statement(
             inputs,
@@ -82,8 +88,8 @@ mod stealth_tests {
 
     #[test]
     fn it_creates_a_valid_statement_with_revealed_only() {
-        let revealed_input_amount = Amount::from(6000);
-        let revealed_output_amount = Amount::from(6000);
+        let revealed_input_amount = Amount::from(6000u64);
+        let revealed_output_amount = Amount::from(6000u64);
         let statement = create_transfer_statement(
             iter::empty(),
             revealed_input_amount,
@@ -93,8 +99,8 @@ mod stealth_tests {
         .unwrap();
         stealth::validate_transfer(&statement, None).unwrap();
 
-        let revealed_input_amount = Amount::from(6000);
-        let revealed_output_amount = Amount::from(5999);
+        let revealed_input_amount = Amount::from(6000u64);
+        let revealed_output_amount = Amount::from(5999u64);
         let statement = create_transfer_statement(
             iter::empty(),
             revealed_input_amount,

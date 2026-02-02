@@ -63,7 +63,7 @@ async fn main() {
     let unsigned_tx = IFaucet::new(&provider)
         .take_faucet_funds(10 * ONE_XTR)
         // NOTE that pay fee must be called after the faucet funds are taken because fees are paid from the faucet funds
-        .pay_fee(500)
+        .pay_fee(500u64)
         .prepare()
         .await
         .expect("Failed to prepare faucet transaction");
@@ -84,7 +84,7 @@ async fn main() {
     let xtr_token = XTR; // resource_address!("resource_deadbeaf");
 
     let unsigned_tx = IAccount::new(&provider)
-        .pay_fee(1000)
+        .pay_fee(1000u64)
         // Multiple transfers in a single transaction
         .public_transfer(&recipient1, xtr_token, 2 * ONE_XTR)
         .public_transfer(&recipient2, xtr_token, ONE_XTR)

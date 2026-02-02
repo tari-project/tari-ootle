@@ -19,7 +19,7 @@ fn deducts_fees_from_payments_and_refunds_the_rest() {
 
     let result = test.execute_expect_success(
         Transaction::builder_localnet()
-            .pay_fee_from_component(account, Amount::from(1000))
+            .pay_fee_from_component(account, Amount::from(1000u64))
             .call_function(test.get_template_address("State"), "new", args![])
             .build_and_seal(&private_key),
         vec![owner_token],
@@ -47,7 +47,7 @@ fn deducts_fees_when_transaction_fails() {
 
     let result = test.execute_and_commit_on_success(
         Transaction::builder_localnet()
-            .pay_fee_from_component(account, 1000)
+            .pay_fee_from_component(account, 1000u64)
             .call_function(test.get_template_address("State"), "this_doesnt_exist", args![])
             .build_and_seal(&private_key),
         vec![owner_token],
@@ -114,9 +114,9 @@ fn another_account_pays_partially_for_fees() {
     let result = test.execute_expect_success(
         Transaction::builder_localnet()
             // Faucet pays a little
-            .pay_fee_from_component(account_fee, Amount::from(200))
+            .pay_fee_from_component(account_fee, Amount::from(200u64))
             // Account pays the rest
-            .pay_fee_from_component(account_fee2, Amount::from(1000))
+            .pay_fee_from_component(account_fee2, Amount::from(1000u64))
             .call_method(xtr_faucet_component(), "take", args![1000])
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])
@@ -137,14 +137,14 @@ fn another_account_pays_partially_for_fees() {
 
     assert_eq!(
         vault.balance(),
-        orig_balance + Amount::from(200) - Amount::from(payment.total_fees_charged())
+        orig_balance + Amount::from(200u64) - Amount::from(payment.total_fees_charged())
     );
     // Check that this test is charging more than just the faucet's portion
-    assert!(Amount::from(200) < payment.total_fees_charged());
+    assert!(Amount::from(200u64) < payment.total_fees_charged());
 
     // Check the rest of the transaction was committed
     let balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
-    assert_eq!(balance, Amount::from(1000));
+    assert_eq!(balance, Amount::from(1000u64));
 }
 
 #[test]
@@ -196,10 +196,10 @@ fn fail_partial_paid_fees() {
             // These instructions should not be applied
             .call_method(account2, "withdraw", args![
                     STEALTH_TARI_RESOURCE_ADDRESS,
-                    Amount(1000)
+                    1000
                 ])
             .put_last_instruction_output_on_workspace("bucket")
-            .take_from_bucket("bucket", 500, "bucket2")
+            .take_from_bucket("bucket", 500u64, "bucket2")
             .call_method(account, "deposit", args![Workspace("bucket")])
             .call_method(account, "deposit", args![Workspace("bucket2")])
             .build_and_seal(&private_key),
@@ -230,9 +230,8 @@ fn fail_pay_negative_fee() {
 
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
-                // Pay less fees than the cost of the main transaction
-                .pay_fee_from_component(account, -100)
-                .build_and_seal(&private_key),
+            .with_fee_instructions_builder(|builder| builder.call_method(account, "pay_fee", args![-100]))
+            .build_and_seal(&private_key),
         vec![owner_token],
     );
 
@@ -276,7 +275,7 @@ fn fail_pay_less_fees_than_fee_transaction() {
                 // These instructions should not be applied
                 .call_method(account2, "withdraw", args![
                     STEALTH_TARI_RESOURCE_ADDRESS,
-                    Amount(500)
+                    500
                 ])
                 .put_last_instruction_output_on_workspace("bucket")
                 .call_method(account, "deposit", args![Workspace("bucket")])
@@ -293,7 +292,7 @@ fn fail_pay_less_fees_than_fee_transaction() {
     let (_, s) = diff.up_iter().find(|(id, _)| id.is_vault()).expect("Account not found");
     assert_eq!(
         s.substate_value().as_vault().unwrap().balance(),
-        orig_balance - Amount::from(127)
+        orig_balance - Amount::from(127u64)
     );
 
     // Fee was not deducted
@@ -322,11 +321,11 @@ fn fail_pay_too_little_no_fee_instruction() {
                     // These instructions should not be applied
                     .call_method(account2, "withdraw", args![
                         STEALTH_TARI_RESOURCE_ADDRESS,
-                        Amount(500)
+                        500
                     ])
                     .put_last_instruction_output_on_workspace("bucket")
                     .call_method(account, "deposit", args![Workspace("bucket")])
-                    .call_method(account, "pay_fee", args![Amount(10)])
+                    .call_method(account, "pay_fee", args![10])
             })
             .build_and_seal(&private_key),
         vec![owner_token, owner_token2],
@@ -355,7 +354,7 @@ fn failure_pay_fee_in_main_instructions() {
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
             // Pay in fee intent, enough to pass this step
-            .pay_fee_from_component(account, 20)
+            .pay_fee_from_component(account, 20u64)
             // Call pay_fee in main instructions (outside fee instructions) not permitted
             .call_method(account, "pay_fee", args![100])
             .call_method(account, "balance", args![STEALTH_TARI_RESOURCE_ADDRESS])
@@ -378,8 +377,8 @@ fn dangling_bucket_pay_fees() {
 
     let result = test.execute_and_commit_on_success(
         Transaction::builder_localnet()
-            .pay_fee_from_component(account, Amount::from(500))
-            .call_method(account, "withdraw", args![STEALTH_TARI_RESOURCE_ADDRESS, Amount(10)])
+            .pay_fee_from_component(account, Amount::from(500u64))
+            .call_method(account, "withdraw", args![STEALTH_TARI_RESOURCE_ADDRESS, 10])
             .put_last_instruction_output_on_workspace("dangling_bucket")
             .build_and_seal(&private_key),
         vec![owner_token],

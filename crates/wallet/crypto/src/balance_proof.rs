@@ -9,7 +9,7 @@ use tari_crypto::{
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey},
 };
 use tari_engine_types::{
-    crypto::{commit_amount_checked, messages},
+    crypto::{commit_amount, messages},
     hashing::EngineSchnorrSignature,
 };
 use tari_template_lib_types::{
@@ -99,15 +99,14 @@ pub fn validate_balance_proof_signature(
 
     // We assume that the input amount is available and only check that the maths is correct. The engine is responsible
     // for checking that the input amount is actually available.
-    let Some(revealed_input_commit) =
-        commit_amount_checked(&RistrettoSecretKey::default(), inputs_statement.revealed_amount)
+    let Some(revealed_input_commit) = commit_amount(&RistrettoSecretKey::default(), inputs_statement.revealed_amount)
     else {
         warn!(target: LOG_TARGET, "Revealed input amount must be non-negative");
         return false;
     };
 
     let Some(revealed_output_commit) =
-        commit_amount_checked(&RistrettoSecretKey::default(), outputs_statement.revealed_output_amount)
+        commit_amount(&RistrettoSecretKey::default(), outputs_statement.revealed_output_amount)
     else {
         warn!(target: LOG_TARGET, "Revealed output amount must be non-negative");
         return false;

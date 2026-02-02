@@ -11,6 +11,7 @@ use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::models::{Account, KeyBranch, KeyId};
 use tari_template_lib_types::{
     constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
+    Amount,
     ResourceType,
 };
 
@@ -35,7 +36,7 @@ impl Runner {
                     .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![1_000_000_000])
                     .put_last_instruction_output_on_workspace("coins")
                     .create_account_with_bucket(owner_public_key, "coins")
-                    .pay_fee_from_component(account_address, 1000)
+                    .pay_fee_from_component(account_address, 1000u64)
             })
             .with_inputs([
                 SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
@@ -102,7 +103,10 @@ impl Runner {
 
         let transaction = self
             .new_transaction_builder()
-            .pay_fee_from_component(pay_fee_account.component_address, 1000 * owners.len())
+            .pay_fee_from_component(
+                pay_fee_account.component_address,
+                Amount::ONE_THOUSAND * Amount::from_usize(owners.len()),
+            )
             .then(|builder| {
                 owners.iter().fold(builder, |builder, owner| {
                     builder.create_account(owner.public_key.to_byte_type())
@@ -166,7 +170,10 @@ impl Runner {
         for accounts in all_accounts.chunks(25) {
             let transaction = self
                 .new_transaction_builder()
-                .pay_fee_from_component(fee_account.component_address, 1000 * accounts.len())
+                .pay_fee_from_component(
+                    fee_account.component_address,
+                    Amount::ONE_THOUSAND * Amount::from_usize(accounts.len()),
+                )
                 .then(|builder| {
                     accounts.iter().fold(builder, |builder, account| {
                         builder

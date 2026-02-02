@@ -15,7 +15,7 @@ use serde::{
     Serializer,
 };
 
-use super::Amount;
+use super::PrecisionAmount as Amount;
 
 impl Serialize for Amount {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -54,27 +54,27 @@ impl<'de> Deserialize<'de> for Amount {
 
             fn visit_i8<E>(self, v: i8) -> Result<Self::Value, E>
             where E: Error {
-                Amount::try_from(v).map_err(Error::custom)
+                Ok(Amount::from(v))
             }
 
             fn visit_i16<E>(self, v: i16) -> Result<Self::Value, E>
             where E: Error {
-                Amount::try_from(v).map_err(Error::custom)
+                Ok(Amount::from(v))
             }
 
             fn visit_i32<E>(self, v: i32) -> Result<Self::Value, E>
             where E: Error {
-                Amount::try_from(v).map_err(Error::custom)
+                Ok(Amount::from(v))
             }
 
             fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
             where E: Error {
-                Amount::try_from(v).map_err(Error::custom)
+                Ok(Amount::from(v))
             }
 
             fn visit_i128<E>(self, v: i128) -> Result<Self::Value, E>
             where E: Error {
-                Amount::try_from(v).map_err(Error::custom)
+                Ok(Amount::from(v))
             }
 
             fn visit_u8<E>(self, v: u8) -> Result<Self::Value, E>
@@ -110,12 +110,10 @@ impl<'de> Deserialize<'de> for Amount {
                 let digit2 = seq
                     .next_element::<u64>()?
                     .ok_or_else(|| Error::invalid_length(1, &self))?;
-                Ok(Amount::from_le_digits([digit1, digit2]))
-            }
-
-            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-            where E: Error {
-                Amount::from_le_slice(v).ok_or_else(|| Error::custom("Invalid byte length for Amount"))
+                let digit3 = seq
+                    .next_element::<u64>()?
+                    .ok_or_else(|| Error::invalid_length(2, &self))?;
+                Ok(Amount::from_le_digits([digit1, digit2, digit3]))
             }
         }
 
@@ -163,13 +161,13 @@ mod tests {
 
     #[test]
     fn cbor_encoding_decoding() {
-        let amount = Amount::from(12345678901234567890u128);
+        let amount = -Amount::from(12345678901234567890u128);
         let cbor = encode(&amount).unwrap();
         let decoded: Amount = decode_exact(&cbor).unwrap();
         assert_eq!(decoded, amount);
 
         // Raw format
-        let cbor = encode(&[123u64, 0]).unwrap();
+        let cbor = encode(&[123u64, 0, 0]).unwrap();
         let decoded: Amount = decode_exact(&cbor).unwrap();
         assert_eq!(decoded, 123);
 
@@ -180,7 +178,7 @@ mod tests {
             let cbor = encode(&amount).unwrap();
             let decoded: Amount = decode_exact(&cbor).unwrap();
             assert_eq!(decoded, amount);
-            let amount = 1234567890u128;
+            let amount = -1234567890i128;
             let cbor = encode(&amount).unwrap();
             let decoded: Amount = decode_exact(&cbor).unwrap();
             assert_eq!(decoded, amount);

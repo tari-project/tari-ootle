@@ -27,6 +27,8 @@ pub mod address_prefixes;
 mod auth_hook;
 pub mod confidential;
 mod owner_rule;
+#[cfg(feature = "precision")]
+pub mod precision;
 pub mod stealth;
 
 pub use access_rules::AccessRule;

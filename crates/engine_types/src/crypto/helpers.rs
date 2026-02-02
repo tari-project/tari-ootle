@@ -53,22 +53,25 @@ pub fn get_commitment_factory() -> &'static CommitmentFactory {
 }
 
 /// Creates a Pedersen commitment to the given amount using the provided mask.
-///
-/// # Panics
-///
-/// Panics if the amount is not positive.
-pub fn commit_amount(mask: &RistrettoSecretKey, amount: Amount) -> PedersenCommitment {
-    commit_amount_checked(mask, amount).expect("commitment amount is negative")
+/// This construction does not check that the amount is within any specific range for bulletproofs+.
+/// however is still a completely valid Pedersen commitment (256-bit vs 128-bit amount).
+pub fn commit_amount_unchecked(mask: &RistrettoSecretKey, amount: Amount) -> PedersenCommitment {
+    let v = convert_amount_to_secret(&amount);
+    get_commitment_factory().commit(mask, &v)
 }
 
 /// Creates a Pedersen commitment to the given amount using the provided mask.
 ///
 /// # Returns
 ///
-/// Returns `None` if the amount is negative, otherwise returns a `PedersenCommitment`.
-pub fn commit_amount_checked(mask: &RistrettoSecretKey, amount: Amount) -> Option<PedersenCommitment> {
-    let v = convert_amount_to_secret(&amount)?;
-    Some(get_commitment_factory().commit(mask, &v))
+/// Returns `None` if the amount exceeds `u64::MAX`, otherwise returns a `PedersenCommitment`.
+/// This restriction is due to the underlying Bulletproofs+ implementation only supporting 64-bit range proofs.
+pub fn commit_amount(mask: &RistrettoSecretKey, amount: Amount) -> Option<PedersenCommitment> {
+    if amount > u64::MAX {
+        return None;
+    }
+
+    Some(commit_amount_unchecked(mask, amount))
 }
 
 /// Creates a Pedersen commitment to the given u64 amount using the provided mask.
@@ -77,21 +80,11 @@ pub fn commit_u64_amount(mask: &RistrettoSecretKey, amount: u64) -> PedersenComm
 }
 
 /// Converts a `Amount` to a `RistrettoSecretKey`.
-///
-/// # Returns
-///
-/// Returns `None` if the amount is negative, otherwise returns a `RistrettoSecretKey`.
-pub fn convert_amount_to_secret(amount: &Amount) -> Option<RistrettoSecretKey> {
-    if amount.is_negative() {
-        return None;
-    }
-
+pub fn convert_amount_to_secret(amount: &Amount) -> RistrettoSecretKey {
     let mut val_bytes = [0u8; 32];
     val_bytes[..Amount::BYTE_SIZE].copy_from_slice(&amount.to_le_bytes());
-    Some(
-        RistrettoSecretKey::from_canonical_bytes(&val_bytes)
-            .expect("MSB in 256-bit integer is always zero and < ell (Ristretto base point) therefore canonical"),
-    )
+    RistrettoSecretKey::from_canonical_bytes(&val_bytes)
+        .expect("MSB in 256-bit integer is always zero and < ell (Ristretto base point) therefore canonical")
 }
 
 pub fn try_decode_to_signature(signature: &SchnorrSignatureBytes) -> Option<EngineSchnorrSignature> {
@@ -105,39 +98,28 @@ mod tests {
     #[test]
     fn homomorphic() {
         let amount1 = Amount::MAX;
-        let commitment1 = commit_amount_checked(&Default::default(), amount1).unwrap();
-        let amount2 = Amount::from(1_000);
-        let commitment2 = commit_amount_checked(&Default::default(), amount2).unwrap();
+        let commitment1 = commit_amount_unchecked(&Default::default(), amount1);
+        let amount2 = Amount::from_u64(1_000);
+        let commitment2 = commit_amount_unchecked(&Default::default(), amount2);
 
         let resulting_commitment = commitment1.as_public_key() - commitment2.as_public_key();
 
-        let check = commit_amount_checked(&Default::default(), amount1 - amount2).unwrap();
+        let check = commit_amount_unchecked(&Default::default(), amount1 - amount2);
         assert_eq!(resulting_commitment, *check.as_public_key());
-    }
-
-    #[test]
-    fn negative() {
-        let amount = Amount::from(-1);
-        assert!(commit_amount_checked(&Default::default(), amount).is_none());
-        let amount = Amount::MIN;
-        assert!(commit_amount_checked(&Default::default(), amount).is_none());
-
-        let amount = -Amount::from(199999999999999999u128);
-        assert!(convert_amount_to_secret(&amount).is_none());
     }
 
     #[test]
     fn endianness() {
         // Check that the endianness used in RistrettoSecretKey (dalek Scalar) is the same as
-        // convert_big_amount_to_secret.
+        // convert_amount_to_secret i.e. Little-Endian.
         let amount = Amount::from(199999999999999999u128);
-        let v1 = convert_amount_to_secret(&amount).unwrap();
+        let v1 = convert_amount_to_secret(&amount);
 
         assert_eq!(v1.as_bytes()[..Amount::BYTE_SIZE], amount.to_le_bytes());
 
         let v2 = RistrettoSecretKey::from(1000);
         let sub = Amount::from_le_slice((v1 - v2).as_bytes()).unwrap();
-        let expected = amount - Amount::from(1000);
+        let expected = amount - Amount::from_u64(1000);
         assert_eq!(sub, expected);
     }
 }

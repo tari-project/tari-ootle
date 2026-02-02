@@ -92,7 +92,7 @@ mod tariswap {
             // so the user will get a lesser amount of tokens than the theoretical (for the gain of the LP holders)
             let input_bucket_balance = input_bucket.amount();
             let effective_input_balance =
-                input_bucket_balance - (input_bucket_balance * Amount::from(self.fee)) / Amount::from(1000);
+                input_bucket_balance - (input_bucket_balance * Amount::from(self.fee)) / Amount::from(1000u64);
 
             // recalculate the new vault balances for the swap
             // constant product AMM formula is "k = a * b"
@@ -146,13 +146,13 @@ mod tariswap {
             let b_resource = self.get_b_resource();
             let b_balance = self.get_pool_balance(b_resource);
 
-            let lp_bucket_amount = lp_bucket.amount() * Amount::from(1_000_000);
+            let lp_bucket_amount = lp_bucket.amount() * Amount::from(1_000_000u32);
             // calculate the amount of tokens to take from each pool
             let lp_ratio = lp_bucket_amount
                 .checked_div(self.lp_total_supply())
                 .expect("lp total supply is zero");
-            let a_amount = (lp_ratio * a_balance).div_ceil(Amount::from(1_000_000));
-            let b_amount = (lp_ratio * b_balance).div_ceil(Amount::from(1_000_000));
+            let a_amount = (lp_ratio * a_balance).div_ceil(Amount::from(1_000_000u32));
+            let b_amount = (lp_ratio * b_balance).div_ceil(Amount::from(1_000_000u32));
 
             // burn the LP tokens
             lp_bucket.burn();

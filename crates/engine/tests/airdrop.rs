@@ -22,7 +22,7 @@ fn airdrop() {
     let (mut test, airdrop, airdrop_resx) = setup();
 
     let total_supply: Amount = test.call_method(airdrop, "total_supply", call_args![], vec![test.owner_proof()]);
-    assert_eq!(total_supply, Amount::from(100));
+    assert_eq!(total_supply, Amount::from(100u64));
 
     let builder = Transaction::builder_localnet().then(|builder| {
         // Create 50 accounts

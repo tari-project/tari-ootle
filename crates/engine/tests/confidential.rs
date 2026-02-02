@@ -79,7 +79,7 @@ fn mint_initial_commitment() {
         .get_resource(&faucet_resx.as_resource_address().unwrap())
         .unwrap();
     // TODO: confidential total_supply tracking only tracks revealed funds
-    assert_eq!(resource.total_supply(), Some(Amount::from(0)));
+    assert_eq!(resource.total_supply(), Some(Amount::from(0u64)));
 }
 
 #[test]
@@ -92,7 +92,7 @@ fn mint_more_later() {
 
     let (user_account, user_proof, user_key) = template_test.create_empty_account();
 
-    let withdraw_proof = generate_withdraw_proof(&mask, 100, None, 0);
+    let withdraw_proof = generate_withdraw_proof(&mask, 100, None, 0u64);
     template_test.execute_expect_success(
         Transaction::builder_localnet()
             .call_method(faucet, "take_free_coins", args![withdraw_proof.proof])
@@ -114,7 +114,7 @@ fn transfer_confidential_amounts_between_accounts() {
     let (account2, _owner2, _k) = template_test.create_funded_account();
 
     // Create proof for transfer
-    let proof = generate_withdraw_proof(&faucet_mask, 1000, Some(99_000), 0);
+    let proof = generate_withdraw_proof(&faucet_mask, 1000, Some(99_000), 0u64);
 
     // Transfer faucet funds into account 1
     let vars = [
@@ -145,8 +145,8 @@ fn transfer_confidential_amounts_between_accounts() {
     assert_eq!(diff.up_iter().count(), 4);
     assert_eq!(diff.down_iter().count(), 2);
 
-    let withdraw_proof = generate_withdraw_proof(&proof.output_mask, 100, Some(900), 0);
-    let split_proof = generate_withdraw_proof(&withdraw_proof.output_mask, 20, Some(80), 0);
+    let withdraw_proof = generate_withdraw_proof(&proof.output_mask, 100, Some(900), 0u64);
+    let split_proof = generate_withdraw_proof(&withdraw_proof.output_mask, 20, Some(80), 0u64);
 
     let vars = [
         ("faucet_resx", faucet_resx.into()),
@@ -196,7 +196,7 @@ fn transfer_confidential_fails_with_invalid_balance() {
     let (account1, _owner1, _k) = template_test.create_funded_account();
 
     // Create proof for transfer
-    let proof = generate_withdraw_proof(&faucet_mask, 1001, Some(99_000), 0);
+    let proof = generate_withdraw_proof(&faucet_mask, 1001, Some(99_000), 0u64);
 
     // Transfer faucet funds into account 1
     let vars = [
@@ -230,11 +230,11 @@ fn reveal_confidential_and_transfer() {
 
     // Create proof for transfer
 
-    let proof = generate_withdraw_proof(&faucet_mask, 1000, Some(99_000), 0);
+    let proof = generate_withdraw_proof(&faucet_mask, 1000, Some(99_000), 0u64);
     // Reveal 90 tokens and 10 confidentially
-    let reveal_proof = generate_withdraw_proof(&proof.output_mask, 10, Some(900), 90);
+    let reveal_proof = generate_withdraw_proof(&proof.output_mask, 10, Some(900), 90u64);
     // Then reveal the rest
-    let reveal_bucket_proof = generate_withdraw_proof(&reveal_proof.output_mask, 0, None, 10);
+    let reveal_bucket_proof = generate_withdraw_proof(&reveal_proof.output_mask, 0, None, 10u64);
 
     let faucet_resx = faucet_resx.as_resource_address().unwrap();
     // Transfer faucet funds into account 1
@@ -272,7 +272,7 @@ fn reveal_confidential_and_transfer() {
         account2.deposit(joined);
 
         // Account2 can withdraw revealed funds by amount
-        let small_amt = account2.withdraw(resource, Amount(10));
+        let small_amt = account2.withdraw(resource, 10);
         account1.deposit(small_amt);
 
         account1.balance(resource);
@@ -307,9 +307,9 @@ fn attempt_to_reveal_with_unbalanced_proof() {
 
     // Create proof for transfer
 
-    let proof = generate_withdraw_proof(&faucet_mask, 1000, Some(99_000), 0);
+    let proof = generate_withdraw_proof(&faucet_mask, 1000, Some(99_000), 0u64);
     // Attempt to reveal more than input - change
-    let reveal_proof = generate_withdraw_proof(&proof.output_mask, 0, Some(900), 110);
+    let reveal_proof = generate_withdraw_proof(&proof.output_mask, 0, Some(900), 110u64);
 
     // Transfer faucet funds into account 1
     let vars = [
@@ -359,11 +359,12 @@ fn multi_commitment_join() {
 
     // Create proof for transfer
 
-    let withdraw_proof1 = generate_withdraw_proof(&faucet_mask, 1000, Some(99_000), 0);
-    let withdraw_proof2 = generate_withdraw_proof(withdraw_proof1.change_mask.as_ref().unwrap(), 1000, Some(98_000), 0);
+    let withdraw_proof1 = generate_withdraw_proof(&faucet_mask, 1000, Some(99_000), 0u64);
+    let withdraw_proof2 =
+        generate_withdraw_proof(withdraw_proof1.change_mask.as_ref().unwrap(), 1000, Some(98_000), 0u64);
     let join_proof = generate_withdraw_proof_with_inputs(
         &[(withdraw_proof1.output_mask, 1000), (withdraw_proof2.output_mask, 1000)],
-        0,
+        0u64,
         2000,
         None,
         0,
@@ -432,10 +433,10 @@ fn mint_and_transfer_revealed() {
 
     test.call_method::<()>(faucet, "mint_revealed", call_args![123], vec![]);
     let balance: Amount = test.call_method(faucet, "vault_balance", call_args![], vec![]);
-    assert_eq!(balance, Amount::from(123));
+    assert_eq!(balance, Amount::from(123u64));
 
     // Convert 100 revealed funds to confidential and the remaining 23 to revealed
-    let withdraw = generate_withdraw_proof_with_inputs(&[], 123, 100, None, 23);
+    let withdraw = generate_withdraw_proof_with_inputs(&[], 123u64, 100, None, 23);
 
     let result = test.execute_expect_success(
         Transaction::builder_localnet()
@@ -459,7 +460,7 @@ fn mint_revealed_with_invalid_proof() {
 
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
-            .call_method(faucet, "mint_revealed_with_bad_range_proof", args![Amount(123)])
+            .call_method(faucet, "mint_revealed_with_bad_range_proof", args![123])
             .build_and_seal(test.secret_key()),
         vec![],
     );
@@ -508,7 +509,7 @@ fn mint_with_view_key() {
     let (user_account, user_proof, user_key) = test.create_empty_account();
     let user_account_entity_id = user_account.entity_id();
 
-    let withdraw_proof = generate_withdraw_proof_with_view_key(&mask, 100, 55, Some(100 - 55), 0, view_key);
+    let withdraw_proof = generate_withdraw_proof_with_view_key(&mask, 100, 55, Some(100 - 55), 0u64, view_key);
     let result = test.execute_expect_success(
         Transaction::builder_localnet()
             .call_method(faucet, "take_free_coins", args![withdraw_proof.proof])

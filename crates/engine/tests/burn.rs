@@ -13,7 +13,7 @@ fn it_burns_all_resource_types() {
     let recall_template = test.get_template_address("Burn");
 
     let (mut initial_supply, _mask, _) = generate_confidential_output_statement(1000, None);
-    initial_supply.output_revealed_amount = Amount::from(1000);
+    initial_supply.output_revealed_amount = Amount::from(1000u64);
 
     let result = test.execute_expect_success(
         Transaction::builder_localnet()
@@ -33,19 +33,19 @@ fn it_burns_all_resource_types() {
         let store = test.read_only_state_store();
         let fungible_resource = *store.get_vault(&fungible_vault).unwrap().resource_address();
         let resource = store.get_resource(&fungible_resource).unwrap();
-        assert_eq!(resource.total_supply(), Some(Amount::from(1_000_000)));
+        assert_eq!(resource.total_supply(), Some(Amount::from(1_000_000u64)));
 
         let non_fungible_resource = *store.get_vault(&non_fungible_vault).unwrap().resource_address();
         let resource = store.get_resource(&non_fungible_resource).unwrap();
-        assert_eq!(resource.total_supply(), Some(Amount::from(10)));
+        assert_eq!(resource.total_supply(), Some(Amount::from(10u64)));
 
         let confidential_resource = *store.get_vault(&confidential_vault).unwrap().resource_address();
         let resource = store.get_resource(&confidential_resource).unwrap();
-        assert_eq!(resource.total_supply(), Some(Amount::from(1000)));
+        assert_eq!(resource.total_supply(), Some(Amount::from(1000u64)));
 
         let stealth_resource = *store.get_vault(&stealth_vault).unwrap().resource_address();
         let resource = store.get_resource(&stealth_resource).unwrap();
-        assert_eq!(resource.total_supply(), Some(Amount::from(1_000_000)));
+        assert_eq!(resource.total_supply(), Some(Amount::from(1_000_000u64)));
     }
 
     test.execute_expect_success(

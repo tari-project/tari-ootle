@@ -36,7 +36,7 @@ mod template {
             if amount.is_zero() || amount.is_negative() {
                 panic!("Amount must be greater than zero");
             }
-            if amount >= Amount::from(10) {
+            if amount >= Amount::from(10u64) {
                 panic!("Amount must be less than or equal to 10");
             }
 

@@ -73,7 +73,7 @@ async fn main() {
         // Tell the transfer to expect 10XTR (+1000 to cover fees) as revealed funds from a bucket (the faucet looks at this value and automatically provides the bucket).
         .spend_revealed_input(10 * ONE_XTR + 1000)
         // The transfer will output 500 micro XTR as revealed funds to pay for the fee
-        .to_revealed_output(500)
+        .to_revealed_output(500u64)
         // Spend the remaining value (10XTR - fee) into an output for the sender address. NOTE: the sender address is not actually included in the output (privacy!),
         // but a supporting wallet that holds the secret key would be able to spend the output.
         // You can specify any address here and split up into many outputs as needed, as long as ∑inputs == ∑outputs.
@@ -115,7 +115,7 @@ async fn main() {
         // This is worth 10.000500 XTR
         .spend_stealth_input(sender_address.clone(), input_to_spend[0].commitment())
         // The transfer will output 0.000500 XTR as revealed funds to pay for the fee
-        .to_revealed_output(500)
+        .to_revealed_output(500u64)
         // Spend to a new output (8 XTR) that we'll generate for the recipient address.
         .to_stealth_output(
             Output::new(recipient, xtr_token, const_nonzero_u64!(8 * ONE_XTR))

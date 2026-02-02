@@ -28,9 +28,8 @@ message Epoch {
 message Amount {
   // LSD
   uint64 digit1 = 1;
-  uint64 digit2 = 2;
   // MSD
-  uint64 digit3 = 3;
+  uint64 digit2 = 2;
 }
 
 message CommitmentSignature {

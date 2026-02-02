@@ -39,7 +39,7 @@ mod access_rules_template {
             let tokens = ResourceBuilder::public_fungible()
                 .with_owner_rule(owner_rule.clone())
                 .with_access_rules(resource_rules)
-                .initial_supply(1000);
+                .initial_supply(1000u32);
 
             let badges = create_badge_resource(recall_rule);
             info!("Badges resource address: {}", badges.resource_address());
@@ -59,7 +59,7 @@ mod access_rules_template {
         pub fn default_rules() -> Component<AccessRulesTest> {
             let badges = create_badge_resource(rule!(deny_all));
 
-            let tokens = ResourceBuilder::public_fungible().initial_supply(1000);
+            let tokens = ResourceBuilder::public_fungible().initial_supply(1000u32);
 
             Component::create(Self {
                 value: 0,
@@ -77,7 +77,7 @@ mod access_rules_template {
 
             let tokens = ResourceBuilder::public_fungible()
                 .with_authorization_hook(address_alloc.get_address(), hook)
-                .initial_supply(1000);
+                .initial_supply(1000u32);
 
             Component::new(Self {
                 value: 0,
@@ -103,7 +103,7 @@ mod access_rules_template {
                     address_alloc.get_address(),
                     "malicious_auth_hook_set_state_on_another_component",
                 )
-                .initial_supply(1000);
+                .initial_supply(1000u32);
 
             Component::new(Self {
                 value: 0,
@@ -138,7 +138,7 @@ mod access_rules_template {
                     badge_resource,
                     NonFungibleId::from_string("deposit")
                 ))))
-                .initial_supply(1000);
+                .initial_supply(1000u32);
 
             Component::new(Self {
                 value: 0,
@@ -160,7 +160,7 @@ mod access_rules_template {
                 .burnable(rule!(resource(badge_resource)))
                 .withdrawable(rule!(resource(badge_resource)))
                 .depositable(rule!(resource(badge_resource)))
-                .initial_supply(1000);
+                .initial_supply(1000u32);
 
             Component::new(Self {
                 value: 0,
@@ -181,7 +181,7 @@ mod access_rules_template {
                 .mintable(rule!(component(allocation.get_address())))
                 // Only access rules apply, this just makes the test simpler because we do not need to change the transaction signer
                 .with_owner_rule(OwnerRule::None)
-                .initial_supply(1000);
+                .initial_supply(1000u32);
 
             Component::new(Self {
                 value: 0,
@@ -321,7 +321,7 @@ mod access_rules_template {
         pub fn mint_resource(resource: ResourceAddress) -> Bucket {
             let manager = ResourceManager::get(resource);
             match manager.resource_type() {
-                ResourceType::Fungible => manager.mint_fungible(1000),
+                ResourceType::Fungible => manager.mint_fungible(1000u32),
                 ResourceType::NonFungible => manager.mint_non_fungible(NonFungibleId::random(), &(), &()),
                 ty => panic!("Unsupported resource type {:?}", ty),
             }

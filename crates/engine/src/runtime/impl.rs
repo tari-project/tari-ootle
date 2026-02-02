@@ -1577,8 +1577,8 @@ where
                         },
                         VaultWithdrawArg::NonFungible { ids } => {
                             let container = vault_mut.withdraw_non_fungibles(&ids)?;
-                            let amount = ids.len().into();
-                            (container, amount)
+                            let amount = ids.len() as u128;
+                            (container, amount.into())
                         },
                         VaultWithdrawArg::Confidential { proof } => {
                             let amount = proof.revealed_input_amount();
@@ -2000,7 +2000,9 @@ where
                             let amount = bucket
                                 .unlocked_amount()
                                 .checked_add(bucket.locked_amount())
-                                .and_then(|a| a.checked_add(Amount::new(bucket.number_of_confidential_commitments())))
+                                .and_then(|a| {
+                                    a.checked_add(Amount::from_usize(bucket.number_of_confidential_commitments()))
+                                })
                                 .ok_or_else(|| RuntimeError::InvariantError {
                                     function: "BucketAction::GetAmount",
                                     details: "Total amount overflowed".to_string(),

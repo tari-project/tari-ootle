@@ -442,7 +442,7 @@ pub async fn submit_manifest_with_signing_keys(
     let instructions = parse_manifest(&manifest_content, globals, HashMap::new()).unwrap();
 
     let transaction = transaction_builder()
-        .pay_fee_from_component(account.component_address, 5000)
+        .pay_fee_from_component(account.component_address, 5000u64)
         .with_instructions(instructions.instructions)
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
@@ -530,7 +530,7 @@ pub async fn submit_manifest(
     let owner_key_id = account.owner_key_id.expect("Account has no owner key id for signing");
 
     let transaction = transaction_builder()
-        .pay_fee_from_component(account.component_address, 5000)
+        .pay_fee_from_component(account.component_address, 5000u64)
         .with_instructions(instructions.instructions)
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
@@ -646,7 +646,7 @@ pub async fn create_component(
     let owner_key_id = account.owner_key_id.expect("Account has no owner key id for signing");
 
     let transaction = transaction_builder()
-        .pay_fee_from_component(account.component_address, 5000)
+        .pay_fee_from_component(account.component_address, 5000u64)
         .call_function(template_address, function_call, args)
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
@@ -748,7 +748,7 @@ pub async fn call_component(
     };
 
     let tx = transaction_builder()
-        .pay_fee_from_component(account_component_address, 1000)
+        .pay_fee_from_component(account_component_address, 1000u64)
         .call_method(source_component_address, &function_call, vec![])
         .with_inputs(inputs)
         .build_unsigned();
@@ -801,7 +801,7 @@ pub async fn concurrent_call_component(
         let acc = account.clone();
         let clt = client.clone();
         let tx = transaction_builder()
-            .pay_fee_from_component(account_component_address, 1000)
+            .pay_fee_from_component(account_component_address, 1000u64)
             .call_method(source_component_address, &function_call, vec![])
             .build_unsigned();
         join_set.spawn(submit_unsigned_tx_and_wait_for_response(clt, tx, acc, true));

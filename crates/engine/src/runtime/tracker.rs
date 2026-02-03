@@ -190,7 +190,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         })
     }
 
-    pub fn lock_substate(&mut self, address: &SubstateId, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError> {
+    pub fn lock_substate(&mut self, address: SubstateId, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError> {
         self.write_with(|state| match lock_flag {
             LockFlag::Read => state.read_lock_substate(address),
             LockFlag::Write => state.write_lock_substate(address),

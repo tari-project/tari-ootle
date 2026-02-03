@@ -272,19 +272,6 @@ impl Runtime {
         })
     }
 
-    /// Creates a Runtime from a raw pointer.
-    ///
-    /// # Safety
-    /// This function is unsafe because it takes a raw pointer and assumes ownership of it. The caller must ensure that
-    /// the pointer is valid (See `Box::from_raw`). Remember that after calling this function, ownership is taken and
-    /// therefore when the resulting Runtime is dropped, the memory will be freed unless `mem::forget` is used.
-    pub unsafe fn from_raw(interface: *mut dyn RuntimeInterface) -> Self {
-        let mut raw = Box::from_raw(interface);
-        Self {
-            interface: NonNull::from_mut(&mut raw),
-        }
-    }
-
     pub fn as_pointer(&self) -> *mut Box<dyn RuntimeInterface> {
         self.interface.as_ptr()
     }

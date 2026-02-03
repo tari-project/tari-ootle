@@ -101,3 +101,104 @@ impl FeeState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tari_template_lib::types::{ObjectKey, ResourceAddress};
+
+    use super::*;
+
+    #[test]
+    fn it_prevents_fees_from_exceeding_u64_max() {
+        let mut fee_state = FeeState::new();
+        let resource = ResourceContainer::stealth(XTR, 100u64.into());
+        let vault_id = VaultId::new(Default::default());
+        fee_state
+            .add_fee_payment_checked(ResourceContainer::stealth(XTR, u128::MAX.into()), Some(vault_id))
+            .unwrap_err();
+
+        fee_state.add_fee_payment_checked(resource, Some(vault_id)).unwrap();
+        fee_state
+            .add_fee_payment_checked(ResourceContainer::stealth(XTR, 123u64.into()), Some(vault_id))
+            .unwrap();
+
+        // 1 more than u64::MAX when added to previous payments
+        fee_state
+            .add_fee_payment_checked(
+                ResourceContainer::stealth(XTR, (u64::MAX - 223 + 1).into()),
+                Some(vault_id),
+            )
+            .unwrap_err();
+        assert_eq!(fee_state.total_payments(), 100 + 123);
+    }
+
+    #[test]
+    fn it_errors_if_incorrect_fee_resource_used() {
+        let mut fee_state = FeeState::new();
+        let resource = ResourceAddress::new(ObjectKey::default());
+        assert_ne!(resource, XTR);
+        let resource = ResourceContainer::stealth(resource, 100u64.into());
+        let err = fee_state.add_fee_payment_checked(resource, None).unwrap_err();
+        assert!(matches!(err, RuntimeError::InvalidArgument { .. }));
+    }
+    #[test]
+    fn it_tracks_refundable_payments() {
+        let mut fee_state = FeeState::new();
+        let resource = ResourceContainer::stealth(XTR, 100u64.into());
+        let vault_id = VaultId::new(Default::default());
+        fee_state
+            .add_fee_payment_checked(resource.clone(), Some(vault_id))
+            .unwrap();
+        let mut drained: Vec<_> = fee_state.drain_refundable_fee_payments().collect();
+        assert_eq!(drained.len(), 1);
+        let (drained_resource, drained_vault_id) = drained.pop().unwrap();
+        assert_eq!(drained_resource.unlocked_amount(), resource.unlocked_amount());
+        assert_eq!(drained_vault_id, vault_id);
+        assert!(fee_state.drain_refundable_fee_payments().next().is_none());
+    }
+
+    #[test]
+    fn it_determines_if_fees_are_paid_in_full_with_refunds() {
+        let mut fee_state = FeeState::new();
+        fee_state.add_charge(FeeSource::Initial, 100);
+        assert_eq!(fee_state.total_charges(), 100);
+        assert!(!fee_state.is_paid_in_full());
+
+        // First payment
+        let resource = ResourceContainer::stealth(XTR, 10u64.into());
+        let vault_id = VaultId::new(Default::default());
+        fee_state.add_fee_payment_checked(resource, Some(vault_id)).unwrap();
+        assert!(!fee_state.is_paid_in_full());
+
+        // Second payment
+        let resource = ResourceContainer::stealth(XTR, 1000u64.into());
+        let vault_id = VaultId::new(Default::default());
+        fee_state.add_fee_payment_checked(resource, Some(vault_id)).unwrap();
+        assert!(fee_state.is_paid_in_full());
+
+        // Assert
+        let mut iter = fee_state.refundable_fee_payments_iter_mut();
+        let (refund, vault) = iter.next().unwrap();
+        assert_eq!(refund.unlocked_amount(), 10);
+        assert_eq!(*vault, vault_id);
+
+        let (refund, vault) = iter.next().unwrap();
+        assert_eq!(refund.unlocked_amount(), 1000);
+        assert_eq!(*vault, vault_id);
+
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn it_merges_charges() {
+        let mut fee_state1 = FeeState::new();
+        fee_state1.add_charge(FeeSource::Initial, 100);
+
+        let mut fee_state2 = FeeState::new();
+        fee_state2.add_charge(FeeSource::Storage, 50);
+        fee_state2.add_charge(FeeSource::RuntimeCall, 25);
+
+        fee_state1.merge_charges(&fee_state2);
+        assert_eq!(fee_state1.total_charges(), 175);
+    }
+}

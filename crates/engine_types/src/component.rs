@@ -120,6 +120,10 @@ impl ComponentBody {
         }
     }
 
+    pub const fn from_cbor_value(state: tari_bor::Value) -> Self {
+        Self { state }
+    }
+
     pub fn set(&mut self, state: tari_bor::Value) -> &mut Self {
         self.state = state;
         self

@@ -175,16 +175,16 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(())
     }
 
-    fn lock_substate(&mut self, addr: &SubstateId, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError> {
-        let lock_id = self.store.try_lock(addr, lock_flag)?;
-        Ok(LockedSubstate::new(addr.clone(), lock_id, lock_flag))
+    fn lock_substate(&mut self, addr: SubstateId, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError> {
+        let lock_id = self.store.try_lock(addr.clone(), lock_flag)?;
+        Ok(LockedSubstate::new(addr, lock_id, lock_flag))
     }
 
-    pub fn read_lock_substate(&mut self, addr: &SubstateId) -> Result<LockedSubstate, RuntimeError> {
+    pub fn read_lock_substate(&mut self, addr: SubstateId) -> Result<LockedSubstate, RuntimeError> {
         self.lock_substate(addr, LockFlag::Read)
     }
 
-    pub fn write_lock_substate(&mut self, addr: &SubstateId) -> Result<LockedSubstate, RuntimeError> {
+    pub fn write_lock_substate(&mut self, addr: SubstateId) -> Result<LockedSubstate, RuntimeError> {
         self.lock_substate(addr, LockFlag::Write)
     }
 
@@ -284,7 +284,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
     ) -> Result<ValidatedStealthTransfer, RuntimeError> {
         for input in &stmt.inputs_statement.inputs {
             let address = UtxoAddress::new(resource_address, input.commitment.into());
-            let lock_id = self.store.try_lock(&address.clone().into(), LockFlag::Write)?;
+            let lock_id = self.store.try_lock(address.clone().into(), LockFlag::Write)?;
             let utxo = self.store.down_utxo(lock_id)?;
             self.store.try_unlock(lock_id)?;
             if utxo.is_frozen() {
@@ -526,7 +526,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         // and not depositing it.
         for token_id in bucket.into_non_fungible_ids().into_iter().flatten() {
             let address = NonFungibleAddress::new(resource_address, token_id);
-            let locked_nft = self.lock_substate(&SubstateId::NonFungible(address.clone()), LockFlag::Write)?;
+            let locked_nft = self.lock_substate(SubstateId::NonFungible(address.clone()), LockFlag::Write)?;
             let nft = self.get_non_fungible_mut(&locked_nft)?;
 
             if nft.is_burnt() {
@@ -566,7 +566,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
                     .unlock(proof)?;
             },
             ContainerRef::Vault(vault_id) => {
-                let vault_lock = self.lock_substate(&SubstateId::Vault(vault_id), LockFlag::Write)?;
+                let vault_lock = self.lock_substate(SubstateId::Vault(vault_id), LockFlag::Write)?;
                 self.get_vault_mut(&vault_lock)?.unlock(proof)?;
                 self.unlock_substate(vault_lock)?;
             },
@@ -868,9 +868,9 @@ impl<TStore: StateReader> WorkingState<TStore> {
 
     pub fn get_template_for_component(
         &mut self,
-        component_address: &ComponentAddress,
+        component_address: ComponentAddress,
     ) -> Result<TemplateAddress, RuntimeError> {
-        match self.get_allocated_address_by_address(*component_address) {
+        match self.get_allocated_address_by_address(component_address) {
             Some(alloc) => Ok(*alloc
                 .template_address()
                 .ok_or(RuntimeError::AddressAllocationNoTemplate)?),
@@ -915,7 +915,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         &mut self,
         address: ValidatorFeePoolAddress,
     ) -> Result<ResourceContainer, RuntimeError> {
-        let locked_substate = self.lock_substate(&SubstateId::ValidatorFeePool(address), LockFlag::Write)?;
+        let locked_substate = self.lock_substate(SubstateId::ValidatorFeePool(address), LockFlag::Write)?;
         {
             let fee_pool = self
                 .get_locked_substate(&locked_substate)?
@@ -1207,7 +1207,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
 
     pub fn load_and_cache_component(
         &mut self,
-        component_address: &ComponentAddress,
+        component_address: ComponentAddress,
     ) -> Result<&ComponentHeader, RuntimeError> {
         self.store.load_and_cache_component(component_address)
     }
@@ -1500,7 +1500,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         check_stealth_transfer_limits(&limits::STEALTH_LIMITS, &statement)?;
         let resource_address = self.resolve_resource_address_ref(resource_address)?;
 
-        let resource_lock = self.read_lock_substate(&SubstateId::Resource(resource_address))?;
+        let resource_lock = self.read_lock_substate(SubstateId::Resource(resource_address))?;
         {
             let resource = self.get_resource(&resource_lock)?;
             if !resource.resource_type().is_stealth() {

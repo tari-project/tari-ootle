@@ -9,7 +9,7 @@ use tari_template_lib::{
     types::{NonFungibleAddress, ResourceAddress},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AuthParams {
     pub initial_ownership_proofs: Arc<IndexSet<NonFungibleAddress>>,
 }

@@ -15,6 +15,7 @@ use tari_engine::{
 };
 use tari_engine_types::hashing::hash_template_code;
 use tari_ootle_common_types::services::template_provider::TemplateProvider;
+use tari_template_builtin::all_builtin_templates;
 use tari_template_lib::types::TemplateAddress;
 use thiserror::Error;
 
@@ -62,6 +63,14 @@ impl PackageBuilder {
         Self {
             templates: HashMap::new(),
         }
+    }
+
+    pub fn add_all_builtin_templates(&mut self) -> &mut Self {
+        for (addr, code) in all_builtin_templates() {
+            self.add_template_from_code(*addr, *code)
+                .expect("failed to add builtin template");
+        }
+        self
     }
 
     pub fn add_template<P>(&mut self, path: P) -> TemplateAddress

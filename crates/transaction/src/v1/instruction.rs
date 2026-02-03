@@ -46,19 +46,12 @@ pub enum Instruction {
         address: TemplateAddress,
         #[cfg_attr(feature = "ts", ts(type = "string"))]
         function: FunctionName,
-        // #[serde(deserialize_with = "crate::special_json_arg_syntax::json_deserialize")]
-        // #[cfg_attr(feature = "ts", ts(type = "Array<any>"))]
         args: Vec<InstructionArg>,
     },
     CallMethod {
         call: ComponentReference,
         #[cfg_attr(feature = "ts", ts(type = "string"))]
         method: FunctionName,
-        // TODO: remove this as it causes tricky issues that are hard to track down (typically Signature errors).
-        // Rather have clients provide raw arguments using CBOR.
-        // #[serde(deserialize_with = "crate::special_json_arg_syntax::json_deserialize")]
-        // Argument parser takes an array of strings as input
-        // #[cfg_attr(feature = "ts", ts(type = "Array<any>"))]
         args: Vec<InstructionArg>,
     },
     PutLastInstructionOutputOnWorkspace {

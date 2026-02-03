@@ -17,7 +17,11 @@ pub trait Executable {
 
     fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateRequirementRef<'_>> + '_;
 
-    fn main_signer(&self) -> Option<RistrettoPublicKeyBytes>;
+    /// Returns the main signer of the executable, if any.
+    fn main_signer(&self) -> Option<RistrettoPublicKeyBytes> {
+        self.signers_iter().next().copied()
+    }
+    /// Returns an iterator over all signers of the executable including the main signer.
     fn signers_iter(&self) -> impl Iterator<Item = &RistrettoPublicKeyBytes>;
 
     fn into_instructions(self) -> Instructions;

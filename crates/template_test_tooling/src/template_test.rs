@@ -46,7 +46,6 @@ use tari_ootle_transaction::{
     Transaction,
     TransactionBuilder,
 };
-use tari_template_builtin::all_builtin_templates;
 use tari_template_lib::types::{
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS},
     crypto::RistrettoPublicKeyBytes,
@@ -144,12 +143,7 @@ impl TemplateTest {
     {
         let mut builder = Package::builder();
 
-        // Add builtin templates
-        for (addr, code) in all_builtin_templates() {
-            builder
-                .add_template_from_code(*addr, *code)
-                .expect("failed to add builtin template");
-        }
+        builder.add_all_builtin_templates();
 
         // Add the faucet template for non-XTR fungible tokens
         builder.add_template(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/faucet"));

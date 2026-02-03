@@ -3,7 +3,6 @@
 
 pub mod executables;
 pub mod fees;
-pub mod function_definitions;
 pub mod runtime;
 pub mod state_store;
 pub mod template;

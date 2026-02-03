@@ -4,7 +4,7 @@
 mod builtin_component_state;
 pub mod compile;
 mod helpers;
-mod mocks;
+pub mod mocks;
 mod package_builder;
 mod read_only_state_store;
 pub mod support;

@@ -110,12 +110,12 @@ where
         owner_rule: OwnerRule::None,
         access_rules: ComponentAccessRules::allow_all(),
         entity_id: EntityId::default(),
-        body: ComponentBody {
-            state: cbor!({
+        body: ComponentBody::from_cbor_value(
+            cbor!({
                 "vault" => XTR_FAUCET_VAULT_ADDRESS,
             })
             .unwrap(),
-        },
+        ),
     };
     create_substate(tx, num_preshards, XTR_FAUCET_COMPONENT_ADDRESS, value)?;
 

@@ -65,7 +65,7 @@ impl ComponentAddress {
     }
 
     /// Creates a new `ComponentAddress` from a byte array.
-    pub fn from_array(arr: [u8; ObjectKey::LENGTH]) -> Self {
+    pub const fn from_array(arr: [u8; ObjectKey::LENGTH]) -> Self {
         Self::new(ObjectKey::from_array(arr))
     }
 

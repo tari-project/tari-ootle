@@ -378,7 +378,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     fn check_resource_auth_hook(&mut self, hook: &AuthHook) -> Result<(), RuntimeError> {
         let template_address = self
             .tracker
-            .write_with(|state| state.get_template_for_component(&hook.component_address))?;
+            .write_with(|state| state.get_template_for_component(hook.component_address))?;
         let template = self.get_template_def(&template_address)?;
         let func = template
             .get_function(&hook.method)
@@ -494,7 +494,7 @@ where
         match call {
             ComponentReference::Address(address) => self.tracker.write_with(|state_mut| {
                 state_mut
-                    .load_and_cache_component(&address)
+                    .load_and_cache_component(address)
                     .cloned()
                     .map(|c| (address, c))
             }),
@@ -549,7 +549,7 @@ where
                     });
                 };
                 state_mut
-                    .load_and_cache_component(&address)
+                    .load_and_cache_component(address)
                     .cloned()
                     .map(|c| (address, c))
             }),
@@ -561,7 +561,7 @@ where
         address: ComponentAddress,
         lock_flag: LockFlag,
     ) -> Result<LockedSubstate, RuntimeError> {
-        self.tracker.lock_substate(&SubstateId::Component(address), lock_flag)
+        self.tracker.lock_substate(SubstateId::Component(address), lock_flag)
     }
 
     #[allow(clippy::too_many_lines)]
@@ -635,7 +635,7 @@ where
                                 action: ComponentAction::GetState.into(),
                             })?
                     } else {
-                        state.read_lock_substate(&SubstateId::Component(component_address))?
+                        state.read_lock_substate(SubstateId::Component(component_address))?
                     };
 
                     // We only allow mutating of the current component.
@@ -869,7 +869,7 @@ where
                     Self::emit_std_event("resource", "create", resource_address, payload, state_mut)?;
 
                     state_mut.new_substate(resource_address, resource)?;
-                    let resource_lock = state_mut.write_lock_substate(&SubstateId::Resource(resource_address))?;
+                    let resource_lock = state_mut.write_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let mut output_bucket = None;
                     if let Some(mint_arg) = arg.mint_arg {
@@ -895,7 +895,7 @@ where
                         })?;
                 args.assert_no_args("ResourceAction::GetTotalSupply")?;
                 self.tracker.write_with(|state| {
-                    let locked = state.read_lock_substate(&SubstateId::Resource(resource_address))?;
+                    let locked = state.read_lock_substate(SubstateId::Resource(resource_address))?;
                     let resource = state.get_resource(&locked)?;
                     let total_supply = resource.total_supply();
                     state.unlock_substate(locked)?;
@@ -914,7 +914,7 @@ where
                 args.assert_no_args("ResourceAction::GetResourceType")?;
 
                 self.tracker.write_with(|state| {
-                    let locked = state.read_lock_substate(&SubstateId::Resource(resource_address))?;
+                    let locked = state.read_lock_substate(SubstateId::Resource(resource_address))?;
                     let resource = state.get_resource(&locked)?;
                     let resource_type = resource.resource_type();
                     let divisibility = resource.divisibility();
@@ -936,7 +936,7 @@ where
                 let mint_resource: MintResourceArg = args.assert_one_arg()?;
 
                 let (resource_lock, maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
-                    let resource_lock = state_mut.write_lock_substate(&SubstateId::Resource(resource_address))?;
+                    let resource_lock = state_mut.write_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -985,7 +985,7 @@ where
                 let arg: RecallResourceArg = args.assert_one_arg()?;
 
                 let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
-                    let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(resource_address))?;
+                    let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
                     state_mut.authorization().check_resource_access_rules(
@@ -1006,7 +1006,7 @@ where
                 }
 
                 self.tracker.write_with(|state_mut| {
-                    let vault_lock = state_mut.write_lock_substate(&arg.vault_id.into())?;
+                    let vault_lock = state_mut.write_lock_substate(arg.vault_id.into())?;
 
                     let resource = state_mut.recall_resource_from_vault(&vault_lock, &arg.resource)?;
 
@@ -1038,8 +1038,9 @@ where
                 let arg: ResourceGetNonFungibleArg = args.assert_one_arg()?;
 
                 self.tracker.write_with(|state| {
-                    let addr = SubstateId::NonFungible(NonFungibleAddress::new(resource_address, arg.id.clone()));
-                    let nft_lock = state.read_lock_substate(&addr)?;
+                    let nft_addr = NonFungibleAddress::new(resource_address, arg.id.clone());
+                    let addr = SubstateId::NonFungible(nft_addr.clone());
+                    let nft_lock = state.read_lock_substate(addr)?;
 
                     let nf_container = state.get_non_fungible(&nft_lock)?;
 
@@ -1053,7 +1054,7 @@ where
 
                     state.unlock_substate(nft_lock)?;
 
-                    Ok(InvokeResult::encode(addr.as_non_fungible_address().unwrap())?)
+                    Ok(InvokeResult::encode(&nft_addr)?)
                 })
             },
             ResourceAction::UpdateNonFungibleData => {
@@ -1067,7 +1068,7 @@ where
                 let arg: ResourceUpdateNonFungibleDataArg = args.assert_one_arg()?;
 
                 let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
-                    let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(resource_address))?;
+                    let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1094,7 +1095,7 @@ where
 
                 self.tracker.write_with(|state_mut| {
                     let addr = NonFungibleAddress::new(resource_address, arg.id);
-                    let locked = state_mut.write_lock_substate(&SubstateId::NonFungible(addr.clone()))?;
+                    let locked = state_mut.write_lock_substate(SubstateId::NonFungible(addr.clone()))?;
 
                     let nft = state_mut.get_non_fungible_mut(&locked)?;
 
@@ -1132,7 +1133,7 @@ where
                 let access_rules: ResourceAccessRules = args.assert_one_arg()?;
 
                 let (resource_lock, maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
-                    let resource_lock = state_mut.write_lock_substate(&SubstateId::Resource(resource_address))?;
+                    let resource_lock = state_mut.write_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1179,7 +1180,7 @@ where
                 }
 
                 let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
-                    let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(resource_address))?;
+                    let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1201,7 +1202,7 @@ where
                 }
 
                 self.tracker.write_with(|state_mut| {
-                    let vault_lock = state_mut.write_lock_substate(&arg.vault_id.into())?;
+                    let vault_lock = state_mut.write_lock_substate(arg.vault_id.into())?;
                     state_mut.set_vault_freeze(&vault_lock, arg.flags)?;
                     let payload =
                         Metadata::from_iter([("vault_id", arg.vault_id.to_string()), ("flags", arg.flags.to_string())]);
@@ -1245,7 +1246,7 @@ where
                 }
 
                 self.tracker.write_with(|state_mut| {
-                    let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(resource_address))?;
+                    let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1264,7 +1265,7 @@ where
 
                     for utxo in arg.utxos {
                         let id = SubstateId::Utxo(UtxoAddress::new(resource_address, utxo));
-                        let locked = state_mut.write_lock_substate(&id)?;
+                        let locked = state_mut.write_lock_substate(id.clone())?;
 
                         let utxo_mut = state_mut
                             .get_locked_substate_mut(&locked)?
@@ -1300,7 +1301,7 @@ where
                 let arg: BurnStealthUtxoArg = args.assert_one_arg()?;
 
                 self.tracker.write_with(|state_mut| {
-                    let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(resource_address))?;
+                    let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1328,7 +1329,7 @@ where
                     state_mut.unlock_substate(resource_lock)?;
 
                     let id = SubstateId::Utxo(UtxoAddress::new(resource_address, arg.utxo_id));
-                    let utxo_lock = state_mut.write_lock_substate(&id)?;
+                    let utxo_lock = state_mut.write_lock_substate(id.clone())?;
 
                     let utxo_mut = state_mut
                         .get_locked_substate_mut(&utxo_lock)?
@@ -1360,7 +1361,7 @@ where
                         let value = stealth::validate_value_proof(&commitment, elgamal_proof, value_proof)?;
                         if value.is_positive() {
                             let resource_lock =
-                                state_mut.write_lock_substate(&SubstateId::Resource(resource_address))?;
+                                state_mut.write_lock_substate(SubstateId::Resource(resource_address))?;
                             let resource_mut = state_mut.get_resource_mut(&resource_lock)?;
                             resource_mut.decrease_total_supply(value);
                             state_mut.unlock_substate(resource_lock)?;
@@ -1406,7 +1407,7 @@ where
 
                 self.tracker.write_with(|state| {
                     let resource_substate_id = SubstateId::Resource(*resource_address);
-                    let resource_lock = state.read_lock_substate(&resource_substate_id)?;
+                    let resource_lock = state.read_lock_substate(resource_substate_id.clone())?;
                     let resource = state.get_resource(&resource_lock)?;
 
                     // Require deposit permissions on the resource to create the vault (even if empty)
@@ -1459,7 +1460,7 @@ where
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
                     self.tracker.write_with(|state_mut| {
-                        let vault_lock = state_mut.write_lock_substate(&SubstateId::Vault(vault_id))?;
+                        let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                         let vault = state_mut.get_vault(&vault_lock)?;
                         if vault.freeze_flags().contains(VaultFreezeFlag::Deposits) {
@@ -1470,7 +1471,7 @@ where
                         }
                         let resource_address = *vault.resource_address();
 
-                        let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(resource_address))?;
+                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                         let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1526,7 +1527,7 @@ where
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
                     self.tracker.write_with(|state_mut| {
-                        let vault_lock = state_mut.write_lock_substate(&SubstateId::Vault(vault_id))?;
+                        let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                         let vault = state_mut.get_vault(&vault_lock)?;
                         if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
@@ -1537,7 +1538,7 @@ where
                         }
                         let resource_address = vault.resource_address();
 
-                        let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(*resource_address))?;
+                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(*resource_address))?;
 
                         let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1614,7 +1615,7 @@ where
                 args.assert_no_args("Vault::GetBalance")?;
 
                 self.tracker.write_with(|state| {
-                    let vault_lock = state.read_lock_substate(&SubstateId::Vault(vault_id))?;
+                    let vault_lock = state.read_lock_substate(SubstateId::Vault(vault_id))?;
                     let balance = state.get_vault(&vault_lock)?.balance();
                     state.unlock_substate(vault_lock)?;
                     Ok(InvokeResult::encode(&balance)?)
@@ -1628,7 +1629,7 @@ where
                 args.assert_no_args("Vault::GetBalance")?;
 
                 self.tracker.write_with(|state| {
-                    let vault_lock = state.read_lock_substate(&SubstateId::Vault(vault_id))?;
+                    let vault_lock = state.read_lock_substate(SubstateId::Vault(vault_id))?;
                     let balance = state.get_vault(&vault_lock)?.locked_balance();
                     state.unlock_substate(vault_lock)?;
                     Ok(InvokeResult::encode(&balance)?)
@@ -1642,7 +1643,7 @@ where
                 args.assert_no_args("Vault::GetResourceAddress")?;
 
                 self.tracker.write_with(|state| {
-                    let vault_lock = state.read_lock_substate(&SubstateId::Vault(vault_id))?;
+                    let vault_lock = state.read_lock_substate(SubstateId::Vault(vault_id))?;
                     let resource_address = *state.get_vault(&vault_lock)?.resource_address();
                     state.unlock_substate(vault_lock)?;
                     Ok(InvokeResult::encode(&resource_address)?)
@@ -1656,7 +1657,7 @@ where
                 args.assert_no_args("Vault::GetNonFungibleIds")?;
 
                 self.tracker.write_with(|state| {
-                    let vault_lock = state.read_lock_substate(&SubstateId::Vault(vault_id))?;
+                    let vault_lock = state.read_lock_substate(SubstateId::Vault(vault_id))?;
                     let non_fungible_ids = state.get_vault(&vault_lock)?.get_non_fungible_ids();
                     let result = InvokeResult::encode(&non_fungible_ids)?;
                     state.unlock_substate(vault_lock)?;
@@ -1672,7 +1673,7 @@ where
                 args.assert_no_args("Vault::GetCommitmentCount")?;
 
                 self.tracker.write_with(|state| {
-                    let vault_lock = state.read_lock_substate(&SubstateId::Vault(vault_id))?;
+                    let vault_lock = state.read_lock_substate(SubstateId::Vault(vault_id))?;
                     let commitment_count = state.get_vault(&vault_lock)?.get_commitment_count();
                     state.unlock_substate(vault_lock)?;
                     Ok(InvokeResult::encode(&commitment_count)?)
@@ -1697,7 +1698,7 @@ where
                 }
 
                 self.tracker.write_with(|state_mut| {
-                    let vault_lock = state_mut.write_lock_substate(&SubstateId::Vault(vault_id))?;
+                    let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                     let vault = state_mut.get_vault(&vault_lock)?;
                     if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
@@ -1716,7 +1717,7 @@ where
                             ),
                         });
                     }
-                    let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(XTR))?;
+                    let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(XTR))?;
                     let resource = state_mut.get_resource(&resource_lock)?;
 
                     state_mut.authorization().check_resource_access_rules(
@@ -1769,7 +1770,7 @@ where
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
                     self.tracker.write_with(|state_mut| {
-                        let vault_lock = state_mut.write_lock_substate(&SubstateId::Vault(vault_id))?;
+                        let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                         let vault = state_mut.get_vault(&vault_lock)?;
                         if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
@@ -1780,7 +1781,7 @@ where
                         }
                         let resource_address = vault.resource_address();
 
-                        let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(*resource_address))?;
+                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(*resource_address))?;
 
                         let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1819,7 +1820,7 @@ where
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
                     self.tracker.write_with(|state_mut| {
-                        let vault_lock = state_mut.write_lock_substate(&SubstateId::Vault(vault_id))?;
+                        let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                         let vault = state_mut.get_vault(&vault_lock)?;
                         if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
@@ -1830,7 +1831,7 @@ where
                         }
                         let resource_address = vault.resource_address();
 
-                        let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(*resource_address))?;
+                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(*resource_address))?;
 
                         let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1869,7 +1870,7 @@ where
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
                     self.tracker.write_with(|state_mut| {
-                        let vault_lock = state_mut.write_lock_substate(&SubstateId::Vault(vault_id))?;
+                        let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                         let vault = state_mut.get_vault(&vault_lock)?;
                         if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
@@ -1880,7 +1881,7 @@ where
                         }
                         let resource_address = vault.resource_address();
 
-                        let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(*resource_address))?;
+                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(*resource_address))?;
 
                         let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1921,7 +1922,7 @@ where
                 args.assert_no_args("Vault::GetNonFungibles")?;
 
                 self.tracker.write_with(|state| {
-                    let vault_lock = state.read_lock_substate(&SubstateId::Vault(vault_id))?;
+                    let vault_lock = state.read_lock_substate(SubstateId::Vault(vault_id))?;
                     let resource_address = state.get_vault(&vault_lock)?.resource_address();
                     let nft_ids = state.get_vault(&vault_lock)?.get_non_fungible_ids();
                     let nfts: Vec<NonFungible> = nft_ids
@@ -2036,7 +2037,7 @@ where
 
                 self.tracker.write_with(|state| {
                     let bucket = state.get_bucket(bucket_id)?;
-                    let resource_lock = state.read_lock_substate(&(*bucket.resource_address()).into())?;
+                    let resource_lock = state.read_lock_substate((*bucket.resource_address()).into())?;
                     let resource = state.get_resource(&resource_lock)?;
                     let view_key = resource
                         .to_view_key_public_key()
@@ -2080,7 +2081,7 @@ where
                     let bucket = state_mut.get_bucket(bucket_id)?;
 
                     let resource_lock =
-                        state_mut.write_lock_substate(&SubstateId::Resource(*bucket.resource_address()))?;
+                        state_mut.write_lock_substate(SubstateId::Resource(*bucket.resource_address()))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -2123,7 +2124,7 @@ where
                     let bucket = state_mut.get_bucket(bucket_id)?;
 
                     let resource_lock =
-                        state_mut.read_lock_substate(&SubstateId::Resource(*bucket.resource_address()))?;
+                        state_mut.read_lock_substate(SubstateId::Resource(*bucket.resource_address()))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -2456,7 +2457,7 @@ where
             NonFungibleAction::GetData => {
                 args.assert_no_args("NonFungibleAction::GetData")?;
                 self.tracker.write_with(|state| {
-                    let nft_lock = state.read_lock_substate(&SubstateId::NonFungible(nf_addr.clone()))?;
+                    let nft_lock = state.read_lock_substate(SubstateId::NonFungible(nf_addr.clone()))?;
                     let nft = state.get_non_fungible(&nft_lock)?;
                     let contents = nft
                         .contents()
@@ -2475,7 +2476,7 @@ where
                 args.assert_no_args("NonFungibleAction::GetMutableData")?;
 
                 self.tracker.write_with(|state| {
-                    let nft_lock = state.read_lock_substate(&SubstateId::NonFungible(nf_addr.clone()))?;
+                    let nft_lock = state.read_lock_substate(SubstateId::NonFungible(nf_addr.clone()))?;
                     let nft = state.get_non_fungible(&nft_lock)?;
                     let contents = nft
                         .contents()

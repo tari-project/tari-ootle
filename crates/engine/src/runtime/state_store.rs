@@ -49,11 +49,11 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
         }
     }
 
-    pub fn try_lock(&mut self, id: &SubstateId, lock_flag: LockFlag) -> Result<LockId, RuntimeError> {
-        if !self.exists(id)? {
+    pub fn try_lock(&mut self, id: SubstateId, lock_flag: LockFlag) -> Result<LockId, RuntimeError> {
+        if !self.exists(&id)? {
             return Err(RuntimeError::SubstateNotFound { id: id.clone() });
         }
-        let lock_id = self.locked_substates.try_lock(id, lock_flag)?;
+        let lock_id = self.locked_substates.try_lock(id.clone(), lock_flag)?;
         self.load_and_cache(id)?;
         Ok(lock_id)
     }
@@ -153,20 +153,24 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
         Ok(())
     }
 
-    fn load_and_cache(&mut self, id: &SubstateId) -> Result<(), RuntimeError> {
-        if self.new_substates.contains_key(id) {
-            return Ok(());
+    fn load_and_cache(&mut self, id: SubstateId) -> Result<&SubstateValue, RuntimeError> {
+        if let Some(s) = self.new_substates.get(&id) {
+            return Ok(s);
         }
-        if self.loaded_substates.contains_key(id) {
-            return Ok(());
+        // Check if it exists first
+        if !self.loaded_substates.contains_key(&id) {
+            // If not, fetch it (this is where the mutation happens)
+            let substate = self
+                .state_store
+                .get_state(&id)
+                .optional()?
+                .ok_or_else(|| RuntimeError::SubstateNotFound { id: id.clone() })?;
+
+            self.loaded_substates.insert(id.clone(), substate.clone());
         }
-        let substate = self
-            .state_store
-            .get_state(id)
-            .optional()?
-            .ok_or_else(|| RuntimeError::SubstateNotFound { id: id.clone() })?;
-        self.loaded_substates.insert(id.clone(), substate.clone());
-        Ok(())
+
+        // unwrap: we just inserted it or confirmed it exists.
+        Ok(self.loaded_substates.get(&id).unwrap().substate_value())
     }
 
     pub fn take_mutated_substates(&mut self) -> IndexMap<SubstateId, SubstateValue> {
@@ -213,13 +217,12 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
     }
 
     /// Loads and caches the component address. No lock is required for this operation.
-    pub fn load_and_cache_component(&mut self, address: &ComponentAddress) -> Result<&ComponentHeader, RuntimeError> {
-        let addr = SubstateId::Component(*address);
-        self.load_and_cache(&addr)?;
-        let component = self.get_ref(&addr)?;
+    pub fn load_and_cache_component(&mut self, address: ComponentAddress) -> Result<&ComponentHeader, RuntimeError> {
+        let addr = SubstateId::Component(address);
+        let component = self.load_and_cache(addr)?;
         component.component().ok_or_else(|| RuntimeError::InvariantError {
             function: "load_component",
-            details: format!("Substate at address {} is not a component", addr),
+            details: format!("Substate at address {} is not a component", address),
         })
     }
 

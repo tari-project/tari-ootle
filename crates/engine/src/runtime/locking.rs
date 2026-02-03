@@ -20,12 +20,12 @@ pub struct LockedSubstates {
 }
 
 impl LockedSubstates {
-    pub fn try_lock(&mut self, addr: &SubstateId, lock_flag: LockFlag) -> Result<LockId, LockError> {
-        match self.locks.get(addr) {
+    pub fn try_lock(&mut self, addr: SubstateId, lock_flag: LockFlag) -> Result<LockId, LockError> {
+        match self.locks.get(&addr) {
             Some(state @ LockState::Read(count)) => {
                 if lock_flag.is_write() {
                     return Err(LockError::InvalidLockRequest {
-                        address: addr.clone(),
+                        address: addr,
                         requested_lock: lock_flag,
                         lock_state: *state,
                     });
@@ -33,17 +33,17 @@ impl LockedSubstates {
 
                 self.locks.insert(addr.clone(), LockState::Read(*count + 1));
                 let id = self.next_id()?;
-                self.lock_ids.insert(id, addr.clone());
+                self.lock_ids.insert(id, addr);
                 Ok(id)
             },
             Some(LockState::Write) => {
                 if lock_flag.is_write() {
                     // Just a slightly clearer error for this case
-                    return Err(LockError::MultipleWriteLockRequested { address: addr.clone() });
+                    return Err(LockError::MultipleWriteLockRequested { address: addr });
                 }
 
                 Err(LockError::InvalidLockRequest {
-                    address: addr.clone(),
+                    address: addr,
                     requested_lock: lock_flag,
                     lock_state: LockState::Write,
                 })
@@ -51,7 +51,7 @@ impl LockedSubstates {
             None => {
                 self.locks.insert(addr.clone(), lock_flag.into());
                 let id = self.next_id()?;
-                self.lock_ids.insert(id, addr.clone());
+                self.lock_ids.insert(id, addr);
                 Ok(id)
             },
         }

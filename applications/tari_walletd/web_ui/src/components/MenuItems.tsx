@@ -42,6 +42,8 @@ import { LuLayoutTemplate } from "react-icons/lu";
 
 function MainListItems() {
   const theme = useTheme();
+  // Compile time environment variable to show/hide dev tools
+  const features = (import.meta.env.VITE_ALPHA_FEATURES || "").split(",");
 
   const iconStyle = {
     height: 22,
@@ -61,48 +63,13 @@ function MainListItems() {
       activeIcon: <IoHome style={activeIconStyle} />,
       link: "/",
     },
-    // {
-    //   title: 'Accounts',
-    //   icon: <IoBarChartOutline style={iconStyle} />,
-    //   activeIcon: <IoBarChart style={activeIconStyle} />,
-    //   link: '/accounts',
-    // },
-    // {
-    //   title: 'Keys',
-    //   icon: <IoKeyOutline style={iconStyle} />,
-    //   activeIcon: <IoKey style={activeIconStyle} />,
-    //   link: 'keys',
-    // },
-    // {
-    //   title: 'Transactions',
-    //   icon: <IoWalletOutline style={iconStyle} />,
-    //   activeIcon: <IoWallet style={activeIconStyle} />,
-    //   link: 'transactions',
-    // },
-    // {
-    //   title: 'Access Tokens',
-    //   icon: <IoTicketOutline style={iconStyle} />,
-    //   activeIcon: <IoTicket style={activeIconStyle} />,
-    //   link: 'access-tokens',
-    // },
     {
       title: "Templates",
       icon: <LuLayoutTemplate style={iconStyle} />,
       activeIcon: <LuLayoutTemplate style={activeIconStyle} />,
       link: "templates",
     },
-    {
-      title: "Manifest",
-      icon: <IoTerminalOutline style={iconStyle} />,
-      activeIcon: <IoTerminal style={activeIconStyle} />,
-      link: "manifest",
-    },
-    {
-      title: "Flow Editor",
-      icon: <IoGitMerge style={iconStyle} />,
-      activeIcon: <IoGitMerge style={activeIconStyle} />,
-      link: "flow-editor",
-    },
+
     {
       title: "Settings",
       icon: <IoSettingsOutline style={iconStyle} />,
@@ -110,6 +77,23 @@ function MainListItems() {
       link: "settings",
     },
   ];
+
+  if (features.includes("manifest")) {
+    mainItems.push({
+      title: "Manifest",
+      icon: <IoTerminalOutline style={iconStyle} />,
+      activeIcon: <IoTerminal style={activeIconStyle} />,
+      link: "manifest",
+    });
+  }
+  if (features.includes("flowEditor")) {
+    mainItems.push({
+      title: "Flow Editor",
+      icon: <IoGitMerge style={iconStyle} />,
+      activeIcon: <IoGitMerge style={activeIconStyle} />,
+      link: "flow-editor",
+    });
+  }
 
   return (
     <Box

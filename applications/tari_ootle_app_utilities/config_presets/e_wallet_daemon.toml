@@ -14,9 +14,6 @@
 [localnet.ootle_wallet_daemon]
 # Indexer API url (default: http://127.0.0.1:18200)
 # indexer_api_url = "http://127.0.0.1:18200"
-[esme.ootle_wallet_daemon]
+[esmeralda.ootle_wallet_daemon]
 # Indexer API url for Esme.
-indexer_api_url = "http://217.182.93.147:50124"
-[igor.ootle_wallet_daemon]
-# Indexer API url for Igor.
-indexer_api_url = "http://217.182.93.147:50124"
+indexer_api_url = "http://217.182.93.35:50124/"

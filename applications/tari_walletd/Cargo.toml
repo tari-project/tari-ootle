@@ -41,7 +41,7 @@ humantime-serde = { workspace = true }
 futures = { workspace = true }
 include_dir = { workspace = true, optional = true }
 indexmap = { workspace = true }
-jsonwebtoken = { workspace = true }
+jsonwebtoken = { workspace = true, features = ["rust_crypto"] }
 libsqlite3-sys = { workspace = true, features = ["bundled"] }
 log = { workspace = true }
 log4rs = { workspace = true, features = [

@@ -22,14 +22,20 @@
 
 use std::{env, fs, process::Command};
 
-const NPM_COMMANDS: &[(&str, &[&str])] = &[
-    ("../../bindings", &["install"]),
-    ("../../bindings", &["run", "build-dev"]),
-    ("../../clients/javascript/wallet_daemon_client", &["install"]),
-    ("../../clients/javascript/wallet_daemon_client", &["run", "build"]),
-    ("./web_ui", &["clean-dist"]),
-    ("./web_ui", &["install"]),
-    ("./web_ui", &["run", "build"]),
+type EnvVars = &'static [(&'static str, &'static str)];
+const NPM_COMMANDS: &[(&str, &[&str], EnvVars)] = &[
+    ("../../bindings", &["install"], &[]),
+    ("../../bindings", &["run", "build-dev"], &[]),
+    ("../../clients/javascript/wallet_daemon_client", &["install"], &[]),
+    ("../../clients/javascript/wallet_daemon_client", &["run", "build"], &[]),
+    ("./web_ui", &["clean-dist"], &[]),
+    ("./web_ui", &["install"], &[]),
+    ("./web_ui", &["run", "build"], {
+        match option_env!("TARI_WALLET_ALPHA_FEATURES") {
+            Some(feat) => &[("VITE_ALPHA_FEATURES", feat)],
+            _ => &[],
+        }
+    }),
 ];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -57,8 +63,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(not(windows))]
     const NPM: &str = "pnpm";
 
-    for (target, args) in NPM_COMMANDS {
-        match Command::new(NPM).args(*args).current_dir(target).output() {
+    for (target, args, envs) in NPM_COMMANDS {
+        match Command::new(NPM)
+            .args(*args)
+            .envs(envs.iter().copied())
+            .current_dir(target)
+            .output()
+        {
             Ok(output) if !output.status.success() => {
                 println!(
                     "cargo:warning='pnpm {}' in {} exited with non-zero status code",

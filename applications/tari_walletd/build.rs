@@ -27,15 +27,15 @@ const NPM_COMMANDS: &[(&str, &[&str], EnvVars)] = &[
     ("../../bindings", &["install"], &[]),
     ("../../bindings", &["run", "build-dev"], &[]),
     ("../../clients/javascript/wallet_daemon_client", &["install"], &[]),
-    ("../../clients/javascript/wallet_daemon_client", &["run", "build"], {
+    ("../../clients/javascript/wallet_daemon_client", &["run", "build"], &[]),
+    ("./web_ui", &["clean-dist"], &[]),
+    ("./web_ui", &["install"], &[]),
+    ("./web_ui", &["run", "build"], {
         match option_env!("TARI_WALLET_ALPHA_FEATURES") {
             Some(feat) => &[("VITE_ALPHA_FEATURES", feat)],
             _ => &[],
         }
     }),
-    ("./web_ui", &["clean-dist"], &[]),
-    ("./web_ui", &["install"], &[]),
-    ("./web_ui", &["run", "build"], &[]),
 ];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

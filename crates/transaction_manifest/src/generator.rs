@@ -6,19 +6,19 @@ use std::collections::HashMap;
 use proc_macro2::Ident;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_transaction::{
+    Instruction,
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
     call_arg,
-    Instruction,
 };
 use tari_template_lib::types::TemplateAddress;
 
 use crate::{
+    ManifestInstructions,
+    ManifestValue,
     ast::ManifestAst,
     error::ManifestError,
     parser::{InvokeIntent, ManifestIntent, ManifestLiteral, OrVar, SpecialLiteral},
     value::lit_to_arg,
-    ManifestInstructions,
-    ManifestValue,
 };
 
 pub struct ManifestInstructionGenerator {

@@ -24,10 +24,10 @@ use log::*;
 use tari_consensus::messages::HotstuffMessage;
 use tari_networking::{NetworkingHandle, NetworkingService};
 use tari_ootle_common_types::ShardGroup;
-use tari_ootle_p2p::{proto, TariMessagingSpec};
+use tari_ootle_p2p::{TariMessagingSpec, proto};
 use tari_swarm::messaging::{
-    prost::{Message, ProstCodec},
     Codec,
+    prost::{Message, ProstCodec},
 };
 
 use super::ConsensusGossipError;

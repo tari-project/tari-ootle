@@ -8,12 +8,12 @@ use std::{
 
 use tari_indexer_client::{rest_api_client::IndexerRestApiClient, types::GetSubstatesRequest};
 use tari_ootle_common_types::{
+    SubstateRequirement,
     engine_types::{
         indexed_value::IndexedValueError,
         substate::{SubstateId, SubstateValue},
     },
     substate_type::SubstateType,
-    SubstateRequirement,
 };
 use tari_ootle_transaction::UnsignedTransaction;
 use tari_template_lib_types::ComponentAddress;

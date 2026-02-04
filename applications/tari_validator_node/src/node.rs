@@ -27,7 +27,7 @@ use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_networking::NetworkingService;
-use tari_ootle_storage::{consensus_models::Block, StateStore};
+use tari_ootle_storage::{StateStore, consensus_models::Block};
 use tari_shutdown::Shutdown;
 
 // use tokio::signal::unix::{signal, SignalKind};

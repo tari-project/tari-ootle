@@ -3,7 +3,7 @@
 
 use std::{path::PathBuf, time::Duration};
 
-use anyhow::{anyhow, bail, Context};
+use anyhow::{Context, anyhow, bail};
 use tari_bor::{Deserialize, Serialize};
 use tari_common::SubConfigPath;
 use tari_epoch_oracles::configured;

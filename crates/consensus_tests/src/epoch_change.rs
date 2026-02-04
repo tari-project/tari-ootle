@@ -8,7 +8,7 @@ use tari_consensus_types::Decision;
 use tari_ootle_common_types::{Epoch, NodeHeight};
 use tari_ootle_storage::{StateStore, StateStoreReadTransaction};
 
-use crate::support::{logging::setup_logger, Test};
+use crate::support::{Test, logging::setup_logger};
 
 async fn epoch_change(mut test: Test) {
     test.start_epoch(Epoch(1)).await;

@@ -24,13 +24,13 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{AngleBracketedGenericArguments, GenericArgument, PathArguments, PathSegment, Result, Type, TypeTuple};
 use tari_template_abi::{
-    version,
+    ABI_TEMPLATE_DEF_GLOBAL_NAME,
     ArgDef,
     FunctionDef,
     TemplateDef,
     TemplateDefV1,
     Type as ArgType,
-    ABI_TEMPLATE_DEF_GLOBAL_NAME,
+    version,
 };
 
 use crate::template::ast::{TemplateAst, TypeAst};
@@ -69,7 +69,7 @@ pub fn generate_abi(ast: &TemplateAst) -> Result<TokenStream> {
     let template_def_name = format_ident!("{ABI_TEMPLATE_DEF_GLOBAL_NAME}");
 
     let output = quote! {
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub static #template_def_name: [u8;#len] = [#(#template_def_data),*];
     };
 

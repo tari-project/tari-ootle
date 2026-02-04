@@ -4,8 +4,8 @@
 //! A collection of convenient constant values
 
 use crate::{
-    substates::{ComponentAddress, ResourceAddress, VaultId},
     ObjectKey,
+    substates::{ComponentAddress, ResourceAddress, VaultId},
 };
 // TODO: These addresses are set pretty arbitrarily.
 

@@ -1,16 +1,16 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_consensus::traits::{hooks::NoopHooks, ConsensusSpec};
+use tari_consensus::traits::{ConsensusSpec, hooks::NoopHooks};
 
 use super::TestBlockTransactionProcessor;
 use crate::support::{
+    RoundRobinLeaderStrategy,
     address::TestAddress,
     epoch_manager::TestEpochManager,
     messaging_impls::{TestInboundMessaging, TestOutboundMessaging},
     signing_service::TestVoteSignatureService,
     sync::AlwaysSyncedSyncManager,
-    RoundRobinLeaderStrategy,
 };
 
 pub type TestStore = tari_state_store_rocksdb::RocksDbStateStore<TestAddress>;

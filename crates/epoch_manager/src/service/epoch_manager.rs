@@ -24,31 +24,31 @@ use std::{
     cmp,
     collections::{HashMap, HashSet},
     num::NonZeroU32,
-    sync::{atomic, atomic::AtomicU64, Arc},
+    sync::{Arc, atomic, atomic::AtomicU64},
 };
 
 use log::*;
 use ootle_byte_type::FromByteType;
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{
-    committee::{Committee, CommitteeInfo, CommitteeMember},
-    layer_one_transaction::{LayerOnePayloadType, LayerOneTransactionDef},
-    optional::Optional,
     DerivableFromPublicKey,
     Epoch,
     NodeAddressable,
     ShardGroup,
     SubstateAddress,
     VotePower,
+    committee::{Committee, CommitteeInfo, CommitteeMember},
+    layer_one_transaction::{LayerOnePayloadType, LayerOneTransactionDef},
+    optional::Optional,
 };
-use tari_ootle_storage::global::{models::ValidatorNode, GlobalDb, MetadataKey};
+use tari_ootle_storage::global::{GlobalDb, MetadataKey, models::ValidatorNode};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_sidechain::EvictionProof;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     error::EpochManagerError,
-    service::{config::EpochManagerConfig, NetworkDescription, ShardGroupInfo},
+    service::{NetworkDescription, ShardGroupInfo, config::EpochManagerConfig},
     traits::{EpochManagerSpec, LayerOneTransactionSubmitter},
 };
 

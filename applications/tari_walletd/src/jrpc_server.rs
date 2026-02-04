@@ -4,27 +4,28 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
+    Router,
     extract::{DefaultBodyLimit, Extension},
     routing::post,
-    Router,
 };
-use axum_extra::{headers, headers::authorization::Bearer, TypedHeader};
+use axum_extra::{TypedHeader, headers, headers::authorization::Bearer};
 use axum_jrpc::{
-    error::{JsonRpcError, JsonRpcErrorReason},
     JrpcResult,
     JsonRpcAnswer,
     JsonRpcExtractor,
     JsonRpcResponse,
+    error::{JsonRpcError, JsonRpcErrorReason},
 };
 use log::*;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::json;
 use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
 use tokio::task;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
-use super::handlers::{stealth_utxos, substates, templates, wallet, webauthn, HandlerContext};
+use super::handlers::{HandlerContext, stealth_utxos, substates, templates, wallet, webauthn};
 use crate::handlers::{
+    Handler,
     accounts,
     auth::jwt::JwtApiError,
     confidential,
@@ -36,7 +37,6 @@ use crate::handlers::{
     transaction,
     validator,
     webrtc,
-    Handler,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::json_rpc";
@@ -79,7 +79,7 @@ async fn handler(
     authorization_header: Option<TypedHeader<headers::Authorization<Bearer>>>,
     value: JsonRpcExtractor,
 ) -> JrpcResult {
-    let token = authorization_header.map(|auth| auth.0 .0);
+    let token = authorization_header.map(|auth| auth.0.0);
     info!(target: LOG_TARGET, "🌐 JSON-RPC request: {}", value.method);
     debug!(target: LOG_TARGET, "🌐 JSON-RPC request: {:?}", value);
     match value.method.as_str().split_once('.') {

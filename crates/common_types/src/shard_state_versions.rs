@@ -6,7 +6,7 @@ pub use bounded_vec::BoundedVecOutOfBounds;
 use indexmap::IndexMap;
 use tari_bor::{Deserialize, Serialize};
 
-use crate::{shard::Shard, NumPreshards, ShardGroup, StateVersion};
+use crate::{NumPreshards, ShardGroup, StateVersion, shard::Shard};
 
 /// Maximum number of shards is one more than the maximum number of presharding options to allow for the global shard
 const MAX_SHARDS: usize = NumPreshards::MAX_SHARD.as_u32() as usize + 1;

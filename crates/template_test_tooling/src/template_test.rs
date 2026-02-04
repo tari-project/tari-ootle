@@ -24,8 +24,8 @@ use tari_engine::{
     fees::{FeeModule, FeeTable},
     runtime::{AuthParams, RuntimeModule},
     state_store::{
-        memory::{MemoryStateStore, ReadOnlyMemoryStateStore},
         StateWriter,
+        memory::{MemoryStateStore, ReadOnlyMemoryStateStore},
     },
     template::LoadedTemplate,
     transaction::{TransactionError, TransactionProcessor},
@@ -37,27 +37,28 @@ use tari_engine_types::{
     substate::{SubstateDiff, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId},
 };
-use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType, SubstateRequirement};
+use tari_ootle_common_types::{SubstateRequirement, crypto::create_key_pair_from_seed, substate_type::SubstateType};
 use tari_ootle_transaction::{
-    args,
-    args::InstructionArg,
-    builder::{named_args::BuilderWorkspaceKey, MainIntent},
     Instruction,
     Transaction,
     TransactionBuilder,
+    args,
+    args::InstructionArg,
+    builder::{MainIntent, named_args::BuilderWorkspaceKey},
 };
 use tari_template_lib::types::{
-    constants::{NFT_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS},
-    crypto::RistrettoPublicKeyBytes,
     Amount,
     ComponentAddress,
     NonFungibleAddress,
     ResourceAddress,
     TemplateAddress,
+    constants::{NFT_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS},
+    crypto::RistrettoPublicKeyBytes,
 };
-use tari_transaction_manifest::{parse_manifest, ManifestValue};
+use tari_transaction_manifest::{ManifestValue, parse_manifest};
 
 use crate::{
+    Package,
     builtin_component_state::{
         add_tari_resources,
         initialize_builtin_faucet_state,
@@ -69,7 +70,6 @@ use crate::{
     template_spec::TemplateSpec,
     track_calls::TrackCallsModule,
     wrapped_transaction::WrappedTransaction,
-    Package,
 };
 
 pub const fn xtr_faucet_component() -> ComponentAddress {
@@ -353,8 +353,7 @@ impl TemplateTest {
             )
             .unwrap_success();
         let diff = result.finalize.accept().expect("create account failed");
-        let component = diff.up_iter().find_map(|(id, _)| id.as_component_address()).unwrap();
-        component
+        diff.up_iter().find_map(|(id, _)| id.as_component_address()).unwrap()
     }
 
     #[track_caller]

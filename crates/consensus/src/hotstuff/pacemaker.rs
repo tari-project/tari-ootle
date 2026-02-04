@@ -11,12 +11,12 @@ use tari_ootle_common_types::NodeHeight;
 use tokio::sync::mpsc;
 
 use crate::hotstuff::{
+    HotStuffError,
     current_view::CurrentView,
     on_beat::OnBeat,
     on_force_beat::OnForceBeat,
     on_leader_timeout::{LeaderTimeout, OnLeaderTimeout},
     pacemaker_handle::{PaceMakerHandle, PacemakerRequest},
-    HotStuffError,
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::pacemaker";

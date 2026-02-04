@@ -5,13 +5,13 @@ use std::{collections::HashSet, fmt::Display};
 
 use ootle_byte_type::ToByteType;
 use tari_engine_types::component::derive_component_address_from_public_key;
-use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
+use tari_ootle_common_types::{SubstateRequirement, optional::Optional};
 use tari_ootle_transaction::TransactionId;
 use tari_ootle_wallet_sdk::{
-    apis::accounts::{AccountsApi, AccountsApiError},
-    models::{AccountWithAddress, DerivedKeyIndex, TransactionFinalizedEvent, WalletEvent},
     WalletSdk,
     WalletSdkSpec,
+    apis::accounts::{AccountsApi, AccountsApiError},
+    models::{AccountWithAddress, DerivedKeyIndex, TransactionFinalizedEvent, WalletEvent},
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib_types::ComponentAddress;

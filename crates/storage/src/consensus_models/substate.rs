@@ -6,24 +6,24 @@ use std::{collections::HashSet, fmt, fmt::Display};
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::LeafBlock;
-use tari_engine_types::substate::{hash_substate, Substate, SubstateId, SubstateValue};
+use tari_engine_types::substate::{Substate, SubstateId, SubstateValue, hash_substate};
 use tari_ootle_common_types::{
-    displayable::Displayable,
-    shard::Shard,
     Epoch,
     SubstateAddress,
     SubstateRequirement,
     VersionedSubstateId,
     VersionedSubstateIdRef,
+    displayable::Displayable,
+    shard::Shard,
 };
 use tari_ootle_transaction::TransactionId;
 use tari_state_tree::{SubstateTreeChange, Version};
 
 use crate::{
-    consensus_models::{substate_update_batch::SubstateUpdateBatch, SubstateLock, SubstateTransition},
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
+    consensus_models::{SubstateLock, SubstateTransition, substate_update_batch::SubstateUpdateBatch},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

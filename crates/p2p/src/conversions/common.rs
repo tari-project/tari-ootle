@@ -30,11 +30,11 @@ use tari_ootle_common_types::{Epoch, SubstateAddress, SubstateRequirement, Subst
 use tari_ootle_transaction::TransactionSignature;
 use tari_template_lib::{
     prelude::{
-        crypto::CommitmentSignatureBytes,
         PedersenCommitmentBytes,
         RistrettoPublicKeyBytes,
         Scalar32Bytes,
         SchnorrSignatureBytes,
+        crypto::CommitmentSignatureBytes,
     },
     types::Amount,
 };

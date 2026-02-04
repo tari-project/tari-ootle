@@ -3,7 +3,7 @@
 
 use log::*;
 use tari_consensus_types::ProposalVote;
-use tari_ootle_common_types::{committee::Committee, NodeHeight};
+use tari_ootle_common_types::{NodeHeight, committee::Committee};
 
 use super::vote_collector::ProposalVoteCollector;
 use crate::{

@@ -3,7 +3,7 @@
 
 use tari_ootle_wallet_crypto::StealthProofError;
 
-use crate::{signer::SignerError, stealth::StealthProviderError, Address};
+use crate::{Address, signer::SignerError, stealth::StealthProviderError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum WalletError {

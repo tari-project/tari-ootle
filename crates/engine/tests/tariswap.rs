@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_common_types::substate_type::SubstateType;
-use tari_ootle_transaction::{args, call_args, Instruction, Transaction};
+use tari_ootle_transaction::{Instruction, Transaction, args, call_args};
 use tari_template_lib::types::{Amount, ComponentAddress, FunctionName, NonFungibleAddress, ResourceAddress};
 use tari_template_test_tooling::TemplateTest;
 

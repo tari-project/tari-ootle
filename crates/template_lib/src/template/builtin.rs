@@ -21,7 +21,7 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use serde::{Deserialize, Serialize};
-use tari_template_abi::{call_engine, EngineOp};
+use tari_template_abi::{EngineOp, call_engine};
 
 use crate::{
     args::{BuiltinTemplateAction, BuiltinTemplateInvokeArg, InvokeResult},

@@ -8,20 +8,20 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
 use tari_ootle_common_types::{
+    RistrettoSchnorrBlake2bVerifier,
     crypto::create_key_pair_from_seed,
     substate_type::SubstateType,
-    RistrettoSchnorrBlake2bVerifier,
 };
-use tari_ootle_transaction::{args, Transaction};
+use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::types::{
-    amount,
-    crypto::{NoSignatureDomain, PublicKey, Signature},
     Amount,
     ComponentAddress,
+    amount,
+    crypto::{NoSignatureDomain, PublicKey, Signature},
 };
 use tari_template_test_tooling::{
-    support::{assert_error::assert_reject_reason, stealth, stealth::NO_INPUTS},
     TemplateTest,
+    support::{assert_error::assert_reject_reason, stealth, stealth::NO_INPUTS},
 };
 
 const TEMPLATE_PATHS: &[&str] = &["tests/templates/signature"];

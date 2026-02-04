@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use futures::future::Either;
 use log::{debug, info};
 use minotari_wallet_grpc_client::grpc;
@@ -23,12 +23,12 @@ use crate::{
     config::{Config, InstanceType},
     layer_one_transactions::LayerOneTransactionService,
     process_manager::{
-        executables::ExecutableManager,
-        handle::{ProcessManagerHandle, ProcessManagerRequest},
-        instances::InstanceManager,
         InstanceId,
         MinoTariWalletProcess,
         MinotariNodeDetails,
+        executables::ExecutableManager,
+        handle::{ProcessManagerHandle, ProcessManagerRequest},
+        instances::InstanceManager,
     },
 };
 
@@ -132,7 +132,7 @@ impl ProcessManager {
                 return Err(anyhow!(
                     "No MinotariConsoleWallet available. Please start a wallet before registering validator nodes and \
                      templates or use --skip-registration flag to skip this.",
-                ))
+                ));
             },
         };
 

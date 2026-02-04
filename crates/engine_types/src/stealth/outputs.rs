@@ -2,16 +2,16 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use ootle_byte_type::ConvertFromByteType;
-use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
+use tari_crypto::ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment};
 use tari_template_lib::{
     prelude::StealthOutputsStatement,
     types::{crypto::UtxoTag, stealth::SpendCondition},
 };
 
 use crate::{
-    crypto::{range_proof::validate_bullet_proof, validate_elgamal_verifiable_balance_proof, ValidateOutputBody},
-    resource_container::ResourceError,
     UtxoOutput,
+    crypto::{ValidateOutputBody, range_proof::validate_bullet_proof, validate_elgamal_verifiable_balance_proof},
+    resource_container::ResourceError,
 };
 
 #[derive(Debug, Clone)]

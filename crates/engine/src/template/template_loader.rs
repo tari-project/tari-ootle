@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use crate::template::{loaded_template::LoadedTemplate, TemplateLoaderError};
+use crate::template::{TemplateLoaderError, loaded_template::LoadedTemplate};
 
 pub trait TemplateModuleLoader {
     fn load_template(&self) -> Result<LoadedTemplate, TemplateLoaderError>;

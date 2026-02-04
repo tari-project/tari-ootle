@@ -13,7 +13,7 @@ pub mod wasm;
 pub use tari_template_abi as abi;
 
 pub mod base_layer_hashers {
-    use blake2::{digest::consts::U32, Blake2b};
+    use blake2::{Blake2b, digest::consts::U32};
     use tari_crypto::hasher;
     // TODO: DRY - This should always be the same as the base layer hasher
     hasher!(

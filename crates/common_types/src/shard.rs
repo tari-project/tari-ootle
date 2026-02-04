@@ -6,7 +6,7 @@ use std::{fmt::Display, ops::RangeInclusive};
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 
-use crate::{uint::U256, NumPreshards, ShardGroup, SubstateAddress};
+use crate::{NumPreshards, ShardGroup, SubstateAddress, uint::U256};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]

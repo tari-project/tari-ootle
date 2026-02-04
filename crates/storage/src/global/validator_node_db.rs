@@ -22,10 +22,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use tari_ootle_common_types::{committee::Committee, Epoch, ShardGroup, SubstateAddress, VotePower};
+use tari_ootle_common_types::{Epoch, ShardGroup, SubstateAddress, VotePower, committee::Committee};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
-use crate::global::{models::ValidatorNode, GlobalDbAdapter};
+use crate::global::{GlobalDbAdapter, models::ValidatorNode};
 
 pub struct ValidatorNodeDb<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> {
     backend: &'a TGlobalDbAdapter,

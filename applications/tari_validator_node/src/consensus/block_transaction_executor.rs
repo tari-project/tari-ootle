@@ -6,9 +6,9 @@ use std::{collections::HashMap, sync::Arc};
 use log::info;
 use tari_consensus::traits::{BlockTransactionExecutor, BlockTransactionExecutorError};
 use tari_engine::state_store::{
+    StateWriter,
     memory::{MemoryStateStore, ReadOnlyMemoryStateStore},
     new_memory_store,
-    StateWriter,
 };
 use tari_engine_types::{
     substate::Substate,
@@ -17,8 +17,8 @@ use tari_engine_types::{
 use tari_ootle_app_utilities::transaction_executor::TransactionExecutor;
 use tari_ootle_common_types::{Epoch, SubstateRequirement, VersionedSubstateId};
 use tari_ootle_storage::{
-    consensus_models::{TransactionExecution, VersionedSubstateIdLockIntent},
     StateStore,
+    consensus_models::{TransactionExecution, VersionedSubstateIdLockIntent},
 };
 use tari_ootle_transaction::Transaction;
 

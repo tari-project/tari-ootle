@@ -27,7 +27,7 @@ mod dispatcher;
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{parse2, Result};
+use syn::{Result, parse2};
 
 use self::{abi::generate_abi, ast::TemplateAst, definition::generate_definition, dispatcher::generate_dispatcher};
 

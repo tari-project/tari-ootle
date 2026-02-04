@@ -6,8 +6,8 @@ use tari_common_types::types::CompressedPublicKey;
 use tari_consensus_types::ProposalCertificate;
 use tari_crypto::{ristretto::RistrettoSecretKey, tari_utilities::ByteArray};
 use tari_ootle_storage::{
-    consensus_models::{Block, BlockHeader, EndOfEpochCommand},
     StateStoreReadTransaction,
+    consensus_models::{Block, BlockHeader, EndOfEpochCommand},
 };
 use tari_sidechain::{
     ChainLink,

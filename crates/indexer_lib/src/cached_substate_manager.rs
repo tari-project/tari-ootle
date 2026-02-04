@@ -26,7 +26,6 @@ use log::*;
 use tari_engine_types::substate::{Substate, SubstateId};
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
-    displayable::Displayable,
     Epoch,
     NodeAddressable,
     NumPreshards,
@@ -34,6 +33,7 @@ use tari_ootle_common_types::{
     SubstateAddress,
     SubstateRequirementRef,
     ToSubstateAddress,
+    displayable::Displayable,
 };
 use tari_validator_node_rpc::client::{SubstateResult, ValidatorNodeClientFactory, ValidatorNodeRpcClient};
 

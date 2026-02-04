@@ -24,9 +24,9 @@ use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use config::Config;
 use serde::{Deserialize, Serialize};
-use tari_common::{configuration::CommonConfig, ConfigurationError, DefaultConfigLoader, SubConfigPath};
+use tari_common::{ConfigurationError, DefaultConfigLoader, SubConfigPath, configuration::CommonConfig};
 use tari_crypto::tari_utilities::SafePassword;
-use tari_ootle_common_types::{crypto::create_secret_password, Network};
+use tari_ootle_common_types::{Network, crypto::create_secret_password};
 use url::Url;
 
 #[derive(Debug, Clone)]

@@ -13,13 +13,13 @@ use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::{FixedHash, FixedHashSizeError};
 use tari_crypto::tari_utilities::{
-    hex::{from_hex, Hex},
     ByteArray,
+    hex::{Hex, from_hex},
 };
 use tari_engine_types::substate::SubstateId;
 use tari_template_lib_types::{ObjectKey, TransactionReceiptAddress};
 
-use crate::{shard::Shard, uint::U256, NumPreshards, ShardGroup};
+use crate::{NumPreshards, ShardGroup, shard::Shard, uint::U256};
 
 pub trait ToSubstateAddress {
     fn to_substate_address(&self) -> SubstateAddress;
@@ -280,7 +280,7 @@ mod tests {
         ops::{Bound, RangeBounds, RangeInclusive},
     };
 
-    use rand::{rngs::OsRng, RngCore};
+    use rand::{RngCore, rngs::OsRng};
 
     use super::*;
 

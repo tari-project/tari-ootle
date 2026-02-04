@@ -5,27 +5,27 @@ use std::{str::FromStr, sync::Arc};
 
 use anyhow::Context;
 use axum::{
-    handler::HandlerWithoutStateExt,
-    http::{header, HeaderValue, Response, StatusCode, Uri},
-    response::IntoResponse,
-    routing::post,
     Extension,
     Router,
+    handler::HandlerWithoutStateExt,
+    http::{HeaderValue, Response, StatusCode, Uri, header},
+    response::IntoResponse,
+    routing::post,
 };
 use axum_extra::{
-    headers::{authorization::Basic, Authorization},
     TypedHeader,
+    headers::{Authorization, authorization::Basic},
 };
 use axum_jrpc::{
-    error::{JsonRpcError, JsonRpcErrorReason},
     JrpcResult,
     JsonRpcAnswer,
     JsonRpcExtractor,
     JsonRpcResponse,
+    error::{JsonRpcError, JsonRpcErrorReason},
 };
-use include_dir::{include_dir, Dir};
+use include_dir::{Dir, include_dir};
 use log::*;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::json;
 use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
 use tokio::fs;

@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_bor::{BorTag, Tagged};
-use tari_template_abi::{call_engine, EngineOp};
+use tari_template_abi::{EngineOp, call_engine};
 use tari_template_lib_types::{BinaryTag, ComponentAddress, ResourceAddress};
 
 use crate::args::{AddressAllocationInvokeArg, InvokeResult};

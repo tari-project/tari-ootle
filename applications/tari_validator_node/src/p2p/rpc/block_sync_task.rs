@@ -6,16 +6,16 @@ use std::collections::HashSet;
 use log::*;
 use tari_consensus::traits::CertificateStore;
 use tari_consensus_types::{BlockId, ProposalCertificate};
-use tari_ootle_common_types::{optional::Optional, Epoch, NumPreshards};
+use tari_ootle_common_types::{Epoch, NumPreshards, optional::Optional};
 use tari_ootle_p2p::{
     proto,
-    proto::rpc::{sync_blocks_response::SyncData, QuorumCertificates, SyncBlocksResponse},
+    proto::rpc::{QuorumCertificates, SyncBlocksResponse, sync_blocks_response::SyncData},
 };
 use tari_ootle_storage::{
-    consensus_models::{Block, SubstateCreate, SubstateUpdateProof, TransactionRecord},
     StateStore,
     StateStoreReadTransaction,
     StorageError,
+    consensus_models::{Block, SubstateCreate, SubstateUpdateProof, TransactionRecord},
 };
 use tari_rpc_framework::RpcStatus;
 use tokio::sync::mpsc;
@@ -144,10 +144,10 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
                 };
 
                 // If we hit the max allowed epoch then we stop streaming
-                if let Some(epoch) = self.up_to_epoch {
-                    if child.epoch() > epoch {
-                        break;
-                    }
+                if let Some(epoch) = self.up_to_epoch &&
+                    child.epoch() > epoch
+                {
+                    break;
                 }
 
                 current_block_id = *child.id();

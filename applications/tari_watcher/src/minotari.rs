@@ -16,7 +16,7 @@ use tari_ootle_common_types::layer_one_transaction::{
     ValidatorRegistrationParams,
 };
 use tari_sidechain::EvictionProof;
-use tari_transaction_components::transaction_components::{memo_field::TxType, MemoField};
+use tari_transaction_components::transaction_components::{MemoField, memo_field::TxType};
 use tonic::transport::Channel;
 use url::Url;
 

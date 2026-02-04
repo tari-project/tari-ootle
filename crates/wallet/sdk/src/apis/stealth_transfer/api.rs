@@ -8,25 +8,26 @@ use ootle_byte_type::{ConvertFromByteType, FromByteType};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_address::{OotleAddress, RistrettoOotleAddress};
-use tari_ootle_common_types::{displayable::Displayable, optional::Optional, Network, SubstateRequirement};
-use tari_ootle_transaction::{args, Transaction, UnsignedTransaction};
+use tari_ootle_common_types::{Network, SubstateRequirement, displayable::Displayable, optional::Optional};
+use tari_ootle_transaction::{Transaction, UnsignedTransaction, args};
 use tari_ootle_wallet_crypto::{memo::Memo, pay_to::PayTo};
 use tari_template_lib::{
     models::Account as BuiltinAccount,
     prelude::StealthTransferStatement,
-    types::{constants::XTR, stealth::StealthUnspentOutput, Amount, ComponentAddress, ResourceAddress, UtxoAddress},
+    types::{Amount, ComponentAddress, ResourceAddress, UtxoAddress, constants::XTR, stealth::StealthUnspentOutput},
 };
 use tokio::{sync::Semaphore, task::block_in_place};
 
 use super::{
+    BadgeUsage,
     error::StealthTransferApiError,
     params::StealthTransferParams,
     types::{InputsToSpend, StealthOutputToCreate, StealthTransferOutput},
-    BadgeUsage,
 };
 use crate::{
+    WalletSdkSpec,
     apis::{
-        accounts::{derive_account_address_from_public_key, AccountsApi},
+        accounts::{AccountsApi, derive_account_address_from_public_key},
         confidential_transfer::UtxoInputSelection,
         config::ConfigApi,
         key_manager::KeyManagerApi,
@@ -43,7 +44,6 @@ use crate::{
         WalletLockDropGuard,
         WalletLockId,
     },
-    WalletSdkSpec,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_sdk::apis::stealth_transfers";
@@ -162,24 +162,24 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             UtxoInputSelection::PreferRevealed => {
                 let revealed_to_spend = cmp::min(available_revealed_funds, spend_amount);
                 let utxo_amount_to_spend = spend_amount - revealed_to_spend;
-                if let Some(ref src_vault) = maybe_src_vault {
-                    if utxo_amount_to_spend.is_zero() {
-                        info!(
-                            target: LOG_TARGET,
-                            "PreferRevealed: Spending {} revealed balance (available: {}) for transfer from {}",
-                            revealed_to_spend,
-                            available_revealed_funds,
-                            src_vault.id
-                        );
+                if let Some(ref src_vault) = maybe_src_vault &&
+                    utxo_amount_to_spend.is_zero()
+                {
+                    info!(
+                        target: LOG_TARGET,
+                        "PreferRevealed: Spending {} revealed balance (available: {}) for transfer from {}",
+                        revealed_to_spend,
+                        available_revealed_funds,
+                        src_vault.id
+                    );
 
-                        self.locks_api
-                            .lock_funds_in_vault(lock_id, &src_vault.id, revealed_to_spend)?;
+                    self.locks_api
+                        .lock_funds_in_vault(lock_id, &src_vault.id, revealed_to_spend)?;
 
-                        return Ok(InputsToSpend {
-                            inputs: vec![],
-                            revealed: revealed_to_spend,
-                        });
-                    }
+                    return Ok(InputsToSpend {
+                        inputs: vec![],
+                        revealed: revealed_to_spend,
+                    });
                 }
 
                 if maybe_src_vault.is_none() && revealed_to_spend.is_positive() {
@@ -451,15 +451,14 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                     substate_inputs.push(SubstateRequirement::unversioned(vault.id));
                     substate_inputs.push(SubstateRequirement::unversioned(vault.resource_address));
                 }
-                if params.resource_address != XTR {
-                    if let Some(vault) = self
+                if params.resource_address != XTR &&
+                    let Some(vault) = self
                         .accounts_api
                         .get_vault_by_resource(owner_account.component_address(), &params.resource_address)
                         .optional()?
-                    {
-                        substate_inputs.push(SubstateRequirement::unversioned(vault.id));
-                        substate_inputs.push(SubstateRequirement::unversioned(vault.resource_address));
-                    }
+                {
+                    substate_inputs.push(SubstateRequirement::unversioned(vault.id));
+                    substate_inputs.push(SubstateRequirement::unversioned(vault.resource_address));
                 }
             }
 
@@ -511,28 +510,28 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             // Add the unconfirmed change output to the wallet store
             // NOTE: we can get the nth element because outputs are guaranteed to be in the order we pass them to
             // generate_transfer_statement
-            if change_amount.is_positive() {
-                if let Some(output) = transfer_statement.outputs_statement.outputs.last() {
-                    debug!(
-                    target: LOG_TARGET,
-                    "Adding TRANSFER unconfirmed output with commitment {} for amount {} to account {}",
-                    output.output.commitment,
-                    change_amount,
-                    owner_account.component_address()
-                    );
-                    self.add_unconfirmed_output_from_statement(
-                        lock.id(),
-                        &owner_account,
-                        params.resource_address,
-                        output,
-                        change_amount
-                            .to_u64_checked()
-                            .ok_or_else(|| StealthTransferApiError::InvariantViolation {
-                                details: "Change amount exceeds u64".to_string(),
-                            })?,
-                        None,
-                    )?;
-                }
+            if change_amount.is_positive() &&
+                let Some(output) = transfer_statement.outputs_statement.outputs.last()
+            {
+                debug!(
+                target: LOG_TARGET,
+                "Adding TRANSFER unconfirmed output with commitment {} for amount {} to account {}",
+                output.output.commitment,
+                change_amount,
+                owner_account.component_address()
+                );
+                self.add_unconfirmed_output_from_statement(
+                    lock.id(),
+                    &owner_account,
+                    params.resource_address,
+                    output,
+                    change_amount
+                        .to_u64_checked()
+                        .ok_or_else(|| StealthTransferApiError::InvariantViolation {
+                            details: "Change amount exceeds u64".to_string(),
+                        })?,
+                    None,
+                )?;
             }
 
             // Add all input UTXO substates to transaction inputs

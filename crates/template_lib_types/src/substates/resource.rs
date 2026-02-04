@@ -29,12 +29,12 @@ use tari_template_abi::rust::{
 
 use super::BinaryTag;
 use crate::{
-    address_prefixes,
-    constants::STEALTH_TARI_RESOURCE_ADDRESS,
-    newtype_struct_serde_impl,
     EntityId,
     KeyParseError,
     ObjectKey,
+    address_prefixes,
+    constants::STEALTH_TARI_RESOURCE_ADDRESS,
+    newtype_struct_serde_impl,
 };
 
 const TAG: u64 = BinaryTag::ResourceAddress.as_u64();

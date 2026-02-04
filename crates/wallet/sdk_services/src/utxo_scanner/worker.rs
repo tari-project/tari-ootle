@@ -4,13 +4,13 @@
 use std::{
     fmt::Display,
     future::poll_fn,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
     time::Duration,
 };
 
 use futures_bounded::PushError;
 use log::{info, warn};
-use tari_ootle_wallet_sdk::{models::WalletEvent, WalletSdk, WalletSdkSpec};
+use tari_ootle_wallet_sdk::{WalletSdk, WalletSdkSpec, models::WalletEvent};
 use tari_template_lib_types::{ComponentAddress, ResourceAddress};
 use tokio::{
     sync::{mpsc, watch},

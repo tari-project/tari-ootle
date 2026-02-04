@@ -13,11 +13,11 @@ use tari_consensus_types::{
     TimeoutVoteMessage,
     ValidatorSignatureBytes,
 };
-use tari_ootle_common_types::{committee::Committee, displayable::Displayable, optional::Optional, Epoch, NodeHeight};
-use tari_ootle_storage::{consensus_models::BookkeepingModel, StateStore};
+use tari_ootle_common_types::{Epoch, NodeHeight, committee::Committee, displayable::Displayable, optional::Optional};
+use tari_ootle_storage::{StateStore, consensus_models::BookkeepingModel};
 
 use crate::{
-    hotstuff::{get_leader_for_view, HotStuffError},
+    hotstuff::{HotStuffError, get_leader_for_view},
     messages::{HotstuffMessage, NewViewMessage},
     traits::{CertificateStore, ConsensusSpec, OutboundMessaging, ValidatorSignerService},
 };
@@ -61,10 +61,11 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
 
             let leaf_block = LeafBlock::get(tx, epoch)?;
             // If we leader failure more than once in a row, propose the next higher view
-            if let Some((nv_epoch, last_sent_new_view)) = self.last_sent_new_view {
-                if nv_epoch == epoch && last_sent_new_view >= timeout_height {
-                    timeout_height = last_sent_new_view + NodeHeight(1);
-                }
+            if let Some((nv_epoch, last_sent_new_view)) = self.last_sent_new_view &&
+                nv_epoch == epoch &&
+                last_sent_new_view >= timeout_height
+            {
+                timeout_height = last_sent_new_view + NodeHeight(1);
             }
             let next_leader = get_leader_for_view(
                 tx,

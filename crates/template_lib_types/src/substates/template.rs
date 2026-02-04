@@ -3,17 +3,17 @@
 
 use std::str::FromStr;
 
-use crate::{address_prefixes, Hash};
+use crate::{Hash, address_prefixes};
 
 /// The address of a Template
 // TODO: should we refactor TemplateAddress as a newtype ?
 pub type TemplateAddress = Hash;
 
 pub fn parse_template_address(s: &str) -> Option<TemplateAddress> {
-    if let Some(hash_str) = s.strip_prefix(address_prefixes::TEMPLATE) {
-        if let Ok(address) = TemplateAddress::from_str(hash_str) {
-            return Some(address);
-        }
+    if let Some(hash_str) = s.strip_prefix(address_prefixes::TEMPLATE) &&
+        let Ok(address) = TemplateAddress::from_str(hash_str)
+    {
+        return Some(address);
     }
 
     None

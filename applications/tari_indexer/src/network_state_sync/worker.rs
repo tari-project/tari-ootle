@@ -9,22 +9,22 @@ use tari_engine_types::{
     substate::{SubstateId, SubstateValue},
     transaction_receipt::TransactionReceipt,
 };
-use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerEvent, EpochManagerReader};
+use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader, service::EpochManagerHandle};
 use tari_indexer_client::event::{IndexerEvent, NewEpochEvent, TransactionFinalizedEvent};
 use tari_networking::NetworkingHandle;
 use tari_ootle_common_types::{
-    optional::Optional,
-    shard::Shard,
     Epoch,
     PeerAddress,
     ShardGroup,
     StateVersion,
     VotePower,
+    optional::Optional,
+    shard::Shard,
 };
-use tari_ootle_p2p::{proto::rpc, TariMessagingSpec};
+use tari_ootle_p2p::{TariMessagingSpec, proto::rpc};
 use tari_ootle_storage::{
-    consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof, SubstateValueFilterFlags},
     StorageError,
+    consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof, SubstateValueFilterFlags},
 };
 use tari_ootle_transaction::TransactionId;
 use tari_rpc_framework::__macro_reexports::future::Either;
@@ -43,9 +43,9 @@ use crate::{
     },
     notify::Notify,
     storage_sqlite::{
-        models::{Key, UtxoSpent, UtxoUnspent, UtxoUpdateRecord},
         SqliteIndexerStore,
         SqliteStoreWriteTransaction,
+        models::{Key, UtxoSpent, UtxoUnspent, UtxoUpdateRecord},
     },
     store::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreReader, IndexerStoreWriteTransaction},
 };
@@ -366,6 +366,7 @@ impl NetworkWideStateSync {
             SubstateValueFilterFlags::TRANSACTION_RECEIPT;
 
         if prev_version == 0 {
+            info!(target: LOG_TARGET, "🌍️ Syncing shard {shard} in shard group {shard_group} from scratch (starting from version 0). Only fetching the head state.");
             // If we are syncing from scratch, only get up states to reduce initial sync size
             value_filters |= SubstateValueFilterFlags::UP_ONLY;
         }

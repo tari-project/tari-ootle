@@ -6,7 +6,7 @@ use ootle_byte_type::ToByteType;
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
     keys::{PublicKey, SecretKey},
-    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey, pedersen::PedersenCommitment},
 };
 use tari_engine_types::crypto::{get_commitment_factory, messages};
 use tari_template_lib_types::{

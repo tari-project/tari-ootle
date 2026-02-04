@@ -24,7 +24,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use tari_bor::BorTag;
-use tari_template_abi::{call_engine, rust::fmt, EngineOp};
+use tari_template_abi::{EngineOp, call_engine, rust::fmt};
 use tari_template_lib_types::{BinaryTag, NonFungibleId, ResourceAddress};
 
 use crate::{

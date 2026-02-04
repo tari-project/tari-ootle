@@ -6,10 +6,10 @@ use std::collections::HashMap;
 use log::info;
 use ootle_byte_type::ToByteType;
 use tari_engine_types::indexed_value::decode_value_at_path;
-use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
+use tari_ootle_common_types::{SubstateRequirement, optional::Optional};
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::models::Account;
-use tari_template_lib_types::{constants::XTR, Amount, ComponentAddress, ResourceAddress, ResourceType, VaultId};
+use tari_template_lib_types::{Amount, ComponentAddress, ResourceAddress, ResourceType, VaultId, constants::XTR};
 
 use crate::{faucet::Faucet, runner::Runner, timer::TraceTimer};
 

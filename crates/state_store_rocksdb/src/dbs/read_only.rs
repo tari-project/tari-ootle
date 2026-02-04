@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use rocksdb::{AsColumnFamilyRef, DBIteratorWithThreadMode, DBPinnableSlice, Error, IteratorMode, ReadOptions, DB};
+use rocksdb::{AsColumnFamilyRef, DB, DBIteratorWithThreadMode, DBPinnableSlice, Error, IteratorMode, ReadOptions};
 
 use crate::traits::{RocksDatabase, RocksReader};
 

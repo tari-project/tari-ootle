@@ -15,16 +15,16 @@ use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_engine_types::commit_result::RejectReason;
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
-    committee::CommitteeInfo,
-    displayable::Displayable,
-    optional::Optional,
     Epoch,
     ExtraData,
     NodeHeight,
+    committee::CommitteeInfo,
+    displayable::Displayable,
+    optional::Optional,
 };
 use tari_ootle_storage::{
+    StateStore,
     consensus_models::{
-        calculate_leader_fee,
         Block,
         BlockHeader,
         BlockTransactionExecution,
@@ -41,8 +41,8 @@ use tari_ootle_storage::{
         TransactionPoolStage,
         TransactionRecord,
         ValidatorConsensusStats,
+        calculate_leader_fee,
     },
-    StateStore,
 };
 use tari_ootle_transaction::TransactionId;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
@@ -50,6 +50,7 @@ use tokio::task;
 
 use crate::{
     hotstuff::{
+        HotstuffConfig,
         apply_leader_fee_to_substate_store,
         block_change_set::ProposedBlockChangeSet,
         calculate_state_merkle_root,
@@ -67,7 +68,6 @@ use crate::{
             PreparedTransaction,
             TransactionLockConflicts,
         },
-        HotstuffConfig,
     },
     messages::{HotstuffMessage, ProposalMessage},
     tracing::TraceTimer,

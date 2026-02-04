@@ -6,10 +6,10 @@ pub mod helpers;
 use helpers::{create_block, create_rocksdb};
 use tari_consensus_types::PcId;
 use tari_ootle_storage::{
-    consensus_models::{BookkeepingModel, PendingShardStateTreeDiff},
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
+    consensus_models::{BookkeepingModel, PendingShardStateTreeDiff},
 };
 use tari_state_tree::StateHashTreeDiff;
 

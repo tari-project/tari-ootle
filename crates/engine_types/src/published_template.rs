@@ -9,14 +9,14 @@ use std::{
 
 use tari_bor::{BorTag, Deserialize, Serialize, Tagged};
 use tari_template_lib::types::{
-    address_prefixes,
-    crypto::RistrettoPublicKeyBytes,
     BinaryTag,
     Hash,
     KeyParseError,
     MaxBytes,
     ObjectKey,
     TemplateAddress,
+    address_prefixes,
+    crypto::RistrettoPublicKeyBytes,
 };
 
 use crate::{

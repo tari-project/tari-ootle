@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use libp2p::{core::ConnectedPoint, swarm::ConnectionId, PeerId};
+use libp2p::{PeerId, core::ConnectedPoint, swarm::ConnectionId};
 
 #[derive(Debug, Clone)]
 pub struct Connection {

@@ -3,7 +3,7 @@
 
 use libp2p::PeerId;
 
-use crate::{error::Error, stream::StreamId, MessageId};
+use crate::{MessageId, error::Error, stream::StreamId};
 
 #[derive(Debug)]
 pub enum Event<TMsg> {

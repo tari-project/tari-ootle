@@ -5,15 +5,15 @@ use std::collections::HashMap;
 
 use indexmap::IndexMap;
 use log::*;
-use tari_ootle_common_types::{shard::Shard, ShardGroup};
+use tari_ootle_common_types::{ShardGroup, shard::Shard};
 use tari_ootle_storage::{
-    consensus_models::PendingShardStateTreeDiff,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
+    consensus_models::PendingShardStateTreeDiff,
 };
 use tari_state_tree::{
-    compute_merkle_root_for_hashes,
     JmtStorageError,
+    SPARSE_MERKLE_PLACEHOLDER_HASH,
     SpreadPrefixStateTree,
     StagedTreeStore,
     StateHashTreeDiff,
@@ -22,7 +22,7 @@ use tari_state_tree::{
     SubstateTreeChange,
     TreeHash,
     Version,
-    SPARSE_MERKLE_PLACEHOLDER_HASH,
+    compute_merkle_root_for_hashes,
 };
 
 use crate::hotstuff::substate_store::shard_state_store::{ShardScopedTreeStoreReader, ShardScopedTreeStoreWriter};

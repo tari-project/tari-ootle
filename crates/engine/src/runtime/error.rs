@@ -51,7 +51,7 @@ use tari_template_lib::{
 
 use super::workspace::WorkspaceError;
 use crate::{
-    runtime::{locking::LockError, ActionIdent, RuntimeModuleError},
+    runtime::{ActionIdent, RuntimeModuleError, locking::LockError},
     state_store::StateStoreError,
 };
 

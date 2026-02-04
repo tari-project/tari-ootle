@@ -9,10 +9,10 @@ use std::{
 
 use async_trait::async_trait;
 use libp2p::{
-    futures,
-    futures::{stream::BoxStream, Stream, StreamExt},
     Multiaddr,
     PeerId,
+    futures,
+    futures::{Stream, StreamExt, stream::BoxStream},
 };
 
 use crate::peer_record::SignedPeerRecord;
@@ -24,10 +24,10 @@ pub trait PeerStore: Clone + Send + Sync + 'static {
     async fn get(&self, peer_id: &PeerId) -> Result<Option<SignedPeerRecord>, Self::Error>;
     async fn put(&self, peer: SignedPeerRecord) -> Result<(), Self::Error>;
     async fn put_if_newer(&self, peer: SignedPeerRecord) -> Result<(), Self::Error> {
-        if let Some(existing) = self.get(&peer.to_peer_id()).await? {
-            if existing.updated_at >= peer.updated_at {
-                return Ok(());
-            }
+        if let Some(existing) = self.get(&peer.to_peer_id()).await? &&
+            existing.updated_at >= peer.updated_at
+        {
+            return Ok(());
         }
         self.put(peer).await
     }

@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use super::StealthUnspentOutput;
 use crate::{
-    crypto::{BalanceProofSignature, PedersenCommitmentBytes, RangeProofBytes},
     Amount,
     UtxoAddress,
+    crypto::{BalanceProofSignature, PedersenCommitmentBytes, RangeProofBytes},
 };
 
 /// A statement for stealth outputs. A statement must contain confidential outputs

@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 
 use anyhow::anyhow;
-use libp2p::{identity::Keypair, Multiaddr, PeerId};
+use libp2p::{Multiaddr, PeerId, identity::Keypair};
 use tari_shutdown::ShutdownSignal;
 use tari_swarm::{is_supported_multiaddr, messaging, messaging::prost::ProstCodec};
 use tokio::{
@@ -12,7 +12,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::{message::MessageSpec, worker::NetworkingWorker, MessagingMode, NetworkingHandle};
+use crate::{MessagingMode, NetworkingHandle, message::MessageSpec, worker::NetworkingWorker};
 
 pub struct Builder<'a, TMsg: MessageSpec> {
     identity: Keypair,

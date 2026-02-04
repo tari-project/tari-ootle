@@ -4,7 +4,7 @@
 use cucumber::{gherkin::Step, given, then, when};
 use tari_base_node_client::BaseNodeClient;
 
-use crate::{mine_blocks, register_miner_process, TariWorld};
+use crate::{TariWorld, mine_blocks, register_miner_process};
 
 #[given(expr = "a miner {word} connected to base node {word} and wallet {word}")]
 async fn create_miner(world: &mut TariWorld, step: &Step, miner_name: String, bn_name: String, wallet_name: String) {

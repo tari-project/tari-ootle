@@ -4,8 +4,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes},
     Amount,
+    crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes},
 };
 
 /// Proof of knowledge of the opening to a commitment and that the commitment commits to a specific value.

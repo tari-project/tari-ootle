@@ -5,15 +5,15 @@ use digest::crypto_common::rand_core::{OsRng, RngCore};
 use passwords::PasswordGenerator;
 use tari_crypto::tari_utilities::SafePassword;
 use tari_ootle_common_types::{
-    optional::{IsNotFoundError, Optional},
     Network,
     NetworkParseError,
+    optional::{IsNotFoundError, Optional},
 };
 
 use crate::{
+    WalletSdkConfig,
     apis::config::{ConfigApi, ConfigApiError, ConfigKey},
     storage::WalletStore,
-    WalletSdkConfig,
 };
 
 const KEYRING_ENTRIES_SERVICE: &str = "tari-ootle-wallet";

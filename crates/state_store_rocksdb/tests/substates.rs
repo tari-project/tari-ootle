@@ -8,10 +8,10 @@ use helpers::{assert_eq_debug, build_substate_record, create_rocksdb, create_sub
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{Epoch, Network, VersionedSubstateId, VersionedSubstateIdRef};
 use tari_ootle_storage::{
-    consensus_models::{Block, SubstateUpdateBatch},
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
+    consensus_models::{Block, SubstateUpdateBatch},
 };
 use tari_template_lib::types::{ComponentAddress, ObjectKey};
 

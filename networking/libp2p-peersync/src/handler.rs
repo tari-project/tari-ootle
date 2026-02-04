@@ -4,15 +4,24 @@
 use std::{
     collections::VecDeque,
     convert::Infallible,
-    future::{ready, Ready},
+    future::{Ready, ready},
     sync::Arc,
     task::{Context, Poll},
 };
 
 use async_semaphore::{Semaphore, SemaphoreGuardArc};
 use libp2p::{
+    InboundUpgrade,
+    OutboundUpgrade,
+    PeerId,
+    Stream,
+    StreamProtocol,
     core::UpgradeInfo,
     swarm::{
+        ConnectionHandler,
+        ConnectionHandlerEvent,
+        StreamUpgradeError,
+        SubstreamProtocol,
         handler::{
             ConnectionEvent,
             DialUpgradeError,
@@ -20,19 +29,14 @@ use libp2p::{
             FullyNegotiatedOutbound,
             ListenUpgradeError,
         },
-        ConnectionHandler,
-        ConnectionHandlerEvent,
-        StreamUpgradeError,
-        SubstreamProtocol,
     },
-    InboundUpgrade,
-    OutboundUpgrade,
-    PeerId,
-    Stream,
-    StreamProtocol,
 };
 
 use crate::{
+    Config,
+    EMPTY_QUEUE_SHRINK_THRESHOLD,
+    MAX_MESSAGE_SIZE,
+    SignedPeerRecord,
     behaviour::WantList,
     error::Error,
     event::Event,
@@ -40,10 +44,6 @@ use crate::{
     outbound_task::outbound_request_want_list_task,
     proto,
     store::PeerStore,
-    Config,
-    SignedPeerRecord,
-    EMPTY_QUEUE_SHRINK_THRESHOLD,
-    MAX_MESSAGE_SIZE,
 };
 
 pub(crate) type Framed<In, Out = In> = asynchronous_codec::Framed<Stream, quick_protobuf_codec::Codec<In, Out>>;

@@ -10,7 +10,7 @@ use std::{
 use log::*;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::Vote;
-use tari_ootle_common_types::{committee::Committee, Epoch, NodeAddressable, NodeHeight, VotePower};
+use tari_ootle_common_types::{Epoch, NodeAddressable, NodeHeight, VotePower, committee::Committee};
 use tari_sidechain::QuorumDecision;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::RwLock;

@@ -5,22 +5,22 @@ use std::path::PathBuf;
 
 use anyhow::anyhow;
 use minotari_app_grpc::tari_rpc::{
-    template_type,
     BuildInfo,
     CreateTemplateRegistrationRequest,
     TemplateType,
     WasmInfo,
+    template_type,
 };
 use tari_engine::wasm::WasmModule;
 use tari_engine_types::hashing::hash_template_code;
 use tari_template_lib_types::TemplateAddress;
 use tari_template_test_tooling::compile::compile_template;
 use tari_wallet_daemon_client::{
-    types::{PublishTemplateRequest, TransactionWaitResultRequest},
     ComponentAddressOrName,
+    types::{PublishTemplateRequest, TransactionWaitResultRequest},
 };
 
-use crate::{wallet_daemon_client::get_auth_wallet_daemon_client, TariWorld};
+use crate::{TariWorld, wallet_daemon_client::get_auth_wallet_daemon_client};
 
 #[derive(Debug)]
 pub struct RegisteredTemplate {

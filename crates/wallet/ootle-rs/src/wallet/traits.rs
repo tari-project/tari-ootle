@@ -6,17 +6,17 @@ use std::future::Future;
 use tari_ootle_transaction::{Transaction, UnsignedTransaction};
 
 use crate::{
+    Address,
     stealth::{InputDecryptor, StealthOutputStatementFactory},
     transaction::{TransactionSigner, TransactionStealthKeySigner},
     wallet::WalletResult,
-    Address,
 };
 
 pub trait NetworkWallet {
     fn default_address(&self) -> &Address;
 
     fn sign_transaction(&self, unsigned: UnsignedTransaction)
-        -> impl Future<Output = WalletResult<Transaction>> + Send;
+    -> impl Future<Output = WalletResult<Transaction>> + Send;
 }
 
 pub trait WalletKeyProvider:

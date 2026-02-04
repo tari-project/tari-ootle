@@ -25,8 +25,8 @@ use std::{net::SocketAddr, path::PathBuf};
 use clap::Parser;
 use minotari_app_utilities::common_cli_args::CommonCliArgs;
 use tari_common::{
-    configuration::{ConfigOverrideProvider, Network as L1Network},
     SubConfigPath,
+    configuration::{ConfigOverrideProvider, Network as L1Network},
 };
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_app_utilities::{

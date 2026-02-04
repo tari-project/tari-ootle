@@ -7,24 +7,24 @@ use futures::Stream;
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::Decision;
 use tari_engine_types::{
+    Utxo,
     commit_result::ExecuteResult,
     substate::{Substate, SubstateId, SubstateValue},
-    Utxo,
 };
 use tari_ootle_common_types::{
+    Epoch,
+    StateVersion,
     optional::IsNotFoundError,
     response_status::TransactionStatusResponseError,
     shard::Shard,
-    Epoch,
-    StateVersion,
 };
 use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
 use tari_template_abi::TemplateDef;
 use tari_template_lib::types::{
-    crypto::{RistrettoPublicKeyBytes, UtxoTag},
     ResourceAddress,
     TemplateAddress,
     UtxoId,
+    crypto::{RistrettoPublicKeyBytes, UtxoTag},
 };
 use time::PrimitiveDateTime;
 

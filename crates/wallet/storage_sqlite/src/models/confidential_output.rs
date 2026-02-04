@@ -3,8 +3,8 @@
 
 use tari_ootle_wallet_sdk::{models::ConfidentialOutputModel, storage::WalletStorageError};
 use tari_template_lib_types::{
-    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     EncryptedData,
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
 };
 use time::PrimitiveDateTime;
 

@@ -28,10 +28,10 @@ use libp2p::StreamProtocol;
 use tower::Service;
 
 use super::{
+    RpcStatus,
     body::Body,
     message::{Request, Response},
     server::RpcServerError,
-    RpcStatus,
 };
 
 #[derive(Clone)]

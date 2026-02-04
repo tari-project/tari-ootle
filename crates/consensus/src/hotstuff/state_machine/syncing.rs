@@ -5,9 +5,9 @@ use std::marker::PhantomData;
 
 use crate::{
     hotstuff::{
-        state_machine::{check_sync::CheckSync, event::ConsensusStateEvent},
         ConsensusWorkerContext,
         HotStuffError,
+        state_machine::{check_sync::CheckSync, event::ConsensusStateEvent},
     },
     traits::{ConsensusSpec, SyncManager},
 };

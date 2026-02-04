@@ -22,17 +22,18 @@
 
 use std::{fs, io, str::FromStr, sync::Arc};
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use libp2p::identity;
 use log::warn;
 use minotari_app_utilities::identity_management;
 use ootle_byte_type::ToByteType;
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
-use tari_common::configuration::bootstrap::{grpc_default_port, ApplicationType};
+use tari_common::configuration::bootstrap::{ApplicationType, grpc_default_port};
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_epoch_manager::service::{EpochManagerConfig, EpochManagerHandle};
 use tari_epoch_oracles::{
+    EpochOracle,
     base_layer::{
         BaseLayerBlockHeaderStore,
         BaseLayerEpochOracleConfig,
@@ -40,9 +41,8 @@ use tari_epoch_oracles::{
         BaseLayerOracle,
     },
     configured::{ConfiguredEpochOracle, RealTimeEpochTicker},
-    hybrid::{watch_ticker, HybridEpochOracle},
+    hybrid::{HybridEpochOracle, watch_ticker},
     store::EpochOracleStore,
-    EpochOracle,
 };
 use tari_indexer_client::event::IndexerEvent;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
@@ -56,29 +56,29 @@ use tari_ootle_app_utilities::{
     seed_peer::SeedPeer,
     shared_consts::TXTR_FAUCET_INITIAL_SUPPLY,
 };
-use tari_ootle_common_types::{optional::Optional, Network, PeerAddress};
+use tari_ootle_common_types::{Network, PeerAddress, optional::Optional};
 use tari_ootle_p2p::TariMessagingSpec;
 use tari_ootle_storage::global::GlobalDb;
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_shutdown::ShutdownSignal;
-use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, Amount};
+use tari_template_lib_types::{Amount, crypto::RistrettoPublicKeyBytes};
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
 use crate::{
+    ApplicationConfig,
+    IndexerEpochManagerSpec,
+    Noop,
     dry_run::processor::DryRunTransactionProcessor,
     network_client::TariNetworkClient,
     network_state_sync,
     network_state_sync::NetworkWideStateSyncConfig,
     notify::Notify,
-    storage_sqlite::{models::Key, SqliteIndexerStore},
+    storage_sqlite::{SqliteIndexerStore, models::Key},
     store::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreWriteTransaction},
     substate_file_cache::SubstateFileCache,
     substate_manager::SubstateManager,
     template_manager::TemplateManager,
     transaction_manager::TransactionManager,
-    ApplicationConfig,
-    IndexerEpochManagerSpec,
-    Noop,
 };
 
 const LOG_TARGET: &str = "tari_indexer::bootstrap";

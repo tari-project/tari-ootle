@@ -101,10 +101,6 @@ pub mod __macro_reexports {
     pub use tower::Service;
 
     pub use crate::{
-        framing::CanonicalFraming,
-        message::{Request, Response},
-        // pool::RpcPoolClient,
-        server::{NamedProtocolService, RpcServerError},
         Body,
         ClientStreaming,
         IntoBody,
@@ -112,6 +108,10 @@ pub mod __macro_reexports {
         RpcClientBuilder,
         RpcError,
         RpcStatus,
+        framing::CanonicalFraming,
+        message::{Request, Response},
+        // pool::RpcPoolClient,
+        server::{NamedProtocolService, RpcServerError},
     };
 }
 

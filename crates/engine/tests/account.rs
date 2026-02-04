@@ -4,13 +4,13 @@
 use ootle_byte_type::ToByteType;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine::runtime::{ActionIdent, RuntimeError};
-use tari_ootle_transaction::{args, call_args, Instruction, Transaction};
+use tari_ootle_transaction::{Instruction, Transaction, args, call_args};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::types::{access_rules::ComponentAccessRules, constants::XTR, rule, Amount, ComponentAddress};
+use tari_template_lib::types::{Amount, ComponentAddress, access_rules::ComponentAccessRules, constants::XTR, rule};
 use tari_template_test_tooling::{
+    TemplateTest,
     support::assert_error::{assert_access_denied_for_action, assert_reject_reason},
     xtr_faucet_component,
-    TemplateTest,
 };
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
@@ -195,11 +195,13 @@ fn create_account_is_idempotent() {
         vec![source_account_proof],
     );
 
-    assert!(result
-        .finalize
-        .events
-        .iter()
-        .all(|e| e.topic() != "std.component.created"));
+    assert!(
+        result
+            .finalize
+            .events
+            .iter()
+            .all(|e| e.topic() != "std.component.created")
+    );
 
     let store = test.read_only_state_store();
     let account = store.get_account(source_account).unwrap();
@@ -229,11 +231,13 @@ fn create_account_is_idempotent_with_deposit() {
         vec![source_account_proof],
     );
 
-    assert!(result
-        .finalize
-        .events
-        .iter()
-        .all(|e| e.topic() != "std.component.created"));
+    assert!(
+        result
+            .finalize
+            .events
+            .iter()
+            .all(|e| e.topic() != "std.component.created")
+    );
 
     let store = test.read_only_state_store();
     let account = store.get_account(source_account).unwrap();

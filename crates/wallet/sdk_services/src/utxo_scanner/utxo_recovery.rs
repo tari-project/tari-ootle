@@ -6,11 +6,13 @@ use std::{array, time::Duration};
 use log::*;
 use tari_engine_types::UtxoOutput;
 use tari_ootle_common_types::{
+    Network,
     optional::{IsNotFoundError, Optional},
     response_status::TransactionStatusResponseError,
-    Network,
 };
 use tari_ootle_wallet_sdk::{
+    WalletSdk,
+    WalletSdkSpec,
     models::{
         AccountAndViewKeys,
         UtxoRecoveredEvent,
@@ -20,8 +22,6 @@ use tari_ootle_wallet_sdk::{
     },
     network::WalletNetworkInterface,
     storage::{ReadableWalletStore, WalletStorageError, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
-    WalletSdk,
-    WalletSdkSpec,
 };
 use tari_template_lib_types::{ComponentAddress, ResourceAddress, UtxoAddress, UtxoId};
 use tokio::sync::watch;

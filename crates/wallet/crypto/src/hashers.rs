@@ -5,8 +5,8 @@ use blake2::Blake2b;
 use borsh::BorshSerialize;
 use chacha20poly1305::aead::generic_array::GenericArray;
 use digest::{
-    consts::{U32, U64},
     Digest,
+    consts::{U32, U64},
 };
 use tari_crypto::{
     hash_domain,

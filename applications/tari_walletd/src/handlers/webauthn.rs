@@ -17,7 +17,7 @@ use uuid::Uuid;
 use webauthn_rs::Webauthn;
 
 use crate::{
-    handlers::{helpers::invalid_request, HandlerContext},
+    handlers::{HandlerContext, helpers::invalid_request},
     services::WebauthnService,
 };
 

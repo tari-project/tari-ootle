@@ -25,7 +25,7 @@ use std::{sync::Arc, time::Instant};
 use log::*;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult},
-    component::{derive_component_address_from_public_key, ComponentHeader},
+    component::{ComponentHeader, derive_component_address_from_public_key},
     entity_id_provider::EntityIdProvider,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     instruction_result::InstructionResult,
@@ -36,14 +36,14 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{optional::Optional, services::template_provider::TemplateProvider};
 use tari_ootle_transaction::{
-    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
-    call_arg,
-    call_args,
     AllocatableAddressType,
     ComponentReference,
     Instruction,
     MigrateFunction,
     ResourceAddressRef,
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
+    call_arg,
+    call_args,
 };
 use tari_template_abi::{FunctionDef, Type};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
@@ -53,21 +53,20 @@ use tari_template_lib::{
     models::Bucket,
     prelude::StealthTransferStatement,
     types::{
-        access_rules::ComponentAccessRules,
-        constants::STEALTH_TARI_RESOURCE_ADDRESS,
-        crypto::RistrettoPublicKeyBytes,
         Amount,
         ComponentAddress,
         NonFungibleAddress,
         OwnerRule,
         TemplateAddress,
+        access_rules::ComponentAccessRules,
+        constants::STEALTH_TARI_RESOURCE_ADDRESS,
+        crypto::RistrettoPublicKeyBytes,
     },
 };
 
 use crate::{
     executables::{Executable, WeightedExecutable},
     runtime::{
-        scope::{CallScope, PushCallFrame},
         AuthParams,
         AuthorizationScope,
         NativeAction,
@@ -78,11 +77,12 @@ use crate::{
         RuntimeInterfaceImpl,
         RuntimeModule,
         StateTracker,
+        scope::{CallScope, PushCallFrame},
     },
     state_store::StateReader,
     template::LoadedTemplate,
     traits::{ClaimProofVerifier, Invokable},
-    transaction::{error::TransactionErrorKind, TransactionError},
+    transaction::{TransactionError, error::TransactionErrorKind},
     wasm::{WasmModule, WasmProcess},
 };
 

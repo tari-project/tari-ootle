@@ -6,20 +6,23 @@ use std::{collections::HashMap, convert::Infallible, future::Future, str::FromSt
 use ootle_byte_type::ToByteType;
 use tari_crypto::tari_utilities::SafePassword;
 use tari_engine_types::{
+    Utxo,
     crypto::commit_amount,
     substate::{Substate, SubstateId},
-    Utxo,
 };
 use tari_ootle_common_types::{
-    optional::{IsNotFoundError, Optional},
-    response_status::{ResponseErrorStatus, TransactionStatusResponseError},
-    shard::Shard,
     Epoch,
     Network,
     StateVersion,
+    optional::{IsNotFoundError, Optional},
+    response_status::{ResponseErrorStatus, TransactionStatusResponseError},
+    shard::Shard,
 };
 use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
 use tari_ootle_wallet_sdk::{
+    WalletSdk,
+    WalletSdkConfig,
+    WalletSdkSpec,
     cipher_seed::CipherSeedRestore,
     local_key_store::LocalKeyStore,
     models::{
@@ -34,15 +37,10 @@ use tari_ootle_wallet_sdk::{
     },
     network::{SubstateQueryResult, TransactionQueryResult, UtxoUpdateStream, WalletNetworkInterface},
     storage::TagAndPublicNoncePair,
-    WalletSdk,
-    WalletSdkConfig,
-    WalletSdkSpec,
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_abi::TemplateDef;
 use tari_template_lib::types::{
-    constants::STEALTH_TARI_RESOURCE_ADDRESS,
-    crypto::PedersenCommitmentBytes,
     Amount,
     ComponentAddress,
     EncryptedData,
@@ -51,6 +49,8 @@ use tari_template_lib::types::{
     TemplateAddress,
     UtxoId,
     VaultId,
+    constants::STEALTH_TARI_RESOURCE_ADDRESS,
+    crypto::PedersenCommitmentBytes,
 };
 
 pub struct TestSdkSpec;

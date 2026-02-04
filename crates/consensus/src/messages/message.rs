@@ -4,7 +4,7 @@
 use std::fmt::Display;
 
 use tari_consensus_types::Vote;
-use tari_ootle_common_types::{displayable::Displayable, Epoch};
+use tari_ootle_common_types::{Epoch, displayable::Displayable};
 
 use super::{
     ForeignProposalMessage,

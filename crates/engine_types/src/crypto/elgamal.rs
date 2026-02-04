@@ -9,7 +9,7 @@ use tari_common_types::types::PrivateKey;
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
     keys::{PublicKey, SecretKey},
-    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey, pedersen::PedersenCommitment},
     tari_utilities,
     tari_utilities::ByteArray,
 };

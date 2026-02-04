@@ -2,8 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use axum::{
-    response::{sse, Sse},
     Extension,
+    response::{Sse, sse},
 };
 use futures::Stream;
 use log::info;

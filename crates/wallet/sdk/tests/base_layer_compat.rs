@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_wallet_crypto::memo::Memo;
-use tari_transaction_components::transaction_components::{memo_field::TxType, MemoField};
+use tari_transaction_components::transaction_components::{MemoField, memo_field::TxType};
 
 #[test]
 fn memo_is_compatible_with_bl_memo_field() {

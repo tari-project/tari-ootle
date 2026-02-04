@@ -3,7 +3,7 @@
 
 use std::ops::Deref;
 
-use axum::{response::Response, Extension, Json};
+use axum::{Extension, Json, response::Response};
 use libp2p::swarm::dial_opts::PeerCondition;
 use ootle_byte_type::FromByteType;
 use tari_indexer_client::{
@@ -19,7 +19,7 @@ use tari_indexer_client::{
         SyncProgress,
     },
 };
-use tari_networking::{is_supported_multiaddr, DialOpts, NetworkingService};
+use tari_networking::{DialOpts, NetworkingService, is_supported_multiaddr};
 use tari_ootle_common_types::{optional::Optional, public_key_to_peer_id};
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};

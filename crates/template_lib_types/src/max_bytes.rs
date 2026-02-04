@@ -33,11 +33,7 @@ impl<const N: usize> MaxBytes<N> {
     /// Returns `None` if the length exceeds `N`.
     pub fn new_checked(bytes: impl Into<Box<[u8]>>) -> Option<Self> {
         let bytes = bytes.into();
-        if bytes.len() <= N {
-            Some(Self(bytes))
-        } else {
-            None
-        }
+        if bytes.len() <= N { Some(Self(bytes)) } else { None }
     }
 
     /// Constructs a new `MaxBytes<N>` without checking the length of the input.

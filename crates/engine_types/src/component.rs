@@ -26,11 +26,11 @@ use serde::{Deserialize, Serialize};
 use tari_template_lib::{
     auth::Ownership,
     prelude::{ComponentAccessRules, ComponentAddress},
-    types::{crypto::RistrettoPublicKeyBytes, EntityId, ObjectKey, OwnerRule, TemplateAddress},
+    types::{EntityId, ObjectKey, OwnerRule, TemplateAddress, crypto::RistrettoPublicKeyBytes},
 };
 
 use crate::{
-    hashing::{hasher32, EngineHashDomainLabel},
+    hashing::{EngineHashDomainLabel, hasher32},
     indexed_value::{IndexedValueError, IndexedWellKnownTypes},
     substate::SubstateId,
 };

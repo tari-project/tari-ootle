@@ -28,7 +28,7 @@ use tari_template_abi::rust::{
 };
 
 use super::BinaryTag;
-use crate::{address_prefixes, newtype_struct_serde_impl, EntityId, KeyParseError, ObjectKey};
+use crate::{EntityId, KeyParseError, ObjectKey, address_prefixes, newtype_struct_serde_impl};
 
 const TAG: u64 = BinaryTag::VaultId as u64;
 

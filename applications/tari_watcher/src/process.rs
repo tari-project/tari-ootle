@@ -20,7 +20,7 @@ use url::Url;
 
 use crate::{
     constants::DEFAULT_VALIDATOR_PID_PATH,
-    monitoring::{monitor_child, ProcessStatus},
+    monitoring::{ProcessStatus, monitor_child},
 };
 
 #[allow(unused)]
@@ -31,19 +31,19 @@ pub async fn clean_stale_pid_file(pid_file_path: PathBuf) -> anyhow::Result<()> 
         return Ok(());
     }
 
-    if let Ok(pid_str) = fs::read_to_string(&pid_file_path).await {
-        if let Ok(pid) = pid_str.trim().parse::<u32>() {
-            // check if still running
-            let status = TokioCommand::new("kill").arg("-0").arg(pid.to_string()).status().await;
-            if status.map(|s| !s.success()).unwrap_or(true) {
-                log::info!("Removing stale PID file");
-                fs::remove_file(&pid_file_path).await?;
-                return Ok(());
-            }
-
-            log::info!("Process with PID {} is still running", pid);
-            bail!("PID file is locked by an active process");
+    if let Ok(pid_str) = fs::read_to_string(&pid_file_path).await &&
+        let Ok(pid) = pid_str.trim().parse::<u32>()
+    {
+        // check if still running
+        let status = TokioCommand::new("kill").arg("-0").arg(pid.to_string()).status().await;
+        if status.map(|s| !s.success()).unwrap_or(true) {
+            log::info!("Removing stale PID file");
+            fs::remove_file(&pid_file_path).await?;
+            return Ok(());
         }
+
+        log::info!("Process with PID {} is still running", pid);
+        bail!("PID file is locked by an active process");
     }
 
     Ok(())

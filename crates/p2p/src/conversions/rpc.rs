@@ -3,7 +3,7 @@
 
 use std::convert::{TryFrom, TryInto};
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use tari_common_types::types::FixedHash;
 use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_jellyfish::TreeHash;

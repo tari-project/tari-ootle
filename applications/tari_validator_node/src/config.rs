@@ -27,7 +27,7 @@ use std::{
 
 use config::Config;
 use serde::{Deserialize, Serialize};
-use tari_common::{configuration::CommonConfig, ConfigurationError, DefaultConfigLoader, SubConfigPath};
+use tari_common::{ConfigurationError, DefaultConfigLoader, SubConfigPath, configuration::CommonConfig};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleConfig,

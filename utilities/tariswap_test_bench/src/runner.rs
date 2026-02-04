@@ -9,11 +9,11 @@ use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_common_types::Network;
 use tari_ootle_transaction::{Transaction, TransactionBuilder, TransactionId};
 use tari_ootle_wallet_sdk::{
+    WalletSdk as Sdk,
+    WalletSdkConfig,
     cipher_seed::CipherSeedRestore,
     local_key_store::LocalKeyStore,
     models::EpochBirthday,
-    WalletSdk as Sdk,
-    WalletSdkConfig,
 };
 use tari_ootle_wallet_sdk_services::indexer_rest_api::IndexerRestApiNetworkInterface;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;

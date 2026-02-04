@@ -64,10 +64,10 @@ use tari_engine_types::{
     published_template::TemplateBlob,
 };
 use tari_ootle_transaction::{
-    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
     AllocatableAddressType,
     ComponentReference,
     ResourceAddressRef,
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
 };
 use tari_template_lib::{
     args::{
@@ -95,13 +95,13 @@ use tari_template_lib::{
     models::{BucketId, VaultRef},
     prelude::StealthTransferStatement,
     types::{
-        engine_args::SignatureAction,
         ComponentAddress,
         EntityId,
         Metadata,
         NonFungibleAddress,
         TemplateAddress,
         ValidatorFeePoolAddress,
+        engine_args::SignatureAction,
     },
 };
 pub use tracker::StateTracker;
@@ -115,7 +115,7 @@ pub trait RuntimeInterface {
     fn emit_log(&mut self, level: LogLevel, message: String) -> Result<(), RuntimeError>;
 
     fn load_component(&mut self, call: ComponentReference)
-        -> Result<(ComponentAddress, ComponentHeader), RuntimeError>;
+    -> Result<(ComponentAddress, ComponentHeader), RuntimeError>;
 
     fn lock_component(
         &mut self,

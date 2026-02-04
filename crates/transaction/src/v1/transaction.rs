@@ -15,16 +15,16 @@ use tari_engine_types::{
 use tari_ootle_common_types::{Epoch, SubstateRequirement, SubstateRequirementRef};
 use tari_template_lib::{
     prelude::StealthTransferStatement,
-    types::{constants::XTR, ComponentAddress},
+    types::{ComponentAddress, constants::XTR},
 };
 
 use crate::{
-    args::InstructionArg,
-    v1::signature::TransactionSignature,
-    weight::TransactionWeight,
     Instruction,
     TransactionSealSignature,
     UnsealedTransactionV1,
+    args::InstructionArg,
+    v1::signature::TransactionSignature,
+    weight::TransactionWeight,
 };
 
 const LOG_TARGET: &str = "tari::ootle::transaction::transaction";

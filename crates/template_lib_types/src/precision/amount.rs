@@ -6,7 +6,7 @@ use newtype_ops::newtype_ops;
 use serde::ser::Error;
 use tari_template_abi::rust::{cmp, fmt, fmt::Debug, iter::Sum, ops, str::FromStr, write};
 
-use crate::{impl_from, partial_eq_impl, partial_ord_impl, Amount};
+use crate::{Amount, impl_from, partial_eq_impl, partial_ord_impl};
 
 /// A 192-bit signed integer type.
 type I192 = bnum::BInt<3>; // 3 x 64 bits = 192 bits
@@ -316,20 +316,12 @@ impl PrecisionAmount {
 
     /// If the amount is negative (< 0), returns `None`, otherwise returns `Some(self)`.
     pub fn non_negative_checked(self) -> Option<Self> {
-        if self.is_negative() {
-            None
-        } else {
-            Some(self)
-        }
+        if self.is_negative() { None } else { Some(self) }
     }
 
     /// If the amount is positive (> 0), returns `None`, otherwise returns `Some(self)`.
     pub fn negative_checked(self) -> Option<Self> {
-        if self.is_positive() {
-            None
-        } else {
-            Some(self)
-        }
+        if self.is_positive() { None } else { Some(self) }
     }
 
     /// Returns the amount raised to the power of `exp`.

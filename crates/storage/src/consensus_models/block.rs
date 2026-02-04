@@ -26,10 +26,6 @@ use tari_consensus_types::{
     TimeoutCertificate,
 };
 use tari_ootle_common_types::{
-    committee::CommitteeInfo,
-    displayable::Displayable,
-    optional::Optional,
-    shard::Shard,
     Epoch,
     ExtraData,
     ExtraFieldKey,
@@ -39,12 +35,16 @@ use tari_ootle_common_types::{
     ShardGroup,
     VersionedSubstateId,
     VersionedSubstateIdRef,
+    committee::CommitteeInfo,
+    displayable::Displayable,
+    optional::Optional,
+    shard::Shard,
 };
 use tari_ootle_transaction::TransactionId;
-use tari_state_tree::{compute_proof_for_hashes, SparseMerkleProofExt, StateTreeError, TreeHash, Version};
+use tari_state_tree::{SparseMerkleProofExt, StateTreeError, TreeHash, Version, compute_proof_for_hashes};
 use tari_template_lib_types::{
-    crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes},
     TransactionReceiptAddress,
+    crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes},
 };
 use time::PrimitiveDateTime;
 
@@ -62,17 +62,17 @@ use super::{
     ValidatorStatsUpdate,
 };
 use crate::{
+    StateStoreReadTransaction,
+    StateStoreWriteTransaction,
+    StorageError,
     consensus_models::{
-        block_header::BlockHeader,
-        substate_update_batch::SubstateUpdateBatch,
         Command,
         SubstateCreate,
         SubstateUpdateProof,
         TransactionRecord,
+        block_header::BlockHeader,
+        substate_update_batch::SubstateUpdateBatch,
     },
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
-    StorageError,
 };
 
 const LOG_TARGET: &str = "tari::ootle::storage::consensus_models::block";

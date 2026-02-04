@@ -5,10 +5,10 @@ use std::slice;
 
 use tari_engine::wasm::WasmExecutionError;
 use tari_engine_types::limits;
-use tari_ootle_transaction::{args, Transaction};
+use tari_ootle_transaction::{Transaction, args};
 use tari_template_abi::CallInfo;
 use tari_template_lib::types::bytes::Bytes;
-use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
+use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
 
 const TEMPLATE_PATHS: &[&str] = &["tests/templates/limits"];
 const TEMPLATE_NAME: &str = "PushItToTheLimit";

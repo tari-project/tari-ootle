@@ -11,7 +11,7 @@ use bytes::{Bytes, BytesMut};
 use futures::Stream;
 use log::*;
 use tari_indexer_client::{protobuf, types::GetUtxoUpdatesRequest};
-use tari_ootle_common_types::{shard::Shard, StateVersion};
+use tari_ootle_common_types::{StateVersion, shard::Shard};
 use tari_ootle_wallet_sdk::models::{UtxoStateUpdateSet, WalletUtxoUpdate};
 
 use crate::{

@@ -11,9 +11,9 @@ mod template_monitor;
 
 // -------------------------------- Spawn -------------------------------- //
 use anyhow::anyhow;
-use futures::{future, future::BoxFuture, FutureExt};
+use futures::{FutureExt, future, future::BoxFuture};
 pub use session_store::*;
-use tari_ootle_wallet_sdk::{models::WalletEvent, WalletSdk};
+use tari_ootle_wallet_sdk::{WalletSdk, models::WalletEvent};
 use tari_ootle_wallet_sdk_services::{
     account_monitor::{AccountMonitor, AccountMonitorHandle},
     notify::Notify,
@@ -23,7 +23,7 @@ use tari_ootle_wallet_sdk_services::{
 use tari_shutdown::ShutdownSignal;
 use tokio::task::JoinHandle;
 
-use crate::{services::template_monitor::TemplateMonitor, OotleWalletDaemonSpec};
+use crate::{OotleWalletDaemonSpec, services::template_monitor::TemplateMonitor};
 
 pub fn spawn_services(
     shutdown_signal: ShutdownSignal,

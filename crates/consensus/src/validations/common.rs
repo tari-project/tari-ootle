@@ -6,7 +6,6 @@ use log::{debug, warn};
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{QuorumCertificateRef, TimeoutVote};
 use tari_ootle_common_types::{
-    committee::Committee,
     DerivableFromPublicKey,
     Epoch,
     ExtraFieldKey,
@@ -15,6 +14,7 @@ use tari_ootle_common_types::{
     NumPreshards,
     ShardGroup,
     VotePower,
+    committee::Committee,
 };
 use tari_ootle_storage::consensus_models::{Block, BlockHeader};
 use tari_sidechain::ProposalCertificateSignatureFields;

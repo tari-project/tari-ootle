@@ -6,13 +6,13 @@ use tari_consensus_types::{BlockId, LeafBlock, PcId, QcId};
 use tari_epoch_manager::EpochManagerError;
 use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, VersionedSubstateIdError, VotePower};
 use tari_ootle_storage::{
+    StorageError,
     consensus_models::{
         BlockError,
         EpochCheckpointValidationError,
         ForeignProposalCommitProofError,
         TransactionPoolError,
     },
-    StorageError,
 };
 use tari_ootle_transaction::TransactionId;
 use tari_state_tree::StateTreeError;

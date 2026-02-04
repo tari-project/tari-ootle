@@ -2,9 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_storage::{
-    consensus_models::{SubstatePledges, TransactionRecord},
     StateStoreReadTransaction,
     StorageError,
+    consensus_models::{SubstatePledges, TransactionRecord},
 };
 use tari_ootle_transaction::TransactionId;
 

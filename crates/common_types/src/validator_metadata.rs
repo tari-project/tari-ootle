@@ -6,7 +6,7 @@ use tari_common_types::types::FixedHash;
 use tari_hashing::TransactionHashDomain;
 use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
-use crate::{base_layer_hashing::TariBaseLayerHasher32, Network, SubstateAddress};
+use crate::{Network, SubstateAddress, base_layer_hashing::TariBaseLayerHasher32};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ValidatorMetadata {

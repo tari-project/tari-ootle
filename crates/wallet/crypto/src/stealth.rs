@@ -4,6 +4,7 @@
 use ootle_byte_type::ToByteType;
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_template_lib_types::{
+    Amount,
     stealth::{
         StealthInput,
         StealthInputsStatement,
@@ -12,17 +13,16 @@ use tari_template_lib_types::{
         StealthUnspentOutput,
         UnspentOutput,
     },
-    Amount,
 };
 
 use crate::{
+    StealthInputWitness,
+    StealthOutputWitness,
+    WalletCryptoError,
     balance_proof::generate_stealth_balance_proof_signature,
     bullet_proof::generate_extended_bullet_proof,
     error::StealthProofError,
     viewable_balance_proof::generate_elgamal_viewable_balance_proof,
-    StealthInputWitness,
-    StealthOutputWitness,
-    WalletCryptoError,
 };
 
 pub fn create_transfer_statement<'a, Inputs, Outputs>(
@@ -144,10 +144,10 @@ mod tests {
     use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
     use tari_engine_types::stealth::validate_stealth_outputs_statement;
     use tari_template_lib_types::{
-        crypto::{RistrettoPublicKeyBytes, UtxoTag},
-        stealth::SpendCondition,
         Amount,
         EncryptedData,
+        crypto::{RistrettoPublicKeyBytes, UtxoTag},
+        stealth::SpendCondition,
     };
 
     use super::*;

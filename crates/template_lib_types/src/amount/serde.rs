@@ -8,11 +8,11 @@
 //! efficient than the bnum implementation (which simply uses the derive macro).
 
 use serde::{
-    de::{Error, SeqAccess},
     Deserialize,
     Deserializer,
     Serialize,
     Serializer,
+    de::{Error, SeqAccess},
 };
 
 use super::Amount;

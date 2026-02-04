@@ -1,11 +1,11 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::sync::{atomic::AtomicU32, Arc};
+use std::sync::{Arc, atomic::AtomicU32};
 
 use tari_template_lib::types::{EntityId, Hash};
 
-use crate::hashing::{hasher32, EngineHashDomainLabel};
+use crate::hashing::{EngineHashDomainLabel, hasher32};
 
 #[derive(Debug, Clone)]
 pub struct EntityIdProvider {

@@ -3,7 +3,7 @@
 
 use log::*;
 use tari_ootle_common_types::displayable::Displayable;
-use tari_ootle_storage::{consensus_models::TransactionRecord, StateStore};
+use tari_ootle_storage::{StateStore, consensus_models::TransactionRecord};
 
 use crate::{
     hotstuff::error::HotStuffError,

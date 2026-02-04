@@ -21,8 +21,8 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use blake2::{
-    digest::consts::{U32, U64},
     Blake2b,
+    digest::consts::{U32, U64},
 };
 use borsh::BorshSerialize;
 use tari_crypto::{

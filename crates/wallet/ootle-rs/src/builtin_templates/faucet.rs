@@ -4,19 +4,19 @@
 use std::collections::HashSet;
 
 use tari_ootle_common_types::SubstateRequirement;
-use tari_ootle_transaction::{args, TransactionBuilder, UnsignedTransaction};
+use tari_ootle_transaction::{TransactionBuilder, UnsignedTransaction, args};
 use tari_template_lib_types::{
-    constants::{ONE_XTR, XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
-    stealth::StealthTransferStatement,
     Amount,
     UtxoAddress,
+    constants::{ONE_XTR, XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
+    stealth::StealthTransferStatement,
 };
 
 use crate::{
-    builtin_templates::UnsignedTransactionBuilder,
-    provider::{Provider, ProviderError, WantInput},
     Address,
     ToAccountAddress,
+    builtin_templates::UnsignedTransactionBuilder,
+    provider::{Provider, ProviderError, WantInput},
 };
 
 pub type IFaucet<'a, P> = FaucetInvokeBuilder<'a, P>;

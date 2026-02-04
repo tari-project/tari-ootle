@@ -7,7 +7,7 @@ use bech32::{Bech32m, Hrp};
 use ootle_byte_type::{ConvertFromByteType, FromByteType, ToByteType};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_ootle_common_types::{Network, NetworkParseError};
-use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, InvalidByteLengthError};
+use tari_template_lib_types::{InvalidByteLengthError, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
     hrp::{hrp_from_network, network_from_hrp},
@@ -292,7 +292,7 @@ pub enum OotleAddressError {
 mod serde_impl {
     use std::borrow::Cow;
 
-    use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as DeError};
 
     use super::*;
 

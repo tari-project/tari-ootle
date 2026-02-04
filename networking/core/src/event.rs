@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use libp2p::{identity, PeerId, StreamProtocol};
+use libp2p::{PeerId, StreamProtocol, identity};
 
 #[derive(Debug, Clone)]
 pub enum NetworkingEvent {

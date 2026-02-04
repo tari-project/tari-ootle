@@ -11,10 +11,10 @@ use serde::Serialize;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::confidential::{AbridgedTransactionKernel, EncodedMerkleProof, MinotariBurnClaimProof};
 use tari_template_lib_types::{
-    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
     EncryptedData,
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
 };
-use tari_transaction_components::transaction_components::{memo_field::TxType, MemoField};
+use tari_transaction_components::transaction_components::{MemoField, memo_field::TxType};
 use tari_wallet_daemon_client::types::ClaimBurnProof;
 
 use crate::process_manager::Instance;

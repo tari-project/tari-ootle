@@ -3,7 +3,7 @@
 
 use std::str::FromStr;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use minotari_node_grpc_client::grpc;
 use tari_common_types::tari_address::TariAddress;

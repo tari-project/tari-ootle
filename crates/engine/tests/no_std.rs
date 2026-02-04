@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::indexed_value::IndexedValue;
-use tari_ootle_transaction::{args, Transaction};
+use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::types::ComponentAddress;
 use tari_template_test_tooling::TemplateTest;
 

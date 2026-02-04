@@ -1,13 +1,13 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::substate::{hash_substate, Substate};
+use tari_engine_types::substate::{Substate, hash_substate};
 use tari_ootle_common_types::VersionedSubstateId;
 use tari_ootle_storage::{
-    consensus_models::SubstateChange,
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
+    consensus_models::SubstateChange,
 };
 
 pub mod helpers;

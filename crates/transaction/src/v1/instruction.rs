@@ -13,9 +13,6 @@ use tari_ootle_common_types::displayable::Displayable;
 use tari_template_lib::{
     args::LogLevel,
     types::{
-        access_rules::ComponentAccessRules,
-        crypto::RistrettoPublicKeyBytes,
-        stealth::StealthTransferStatement,
         Amount,
         FunctionName,
         MaxString,
@@ -23,14 +20,17 @@ use tari_template_lib::{
         ResourceAddress,
         TemplateAddress,
         ValidatorFeePoolAddress,
+        access_rules::ComponentAccessRules,
+        crypto::RistrettoPublicKeyBytes,
+        stealth::StealthTransferStatement,
     },
 };
 
 use crate::{
-    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
     AllocatableAddressType,
     ComponentReference,
     ResourceAddressRef,
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]

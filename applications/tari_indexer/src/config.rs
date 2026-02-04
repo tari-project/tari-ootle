@@ -25,10 +25,10 @@ use std::{net::SocketAddr, path::PathBuf, time::Duration};
 use config::Config;
 use serde::{Deserialize, Serialize};
 use tari_common::{
-    configuration::{serializers, CommonConfig},
     ConfigurationError,
     DefaultConfigLoader,
     SubConfigPath,
+    configuration::{CommonConfig, serializers},
 };
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_ootle_app_utilities::{

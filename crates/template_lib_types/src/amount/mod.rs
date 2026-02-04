@@ -23,9 +23,7 @@ pub mod public_macros {
     ///  ```
     #[macro_export]
     macro_rules! amount {
-        ($int:expr) => {{
-            $crate::Amount::from_str_radix($int, 10)
-        }};
+        ($int:expr) => {{ $crate::Amount::from_str_radix($int, 10) }};
     }
 
     #[cfg(test)]

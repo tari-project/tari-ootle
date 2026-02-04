@@ -9,7 +9,7 @@ use either::Either;
 use log::*;
 use ootle_byte_type::ToByteType;
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::{derive_fee_pool_address, SubstateAddress, SubstateRequirement};
+use tari_ootle_common_types::{SubstateAddress, SubstateRequirement, derive_fee_pool_address};
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId};
 use tari_wallet_daemon_client::{
@@ -25,12 +25,12 @@ use tari_wallet_daemon_client::{
 };
 
 use crate::{
-    handlers::{
-        helpers::{get_account_or_default, get_account_with_inputs, invalid_params, wait_for_result},
-        HandlerContext,
-    },
     DEFAULT_FEE,
     NUM_PRESHARDS,
+    handlers::{
+        HandlerContext,
+        helpers::{get_account_or_default, get_account_with_inputs, invalid_params, wait_for_result},
+    },
 };
 
 const LOG_TARGET: &str = "tari::ootle::walletd::handlers::validator";

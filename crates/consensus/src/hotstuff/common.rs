@@ -7,21 +7,23 @@ use indexmap::IndexMap;
 use log::*;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock, PcId, ProposalCertificate, ShardGroupAccumulatedData};
-use tari_engine_types::{substate::SubstateDiff, ValidatorFeePool};
+use tari_engine_types::{ValidatorFeePool, substate::SubstateDiff};
 use tari_ootle_common_types::{
-    committee::{Committee, CommitteeInfo},
-    derive_fee_pool_address,
-    optional::Optional,
-    shard::Shard,
-    substate_type::SubstateType,
     Epoch,
     Network,
     NodeAddressable,
     NodeHeight,
     NumPreshards,
     ShardGroup,
+    committee::{Committee, CommitteeInfo},
+    derive_fee_pool_address,
+    optional::Optional,
+    shard::Shard,
+    substate_type::SubstateType,
 };
 use tari_ootle_storage::{
+    StateStore,
+    StateStoreReadTransaction,
     consensus_models::{
         Block,
         BlockHeader,
@@ -32,18 +34,16 @@ use tari_ootle_storage::{
         TreeRootSummary,
         ValidatorConsensusStats,
     },
-    StateStore,
-    StateStoreReadTransaction,
 };
-use tari_state_tree::{JellyfishMerkleTree, StateTreeError, SPARSE_MERKLE_PLACEHOLDER_HASH};
+use tari_state_tree::{JellyfishMerkleTree, SPARSE_MERKLE_PLACEHOLDER_HASH, StateTreeError};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     hotstuff::{
+        HotStuffError,
         block_change_set::ProposedBlockChangeSet,
         commit_proofs::generate_end_of_epoch_commit_proof,
         substate_store::{PendingSubstateStore, ShardScopedTreeStoreReader, ShardedStateTree},
-        HotStuffError,
     },
     tracing::TraceTimer,
     traits::LeaderStrategy,

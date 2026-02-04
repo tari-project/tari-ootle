@@ -36,22 +36,22 @@ use tari_ootle_app_utilities::{
     p2p_config::PeerSeedsConfig,
 };
 use tari_ootle_common_types::{
-    layer_one_transaction::{LayerOneTransactionDef, ValidatorRegistrationParams},
     Network,
+    layer_one_transaction::{LayerOneTransactionDef, ValidatorRegistrationParams},
 };
 use tari_shutdown::Shutdown;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
-use tari_validator_node::{run_validator_node, ApplicationConfig, ValidatorNodeConfig};
+use tari_validator_node::{ApplicationConfig, ValidatorNodeConfig, run_validator_node};
 use tari_validator_node_client::{
-    types::{LayerOneTransactionParams, PrepareLayerOneTransactionRequest},
     ValidatorNodeClient,
+    types::{LayerOneTransactionParams, PrepareLayerOneTransactionRequest},
 };
 use tokio::task;
 
 use crate::{
+    TariWorld,
     helpers::{check_join_handle, get_os_assigned_port, get_os_assigned_ports, wait_listener_on_local_port},
     logging::get_base_dir_for_scenario,
-    TariWorld,
 };
 
 #[derive(Debug)]

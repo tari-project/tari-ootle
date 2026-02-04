@@ -7,13 +7,12 @@ use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{
     confidential::MinotariBurnClaimProof,
-    hashing::{hasher32, EngineHashDomainLabel},
+    hashing::{EngineHashDomainLabel, hasher32},
     indexed_value::IndexedValueError,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
 };
 use tari_ootle_common_types::{
-    committee::CommitteeInfo,
     Epoch,
     Network,
     SubstateAddress,
@@ -21,19 +20,20 @@ use tari_ootle_common_types::{
     SubstateRequirementRef,
     ToSubstateAddress,
     VersionedSubstateId,
+    committee::CommitteeInfo,
 };
 use tari_template_lib::types::{ClaimedOutputTombstoneAddress, ComponentAddress, TemplateAddress};
 
 use crate::{
+    Instruction,
+    TransactionSealSignature,
+    TransactionSignature,
+    TransactionV1,
     builder::TransactionBuilder,
     transaction_id::TransactionId,
     unsealed::UnsealedTransaction,
     v1::UnsealedTransactionV1,
     weight::TransactionWeight,
-    Instruction,
-    TransactionSealSignature,
-    TransactionSignature,
-    TransactionV1,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]

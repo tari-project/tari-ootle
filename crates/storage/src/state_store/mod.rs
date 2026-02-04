@@ -25,7 +25,6 @@ use tari_consensus_types::{
 };
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{
-    shard::Shard,
     Epoch,
     NodeAddressable,
     NodeHeight,
@@ -35,6 +34,7 @@ use tari_ootle_common_types::{
     SubstateAddress,
     ToSubstateAddress,
     VersionedSubstateIdRef,
+    shard::Shard,
 };
 use tari_ootle_transaction::TransactionId;
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, StateTreePayload, Version};
@@ -42,6 +42,7 @@ use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use time::PrimitiveDateTime;
 
 use crate::{
+    StorageError,
     consensus_models::{
         Block,
         BlockDiff,
@@ -71,7 +72,6 @@ use crate::{
         ValidatorConsensusStats,
         ValidatorStatsUpdate,
     },
-    StorageError,
 };
 
 const LOG_TARGET: &str = "tari::ootle::storage";
@@ -266,6 +266,8 @@ pub trait StateStoreReadTransaction: Sized {
     fn substates_any_exist<'a, I>(&self, substates: I) -> Result<bool, StorageError>
     where I: IntoIterator<Item = VersionedSubstateIdRef<'a>>;
 
+    // -------------------------------- SubstateLocks -------------------------------- //
+
     fn substate_locks_get_locked_substates_for_transaction(
         &self,
         transaction_id: &TransactionId,
@@ -456,7 +458,7 @@ pub trait StateStoreWriteTransaction {
     ) -> Result<Vec<TransactionPoolRecord>, StorageError>;
     fn transaction_pool_confirm_all_transitions(&mut self, block: &LeafBlock) -> Result<(), StorageError>;
     fn transaction_pool_state_updates_remove_any_by_block_id(&mut self, block_id: &BlockId)
-        -> Result<(), StorageError>;
+    -> Result<(), StorageError>;
 
     // -------------------------------- Parked blocks / Missing Transactions -------------------------------- //
 

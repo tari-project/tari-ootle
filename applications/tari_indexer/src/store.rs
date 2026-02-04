@@ -6,36 +6,36 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use tari_engine_types::{
+    Utxo,
     events::Event,
     substate::{Substate, SubstateId},
     transaction_receipt::TransactionReceipt,
-    Utxo,
 };
 use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate, TransactionEntry};
 use tari_ootle_common_types::{
-    optional::Optional,
-    shard::Shard,
-    substate_type::SubstateType,
     Epoch,
     ShardGroup,
     StateVersion,
+    optional::Optional,
+    shard::Shard,
+    substate_type::SubstateType,
 };
 use tari_ootle_storage::{
-    consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof},
     Ordering,
     StorageError,
+    consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof},
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_ootle_wallet_sdk::models::UtxoStateUpdateSet;
 use tari_template_lib_types::{
-    crypto::{RistrettoPublicKeyBytes, UtxoTag},
     Amount,
     ResourceAddress,
     TemplateAddress,
     TransactionReceiptAddress,
     UtxoId,
+    crypto::{RistrettoPublicKeyBytes, UtxoTag},
 };
 
 use crate::{

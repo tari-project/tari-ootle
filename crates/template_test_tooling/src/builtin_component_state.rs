@@ -13,6 +13,11 @@ use tari_engine_types::{
 };
 use tari_template_builtin::{NFT_FAUCET_TEMPLATE_ADDRESS, XTR_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::types::{
+    Amount,
+    EntityId,
+    Metadata,
+    OwnerRule,
+    ResourceType,
     access_rules::{ComponentAccessRules, ResourceAccessRules},
     constants::{
         NFT_FAUCET_COMPONENT_ADDRESS,
@@ -25,11 +30,6 @@ use tari_template_lib::types::{
     crypto::RistrettoPublicKeyBytes,
     metadata,
     rule,
-    Amount,
-    EntityId,
-    Metadata,
-    OwnerRule,
-    ResourceType,
 };
 
 use crate::{template_test::test_nft_faucet_component, xtr_faucet_component};

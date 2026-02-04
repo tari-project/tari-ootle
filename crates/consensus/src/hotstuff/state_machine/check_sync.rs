@@ -5,8 +5,8 @@ use std::marker::PhantomData;
 
 use crate::{
     hotstuff::{
-        state_machine::{event::ConsensusStateEvent, idle::Idle, running::Running, worker::ConsensusWorkerContext},
         HotStuffError,
+        state_machine::{event::ConsensusStateEvent, idle::Idle, running::Running, worker::ConsensusWorkerContext},
     },
     traits::{ConsensusSpec, SyncManager, SyncStatus},
 };

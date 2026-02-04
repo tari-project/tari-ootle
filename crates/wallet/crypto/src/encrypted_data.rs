@@ -3,15 +3,15 @@
 
 use blake2::Blake2b;
 use chacha20poly1305::{
-    aead,
-    aead::{generic_array::GenericArray, OsRng},
-    consts::U32,
     AeadCore,
     AeadInPlace,
     KeyInit,
     Tag,
     XChaCha20Poly1305,
     XNonce,
+    aead,
+    aead::{OsRng, generic_array::GenericArray},
+    consts::U32,
 };
 use digest::FixedOutput;
 use ootle_byte_type::ToByteType;
@@ -22,11 +22,11 @@ use tari_crypto::{
 };
 use tari_engine_types::crypto::get_commitment_factory;
 use tari_hashing::TransactionSecureNonceKdfDomain;
-use tari_template_lib_types::{crypto::PedersenCommitmentBytes, EncryptedData};
-use tari_utilities::{safe_array::SafeArray, ByteArray};
+use tari_template_lib_types::{EncryptedData, crypto::PedersenCommitmentBytes};
+use tari_utilities::{ByteArray, safe_array::SafeArray};
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::{kdfs::EncryptedDataKey, memo::Memo, DecryptedData, MaskAndValue, WalletCryptoError};
+use crate::{DecryptedData, MaskAndValue, WalletCryptoError, kdfs::EncryptedDataKey, memo::Memo};
 
 pub fn unblind_output(
     output_commitment: &PedersenCommitmentBytes,

@@ -8,16 +8,16 @@ use tari_engine_types::{indexed_value::IndexedWellKnownTypes, lock::LockId, subs
 use tari_template_lib::{
     models::{BucketId, ProofId},
     types::{
-        constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, XTR},
         EntityId,
         TemplateAddress,
+        constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, XTR},
     },
 };
 
 use crate::runtime::{
-    locking::{LockError, LockedSubstate},
     AuthorizationScope,
     RuntimeError,
+    locking::{LockError, LockedSubstate},
 };
 
 #[derive(Debug, Clone)]

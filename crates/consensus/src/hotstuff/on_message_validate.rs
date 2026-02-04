@@ -7,11 +7,13 @@ use log::*;
 use tari_consensus_types::BlockId;
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
-    committee::{Committee, CommitteeInfo},
     Epoch,
     NodeHeight,
+    committee::{Committee, CommitteeInfo},
 };
 use tari_ootle_storage::{
+    StateStore,
+    StateStoreWriteTransaction,
     consensus_models::{
         Block,
         ForeignParkedProposal,
@@ -20,15 +22,13 @@ use tari_ootle_storage::{
         ForeignProposalStatus,
         TransactionRecord,
     },
-    StateStore,
-    StateStoreWriteTransaction,
 };
 use tari_ootle_transaction::TransactionId;
 use tokio::sync::broadcast;
 
 use super::config::HotstuffConfig;
 use crate::{
-    hotstuff::{epoch_state::EpochState, error::HotStuffError, CurrentView, HotstuffEvent, ProposalValidationError},
+    hotstuff::{CurrentView, HotstuffEvent, ProposalValidationError, epoch_state::EpochState, error::HotStuffError},
     messages::{ForeignProposalMessage, HotstuffMessage, MissingTransactionsRequest, ProposalMessage},
     tracing::TraceTimer,
     traits::{ConsensusSpec, OutboundMessaging},

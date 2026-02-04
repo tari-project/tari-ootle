@@ -13,23 +13,23 @@ use tari_common_types::types::FixedHash;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_epoch_manager::{EpochManagerError, EpochManagerEvent, EpochManagerReader};
 use tari_ootle_common_types::{
-    committee::{Committee, CommitteeInfo},
     Epoch,
     ShardGroup,
     SubstateAddress,
     ToSubstateAddress,
     VersionedSubstateId,
     VotePower,
+    committee::{Committee, CommitteeInfo},
 };
-use tari_ootle_storage::{global::models::ValidatorNode, StorageError};
+use tari_ootle_storage::{StorageError, global::models::ValidatorNode};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
-use tokio::sync::{broadcast, Mutex, MutexGuard};
+use tokio::sync::{Mutex, MutexGuard, broadcast};
 
 use crate::support::{
+    TEST_NUM_PRESHARDS,
+    TestVnDestination,
     address::TestAddress,
     helpers::random_substate_in_shard_group,
-    TestVnDestination,
-    TEST_NUM_PRESHARDS,
 };
 
 #[derive(Debug, Clone)]

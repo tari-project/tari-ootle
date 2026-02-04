@@ -6,10 +6,10 @@ use std::num::NonZeroUsize;
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::{shard::Shard, Epoch};
+use tari_ootle_common_types::{Epoch, shard::Shard};
 use tari_state_tree::Version;
 
-use crate::{consensus_models::SubstateUpdateProof, StateStoreReadTransaction, StorageError};
+use crate::{StateStoreReadTransaction, StorageError, consensus_models::SubstateUpdateProof};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateVersionTransitions {

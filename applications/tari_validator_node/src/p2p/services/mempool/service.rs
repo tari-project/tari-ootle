@@ -22,20 +22,20 @@
 
 use std::{collections::HashSet, fmt::Display};
 
-use libp2p::{gossipsub, PeerId};
+use libp2p::{PeerId, gossipsub};
 use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
-use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
+use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
 use tari_networking::NetworkingHandle;
-use tari_ootle_common_types::{optional::Optional, PeerAddress, ShardGroup};
+use tari_ootle_common_types::{PeerAddress, ShardGroup, optional::Optional};
 use tari_ootle_p2p::{NewTransactionMessage, TariMessage, TariMessagingSpec};
-use tari_ootle_storage::{consensus_models::TransactionRecord, StateStore, StateStoreReadTransaction};
+use tari_ootle_storage::{StateStore, StateStoreReadTransaction, consensus_models::TransactionRecord};
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
+use super::MempoolError;
 #[cfg(feature = "metrics")]
 use super::metrics::PrometheusMempoolMetrics;
-use super::MempoolError;
 use crate::{
     consensus::ConsensusHandle,
     p2p::services::mempool::{

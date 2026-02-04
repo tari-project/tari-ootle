@@ -4,7 +4,7 @@
 use tari_crypto::{hashing::DomainSeparatedHasher, keys::SecretKey, ristretto::RistrettoSecretKey};
 
 pub fn derive_ristretto_key(entropy: &[u8], branch: &[u8], account: u64) -> RistrettoSecretKey {
-    use blake2::{digest::consts::U64, Blake2b};
+    use blake2::{Blake2b, digest::consts::U64};
     use digest::typenum::ToInt;
     use tari_hashing::KeyManagerDomain;
 

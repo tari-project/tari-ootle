@@ -3,7 +3,7 @@
 
 use std::{collections::HashSet, iter, time::Duration};
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use axum_extra::headers::authorization::Bearer;
 use indexmap::{IndexMap, IndexSet};
 use log::*;
@@ -15,9 +15,9 @@ use tari_engine_types::{
     confidential::ClaimBurnOutputData,
     substate::SubstateId,
 };
-use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
+use tari_ootle_common_types::{SubstateRequirement, optional::Optional};
 use tari_ootle_transaction::args;
-use tari_ootle_wallet_crypto::{memo::Memo, OutputWitness, StealthInputWitness, StealthOutputWitness};
+use tari_ootle_wallet_crypto::{OutputWitness, StealthInputWitness, StealthOutputWitness, memo::Memo};
 use tari_ootle_wallet_sdk::{
     apis::{
         confidential_transfer::ConfidentialTransferParams,
@@ -29,12 +29,13 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib_types::{
-    constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
-    stealth::SpendCondition,
     Amount,
     ResourceType,
+    constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
+    stealth::SpendCondition,
 };
 use tari_wallet_daemon_client::{
+    ComponentAddressOrName,
     permissions::JrpcPermission,
     types::{
         AccountGetByKeyIndexRequest,
@@ -71,12 +72,12 @@ use tari_wallet_daemon_client::{
         StealthTransferRequest,
         StealthTransferResponse,
     },
-    ComponentAddressOrName,
 };
 use tokio::task;
 
 use super::context::HandlerContext;
 use crate::{
+    DEFAULT_FEE,
     handlers::helpers::{
         general_error,
         get_account,
@@ -90,7 +91,6 @@ use crate::{
         wait_for_result,
         wait_for_result_and_account,
     },
-    DEFAULT_FEE,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::transaction";

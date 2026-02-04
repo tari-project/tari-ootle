@@ -25,7 +25,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
 };
 
-use tari_template_abi::{TemplateDef, ABI_TEMPLATE_DEF_GLOBAL_NAME};
+use tari_template_abi::{ABI_TEMPLATE_DEF_GLOBAL_NAME, TemplateDef};
 use wasmer::{
     AsStoreMut,
     AsStoreRef,
@@ -40,7 +40,7 @@ use wasmer::{
 
 use crate::{
     runtime::RuntimeError,
-    wasm::{mem_writer::MemWriter, WasmExecutionError},
+    wasm::{WasmExecutionError, mem_writer::MemWriter},
 };
 
 #[derive(Clone)]
@@ -155,7 +155,7 @@ impl<T> WasmEnv<T> {
         let memory = self.get_memory()?;
         let view = memory.view(store);
 
-        let slice = view.data_unchecked();
+        let slice = unsafe { view.data_unchecked() };
 
         let start = ptr.offset() as usize;
         let end = start
@@ -210,7 +210,7 @@ impl<T> WasmEnv<T> {
                 len: u64::from(len),
             })?;
 
-        let slice = view.data_unchecked();
+        let slice = unsafe { view.data_unchecked() };
         let slice = slice
             .get(start as usize..end as usize)
             .ok_or(WasmExecutionError::MemoryPointerOutOfRange {

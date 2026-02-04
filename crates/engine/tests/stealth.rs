@@ -9,31 +9,31 @@ use tari_common_types::types::PrivateKey;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine::runtime::{ActionIdent, NativeAction};
 use tari_engine_types::{
-    crypto::{get_commitment_factory, ElgamalVerifiableBalance, ValueLookupTable},
-    resource_container::ResourceError,
     UtxoOutput,
+    crypto::{ElgamalVerifiableBalance, ValueLookupTable, get_commitment_factory},
+    resource_container::ResourceError,
 };
 use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType};
-use tari_ootle_transaction::{args, call_args, Transaction};
+use tari_ootle_transaction::{Transaction, args, call_args};
 use tari_template_lib::types::{
-    crypto::PedersenCommitmentBytes,
-    rule,
-    stealth::SpendCondition,
     AccessRule,
     ComponentAddress,
     ResourceAddress,
     UtxoAddress,
     UtxoId,
+    crypto::PedersenCommitmentBytes,
+    rule,
+    stealth::SpendCondition,
 };
 use tari_template_test_tooling::{
+    TemplateTest,
     support::{
+        GenerateValueLookup,
         assert_error::{assert_access_denied_for_action, assert_reject_reason},
         stealth,
-        stealth::{StealthSecretTransferData, NO_INPUTS},
-        GenerateValueLookup,
+        stealth::{NO_INPUTS, StealthSecretTransferData},
     },
     wallet_crypto::MaskAndValue,
-    TemplateTest,
 };
 
 const TEMPLATE_PATHS: &[&str] = &["tests/templates/stealth"];

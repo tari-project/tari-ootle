@@ -1,7 +1,7 @@
 //   Copyright 2022 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use serde::{de::DeserializeOwned, ser::SerializeSeq, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::DeserializeOwned, ser::SerializeSeq};
 
 /// This gets around the JSON key must be a string issue by serializing the elements as a Vec containing the key and
 /// value as a tuple

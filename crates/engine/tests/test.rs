@@ -32,24 +32,24 @@ use tari_engine_types::{
     virtual_substate::{VirtualSubstate, VirtualSubstateId},
 };
 use tari_ootle_common_types::substate_type::SubstateType;
-use tari_ootle_transaction::{args, call_args, Transaction};
+use tari_ootle_transaction::{Transaction, args, call_args};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     models::NonFungible,
     types::{
-        constants::XTR,
-        crypto::RistrettoPublicKeyBytes,
         Amount,
         ComponentAddress,
         NonFungibleAddress,
         ResourceAddress,
         TemplateAddress,
+        constants::XTR,
+        crypto::RistrettoPublicKeyBytes,
     },
 };
 use tari_template_test_tooling::{
+    TemplateTest,
     compile::compile_template,
     support::assert_error::assert_reject_reason,
-    TemplateTest,
 };
 use tari_transaction_manifest::ManifestValue;
 use tari_utilities::hex::to_hex;
@@ -894,7 +894,7 @@ mod basic_nft {
 }
 
 mod emoji_id {
-    use tari_template_lib::types::{constants::XTR, Amount};
+    use tari_template_lib::types::{Amount, constants::XTR};
 
     use super::*;
 

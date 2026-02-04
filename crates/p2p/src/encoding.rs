@@ -3,7 +3,7 @@
 
 use std::any::type_name;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 
 pub fn encode_to_vec<T: serde::Serialize>(value: &T) -> anyhow::Result<Vec<u8>> {
     let bytes = tari_bor::encode(value).with_context(|| anyhow!("Failed to encode {}", type_name::<T>()))?;

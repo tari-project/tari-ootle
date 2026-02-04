@@ -2,12 +2,12 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_common_types::types::PrivateKey;
-use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
+use tari_crypto::ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment};
 use tari_template_lib::{prelude::ConfidentialWithdrawProof, types::Amount};
 
 use super::validate_confidential_statement;
 use crate::{
-    crypto::{commit_amount, messages, try_decode_to_signature, ValidateOutputBody},
+    crypto::{ValidateOutputBody, commit_amount, messages, try_decode_to_signature},
     resource_container::ResourceError,
 };
 

@@ -6,11 +6,11 @@ use tari_engine_types::{hashing::substate_value_hasher32, substate::SubstateId};
 use tari_jellyfish::{LeafKey, TreeHash, TreeStore, Version};
 use tari_ootle_common_types::VersionedSubstateId;
 use tari_state_tree::{
-    key_mapper::DbKeyMapper,
-    memory_store::MemoryTreeStore,
     StateTree,
     StateTreePayload,
     SubstateTreeChange,
+    key_mapper::DbKeyMapper,
+    memory_store::MemoryTreeStore,
 };
 use tari_template_lib_types::{ComponentAddress, ObjectKey};
 

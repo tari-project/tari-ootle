@@ -5,11 +5,11 @@ use std::collections::{HashMap, HashSet};
 
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{
-    committee::{Committee, CommitteeInfo},
     Epoch,
     ShardGroup,
     SubstateAddress,
     VotePower,
+    committee::{Committee, CommitteeInfo},
 };
 use tari_ootle_storage::global::models::ValidatorNode;
 use tari_sidechain::EvictionProof;

@@ -4,6 +4,8 @@
 use tari_template_lib::{
     auth::Ownership,
     types::{
+        NonFungibleAddress,
+        OwnerRule,
         access_rules::{
             AccessRule,
             RequireRule,
@@ -12,13 +14,11 @@ use tari_template_lib::{
             RestrictedAccessRule,
             RuleRequirement,
         },
-        NonFungibleAddress,
-        OwnerRule,
     },
 };
 
 use crate::{
-    runtime::{working_state::WorkingState, ActionIdent, AuthorizationScope, RuntimeError},
+    runtime::{ActionIdent, AuthorizationScope, RuntimeError, working_state::WorkingState},
     state_store::StateReader,
 };
 

@@ -11,15 +11,15 @@ use tari_crypto::{
 };
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::{
-    optional::{IsNotFoundError, Optional},
-    signature::SignatureOutput,
     Epoch,
     Network,
+    optional::{IsNotFoundError, Optional},
+    signature::SignatureOutput,
 };
 use tari_ootle_transaction::Signable;
 use tari_ootle_wallet_crypto::{
-    encryption::{decrypt_with_password, encrypt_with_password, CipherError},
     StealthCryptoApi,
+    encryption::{CipherError, decrypt_with_password, encrypt_with_password},
 };
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 

@@ -4,9 +4,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    Amount,
     crypto::{BalanceProofSignature, PedersenCommitmentBytes, RangeProofBytes},
     stealth::UnspentOutput,
-    Amount,
 };
 
 /// A statement for confidential and revealed outputs. A statement must contain either confidential outputs or non-zero

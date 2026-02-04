@@ -27,21 +27,21 @@ use std::{
 
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{
-    committee::{Committee, CommitteeInfo},
-    layer_one_transaction::LayerOneTransactionDef,
     DerivableFromPublicKey,
     Epoch,
     NodeAddressable,
     ShardGroup,
     SubstateAddress,
     VotePower,
+    committee::{Committee, CommitteeInfo},
+    layer_one_transaction::LayerOneTransactionDef,
 };
 use tari_ootle_storage::global::models::ValidatorNode;
 use tari_sidechain::EvictionProof;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::broadcast;
 
-use crate::{epoch_event_oracle::EpochEventOracle, EpochManagerError, EpochManagerEvent};
+use crate::{EpochManagerError, EpochManagerEvent, epoch_event_oracle::EpochEventOracle};
 
 pub trait EpochManagerSpec: Send + 'static {
     type Addr: NodeAddressable + DerivableFromPublicKey + 'static;

@@ -4,13 +4,13 @@
 use tari_template_lib::types::TemplateAddress;
 
 use crate::{
-    args,
-    args::{InstructionArg, WorkspaceOffsetId},
-    builder::named_component_call::CallFromWorkspace,
     AllocatableAddressType,
     ComponentReference,
     Instruction,
     Transaction,
+    args,
+    args::{InstructionArg, WorkspaceOffsetId},
+    builder::named_component_call::CallFromWorkspace,
 };
 
 #[test]

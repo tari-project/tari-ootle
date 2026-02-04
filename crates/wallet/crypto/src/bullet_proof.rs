@@ -8,11 +8,11 @@ use tari_crypto::{
     errors::RangeProofError,
     extended_range_proof::ExtendedRangeProofService,
     ristretto::{
-        bulletproofs_plus::{RistrettoExtendedMask, RistrettoExtendedWitness},
         RistrettoSecretKey,
+        bulletproofs_plus::{RistrettoExtendedMask, RistrettoExtendedWitness},
     },
 };
-use tari_engine_types::crypto::{get_static_range_proof_service, MAX_LAZY_BP_AGG_FACTORS};
+use tari_engine_types::crypto::{MAX_LAZY_BP_AGG_FACTORS, get_static_range_proof_service};
 use tari_template_lib_types::crypto::RangeProofBytes;
 
 use crate::OutputWitness;

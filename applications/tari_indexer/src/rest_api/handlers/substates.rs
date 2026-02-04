@@ -5,10 +5,10 @@ use std::{array, iter};
 
 use anyhow::anyhow;
 use axum::{
-    extract::{Path, Query},
-    response::Response,
     Extension,
     Json,
+    extract::{Path, Query},
+    response::Response,
 };
 use tari_engine_types::substate::SubstateId;
 use tari_indexer_client::types::{

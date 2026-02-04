@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_bor::cbor;
-use tari_engine::state_store::{memory::MemoryStateStore, StateWriter};
+use tari_engine::state_store::{StateWriter, memory::MemoryStateStore};
 use tari_engine_types::{
     component::{ComponentBody, ComponentHeader},
     resource::Resource,
@@ -14,7 +14,7 @@ use tari_template_builtin::XTR_FAUCET_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     prelude::{ComponentAddress, OwnerRule, ResourceAccessRules, VaultId, XTR},
     template_macro_deps::ComponentAccessRules,
-    types::{metadata, Amount, ObjectKey, ResourceType},
+    types::{Amount, ObjectKey, ResourceType, metadata},
 };
 
 pub const FAUCET_COMPONENT_ADDRESS: ComponentAddress = ComponentAddress::from_array([0u8; 32]);

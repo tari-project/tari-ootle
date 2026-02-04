@@ -20,12 +20,14 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::sync::{atomic, atomic::AtomicPtr, Arc};
+use std::sync::{Arc, atomic, atomic::AtomicPtr};
 
 use log::{warn, *};
-use tari_bor::{decode_exact, MaybeTagged};
+use tari_bor::{MaybeTagged, decode_exact};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_engine_types::{
+    Utxo,
+    UtxoOutput,
     commit_result::{FinalizeResult, RejectReason},
     component::ComponentHeader,
     confidential::{ClaimBurnOutputData, ClaimedOutputTombstone, MinotariBurnClaimProof},
@@ -44,18 +46,16 @@ use tari_engine_types::{
     stealth,
     substate::{SubstateId, SubstateValue},
     vault::Vault,
-    Utxo,
-    UtxoOutput,
 };
-use tari_ootle_common_types::{services::template_provider::TemplateProvider, GetVerifier};
+use tari_ootle_common_types::{GetVerifier, services::template_provider::TemplateProvider};
 use tari_ootle_transaction::{
-    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
     AllocatableAddressType,
     ComponentReference,
     ResourceAddressRef,
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
 };
 use tari_template_abi::{TemplateDef, Type};
-use tari_template_builtin::{is_builtin_template_address, ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
+use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, is_builtin_template_address};
 use tari_template_lib::{
     args::{
         AddressAllocationInvokeArg,
@@ -102,13 +102,6 @@ use tari_template_lib::{
     prelude::{ResourceType, RistrettoPublicKeyBytes, StealthTransferStatement},
     template::BuiltinTemplate,
     types::{
-        access_rules::{ComponentAccessRules, ResourceAccessRules, ResourceAuthAction},
-        bytes::Bytes,
-        constants::{IMAGE_URL, STEALTH_TARI_RESOURCE_ADDRESS, TOKEN_SYMBOL, XTR},
-        crypto::UtxoTag,
-        engine_args::{SignatureAction, SignatureVerifyArg},
-        metadata,
-        stealth::SpendCondition,
         Amount,
         AuthHook,
         AuthHookCaller,
@@ -123,20 +116,27 @@ use tari_template_lib::{
         TemplateAddress,
         UtxoAddress,
         ValidatorFeePoolAddress,
+        access_rules::{ComponentAccessRules, ResourceAccessRules, ResourceAuthAction},
+        bytes::Bytes,
+        constants::{IMAGE_URL, STEALTH_TARI_RESOURCE_ADDRESS, TOKEN_SYMBOL, XTR},
+        crypto::UtxoTag,
+        engine_args::{SignatureAction, SignatureVerifyArg},
+        metadata,
+        stealth::SpendCondition,
     },
 };
 
-use super::{working_state::WorkingState, ActionIdent, Runtime, RuntimeEvent};
+use super::{ActionIdent, Runtime, RuntimeEvent, working_state::WorkingState};
 use crate::{
     runtime::{
+        RuntimeError,
+        RuntimeInterface,
         engine_args::EngineArgs,
         error::{ArgumentValidationError, AssertError},
         locking::{LockError, LockedSubstate},
         pay_fee::PayFee,
         scope::PushCallFrame,
         tracker::StateTracker,
-        RuntimeError,
-        RuntimeInterface,
     },
     state_store::StateReader,
     template::LoadedTemplate,
@@ -1388,11 +1388,11 @@ where
         debug!(target: LOG_TARGET, "Vault invoke: {} {:?}", vault_ref, action,);
 
         // Check vault ownership if referencing an ID
-        if action.requires_write_access() {
-            if let Some(vault_id) = vault_ref.vault_id() {
-                self.tracker
-                    .read_with(|state| state.check_component_scope(&vault_id.into(), action))?;
-            }
+        if action.requires_write_access() &&
+            let Some(vault_id) = vault_ref.vault_id()
+        {
+            self.tracker
+                .read_with(|state| state.check_component_scope(&vault_id.into(), action))?;
         }
 
         match action {
@@ -1733,10 +1733,10 @@ where
                         let withdrawn = vault_mut.withdraw(arg.amount)?;
                         container.deposit(withdrawn)?;
                     }
-                    if let Some(statement) = arg.statement {
-                        if let Some(revealed) = state_mut.execute_stealth_transfer(XTR.into(), statement, None)? {
-                            container.deposit(revealed)?;
-                        }
+                    if let Some(statement) = arg.statement &&
+                        let Some(revealed) = state_mut.execute_stealth_transfer(XTR.into(), statement, None)?
+                    {
+                        container.deposit(revealed)?;
                     }
                     if container.unlocked_amount().is_zero() {
                         return Err(RuntimeError::InvalidArgument {

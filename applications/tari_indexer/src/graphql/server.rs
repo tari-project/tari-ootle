@@ -23,19 +23,19 @@
 use std::net::SocketAddr;
 
 use async_graphql::{
-    http::{playground_source, GraphQLPlaygroundConfig},
     EmptyMutation,
     EmptySubscription,
     Schema,
+    http::{GraphQLPlaygroundConfig, playground_source},
 };
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
 use axum::{
+    Json,
+    Router,
     extract::Extension,
     http::StatusCode,
     response::{Html, IntoResponse},
     routing::get,
-    Json,
-    Router,
 };
 use log::*;
 use serde::Serialize;
@@ -43,10 +43,10 @@ use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
 use tower_http::cors::CorsLayer;
 
 use crate::{
+    EventManager,
     graphql::model::events::{EventQuery, EventSchema},
     storage_sqlite::SqliteIndexerStore,
     substate_manager::SubstateManager,
-    EventManager,
 };
 
 const LOG_TARGET: &str = "tari::indexer::graphql";

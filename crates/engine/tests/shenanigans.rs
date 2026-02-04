@@ -7,12 +7,12 @@ use tari_engine_types::{
     indexed_value::IndexedWellKnownTypes,
     resource_container::ResourceError,
 };
-use tari_ootle_transaction::{args, Transaction};
+use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::{
     args::VaultAction,
-    types::{constants::XTR, Amount, ComponentAddress, ResourceType},
+    types::{Amount, ComponentAddress, ResourceType, constants::XTR},
 };
-use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
+use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 const TEMPLATE_NAME: &str = "Shenanigans";

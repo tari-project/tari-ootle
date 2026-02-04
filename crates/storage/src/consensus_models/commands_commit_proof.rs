@@ -7,7 +7,7 @@ use tari_common_types::types::{CompressedPublicKey, FixedHash};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_ootle_common_types::VotePower;
 use tari_sidechain::{CommitProofElement, SidechainBlockCommitProof, SidechainProofValidationError};
-use tari_state_tree::{compute_merkle_root_for_hashes, StateTreeError, TreeHash};
+use tari_state_tree::{StateTreeError, TreeHash, compute_merkle_root_for_hashes};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::consensus_models::Command;

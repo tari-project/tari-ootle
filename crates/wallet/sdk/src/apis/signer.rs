@@ -8,11 +8,11 @@ use tari_ootle_common_types::signature::SignatureOutput;
 use tari_ootle_transaction::{IntoSigned, Signable};
 
 use crate::{
+    WalletSdkSpec,
     apis::key_manager::{KeyManagerApi, KeyManagerApiError},
     models::{KeyId, StealthUtxoSpendKeyId},
     spec::KeyStoreError,
     storage::WalletStorageError,
-    WalletSdkSpec,
 };
 
 pub struct SignerApi<'a, TSpec: WalletSdkSpec, Ctx = ()> {

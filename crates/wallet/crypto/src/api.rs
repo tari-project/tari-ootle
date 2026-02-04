@@ -5,31 +5,31 @@ use log::*;
 use ootle_byte_type::ConvertFromByteType;
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
-    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey, pedersen::PedersenCommitment},
 };
 use tari_engine_types::crypto::get_commitment_factory;
-use tari_ootle_common_types::{base_layer_hashing::ownership_proof_hasher64, Network};
+use tari_ootle_common_types::{Network, base_layer_hashing::ownership_proof_hasher64};
 use tari_template_lib_types::{
-    confidential::ConfidentialOutputStatement,
-    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes, UtxoTag},
-    stealth::StealthTransferStatement,
     Amount,
     EncryptedData,
     ResourceAddress,
+    confidential::ConfidentialOutputStatement,
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes, UtxoTag},
+    stealth::StealthTransferStatement,
 };
 
 use crate::{
-    confidential,
-    encrypted_data::{encrypt_data, unblind_output},
-    kdfs,
-    memo::Memo,
-    stealth,
     DecryptedData,
     OutputWitness,
     StealthInputWitness,
     StealthOutputWitness,
     StealthProofError,
     WalletCryptoError,
+    confidential,
+    encrypted_data::{encrypt_data, unblind_output},
+    kdfs,
+    memo::Memo,
+    stealth,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet::sdk::stealth_crypto";

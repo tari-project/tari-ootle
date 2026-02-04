@@ -7,8 +7,8 @@ use tari_ootle_common_types::Epoch;
 use tari_ootle_transaction::TransactionId;
 
 use crate::{
-    consensus_models::{Evidence, LeaderFee, TransactionPoolRecord, TransactionPoolStage},
     StateStoreWriteTransaction,
+    consensus_models::{Evidence, LeaderFee, TransactionPoolRecord, TransactionPoolStage},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

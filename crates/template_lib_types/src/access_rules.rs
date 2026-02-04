@@ -471,7 +471,7 @@ pub fn __push<T>(v: &mut Vec<T>, arg: T) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{crypto::RistrettoPublicKeyBytes, ObjectKey};
+    use crate::{ObjectKey, crypto::RistrettoPublicKeyBytes};
 
     #[test]
     fn it_builds_correct_access_rules() {

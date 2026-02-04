@@ -22,7 +22,7 @@
 
 use tari_common_types::types::FixedHash;
 
-use crate::hashing::{hasher32, EngineHashDomainLabel};
+use crate::hashing::{EngineHashDomainLabel, hasher32};
 
 pub fn calculate_template_binary_hash(wasm_code: &[u8]) -> FixedHash {
     let hash = hasher32(EngineHashDomainLabel::Template).chain(wasm_code).result();

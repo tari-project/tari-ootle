@@ -9,33 +9,33 @@ use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::Decision;
 use tari_engine_types::{
+    Utxo,
     commit_result::ExecuteResult,
     resource::Resource,
     substate::{Substate, SubstateId, SubstateValue},
     transaction_receipt::TransactionReceipt,
-    Utxo,
 };
 use tari_ootle_common_types::{
-    shard::Shard,
-    substate_type::SubstateType,
     Epoch,
     Network,
     NumPreshards,
     ShardGroup,
     StateVersion,
+    shard::Shard,
+    substate_type::SubstateType,
 };
-use tari_ootle_storage::{time::PrimitiveDateTime, Ordering};
+use tari_ootle_storage::{Ordering, time::PrimitiveDateTime};
 use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
 use tari_ootle_wallet_sdk::models::UtxoUpdateSet;
 use tari_template_abi::TemplateDef;
 use tari_template_lib_types::{
-    crypto::{RistrettoPublicKeyBytes, UtxoTag},
     Amount,
     NonFungibleAddress,
     ResourceAddress,
     TemplateAddress,
     TransactionReceiptAddress,
     UtxoId,
+    crypto::{RistrettoPublicKeyBytes, UtxoTag},
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

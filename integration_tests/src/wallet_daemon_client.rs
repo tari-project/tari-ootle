@@ -33,9 +33,11 @@ use tari_ootle_wallet_sdk::{
     crypto::pay_to::PayTo,
     models::{Account, AccountWithAddress, NonFungibleToken},
 };
-use tari_template_lib_types::{constants::TOKEN_SYMBOL, crypto::RistrettoPublicKeyBytes, Amount, ResourceAddress};
-use tari_transaction_manifest::{parse_manifest, ManifestValue};
+use tari_template_lib_types::{Amount, ResourceAddress, constants::TOKEN_SYMBOL, crypto::RistrettoPublicKeyBytes};
+use tari_transaction_manifest::{ManifestValue, parse_manifest};
 use tari_wallet_daemon_client::{
+    ComponentAddressOrName,
+    WalletDaemonClient,
     error::WalletDaemonClientError,
     types::{
         AccountGetResponse,
@@ -54,16 +56,14 @@ use tari_wallet_daemon_client::{
         TransactionWaitResultRequest,
         TransactionWaitResultResponse,
     },
-    ComponentAddressOrName,
-    WalletDaemonClient,
 };
 use tokio::{task::JoinSet, time::timeout};
 
 use crate::{
+    TariWorld,
     helpers::get_address_from_output,
     util::transaction_builder,
     validator_node_client::{add_outputs_from_diff, parse_arg},
-    TariWorld,
 };
 
 pub async fn claim_fees(
@@ -84,11 +84,13 @@ pub async fn claim_fees(
         account: Some(ComponentAddressOrName::Name(account_name)),
         claim_key_index: None,
         max_fee: None,
-        shards: vec![stats
-            .committee_info
-            .expect("claim_fees: committee_info is None")
-            .shard_group()
-            .start()],
+        shards: vec![
+            stats
+                .committee_info
+                .expect("claim_fees: committee_info is None")
+                .shard_group()
+                .start(),
+        ],
         dry_run,
     };
 

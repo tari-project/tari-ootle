@@ -30,11 +30,11 @@ static ALLOC: lol_alloc::AssumeSingleThreaded<lol_alloc::FreeListAllocator> =
     unsafe { lol_alloc::AssumeSingleThreaded::new(lol_alloc::FreeListAllocator::new()) };
 
 #[cfg(feature = "return_null_abi")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static _ABI_TEMPLATE_DEF: [u8; 0] = [];
 
 #[cfg(feature = "return_empty_abi")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static _ABI_TEMPLATE_DEF: [u8; 4] = [0, 0, 0, 0];
 
 #[cfg(not(any(
@@ -42,14 +42,14 @@ pub static _ABI_TEMPLATE_DEF: [u8; 4] = [0, 0, 0, 0];
     feature = "return_null_abi",
     feature = "no_template_def"
 )))]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static _ABI_TEMPLATE_DEF: [u8; 53] = [
     49, 0, 0, 0, 161, 98, 86, 49, 163, 109, 116, 101, 109, 112, 108, 97, 116, 101, 95, 110, 97, 109, 101, 101, 66, 117,
     103, 103, 121, 107, 97, 98, 105, 95, 118, 101, 114, 115, 105, 111, 110, 0, 105, 102, 117, 110, 99, 116, 105, 111,
     110, 115, 128,
 ];
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn Buggy_main(_call_info: *mut u8, _call_info_len: usize) -> *mut u8 {
     ptr::null_mut()
 }
@@ -61,7 +61,7 @@ extern "C" {
 }
 
 #[cfg(feature = "unexpected_export_function")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn i_shouldnt_be_here() -> *mut u8 {
     ptr::null_mut()
 }

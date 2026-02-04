@@ -20,19 +20,19 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use libp2p::{gossipsub, PeerId};
+use libp2p::{PeerId, gossipsub};
 use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
 use tari_epoch_manager::EpochManagerEvent;
 use tari_networking::NetworkingHandle;
-use tari_ootle_p2p::{proto, TariMessagingSpec};
+use tari_ootle_p2p::{TariMessagingSpec, proto};
 use tokio::{
     sync::{broadcast, mpsc},
     task,
     task::JoinHandle,
 };
 
-use crate::p2p::services::consensus_gossip::{service::ConsensusGossipService, ConsensusGossipHandle};
+use crate::p2p::services::consensus_gossip::{ConsensusGossipHandle, service::ConsensusGossipService};
 
 const LOG_TARGET: &str = "tari::validator_node::consensus_gossip::initializer";
 

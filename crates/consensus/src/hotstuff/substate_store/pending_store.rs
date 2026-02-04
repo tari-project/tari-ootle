@@ -8,9 +8,6 @@ use log::*;
 use tari_consensus_types::LeafBlock;
 use tari_engine_types::substate::{Substate, SubstateDiff, SubstateId, SubstateValue};
 use tari_ootle_common_types::{
-    displayable::Displayable,
-    optional::Optional,
-    substate_type::SubstateType,
     LockIntent,
     NumPreshards,
     SubstateAddress,
@@ -19,11 +16,14 @@ use tari_ootle_common_types::{
     ToSubstateAddress,
     VersionedSubstateId,
     VersionedSubstateIdRef,
+    displayable::Displayable,
+    optional::Optional,
+    substate_type::SubstateType,
 };
 use tari_ootle_storage::{
-    consensus_models::{BlockDiff, LockConflict, SubstateChange, SubstateLock, SubstateRecord},
     StateStore,
     StateStoreReadTransaction,
+    consensus_models::{BlockDiff, LockConflict, SubstateChange, SubstateLock, SubstateRecord},
 };
 use tari_ootle_transaction::TransactionId;
 

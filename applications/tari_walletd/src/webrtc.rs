@@ -12,7 +12,7 @@ use tari_shutdown::ShutdownSignal;
 use tari_wallet_daemon_client::types::EncodedJwtString;
 use webrtc::{
     api::APIBuilder,
-    data_channel::{data_channel_message::DataChannelMessage, RTCDataChannel},
+    data_channel::{RTCDataChannel, data_channel_message::DataChannelMessage},
     ice_transport::{
         ice_candidate::{RTCIceCandidate, RTCIceCandidateInit},
         ice_server::RTCIceServer,

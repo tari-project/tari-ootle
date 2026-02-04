@@ -48,26 +48,26 @@ use std::{
 };
 
 use bytes::Bytes;
-use futures::{stream::FuturesUnordered, SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt, stream::FuturesUnordered};
 use libp2p::{PeerId, StreamProtocol};
 use libp2p_substream::{ProtocolEvent, ProtocolNotification};
 use log::*;
 use prost::Message;
 use router::Router;
 use tokio::{sync::mpsc, task::JoinHandle, time};
-use tower::{make::MakeService, Service};
-use tracing::{debug, error, instrument, span, trace, warn, Instrument, Level};
+use tower::{Service, make::MakeService};
+use tracing::{Instrument, Level, debug, error, instrument, span, trace, warn};
 
 use super::{
+    Handshake,
+    RPC_MAX_FRAME_SIZE,
+    Substream,
     body::Body,
     error::HandshakeRejectReason,
     max_response_payload_size,
     message::{Request, Response, RpcMessageFlags},
     not_found::ProtocolServiceNotFound,
     status::RpcStatus,
-    Handshake,
-    Substream,
-    RPC_MAX_FRAME_SIZE,
 };
 use crate::{
     body::BodyBytes,

@@ -1,7 +1,7 @@
 //  Copyright 2022 The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, Hash, TemplateAddress};
+use tari_template_lib_types::{Hash, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 use crate::Epoch;
 

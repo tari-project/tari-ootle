@@ -4,13 +4,13 @@
 use std::collections::HashSet;
 
 use either::Either;
-use libp2p::{gossipsub, PeerId};
+use libp2p::{PeerId, gossipsub};
 use log::*;
-use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
+use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
 use tari_networking::{NetworkingHandle, NetworkingService};
 use tari_ootle_common_types::{Epoch, PeerAddress, ShardGroup};
-use tari_ootle_p2p::{proto, NewTransactionMessage, TariMessage, TariMessagingSpec};
-use tari_swarm::messaging::{prost::ProstCodec, Codec};
+use tari_ootle_p2p::{NewTransactionMessage, TariMessage, TariMessagingSpec, proto};
+use tari_swarm::messaging::{Codec, prost::ProstCodec};
 use tokio::sync::mpsc;
 
 use crate::p2p::services::mempool::MempoolError;

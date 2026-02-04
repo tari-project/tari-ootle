@@ -103,10 +103,8 @@ async fn main() -> Result<(), anyhow::Error> {
                 is_default,
             )?;
 
-            if *set_active {
-                if let Some(index) = account_address.owner_key_id.derived_index() {
-                    km.set_active_key(KeyBranch::Account, index)?;
-                }
+            if *set_active && let Some(index) = account_address.owner_key_id.derived_index() {
+                km.set_active_key(KeyBranch::Account, index)?;
             }
 
             let view_only_secret = km.get_key(account_address.view_only_key_id)?;

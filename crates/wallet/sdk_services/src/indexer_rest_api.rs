@@ -10,8 +10,8 @@ use anyhow::anyhow;
 use futures::{StreamExt, TryStreamExt};
 use reqwest::{IntoUrl, Url};
 use tari_engine_types::{
-    substate::{Substate, SubstateId},
     Utxo,
+    substate::{Substate, SubstateId},
 };
 use tari_indexer_client::{
     error::IndexerRestClientError,
@@ -28,13 +28,13 @@ use tari_indexer_client::{
     },
 };
 use tari_ootle_common_types::{
+    Epoch,
+    StateVersion,
     array_utils::copy_fixed_checked,
     displayable::Displayable,
     optional::IsNotFoundError,
     response_status::{ResponseErrorStatus, TransactionStatusResponseError},
     shard::Shard,
-    Epoch,
-    StateVersion,
 };
 use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
 use tari_ootle_wallet_sdk::{
@@ -48,10 +48,10 @@ use tari_ootle_wallet_sdk::{
     },
 };
 use tari_template_lib_types::{
-    crypto::{RistrettoPublicKeyBytes, UtxoTag},
     ResourceAddress,
     TemplateAddress,
     UtxoId,
+    crypto::{RistrettoPublicKeyBytes, UtxoTag},
 };
 use time::{OffsetDateTime, PrimitiveDateTime};
 use url::ParseError;

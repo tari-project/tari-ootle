@@ -3,7 +3,7 @@
 
 use std::str::FromStr;
 
-use syn::{parse2, Lit};
+use syn::{Lit, parse2};
 use tari_bor::{BorError, Serialize};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_transaction::{args::InstructionArg, call_arg};

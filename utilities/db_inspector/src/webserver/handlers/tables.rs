@@ -5,15 +5,15 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use axum::{
-    extract::{Path, Query},
-    handler::Handler,
     Extension,
     Json,
+    extract::{Path, Query},
+    handler::Handler,
 };
 use serde::Serialize;
 use serde_json::{json, value::Index};
 use tari_ootle_common_types::displayable::Displayable;
-use tari_ootle_storage::{consensus_models::Evidence, Ordering};
+use tari_ootle_storage::{Ordering, consensus_models::Evidence};
 use tari_state_store_rocksdb::{
     codecs::{DbCodec, KeyPrefix},
     error::RocksDbStorageError,
@@ -23,7 +23,7 @@ use tari_state_store_rocksdb::{
 use crate::webserver::{
     context::HandlerContext,
     error::WebError,
-    handlers::types::{decode_hex_prefix, Column, TableRequest, TableResponse},
+    handlers::types::{Column, TableRequest, TableResponse, decode_hex_prefix},
 };
 
 pub fn list<CF, F, S>(cf: F) -> impl Handler<(), S>
@@ -238,22 +238,14 @@ fn create_transformer<CF: Cf>() -> Box<dyn Fn(serde_json::Value) -> anyhow::Resu
                     let ok_sym = match stage {
                         "New" => {
                             if num_inputs > 0 {
-                                if prepared.is_some() {
-                                    "✅ Prepared "
-                                } else {
-                                    "🔴"
-                                }
+                                if prepared.is_some() { "✅ Prepared " } else { "🔴" }
                             } else {
                                 "🌟"
                             }
                         },
                         "LocalPrepared" => {
                             if num_inputs > 0 {
-                                if prepared.is_some() {
-                                    "✅ Prepared "
-                                } else {
-                                    "🔴"
-                                }
+                                if prepared.is_some() { "✅ Prepared " } else { "🔴" }
                             } else {
                                 // Only expect LocalPrepared for local evidence, otherwise we're waiting for the foreign
                                 // shard

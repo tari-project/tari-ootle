@@ -7,10 +7,9 @@ use tari_engine_types::{
     resource::Resource,
     substate::{SubstateDiff, SubstateId},
 };
-use tari_ootle_common_types::{shard::Shard, Epoch, StateVersion, VersionedSubstateIdRef};
+use tari_ootle_common_types::{Epoch, StateVersion, VersionedSubstateIdRef, shard::Shard};
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_template_lib::types::{
-    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
     Amount,
     ComponentAddress,
     NonFungibleId,
@@ -19,6 +18,7 @@ use tari_template_lib::types::{
     UtxoAddress,
     UtxoId,
     VaultId,
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
 };
 use webauthn_rs::prelude::Passkey;
 

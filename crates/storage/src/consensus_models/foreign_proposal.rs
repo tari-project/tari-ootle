@@ -12,7 +12,7 @@ use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::{BlockId, LeafBlock};
 use tari_crypto::tari_utilities::ByteArray;
-use tari_ootle_common_types::{committee::CommitteeInfo, Epoch, NodeHeight, ShardGroup};
+use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, committee::CommitteeInfo};
 use tari_ootle_transaction::TransactionId;
 use tari_sidechain::QuorumCertificate;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;

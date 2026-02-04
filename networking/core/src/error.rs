@@ -22,9 +22,9 @@
 
 use std::io;
 
-use libp2p::{gossipsub, gossipsub::SubscriptionError, swarm::DialError, TransportError};
+use libp2p::{TransportError, gossipsub, gossipsub::SubscriptionError, swarm::DialError};
 use tari_rpc_framework::RpcError;
-use tari_swarm::{messaging, substream, TariSwarmError};
+use tari_swarm::{TariSwarmError, messaging, substream};
 use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug, thiserror::Error)]

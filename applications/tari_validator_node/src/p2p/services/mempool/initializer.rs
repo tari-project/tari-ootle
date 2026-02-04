@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use libp2p::{gossipsub, PeerId};
+use libp2p::{PeerId, gossipsub};
 use log::*;
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_networking::NetworkingHandle;

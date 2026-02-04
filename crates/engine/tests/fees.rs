@@ -2,9 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::commit_result::RejectReason;
-use tari_ootle_transaction::{args, call_args, Transaction};
-use tari_template_lib::types::{constants::STEALTH_TARI_RESOURCE_ADDRESS, Amount, ComponentAddress};
-use tari_template_test_tooling::{support::assert_error::assert_reject_reason, xtr_faucet_component, TemplateTest};
+use tari_ootle_transaction::{Transaction, args, call_args};
+use tari_template_lib::types::{Amount, ComponentAddress, constants::STEALTH_TARI_RESOURCE_ADDRESS};
+use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason, xtr_faucet_component};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 

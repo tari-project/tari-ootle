@@ -6,11 +6,11 @@ use tari_consensus::{
     messages::HotstuffMessage,
 };
 use tari_consensus_types::{BlockId, LeafBlock};
-use tari_ootle_common_types::{optional::Optional, NodeHeight, ShardGroup, SubstateAddress, VersionedSubstateIdRef};
+use tari_ootle_common_types::{NodeHeight, ShardGroup, SubstateAddress, VersionedSubstateIdRef, optional::Optional};
 use tari_ootle_storage::{
-    consensus_models::{BookkeepingModel, TransactionExecution},
     StateStore,
     StateStoreReadTransaction,
+    consensus_models::{BookkeepingModel, TransactionExecution},
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
@@ -20,11 +20,11 @@ use tokio::{
 };
 
 use crate::support::{
-    address::TestAddress,
-    epoch_manager::TestEpochManager,
     TestBlockTransactionProcessor,
     TestStore,
     ValidatorBuilder,
+    address::TestAddress,
+    epoch_manager::TestEpochManager,
 };
 
 pub struct ValidatorChannels {

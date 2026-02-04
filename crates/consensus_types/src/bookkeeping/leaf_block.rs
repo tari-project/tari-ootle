@@ -25,7 +25,7 @@ use std::fmt::Display;
 use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup};
 
-use crate::{ids::BlockId, HighestSeenBlock};
+use crate::{HighestSeenBlock, ids::BlockId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LeafBlock {

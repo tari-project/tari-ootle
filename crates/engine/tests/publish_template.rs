@@ -15,9 +15,9 @@ use tari_engine_types::{
 };
 use tari_ootle_transaction::Transaction;
 use tari_template_test_tooling::{
+    TemplateTest,
     compile::compile_template,
     support::assert_error::assert_reject_reason,
-    TemplateTest,
 };
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
@@ -44,13 +44,13 @@ fn publish_template_success() {
     let mut template_found = false;
     let diff = result.expect_success();
     diff.up_iter().for_each(|(substate_id, substate)| {
-        if let SubstateValue::Template(curr_template) = substate.substate_value() {
-            if curr_template.to_binary_hash() == expected_binary_hash {
-                template_found = true;
-                assert!(matches!(substate_id, SubstateId::Template(_)));
-                if let SubstateId::Template(curr_template_addr) = substate_id {
-                    assert_eq!(expected_template_address, *curr_template_addr);
-                }
+        if let SubstateValue::Template(curr_template) = substate.substate_value() &&
+            curr_template.to_binary_hash() == expected_binary_hash
+        {
+            template_found = true;
+            assert!(matches!(substate_id, SubstateId::Template(_)));
+            if let SubstateId::Template(curr_template_addr) = substate_id {
+                assert_eq!(expected_template_address, *curr_template_addr);
             }
         }
     });

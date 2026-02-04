@@ -6,10 +6,10 @@ use std::time::Instant;
 use rand::rngs::OsRng;
 use tari_crypto::{
     keys::{PublicKey, SecretKey},
-    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey, pedersen::PedersenCommitment},
 };
 use tari_engine_types::crypto::validate_elgamal_verifiable_balance_proof;
-use tari_ootle_wallet_crypto::{confidential, GenerateValueLookup, OutputWitness};
+use tari_ootle_wallet_crypto::{GenerateValueLookup, OutputWitness, confidential};
 use tari_template_lib_types::{Amount, EncryptedData};
 use tari_utilities::ByteArray;
 

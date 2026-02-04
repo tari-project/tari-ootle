@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Serialize};
-use tari_template_abi::{version::WasmAbiVersion, FunctionDef, TemplateDef};
-use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
+use tari_template_abi::{FunctionDef, TemplateDef, version::WasmAbiVersion};
+use tari_template_lib::types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AuthoredTemplateModel {

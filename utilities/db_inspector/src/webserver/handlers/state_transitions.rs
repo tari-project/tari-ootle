@@ -4,9 +4,9 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query},
     Extension,
     Json,
+    extract::{Path, Query},
 };
 use serde_json::json;
 use tari_ootle_common_types::optional::Optional;
@@ -16,7 +16,7 @@ use tari_state_store_rocksdb::column_families;
 use crate::webserver::{
     context::HandlerContext,
     error::WebError,
-    handlers::types::{decode_hex_prefix, Column, TableRequest, TableResponse},
+    handlers::types::{Column, TableRequest, TableResponse, decode_hex_prefix},
 };
 
 pub async fn list(

@@ -12,22 +12,22 @@ use tari_ootle_wallet_crypto::balance_proof::{
     validate_balance_proof_signature,
 };
 use tari_template_lib_types::{
-    stealth::{StealthInput, StealthInputsStatement, StealthTransferStatement},
     Amount,
     ResourceAddress,
     UtxoAddress,
+    stealth::{StealthInput, StealthInputsStatement, StealthTransferStatement},
 };
 
 use crate::{
+    Address,
     provider::{Provider, WalletProvider},
     stealth::{
-        error::{InvalidStealthInputError, StealthProviderError},
-        spec::Output,
         SignatureRequirements,
         StealthSignerRequirement,
+        error::{InvalidStealthInputError, StealthProviderError},
+        spec::Output,
     },
     wallet::{OotleWallet, WalletResult},
-    Address,
 };
 
 pub struct StealthTransfer<'a, P> {
@@ -165,7 +165,7 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> StealthTransfer<'a, P> {
             )
         });
 
-        if let Some(ref balance_proof) = &balance_proof {
+        if let Some(balance_proof) = &balance_proof {
             // Check that the provided inputs and outputs balance
             // We assume that the code has otherwise generated valid proofs, so the only reason this can fail
             // is if the input values and output values do not balance.

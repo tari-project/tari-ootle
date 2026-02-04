@@ -7,10 +7,10 @@ use log::debug;
 use tari_consensus_types::{HighPc, HighestSeenBlock, LastExecuted, LockedBlock, ProposalCertificate};
 use tari_ootle_common_types::optional::Optional;
 use tari_ootle_storage::{
-    consensus_models::{Block, BookkeepingModel},
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
+    consensus_models::{Block, BookkeepingModel},
 };
 
 use crate::traits::CertificateStore;

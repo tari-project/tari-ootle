@@ -4,11 +4,11 @@
 use std::{
     fs,
     io,
-    io::{stdout, Write},
+    io::{Write, stdout},
     time::{Duration, Instant},
 };
 
-use futures::{stream::FuturesOrdered, StreamExt};
+use futures::{StreamExt, stream::FuturesOrdered};
 use human_bytes::human_bytes;
 use tari_crypto::{
     keys::PublicKey,

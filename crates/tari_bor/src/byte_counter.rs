@@ -55,10 +55,10 @@ impl std::io::Write for ByteCounter {
             .count
             .checked_add(len)
             .ok_or_else(|| std::io::Error::other("ByteCounter overflow"))?;
-        if let Some(limit) = self.limit {
-            if self.count > limit {
-                return Err(std::io::Error::other("ByteCounter limit exceeded"));
-            }
+        if let Some(limit) = self.limit &&
+            self.count > limit
+        {
+            return Err(std::io::Error::other("ByteCounter limit exceeded"));
         }
         Ok(len)
     }

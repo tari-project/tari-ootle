@@ -3,7 +3,7 @@
 
 //! Context definitions related to the caller of an instruction
 
-use tari_template_abi::{call_engine, EngineOp};
+use tari_template_abi::{EngineOp, call_engine};
 use tari_template_lib_types::ComponentAddress;
 
 use crate::{

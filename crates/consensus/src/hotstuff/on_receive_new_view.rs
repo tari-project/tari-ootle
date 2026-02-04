@@ -3,20 +3,20 @@
 
 use log::*;
 use tari_consensus_types::{HighPc, LeafBlock, ProposalCertificate, Vote};
-use tari_ootle_common_types::{optional::Optional, NodeHeight};
+use tari_ootle_common_types::{NodeHeight, optional::Optional};
 use tari_ootle_storage::{
-    consensus_models::{Block, BookkeepingModel},
     StateStore,
     StateStoreWriteTransaction,
+    consensus_models::{Block, BookkeepingModel},
 };
 
 use super::vote_collector::{ProposalVoteCollector, TimeoutVoteCollector};
 use crate::{
     hotstuff::{
+        ProposalValidationError,
         epoch_state::EpochState,
         error::HotStuffError,
         pacemaker_handle::PaceMakerHandle,
-        ProposalValidationError,
     },
     messages::NewViewMessage,
     tracing::TraceTimer,

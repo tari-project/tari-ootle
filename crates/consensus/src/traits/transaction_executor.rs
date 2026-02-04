@@ -4,11 +4,11 @@
 use std::collections::HashMap;
 
 use tari_engine_types::substate::Substate;
-use tari_ootle_common_types::{optional::IsNotFoundError, Epoch, SubstateRequirement};
+use tari_ootle_common_types::{Epoch, SubstateRequirement, optional::IsNotFoundError};
 use tari_ootle_storage::{
-    consensus_models::{TransactionExecution, TransactionPoolError},
     StateStore,
     StorageError,
+    consensus_models::{TransactionExecution, TransactionPoolError},
 };
 use tari_ootle_transaction::Transaction;
 

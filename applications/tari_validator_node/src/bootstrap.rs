@@ -22,15 +22,15 @@
 
 use std::{collections::HashMap, fs, io, str::FromStr, sync::Arc};
 
-use anyhow::{anyhow, Context};
-use futures::{future, FutureExt};
+use anyhow::{Context, anyhow};
+use futures::{FutureExt, future};
 use libp2p::identity;
 use log::*;
 use minotari_app_utilities::identity_management;
 use ootle_byte_type::ToByteType;
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common::{
-    configuration::bootstrap::{grpc_default_port, ApplicationType},
+    configuration::bootstrap::{ApplicationType, grpc_default_port},
     exit_codes::{ExitCode, ExitError},
 };
 use tari_consensus::consensus_constants::ConsensusConstants;
@@ -38,10 +38,11 @@ use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_consensus::traits::hooks::NoopHooks;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_epoch_manager::{
-    service::{EpochManagerConfig, EpochManagerHandle},
     EpochManagerReader,
+    service::{EpochManagerConfig, EpochManagerHandle},
 };
 use tari_epoch_oracles::{
+    EpochOracle,
     base_layer::{
         BaseLayerBlockHeaderStore,
         BaseLayerEpochOracleConfig,
@@ -49,9 +50,8 @@ use tari_epoch_oracles::{
         BaseLayerOracle,
     },
     configured::{ConfiguredEpochOracle, RealTimeEpochTicker},
-    hybrid::{watch_ticker, HybridEpochOracle},
+    hybrid::{HybridEpochOracle, watch_ticker},
     store::EpochOracleStore,
-    EpochOracle,
 };
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_ootle_app_utilities::{
@@ -64,9 +64,9 @@ use tari_ootle_app_utilities::{
     seed_peer::SeedPeer,
     transaction_executor::TariTransactionProcessor,
 };
-use tari_ootle_common_types::{services::template_provider::TemplateProvider, Network, PeerAddress};
+use tari_ootle_common_types::{Network, PeerAddress, services::template_provider::TemplateProvider};
 use tari_ootle_p2p::TariMessagingSpec;
-use tari_ootle_storage::{global::GlobalDb, StateStore};
+use tari_ootle_storage::{StateStore, global::GlobalDb};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_ootle_transaction::Transaction;
 use tari_rpc_framework::RpcServer;
@@ -81,17 +81,20 @@ use tokio::{
 #[cfg(feature = "metrics")]
 use crate::consensus::metrics::PrometheusConsensusMetrics;
 use crate::{
+    ApplicationConfig,
+    ValidatorNodeEpochManagerSpec,
+    ValidatorNodeStateStore,
     consensus::{self, ConsensusHandle, TarBlockTransactionExecutor, ValidationContext},
     file_l1_submitter::FileLayerOneSubmitter,
     genesis_state::create_genesis_state,
     p2p::{
+        NopLogger,
         create_tari_validator_node_rpc_service,
         services::{
             consensus_gossip::{self},
             mempool::{self, MempoolHandle},
             messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
         },
-        NopLogger,
     },
     state_store_template_provider::StateStoreTemplateProvider,
     transaction_validators::{
@@ -105,9 +108,6 @@ use crate::{
         WithContext,
     },
     validator::Validator,
-    ApplicationConfig,
-    ValidatorNodeEpochManagerSpec,
-    ValidatorNodeStateStore,
 };
 
 const LOG_TARGET: &str = "tari::validator_node::bootstrap";

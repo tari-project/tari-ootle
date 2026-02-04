@@ -30,11 +30,11 @@ use tari_engine_types::{
 };
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{
-    shard::Shard,
-    substate_type::SubstateType,
     ShardGroup,
     SubstateAddress,
     SubstateRequirement,
+    shard::Shard,
+    substate_type::SubstateType,
 };
 use tari_ootle_transaction::{Instruction, Transaction, TransactionId, UnsignedTransaction};
 use tari_ootle_wallet_sdk::{
@@ -57,11 +57,8 @@ use tari_ootle_wallet_sdk::{
         WalletTransaction,
     },
 };
-use tari_template_abi::{version::WasmAbiVersion, FunctionDef, TemplateDef};
+use tari_template_abi::{FunctionDef, TemplateDef, version::WasmAbiVersion};
 use tari_template_lib::types::{
-    confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
-    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    stealth::{SpendCondition, StealthTransferStatement},
     Amount,
     ComponentAddress,
     EncryptedData,
@@ -73,6 +70,9 @@ use tari_template_lib::types::{
     UtxoId,
     ValidatorFeePoolAddress,
     VaultId,
+    confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    stealth::{SpendCondition, StealthTransferStatement},
 };
 use time::PrimitiveDateTime;
 use webauthn_rs_proto::{
@@ -84,9 +84,9 @@ use webauthn_rs_proto::{
 use zeroize::Zeroizing;
 
 use crate::{
+    ComponentAddressOrName,
     permissions::Claims,
     serialize::{opt_string_or_struct, string_or_struct},
-    ComponentAddressOrName,
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

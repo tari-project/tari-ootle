@@ -4,7 +4,7 @@
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    sync::{atomic, atomic::AtomicU16, Arc},
+    sync::{Arc, atomic, atomic::AtomicU16},
 };
 
 use tokio::net::TcpListener;

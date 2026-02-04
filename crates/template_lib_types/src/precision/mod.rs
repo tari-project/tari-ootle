@@ -21,9 +21,7 @@ pub mod public_macros {
     ///  ```
     #[macro_export]
     macro_rules! precision_amount {
-        ($int:expr) => {{
-            $crate::precision::PrecisionAmount::from_str_radix($int, 10)
-        }};
+        ($int:expr) => {{ $crate::precision::PrecisionAmount::from_str_radix($int, 10) }};
     }
 }
 

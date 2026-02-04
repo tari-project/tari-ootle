@@ -23,8 +23,8 @@
 //! Public types that are available to internal template code.
 
 pub use tari_bor::{decode, decode_exact, encode_with_len, from_value, serde};
-pub use tari_template_abi::{rust, wrap_ptr, CallInfo};
-pub use tari_template_lib_types::{access_rules::ComponentAccessRules, OwnerRule};
+pub use tari_template_abi::{CallInfo, rust, wrap_ptr};
+pub use tari_template_lib_types::{OwnerRule, access_rules::ComponentAccessRules};
 
 #[cfg(target_arch = "wasm32")]
 pub use crate::debug;

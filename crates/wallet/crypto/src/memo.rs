@@ -3,7 +3,7 @@
 
 use std::{cmp, fmt::Display, io};
 
-use tari_template_lib_types::{hex::write_hex_fmt, MaxBytes, MaxString};
+use tari_template_lib_types::{MaxBytes, MaxString, hex::write_hex_fmt};
 
 /// These are selected to be out of range of the Minotari memo field tags
 /// See:
@@ -362,7 +362,7 @@ mod tests {
 
         let memo = Memo::new_pay_ref_and_message([], "").unwrap();
         assert_eq!(memo.len(), 1); // 1 byte for the pay_ref length
-                                   // Encode/decode empty
+        // Encode/decode empty
         let mut buf = Vec::new();
         memo.encode_into(&mut buf).unwrap();
         let decoded = Memo::decode_from(&mut buf.as_slice()).unwrap();

@@ -11,13 +11,13 @@ use std::{
 };
 
 use diesel::{
-    dsl,
     BoolExpressionMethods,
     NullableExpressionMethods,
     OptionalExtension,
     QueryDsl,
     RunQueryDsl,
     SqliteConnection,
+    dsl,
 };
 use log::*;
 use serde::Serialize;
@@ -27,12 +27,12 @@ use tari_engine_types::{
     substate::{SubstateDiff, SubstateId},
 };
 use tari_ootle_common_types::{
-    displayable::Displayable,
-    optional::Optional,
-    shard::Shard,
     Epoch,
     StateVersion,
     VersionedSubstateIdRef,
+    displayable::Displayable,
+    optional::Optional,
+    shard::Shard,
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_ootle_wallet_sdk::{
@@ -58,7 +58,6 @@ use tari_ootle_wallet_sdk::{
     storage::{CommittableStore, WalletEventStoreWriter, WalletStorageError, WalletStoreReader, WalletStoreWriter},
 };
 use tari_template_lib_types::{
-    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
     Amount,
     ComponentAddress,
     EncryptedData,
@@ -68,6 +67,7 @@ use tari_template_lib_types::{
     UtxoAddress,
     UtxoId,
     VaultId,
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
 };
 use tari_utilities::hex::Hex;
 use time::PrimitiveDateTime;

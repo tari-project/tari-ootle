@@ -5,11 +5,11 @@ use std::{fmt, marker::PhantomData, pin::Pin};
 
 use bytes::{Bytes, BytesMut};
 use futures::{
+    Stream,
+    StreamExt,
     ready,
     stream::BoxStream,
     task::{Context, Poll},
-    Stream,
-    StreamExt,
 };
 use pin_project::pin_project;
 use prost::bytes::Buf;

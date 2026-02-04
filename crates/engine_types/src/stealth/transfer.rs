@@ -4,7 +4,7 @@
 use log::*;
 use ootle_byte_type::ConvertFromByteType;
 use tari_crypto::{
-    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey, pedersen::PedersenCommitment},
     tari_utilities::ByteArrayError,
 };
 use tari_template_lib::{prelude::StealthTransferStatement, types::Amount};

@@ -279,20 +279,12 @@ impl Amount {
 
     /// If the amount is negative (< 0), returns `None`, otherwise returns `Some(self)`.
     pub fn non_negative_checked(self) -> Option<Self> {
-        if self.is_negative() {
-            None
-        } else {
-            Some(self)
-        }
+        if self.is_negative() { None } else { Some(self) }
     }
 
     /// If the amount is positive (> 0), returns `None`, otherwise returns `Some(self)`.
     pub fn negative_checked(self) -> Option<Self> {
-        if self.is_positive() {
-            None
-        } else {
-            Some(self)
-        }
+        if self.is_positive() { None } else { Some(self) }
     }
 
     /// Returns the amount raised to the power of `exp`.

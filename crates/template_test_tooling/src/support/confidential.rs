@@ -5,14 +5,14 @@ use rand::rngs::OsRng;
 use tari_common_types::types::PrivateKey;
 use tari_crypto::{
     keys::SecretKey,
-    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey},
+    ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment},
 };
 use tari_engine_types::crypto::commit_amount;
-use tari_ootle_wallet_crypto::{confidential, MaskAndValue, OutputWitness};
+use tari_ootle_wallet_crypto::{MaskAndValue, OutputWitness, confidential};
 use tari_template_lib::types::{
-    confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     Amount,
     EncryptedData,
+    confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
 };
 
 pub fn generate_confidential_output_statement(

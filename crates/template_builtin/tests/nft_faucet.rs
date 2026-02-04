@@ -2,12 +2,12 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::commit_result::ExecuteResult;
-use tari_ootle_transaction::{args, Transaction};
+use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::types::{
-    constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS, TOKEN_SYMBOL},
     ComponentAddress,
     Metadata,
     NonFungibleAddress,
+    constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS, TOKEN_SYMBOL},
 };
 use tari_template_test_tooling::TemplateTest;
 

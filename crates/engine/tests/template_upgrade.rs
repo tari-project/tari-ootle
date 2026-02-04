@@ -8,12 +8,12 @@ use tari_engine::{
 };
 use tari_engine_types::{commit_result::RejectReason, indexed_value::IndexedValue};
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
-use tari_ootle_transaction::{args, Transaction};
+use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::{
     args::CallAction,
     types::{ComponentAddress, OwnerRule, VaultId},
 };
-use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
+use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 

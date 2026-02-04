@@ -4,11 +4,11 @@
 use std::{collections::HashSet, io};
 
 use libp2p::{
-    futures::{SinkExt, StreamExt},
     PeerId,
+    futures::{SinkExt, StreamExt},
 };
 
-use crate::{handler::FramedInbound, proto, store::PeerStore, Config, Error, Event, SignedPeerRecord};
+use crate::{Config, Error, Event, SignedPeerRecord, handler::FramedInbound, proto, store::PeerStore};
 
 pub async fn inbound_sync_task<TPeerStore: PeerStore>(
     peer_id: PeerId,

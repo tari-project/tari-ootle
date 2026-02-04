@@ -5,10 +5,10 @@ use std::{net::SocketAddr, sync::Arc};
 
 use axum_extra::headers::authorization::Bearer;
 use axum_jrpc::{
-    error::{JsonRpcError, JsonRpcErrorReason},
     JrpcResult,
     JsonRpcExtractor,
     JsonRpcResponse,
+    error::{JsonRpcError, JsonRpcErrorReason},
 };
 use log::*;
 use tari_wallet_daemon_client::{

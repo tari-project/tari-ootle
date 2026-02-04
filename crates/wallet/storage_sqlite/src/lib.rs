@@ -16,8 +16,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use diesel::{sql_query, Connection, RunQueryDsl, SqliteConnection};
-use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use diesel::{Connection, RunQueryDsl, SqliteConnection, sql_query};
+use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
 use tari_ootle_wallet_sdk::storage::{ReadableWalletStore, WalletStorageError, WriteableWalletStore};
 
 use crate::{reader::ReadTransaction, writer::WriteTransaction};

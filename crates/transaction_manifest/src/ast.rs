@@ -21,8 +21,8 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use syn::{
-    parse::{Parse, ParseStream},
     Result,
+    parse::{Parse, ParseStream},
 };
 
 use crate::parser::{ManifestParser, ParsedManifest};

@@ -25,7 +25,7 @@ pub use ciborium::{cbor, value::Value};
 use ciborium::{de::from_reader, ser::into_writer};
 pub use ciborium_io::{Read, Write};
 pub use error::BorError;
-pub use serde::{self, de::DeserializeOwned, Deserialize, Serialize};
+pub use serde::{self, Deserialize, Serialize, de::DeserializeOwned};
 pub use walker::*;
 
 pub use crate::byte_counter::ByteCounter;

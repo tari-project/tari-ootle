@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use blake2::{digest::consts::U32, Blake2b};
+use blake2::{Blake2b, digest::consts::U32};
 use tari_common_types::types::FixedHash;
 use tari_hashing::BlocksHashDomain;
 use tari_node_components::blocks::BlockHeader;

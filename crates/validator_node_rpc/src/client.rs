@@ -15,15 +15,15 @@ use tari_engine_types::{
 use tari_networking::{MessageSpec, NetworkingHandle, PeerId};
 use tari_ootle_common_types::{NodeAddressable, SubstateRequirementRef, ToPeerId};
 use tari_ootle_p2p::{
+    TariMessagingSpec,
     proto,
     proto::rpc::{GetTransactionResultRequest, PayloadResultStatus, SubmitTransactionRequest, SubstateStatus},
-    TariMessagingSpec,
 };
 use tari_ootle_storage::time::{PrimitiveDateTime, UtcDateTime};
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tokio::sync::RwLock;
 
-use crate::{rpc_service, ValidatorNodeRpcClientError};
+use crate::{ValidatorNodeRpcClientError, rpc_service};
 
 pub trait ValidatorNodeClientFactory<TAddr: NodeAddressable>: Send + Sync {
     type Client: ValidatorNodeRpcClient<TAddr>;

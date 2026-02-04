@@ -21,29 +21,18 @@ use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib::{
     prelude::{AccessRules, StealthTransferStatement},
     types::{
-        constants::XTR,
-        crypto::RistrettoPublicKeyBytes,
         Amount,
         FunctionName,
         OwnerRule,
         ResourceAddress,
         TemplateAddress,
         ValidatorFeePoolAddress,
+        constants::XTR,
+        crypto::RistrettoPublicKeyBytes,
     },
 };
 
 use crate::{
-    args,
-    args::{InstructionArg, WorkspaceOffsetId},
-    builder::{
-        error::BuilderError,
-        named_args::{parse_workspace_key, BuilderWorkspaceKey, NamedArg},
-        named_resource_ref::NamedResourceRef,
-        workspace_ids::WorkspaceIds,
-    },
-    call_args,
-    unsealed::UnsealedTransaction,
-    unsigned_transaction::UnsignedTransaction,
     AllocatableAddressType,
     ComponentReference,
     Instruction,
@@ -53,6 +42,17 @@ use crate::{
     Signable,
     Transaction,
     TransactionSignature,
+    args,
+    args::{InstructionArg, WorkspaceOffsetId},
+    builder::{
+        error::BuilderError,
+        named_args::{BuilderWorkspaceKey, NamedArg, parse_workspace_key},
+        named_resource_ref::NamedResourceRef,
+        workspace_ids::WorkspaceIds,
+    },
+    call_args,
+    unsealed::UnsealedTransaction,
+    unsigned_transaction::UnsignedTransaction,
 };
 
 #[derive(Debug, Clone)]
@@ -644,24 +644,24 @@ impl<D> TransactionBuilder<D> {
         match instruction {
             Instruction::CallFunction { args, .. } => {
                 for arg in args {
-                    if let InstructionArg::Literal(bytes) = arg {
-                        if let Ok(indexed) = IndexedValue::from_raw(bytes) {
-                            self.unsigned_transaction
-                                .inputs_mut()
-                                .extend(indexed.referenced_substates().map(SubstateRequirement::unversioned));
-                        }
+                    if let InstructionArg::Literal(bytes) = arg &&
+                        let Ok(indexed) = IndexedValue::from_raw(bytes)
+                    {
+                        self.unsigned_transaction
+                            .inputs_mut()
+                            .extend(indexed.referenced_substates().map(SubstateRequirement::unversioned));
                     }
                 }
             },
             Instruction::CallMethod { call, args, .. } => {
                 self.add_input_for_component_ref(call);
                 for arg in args {
-                    if let InstructionArg::Literal(bytes) = arg {
-                        if let Ok(indexed) = IndexedValue::from_raw(bytes) {
-                            self.unsigned_transaction
-                                .inputs_mut()
-                                .extend(indexed.referenced_substates().map(SubstateRequirement::unversioned));
-                        }
+                    if let InstructionArg::Literal(bytes) = arg &&
+                        let Ok(indexed) = IndexedValue::from_raw(bytes)
+                    {
+                        self.unsigned_transaction
+                            .inputs_mut()
+                            .extend(indexed.referenced_substates().map(SubstateRequirement::unversioned));
                     }
                 }
             },

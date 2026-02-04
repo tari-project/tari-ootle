@@ -2,7 +2,7 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use tari_consensus::traits::LeaderStrategy;
-use tari_ootle_common_types::{committee::Committee, NodeAddressable, NodeHeight};
+use tari_ootle_common_types::{NodeAddressable, NodeHeight, committee::Committee};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RoundRobinLeaderStrategy;

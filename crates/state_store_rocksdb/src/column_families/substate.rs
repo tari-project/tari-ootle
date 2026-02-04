@@ -22,7 +22,7 @@
 
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::{shard::Shard, Epoch, SubstateAddress};
+use tari_ootle_common_types::{Epoch, SubstateAddress, shard::Shard};
 use tari_state_tree::Version;
 
 use crate::{

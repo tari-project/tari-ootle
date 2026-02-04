@@ -114,7 +114,7 @@ impl<R: Read + Seek> ValueLookupTable for IoReaderValueLookup<'_, R> {
 mod tests {
     use std::io::Cursor;
 
-    use rand::{rngs::OsRng, Rng};
+    use rand::{Rng, rngs::OsRng};
 
     use super::*;
     use crate::value_lookup::header::LOOKUP_HEADER_LEADING_BYTES;

@@ -8,7 +8,7 @@
 
 use core::{fmt, fmt::Formatter, marker::PhantomData};
 
-use ciborium::{value::Integer, Value};
+use ciborium::{Value, value::Integer};
 use serde::{de::VariantAccess, ser::SerializeTupleVariant};
 
 pub struct CborValueJsonSerializeWrapper<'a>(pub &'a Value);
@@ -16,35 +16,35 @@ pub struct CborValueJsonSerializeWrapper<'a>(pub &'a Value);
 impl serde::Serialize for CborValueJsonSerializeWrapper<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where S: serde::Serializer {
-        match self.0 {
-            Value::Integer(ref __field0) => {
+        match &self.0 {
+            Value::Integer(__field0) => {
                 let value = i128::from(*__field0);
                 serializer.serialize_newtype_variant("Value", 1u32, "Integer", &value)
             },
-            Value::Bytes(ref __field0) => {
+            Value::Bytes(__field0) => {
                 serde::Serializer::serialize_newtype_variant(serializer, "Value", 1u32, "Bytes", __field0)
             },
-            Value::Float(ref __field0) => {
+            Value::Float(__field0) => {
                 serde::Serializer::serialize_newtype_variant(serializer, "Value", 2u32, "Float", __field0)
             },
-            Value::Text(ref __field0) => {
+            Value::Text(__field0) => {
                 serde::Serializer::serialize_newtype_variant(serializer, "Value", 3u32, "Text", __field0)
             },
-            Value::Bool(ref __field0) => {
+            Value::Bool(__field0) => {
                 serde::Serializer::serialize_newtype_variant(serializer, "Value", 4u32, "Bool", __field0)
             },
             Value::Null => serde::Serializer::serialize_unit_variant(serializer, "Value", 5u32, "Null"),
-            Value::Tag(ref tag, ref value) => {
+            Value::Tag(tag, value) => {
                 let mut state = serde::Serializer::serialize_tuple_variant(serializer, "Value", 6u32, "Tag", 2)?;
                 SerializeTupleVariant::serialize_field(&mut state, tag)?;
                 SerializeTupleVariant::serialize_field(&mut state, &Self(value))?;
                 SerializeTupleVariant::end(state)
             },
-            Value::Array(ref arr) => {
+            Value::Array(arr) => {
                 let wrapped = arr.iter().map(Self).collect::<Vec<_>>();
                 serde::Serializer::serialize_newtype_variant(serializer, "Value", 7u32, "Array", &wrapped)
             },
-            Value::Map(ref map) => {
+            Value::Map(map) => {
                 let wrapped = map.iter().map(|(k, v)| (Self(k), Self(v))).collect::<Vec<_>>();
                 serde::Serializer::serialize_newtype_variant(serializer, "Value", 8u32, "Map", &wrapped)
             },
@@ -211,7 +211,7 @@ impl<'de> serde::Deserialize<'de> for CiboruimValueDeserializeFixWrapper {
                                         return Err(serde::de::Error::invalid_length(
                                             0usize,
                                             &"tuple variant Value::Tag with 2 elements",
-                                        ))
+                                        ));
                                     },
                                 };
                                 let wrapped = serde::de::SeqAccess::next_element::<CiboruimValueDeserializeFixWrapper>(

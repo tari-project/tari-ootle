@@ -25,6 +25,21 @@
 
 pub use tari_bor;
 pub use tari_template_lib_types::{
+    AccessRule,
+    AuthHookCaller,
+    ComponentAddress,
+    MaxBytes,
+    MaxString,
+    Metadata,
+    NonFungibleAddress,
+    NonFungibleId,
+    OwnerRule,
+    ResourceAddress,
+    ResourceType,
+    TemplateAddress,
+    UtxoAddress,
+    UtxoId,
+    VaultId,
     access_rules::{ComponentAccessRules as AccessRules, RestrictedAccessRule::*, *},
     bytes::Bytes,
     confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
@@ -44,21 +59,6 @@ pub use tari_template_lib_types::{
     metadata,
     rule,
     stealth::{StealthInputsStatement, StealthOutputsStatement, StealthTransferStatement},
-    AccessRule,
-    AuthHookCaller,
-    ComponentAddress,
-    MaxBytes,
-    MaxString,
-    Metadata,
-    NonFungibleAddress,
-    NonFungibleId,
-    OwnerRule,
-    ResourceAddress,
-    ResourceType,
-    TemplateAddress,
-    UtxoAddress,
-    UtxoId,
-    VaultId,
 };
 #[cfg(all(feature = "macro", target_arch = "wasm32"))]
 pub use tari_template_macros::template;
@@ -89,7 +89,7 @@ pub use crate::{
     resource::{ResourceBuilder, ResourceManager},
     template::{BuiltinTemplate, TemplateManager},
     types,
-    types::{amount, crypto, Amount},
+    types::{Amount, amount, crypto},
 };
 #[cfg(target_arch = "wasm32")]
 pub use crate::{debug, error, info, log, warn};

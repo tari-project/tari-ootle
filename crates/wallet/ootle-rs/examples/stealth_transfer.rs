@@ -2,7 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use ootle_rs::{
-    builtin_templates::{faucet::IFaucet, UnsignedTransactionBuilder},
+    ToAccountAddress,
+    TransactionRequest,
+    builtin_templates::{UnsignedTransactionBuilder, faucet::IFaucet},
     const_nonzero_u64,
     key_provider::PrivateKeyProvider,
     keys::HasViewOnlyKeySecret,
@@ -10,19 +12,17 @@ use ootle_rs::{
     stealth::{Output, StealthTransfer},
     transaction::TransactionSigner,
     wallet::OotleWallet,
-    ToAccountAddress,
-    TransactionRequest,
 };
 use tari_ootle_address::address;
 use tari_ootle_common_types::{
+    Network,
     displayable::Displayable,
     engine_types::transaction_receipt::TransactionReceipt,
-    Network,
 };
 use tari_ootle_transaction::Transaction;
 use tari_template_lib_types::{
-    constants::{ONE_XTR, XTR},
     UtxoAddress,
+    constants::{ONE_XTR, XTR},
 };
 
 #[tokio::main]
@@ -107,7 +107,9 @@ async fn main() {
     print_fancy_results("Faucet transfer", &pending_tx).await;
 
     // Then we'll send it to some other address (Feel free to change this to any valid address).
-    let recipient= address!("otl_loc_10mc0v2lyy43kldl0ft4c2x5pe7j0ckduv8zej6jgr2z2g9m07fz7gl96ar5wwgu0qu0atmr5tl53ye7n38xr5u7ytlmudq0ruxcau0gge7rxk");
+    let recipient = address!(
+        "otl_loc_10mc0v2lyy43kldl0ft4c2x5pe7j0ckduv8zej6jgr2z2g9m07fz7gl96ar5wwgu0qu0atmr5tl53ye7n38xr5u7ytlmudq0ruxcau0gge7rxk"
+    );
 
     // This builder creates a stealth transfer statement (spend proof). This is added to the transaction later.
     let (transfer, required_signers) = StealthTransfer::new(xtr_token, &provider)

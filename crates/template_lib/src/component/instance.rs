@@ -3,7 +3,7 @@
 
 use std::marker::PhantomData;
 
-use tari_template_lib_types::{access_rules::ComponentAccessRules, ComponentAddress, OwnerRule};
+use tari_template_lib_types::{ComponentAddress, OwnerRule, access_rules::ComponentAccessRules};
 
 use crate::{
     caller_context::CallerContext,

@@ -7,7 +7,6 @@ use tari_template_lib::{
     models::{BucketId, ProofId},
     prelude::TemplateAddress,
     types::{
-        crypto::RistrettoPublicKeyBytes,
         ComponentAddress,
         ComponentKey,
         EntityId,
@@ -15,12 +14,13 @@ use tari_template_lib::{
         ObjectKey,
         ResourceAddress,
         VaultId,
+        crypto::RistrettoPublicKeyBytes,
     },
 };
 
 use crate::{
     component::derive_component_address_from_public_key,
-    hashing::{hasher32, EngineHashDomainLabel},
+    hashing::{EngineHashDomainLabel, hasher32},
 };
 
 #[derive(Debug, Clone)]

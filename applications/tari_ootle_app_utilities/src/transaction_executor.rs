@@ -14,10 +14,10 @@ use tari_engine::{
 };
 use tari_engine_types::{commit_result::ExecuteResult, substate::Substate, virtual_substate::VirtualSubstates};
 use tari_ootle_common_types::{
-    services::template_provider::TemplateProvider,
     SubstateLockType,
     SubstateRequirement,
     VersionedSubstateId,
+    services::template_provider::TemplateProvider,
 };
 use tari_ootle_storage::consensus_models::VersionedSubstateIdLockIntent;
 use tari_ootle_transaction::Transaction;

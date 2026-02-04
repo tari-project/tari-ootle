@@ -1,7 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use reqwest::StatusCode;
 use serde_json::json;
 use url::Url;

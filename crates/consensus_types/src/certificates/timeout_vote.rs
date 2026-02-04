@@ -10,7 +10,7 @@ use tari_ootle_common_types::{Epoch, NodeHeight};
 use tari_sidechain::QuorumDecision;
 use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
-use crate::{validator_signature::ValidatorSignatureBytes, SignedMessage, ToSignatureMessage, Vote};
+use crate::{SignedMessage, ToSignatureMessage, Vote, validator_signature::ValidatorSignatureBytes};
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct TimeoutVote {

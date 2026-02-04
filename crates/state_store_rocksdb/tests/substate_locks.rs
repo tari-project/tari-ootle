@@ -7,12 +7,12 @@ use std::collections::HashMap;
 
 use indexmap::IndexMap;
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::{optional::Optional, SubstateLockType};
+use tari_ootle_common_types::{SubstateLockType, optional::Optional};
 use tari_ootle_storage::{
-    consensus_models::SubstateLock,
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
+    consensus_models::SubstateLock,
 };
 use tari_ootle_transaction::TransactionId;
 

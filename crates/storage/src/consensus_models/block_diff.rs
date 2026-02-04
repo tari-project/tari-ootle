@@ -8,10 +8,10 @@ use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{ShardGroup, VersionedSubstateIdRef};
 
 use crate::{
-    consensus_models::substate_change::SubstateChange,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
+    consensus_models::substate_change::SubstateChange,
 };
 
 #[derive(Debug, Clone)]

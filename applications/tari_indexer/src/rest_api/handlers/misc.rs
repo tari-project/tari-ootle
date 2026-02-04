@@ -2,9 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use axum::{
-    response::{IntoResponse, Response},
     Extension,
     Json,
+    response::{IntoResponse, Response},
 };
 use serde_json::json;
 use tari_epoch_manager::EpochManagerReader;

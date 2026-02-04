@@ -23,10 +23,8 @@
 use std::{fmt, fmt::Formatter, sync::Arc};
 
 use tari_engine_types::limits;
-use tari_template_abi::{FunctionDef, TemplateDef, Type, ABI_TEMPLATE_DEF_GLOBAL_NAME};
+use tari_template_abi::{ABI_TEMPLATE_DEF_GLOBAL_NAME, FunctionDef, TemplateDef, Type};
 use wasmer::{
-    imports,
-    sys::{BaseTunables, CompilerConfig, Cranelift, CraneliftOptLevel, EngineBuilder, Target},
     AsStoreMut,
     Engine,
     ExportError,
@@ -35,19 +33,21 @@ use wasmer::{
     Pages,
     Store,
     TypedFunction,
-    WasmPtr,
     WASM_PAGE_SIZE,
+    WasmPtr,
+    imports,
+    sys::{BaseTunables, CompilerConfig, Cranelift, CraneliftOptLevel, EngineBuilder, Target},
 };
 
 use crate::{
     template::{LoadedTemplate, TemplateLoaderError, TemplateModuleLoader},
     wasm::{
-        environment::WasmEnv,
-        limiting_tunable::LimitingTunables,
-        metering,
         WasmExecutionError,
         WasmProcess,
         WasmValidationError,
+        environment::WasmEnv,
+        limiting_tunable::LimitingTunables,
+        metering,
     },
 };
 

@@ -8,8 +8,8 @@ use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use futures::{future, future::Either};
 use log::*;
 use ootle_byte_type::ToByteType;
-use tari_ootle_common_types::{optional::Optional, response_status::ResponseErrorStatus, Epoch, Network};
-use tari_ootle_transaction::{args, Transaction};
+use tari_ootle_common_types::{Epoch, Network, optional::Optional, response_status::ResponseErrorStatus};
+use tari_ootle_transaction::{Transaction, args};
 use tari_ootle_wallet_sdk::{
     apis::{config::ConfigKey, transaction::TransactionApiError},
     models::WalletEvent,
@@ -43,6 +43,7 @@ use tokio::time;
 use super::context::HandlerContext;
 use crate::{
     handlers::{
+        HandlerError,
         helpers::{
             get_account,
             get_account_or_default,
@@ -51,7 +52,6 @@ use crate::{
             not_found,
             transaction_rejected,
         },
-        HandlerError,
     },
     services::wasm_optimizer::optimize_wasm_template,
 };

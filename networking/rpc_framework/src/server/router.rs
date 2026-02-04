@@ -24,25 +24,25 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::{
+    FutureExt,
     future::BoxFuture,
     task::{Context, Poll},
-    FutureExt,
 };
 use libp2p::StreamProtocol;
-use tower::{make::MakeService, Service};
+use tower::{Service, make::MakeService};
 
 use super::RpcServerError;
 use crate::{
+    RpcError,
+    RpcServer,
+    RpcStatus,
+    Substream,
     body::Body,
     either::Either,
     message::{Request, Response},
     not_found::ProtocolServiceNotFound,
     notify::ProtocolNotificationRx,
     server::{NamedProtocolService, RpcServerHandle},
-    RpcError,
-    RpcServer,
-    RpcStatus,
-    Substream,
 };
 
 /// Allows service factories of different types to be composed into a single service that resolves a given

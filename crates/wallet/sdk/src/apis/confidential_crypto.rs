@@ -4,15 +4,15 @@
 use tari_common_types::types::PrivateKey;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_ootle_wallet_crypto::{
-    confidential,
-    encrypted_data::{decrypt_data, encrypt_data, unblind_output},
-    kdfs,
-    memo::Memo,
     DecryptedData,
     MaskAndValue,
     OutputWitness,
     StealthProofError,
     WalletCryptoError,
+    confidential,
+    encrypted_data::{decrypt_data, encrypt_data, unblind_output},
+    kdfs,
+    memo::Memo,
 };
 use tari_template_lib::{
     prelude::{ConfidentialOutputStatement, ConfidentialWithdrawProof, PedersenCommitmentBytes},

@@ -111,12 +111,12 @@ mod tests {
 
     use rand::Rng;
     use tari_state_tree::{
-        memory_store::MemoryTreeStore,
         JellyfishMerkleTree,
         LeafKey,
         StaleTreeNode,
         TreeHash,
         TreeStoreWriter,
+        memory_store::MemoryTreeStore,
     };
 
     use super::*;

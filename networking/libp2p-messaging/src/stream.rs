@@ -2,8 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use libp2p::{
-    futures::{channel::mpsc, SinkExt, Stream, StreamExt},
     PeerId,
+    futures::{SinkExt, Stream, StreamExt, channel::mpsc},
 };
 
 pub type StreamId = u64;

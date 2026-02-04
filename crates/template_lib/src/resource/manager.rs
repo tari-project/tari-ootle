@@ -42,12 +42,8 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use tari_bor::to_value;
-use tari_template_abi::{call_engine, rust::collections::BTreeMap, EngineOp};
+use tari_template_abi::{EngineOp, call_engine, rust::collections::BTreeMap};
 use tari_template_lib_types::{
-    access_rules::ResourceAccessRules,
-    confidential::ConfidentialOutputStatement,
-    crypto::StealthValueProof,
-    stealth::StealthTransferStatement,
     AuthHook,
     Metadata,
     NonFungibleId,
@@ -56,6 +52,10 @@ use tari_template_lib_types::{
     ResourceInfo,
     UtxoId,
     VaultId,
+    access_rules::ResourceAccessRules,
+    confidential::ConfidentialOutputStatement,
+    crypto::StealthValueProof,
+    stealth::StealthTransferStatement,
 };
 
 use crate::{
@@ -80,8 +80,8 @@ use crate::{
     models::{Bucket, BucketId, NonFungible, ResourceAddressAllocation},
     prelude::ResourceType,
     types::{
-        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
         Amount,
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     },
 };
 

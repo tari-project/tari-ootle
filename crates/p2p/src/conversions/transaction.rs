@@ -26,9 +26,9 @@ use anyhow::anyhow;
 use tari_ootle_transaction::Transaction;
 
 use crate::{
+    NewTransactionMessage,
     encoding::{decode_from_slice, encode_to_vec},
     proto::{self},
-    NewTransactionMessage,
 };
 
 // -------------------------------- NewTransactionMessage -------------------------------- //

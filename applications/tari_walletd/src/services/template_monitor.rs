@@ -4,7 +4,7 @@
 use log::*;
 use tari_engine::wasm::WasmModule;
 use tari_ootle_common_types::substate_type::SubstateType;
-use tari_ootle_wallet_sdk::{models::WalletEvent, WalletSdk, WalletSdkSpec};
+use tari_ootle_wallet_sdk::{WalletSdk, WalletSdkSpec, models::WalletEvent};
 use tari_ootle_wallet_sdk_services::notify::Notify;
 use tari_shutdown::ShutdownSignal;
 use tokio::task;

@@ -7,8 +7,8 @@ use anyhow::bail;
 use tari_ootle_common_types::optional::Optional;
 use tari_ootle_transaction::TransactionId;
 use tari_validator_node_client::{
-    types::{GetTransactionResultRequest, SubmitTransactionRequest, SubmitTransactionResponse},
     ValidatorNodeClient,
+    types::{GetTransactionResultRequest, SubmitTransactionRequest, SubmitTransactionResponse},
 };
 use tokio::{
     sync::mpsc,

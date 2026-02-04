@@ -34,15 +34,15 @@ use std::{fs, panic, pin, process};
 use log::*;
 use tari_common_types::seeds::seed_words::SeedWords;
 use tari_ootle_app_utilities::genesis_resources::{get_public_identity_resource, get_stealth_tari_resource};
-use tari_ootle_common_types::{optional::Optional, Network, NumPreshards};
+use tari_ootle_common_types::{Network, NumPreshards, optional::Optional};
 use tari_ootle_wallet_sdk::{
+    WalletSdk as Sdk,
+    WalletSdkConfig,
+    WalletSdkSpec,
     apis::config::{ConfigApi, ConfigKey},
     cipher_seed::CipherSeedRestore,
     local_key_store::LocalKeyStore,
     models::EpochBirthday,
-    WalletSdk as Sdk,
-    WalletSdkConfig,
-    WalletSdkSpec,
 };
 use tari_ootle_wallet_sdk_services::{
     account_recovery::AccountRecoveryService,
@@ -54,7 +54,7 @@ use tari_shutdown::ShutdownSignal;
 
 use crate::{
     config::ApplicationConfig,
-    handlers::{auth::create_authenticator, HandlerContext},
+    handlers::{HandlerContext, auth::create_authenticator},
     services::spawn_services,
 };
 

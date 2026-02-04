@@ -13,17 +13,17 @@ use minotari_app_grpc::{
 use tari_engine_types::confidential::{AbridgedTransactionKernel, EncodedMerkleProof, MinotariBurnClaimProof};
 use tari_ootle_wallet_sdk::models::KeyBranch;
 use tari_template_lib_types::{
-    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
     EncryptedData,
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
 };
 use tari_transaction_components::{
     tari_amount::T,
-    transaction_components::{memo_field::TxType, MemoField},
+    transaction_components::{MemoField, memo_field::TxType},
 };
 use tari_wallet_daemon_client::types::ClaimBurnProof;
 use tokio::time::sleep;
 
-use crate::{spawn_minotari_wallet, TariWorld};
+use crate::{TariWorld, spawn_minotari_wallet};
 
 #[given(expr = "a wallet {word} connected to base node {word}")]
 async fn start_wallet(world: &mut TariWorld, step: &Step, wallet_name: String, bn_name: String) {

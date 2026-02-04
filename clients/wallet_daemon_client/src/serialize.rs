@@ -4,10 +4,10 @@
 use std::{fmt, marker::PhantomData, str::FromStr};
 
 use serde::{
-    de,
-    de::{MapAccess, Visitor},
     Deserialize,
     Deserializer,
+    de,
+    de::{MapAccess, Visitor},
 };
 
 pub(crate) fn string_or_struct<'de, T, D, TErr>(deserializer: D) -> Result<T, D::Error>

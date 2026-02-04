@@ -8,16 +8,16 @@ use serde::{Deserialize, Serialize};
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::{indexed_value::IndexedValueError, substate::SubstateId};
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
-use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, ComponentAddress};
+use tari_template_lib::types::{ComponentAddress, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
-    unsealed::UnsealedTransaction,
     Instruction,
     IntoSigned,
     Signable,
     TransactionSignature,
     UnsealedTransactionV1,
     UnsignedTransactionV1,
+    unsealed::UnsealedTransaction,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

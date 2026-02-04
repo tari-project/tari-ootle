@@ -14,8 +14,8 @@ use integration_tests::{
 use tari_validator_node_client::types::AddPeerRequest;
 
 use crate::{
-    steps::{indexer, miner, network::spec::NetworkSpec, validator_node, wallet},
     TariWorld,
+    steps::{indexer, miner, network::spec::NetworkSpec, validator_node, wallet},
 };
 
 async fn create_network(world: &mut TariWorld, step: &Step, spec: NetworkSpec) {

@@ -27,7 +27,7 @@ use std::{
 
 use log::*;
 use rocksdb::{Transaction, TransactionDB};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use tari_consensus_types::{
     BlockId,
     HighPc,
@@ -47,9 +47,6 @@ use tari_consensus_types::{
 };
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{
-    displayable::Displayable,
-    optional::Optional,
-    shard::Shard,
     Epoch,
     NodeAddressable,
     NodeHeight,
@@ -59,8 +56,14 @@ use tari_ootle_common_types::{
     SubstateAddress,
     ToSubstateAddress,
     VersionedSubstateIdRef,
+    displayable::Displayable,
+    optional::Optional,
+    shard::Shard,
 };
 use tari_ootle_storage::{
+    Ordering,
+    StateStoreReadTransaction,
+    StorageError,
     consensus_models::{
         Block,
         BlockDiff,
@@ -87,9 +90,6 @@ use tari_ootle_storage::{
         ValidatorConsensusStats,
     },
     time::PrimitiveDateTime,
-    Ordering,
-    StateStoreReadTransaction,
-    StorageError,
 };
 use tari_ootle_transaction::TransactionId;
 use tari_state_tree::{Node, NodeKey, StateTreePayload, Version};
@@ -956,31 +956,30 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let block_filter = |block: &Block| {
             let mut res = true;
-            if let Some(filter) = &filter {
-                if !filter.is_empty() {
-                    if let Some(filter_index) = filter_index {
-                        match filter_index {
-                            0 => res = block.id().to_string().contains(filter),
-                            1 => {
-                                let epoch_number = filter.parse::<u64>().unwrap();
-                                res = block.epoch() == Epoch(epoch_number);
-                            },
-                            2 => {
-                                let height_number = filter.parse::<u64>().unwrap();
-                                res = block.height() == NodeHeight(height_number);
-                            },
-                            4 => {
-                                let cmd_number = filter.parse::<usize>().unwrap();
-                                res = block.command_count() >= cmd_number;
-                            },
-                            5 => {
-                                let fee = filter.parse::<u64>().unwrap();
-                                res = block.total_leader_fee() >= fee;
-                            },
-                            7 => res = block.proposed_by().to_string().contains(filter),
-                            _ => (),
-                        }
-                    }
+            if let Some(filter) = &filter &&
+                !filter.is_empty() &&
+                let Some(filter_index) = filter_index
+            {
+                match filter_index {
+                    0 => res = block.id().to_string().contains(filter),
+                    1 => {
+                        let epoch_number = filter.parse::<u64>().unwrap();
+                        res = block.epoch() == Epoch(epoch_number);
+                    },
+                    2 => {
+                        let height_number = filter.parse::<u64>().unwrap();
+                        res = block.height() == NodeHeight(height_number);
+                    },
+                    4 => {
+                        let cmd_number = filter.parse::<usize>().unwrap();
+                        res = block.command_count() >= cmd_number;
+                    },
+                    5 => {
+                        let fee = filter.parse::<u64>().unwrap();
+                        res = block.total_leader_fee() >= fee;
+                    },
+                    7 => res = block.proposed_by().to_string().contains(filter),
+                    _ => (),
                 }
             }
             res
@@ -1323,16 +1322,16 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                     continue;
                 };
 
-                if let Some(stage) = stage {
-                    if tx_pool_rec.pending_stage() != Some(stage) {
-                        continue;
-                    }
+                if let Some(stage) = stage &&
+                    tx_pool_rec.pending_stage() != Some(stage)
+                {
+                    continue;
                 }
 
-                if let Some(is_ready) = is_ready {
-                    if tx_pool_rec.is_ready() != is_ready {
-                        continue;
-                    }
+                if let Some(is_ready) = is_ready &&
+                    tx_pool_rec.is_ready() != is_ready
+                {
+                    continue;
                 }
 
                 if skip_lock_conflicted && lock_conflict_query.exists_prefix(&tx_id)? {
@@ -1514,11 +1513,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         // Check if the substate lock is in the head index (typical case optimisation)
         let head_idx = self.db().cf(substate_locks::HeadIndex)?;
-        if let Some(head) = head_idx.get(substate_id, OPERATION).optional()? {
-            if pending_chain.contains(&head.block_id) {
-                let lock = cf.get(&head, OPERATION)?;
-                return Ok(lock);
-            }
+        if let Some(head) = head_idx.get(substate_id, OPERATION).optional()? &&
+            pending_chain.contains(&head.block_id)
+        {
+            let lock = cf.get(&head, OPERATION)?;
+            return Ok(lock);
         }
 
         let query = self.db().cf(substate_locks::ByBlockIdSubstateIdQuery::default())?;
@@ -1644,27 +1643,32 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         for (rec, substate) in data.transitions.iter().zip(substates) {
             let update = match rec.transition {
                 StateTransitionType::Up => {
-                    let exclude = up_only && substate.substate_value.is_none();
-                    value_filter
-                        .contains_substate(&substate.substate_id)
-                        // filter includes substate, return full value if available, otherwise return hash
-                        .then(|| {
-                            substate
-                                .substate_value
-                                .map(|v| SubstateValueOrHash::Value(Box::new(v)))
-                                .unwrap_or_else(|| SubstateValueOrHash::Hash(substate.state_hash))
-                        })
-                        // Otherwise if the client still wants all hashes for filtered out substates
-                        .or_else(|| all_hashes.then_some(SubstateValueOrHash::Hash(substate.state_hash)))
-                        .map(|value| {
-                            SubstateUpdateProof::Create(SubstateCreate {
-                                substate: SubstateData {
-                                    substate_id: substate.substate_id,
-                                    version: substate.version,
-                                    value,
-                                },
+                    if up_only && substate.substate_value.is_none() {
+                        // If the client only wants up transitions with values, and this up transition doesn't have a
+                        // value, skip it
+                        None
+                    } else {
+                        value_filter
+                            .contains_substate(&substate.substate_id)
+                            // filter includes substate, return full value if available, otherwise return hash
+                            .then(|| {
+                                substate
+                                    .substate_value
+                                    .map(|v| SubstateValueOrHash::Value(Box::new(v)))
+                                    .unwrap_or_else(|| SubstateValueOrHash::Hash(substate.state_hash))
                             })
-                        }).filter(|_| !exclude)
+                            // Otherwise if the client still wants all hashes for filtered out substates
+                            .or_else(|| all_hashes.then_some(SubstateValueOrHash::Hash(substate.state_hash)))
+                            .map(|value| {
+                                SubstateUpdateProof::Create(SubstateCreate {
+                                    substate: SubstateData {
+                                        substate_id: substate.substate_id,
+                                        version: substate.version,
+                                        value,
+                                    },
+                                })
+                            })
+                    }
                 },
                 StateTransitionType::Down => (!up_only)
                     .then(|| {

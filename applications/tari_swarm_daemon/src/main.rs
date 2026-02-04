@@ -4,11 +4,11 @@
 use std::{
     collections::HashMap,
     future::Future,
-    pin::{pin, Pin},
+    pin::{Pin, pin},
 };
 
-use anyhow::{anyhow, Context};
-use futures::future::{select, Either};
+use anyhow::{Context, anyhow};
+use futures::future::{Either, select};
 use tari_ootle_common_types::Network;
 use tari_shutdown::Shutdown;
 use tokio::fs;

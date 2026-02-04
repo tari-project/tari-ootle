@@ -6,20 +6,20 @@ use std::{collections::BTreeMap, mem};
 use ootle_byte_type::ToByteType;
 use serde::{Deserialize, Serialize};
 use tari_crypto::{
-    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey},
+    ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment},
     tari_utilities::ByteArray,
 };
 use tari_template_abi::rust::collections::BTreeSet;
 use tari_template_lib::{
     prelude::{ConfidentialOutputStatement, ConfidentialWithdrawProof, RistrettoPublicKeyBytes},
     types::{
-        crypto::PedersenCommitmentBytes,
         Amount,
         NonFungibleAddress,
         NonFungibleId,
         ResourceAddress,
         ResourceType,
         UtxoId,
+        crypto::PedersenCommitmentBytes,
     },
 };
 
@@ -281,7 +281,7 @@ impl ResourceContainer {
                     operate: "deposit",
                     given: other.resource_type(),
                     expected: this.resource_type(),
-                })
+                });
             },
         }
         Ok(())

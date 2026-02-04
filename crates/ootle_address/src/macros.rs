@@ -14,7 +14,9 @@ mod tests {
 
     #[test]
     fn it_produces_a_address_from_string() {
-        let addr = address!("otl_loc_1nsy5c5mfn7jgmg5nm3s3m4vr829tgpeehmymkme6k5wszde6wc7zcfwtyyxwn62tqefqyfyjangalt4zrygzwyf8c6c2jtfqyd8dk0gtwcv5x");
+        let addr = address!(
+            "otl_loc_1nsy5c5mfn7jgmg5nm3s3m4vr829tgpeehmymkme6k5wszde6wc7zcfwtyyxwn62tqefqyfyjangalt4zrygzwyf8c6c2jtfqyd8dk0gtwcv5x"
+        );
         assert_eq!(addr.network(), Network::LocalNet);
     }
 }

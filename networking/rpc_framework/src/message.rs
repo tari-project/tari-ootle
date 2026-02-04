@@ -7,13 +7,13 @@ use bitflags::bitflags;
 use bytes::Bytes;
 
 use crate::{
+    RpcError,
+    RpcStatusCode,
     body::{Body, IntoBody},
     error::HandshakeRejectReason,
     max_response_payload_size,
     proto,
     proto::rpc_session_reply::SessionResult,
-    RpcError,
-    RpcStatusCode,
 };
 
 #[derive(Debug)]

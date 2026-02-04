@@ -6,7 +6,7 @@ use std::{num::NonZeroU64, ops::Not};
 use indexmap::IndexSet;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_ootle_wallet_crypto::{memo::Memo, pay_to::PayTo};
-use tari_template_lib_types::{crypto::UtxoTag, ResourceAddress};
+use tari_template_lib_types::{ResourceAddress, crypto::UtxoTag};
 
 use crate::Address;
 

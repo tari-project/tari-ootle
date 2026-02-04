@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use pb_rs::{types::FileDescriptor, ConfigBuilder};
+use pb_rs::{ConfigBuilder, types::FileDescriptor};
 
 const PROTOS: &[&str] = &["messages.proto"];
 

@@ -4,12 +4,12 @@
 use std::collections::BTreeMap;
 
 use tari_engine::runtime::RuntimeError;
-use tari_ootle_transaction::{args, Transaction};
+use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::{
     args::VaultFreezeFlag,
     types::{ComponentAddress, ResourceAddress, VaultId},
 };
-use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
+use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 

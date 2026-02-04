@@ -1,7 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_jellyfish::{jmt_node_hash, LeafKey, TreeHash};
+use tari_jellyfish::{LeafKey, TreeHash, jmt_node_hash};
 use tari_ootle_common_types::VersionedSubstateId;
 
 pub trait DbKeyMapper<T> {

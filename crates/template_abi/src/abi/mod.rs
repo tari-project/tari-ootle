@@ -22,7 +22,7 @@
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 #[cfg(target_arch = "wasm32")]
 pub use wasm::*;
 #[cfg(not(target_arch = "wasm32"))]
@@ -74,7 +74,7 @@ pub fn call_debug<T: AsRef<[u8]>>(data: T) {
 }
 
 /// Allocates a length-prefixed block of memory of length `len` + 4 bytes.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn tari_alloc(len: u32) -> *mut u8 {
     let cap = (len + 4) as usize;
     let mut buf = Vec::<u8>::with_capacity(cap);

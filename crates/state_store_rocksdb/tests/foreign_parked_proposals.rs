@@ -6,9 +6,9 @@ pub mod helpers;
 use helpers::{create_foreign_proposal, create_rocksdb, transaction_id_from_seed};
 use tari_ootle_common_types::{Epoch, Network};
 use tari_ootle_storage::{
-    consensus_models::{Block, BookkeepingModel, ForeignParkedProposal},
     StateStore,
     StateStoreWriteTransaction,
+    consensus_models::{Block, BookkeepingModel, ForeignParkedProposal},
 };
 
 use crate::helpers::num_preshards;

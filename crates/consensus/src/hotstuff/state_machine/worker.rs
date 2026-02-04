@@ -9,13 +9,13 @@ use tokio::{sync::watch, time};
 
 use crate::{
     hotstuff::{
+        HotStuffError,
+        HotstuffWorker,
         state_machine::{
             event::ConsensusStateEvent,
             idle::Idle,
             state::{ConsensusCurrentState, ConsensusState},
         },
-        HotStuffError,
-        HotstuffWorker,
     },
     traits::{ConsensusSpec, SyncManager},
 };

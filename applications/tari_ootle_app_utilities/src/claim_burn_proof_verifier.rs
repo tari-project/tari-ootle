@@ -3,24 +3,24 @@
 
 use std::fmt::Display;
 
-use blake2::{digest::consts::U32, Blake2b};
+use blake2::{Blake2b, digest::consts::U32};
 use log::*;
 use ootle_byte_type::ConvertFromByteType;
 use tari_common_types::types::{CompressedCommitment, CompressedPublicKey, CompressedSignature, FixedHash};
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
-    ristretto::{pedersen::PedersenCommitment, RistrettoSchnorr, RistrettoSecretKey},
+    ristretto::{RistrettoSchnorr, RistrettoSecretKey, pedersen::PedersenCommitment},
     tari_utilities::ByteArray,
 };
 use tari_engine::traits::ClaimProofVerifier;
 use tari_engine_types::{confidential::MinotariBurnClaimProof, crypto::get_commitment_factory};
-use tari_hashing::{hashers::KernelMmrHasherBlake256, TransactionHashDomain};
+use tari_hashing::{TransactionHashDomain, hashers::KernelMmrHasherBlake256};
 use tari_mmr::common::LeafIndex;
 use tari_ootle_common_types::{
-    base_layer_hashing::ownership_proof_hasher64,
-    optional::{IsNotFoundError, Optional},
     Epoch,
     Network,
+    base_layer_hashing::ownership_proof_hasher64,
+    optional::{IsNotFoundError, Optional},
 };
 use tari_ootle_storage::global::{GlobalDb, GlobalDbAdapter};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;

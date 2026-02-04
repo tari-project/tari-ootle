@@ -7,7 +7,6 @@ use helpers::{commit_chain, create_chain, create_rocksdb, create_tx_atom};
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{PcId, ShardGroupAccumulatedData};
 use tari_ootle_common_types::{
-    optional::Optional,
     Epoch,
     ExtraData,
     ExtraFieldKey,
@@ -15,13 +14,14 @@ use tari_ootle_common_types::{
     NodeHeight,
     NumPreshards,
     ShardGroup,
+    optional::Optional,
 };
 use tari_ootle_storage::{
-    consensus_models::{Block, BookkeepingModel, Command},
     Ordering,
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
+    consensus_models::{Block, BookkeepingModel, Command},
 };
 use tari_template_lib::prelude::SchnorrSignatureBytes;
 use tari_utilities::epoch_time::EpochTime;

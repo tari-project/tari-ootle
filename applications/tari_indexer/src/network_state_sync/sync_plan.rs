@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use tari_epoch_manager::service::NetworkDescription;
-use tari_ootle_common_types::{shard::Shard, Epoch, ShardGroup, StateVersion};
+use tari_ootle_common_types::{Epoch, ShardGroup, StateVersion, shard::Shard};
 
 use crate::network_state_sync::{committee_client::ValidatorCommitteeRpcPool, sync_progress::SyncProgress};
 

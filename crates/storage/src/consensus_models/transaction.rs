@@ -9,17 +9,20 @@ use std::{
 use log::*;
 use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::{
+    NumPreshards,
+    ToSubstateAddress,
     committee::CommitteeInfo,
     displayable::Displayable,
     optional::Optional,
-    NumPreshards,
-    ToSubstateAddress,
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_template_lib_types::TransactionReceiptAddress;
 use time::PrimitiveDateTime;
 
 use crate::{
+    StateStoreReadTransaction,
+    StateStoreWriteTransaction,
+    StorageError,
     consensus_models::{
         Evidence,
         LockedSubstateValue,
@@ -28,9 +31,6 @@ use crate::{
         TransactionExecution,
         TransactionPoolRecord,
     },
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
-    StorageError,
 };
 
 const LOG_TARGET: &str = "tari::ootle::storage::consensus_models::transaction";

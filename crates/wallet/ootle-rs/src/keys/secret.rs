@@ -4,7 +4,7 @@
 use async_trait::async_trait;
 use ootle_byte_type::ToByteType;
 use rand::thread_rng;
-use signature::{hazmat::PrehashSigner, Keypair};
+use signature::{Keypair, hazmat::PrehashSigner};
 use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},

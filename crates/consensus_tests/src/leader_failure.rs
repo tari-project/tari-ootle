@@ -10,7 +10,7 @@ use tari_crypto::tari_utilities::ByteArray;
 use tari_ootle_common_types::{Epoch, NodeHeight};
 use tari_ootle_storage::{StateStore, StateStoreReadTransaction};
 
-use crate::support::{helpers, logging::setup_logger, Test, TestAddress, TestVnDestination};
+use crate::support::{Test, TestAddress, TestVnDestination, helpers, logging::setup_logger};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn single_shard_node_goes_down() {

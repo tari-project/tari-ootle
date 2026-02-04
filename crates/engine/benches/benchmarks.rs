@@ -5,7 +5,7 @@ mod common;
 
 use std::{hint::black_box, iter, sync::Arc};
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use tari_engine::{
     executables::{Executable, Instructions, WeightedExecutable},
     runtime::AuthParams,
@@ -14,11 +14,11 @@ use tari_engine::{
 };
 use tari_engine_types::virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates};
 use tari_ootle_common_types::SubstateRequirementRef;
-use tari_ootle_transaction::{args::WorkspaceOffsetId, call_args, Instruction, TransactionId, TransactionWeight};
+use tari_ootle_transaction::{Instruction, TransactionId, TransactionWeight, args::WorkspaceOffsetId, call_args};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
-use tari_template_test_tooling::{mocks::AlwaysPassesProofVerifier, Package};
+use tari_template_test_tooling::{Package, mocks::AlwaysPassesProofVerifier};
 
-use crate::common::{setup_store, FAUCET_COMPONENT_ADDRESS};
+use crate::common::{FAUCET_COMPONENT_ADDRESS, setup_store};
 
 type BenchTxProcessor = TransactionProcessor<ReadOnlyMemoryStateStore, Package>;
 

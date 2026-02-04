@@ -6,7 +6,7 @@ use std::fmt::Display;
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
-use tari_ootle_common_types::{hashing::quorum_certificate_id_hasher, Epoch, NodeHeight, ShardGroup};
+use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, hashing::quorum_certificate_id_hasher};
 use tari_sidechain::QuorumDecision;
 
 use crate::{

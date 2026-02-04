@@ -4,7 +4,7 @@
 use ootle_byte_type::ToByteType;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::substate_type::SubstateType;
-use tari_ootle_transaction::{args, call_args, Transaction};
+use tari_ootle_transaction::{Transaction, args, call_args};
 use tari_template_lib::types::{Amount, ComponentAddress};
 use tari_template_test_tooling::TemplateTest;
 

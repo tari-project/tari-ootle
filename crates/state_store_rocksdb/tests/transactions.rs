@@ -14,6 +14,9 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{Epoch, ExtraData, Network, NodeHeight, SubstateRequirement};
 use tari_ootle_storage::{
+    StateStore,
+    StateStoreReadTransaction,
+    StateStoreWriteTransaction,
     consensus_models::{
         Block,
         BlockTransactionExecution,
@@ -24,9 +27,6 @@ use tari_ootle_storage::{
         TransactionPoolStatusUpdate,
         TransactionRecord,
     },
-    StateStore,
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
 };
 use tari_ootle_transaction::{Instruction, Transaction};
 use tari_template_lib::{prelude::SchnorrSignatureBytes, types::Hash};

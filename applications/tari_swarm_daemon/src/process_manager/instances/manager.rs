@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use indexmap::IndexMap;
 use log::info;
 use slug::slugify;
@@ -26,15 +26,15 @@ use tokio::{
 use super::InstanceId;
 use crate::{
     config::{InstanceConfig, InstanceType},
-    process_definitions::{get_definition, ProcessContext},
+    process_definitions::{ProcessContext, get_definition},
     process_manager::{
-        executables::{Executable, Executables},
-        port_allocator::PortAllocator,
-        processes::{MinoTariMinerProcess, MinoTariNodeProcess, MinoTariWalletProcess, ValidatorNodeProcess},
         AllocatedPorts,
         IndexerProcess,
         Instance,
         WalletDaemonProcess,
+        executables::{Executable, Executables},
+        port_allocator::PortAllocator,
+        processes::{MinoTariMinerProcess, MinoTariNodeProcess, MinoTariWalletProcess, ValidatorNodeProcess},
     },
 };
 

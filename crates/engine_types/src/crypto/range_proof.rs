@@ -11,7 +11,7 @@ use tari_crypto::{
 use tari_template_lib::types::{crypto::RangeProofBytes, stealth::UnspentOutput};
 
 use crate::{
-    crypto::{get_static_range_proof_service, MAX_LAZY_BP_AGG_FACTORS},
+    crypto::{MAX_LAZY_BP_AGG_FACTORS, get_static_range_proof_service},
     resource_container::ResourceError,
 };
 

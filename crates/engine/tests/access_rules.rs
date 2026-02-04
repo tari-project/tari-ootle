@@ -3,10 +3,17 @@
 use std::collections::{BTreeMap, HashMap};
 
 use tari_engine::runtime::{ActionIdent, LockError, RuntimeError};
-use tari_ootle_transaction::{args, Transaction};
+use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::{
     args::ComponentAction,
     types::{
+        AccessRule,
+        ComponentAddress,
+        Metadata,
+        NonFungibleId,
+        OwnerRule,
+        ResourceAddress,
+        VaultId,
         access_rules::{
             ComponentAccessRules,
             RequireRule,
@@ -15,22 +22,15 @@ use tari_template_lib::{
             RestrictedAccessRule,
         },
         rule,
-        AccessRule,
-        ComponentAddress,
-        Metadata,
-        NonFungibleId,
-        OwnerRule,
-        ResourceAddress,
-        VaultId,
     },
 };
 use tari_template_test_tooling::{
+    TemplateTest,
     support::assert_error::{
         assert_access_denied_for_action,
         assert_insufficient_funds_for_action,
         assert_reject_reason,
     },
-    TemplateTest,
 };
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");

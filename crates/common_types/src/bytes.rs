@@ -23,7 +23,7 @@
 use std::{cmp, convert::TryFrom, ops::Deref};
 
 use borsh::BorshSerialize;
-use bounded_vec::{witnesses, BoundedVec};
+use bounded_vec::{BoundedVec, witnesses};
 use serde::{Deserialize, Serialize};
 
 type BoundedByteVec<const MAX: usize> = BoundedVec<u8, 0, MAX, witnesses::Empty<MAX>>;

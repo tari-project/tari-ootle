@@ -3,7 +3,7 @@
 
 use std::io::{Read, Write};
 
-use tari_ootle_common_types::{shard::Shard, Epoch, NodeHeight};
+use tari_ootle_common_types::{Epoch, NodeHeight, shard::Shard};
 
 use crate::{
     codecs::{DbCodec, EncodeVec},

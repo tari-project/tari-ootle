@@ -4,11 +4,11 @@
 use std::str::FromStr;
 
 use clap::{Args, Subcommand};
-use tari_ootle_common_types::{shard::Shard, ShardGroup};
+use tari_ootle_common_types::{ShardGroup, shard::Shard};
 use tari_wallet_daemon_client::{
-    types::{AccountOrKeyId, ClaimValidatorFeesRequest, GetValidatorFeesRequest},
     ComponentAddressOrName,
     WalletDaemonClient,
+    types::{AccountOrKeyId, ClaimValidatorFeesRequest, GetValidatorFeesRequest},
 };
 
 use crate::command::transaction::summarize_finalize_result;

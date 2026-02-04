@@ -54,21 +54,21 @@ use serde::Serialize;
 use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_epoch_manager::{
-    traits::{EpochManagerSpec, LayerOneTransactionSubmitter},
     EpochManagerEvent,
     EpochManagerReader,
+    traits::{EpochManagerSpec, LayerOneTransactionSubmitter},
 };
 use tari_epoch_oracles::EpochOracle;
 use tari_networking::NetworkingService;
 use tari_ootle_app_utilities::keypair::setup_keypair_prompt;
-use tari_ootle_common_types::{layer_one_transaction::LayerOneTransactionDef, PeerAddress};
+use tari_ootle_common_types::{PeerAddress, layer_one_transaction::LayerOneTransactionDef};
 use tari_ootle_storage::global::{DbFactory, GlobalDb};
-use tari_ootle_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
+use tari_ootle_storage_sqlite::{SqliteDbFactory, global::SqliteGlobalDbAdapter};
 use tari_shutdown::ShutdownSignal;
 use tokio::task;
 
 use crate::{
-    bootstrap::{spawn_services, Services},
+    bootstrap::{Services, spawn_services},
     config::ApplicationConfig,
     event_manager::EventManager,
     graphql::server::run_graphql,

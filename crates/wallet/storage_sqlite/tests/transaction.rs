@@ -3,7 +3,7 @@
 
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_ootle_common_types::optional::Optional;
-use tari_ootle_transaction::{args, Transaction, TransactionId};
+use tari_ootle_transaction::{Transaction, TransactionId, args};
 use tari_ootle_wallet_sdk::{
     models::TransactionStatus,
     storage::{CommittableStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},

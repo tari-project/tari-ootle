@@ -12,6 +12,7 @@ use std::{
 use log::{log, warn};
 use rocksdb::{
     ColumnFamilyDescriptor,
+    DB,
     IteratorMode,
     SingleThreaded,
     SliceTransform,
@@ -19,9 +20,8 @@ use rocksdb::{
     TransactionDBOptions,
     TransactionOptions,
     WriteOptions,
-    DB,
 };
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use tari_ootle_common_types::NodeAddressable;
 use tari_ootle_storage::{StateStore, StorageError};
 

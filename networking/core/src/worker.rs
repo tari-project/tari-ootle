@@ -2,13 +2,16 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     hash::Hash,
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use libp2p::{
+    Multiaddr,
+    PeerId,
+    StreamProtocol,
     autonat,
     autonat::NatStatus,
     core::ConnectedPoint,
@@ -23,19 +26,18 @@ use libp2p::{
     ping,
     relay,
     swarm::{
-        dial_opts::{DialOpts, PeerCondition},
         ConnectionId,
         DialError,
         SwarmEvent,
+        dial_opts::{DialOpts, PeerCondition},
     },
-    Multiaddr,
-    PeerId,
-    StreamProtocol,
 };
 use log::*;
 use tari_rpc_framework::Substream;
 use tari_shutdown::ShutdownSignal;
 use tari_swarm::{
+    TariNodeBehaviourEvent,
+    TariSwarm,
     is_supported_multiaddr,
     messaging,
     messaging::{prost, prost::ProstCodec},
@@ -44,8 +46,6 @@ use tari_swarm::{
     rendezvous::Namespace,
     substream,
     substream::{NegotiatedSubstream, ProtocolNotification, StreamId},
-    TariNodeBehaviourEvent,
-    TariSwarm,
 };
 use tokio::{
     sync::{broadcast, mpsc, oneshot},
@@ -53,6 +53,10 @@ use tokio::{
 };
 
 use crate::{
+    MessageSpec,
+    MessagingMode,
+    NetworkingError,
+    ReachabilityMode,
     connection::Connection,
     event::NetworkingEvent,
     global_ip::GlobalIp,
@@ -60,10 +64,6 @@ use crate::{
     notify::Notifiers,
     relay_state::RelayState,
     rendezvous_state::RendezvousState,
-    MessageSpec,
-    MessagingMode,
-    NetworkingError,
-    ReachabilityMode,
 };
 
 const LOG_TARGET: &str = "tari::networking::service::worker";
@@ -508,11 +508,11 @@ where
                     },
                 }
                 shrink_hashmap_if_required(&mut self.active_connections);
-                if let Some(selected) = self.relays.selected_relay() {
-                    if selected.circuit_connection_id == Some(connection_id) {
-                        // Our selected relay has disconnected, attempt to reserve another
-                        self.attempt_relay_reservation();
-                    }
+                if let Some(selected) = self.relays.selected_relay() &&
+                    selected.circuit_connection_id == Some(connection_id)
+                {
+                    // Our selected relay has disconnected, attempt to reserve another
+                    self.attempt_relay_reservation();
                 }
             },
             SwarmEvent::OutgoingConnectionError {
@@ -531,16 +531,16 @@ where
                     let _ignore = waiter.send(Err(NetworkingError::OutgoingConnectionError(error.to_string())));
                 }
 
-                if matches!(error, DialError::NoAddresses) {
-                    if let Some((peer_id, cookie)) = self.rendezvous_state.get_peer_and_cookie() {
-                        let ns = self.get_rendezvous_namespace();
-                        self.swarm.behaviour_mut().rendezvous_client.discover(
-                            Some(ns),
-                            cookie,
-                            self.config.rendezvous_peer_limit,
-                            peer_id,
-                        );
-                    }
+                if matches!(error, DialError::NoAddresses) &&
+                    let Some((peer_id, cookie)) = self.rendezvous_state.get_peer_and_cookie()
+                {
+                    let ns = self.get_rendezvous_namespace();
+                    self.swarm.behaviour_mut().rendezvous_client.discover(
+                        Some(ns),
+                        cookie,
+                        self.config.rendezvous_peer_limit,
+                        peer_id,
+                    );
                 }
             },
             SwarmEvent::ExternalAddrConfirmed { address } => {
@@ -799,19 +799,19 @@ where
 
     fn attempt_relay_reservation(&mut self) {
         self.relays.select_random_relay();
-        if let Some(relay) = self.relays.selected_relay() {
-            if let Err(err) = self.swarm.dial(
+        if let Some(relay) = self.relays.selected_relay() &&
+            let Err(err) = self.swarm.dial(
                 DialOpts::peer_id(relay.peer_id)
                     .addresses(relay.addresses.clone())
                     .condition(PeerCondition::NotDialing)
                     .extend_addresses_through_behaviour()
                     .build(),
-            ) {
-                if is_dial_error_caused_by_remote(&err) {
-                    self.relays.clear_selected_relay();
-                }
-                warn!(target: LOG_TARGET, "🚨 Failed to dial relay: {}", err);
+            )
+        {
+            if is_dial_error_caused_by_remote(&err) {
+                self.relays.clear_selected_relay();
             }
+            warn!(target: LOG_TARGET, "🚨 Failed to dial relay: {}", err);
         }
     }
 
@@ -836,10 +836,11 @@ where
             established_in
         );
 
-        if let Some(relay) = self.relays.selected_relay_mut() {
-            if endpoint.is_dialer() && relay.peer_id == peer_id {
-                relay.remote_address = Some(endpoint.get_remote_address().clone());
-            }
+        if let Some(relay) = self.relays.selected_relay_mut() &&
+            endpoint.is_dialer() &&
+            relay.peer_id == peer_id
+        {
+            relay.remote_address = Some(endpoint.get_remote_address().clone());
         }
 
         self.active_connections.entry(peer_id).or_default().push(Connection {

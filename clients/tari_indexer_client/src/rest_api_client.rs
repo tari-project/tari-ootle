@@ -1,8 +1,8 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use reqwest::{header, header::HeaderMap, IntoUrl, Url};
-use serde::{de::DeserializeOwned, Serialize};
+use reqwest::{IntoUrl, Url, header, header::HeaderMap};
+use serde::{Serialize, de::DeserializeOwned};
 use tari_engine_types::substate::SubstateId;
 use tari_template_lib_types::{ResourceAddress, TemplateAddress, TransactionReceiptAddress};
 

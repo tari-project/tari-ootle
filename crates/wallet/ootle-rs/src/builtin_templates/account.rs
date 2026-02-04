@@ -4,14 +4,14 @@
 use std::collections::HashSet;
 
 use tari_ootle_common_types::SubstateRequirement;
-use tari_ootle_transaction::{args, TransactionBuilder, UnsignedTransaction};
-use tari_template_lib_types::{constants::XTR, Amount, ResourceAddress};
+use tari_ootle_transaction::{TransactionBuilder, UnsignedTransaction, args};
+use tari_template_lib_types::{Amount, ResourceAddress, constants::XTR};
 
 use crate::{
-    builtin_templates::traits::UnsignedTransactionBuilder,
-    provider::{Provider, ProviderError, WantInput},
     Address,
     ToAccountAddress,
+    builtin_templates::traits::UnsignedTransactionBuilder,
+    provider::{Provider, ProviderError, WantInput},
 };
 
 pub type IAccount<'a, P> = AccountInvokeBuilder<'a, P>;

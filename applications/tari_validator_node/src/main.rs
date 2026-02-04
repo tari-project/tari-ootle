@@ -30,7 +30,7 @@ use tari_bor::Write;
 use tari_common::initialize_logging;
 use tari_ootle_app_utilities::{configuration::load_configuration, keypair::setup_keypair_prompt};
 use tari_shutdown::Shutdown;
-use tari_validator_node::{node, run_validator_node, ApplicationConfig};
+use tari_validator_node::{ApplicationConfig, node, run_validator_node};
 
 use crate::cli::Cli;
 

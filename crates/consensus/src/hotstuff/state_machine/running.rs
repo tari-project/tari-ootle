@@ -5,14 +5,14 @@ use log::*;
 
 use crate::{
     hotstuff::{
+        HotStuffError,
+        ProposalValidationError,
         state_machine::{
             check_sync::CheckSync,
             event::ConsensusStateEvent,
             syncing::Syncing,
             worker::ConsensusWorkerContext,
         },
-        HotStuffError,
-        ProposalValidationError,
     },
     traits::ConsensusSpec,
 };

@@ -8,7 +8,7 @@ use std::{
 
 use libp2p_identity::PeerId;
 use ootle_byte_type::ToByteType;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 

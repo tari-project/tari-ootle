@@ -4,11 +4,11 @@
 use std::{io, sync::Arc};
 
 use libp2p::{
-    futures::{SinkExt, StreamExt},
     PeerId,
+    futures::{SinkExt, StreamExt},
 };
 
-use crate::{behaviour::WantList, handler::FramedOutbound, proto, store::PeerStore, Error, Event, SignedPeerRecord};
+use crate::{Error, Event, SignedPeerRecord, behaviour::WantList, handler::FramedOutbound, proto, store::PeerStore};
 
 pub async fn outbound_request_want_list_task<TPeerStore: PeerStore>(
     peer_id: PeerId,

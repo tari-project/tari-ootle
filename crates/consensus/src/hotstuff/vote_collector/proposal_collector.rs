@@ -3,8 +3,8 @@
 
 use log::*;
 use tari_consensus_types::{HighPc, ProposalCertificate, ProposalVote, ValidatorSignatureBytes};
-use tari_ootle_common_types::{optional::Optional, Epoch, Network, NodeHeight};
-use tari_ootle_storage::{consensus_models::Block, StateStore};
+use tari_ootle_common_types::{Epoch, Network, NodeHeight, optional::Optional};
+use tari_ootle_storage::{StateStore, consensus_models::Block};
 use tari_sidechain::QuorumDecision;
 
 use super::collector::VoteCollector;

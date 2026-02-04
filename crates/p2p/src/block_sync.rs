@@ -5,7 +5,7 @@ use crate::{
     proto,
     proto::{
         consensus::{Block, QuorumCertificate},
-        rpc::{sync_blocks_response::SyncData, QuorumCertificates, SubstateCreate, SubstateUpdate},
+        rpc::{QuorumCertificates, SubstateCreate, SubstateUpdate, sync_blocks_response::SyncData},
         transaction::Transaction,
     },
 };

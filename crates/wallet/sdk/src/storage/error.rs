@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_common_types::optional::IsNotFoundError;
-use tari_template_lib::prelude::{crypto::UtxoTag, RistrettoPublicKeyBytes};
+use tari_template_lib::prelude::{RistrettoPublicKeyBytes, crypto::UtxoTag};
 
 #[derive(Debug, thiserror::Error)]
 pub enum WalletStorageError {

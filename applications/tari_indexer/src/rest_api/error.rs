@@ -3,13 +3,13 @@
 
 use std::{borrow::Cow, env};
 
-use axum::{http::StatusCode, response::IntoResponse, Json};
+use axum::{Json, http::StatusCode, response::IntoResponse};
 use log::*;
 use serde_json::json;
 use utoipa::{
-    openapi::{RefOr, Schema},
     PartialSchema,
     ToSchema,
+    openapi::{RefOr, Schema},
 };
 
 const LOG_TARGET: &str = "tari::indexer::rest_api::error";

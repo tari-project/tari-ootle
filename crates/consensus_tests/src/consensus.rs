@@ -17,39 +17,39 @@ use tari_consensus::{hotstuff::HotStuffError, messages::HotstuffMessage};
 use tari_consensus_types::Decision;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::{
+    ValidatorFeeWithdrawal,
     commit_result::AbortReason,
     hashing::hash_template_code,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
-    ValidatorFeeWithdrawal,
 };
 use tari_ootle_common_types::{
-    crypto::{create_key_pair, create_key_pair_from_seed},
-    derive_fee_pool_address,
-    optional::Optional,
-    shard::Shard,
     Epoch,
     NodeHeight,
     SubstateLockType,
     SubstateRequirement,
     ToSubstateAddress,
     VersionedSubstateId,
+    crypto::{create_key_pair, create_key_pair_from_seed},
+    derive_fee_pool_address,
+    optional::Optional,
+    shard::Shard,
 };
 use tari_ootle_storage::{
-    consensus_models::{Block, Command, SubstateRecord, TransactionRecord},
     StateStore,
     StateStoreReadTransaction,
+    consensus_models::{Block, Command, SubstateRecord, TransactionRecord},
 };
 use tari_ootle_transaction::Transaction;
 
 use crate::support::{
-    build_transaction_from,
-    load_binary_fixture,
-    logging::setup_logger,
     ExecuteSpec,
     Test,
     TestAddress,
     TestVnDestination,
+    build_transaction_from,
+    load_binary_fixture,
+    logging::setup_logger,
 };
 
 // Although these tests will pass with a single thread, we enable multi-threaded mode so that any unhandled race

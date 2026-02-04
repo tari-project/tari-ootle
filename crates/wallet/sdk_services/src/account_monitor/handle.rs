@@ -4,7 +4,7 @@
 use tari_template_lib_types::{ComponentAddress, ResourceAddress};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::{account_monitor::monitor::AccountMonitorError, Reply};
+use crate::{Reply, account_monitor::monitor::AccountMonitorError};
 
 #[derive(Debug)]
 pub(super) enum AccountMonitorRequest {

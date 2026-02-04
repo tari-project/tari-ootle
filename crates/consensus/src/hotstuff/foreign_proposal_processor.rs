@@ -6,14 +6,16 @@ use tari_consensus_types::{BlockId, Decision, LeafBlock, PcId, ProposalCertifica
 use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::commit_result::RejectReason;
 use tari_ootle_common_types::{
-    committee::CommitteeInfo,
-    displayable::Displayable,
-    optional::Optional,
     NumPreshards,
     ShardGroup,
     SubstateAddress,
+    committee::CommitteeInfo,
+    displayable::Displayable,
+    optional::Optional,
 };
 use tari_ootle_storage::{
+    StateStore,
+    StateStoreReadTransaction,
     consensus_models::{
         BlockPledge,
         Command,
@@ -26,18 +28,16 @@ use tari_ootle_storage::{
         TransactionPoolStage,
         TransactionRecord,
     },
-    StateStore,
-    StateStoreReadTransaction,
 };
 use tari_ootle_transaction::TransactionId;
 use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
 
 use crate::{
     hotstuff::{
+        ProposalValidationError,
         block_change_set::ProposedBlockChangeSet,
         error::HotStuffError,
         substate_store::PendingSubstateStore,
-        ProposalValidationError,
     },
     tracing::TraceTimer,
 };
@@ -144,24 +144,24 @@ pub fn process_foreign_block<TStore: StateStore>(
 
                 let remote_decision = atom.decision;
                 let local_decision = tx_rec.current_decision();
-                if let Some(abort_reason) = remote_decision.abort_reason() {
-                    if local_decision.is_commit() {
-                        info!(
-                            target: LOG_TARGET,
-                            "⚠️ Foreign committee ABORT transaction {}. Update overall decision to ABORT. Local stage: {}, Leaf: {}",
-                            tx_rec.id(), tx_rec.current_stage(), local_leaf
-                        );
+                if let Some(abort_reason) = remote_decision.abort_reason() &&
+                    local_decision.is_commit()
+                {
+                    info!(
+                        target: LOG_TARGET,
+                        "⚠️ Foreign committee ABORT transaction {}. Update overall decision to ABORT. Local stage: {}, Leaf: {}",
+                        tx_rec.id(), tx_rec.current_stage(), local_leaf
+                    );
 
-                        // Add an abort execution since we previously decided to commit
-                        let exec =
-                            TransactionExecution::abort(tx_rec.id(), RejectReason::ForeignShardGroupDecidedToAbort {
-                                start_shard: foreign_shard_group.start().as_u32(),
-                                end_shard: foreign_shard_group.end().as_u32(),
-                                abort_reason,
-                            });
-                        tx_rec.set_local_decision(exec.decision());
-                        proposed_block_change_set.add_transaction_execution(*tx_rec.id(), exec)?;
-                    }
+                    // Add an abort execution since we previously decided to commit
+                    let exec =
+                        TransactionExecution::abort(tx_rec.id(), RejectReason::ForeignShardGroupDecidedToAbort {
+                            start_shard: foreign_shard_group.start().as_u32(),
+                            end_shard: foreign_shard_group.end().as_u32(),
+                            abort_reason,
+                        });
+                    tx_rec.set_local_decision(exec.decision());
+                    proposed_block_change_set.add_transaction_execution(*tx_rec.id(), exec)?;
                 }
 
                 // Update the transaction record with any new information provided by this foreign block
@@ -207,73 +207,71 @@ pub fn process_foreign_block<TStore: StateStore>(
                 // If we have not yet prepared the transaction, we can wait to do that until this transaction is
                 // finalised and there is no need to abort either. If we have already prepared the transaction, we
                 // need to abort in this case since we've already pledged.
-                if tx_rec.current_decision().is_commit() {
-                    if let Some(conflicting_transaction_id) =
+                if tx_rec.current_decision().is_commit() &&
+                    let Some(conflicting_transaction_id) =
                         LockedSubstateValue::get_transaction_id_that_conflicts_with_write_locks(
                             substate_store.read_transaction(),
                             tx_rec.id(),
                             inputs,
                         )?
-                    {
-                        // Determine if we're the only conflicting shard group. If so, we can ignore this conflict
-                        // and wait for the conflicting transaction to be finalised before pledging, using the outputs
-                        // of this transaction. If not, resolving the conflict is more
-                        // complex/unsafe, and we need to abort.
-                        let conflicting_tx = proposed_block_change_set.get_transaction_pool_record(
-                            tx,
-                            local_leaf,
-                            &conflicting_transaction_id,
-                        )?;
-                        let has_conflicts = conflicting_tx
-                            .evidence()
-                            .iter()
-                            .filter(|(sg, _)| **sg != local_committee_info.shard_group())
-                            .any(|(sg, conflicting_evidence)| {
-                                tx_rec.evidence().get(sg).is_some_and(|shard_ev| {
-                                    shard_ev.inputs().iter().any(|(id, e)| {
-                                        // If the current transaction (tx_rec) has a strict input version, it will be
-                                        // aborted later.
-                                        match conflicting_evidence.inputs().get(id) {
-                                            Some(Some(ev)) => {
-                                                let conflicting_is_write = e.as_ref().is_none_or(|e| e.is_write);
-                                                // If either are write, we ABORT
-                                                conflicting_is_write || ev.is_write
-                                            },
-                                            Some(None) => {
-                                                // We don't know the pledge, so we have to assume write
-                                                // TODO: check if this can ever legitimately happen
-                                                true
-                                            },
-                                            None => {
-                                                // No matching input - OK
-                                                false
-                                            },
-                                        }
-                                    })
+                {
+                    // Determine if we're the only conflicting shard group. If so, we can ignore this conflict
+                    // and wait for the conflicting transaction to be finalised before pledging, using the outputs
+                    // of this transaction. If not, resolving the conflict is more
+                    // complex/unsafe, and we need to abort.
+                    let conflicting_tx = proposed_block_change_set.get_transaction_pool_record(
+                        tx,
+                        local_leaf,
+                        &conflicting_transaction_id,
+                    )?;
+                    let has_conflicts = conflicting_tx
+                        .evidence()
+                        .iter()
+                        .filter(|(sg, _)| **sg != local_committee_info.shard_group())
+                        .any(|(sg, conflicting_evidence)| {
+                            tx_rec.evidence().get(sg).is_some_and(|shard_ev| {
+                                shard_ev.inputs().iter().any(|(id, e)| {
+                                    // If the current transaction (tx_rec) has a strict input version, it will be
+                                    // aborted later.
+                                    match conflicting_evidence.inputs().get(id) {
+                                        Some(Some(ev)) => {
+                                            let conflicting_is_write = e.as_ref().is_none_or(|e| e.is_write);
+                                            // If either are write, we ABORT
+                                            conflicting_is_write || ev.is_write
+                                        },
+                                        Some(None) => {
+                                            // We don't know the pledge, so we have to assume write
+                                            // TODO: check if this can ever legitimately happen
+                                            true
+                                        },
+                                        None => {
+                                            // No matching input - OK
+                                            false
+                                        },
+                                    }
                                 })
-                            });
-                        if has_conflicts {
-                            warn!(
-                                target: LOG_TARGET,
-                                "⚠️ Foreign proposal {} received for transaction {} but a conflicting transaction ({}) has already been prepared by this node. Abort.",
-                                proposal,
-                                tx_rec.id(),
-                                conflicting_transaction_id
-                            );
+                            })
+                        });
+                    if has_conflicts {
+                        warn!(
+                            target: LOG_TARGET,
+                            "⚠️ Foreign proposal {} received for transaction {} but a conflicting transaction ({}) has already been prepared by this node. Abort.",
+                            proposal,
+                            tx_rec.id(),
+                            conflicting_transaction_id
+                        );
 
-                            // Add an abort execution since we previously decided to commit
-                            let exec =
-                                TransactionExecution::abort(tx_rec.id(), RejectReason::ForeignPledgeInputConflict);
-                            tx_rec.set_local_decision(exec.decision());
-                            proposed_block_change_set.add_transaction_execution(*tx_rec.id(), exec)?;
-                        } else {
-                            info!(
-                                target: LOG_TARGET,
-                                "Transaction {} conflicts with {} but does not conflict with any foreign pledges. No need to abort.",
-                                tx_rec.id(),
-                                conflicting_transaction_id
-                            );
-                        }
+                        // Add an abort execution since we previously decided to commit
+                        let exec = TransactionExecution::abort(tx_rec.id(), RejectReason::ForeignPledgeInputConflict);
+                        tx_rec.set_local_decision(exec.decision());
+                        proposed_block_change_set.add_transaction_execution(*tx_rec.id(), exec)?;
+                    } else {
+                        info!(
+                            target: LOG_TARGET,
+                            "Transaction {} conflicts with {} but does not conflict with any foreign pledges. No need to abort.",
+                            tx_rec.id(),
+                            conflicting_transaction_id
+                        );
                     }
                 }
 
@@ -420,23 +418,23 @@ pub fn process_foreign_block<TStore: StateStore>(
 
                 let remote_decision = atom.decision;
                 let local_decision = tx_rec.current_decision();
-                if let Some(abort_reason) = remote_decision.abort_reason() {
-                    if local_decision.is_commit() {
-                        info!(
-                            target: LOG_TARGET,
-                            "⚠️ Foreign {foreign_shard_group} ABORT {}. Update overall decision to ABORT. Local stage: {}, Leaf: {}",
-                            tx_rec.id(), tx_rec.current_stage(), local_leaf
-                        );
-                        // Add an abort execution since we previously decided to commit
-                        let exec =
-                            TransactionExecution::abort(tx_rec.id(), RejectReason::ForeignShardGroupDecidedToAbort {
-                                start_shard: foreign_shard_group.start().as_u32(),
-                                end_shard: foreign_shard_group.end().as_u32(),
-                                abort_reason,
-                            });
-                        tx_rec.set_local_decision(exec.decision());
-                        proposed_block_change_set.add_transaction_execution(*tx_rec.id(), exec)?;
-                    }
+                if let Some(abort_reason) = remote_decision.abort_reason() &&
+                    local_decision.is_commit()
+                {
+                    info!(
+                        target: LOG_TARGET,
+                        "⚠️ Foreign {foreign_shard_group} ABORT {}. Update overall decision to ABORT. Local stage: {}, Leaf: {}",
+                        tx_rec.id(), tx_rec.current_stage(), local_leaf
+                    );
+                    // Add an abort execution since we previously decided to commit
+                    let exec =
+                        TransactionExecution::abort(tx_rec.id(), RejectReason::ForeignShardGroupDecidedToAbort {
+                            start_shard: foreign_shard_group.start().as_u32(),
+                            end_shard: foreign_shard_group.end().as_u32(),
+                            abort_reason,
+                        });
+                    tx_rec.set_local_decision(exec.decision());
+                    proposed_block_change_set.add_transaction_execution(*tx_rec.id(), exec)?;
                 }
 
                 // Update the transaction record with any new information provided by this foreign block

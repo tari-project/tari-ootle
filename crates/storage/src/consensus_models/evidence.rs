@@ -10,8 +10,6 @@ use serde::{Deserialize, Serialize};
 use tari_consensus_types::PcId;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{
-    borsh::indexmap as indexmap_borsh,
-    displayable::Displayable,
     LockIntent,
     NumPreshards,
     ShardGroup,
@@ -20,6 +18,8 @@ use tari_ootle_common_types::{
     SubstateRequirementRef,
     ToSubstateAddress,
     VersionedSubstateId,
+    borsh::indexmap as indexmap_borsh,
+    displayable::Displayable,
 };
 
 use crate::consensus_models::{RequireLockIntentRef, SubstatePledge};

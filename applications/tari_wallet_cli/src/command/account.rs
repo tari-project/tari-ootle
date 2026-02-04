@@ -23,6 +23,8 @@
 use clap::{Args, Subcommand};
 use tari_ootle_common_types::displayable::Displayable;
 use tari_wallet_daemon_client::{
+    ComponentAddressOrName,
+    WalletDaemonClient,
     types::{
         AccountInfo,
         AccountsCreateFreeTestCoinsRequest,
@@ -30,8 +32,6 @@ use tari_wallet_daemon_client::{
         AccountsCreateRequest,
         AccountsGetBalancesRequest,
     },
-    ComponentAddressOrName,
-    WalletDaemonClient,
 };
 
 use crate::{table::Table, table_row};

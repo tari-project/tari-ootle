@@ -2,7 +2,7 @@
 [package]
 name = "nft_faucet"
 version = "0.9.1"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 tari_template_lib = { path = "../../../template_lib" }

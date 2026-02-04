@@ -17,15 +17,15 @@ use tari_consensus_types::{
     ProposalVote,
     ValidatorSignatureBytes,
 };
-use tari_ootle_common_types::{optional::Optional, Epoch, Network, NodeHeight, ShardGroup};
+use tari_ootle_common_types::{Epoch, Network, NodeHeight, ShardGroup, optional::Optional};
 use tari_ootle_storage::{
-    consensus_models::{Block, EndOfEpochCommand, EpochCheckpoint, TreeRootSummary},
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
+    consensus_models::{Block, EndOfEpochCommand, EpochCheckpoint, TreeRootSummary},
 };
 use tari_sidechain::{CommandCommitProof, QuorumDecision, SidechainBlockCommitProof, SidechainBlockHeader};
-use tari_state_tree::{compute_proof_for_hashes, TreeHash};
+use tari_state_tree::{TreeHash, compute_proof_for_hashes};
 use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
 use crate::helpers::num_preshards;

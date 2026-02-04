@@ -3,8 +3,8 @@
 
 use std::{str::FromStr, sync::OnceLock};
 
-use serde::{de::DeserializeOwned, Serialize};
-use tari_ootle_common_types::{optional::IsNotFoundError, Network};
+use serde::{Serialize, de::DeserializeOwned};
+use tari_ootle_common_types::{Network, optional::IsNotFoundError};
 
 use crate::storage::{CommittableStore, WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter};
 

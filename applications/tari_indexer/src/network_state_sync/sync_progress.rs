@@ -3,8 +3,8 @@
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, Seq};
-use tari_ootle_common_types::{shard::Shard, Epoch, ShardGroup, StateVersion};
+use serde_with::{Seq, serde_as};
+use tari_ootle_common_types::{Epoch, ShardGroup, StateVersion, shard::Shard};
 
 #[serde_as]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

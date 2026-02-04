@@ -3,10 +3,10 @@
 
 use log::*;
 use tari_consensus_types::{LastProposed, LeafBlock};
-use tari_ootle_common_types::{optional::Optional, Epoch, NodeHeight};
+use tari_ootle_common_types::{Epoch, NodeHeight, optional::Optional};
 use tari_ootle_storage::{
-    consensus_models::{Block, BookkeepingModel},
     StateStore,
+    consensus_models::{Block, BookkeepingModel},
 };
 use tokio::task;
 
@@ -52,10 +52,9 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
             let result = store.with_read_tx(|tx| {
                 let mut leaf_block = LeafBlock::get(tx, epoch)?;
                 // Include the block we last proposed if applicable.
-                if let Some(last_proposed) = LastProposed::get(tx, epoch).optional()? {
-                    if last_proposed.epoch == leaf_block.epoch() && last_proposed.height > leaf_block.height() {
+                if let Some(last_proposed) = LastProposed::get(tx, epoch).optional()?
+                    && last_proposed.epoch == leaf_block.epoch() && last_proposed.height > leaf_block.height() {
                         leaf_block = last_proposed.as_leaf_block();
-                    }
                 }
 
                 if leaf_block.epoch() != msg.epoch {

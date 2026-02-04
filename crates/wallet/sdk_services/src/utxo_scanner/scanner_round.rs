@@ -6,8 +6,11 @@ use std::collections::HashMap;
 use futures::StreamExt;
 use log::{debug, info, trace, warn};
 use ootle_byte_type::FromByteType;
-use tari_ootle_common_types::{optional::Optional, shard::Shard, Network, NumPreshards, StateVersion};
+use tari_ootle_common_types::{Network, NumPreshards, StateVersion, optional::Optional, shard::Shard};
 use tari_ootle_wallet_sdk::{
+    NetworkInterfaceError,
+    WalletSdk,
+    WalletSdkSpec,
     models::{
         AccountWithAddress,
         StartOfShard,
@@ -20,9 +23,6 @@ use tari_ootle_wallet_sdk::{
     },
     network::{UtxoUpdateStream, WalletNetworkInterface},
     storage::{ReadableWalletStore, WalletStorageError, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
-    NetworkInterfaceError,
-    WalletSdk,
-    WalletSdkSpec,
 };
 use tari_template_lib_types::{ComponentAddress, ResourceAddress, UtxoAddress};
 

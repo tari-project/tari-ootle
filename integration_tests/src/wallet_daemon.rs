@@ -35,6 +35,8 @@ use tari_ootle_walletd::{
 };
 use tari_shutdown::Shutdown;
 use tari_wallet_daemon_client::{
+    ComponentAddressOrName,
+    WalletDaemonClient,
     error::WalletDaemonClientError,
     types::{
         AuthLoginAcceptRequest,
@@ -46,16 +48,14 @@ use tari_wallet_daemon_client::{
         TransactionWaitResultRequest,
         TransactionWaitResultResponse,
     },
-    ComponentAddressOrName,
-    WalletDaemonClient,
 };
 use tokio::task;
 
 use crate::{
+    TariWorld,
     cucumber_log,
     helpers::{check_join_handle, get_os_assigned_ports, wait_listener_on_local_port},
     logging::get_base_dir_for_scenario,
-    TariWorld,
 };
 
 #[derive(Debug)]

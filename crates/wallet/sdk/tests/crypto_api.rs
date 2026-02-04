@@ -11,7 +11,7 @@ use tari_crypto::{
 };
 use tari_engine_types::crypto::get_commitment_factory;
 use tari_ootle_common_types::Network;
-use tari_ootle_wallet_crypto::{memo::Memo, StealthCryptoApi};
+use tari_ootle_wallet_crypto::{StealthCryptoApi, memo::Memo};
 
 use crate::support::{random_key, random_keypair, resource_address_from_seed};
 

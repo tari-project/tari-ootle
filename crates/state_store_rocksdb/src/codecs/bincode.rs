@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use anyhow::anyhow;
 
 use crate::{
-    codecs::{byte_counter::ByteCounter, DbCodec},
+    codecs::{DbCodec, byte_counter::ByteCounter},
     error::RocksDbStorageError,
 };
 

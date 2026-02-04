@@ -42,29 +42,31 @@ use tari_engine_types::{
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{Epoch, SubstateAddress, SubstateRequirement};
 use tari_ootle_transaction::{
-    args,
-    args::InstructionArg,
-    call_arg,
     Instruction,
     Transaction,
     TransactionId,
     UnsignedTransaction,
+    args,
+    args::InstructionArg,
+    call_arg,
 };
 use tari_ootle_wallet_sdk::{apis::confidential_transfer::UtxoInputSelection, crypto::memo::Memo};
 use tari_template_lib::{
     models::BucketId,
     types::{
-        constants::STEALTH_TARI_RESOURCE_ADDRESS,
-        crypto::RistrettoPublicKeyBytes,
         Amount,
         NonFungibleAddress,
         NonFungibleId,
         ResourceAddress,
         TemplateAddress,
+        constants::STEALTH_TARI_RESOURCE_ADDRESS,
+        crypto::RistrettoPublicKeyBytes,
     },
 };
-use tari_transaction_manifest::{parse_manifest, ManifestValue};
+use tari_transaction_manifest::{ManifestValue, parse_manifest};
 use tari_wallet_daemon_client::{
+    ComponentAddressOrName,
+    WalletDaemonClient,
     types::{
         AccountGetResponse,
         AccountsTransferRequest,
@@ -76,8 +78,6 @@ use tari_wallet_daemon_client::{
         TransactionWaitResultRequest,
         TransactionWaitResultResponse,
     },
-    ComponentAddressOrName,
-    WalletDaemonClient,
 };
 
 use crate::from_hex::FromHex;
@@ -767,13 +767,13 @@ pub fn print_execution_results(results: &[InstructionResult]) {
                 let str = format_tuple(subtypes, result);
                 println!("{}", str);
             },
-            Type::Other { ref name } if name == "Amount" => {
+            Type::Other { name } if name == "Amount" => {
                 println!("{}: {}", name, result.decode::<Amount>().unwrap());
             },
-            Type::Other { ref name } if name == "Bucket" => {
+            Type::Other { name } if name == "Bucket" => {
                 println!("{}: {}", name, result.decode::<BucketId>().unwrap());
             },
-            Type::Other { ref name } => {
+            Type::Other { name } => {
                 println!("{}: {}", name, serde_json::to_string_pretty(&result.indexed).unwrap());
             },
         }

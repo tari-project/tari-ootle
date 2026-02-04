@@ -3,7 +3,7 @@
 
 use std::{io, path::Path, sync::Arc};
 
-use axum::{extract::Path as ExtractPath, Extension, Json};
+use axum::{Extension, Json, extract::Path as ExtractPath};
 use serde::Serialize;
 use tokio::fs;
 

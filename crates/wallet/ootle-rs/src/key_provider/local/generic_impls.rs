@@ -13,7 +13,7 @@ use tari_crypto::{
 };
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::{
-    base_layer_hashing::{encrypted_data_hasher, WalletOutputEncryptionKeysDomainHasher},
+    base_layer_hashing::{WalletOutputEncryptionKeysDomainHasher, encrypted_data_hasher},
     engine_types::crypto::OutputBody,
 };
 use tari_ootle_transaction::{
@@ -24,25 +24,26 @@ use tari_ootle_transaction::{
     UnsignedTransaction,
 };
 use tari_ootle_wallet_crypto::{
+    DecryptedData,
+    OutputWitness,
+    StealthCryptoApi,
+    StealthOutputWitness,
     bullet_proof::generate_extended_bullet_proof,
     encrypted_data,
     kdfs,
     pay_to::PayTo,
     viewable_balance_proof::generate_elgamal_viewable_balance_proof,
-    DecryptedData,
-    OutputWitness,
-    StealthCryptoApi,
-    StealthOutputWitness,
 };
 use tari_template_lib_types::{
-    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    stealth::{SpendCondition, StealthOutputsStatement, StealthUnspentOutput, UnspentOutput},
     Amount,
     EncryptedData,
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    stealth::{SpendCondition, StealthOutputsStatement, StealthUnspentOutput, UnspentOutput},
 };
 use tokio::task;
 
 use crate::{
+    Address,
     key_provider,
     key_provider::{DiffieHellmanKdfKeyProvider, LocalKeyProvider, OutputMaskProvider},
     keys::HasViewOnlyKeySecret,
@@ -51,7 +52,6 @@ use crate::{
     stealth::{InputDecryptor, Output, StealthOutputStatementFactory, StealthProviderError, StealthResult},
     transaction::{TransactionSigner, TransactionStealthKeySigner},
     wallet::TransactionAuthorization,
-    Address,
 };
 
 #[async_trait]

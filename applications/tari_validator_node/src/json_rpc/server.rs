@@ -23,13 +23,13 @@
 use std::{future::IntoFuture, net::SocketAddr, sync::Arc};
 
 use axum::{
+    Json,
+    Router,
     extract::Extension,
     response::IntoResponse,
     routing::{get, post},
-    Json,
-    Router,
 };
-use axum_jrpc::{error::JsonRpcErrorReason, JrpcResult, JsonRpcAnswer, JsonRpcExtractor};
+use axum_jrpc::{JrpcResult, JsonRpcAnswer, JsonRpcExtractor, error::JsonRpcErrorReason};
 use log::*;
 use serde_json::json;
 use tari_consensus::hotstuff::ConsensusCurrentState;

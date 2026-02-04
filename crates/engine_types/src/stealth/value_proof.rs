@@ -4,19 +4,19 @@
 use ootle_byte_type::FromByteType;
 use tari_crypto::{
     keys::PublicKey,
-    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey, pedersen::PedersenCommitment},
 };
 use tari_template_lib::{
     prelude::{
-        crypto::{StealthValueProof, ValueKnowledgeProof},
         Amount,
         PedersenCommitmentBytes,
+        crypto::{StealthValueProof, ValueKnowledgeProof},
     },
     types::UtxoId,
 };
 
 use crate::{
-    crypto::{commit_amount, convert_amount_to_secret, messages, ElgamalVerifiableBalanceBytes},
+    crypto::{ElgamalVerifiableBalanceBytes, commit_amount, convert_amount_to_secret, messages},
     resource_container::ResourceError,
 };
 

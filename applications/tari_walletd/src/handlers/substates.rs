@@ -16,7 +16,7 @@ use tari_wallet_daemon_client::{
     },
 };
 
-use crate::handlers::{helpers::not_found, HandlerContext};
+use crate::handlers::{HandlerContext, helpers::not_found};
 
 pub async fn handle_get(
     context: &HandlerContext,

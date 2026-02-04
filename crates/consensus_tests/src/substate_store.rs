@@ -11,7 +11,6 @@ use tari_engine_types::{
     substate::{Substate, SubstateId, SubstateValue},
 };
 use tari_ootle_common_types::{
-    shard::Shard,
     Epoch,
     Network,
     NodeHeight,
@@ -20,8 +19,10 @@ use tari_ootle_common_types::{
     ShardGroup,
     SubstateLockType,
     VersionedSubstateId,
+    shard::Shard,
 };
 use tari_ootle_storage::{
+    StateStore,
     consensus_models::{
         Block,
         RequireLockIntentRef,
@@ -30,13 +31,12 @@ use tari_ootle_storage::{
         SubstateTransition,
         SubstateUpdateBatch,
     },
-    StateStore,
 };
 use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
 use tari_template_lib_types::{ComponentAddress, EntityId, ObjectKey};
 use tempfile::TempDir;
 
-use crate::support::{logging::setup_logger, TEST_NUM_PRESHARDS};
+use crate::support::{TEST_NUM_PRESHARDS, logging::setup_logger};
 
 type TestStore = RocksDbStateStore<PeerAddress>;
 

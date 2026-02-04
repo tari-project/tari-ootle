@@ -8,18 +8,18 @@ use ootle_byte_type::ToByteType;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine_types::component::derive_component_address_from_public_key;
 use tari_ootle_common_types::{
+    Epoch,
     displayable::Displayable,
     optional::{IsNotFoundError, Optional},
     response_status::TransactionStatusResponseError,
     substate_type::SubstateType,
-    Epoch,
 };
 use tari_ootle_wallet_sdk::{
+    WalletSdk,
+    WalletSdkSpec,
     apis::config::ConfigKey,
     models::{DerivedWalletKey, KeyBranch, KeyId},
     network::WalletNetworkInterface,
-    WalletSdk,
-    WalletSdkSpec,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tokio::time;

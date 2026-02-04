@@ -3,8 +3,8 @@
 
 use std::{env, io, path::Path};
 
-use anyhow::{anyhow, Context};
-use futures::{stream::FuturesUnordered, StreamExt};
+use anyhow::{Context, anyhow};
+use futures::{StreamExt, stream::FuturesUnordered};
 use tokio::process::{Child, Command};
 
 use super::executable::Executable;

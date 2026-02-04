@@ -3,8 +3,8 @@
 
 use std::collections::HashMap;
 
-use tari_ootle_transaction::{args, Transaction};
-use tari_template_lib::types::{constants::XTR, metadata, AccessRule, OwnerRule};
+use tari_ootle_transaction::{Transaction, args};
+use tari_template_lib::types::{AccessRule, OwnerRule, constants::XTR, metadata};
 use tari_template_test_tooling::TemplateTest;
 
 const TEMPLATE_NAME: &str = "TwoResourceLiquidityPool";

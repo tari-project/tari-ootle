@@ -11,22 +11,20 @@ use tari_indexer_client::{
     types::{GetSubstateRequest, GetSubstatesRequest, SubmitTransactionRequest},
 };
 use tari_ootle_common_types::{
+    Epoch,
+    Network,
     engine_types::{
         commit_result::ExecuteResult,
         substate::{Substate, SubstateId},
     },
     optional::Optional,
-    Epoch,
-    Network,
 };
 use tari_ootle_transaction::{Transaction, TransactionEnvelope, UnsignedTransaction};
 use tracing::debug;
 
 use crate::{
+    Address,
     provider::{
-        input_resolver::TransactionInputResolver,
-        tx_stream::{EventStream, Paused},
-        tx_watcher::TransactionWatcherHandle,
         PendingTransaction,
         Provider,
         ProviderError,
@@ -34,9 +32,11 @@ use crate::{
         TransactionWatcher,
         WalletProvider,
         WantInput,
+        input_resolver::TransactionInputResolver,
+        tx_stream::{EventStream, Paused},
+        tx_watcher::TransactionWatcherHandle,
     },
     wallet::NetworkWallet,
-    Address,
 };
 
 #[derive(Debug, Clone)]

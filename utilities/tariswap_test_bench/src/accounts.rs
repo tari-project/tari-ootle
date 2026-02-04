@@ -10,9 +10,9 @@ use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::models::{Account, KeyBranch, KeyId};
 use tari_template_lib_types::{
-    constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
     Amount,
     ResourceType,
+    constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
 };
 
 use crate::{faucet::Faucet, runner::Runner};

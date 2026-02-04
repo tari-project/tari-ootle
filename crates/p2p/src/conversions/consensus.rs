@@ -25,7 +25,7 @@ use std::{
     convert::{TryFrom, TryInto},
 };
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use tari_consensus::messages::{
     CatchUpRequestMessage,
     ForeignProposalMessage,
@@ -54,7 +54,6 @@ use tari_engine_types::{
     substate::{SubstateId, SubstateValue},
 };
 use tari_ootle_common_types::{
-    shard::Shard,
     Epoch,
     ExtraData,
     NodeHeight,
@@ -62,6 +61,7 @@ use tari_ootle_common_types::{
     ShardStateVersions,
     StateVersion,
     ValidatorMetadata,
+    shard::Shard,
 };
 use tari_ootle_storage::{
     consensus_models,

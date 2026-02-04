@@ -29,7 +29,7 @@ use tari_indexer::{cli::Cli, config::ApplicationConfig, run_indexer};
 use tari_ootle_app_utilities::configuration::load_configuration;
 use tari_shutdown::Shutdown;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{filter, fmt, layer::SubscriberExt, util::SubscriberInitExt, Layer};
+use tracing_subscriber::{Layer, filter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 const LOG_TARGET: &str = "tari::indexer::app";
 

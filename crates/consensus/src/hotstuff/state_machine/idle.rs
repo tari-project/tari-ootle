@@ -10,8 +10,8 @@ use tokio::{sync::broadcast, time};
 
 use crate::{
     hotstuff::{
-        state_machine::{event::ConsensusStateEvent, running::Running, worker::ConsensusWorkerContext},
         HotStuffError,
+        state_machine::{event::ConsensusStateEvent, running::Running, worker::ConsensusWorkerContext},
     },
     traits::ConsensusSpec,
 };

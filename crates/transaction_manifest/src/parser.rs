@@ -3,10 +3,6 @@
 
 use proc_macro2::{Ident, TokenStream};
 use syn::{
-    parse::ParseStream,
-    parse2,
-    punctuated::Punctuated,
-    token::Comma,
     Block,
     Expr,
     ExprCall,
@@ -27,12 +23,16 @@ use syn::{
     Signature,
     Stmt,
     UseTree,
+    parse::ParseStream,
+    parse2,
+    punctuated::Punctuated,
+    token::Comma,
 };
 use tari_engine_types::{json_cbor::convert_json_to_cbor, substate::SubstateId};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     args::LogLevel,
-    types::{constants::XTR, hex::bytes_from_hex, Amount, Metadata, NonFungibleId, TemplateAddress},
+    types::{Amount, Metadata, NonFungibleId, TemplateAddress, constants::XTR, hex::bytes_from_hex},
 };
 
 use crate::error::ManifestError;
@@ -170,7 +170,7 @@ impl ManifestParser {
                     return Err(syn::Error::new_spanned(
                         stmt.clone(),
                         format!("Unsupported outer statement {:?}", stmt),
-                    ))
+                    ));
                 },
             }
         }
@@ -290,7 +290,7 @@ impl ManifestParser {
                 return Err(syn::Error::new_spanned(
                     expr.clone(),
                     format!("Only function calls are supported in let statements. {:?}", expr),
-                ))
+                ));
             },
         };
 

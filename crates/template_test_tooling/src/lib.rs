@@ -14,7 +14,7 @@ mod track_calls;
 mod wrapped_transaction;
 
 pub use package_builder::Package;
-pub use template_test::{xtr_faucet_component, TemplateTest};
+pub use template_test::{TemplateTest, xtr_faucet_component};
 
 // Re-export types used in public interfaces. This allows users to use these types when writing tests without including
 // the various crates themselves.

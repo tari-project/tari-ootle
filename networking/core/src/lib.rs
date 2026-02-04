@@ -38,7 +38,7 @@ pub use tari_swarm::{
     config::{Config as SwarmConfig, LimitPerInterval, RelayCircuitLimits, RelayReservationLimits},
     identity::PeerId,
     is_supported_multiaddr,
-    swarm::{dial_opts::DialOpts, DialError},
+    swarm::{DialError, dial_opts::DialOpts},
 };
 
 #[async_trait]
@@ -79,7 +79,7 @@ pub trait NetworkingService<TMsg: MessageSpec> {
     async fn unsubscribe_topic<T: Into<String> + Send>(&mut self, topic: T) -> Result<(), NetworkingError>;
 
     async fn set_want_peers<I: IntoIterator<Item = PeerId> + Send>(&self, want_peers: I)
-        -> Result<(), NetworkingError>;
+    -> Result<(), NetworkingError>;
 }
 
 pub struct Waiter<T> {

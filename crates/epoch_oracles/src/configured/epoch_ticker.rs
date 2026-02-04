@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll, ready};
 
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::Epoch;

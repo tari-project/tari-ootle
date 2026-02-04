@@ -2,10 +2,10 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use ::serde::{
-    de::{Error, Visitor},
     Deserialize,
     Deserializer,
     Serializer,
+    de::{Error, Visitor},
 };
 use tari_template_abi::rust::{fmt, marker::PhantomData};
 

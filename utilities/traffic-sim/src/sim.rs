@@ -12,19 +12,20 @@ use reqwest::Client;
 use serde_json::json;
 use tari_indexer_client::types::{GetSubstateRequest, ListUtxosRequest};
 use tari_ootle_common_types::{
+    Network,
     displayable::Displayable,
     engine_types::published_template::PublishedTemplateAddress,
     optional::Optional,
-    Network,
 };
-use tari_ootle_transaction::{args, Transaction};
+use tari_ootle_transaction::{Transaction, args};
 use tari_ootle_wallet_sdk::{
     apis::{confidential_transfer::UtxoInputSelection, stealth_transfer::TransferOutput},
     crypto::{memo::Memo, pay_to::PayTo},
     models::{AccountWithAddress, KeyBranch},
 };
-use tari_template_lib_types::{amount, constants::XTR, metadata, Amount, ComponentAddress, ResourceAddress, UtxoId};
+use tari_template_lib_types::{Amount, ComponentAddress, ResourceAddress, UtxoId, amount, constants::XTR, metadata};
 use tari_wallet_daemon_client::{
+    WalletDaemonClient,
     types::{
         AccountsAssociateStealthResourceRequest,
         AccountsCreateFreeTestCoinsRequest,
@@ -41,7 +42,6 @@ use tari_wallet_daemon_client::{
         TransactionWaitResultRequest,
         TransferStatementRequest,
     },
-    WalletDaemonClient,
 };
 use tokio::time::sleep;
 

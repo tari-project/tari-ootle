@@ -4,19 +4,19 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query},
     Extension,
     Json,
+    extract::{Path, Query},
 };
 use serde_json::json;
-use tari_ootle_common_types::{optional::Optional, Epoch, NodeHeight};
+use tari_ootle_common_types::{Epoch, NodeHeight, optional::Optional};
 use tari_ootle_storage::Ordering;
 use tari_state_store_rocksdb::{column_families as cfs, error::RocksDbStorageError};
 
 use crate::webserver::{
     context::HandlerContext,
     error::WebError,
-    handlers::types::{decode_hex_prefix, Column, TableRequest, TableResponse},
+    handlers::types::{Column, TableRequest, TableResponse, decode_hex_prefix},
 };
 
 #[allow(clippy::too_many_lines)]
@@ -141,15 +141,15 @@ fn parse_query(query: &str) -> Result<Option<BlockQuery>, WebError> {
         return Ok(None);
     }
 
-    if let Some((key, value)) = query.split_once('=') {
-        if key == "height" {
-            return Ok(Some(BlockQuery::ByHeight(
-                value
-                    .parse::<u64>()
-                    .map(NodeHeight)
-                    .map_err(|e| WebError::bad_request(format!("Invalid height: {}", e)))?,
-            )));
-        }
+    if let Some((key, value)) = query.split_once('=') &&
+        key == "height"
+    {
+        return Ok(Some(BlockQuery::ByHeight(
+            value
+                .parse::<u64>()
+                .map(NodeHeight)
+                .map_err(|e| WebError::bad_request(format!("Invalid height: {}", e)))?,
+        )));
     }
 
     let prefix = decode_hex_prefix::<cfs::block::BlockCf>(query)?;

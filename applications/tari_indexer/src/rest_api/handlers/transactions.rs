@@ -2,10 +2,10 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use axum::{
-    extract::{Path, Query},
-    response::Response,
     Extension,
     Json,
+    extract::{Path, Query},
+    response::Response,
 };
 use log::*;
 use tari_indexer_client::types::{

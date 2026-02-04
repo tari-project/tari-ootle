@@ -6,9 +6,9 @@
 
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{
-    committee::{Committee, CommitteeInfo},
     DerivableFromPublicKey,
     Epoch,
+    committee::{Committee, CommitteeInfo},
 };
 use tari_ootle_storage::consensus_models::{Block, BlockHeader};
 

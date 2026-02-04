@@ -1,17 +1,17 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use anyhow::{anyhow, bail, Context};
+use anyhow::{Context, anyhow, bail};
 use tari_shutdown::{Shutdown, ShutdownSignal};
 use tokio::{fs, task::JoinHandle};
 use transaction_worker::worker_loop;
 
 use crate::{
     cli::{Cli, Commands},
-    config::{get_base_config, Config},
+    config::{Config, get_base_config},
     helpers::read_config_file,
     logger::init_logger,
-    manager::{start_receivers, ManagerHandle, ProcessManager},
+    manager::{ManagerHandle, ProcessManager, start_receivers},
     process::create_pid_file,
     shutdown::exit_signal,
 };

@@ -5,7 +5,7 @@ use tari_consensus::hotstuff::{HotStuffError, ProposalValidationError};
 use tari_consensus_types::BlockId;
 use tari_epoch_manager::EpochManagerError;
 use tari_ootle_common_types::Epoch;
-use tari_ootle_storage::{consensus_models::TransactionPoolError, StorageError};
+use tari_ootle_storage::{StorageError, consensus_models::TransactionPoolError};
 use tari_rpc_framework::{RpcError, RpcStatus};
 use tari_state_tree::{JmtStorageError, TreeHash};
 use tari_validator_node_rpc::ValidatorNodeRpcClientError;

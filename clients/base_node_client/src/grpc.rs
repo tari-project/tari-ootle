@@ -39,9 +39,9 @@ use tonic::codegen::tokio_stream::Stream;
 use url::Url;
 
 use crate::{
-    types::{BaseLayerConsensusConstants, BaseLayerMetadata, BaseLayerValidatorNode, BlockInfo, SideChainUtxos},
     BaseNodeClient,
     BaseNodeClientError,
+    types::{BaseLayerConsensusConstants, BaseLayerMetadata, BaseLayerValidatorNode, BlockInfo, SideChainUtxos},
 };
 
 const LOG_TARGET: &str = "tari::validator_node::app";

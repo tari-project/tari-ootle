@@ -23,28 +23,28 @@
 use std::collections::HashSet;
 
 use async_trait::async_trait;
-use libp2p::{gossipsub::IdentTopic, swarm::dial_opts::DialOpts, PeerId, StreamProtocol};
+use libp2p::{PeerId, StreamProtocol, gossipsub::IdentTopic, swarm::dial_opts::DialOpts};
 use log::*;
 use tari_rpc_framework::{
-    framing,
-    framing::CanonicalFraming,
     NamedProtocolService,
     RpcClient,
     RpcClientBuilder,
     Substream,
+    framing,
+    framing::CanonicalFraming,
 };
 use tari_swarm::substream::{NegotiatedSubstream, ProtocolNotification};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::{
+    NetworkingError,
+    NetworkingService,
+    Waiter,
     connection::Connection,
     error::NetworkingHandleError,
     event::NetworkingEvent,
     message::MessageSpec,
     peer::PeerInfo,
-    NetworkingError,
-    NetworkingService,
-    Waiter,
 };
 
 const LOG_TARGET: &str = "tari::networking::handle";

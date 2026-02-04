@@ -11,16 +11,16 @@ use tari_crypto::{
     tari_utilities,
     tari_utilities::ByteArray,
 };
-use tari_ootle_common_types::{signature::SignatureOutput, Epoch, SubstateRequirement};
+use tari_ootle_common_types::{Epoch, SubstateRequirement, signature::SignatureOutput};
 use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
 use crate::{
-    hashing::transaction_hasher_v1,
-    unsealed::UnsealedTransaction,
     Instruction,
     UnsealedTransactionV1,
     UnsignedTransaction,
     UnsignedTransactionV1,
+    hashing::transaction_hasher_v1,
+    unsealed::UnsealedTransaction,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, borsh::BorshSerialize)]

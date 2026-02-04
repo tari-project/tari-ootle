@@ -21,11 +21,7 @@ impl<const N: usize, T> Deref for MaxVec<N, T> {
 impl<const N: usize, T> MaxVec<N, T> {
     pub fn new_checked(elems: impl Into<Box<[T]>>) -> Option<Self> {
         let elems = elems.into();
-        if elems.len() <= N {
-            Some(Self { elems })
-        } else {
-            None
-        }
+        if elems.len() <= N { Some(Self { elems }) } else { None }
     }
 
     /// Constructs a new `MaxVec<N>` without checking the length of the input.

@@ -4,7 +4,7 @@
 use std::{any::type_name, collections::BTreeMap, ops::ControlFlow};
 
 use serde::{Deserialize, Serialize};
-use tari_bor::{decode, BorError, FromTagAndValue, ValueVisitor};
+use tari_bor::{BorError, FromTagAndValue, ValueVisitor, decode};
 use tari_template_lib::{
     models::{BucketId, ComponentAddressAllocation, ProofId, ResourceAddressAllocation},
     prelude::{ComponentAddress, Metadata, NonFungibleAddress},
@@ -603,12 +603,12 @@ fn get_value_by_path<'a>(value: &'a tari_bor::Value, path: &str) -> Option<&'a t
 mod tests {
     use std::collections::HashMap;
 
-    use rand::{rngs::OsRng, RngCore};
+    use rand::{RngCore, rngs::OsRng};
     use tari_bor::cbor;
     use tari_template_lib::types::NonFungibleId;
 
     use super::*;
-    use crate::hashing::{hasher32, EngineHashDomainLabel};
+    use crate::hashing::{EngineHashDomainLabel, hasher32};
 
     fn new_object_key() -> ObjectKey {
         hasher32(EngineHashDomainLabel::ComponentAddress)

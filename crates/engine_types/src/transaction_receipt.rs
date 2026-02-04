@@ -5,11 +5,11 @@ use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 
 use crate::{
+    ValidatorFeeWithdrawal,
     events::Event,
     fees::FeeReceipt,
     logs::LogEntry,
-    substate::{hash_substate, SubstateDiff, SubstateId},
-    ValidatorFeeWithdrawal,
+    substate::{SubstateDiff, SubstateId, hash_substate},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]

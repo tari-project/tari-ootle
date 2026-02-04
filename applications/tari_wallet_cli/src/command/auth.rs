@@ -24,6 +24,7 @@ use std::time::Duration;
 
 use clap::{Args, Subcommand};
 use tari_wallet_daemon_client::{
+    WalletDaemonClient,
     types::{
         AuthGetAllJwtRequest,
         AuthLoginAcceptRequest,
@@ -31,7 +32,6 @@ use tari_wallet_daemon_client::{
         AuthLoginRequest,
         AuthRevokeTokenRequest,
     },
-    WalletDaemonClient,
 };
 
 #[derive(Debug, Subcommand, Clone)]

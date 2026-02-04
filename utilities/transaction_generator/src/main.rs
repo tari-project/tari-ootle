@@ -8,7 +8,7 @@ use std::{
     collections::HashMap,
     fs,
     io,
-    io::{stdout, BufRead, Seek, SeekFrom, Write},
+    io::{BufRead, Seek, SeekFrom, Write, stdout},
 };
 
 use anyhow::anyhow;
@@ -18,10 +18,10 @@ use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey, tari_utilities
 use tari_ootle_common_types::Network;
 use tari_transaction_manifest::ManifestValue;
 use transaction_generator::{
+    BoxedTransactionBuilder,
     read_number_of_transactions,
     read_transactions,
     transaction_builders::{free_coins, manifest},
-    BoxedTransactionBuilder,
 };
 
 use crate::{

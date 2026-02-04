@@ -10,11 +10,11 @@ use tari_template_abi::rust::{
 
 use super::{BinaryTag, ResourceAddress};
 use crate::{
+    KeyParseError,
     address_prefixes,
     crypto::PedersenCommitmentBytes,
     hex::{fixed_bytes_from_hex, write_hex_fmt},
     serde_helpers,
-    KeyParseError,
 };
 
 const TAG: u64 = BinaryTag::Utxo.as_u64();

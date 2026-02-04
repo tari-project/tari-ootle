@@ -3,14 +3,14 @@
 
 use std::collections::HashMap;
 
-use tari_engine::state_store::{memory::MemoryStateStore, StateReader, StateStoreError};
+use tari_engine::state_store::{StateReader, StateStoreError, memory::MemoryStateStore};
 use tari_engine_types::{
+    Utxo,
     component::ComponentHeader,
     indexed_value::IndexedValue,
     resource::Resource,
     substate::{Substate, SubstateId},
     vault::Vault,
-    Utxo,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
@@ -37,12 +37,11 @@ impl<'a> ReadOnlyStateStore<'a> {
     ) -> Result<Vec<(ComponentAddress, ComponentHeader)>, StateStoreError> {
         let mut components = Vec::new();
         self.with_substates(|id, substate| {
-            if let SubstateId::Component(component_address) = id {
-                if let Some(component) = substate.substate_value().as_component() {
-                    if component.template_address == template_address {
-                        components.push((*component_address, component.clone()));
-                    }
-                }
+            if let SubstateId::Component(component_address) = id &&
+                let Some(component) = substate.substate_value().as_component() &&
+                component.template_address == template_address
+            {
+                components.push((*component_address, component.clone()));
             }
         })?;
         Ok(components)
@@ -56,14 +55,12 @@ impl<'a> ReadOnlyStateStore<'a> {
     pub fn all_accounts(&self) -> Result<HashMap<ComponentAddress, Account>, StateStoreError> {
         let mut accounts = HashMap::new();
         self.with_substates(|id, substate| {
-            if let SubstateId::Component(component_address) = id {
-                if let Some(component) = substate.substate_value().as_component() {
-                    if component.template_address == ACCOUNT_TEMPLATE_ADDRESS {
-                        if let Ok(account) = Account::from_value(component.state()) {
-                            accounts.insert(*component_address, account);
-                        }
-                    }
-                }
+            if let SubstateId::Component(component_address) = id &&
+                let Some(component) = substate.substate_value().as_component() &&
+                component.template_address == ACCOUNT_TEMPLATE_ADDRESS &&
+                let Ok(account) = Account::from_value(component.state())
+            {
+                accounts.insert(*component_address, account);
             }
         })?;
         Ok(accounts)

@@ -24,27 +24,27 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{
-    substate::{Substate, SubstateId, SubstateValue},
     Utxo,
+    substate::{Substate, SubstateId, SubstateValue},
 };
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate};
 use tari_indexer_lib::{cached_substate_manager::CachedSubstateManager, error::IndexerError};
 use tari_ootle_common_types::{
-    shard::Shard,
-    substate_type::SubstateType,
     Epoch,
     PeerAddress,
     StateVersion,
     SubstateRequirementRef,
+    shard::Shard,
+    substate_type::SubstateType,
 };
 use tari_ootle_storage::StorageError;
 use tari_ootle_wallet_sdk::models::UtxoStateUpdateSet;
 use tari_template_lib_types::{
-    crypto::{RistrettoPublicKeyBytes, UtxoTag},
     ResourceAddress,
     TemplateAddress,
     UtxoId,
+    crypto::{RistrettoPublicKeyBytes, UtxoTag},
 };
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
@@ -176,14 +176,14 @@ impl SubstateManager {
         let mut found_in_cache = HashSet::new();
 
         for req in &substate_req {
-            if let Some(version) = req.version() {
-                if let Some(substate) = self.get_substate_from_db(req.substate_id(), Some(version))? {
-                    found_in_cache.insert(*req);
-                    results.insert(
-                        req.substate_id().clone(),
-                        Substate::new(substate.version, substate.substate),
-                    );
-                }
+            if let Some(version) = req.version() &&
+                let Some(substate) = self.get_substate_from_db(req.substate_id(), Some(version))?
+            {
+                found_in_cache.insert(*req);
+                results.insert(
+                    req.substate_id().clone(),
+                    Substate::new(substate.version, substate.substate),
+                );
             }
         }
 

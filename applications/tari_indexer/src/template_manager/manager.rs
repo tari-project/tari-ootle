@@ -33,11 +33,11 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::{
-    optional::Optional,
-    services::template_provider::TemplateProvider,
     Epoch,
     PeerAddress,
     SubstateRequirementRef,
+    optional::Optional,
+    services::template_provider::TemplateProvider,
 };
 use tari_ootle_storage::{
     global::{DbTemplate, DbTemplateType, GlobalDb, TemplateStatus},
@@ -45,13 +45,13 @@ use tari_ootle_storage::{
 };
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_template_builtin::{
-    get_template_builtin,
-    try_get_template_builtin,
     ACCOUNT_TEMPLATE_ADDRESS,
     NFT_FAUCET_TEMPLATE_ADDRESS,
     XTR_FAUCET_TEMPLATE_ADDRESS,
+    get_template_builtin,
+    try_get_template_builtin,
 };
-use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
+use tari_template_lib_types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 use super::{LoadedTemplateWithMetadata, Template, TemplateCode, TemplateMetadata};
 use crate::{substate_manager::SubstateManager, template_manager::error::TemplateManagerError};

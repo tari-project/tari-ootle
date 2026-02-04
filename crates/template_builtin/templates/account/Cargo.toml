@@ -2,7 +2,7 @@
 [package]
 name = "account"
 version = "0.9.1"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 tari_template_abi = { path = "../../../template_abi" }

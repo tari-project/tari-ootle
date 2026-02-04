@@ -5,7 +5,7 @@ use std::{error::Error, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{shard::Shard, ShardGroup};
+use crate::{ShardGroup, shard::Shard};
 
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]

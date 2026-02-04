@@ -4,12 +4,12 @@
 use std::num::NonZeroUsize;
 
 use log::*;
-use tari_ootle_common_types::{optional::Optional, shard::Shard, Epoch};
+use tari_ootle_common_types::{Epoch, optional::Optional, shard::Shard};
 use tari_ootle_p2p::proto::rpc;
 use tari_ootle_storage::{
-    consensus_models::{StateTransition, StateVersionTransitions, SubstateValueFilterFlags},
     StateStore,
     StorageError,
+    consensus_models::{StateTransition, StateVersionTransitions, SubstateValueFilterFlags},
 };
 use tari_rpc_framework::RpcStatus;
 use tari_state_tree::Version;

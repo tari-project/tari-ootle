@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_abi::{call_engine, EngineOp};
+use tari_template_abi::{EngineOp, call_engine};
 use tari_template_lib_types::{
     crypto::{PublicKey, Signature, SignatureDomain, SignaturePayload},
     engine_args::{SignatureAction, SignatureInvokeArg, SignatureVerifyArgRef},

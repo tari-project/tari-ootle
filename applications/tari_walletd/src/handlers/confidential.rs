@@ -11,7 +11,7 @@ use ootle_byte_type::ToByteType;
 use rand::rngs::OsRng;
 use serde_json::json;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey as _, ristretto::RistrettoPublicKey};
-use tari_engine_types::crypto::{get_commitment_factory, ValueLookupTable};
+use tari_engine_types::crypto::{ValueLookupTable, get_commitment_factory};
 use tari_ootle_common_types::{displayable::Displayable, optional::Optional};
 use tari_ootle_wallet_crypto::{GenerateValueLookup, MMapValueLookup, OutputWitness};
 use tari_ootle_wallet_sdk::models::{ConfidentialOutputModel, KeyBranch, OutputStatus};
@@ -34,8 +34,8 @@ use tari_wallet_daemon_client::{
 use tokio::{task::block_in_place, time::Instant};
 
 use crate::handlers::{
-    helpers::{get_account_or_default, invalid_params, invalid_request},
     HandlerContext,
+    helpers::{get_account_or_default, invalid_params, invalid_request},
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::json_rpc::confidential";

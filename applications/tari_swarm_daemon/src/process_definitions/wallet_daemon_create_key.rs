@@ -7,7 +7,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use tokio::process::Command;
 
-use crate::process_definitions::{wallet_daemon, wallet_daemon::WalletDaemon, ProcessContext, ProcessDefinition};
+use crate::process_definitions::{ProcessContext, ProcessDefinition, wallet_daemon, wallet_daemon::WalletDaemon};
 
 #[derive(Debug, Default)]
 pub struct WalletDaemonCreateAccount;

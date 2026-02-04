@@ -5,9 +5,9 @@ use tari_bor::{Deserialize, Serialize};
 
 use super::ViewableBalanceProof;
 use crate::{
+    EncryptedData,
     access_rules::AccessRule,
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
-    EncryptedData,
 };
 
 /// An unspent output that does not reveal the value and the owner of the coin it represents.

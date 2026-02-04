@@ -6,11 +6,11 @@ use std::fmt::Display;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::{Substate, SubstateId};
 use tari_ootle_common_types::{
-    shard::Shard,
     SubstateAddress,
     ToSubstateAddress,
     VersionedSubstateId,
     VersionedSubstateIdRef,
+    shard::Shard,
 };
 use tari_state_tree::SubstateTreeChange;
 

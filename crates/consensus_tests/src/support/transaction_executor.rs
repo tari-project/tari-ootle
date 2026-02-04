@@ -8,24 +8,24 @@ use std::{
 };
 
 use tari_consensus::traits::{BlockTransactionExecutor, BlockTransactionExecutorError};
-use tari_engine::state_store::{memory::MemoryStateStore, new_memory_store, StateWriter};
+use tari_engine::state_store::{StateWriter, memory::MemoryStateStore, new_memory_store};
 use tari_engine_types::substate::{Substate, SubstateId};
 use tari_ootle_common_types::{
-    displayable::Displayable,
     Epoch,
     LockIntent,
     SubstateLockType,
     SubstateRequirement,
     VersionedSubstateId,
+    displayable::Displayable,
 };
 use tari_ootle_storage::{
-    consensus_models::{TransactionExecution, VersionedSubstateIdLockIntent},
     StateStore,
+    consensus_models::{TransactionExecution, VersionedSubstateIdLockIntent},
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
-use tari_template_lib_types::{constants::XTR, TransactionReceiptAddress};
+use tari_template_lib_types::{TransactionReceiptAddress, constants::XTR};
 
-use crate::support::{create_execution_result_for_transaction, executions_store::TestExecutionSpecStore, TestAddress};
+use crate::support::{TestAddress, create_execution_result_for_transaction, executions_store::TestExecutionSpecStore};
 
 #[derive(Debug, Clone)]
 pub struct TestBlockTransactionProcessor {

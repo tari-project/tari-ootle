@@ -9,7 +9,7 @@ use std::{
 
 use tari_bor::{BorTag, Deserialize, Serialize};
 
-use crate::{address_prefixes, BinaryTag, Hash, KeyParseError, ObjectKey};
+use crate::{BinaryTag, Hash, KeyParseError, ObjectKey, address_prefixes};
 
 const TAG: u64 = BinaryTag::ValidatorNodeFeePool.as_u64();
 

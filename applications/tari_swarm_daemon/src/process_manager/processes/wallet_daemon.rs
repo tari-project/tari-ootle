@@ -5,8 +5,8 @@ use anyhow::anyhow;
 use tari_ootle_wallet_sdk::models::KeyBranch;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_wallet_daemon_client::{
-    types::{AuthLoginAcceptRequest, AuthLoginRequest, AuthLoginResponse, WebauthnFinishAuthRequest},
     WalletDaemonClient,
+    types::{AuthLoginAcceptRequest, AuthLoginRequest, AuthLoginResponse, WebauthnFinishAuthRequest},
 };
 
 use crate::process_manager::Instance;

@@ -42,8 +42,8 @@
 use std::{fs, io, path::Path, sync::Arc};
 
 use log::*;
-use rand::{rngs::OsRng, CryptoRng, RngCore};
-use serde::{de::DeserializeOwned, Serialize};
+use rand::{CryptoRng, RngCore, rngs::OsRng};
+use serde::{Serialize, de::DeserializeOwned};
 use tari_common::{
     configuration::bootstrap::prompt,
     exit_codes::{ExitCode, ExitError},
@@ -240,10 +240,10 @@ pub fn load_from_json<P: AsRef<Path>, T: DeserializeOwned>(path: P) -> Result<Op
 /// ## Returns
 /// Result to check if successful or not, string will indicate reason on error
 pub fn save_as_json<P: AsRef<Path>, T: Serialize>(path: P, object: &T) -> Result<(), IdentityError> {
-    if let Some(p) = path.as_ref().parent() {
-        if !p.exists() {
-            fs::create_dir_all(p)?;
-        }
+    if let Some(p) = path.as_ref().parent() &&
+        !p.exists()
+    {
+        fs::create_dir_all(p)?;
     }
     let json = serde_json5::to_string(object)?;
     let json_with_comment = format!(

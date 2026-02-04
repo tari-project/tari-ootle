@@ -21,7 +21,7 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use serde::de::DeserializeOwned;
-use tari_template_abi::{call_engine, EngineOp};
+use tari_template_abi::{EngineOp, call_engine};
 use tari_template_lib_types::bytes::Bytes;
 
 use crate::{

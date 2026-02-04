@@ -4,7 +4,7 @@
 use std::fmt::Display;
 
 use tari_consensus_types::{ProposalCertificate, ProposalVote, TimeoutVote, Vote};
-use tari_ootle_common_types::{displayable::Displayable, Epoch, NodeHeight};
+use tari_ootle_common_types::{Epoch, NodeHeight, displayable::Displayable};
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct NewViewMessage {

@@ -17,11 +17,11 @@ use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_ootle_common_types::{Epoch, NodeAddressable, ShardGroup, SubstateAddress, VersionedSubstateIdRef};
 use tari_ootle_storage::{
-    consensus_models::{SubstateRecord, SubstateTransition, SubstateUpdateBatch, TransactionPool},
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
+    consensus_models::{SubstateRecord, SubstateTransition, SubstateUpdateBatch, TransactionPool},
 };
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_rocksdb::DatabaseOptions;
@@ -30,19 +30,19 @@ use tempfile::TempDir;
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::support::{
+    RoundRobinLeaderStrategy,
+    TEST_NUM_PRESHARDS,
+    TestBlockTransactionProcessor,
+    TestConsensusSpec,
+    TestStore,
+    Validator,
+    ValidatorChannels,
     address::TestAddress,
     epoch_manager::TestEpochManager,
     executions_store::TestExecutionSpecStore,
     messaging_impls::{TestInboundMessaging, TestOutboundMessaging},
     signing_service::TestVoteSignatureService,
     sync::AlwaysSyncedSyncManager,
-    RoundRobinLeaderStrategy,
-    TestBlockTransactionProcessor,
-    TestConsensusSpec,
-    TestStore,
-    Validator,
-    ValidatorChannels,
-    TEST_NUM_PRESHARDS,
 };
 
 pub struct ValidatorBuilder {

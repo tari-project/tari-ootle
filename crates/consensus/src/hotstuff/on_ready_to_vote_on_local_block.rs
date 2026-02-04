@@ -7,8 +7,10 @@ use log::*;
 use tari_consensus_types::{Decision, LastVoted, LeafBlock, PcId};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::commit_result::{AbortReason, RejectReason};
-use tari_ootle_common_types::{committee::CommitteeInfo, optional::Optional, Epoch, ShardGroup};
+use tari_ootle_common_types::{Epoch, ShardGroup, committee::CommitteeInfo, optional::Optional};
 use tari_ootle_storage::{
+    StateStore,
+    StateStoreWriteTransaction,
     consensus_models::{
         Block,
         BlockDiff,
@@ -31,8 +33,6 @@ use tari_ootle_storage::{
         ValidatorConsensusStats,
         ValidatorStatsUpdate,
     },
-    StateStore,
-    StateStoreWriteTransaction,
 };
 use tari_sidechain::QuorumDecision;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
@@ -40,6 +40,8 @@ use tokio::sync::broadcast;
 
 use crate::{
     hotstuff::{
+        HotstuffConfig,
+        ProposalValidationError,
         apply_leader_fee_to_substate_store,
         block_change_set::{BlockDecision, ProposedBlockChangeSet},
         calculate_state_merkle_root,
@@ -57,8 +59,6 @@ use crate::{
             PreparedTransaction,
             TransactionLockConflicts,
         },
-        HotstuffConfig,
-        ProposalValidationError,
     },
     tracing::TraceTimer,
     traits::{BlockStore, CertificateStore, ConsensusSpec, WriteableSubstateStore},

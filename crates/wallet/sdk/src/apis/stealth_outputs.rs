@@ -8,38 +8,39 @@ use log::*;
 use ootle_byte_type::{FromByteType, ToByteType};
 use tari_crypto::{
     keys::PublicKey,
-    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey},
+    ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment},
 };
-use tari_engine_types::{component::derive_component_address_from_public_key, limits, Utxo, UtxoOutput};
+use tari_engine_types::{Utxo, UtxoOutput, component::derive_component_address_from_public_key, limits};
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::{
+    Network,
     displayable::Displayable,
     optional::{IsNotFoundError, Optional},
-    Network,
 };
 use tari_ootle_wallet_crypto::{
-    memo::Memo,
-    pay_to::PayTo,
     DecryptedData,
     OutputWitness,
     StealthCryptoApi,
     StealthCryptoApiError,
     StealthInputWitness,
     StealthOutputWitness,
+    memo::Memo,
+    pay_to::PayTo,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::types::{
-    access_rules::AccessRule,
-    crypto::PedersenCommitmentBytes,
-    stealth::{SpendCondition, StealthTransferStatement},
     Amount,
     ComponentAddress,
     EncryptedData,
     ResourceAddress,
     UtxoAddress,
+    access_rules::AccessRule,
+    crypto::PedersenCommitmentBytes,
+    stealth::{SpendCondition, StealthTransferStatement},
 };
 
 use crate::{
+    WalletSdkSpec,
     apis::{
         accounts::AccountsApiError,
         config::{ConfigApi, ConfigApiError},
@@ -47,8 +48,6 @@ use crate::{
         stealth_transfer::{StealthOutputToCreate, UnblindedInputToSpend},
     },
     models::{
-        input_selection,
-        input_selection::{branch_and_bound::KeyedInput, InputSelectionAlgorithm},
         AccountAndViewKeys,
         InputSpendData,
         KeyBranch,
@@ -58,6 +57,8 @@ use crate::{
         StealthOutputInfo,
         StealthOutputModel,
         WalletLockId,
+        input_selection,
+        input_selection::{InputSelectionAlgorithm, branch_and_bound::KeyedInput},
     },
     storage::{
         CommittableStore,
@@ -67,7 +68,6 @@ use crate::{
         WalletStoreWriter,
         WriteableWalletStore,
     },
-    WalletSdkSpec,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet::apis::stealth_outputs";

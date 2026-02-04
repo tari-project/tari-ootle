@@ -22,10 +22,10 @@
 
 use std::sync::Arc;
 
-use super::{validator_node_db::ValidatorNodeDb, BaseLayerDb, BlockHeaderDb, BmtDb, EpochDb};
+use super::{BaseLayerDb, BlockHeaderDb, BmtDb, EpochDb, validator_node_db::ValidatorNodeDb};
 use crate::{
-    global::{backend_adapter::GlobalDbAdapter, metadata_db::MetadataDb, template_db::TemplateDb},
     StorageError,
+    global::{backend_adapter::GlobalDbAdapter, metadata_db::MetadataDb, template_db::TemplateDb},
 };
 
 pub trait DbFactory: Sync + Send + 'static {

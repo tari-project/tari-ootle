@@ -3,17 +3,17 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::{atomic::AtomicU64, Arc},
+    sync::{Arc, atomic::AtomicU64},
 };
 
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{
-    committee::{Committee, CommitteeInfo},
     Epoch,
     NodeAddressable,
     ShardGroup,
     SubstateAddress,
     VotePower,
+    committee::{Committee, CommitteeInfo},
 };
 use tari_ootle_storage::global::models::ValidatorNode;
 use tari_sidechain::EvictionProof;
@@ -21,10 +21,10 @@ use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::{
-    error::EpochManagerError,
-    service::{types::EpochManagerRequest, NetworkDescription},
-    traits::{EpochManagerReader, EpochManagerWriter},
     EpochManagerEvent,
+    error::EpochManagerError,
+    service::{NetworkDescription, types::EpochManagerRequest},
+    traits::{EpochManagerReader, EpochManagerWriter},
 };
 
 #[derive(Clone, Debug)]

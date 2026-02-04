@@ -2,9 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use blake2::{
-    digest::{consts, generic_array::GenericArray},
     Blake2b,
     Digest,
+    digest::{consts, generic_array::GenericArray},
 };
 use ootle_byte_type::{ConvertFromByteType, FromByteType, ToByteType};
 use tari_crypto::ristretto::RistrettoSchnorr;

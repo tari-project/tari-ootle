@@ -21,7 +21,8 @@ impl MMapValueLookup {
     /// This function uses unsafe code to create a memory-mapped file. The caller must ensure that the file is not
     /// modified while it is being used.
     pub unsafe fn load(file: &File) -> io::Result<Self> {
-        let mmap = memmap2::Mmap::map(file)?;
+        // Safety: The caller must ensure that the file is not modified while it is being used.
+        let mmap = unsafe { memmap2::Mmap::map(file)? };
         let header = LookupHeader::from_buf(&mmap)?;
         #[cfg(unix)]
         mmap.advise_range(
@@ -119,7 +120,7 @@ impl ValueLookupTable for MMapValueLookup {
 
 #[cfg(test)]
 mod tests {
-    use rand::{rngs::OsRng, Rng};
+    use rand::{Rng, rngs::OsRng};
 
     use super::*;
 

@@ -3,13 +3,14 @@
 
 use log::*;
 use ootle_byte_type::{ConvertFromByteType, ToByteType};
-use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
+use tari_crypto::ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment};
 use tari_engine_types::crypto::OutputBody;
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
-use tari_ootle_wallet_crypto::{kdfs, MaskAndValue};
-use tari_template_lib::types::{crypto::PedersenCommitmentBytes, Amount, VaultId};
+use tari_ootle_wallet_crypto::{MaskAndValue, kdfs};
+use tari_template_lib::types::{Amount, VaultId, crypto::PedersenCommitmentBytes};
 
 use crate::{
+    WalletSdkSpec,
     apis::{
         accounts::AccountsApiError,
         confidential_crypto::{ConfidentialCryptoApi, ConfidentialCryptoApiError},
@@ -24,7 +25,6 @@ use crate::{
         WalletStoreWriter,
         WriteableWalletStore,
     },
-    WalletSdkSpec,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_sdk::apis::confidential_outputs";

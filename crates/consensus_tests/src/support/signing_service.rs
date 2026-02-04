@@ -7,7 +7,7 @@ use tari_consensus::traits::{ValidatorSignatureVerifierService, ValidatorSignerS
 use tari_consensus_types::{ToSignatureMessage, ValidatorSchnorrSignature};
 use tari_crypto::ristretto::RistrettoPublicKey;
 
-use super::{helpers, TestAddress};
+use super::{TestAddress, helpers};
 
 #[derive(Debug, Clone)]
 pub struct TestVoteSignatureService {

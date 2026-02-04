@@ -10,7 +10,7 @@ use tari_ootle_common_types::{Epoch, NodeHeight};
 use tari_sidechain::{ProposalCertificateSignatureFields, QuorumDecision};
 use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
-use crate::{ids::BlockId, validator_signature::ValidatorSignatureBytes, SignedMessage, ToSignatureMessage, Vote};
+use crate::{SignedMessage, ToSignatureMessage, Vote, ids::BlockId, validator_signature::ValidatorSignatureBytes};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProposalVote {

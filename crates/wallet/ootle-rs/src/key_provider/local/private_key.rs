@@ -1,7 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use rand::{thread_rng, CryptoRng, Rng};
+use rand::{CryptoRng, Rng, thread_rng};
 use tari_ootle_common_types::Network;
 
 use crate::{key_provider::local::LocalKeyProvider, keys::OotleSecretKey};

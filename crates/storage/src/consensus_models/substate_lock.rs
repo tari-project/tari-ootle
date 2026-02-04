@@ -14,7 +14,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_transaction::TransactionId;
 
-use crate::{consensus_models::RequireLockIntentRef, StateStoreReadTransaction, StorageError};
+use crate::{StateStoreReadTransaction, StorageError, consensus_models::RequireLockIntentRef};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct SubstateLock {

@@ -9,18 +9,18 @@ use tari_engine_types::{
     commit_result::RejectReason,
     substate::{SubstateDiff, SubstateId},
 };
-use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
-use tari_ootle_transaction::{builder::TransactionBuilder, Transaction};
+use tari_ootle_common_types::{SubstateRequirement, optional::Optional};
+use tari_ootle_transaction::{Transaction, builder::TransactionBuilder};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib_types::{NonFungibleId, TemplateAddress};
 use tari_transaction_components::key_manager::{SecretTransactionKeyManagerInterface, TariKeyId};
 use tari_validator_node_client::{
-    types::{GetTransactionResultRequest, SubmitTransactionRequest, SubmitTransactionResponse},
     ValidatorNodeClient,
+    types::{GetTransactionResultRequest, SubmitTransactionRequest, SubmitTransactionResponse},
 };
-use tokio::time::{interval, MissedTickBehavior};
+use tokio::time::{MissedTickBehavior, interval};
 
-use crate::{helpers::get_component_from_namespace, TariWorld};
+use crate::{TariWorld, helpers::get_component_from_namespace};
 
 /// Creates a component by calling a template function
 pub async fn create_component(
@@ -389,16 +389,16 @@ pub fn parse_arg(s: &str) -> Result<tari_ootle_transaction::builder::named_args:
     }
 
     // Try parsing special prefixed types
-    if let Some(("nft", nft_id)) = s.split_once('_') {
-        if let Ok(v) = NonFungibleId::try_from_canonical_string(nft_id) {
-            return Ok(arg!(v));
-        }
+    if let Some(("nft", nft_id)) = s.split_once('_') &&
+        let Ok(v) = NonFungibleId::try_from_canonical_string(nft_id)
+    {
+        return Ok(arg!(v));
     }
 
-    if let Some(("amount", amount)) = s.split_once('_') {
-        if let Ok(number) = amount.parse::<i64>() {
-            return Ok(arg!(number));
-        }
+    if let Some(("amount", amount)) = s.split_once('_') &&
+        let Ok(number) = amount.parse::<i64>()
+    {
+        return Ok(arg!(number));
     }
 
     // Default to string

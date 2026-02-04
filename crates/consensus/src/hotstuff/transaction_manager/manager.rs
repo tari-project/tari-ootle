@@ -11,14 +11,15 @@ use tari_engine_types::{
     substate::{Substate, SubstateId},
 };
 use tari_ootle_common_types::{
-    committee::CommitteeInfo,
-    optional::{IsNotFoundError, Optional},
     Epoch,
     LockIntent,
     SubstateRequirement,
     SubstateRequirementRef,
+    committee::CommitteeInfo,
+    optional::{IsNotFoundError, Optional},
 };
 use tari_ootle_storage::{
+    StateStore,
     consensus_models::{
         BlockTransactionExecution,
         Evidence,
@@ -27,7 +28,6 @@ use tari_ootle_storage::{
         TransactionPoolRecord,
         TransactionRecord,
     },
-    StateStore,
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 

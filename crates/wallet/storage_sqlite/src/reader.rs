@@ -9,10 +9,6 @@ use std::{
 
 use bigdecimal::{BigDecimal, ToPrimitive};
 use diesel::{
-    dsl,
-    dsl::sum,
-    sql_query,
-    sql_types,
     BoolExpressionMethods,
     ExpressionMethods,
     JoinOnDsl,
@@ -23,11 +19,15 @@ use diesel::{
     SelectableHelper,
     SqliteConnection,
     TextExpressionMethods,
+    dsl,
+    dsl::sum,
+    sql_query,
+    sql_types,
 };
 use log::{error, warn};
 use serde::de::DeserializeOwned;
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, StateVersion};
+use tari_ootle_common_types::{StateVersion, shard::Shard, substate_type::SubstateType};
 use tari_ootle_transaction::TransactionId;
 use tari_ootle_wallet_sdk::{
     models::{
@@ -52,13 +52,13 @@ use tari_ootle_wallet_sdk::{
     storage::{TagAndPublicNoncePair, WalletStorageError, WalletStoreReader},
 };
 use tari_template_lib_types::{
-    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
     ComponentAddress,
     NonFungibleId,
     ResourceAddress,
     ResourceType,
     TemplateAddress,
     VaultId,
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
 };
 use webauthn_rs::prelude::Passkey;
 
@@ -1445,10 +1445,10 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
 impl Drop for ReadTransaction<'_> {
     fn drop(&mut self) {
-        if !self.is_done {
-            if let Err(err) = self.rollback_internal() {
-                error!(target: LOG_TARGET, "Failed to rollback transaction: {}", err);
-            }
+        if !self.is_done &&
+            let Err(err) = self.rollback_internal()
+        {
+            error!(target: LOG_TARGET, "Failed to rollback transaction: {}", err);
         }
     }
 }

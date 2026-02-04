@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 use serde::{Deserialize, Serialize};
 
-use crate::crypto::{scalar::Scalar32Bytes, InvalidByteLengthError, PedersenCommitmentBytes};
+use crate::crypto::{InvalidByteLengthError, PedersenCommitmentBytes, scalar::Scalar32Bytes};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]

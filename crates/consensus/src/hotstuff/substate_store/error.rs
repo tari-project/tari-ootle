@@ -1,8 +1,8 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_ootle_common_types::{optional::IsNotFoundError, VersionedSubstateId};
-use tari_ootle_storage::{consensus_models::LockConflict, StorageError};
+use tari_ootle_common_types::{VersionedSubstateId, optional::IsNotFoundError};
+use tari_ootle_storage::{StorageError, consensus_models::LockConflict};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SubstateStoreError {

@@ -4,11 +4,11 @@
 use std::collections::HashSet;
 
 use axum::{
+    Extension,
+    Json,
     extract::Query,
     http::header::HeaderMap,
     response::{IntoResponse, Response},
-    Extension,
-    Json,
 };
 use log::*;
 use tari_indexer_client::types::{
@@ -24,7 +24,7 @@ use crate::rest_api::{
     context::HandlerContext,
     error::ErrorResponse,
     handlers::HandlerResult,
-    streaming::{encoding, UtxoUpdateStream},
+    streaming::{UtxoUpdateStream, encoding},
 };
 
 const LOG_TARGET: &str = "tari::ootle::indexer::rest_api::handlers::utxos";

@@ -1,7 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use tari_base_node_client::BaseNodeClient;
 use tari_ootle_common_types::Network;
 

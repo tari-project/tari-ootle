@@ -22,8 +22,8 @@
 
 use serde::Serialize;
 use tari_bor::to_value;
-use tari_template_abi::{call_engine, EngineOp};
-use tari_template_lib_types::{access_rules::ComponentAccessRules, ComponentAddress, OwnerRule};
+use tari_template_abi::{EngineOp, call_engine};
+use tari_template_lib_types::{ComponentAddress, OwnerRule, access_rules::ComponentAccessRules};
 
 use crate::{
     args::{ComponentAction, ComponentInvokeArg, ComponentRef, CreateComponentArg, EmitLogArg, InvokeResult, LogLevel},

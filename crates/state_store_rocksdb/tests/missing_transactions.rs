@@ -8,9 +8,9 @@ use tari_common_types::types::FixedHash;
 use tari_consensus_types::ShardGroupAccumulatedData;
 use tari_ootle_common_types::{Epoch, ExtraData, Network, NodeHeight};
 use tari_ootle_storage::{
-    consensus_models::{Block, Command},
     StateStore,
     StateStoreWriteTransaction,
+    consensus_models::{Block, Command},
 };
 use tari_template_lib::prelude::SchnorrSignatureBytes;
 use tari_utilities::epoch_time::EpochTime;

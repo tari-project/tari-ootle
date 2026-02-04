@@ -5,7 +5,7 @@ use rand::rngs::OsRng;
 use tari_crypto::{
     keys::{PublicKey as PublicKeyT, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
-    tari_utilities::{hex::Hex, SafePassword},
+    tari_utilities::{SafePassword, hex::Hex},
 };
 
 pub fn create_key_pair() -> (RistrettoSecretKey, RistrettoPublicKey) {

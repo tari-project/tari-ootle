@@ -5,7 +5,7 @@ use std::{fmt, fmt::Display, str::FromStr};
 
 use anyhow::anyhow;
 use tari_bor::{Deserialize, Serialize};
-use tari_common::{configuration::StringList, SubConfigPath};
+use tari_common::{SubConfigPath, configuration::StringList};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

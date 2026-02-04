@@ -11,10 +11,10 @@ use tari_ootle_transaction::TransactionId;
 use time::PrimitiveDateTime;
 
 use crate::{
-    consensus_models::{Evidence, VersionedSubstateIdLockIntent},
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
+    consensus_models::{Evidence, VersionedSubstateIdLockIntent},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

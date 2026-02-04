@@ -10,14 +10,14 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
 use tari_engine_types::crypto::{commit_amount, messages};
-use tari_ootle_wallet_crypto::{stealth, MaskAndValue, OutputWitness, StealthInputWitness, StealthOutputWitness};
+use tari_ootle_wallet_crypto::{MaskAndValue, OutputWitness, StealthInputWitness, StealthOutputWitness, stealth};
 use tari_template_lib::{
     prelude::StealthTransferStatement,
     types::{
-        crypto::{RistrettoPublicKeyBytes, StealthValueProof, UtxoTag, ValueKnowledgeProof},
-        stealth::{SpendCondition, StealthOutputsStatement},
         Amount,
         EncryptedData,
+        crypto::{RistrettoPublicKeyBytes, StealthValueProof, UtxoTag, ValueKnowledgeProof},
+        stealth::{SpendCondition, StealthOutputsStatement},
     },
 };
 

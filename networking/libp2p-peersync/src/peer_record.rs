@@ -4,10 +4,10 @@
 use std::{collections::HashSet, io, sync::Arc, time::Duration};
 
 use asynchronous_codec::{BytesMut, Decoder, Encoder};
-use blake2::{digest::consts::U64, Blake2b, Digest};
-use libp2p::{identity, Multiaddr, PeerId};
+use blake2::{Blake2b, Digest, digest::consts::U64};
+use libp2p::{Multiaddr, PeerId, identity};
 
-use crate::{epoch_time::epoch_time_now, proto, Error, MAX_MESSAGE_SIZE};
+use crate::{Error, MAX_MESSAGE_SIZE, epoch_time::epoch_time_now, proto};
 
 #[derive(Debug, Clone)]
 pub struct SignedPeerRecord {

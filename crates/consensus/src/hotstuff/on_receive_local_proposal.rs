@@ -19,12 +19,14 @@ use tari_consensus_types::{
 };
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
-    committee::{Committee, CommitteeInfo},
-    optional::Optional,
     Epoch,
     NodeHeight,
+    committee::{Committee, CommitteeInfo},
+    optional::Optional,
 };
 use tari_ootle_storage::{
+    StateStore,
+    StateStoreReadTransaction,
     consensus_models::{
         Block,
         BookkeepingModel,
@@ -34,8 +36,6 @@ use tari_ootle_storage::{
         TransactionPool,
         ValidBlock,
     },
-    StateStore,
-    StateStoreReadTransaction,
 };
 use tari_sidechain::{ProposalCertificateSignatureFields, QuorumDecision};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
@@ -43,6 +43,9 @@ use tokio::{sync::broadcast, task};
 
 use crate::{
     hotstuff::{
+        HotstuffConfig,
+        HotstuffEvent,
+        ProposalValidationError,
         block_change_set::{BlockDecision, ProposedBlockChangeSet},
         calculate_dummy_blocks_from_justify,
         commit_proofs::generate_eviction_proofs,
@@ -54,13 +57,10 @@ use crate::{
         on_receive_foreign_proposal::OnReceiveForeignProposalHandler,
         pacemaker_handle::PaceMakerHandle,
         transaction_manager::ConsensusTransactionManager,
-        HotstuffConfig,
-        HotstuffEvent,
-        ProposalValidationError,
     },
     messages::{ForeignProposalNotificationMessage, HotstuffMessage, NewViewMessage, ProposalMessage, VoteMessage},
     tracing::TraceTimer,
-    traits::{hooks::ConsensusHooks, CertificateStore, ConsensusSpec, OutboundMessaging, ValidatorSignerService},
+    traits::{CertificateStore, ConsensusSpec, OutboundMessaging, ValidatorSignerService, hooks::ConsensusHooks},
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::on_receive_local_proposal";
@@ -369,44 +369,44 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         }
 
         // End of epoch committed? No need to enter the view or send votes
-        if !block_decision.is_committed_epoch_end() {
-            if let Some(decision) = block_decision.local_decision {
-                // Enter the highest view justified by this block
-                self.pacemaker
-                    .enter_view(
-                        valid_block.epoch(),
-                        block_decision.highest_qc_view(),
-                        block_decision.high_pc.height(),
-                    )
-                    .await?;
+        if !block_decision.is_committed_epoch_end() &&
+            let Some(decision) = block_decision.local_decision
+        {
+            // Enter the highest view justified by this block
+            self.pacemaker
+                .enter_view(
+                    valid_block.epoch(),
+                    block_decision.highest_qc_view(),
+                    block_decision.high_pc.height(),
+                )
+                .await?;
 
-                // Get the leader that will collect votes for this block to justify moving onto the next view
-                let next_leader = self.store.with_read_tx(|tx| {
-                    get_leader_for_view(
-                        tx,
-                        local_committee,
-                        &self.leader_strategy,
-                        valid_block.id(),
-                        valid_block.height(),
-                    )
-                })?;
+            // Get the leader that will collect votes for this block to justify moving onto the next view
+            let next_leader = self.store.with_read_tx(|tx| {
+                get_leader_for_view(
+                    tx,
+                    local_committee,
+                    &self.leader_strategy,
+                    valid_block.id(),
+                    valid_block.height(),
+                )
+            })?;
 
-                // And vote to move onto the next view
-                if next_leader.vote_to_skip_next {
-                    self.send_new_view_and_vote_to_leader(
-                        next_leader.height,
-                        next_leader.address,
-                        valid_block.block(),
-                        block_decision.high_pc.clone(),
-                        decision,
-                    )
+            // And vote to move onto the next view
+            if next_leader.vote_to_skip_next {
+                self.send_new_view_and_vote_to_leader(
+                    next_leader.height,
+                    next_leader.address,
+                    valid_block.block(),
+                    block_decision.high_pc.clone(),
+                    decision,
+                )
+                .await?;
+            } else {
+                self.send_vote_to_leader(next_leader.address, valid_block.block(), decision)
                     .await?;
-                } else {
-                    self.send_vote_to_leader(next_leader.address, valid_block.block(), decision)
-                        .await?;
-                    self.store
-                        .with_write_tx(|tx| valid_block.block().as_last_voted().set(tx))?;
-                }
+                self.store
+                    .with_write_tx(|tx| valid_block.block().as_last_voted().set(tx))?;
             }
         }
 

@@ -31,17 +31,17 @@ use std::{
 
 use minotari_app_grpc::{
     authentication::ClientAuthenticationInterceptor,
-    tari_rpc::{wallet_client::WalletClient, GetIdentityRequest},
+    tari_rpc::{GetIdentityRequest, wallet_client::WalletClient},
 };
 use minotari_app_utilities::common_cli_args::CommonCliArgs;
-use minotari_console_wallet::{run_wallet_with_cli, ApplicationConfig};
+use minotari_console_wallet::{ApplicationConfig, run_wallet_with_cli};
 use minotari_wallet::WalletConfig;
 use tari_common::{configuration::CommonConfig, exit_codes::ExitError};
 use tari_common_sqlite::connection::DbConnectionUrl;
 use tari_common_types::grpc_authentication::GrpcAuthentication;
 use tari_comms::multiaddr::Multiaddr;
 use tari_comms_dht::DhtConfig;
-use tari_p2p::{auto_update::AutoUpdateConfig, Network, PeerSeedsConfig, TransportType};
+use tari_p2p::{Network, PeerSeedsConfig, TransportType, auto_update::AutoUpdateConfig};
 use tari_shutdown::Shutdown;
 use tokio::{runtime, runtime::Runtime};
 use tonic::{
@@ -51,9 +51,9 @@ use tonic::{
 
 type WalletGrpcClient = WalletClient<InterceptedService<Channel, ClientAuthenticationInterceptor>>;
 use crate::{
+    TariWorld,
     helpers::{get_os_assigned_ports, wait_listener_on_local_port_os_thread},
     logging::get_base_dir_for_scenario,
-    TariWorld,
 };
 
 #[derive(Debug)]

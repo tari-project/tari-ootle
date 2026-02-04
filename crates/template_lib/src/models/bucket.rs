@@ -22,13 +22,13 @@
 
 use serde::{Deserialize, Serialize};
 use tari_bor::BorTag;
-use tari_template_abi::{call_engine, rust::fmt, EngineOp};
+use tari_template_abi::{EngineOp, call_engine, rust::fmt};
 use tari_template_lib_types::{
-    confidential::ConfidentialWithdrawProof,
-    stealth::StealthTransferStatement,
     BinaryTag,
     NonFungibleId,
     ResourceAddress,
+    confidential::ConfidentialWithdrawProof,
+    stealth::StealthTransferStatement,
 };
 
 use super::{NonFungible, Proof};

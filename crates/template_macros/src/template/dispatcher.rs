@@ -23,9 +23,9 @@
 use std::collections::HashMap;
 
 use proc_macro2::{Ident, Span, TokenStream};
-use quote::{format_ident, quote, ToTokens};
-use syn::{parse_quote, token::Brace, Block, Expr, ExprBlock, ExprField, Result, Stmt, TypePath, TypeTuple};
-use tari_template_abi::{func_hasher::hash_function_name, FunctionIdent};
+use quote::{ToTokens, format_ident, quote};
+use syn::{Block, Expr, ExprBlock, ExprField, Result, Stmt, TypePath, TypeTuple, parse_quote, token::Brace};
+use tari_template_abi::{FunctionIdent, func_hasher::hash_function_name};
 
 use crate::template::ast::{FunctionAst, TemplateAst, TypeAst};
 
@@ -36,7 +36,7 @@ pub fn generate_dispatcher(ast: &TemplateAst) -> Result<TokenStream> {
     let uses = &ast.uses;
 
     let output = quote! {
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub unsafe extern "C" fn #dispatcher_function_name(call_info: *mut u8, call_info_len: u32) -> *mut u8 {
             use ::tari_template_lib::template_macro_deps::*;
             // include all use statements from the template module here as these may be used in the function arguments.

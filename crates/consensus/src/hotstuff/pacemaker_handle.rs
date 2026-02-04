@@ -6,11 +6,11 @@ use tari_ootle_common_types::{Epoch, NodeHeight};
 use tokio::sync::mpsc;
 
 use crate::hotstuff::{
+    HotStuffError,
     current_view::CurrentView,
     on_beat::OnBeat,
     on_force_beat::OnForceBeat,
     on_leader_timeout::OnLeaderTimeout,
-    HotStuffError,
 };
 
 pub enum PacemakerRequest {

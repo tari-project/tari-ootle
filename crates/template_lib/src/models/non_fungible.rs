@@ -1,8 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tari_template_abi::{call_engine, EngineOp};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use tari_template_abi::{EngineOp, call_engine};
 use tari_template_lib_types::NonFungibleAddress;
 
 use crate::{

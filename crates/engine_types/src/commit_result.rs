@@ -25,7 +25,7 @@ use std::{
     time::Duration,
 };
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tari_template_lib::types::{ComponentAddress, Hash, ResourceAddress, TemplateAddress};
 
 use crate::{
@@ -237,13 +237,13 @@ impl FinalizeResult {
         let mut components = Vec::new();
         if let Some(diff) = self.any_accept() {
             for (id, substate) in diff.up_iter() {
-                if let Some(component) = substate.substate_value().as_component() {
-                    if component.template_address == *template_address {
-                        components.push(
-                            id.as_component_address()
-                                .expect("Substate value is a component but address is not a component address"),
-                        );
-                    }
+                if let Some(component) = substate.substate_value().as_component() &&
+                    component.template_address == *template_address
+                {
+                    components.push(
+                        id.as_component_address()
+                            .expect("Substate value is a component but address is not a component address"),
+                    );
                 }
             }
         }

@@ -22,17 +22,17 @@
 
 use std::{
     mem,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{Arc, atomic::AtomicU64},
     time::Instant,
 };
 
 use log::*;
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{
-    displayable::Displayable,
-    optional::{IsNotFoundError, Optional},
     Epoch,
     VotePower,
+    displayable::Displayable,
+    optional::{IsNotFoundError, Optional},
 };
 use tari_ootle_storage::global::GlobalDb;
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
@@ -44,16 +44,16 @@ use tokio::{
 };
 
 use crate::{
+    EpochManagerEvent,
     epoch_event_oracle::{EpochEvent, EpochEventOracle, ValidatorNodeChange},
     error::EpochManagerError,
     service::{
+        EpochManagerHandle,
         config::EpochManagerConfig,
         epoch_manager::EpochManager,
         types::EpochManagerRequest,
-        EpochManagerHandle,
     },
     traits::EpochManagerSpec,
-    EpochManagerEvent,
 };
 
 const LOG_TARGET: &str = "tari::ootle::epoch_manager";

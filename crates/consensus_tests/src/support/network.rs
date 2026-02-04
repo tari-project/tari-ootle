@@ -3,10 +3,10 @@
 
 use std::{
     collections::HashMap,
-    sync::{atomic::AtomicUsize, Arc},
+    sync::{Arc, atomic::AtomicUsize},
 };
 
-use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
 use itertools::Itertools;
 use log::info;
 use tari_consensus::messages::HotstuffMessage;
@@ -16,20 +16,20 @@ use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_shutdown::ShutdownSignal;
 use tokio::{
     sync::{
+        RwLock,
         mpsc::{self},
         watch,
-        RwLock,
     },
     task,
 };
 
 use crate::support::{
-    address::TestAddress,
-    committee_number_to_shard_group,
+    TEST_NUM_PRESHARDS,
     TestStore,
     Validator,
     ValidatorChannels,
-    TEST_NUM_PRESHARDS,
+    address::TestAddress,
+    committee_number_to_shard_group,
 };
 
 pub type MessageFilter = Box<dyn Fn(&TestAddress, &TestAddress, &HotstuffMessage) -> bool + Sync + Send + 'static>;
@@ -327,12 +327,12 @@ impl TestNetworkWorker {
     pub async fn handle_broadcast(&mut self, from: TestAddress, to_addrs: Vec<TestAddress>, msg: HotstuffMessage) {
         log::debug!("✉️ Broadcast {} from {} to {}", msg, from, to_addrs.iter().join(", "));
         for to in to_addrs {
-            if let Some(message_filter) = &self.message_filter {
-                if !message_filter(&from, &to, &msg) {
-                    self.num_filtered_messages
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    continue;
-                }
+            if let Some(message_filter) = &self.message_filter &&
+                !message_filter(&from, &to, &msg)
+            {
+                self.num_filtered_messages
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                continue;
             }
             if to != from && self.is_offline_destination(&from, &to).await {
                 continue;
@@ -355,12 +355,12 @@ impl TestNetworkWorker {
     }
 
     async fn handle_leader(&mut self, from: TestAddress, to: TestAddress, msg: HotstuffMessage) {
-        if let Some(message_filter) = &self.message_filter {
-            if !message_filter(&from, &to, &msg) {
-                self.num_filtered_messages
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                return;
-            }
+        if let Some(message_filter) = &self.message_filter &&
+            !message_filter(&from, &to, &msg)
+        {
+            self.num_filtered_messages
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return;
         }
         if from != to && self.is_offline_destination(&from, &to).await {
             log::info!("🗑️ [TEST] Discarding message {msg} from {from}. {from}/{to} is offline");

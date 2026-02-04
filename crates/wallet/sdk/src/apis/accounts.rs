@@ -7,20 +7,20 @@ use ootle_byte_type::{FromByteType, ToByteType};
 use tari_engine_types::{component::derive_component_address_from_public_key, indexed_value::IndexedWellKnownTypes};
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::{
-    optional::{IsNotFoundError, Optional},
-    substate_type::SubstateType,
     Epoch,
     Network,
+    optional::{IsNotFoundError, Optional},
+    substate_type::SubstateType,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::types::{
-    constants::XTR,
-    crypto::RistrettoPublicKeyBytes,
     Amount,
     ComponentAddress,
     ResourceAddress,
     ResourceType,
     VaultId,
+    constants::XTR,
+    crypto::RistrettoPublicKeyBytes,
 };
 
 use crate::{
@@ -138,10 +138,10 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
             KeyIdOrPublicKey::PublicKey(pk) => (pk, None),
         };
         self.store.with_write_tx(|tx| {
-            if let Some(name) = account_name {
-                if tx.accounts_get_by_name(name).optional()?.is_some() {
-                    return Err(AccountsApiError::AccountNameAlreadyExists { name: name.to_string() });
-                }
+            if let Some(name) = account_name &&
+                tx.accounts_get_by_name(name).optional()?.is_some()
+            {
+                return Err(AccountsApiError::AccountNameAlreadyExists { name: name.to_string() });
             }
 
             let mut associated_stealth_resources = HashSet::new();

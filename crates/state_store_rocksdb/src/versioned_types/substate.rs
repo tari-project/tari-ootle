@@ -43,7 +43,7 @@ mod tests {
         component::{ComponentBody, ComponentHeader},
         substate::SubstateValue,
     };
-    use tari_ootle_common_types::{shard::Shard, Epoch};
+    use tari_ootle_common_types::{Epoch, shard::Shard};
     use tari_ootle_storage::consensus_models::{SubstateCreated, SubstateDestroyed};
     use tari_utilities::hex::Hex;
 

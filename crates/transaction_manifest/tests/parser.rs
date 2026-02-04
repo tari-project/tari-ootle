@@ -24,15 +24,15 @@ use std::{collections::HashMap, fs, str::FromStr};
 
 use tari_bor::cbor;
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_transaction::{call_args, Instruction};
+use tari_ootle_transaction::{Instruction, call_args};
 use tari_template_lib::types::{
-    constants::XTR,
-    crypto::RistrettoPublicKeyBytes,
     ComponentAddress,
     ObjectKey,
     TemplateAddress,
+    constants::XTR,
+    crypto::RistrettoPublicKeyBytes,
 };
-use tari_transaction_manifest::{parse_manifest, ManifestInstructions};
+use tari_transaction_manifest::{ManifestInstructions, parse_manifest};
 
 #[test]
 #[allow(clippy::too_many_lines)]

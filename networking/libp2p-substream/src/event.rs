@@ -3,7 +3,7 @@
 
 use libp2p::{PeerId, Stream, StreamProtocol};
 
-use crate::{error::Error, stream::StreamId, ProtocolNotification};
+use crate::{ProtocolNotification, error::Error, stream::StreamId};
 
 #[derive(Debug)]
 pub enum Event {

@@ -18,7 +18,6 @@ pub fn compile_template_with_envs<P, TEnvs, K, V>(
 ) -> io::Result<WasmModule>
 where
     P: AsRef<Path>,
-
     TEnvs: IntoIterator<Item = (K, V)>,
     K: AsRef<OsStr>,
     V: AsRef<OsStr>,

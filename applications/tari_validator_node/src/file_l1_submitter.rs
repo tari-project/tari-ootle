@@ -4,7 +4,7 @@
 use std::{io, path::PathBuf};
 
 use log::*;
-use rand::{rngs::OsRng, RngCore};
+use rand::{RngCore, rngs::OsRng};
 use serde::Serialize;
 use tari_epoch_manager::traits::LayerOneTransactionSubmitter;
 use tari_ootle_common_types::layer_one_transaction::LayerOneTransactionDef;

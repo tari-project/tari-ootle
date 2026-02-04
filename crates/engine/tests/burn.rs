@@ -1,9 +1,9 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_ootle_transaction::{args, Transaction};
+use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::{prelude::ComponentAddress, types::Amount};
-use tari_template_test_tooling::{support::confidential::generate_confidential_output_statement, TemplateTest};
+use tari_template_test_tooling::{TemplateTest, support::confidential::generate_confidential_output_statement};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 

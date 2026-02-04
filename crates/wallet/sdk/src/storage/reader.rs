@@ -4,16 +4,16 @@
 use std::collections::{HashMap, HashSet};
 
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, StateVersion};
+use tari_ootle_common_types::{StateVersion, shard::Shard, substate_type::SubstateType};
 use tari_ootle_transaction::TransactionId;
 use tari_template_lib::types::{
-    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     ComponentAddress,
     NonFungibleId,
     ResourceAddress,
     ResourceType,
     TemplateAddress,
     VaultId,
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
 };
 use webauthn_rs::prelude::Passkey;
 
@@ -90,7 +90,7 @@ pub trait WalletStoreReader {
         resource_address: &ResourceAddress,
     ) -> Result<VaultModel, WalletStorageError>;
     fn vaults_get_by_account(&mut self, account_addr: &ComponentAddress)
-        -> Result<Vec<VaultModel>, WalletStorageError>;
+    -> Result<Vec<VaultModel>, WalletStorageError>;
 
     // Resources
     fn resources_get(&mut self, resource_address: &ResourceAddress) -> Result<ResourceModel, WalletStorageError>;

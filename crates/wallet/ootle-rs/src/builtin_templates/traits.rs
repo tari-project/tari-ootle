@@ -6,7 +6,7 @@ use std::future::Future;
 use tari_ootle_common_types::SubstateRequirement;
 use tari_ootle_transaction::UnsignedTransaction;
 
-use crate::{provider::ProviderError, Address};
+use crate::{Address, provider::ProviderError};
 
 pub trait UnsignedTransactionBuilder {
     fn default_signer_address(&self) -> &Address;

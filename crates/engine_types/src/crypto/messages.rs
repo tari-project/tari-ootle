@@ -1,15 +1,15 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
+use tari_crypto::ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment};
 use tari_template_lib::{
     prelude::{PedersenCommitmentBytes, StealthInputsStatement, StealthOutputsStatement},
-    types::{stealth::ViewableBalanceProofMessageFields, Amount},
+    types::{Amount, stealth::ViewableBalanceProofMessageFields},
 };
 
 use crate::{
-    hashing::{engine_hasher64, EngineHashDomainLabel},
     Hash64,
+    hashing::{EngineHashDomainLabel, engine_hasher64},
 };
 
 pub fn confidential_withdraw64(

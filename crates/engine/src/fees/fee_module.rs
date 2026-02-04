@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_bor::{encode_into_writer, ByteCounter};
+use tari_bor::{ByteCounter, encode_into_writer};
 use tari_engine_types::fees::FeeSource;
 
 use super::FeeTable;

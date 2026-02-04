@@ -5,7 +5,7 @@ use log::info;
 use tari_ootle_common_types::SubstateRequirement;
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::models::Account;
-use tari_template_lib_types::{constants::XTR, ComponentAddress, ResourceAddress, VaultId};
+use tari_template_lib_types::{ComponentAddress, ResourceAddress, VaultId, constants::XTR};
 
 use crate::runner::Runner;
 

@@ -1,8 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tari_bor::{from_value, to_value, BorError};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use tari_bor::{BorError, from_value, to_value};
 
 /// The result of an instruction invocation, which is either the CBOR encoded result value or a `String` with an error
 /// message

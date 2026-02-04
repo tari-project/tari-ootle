@@ -4,11 +4,11 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use tari_jellyfish::{StaleTreeNode, Version, SPARSE_MERKLE_PLACEHOLDER_HASH};
+use tari_jellyfish::{SPARSE_MERKLE_PLACEHOLDER_HASH, StaleTreeNode, Version};
 use tari_ootle_common_types::ToSubstateAddress;
 use tari_state_tree::memory_store::MemoryTreeStore;
 
-use crate::support::{change, hash_value_from_seed, make_value, HashTreeTester};
+use crate::support::{HashTreeTester, change, hash_value_from_seed, make_value};
 mod support;
 
 #[test]

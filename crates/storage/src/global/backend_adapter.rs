@@ -22,18 +22,18 @@
 
 use std::collections::{HashMap, HashSet};
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{
-    committee::Committee,
-    hashing::ValidatorNodeBalancedMerkleTree,
     Epoch,
     NodeAddressable,
     ShardGroup,
     SubstateAddress,
     VotePower,
+    committee::Committee,
+    hashing::ValidatorNodeBalancedMerkleTree,
 };
-use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
+use tari_template_lib_types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 use super::{BlockHeaderModel, EpochData, TemplateStatus};
 use crate::{

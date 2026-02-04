@@ -1,9 +1,9 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey};
+use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey, pedersen::PedersenCommitment};
 use tari_engine_types::crypto::commit_u64_amount;
-use tari_template_lib_types::{crypto::UtxoTag, stealth::SpendCondition, EncryptedData};
+use tari_template_lib_types::{EncryptedData, crypto::UtxoTag, stealth::SpendCondition};
 
 use crate::memo::Memo;
 

@@ -26,7 +26,7 @@
 use tari_consensus::{messages::HotstuffMessage, traits::OutboundMessagingError};
 use tari_networking::{NetworkingHandle, NetworkingService};
 use tari_ootle_common_types::{PeerAddress, ShardGroup};
-use tari_ootle_p2p::{proto, TariMessagingSpec};
+use tari_ootle_p2p::{TariMessagingSpec, proto};
 use tokio::sync::mpsc;
 
 use crate::p2p::{logging::MessageLogger, services::consensus_gossip::ConsensusGossipHandle};

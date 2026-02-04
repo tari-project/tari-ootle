@@ -7,7 +7,7 @@ use bytes::BytesMut;
 use futures::{AsyncRead, AsyncWrite, SinkExt, StreamExt};
 use prost::{DecodeError, Message};
 use tokio::time;
-use tracing::{debug, error, span, warn, Instrument, Level};
+use tracing::{Instrument, Level, debug, error, span, warn};
 
 use crate::{error::HandshakeRejectReason, framing::CanonicalFraming, proto};
 

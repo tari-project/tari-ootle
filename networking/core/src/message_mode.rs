@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use libp2p::{gossipsub, PeerId};
+use libp2p::{PeerId, gossipsub};
 use tokio::sync::mpsc;
 
 use crate::message::MessageSpec;

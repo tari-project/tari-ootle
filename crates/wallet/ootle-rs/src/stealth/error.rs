@@ -1,7 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 use tari_ootle_wallet_crypto::{StealthCryptoApiError, StealthProofError};
-use tari_template_lib_types::{crypto::PedersenCommitmentBytes, Amount, UtxoAddress};
+use tari_template_lib_types::{Amount, UtxoAddress, crypto::PedersenCommitmentBytes};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StealthProviderError {

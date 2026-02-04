@@ -15,13 +15,13 @@ use tari_wallet_daemon_client::permissions::JrpcPermission;
 use webauthn_rs::Webauthn;
 
 use crate::{
+    WalletSdk,
     config::WalletDaemonConfig,
     handlers::auth::{
-        jwt::{JwtApi, JwtApiError},
         WalletAuthenticator,
+        jwt::{JwtApi, JwtApiError},
     },
     services::WebauthnService,
-    WalletSdk,
 };
 
 #[derive(Debug, Clone)]

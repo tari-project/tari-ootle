@@ -10,14 +10,14 @@ use tari_engine_types::{
     substate::{Substate, SubstateId, SubstateValue},
 };
 use tari_ootle_common_types::{
-    displayable::Displayable,
-    optional::{IsNotFoundError, Optional},
-    substate_type::SubstateType,
     SubstateRequirement,
     VersionedSubstateId,
     VersionedSubstateIdRef,
+    displayable::Displayable,
+    optional::{IsNotFoundError, Optional},
+    substate_type::SubstateType,
 };
-use tari_template_lib::types::{constants::XTR, ResourceAddress, TemplateAddress};
+use tari_template_lib::types::{ResourceAddress, TemplateAddress, constants::XTR};
 
 use crate::{
     models::SubstateModel,

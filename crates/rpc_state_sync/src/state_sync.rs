@@ -13,18 +13,22 @@ use tari_consensus::{
 use tari_consensus_types::LeafBlock;
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
-    committee::Committee,
-    displayable::Displayable,
-    optional::Optional,
-    shard::Shard,
     Epoch,
     PeerAddress,
     ShardGroup,
     VersionedSubstateId,
     VotePower,
+    committee::Committee,
+    displayable::Displayable,
+    optional::Optional,
+    shard::Shard,
 };
 use tari_ootle_p2p::proto::rpc::{GetCheckpointsRequest, GetCheckpointsResponse, SyncStateRequest};
 use tari_ootle_storage::{
+    StateStore,
+    StateStoreReadTransaction,
+    StateStoreWriteTransaction,
+    StorageError,
     consensus_models::{
         BookkeepingModel,
         EpochCheckpoint,
@@ -34,17 +38,13 @@ use tari_ootle_storage::{
         SubstateUpdateProof,
         SubstateValueFilterFlags,
     },
-    StateStore,
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
-    StorageError,
 };
 use tari_rpc_framework::RpcError;
-use tari_state_tree::{SpreadPrefixStateTree, SubstateTreeChange, TreeHash, Version, SPARSE_MERKLE_PLACEHOLDER_HASH};
+use tari_state_tree::{SPARSE_MERKLE_PLACEHOLDER_HASH, SpreadPrefixStateTree, SubstateTreeChange, TreeHash, Version};
 use tari_validator_node_rpc::{
+    STATE_SYNC_MAX_BATCH_SIZE,
     client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory},
     rpc_service::ValidatorNodeRpcClient,
-    STATE_SYNC_MAX_BATCH_SIZE,
 };
 
 use crate::{error::RpcStateSyncError, stats::StateSyncStats};

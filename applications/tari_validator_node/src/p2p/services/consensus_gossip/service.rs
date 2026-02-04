@@ -20,14 +20,14 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use libp2p::{gossipsub, PeerId};
+use libp2p::{PeerId, gossipsub};
 use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
 use tari_epoch_manager::EpochManagerEvent;
 use tari_networking::{NetworkingHandle, NetworkingService};
 use tari_ootle_common_types::ShardGroup;
-use tari_ootle_p2p::{proto, TariMessagingSpec};
-use tari_swarm::messaging::{prost::ProstCodec, Codec};
+use tari_ootle_p2p::{TariMessagingSpec, proto};
+use tari_swarm::messaging::{Codec, prost::ProstCodec};
 use tokio::sync::{broadcast, mpsc};
 
 use super::ConsensusGossipError;
@@ -81,12 +81,11 @@ impl ConsensusGossipService {
                     }
                 },
                 Ok(EpochManagerEvent::EpochChanged{ registered_shard_group, .. }) = self.epoch_manager_events.recv() => {
-                    if !initial_subscription_complete {
-                        if let Some(shard_group) = registered_shard_group {
+                    if !initial_subscription_complete
+                        && let Some(shard_group) = registered_shard_group {
                             self.subscribe(shard_group).await?;
                             initial_subscription_complete = true;
                         }
-                    }
                 },
                 else => {
                     info!(target: LOG_TARGET, "Consensus gossip service shutting down");

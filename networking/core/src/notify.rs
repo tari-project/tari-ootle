@@ -23,10 +23,10 @@ impl<T> Notifiers<T> {
     }
 
     pub fn notify(&mut self, notification: ProtocolNotification<T>) -> bool {
-        if let Some(sender) = self.senders.get_mut(&notification.protocol) {
-            if sender.send(notification).is_ok() {
-                return true;
-            }
+        if let Some(sender) = self.senders.get_mut(&notification.protocol) &&
+            sender.send(notification).is_ok()
+        {
+            return true;
         }
         false
     }

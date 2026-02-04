@@ -5,20 +5,20 @@ use ootle_byte_type::ToByteType;
 use tari_crypto::{ristretto::RistrettoSecretKey, tari_utilities::ByteArray};
 use tari_engine_types::crypto::commit_u64_amount;
 use tari_template_lib_types::{
+    Amount,
     confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     crypto::RistrettoPublicKeyBytes,
     stealth::UnspentOutput,
-    Amount,
 };
 
 use crate::{
+    MaskAndValue,
+    OutputWitness,
+    WalletCryptoError,
     balance_proof::generate_confidential_balance_proof,
     bullet_proof::generate_extended_bullet_proof,
     error::StealthProofError,
     viewable_balance_proof::generate_elgamal_viewable_balance_proof,
-    MaskAndValue,
-    OutputWitness,
-    WalletCryptoError,
 };
 
 pub fn create_withdraw_proof(

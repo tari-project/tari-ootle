@@ -4,13 +4,22 @@
 use std::{
     collections::VecDeque,
     convert::Infallible,
-    future::{ready, Ready},
+    future::{Ready, ready},
     task::{Context, Poll},
 };
 
 use libp2p::{
+    InboundUpgrade,
+    OutboundUpgrade,
+    PeerId,
+    Stream,
+    StreamProtocol,
     core::UpgradeInfo,
     swarm::{
+        ConnectionHandler,
+        ConnectionHandlerEvent,
+        StreamUpgradeError,
+        SubstreamProtocol,
         handler::{
             ConnectionEvent,
             DialUpgradeError,
@@ -18,28 +27,19 @@ use libp2p::{
             FullyNegotiatedOutbound,
             ListenUpgradeError,
         },
-        ConnectionHandler,
-        ConnectionHandlerEvent,
-        StreamUpgradeError,
-        SubstreamProtocol,
     },
-    InboundUpgrade,
-    OutboundUpgrade,
-    PeerId,
-    Stream,
-    StreamProtocol,
 };
 use smallvec::SmallVec;
 
 use crate::{
-    error::Error,
-    event::Event,
-    stream::OpenStreamRequest,
+    EMPTY_QUEUE_SHRINK_THRESHOLD,
     FromBehaviourEvent,
     ProtocolEvent,
     ProtocolNotification,
     StreamId,
-    EMPTY_QUEUE_SHRINK_THRESHOLD,
+    error::Error,
+    event::Event,
+    stream::OpenStreamRequest,
 };
 
 pub struct Handler {

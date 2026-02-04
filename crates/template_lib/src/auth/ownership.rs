@@ -3,7 +3,7 @@
 
 use std::borrow::Cow;
 
-use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, OwnerRule};
+use tari_template_lib_types::{OwnerRule, crypto::RistrettoPublicKeyBytes};
 
 /// Data that is needed to represent ownership of a value (resource or component method).
 /// Owners are the only ones allowed to update the values's access rules after creation

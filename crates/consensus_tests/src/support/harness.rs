@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
 use itertools::Itertools;
 use log::info;
 use ootle_byte_type::ToByteType;
@@ -21,10 +21,6 @@ use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
-    committee::{Committee, CommitteeMember},
-    displayable::Displayable,
-    optional::Optional,
-    shard::Shard,
     Epoch,
     Network,
     NodeHeight,
@@ -33,12 +29,16 @@ use tari_ootle_common_types::{
     SubstateLockType,
     VersionedSubstateId,
     VotePower,
+    committee::{Committee, CommitteeMember},
+    displayable::Displayable,
+    optional::Optional,
+    shard::Shard,
 };
 use tari_ootle_storage::{
-    consensus_models::{SubstateCreated, SubstateRecord, SubstateUpdateBatch, TransactionExecution, TransactionRecord},
     Ordering,
     StateStore,
     StateStoreReadTransaction,
+    consensus_models::{SubstateCreated, SubstateRecord, SubstateUpdateBatch, TransactionExecution, TransactionRecord},
 };
 use tari_ootle_transaction::TransactionId;
 use tari_shutdown::{Shutdown, ShutdownSignal};
@@ -49,24 +49,24 @@ use tari_state_store_rocksdb::column_families::{
 use tokio::{sync::broadcast, task, time::sleep};
 
 use super::{
+    MessageFilter,
+    TEST_NUM_PRESHARDS,
     build_substate_id_for_committee,
     build_transaction,
     helpers,
     random_substates_ids_for_committee_generator,
-    MessageFilter,
-    TEST_NUM_PRESHARDS,
 };
 use crate::{
     support::{
+        RoundRobinLeaderStrategy,
+        ValidatorChannels,
         address::TestAddress,
         epoch_manager::TestEpochManager,
         executions_store::ExecuteSpec,
         helpers::make_test_component,
-        network::{spawn_network, TestNetwork, TestVnDestination},
+        network::{TestNetwork, TestVnDestination, spawn_network},
         table::Table,
         validator::Validator,
-        RoundRobinLeaderStrategy,
-        ValidatorChannels,
     },
     table_row,
 };

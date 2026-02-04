@@ -6,8 +6,8 @@ use std::borrow::Cow;
 use tari_common_types::types::FixedHash;
 use tari_engine::{abi::TemplateDef, template::LoadedTemplate};
 use tari_ootle_common_types::Epoch;
-use tari_ootle_storage::{global::DbTemplate, StorageError};
-use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
+use tari_ootle_storage::{StorageError, global::DbTemplate};
+use tari_template_lib_types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TemplateMetadata {

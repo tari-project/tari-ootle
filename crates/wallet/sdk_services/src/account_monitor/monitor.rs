@@ -8,6 +8,8 @@ use tari_engine_types::{indexed_value::IndexedValueError, resource::Resource};
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 use tari_ootle_transaction::TransactionId;
 use tari_ootle_wallet_sdk::{
+    WalletSdk,
+    WalletSdkSpec,
     apis::{
         accounts::AccountsApiError,
         confidential_outputs::ConfidentialOutputsApiError,
@@ -18,8 +20,6 @@ use tari_ootle_wallet_sdk::{
         transaction::TransactionApiError,
     },
     models::{NewAccountData, WalletEvent},
-    WalletSdk,
-    WalletSdkSpec,
 };
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib_types::{ComponentAddress, ResourceAddress};

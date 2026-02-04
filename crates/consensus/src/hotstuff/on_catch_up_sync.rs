@@ -4,10 +4,10 @@
 use log::{info, warn};
 use tari_consensus_types::HighPc;
 use tari_ootle_common_types::{Epoch, NodeHeight};
-use tari_ootle_storage::{consensus_models::BookkeepingModel, StateStore};
+use tari_ootle_storage::{StateStore, consensus_models::BookkeepingModel};
 
 use crate::{
-    hotstuff::{pacemaker_handle::PaceMakerHandle, HotStuffError},
+    hotstuff::{HotStuffError, pacemaker_handle::PaceMakerHandle},
     messages::{CatchUpRequestMessage, HotstuffMessage},
     traits::{ConsensusSpec, OutboundMessaging},
 };

@@ -4,9 +4,9 @@
 use serde::{Deserialize, Serialize};
 use tari_bor::BorTag;
 use tari_template_abi::{
+    EngineOp,
     call_engine,
     rust::{fmt, fmt::Display, str::FromStr, write},
-    EngineOp,
 };
 
 use super::{BinaryTag, ResourceAddress};
@@ -348,7 +348,9 @@ mod tests {
                 Err(ParseNonFungibleIdError::InvalidStringLength)
             );
             assert_eq!(
-                NonFungibleId::try_from_string("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                NonFungibleId::try_from_string(
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                ),
                 Err(ParseNonFungibleIdError::InvalidStringLength)
             );
         }

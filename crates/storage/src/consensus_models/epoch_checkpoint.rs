@@ -9,14 +9,14 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::{CompressedPublicKey, FixedHash};
 use tari_crypto::tari_utilities::ByteArray;
-use tari_ootle_common_types::{shard::Shard, Epoch, ShardGroup, VotePower};
+use tari_ootle_common_types::{Epoch, ShardGroup, VotePower, shard::Shard};
 use tari_sidechain::{CommandCommitProof, SidechainBlockHeader, SidechainProofValidationError, ToCommand};
 use tari_state_tree::{
-    compute_merkle_root_for_hashes,
+    SPARSE_MERKLE_PLACEHOLDER_HASH,
     StateTreeError,
     TreeHash,
     Version,
-    SPARSE_MERKLE_PLACEHOLDER_HASH,
+    compute_merkle_root_for_hashes,
 };
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
@@ -209,9 +209,7 @@ impl Display for EpochCheckpoint {
 
 #[derive(Debug, thiserror::Error)]
 pub enum EpochCheckpointValidationError {
-    #[error(
-        "Shard state root merkle tree root mismatch: computed {computed} != header state root {header_state_root}"
-    )]
+    #[error("Shard state root merkle tree root mismatch: computed {computed} != header state root {header_state_root}")]
     ShardStateRootMerkleTreeRootMismatch {
         computed: TreeHash,
         header_state_root: FixedHash,

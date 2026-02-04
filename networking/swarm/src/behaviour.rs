@@ -2,11 +2,14 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{hash_map::DefaultHasher, HashSet},
+    collections::{HashSet, hash_map::DefaultHasher},
     hash::Hasher,
 };
 
 use libp2p::{
+    StreamProtocol,
+    Swarm,
+    SwarmBuilder,
     autonat,
     connection_limits,
     connection_limits::ConnectionLimits,
@@ -19,12 +22,9 @@ use libp2p::{
     ping,
     relay,
     rendezvous,
-    swarm::{behaviour::toggle::Toggle, NetworkBehaviour},
+    swarm::{NetworkBehaviour, behaviour::toggle::Toggle},
     tcp,
     yamux,
-    StreamProtocol,
-    Swarm,
-    SwarmBuilder,
 };
 use libp2p_messaging as messaging;
 use libp2p_peer_store as peer_store;

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use axum::{extract::Path, Extension, Json};
+use axum::{Extension, Json, extract::Path};
 use serde_json::json;
 use tari_ootle_common_types::optional::Optional;
 use tari_state_store_rocksdb::{codecs::ByteColumn, column_families, read_only_ctx::ReadOnlyContext, traits::Cf};

@@ -4,8 +4,6 @@
 use std::{collections::HashMap, fmt::Write, str::FromStr};
 
 use diesel::{
-    dsl,
-    sql_types,
     ExpressionMethods,
     NullableExpressionMethods,
     OptionalExtension,
@@ -13,35 +11,37 @@ use diesel::{
     RunQueryDsl,
     SqliteConnection,
     TextExpressionMethods,
+    dsl,
+    sql_types,
 };
 use log::info;
 use serde::de::DeserializeOwned;
 use tari_engine_types::{
+    Utxo,
     events::Event,
     substate::{Substate, SubstateId, SubstateValue},
     transaction_receipt::TransactionReceipt,
-    Utxo,
 };
 use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate, TransactionEntry};
 use tari_ootle_common_types::{
-    displayable::Displayable,
-    shard::Shard,
-    substate_type::SubstateType,
     Epoch,
     ShardGroup,
     StateVersion,
+    displayable::Displayable,
+    shard::Shard,
+    substate_type::SubstateType,
 };
-use tari_ootle_storage::{time::PrimitiveDateTime, Ordering, StorageError};
+use tari_ootle_storage::{Ordering, StorageError, time::PrimitiveDateTime};
 use tari_ootle_storage_sqlite::SqliteTransaction;
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_ootle_wallet_sdk::models::UtxoStateUpdateSet;
 use tari_template_lib_types::{
-    crypto::{RistrettoPublicKeyBytes, UtxoTag},
     Hash,
     ResourceAddress,
     TemplateAddress,
     TransactionReceiptAddress,
     UtxoId,
+    crypto::{RistrettoPublicKeyBytes, UtxoTag},
 };
 
 use crate::{

@@ -3,7 +3,7 @@
 
 use tari_networking::NetworkingError;
 use tari_ootle_common_types::{Epoch, Network};
-use tari_ootle_storage::{consensus_models::TransactionPoolError, StorageError};
+use tari_ootle_storage::{StorageError, consensus_models::TransactionPoolError};
 use tari_ootle_transaction::TransactionId;
 use tari_template_lib::types::TemplateAddress;
 

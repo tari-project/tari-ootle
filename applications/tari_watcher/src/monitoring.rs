@@ -5,7 +5,7 @@ use log::*;
 use tokio::{
     process::Child,
     sync::mpsc,
-    time::{sleep, Duration},
+    time::{Duration, sleep},
 };
 
 use crate::{
@@ -204,15 +204,15 @@ pub async fn process_status_alert(mut rx: mpsc::Receiver<ProcessStatus>, cfg: Ch
                 },
                 ProcessStatus::Running => {
                     // all good, process is still running, send heartbeat to channel(s)
-                    if let Some(mm) = &mut mattermost {
-                        if mm.ping().await.is_err() {
-                            warn!("Failed to send heartbeat to MatterMost");
-                        }
+                    if let Some(mm) = &mut mattermost &&
+                        mm.ping().await.is_err()
+                    {
+                        warn!("Failed to send heartbeat to MatterMost");
                     }
-                    if let Some(tg) = &mut telegram {
-                        if tg.ping().await.is_err() {
-                            warn!("Failed to send heartbeat to Telegram");
-                        }
+                    if let Some(tg) = &mut telegram &&
+                        tg.ping().await.is_err()
+                    {
+                        warn!("Failed to send heartbeat to Telegram");
                     }
                 },
                 ProcessStatus::Submitted(tx) => {

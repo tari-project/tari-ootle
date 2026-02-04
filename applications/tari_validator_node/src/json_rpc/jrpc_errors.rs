@@ -25,8 +25,8 @@ const LOG_TARGET: &str = "tari::validator_node::json_rpc::handlers";
 use std::{env, fmt::Display};
 
 use axum_jrpc::{
-    error::{JsonRpcError, JsonRpcErrorReason},
     JsonRpcResponse,
+    error::{JsonRpcError, JsonRpcErrorReason},
 };
 
 // pub fn invalid_params<T: Display, S: Display>(answer_id: axum_jrpc::Id, details: S) -> impl Fn(T) -> JsonRpcResponse

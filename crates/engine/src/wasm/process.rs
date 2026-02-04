@@ -21,10 +21,10 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use log::*;
-use serde::{de::DeserializeOwned, Serialize};
-use tari_bor::{decode_exact, encode_with_len_to_writer, encoded_len, ByteCounter};
+use serde::{Serialize, de::DeserializeOwned};
+use tari_bor::{ByteCounter, decode_exact, encode_with_len_to_writer, encoded_len};
 use tari_engine_types::{indexed_value::IndexedValue, instruction_result::InstructionResult, limits};
-use tari_template_abi::{func_hasher::hash_function_name, version, CallInfo, EngineOp, FunctionDef, TemplateDef};
+use tari_template_abi::{CallInfo, EngineOp, FunctionDef, TemplateDef, func_hasher::hash_function_name, version};
 use tari_template_lib::{
     args::{
         AddressAllocationInvokeArg,
@@ -45,17 +45,17 @@ use tari_template_lib::{
     },
     types::engine_args::SignatureInvokeArg,
 };
-use wasmer::{imports, AsStoreMut, Function, FunctionEnv, FunctionEnvMut, Instance, Store, StoreMut, WasmPtr};
+use wasmer::{AsStoreMut, Function, FunctionEnv, FunctionEnvMut, Instance, Store, StoreMut, WasmPtr, imports};
 
 use crate::{
     runtime::Runtime,
     traits::Invokable,
     wasm::{
+        LoadedWasmTemplate,
         environment::{AllocPtr, WasmEnv},
         error::WasmExecutionError,
         mem_writer::MemWriter,
         module::MainFunction,
-        LoadedWasmTemplate,
     },
 };
 

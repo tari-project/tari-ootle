@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use tari_bor::BorTag;
 
 use super::BinaryTag;
-use crate::{address_prefixes, crypto::PedersenCommitmentBytes, KeyParseError, ObjectKey};
+use crate::{KeyParseError, ObjectKey, address_prefixes, crypto::PedersenCommitmentBytes};
 
 const TAG: u64 = BinaryTag::ClaimedOutputTombstoneAddress.as_u64();
 

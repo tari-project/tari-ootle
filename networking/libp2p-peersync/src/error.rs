@@ -4,7 +4,7 @@
 use std::{fmt::Debug, io};
 
 use futures_bounded::Timeout;
-use libp2p::{multiaddr, PeerId};
+use libp2p::{PeerId, multiaddr};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

@@ -22,21 +22,21 @@
 
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 
-use minotari_node::{run_base_node, BaseNodeConfig, GrpcMethod};
+use minotari_node::{BaseNodeConfig, GrpcMethod, run_base_node};
 use rand::rngs::OsRng;
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common::{configuration::CommonConfig, exit_codes::ExitError};
 use tari_common_sqlite::connection::DbConnectionUrl;
-use tari_comms::{multiaddr::Multiaddr, peer_manager::PeerFeatures, NodeIdentity};
+use tari_comms::{NodeIdentity, multiaddr::Multiaddr, peer_manager::PeerFeatures};
 use tari_comms_dht::DhtConfig;
-use tari_p2p::{auto_update::AutoUpdateConfig, peer_seeds::SeedPeer, Network, PeerSeedsConfig, TransportType};
+use tari_p2p::{Network, PeerSeedsConfig, TransportType, auto_update::AutoUpdateConfig, peer_seeds::SeedPeer};
 use tari_shutdown::Shutdown;
 use tokio::task;
 
 use crate::{
+    TariWorld,
     helpers::{get_os_assigned_port, get_os_assigned_ports, wait_listener_on_local_port},
     logging::get_base_dir_for_scenario,
-    TariWorld,
 };
 
 #[derive(Debug)]

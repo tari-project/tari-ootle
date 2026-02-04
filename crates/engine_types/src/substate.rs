@@ -29,13 +29,11 @@ use std::{
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
-use tari_bor::{decode, decode_exact, encode, BorError};
+use tari_bor::{BorError, decode, decode_exact, encode};
 use tari_common_types::types::FixedHash;
 use tari_template_lib::{
     prelude::STEALTH_TARI_RESOURCE_ADDRESS,
     types::{
-        address_prefixes,
-        constants::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
         ClaimedOutputTombstoneAddress,
         ComponentAddress,
         Hash,
@@ -47,21 +45,23 @@ use tari_template_lib::{
         UtxoAddress,
         ValidatorFeePoolAddress,
         VaultId,
+        address_prefixes,
+        constants::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
     },
 };
 
 use crate::{
+    ValidatorFeePool,
+    ValidatorFeeWithdrawal,
     component::ComponentHeader,
     confidential::ClaimedOutputTombstone,
-    hashing::{hasher32, substate_value_hasher32, EngineHashDomainLabel},
+    hashing::{EngineHashDomainLabel, hasher32, substate_value_hasher32},
     non_fungible::NonFungibleContainer,
     published_template::{PublishedTemplate, PublishedTemplateAddress},
     resource::Resource,
     transaction_receipt::TransactionReceipt,
     utxo::Utxo,
     vault::Vault,
-    ValidatorFeePool,
-    ValidatorFeeWithdrawal,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -986,7 +986,9 @@ mod tests {
             check("txreceipt_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
             check("tombstone_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
             check("template_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
-            check("utxo_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
+            check(
+                "utxo_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff",
+            );
         }
     }
 }

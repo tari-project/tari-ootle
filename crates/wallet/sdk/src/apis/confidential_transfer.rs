@@ -9,9 +9,9 @@ use ootle_byte_type::{FromByteType, ToByteType};
 use tari_bor::{Deserialize, Serialize};
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_ootle_address::OotleAddress;
-use tari_ootle_common_types::{optional::IsNotFoundError, SubstateRequirement};
-use tari_ootle_transaction::{args, Transaction};
-use tari_ootle_wallet_crypto::{memo::Memo, MaskAndValue, OutputWitness};
+use tari_ootle_common_types::{SubstateRequirement, optional::IsNotFoundError};
+use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_wallet_crypto::{MaskAndValue, OutputWitness, memo::Memo};
 use tari_template_lib::types::{Amount, ComponentAddress, ResourceAddress, VaultId};
 
 use crate::{

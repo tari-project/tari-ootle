@@ -4,16 +4,25 @@
 use std::{
     collections::VecDeque,
     convert::Infallible,
-    future::{ready, Ready},
+    future::{Ready, ready},
     io,
     task::{Context, Poll},
     time::Duration,
 };
 
 use libp2p::{
+    InboundUpgrade,
+    OutboundUpgrade,
+    PeerId,
+    Stream,
+    StreamProtocol,
     core::UpgradeInfo,
-    futures::{channel::mpsc, FutureExt, SinkExt, StreamExt},
+    futures::{FutureExt, SinkExt, StreamExt, channel::mpsc},
     swarm::{
+        ConnectionHandler,
+        ConnectionHandlerEvent,
+        StreamUpgradeError,
+        SubstreamProtocol,
         handler::{
             ConnectionEvent,
             DialUpgradeError,
@@ -21,26 +30,17 @@ use libp2p::{
             FullyNegotiatedOutbound,
             ListenUpgradeError,
         },
-        ConnectionHandler,
-        ConnectionHandlerEvent,
-        StreamUpgradeError,
-        SubstreamProtocol,
     },
-    InboundUpgrade,
-    OutboundUpgrade,
-    PeerId,
-    Stream,
-    StreamProtocol,
 };
 
 use crate::{
+    Config,
+    EMPTY_QUEUE_SHRINK_THRESHOLD,
+    MessageId,
     codec::Codec,
     error::Error,
     event::Event,
     stream::MessageStream,
-    Config,
-    MessageId,
-    EMPTY_QUEUE_SHRINK_THRESHOLD,
 };
 
 pub struct Handler<TCodec: Codec> {

@@ -3,11 +3,11 @@
 
 use std::iter;
 
-use axum::{extract::Path, Extension, Json};
+use axum::{Extension, Json, extract::Path};
 use tari_engine_types::substate::SubstateId;
 use tari_indexer_client::types::GetResourceResponse;
 use tari_ootle_common_types::SubstateRequirementRef;
-use tari_template_lib_types::{constants::XTR, ResourceAddress};
+use tari_template_lib_types::{ResourceAddress, constants::XTR};
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
 

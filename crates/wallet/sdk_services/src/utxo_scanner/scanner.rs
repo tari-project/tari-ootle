@@ -2,9 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_wallet_sdk::{
-    models::{AccountWithAddress, WalletEvent},
     WalletSdk,
     WalletSdkSpec,
+    models::{AccountWithAddress, WalletEvent},
 };
 use tari_template_lib_types::ResourceAddress;
 

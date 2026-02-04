@@ -4,13 +4,13 @@
 use serde::Serialize;
 use tari_bor::to_value;
 use tari_template_lib_types::{
-    access_rules::ResourceAccessRules,
-    constants::{IMAGE_URL, TOKEN_SYMBOL},
     ComponentAddress,
     Metadata,
     NonFungibleId,
     ResourceAddress,
     ResourceType,
+    access_rules::ResourceAccessRules,
+    constants::{IMAGE_URL, TOKEN_SYMBOL},
 };
 
 use crate::{

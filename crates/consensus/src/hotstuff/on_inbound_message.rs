@@ -10,7 +10,7 @@ use tari_ootle_common_types::{Epoch, NodeHeight};
 use crate::{
     hotstuff::error::HotStuffError,
     messages::HotstuffMessage,
-    traits::{hooks::ConsensusHooks, ConsensusSpec, InboundMessaging},
+    traits::{ConsensusSpec, InboundMessaging, hooks::ConsensusHooks},
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::inbound_messages";
@@ -102,10 +102,10 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
         );
         if has_processed_first_block {
             // Drain all buffered messages for the current view
-            if let Some(buffer) = self.buffer.get_mut(&(current_epoch, next_height)) {
-                if let Some(msg_tuple) = buffer.pop_front() {
-                    return Ok(Some(msg_tuple));
-                }
+            if let Some(buffer) = self.buffer.get_mut(&(current_epoch, next_height)) &&
+                let Some(msg_tuple) = buffer.pop_front()
+            {
+                return Ok(Some(msg_tuple));
             }
         }
 

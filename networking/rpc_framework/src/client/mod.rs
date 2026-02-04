@@ -40,32 +40,28 @@ use std::{
 
 use bytes::{Bytes, BytesMut};
 use futures::{
-    future,
-    future::{BoxFuture, Either},
-    task::{Context, Poll},
     AsyncRead,
     AsyncWrite,
     FutureExt,
     SinkExt,
     StreamExt,
+    future,
+    future::{BoxFuture, Either},
+    task::{Context, Poll},
 };
 use libp2p::{PeerId, StreamProtocol};
 use log::*;
 use prost::Message;
 use tari_shutdown::{Shutdown, ShutdownSignal};
 use tokio::{
-    sync::{mpsc, oneshot, watch, Mutex},
+    sync::{Mutex, mpsc, oneshot, watch},
     time,
 };
 use tower::{Service, ServiceExt};
-use tracing::{span, Instrument, Level};
+use tracing::{Instrument, Level, span};
 
 use super::message::RpcMethod;
 use crate::{
-    body::ClientStreaming,
-    framing::CanonicalFraming,
-    message::{BaseRequest, RpcMessageFlags},
-    proto,
     Handshake,
     NamedProtocolService,
     Response,
@@ -73,6 +69,10 @@ use crate::{
     RpcHandshakeError,
     RpcServerError,
     RpcStatus,
+    body::ClientStreaming,
+    framing::CanonicalFraming,
+    message::{BaseRequest, RpcMessageFlags},
+    proto,
 };
 
 const LOG_TARGET: &str = "libp2p::rpc::client";

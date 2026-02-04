@@ -11,14 +11,14 @@ use tari_crypto::{
 use tari_engine_types::stealth;
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
 use tari_ootle_wallet_crypto::{
-    confidential,
-    stealth::create_transfer_statement,
     MaskAndValue,
     OutputWitness,
     StealthInputWitness,
     StealthOutputWitness,
+    confidential,
+    stealth::create_transfer_statement,
 };
-use tari_template_lib_types::{crypto::UtxoTag, Amount, EncryptedData};
+use tari_template_lib_types::{Amount, EncryptedData, crypto::UtxoTag};
 
 #[test]
 fn it_create_a_valid_revealed_only_proof() {

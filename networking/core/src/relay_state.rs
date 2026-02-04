@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use libp2p::{multiaddr::Protocol, swarm::ConnectionId, Multiaddr, PeerId};
+use libp2p::{Multiaddr, PeerId, multiaddr::Protocol, swarm::ConnectionId};
 use rand::seq::IteratorRandom;
 
 #[derive(Debug, Clone, Default)]

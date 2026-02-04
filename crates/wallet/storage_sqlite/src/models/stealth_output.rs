@@ -7,9 +7,9 @@ use tari_ootle_wallet_sdk::{
     storage::WalletStorageError,
 };
 use tari_template_lib_types::{
-    crypto::{RistrettoPublicKeyBytes, UtxoTag},
     ComponentAddress,
     EncryptedData,
+    crypto::{RistrettoPublicKeyBytes, UtxoTag},
 };
 use time::PrimitiveDateTime;
 

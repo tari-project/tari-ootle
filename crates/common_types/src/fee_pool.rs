@@ -1,9 +1,9 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, ValidatorFeePoolAddress};
+use tari_template_lib_types::{ValidatorFeePoolAddress, crypto::RistrettoPublicKeyBytes};
 
-use crate::{shard::Shard, uint::U256, NumPreshards};
+use crate::{NumPreshards, shard::Shard, uint::U256};
 
 pub fn derive_fee_pool_address(
     public_key_bytes: &RistrettoPublicKeyBytes,

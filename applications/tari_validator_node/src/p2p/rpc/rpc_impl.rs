@@ -30,16 +30,16 @@ use tari_bor::encode;
 use tari_consensus::hotstuff::ConsensusCurrentState;
 use tari_consensus_types::BlockId;
 use tari_engine_types::substate::SubstateId;
-use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
+use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
 use tari_ootle_common_types::{
-    displayable::Displayable,
-    optional::Optional,
-    shard::Shard,
     Epoch,
     NodeHeight,
     NumPreshards,
     PeerAddress,
     SubstateRequirement,
+    displayable::Displayable,
+    optional::Optional,
+    shard::Shard,
 };
 use tari_ootle_p2p::{
     proto,
@@ -61,12 +61,12 @@ use tari_ootle_p2p::{
     },
 };
 use tari_ootle_storage::{
-    consensus_models::{Block, EpochCheckpoint, SubstateRecord, SubstateValueFilterFlags, TransactionRecord},
     StateStore,
+    consensus_models::{Block, EpochCheckpoint, SubstateRecord, SubstateValueFilterFlags, TransactionRecord},
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
-use tari_validator_node_rpc::{rpc_service::ValidatorNodeRpcService, STATE_SYNC_MAX_BATCH_SIZE};
+use tari_validator_node_rpc::{STATE_SYNC_MAX_BATCH_SIZE, rpc_service::ValidatorNodeRpcService};
 use tokio::{sync::mpsc, task};
 
 use crate::{

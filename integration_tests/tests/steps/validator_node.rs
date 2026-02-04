@@ -9,28 +9,28 @@ use std::{
 
 use cucumber::{gherkin::Step, given, then, when};
 use integration_tests::{
+    TariWorld,
     base_node::get_base_node_client,
     cucumber_log,
     template,
-    template::{send_template_registration, RegisteredTemplate},
-    validator_node::{spawn_validator_node, ValidatorNodeProcess},
-    TariWorld,
+    template::{RegisteredTemplate, send_template_registration},
+    validator_node::{ValidatorNodeProcess, spawn_validator_node},
 };
 use libp2p::Multiaddr;
 use log::warn;
 use minotari_app_grpc::tari_rpc::{RegisterValidatorNodeRequest, Signature};
 use notify::Watcher;
-use tari_base_node_client::{grpc::GrpcBaseNodeClient, BaseNodeClient};
+use tari_base_node_client::{BaseNodeClient, grpc::GrpcBaseNodeClient};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_ootle_common_types::{
-    layer_one_transaction::LayerOneTransactionDef,
-    optional::Optional,
     Epoch,
     SubstateAddress,
+    layer_one_transaction::LayerOneTransactionDef,
+    optional::Optional,
 };
 use tari_ootle_storage::Ordering;
 use tari_sidechain::EvictionProof;
-use tari_transaction_components::transaction_components::{memo_field::TxType, MemoField};
+use tari_transaction_components::transaction_components::{MemoField, memo_field::TxType};
 use tari_validator_node_client::types::{
     AddPeerRequest,
     GetBlocksRequest,
@@ -661,32 +661,30 @@ async fn then_i_wait_for_validator_node_to_be_evicted(
             kind: notify::EventKind::Access(notify::event::AccessKind::Close(notify::event::AccessMode::Write)),
             paths,
             ..
-        } = event
-        {
-            if let Some(json_file) = paths
+        } = event &&
+            let Some(json_file) = paths
                 .into_iter()
                 .find(|p| p.extension().is_some_and(|ext| ext == "json") && p.is_file())
-            {
-                eprintln!("🗒️ Found file: {}", json_file.display());
-                let contents = fs::read(json_file).expect("Could not read file");
-                let transaction_def = match serde_json::from_slice::<LayerOneTransactionDef<EvictionProof>>(&contents) {
-                    Ok(def) => def,
-                    Err(err) => {
-                        eprintln!("Error deserializing eviction proof: {}", err);
-                        continue;
-                    },
-                };
-                if transaction_def.payload.node_to_evict().as_bytes() != evict_vn.public_key.as_bytes() {
-                    panic!(
-                        "Got an eviction proof for public key {}, however this did not match the public key of \
-                         validator {evict_vn_name}",
-                        transaction_def.payload.node_to_evict()
-                    );
-                }
-                watcher.unwatch(&l1_tx_path).unwrap();
-                world.add_eviction_proof(proof_name.clone(), transaction_def.payload);
-                break;
+        {
+            eprintln!("🗒️ Found file: {}", json_file.display());
+            let contents = fs::read(json_file).expect("Could not read file");
+            let transaction_def = match serde_json::from_slice::<LayerOneTransactionDef<EvictionProof>>(&contents) {
+                Ok(def) => def,
+                Err(err) => {
+                    eprintln!("Error deserializing eviction proof: {}", err);
+                    continue;
+                },
+            };
+            if transaction_def.payload.node_to_evict().as_bytes() != evict_vn.public_key.as_bytes() {
+                panic!(
+                    "Got an eviction proof for public key {}, however this did not match the public key of validator \
+                     {evict_vn_name}",
+                    transaction_def.payload.node_to_evict()
+                );
             }
+            watcher.unwatch(&l1_tx_path).unwrap();
+            world.add_eviction_proof(proof_name.clone(), transaction_def.payload);
+            break;
         }
     }
 }

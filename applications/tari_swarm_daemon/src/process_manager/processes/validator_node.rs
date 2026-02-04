@@ -11,8 +11,8 @@ use std::{
 use anyhow::bail;
 use log::info;
 use tari_validator_node_client::{
-    types::{LayerOneTransactionParams, PrepareLayerOneTransactionRequest},
     ValidatorNodeClient,
+    types::{LayerOneTransactionParams, PrepareLayerOneTransactionRequest},
 };
 use tokio::time::sleep;
 use url::Url;

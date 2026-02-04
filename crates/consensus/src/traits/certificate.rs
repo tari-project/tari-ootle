@@ -5,12 +5,12 @@ use std::ops::Deref;
 
 use log::info;
 use tari_consensus_types::{HighPc, HighTc, PcId, ProposalCertificate, TcId, TimeoutCertificate};
-use tari_ootle_common_types::{displayable::Displayable, optional::Optional, Epoch};
+use tari_ootle_common_types::{Epoch, displayable::Displayable, optional::Optional};
 use tari_ootle_storage::{
-    consensus_models::BookkeepingModel,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
+    consensus_models::BookkeepingModel,
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::quorum_certificate";

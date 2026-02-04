@@ -3,7 +3,7 @@
 
 use std::{
     fmt::Display,
-    sync::{atomic, atomic::AtomicU64, Arc},
+    sync::{Arc, atomic, atomic::AtomicU64},
 };
 
 use log::info;

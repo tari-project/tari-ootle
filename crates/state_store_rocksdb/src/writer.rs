@@ -44,16 +44,20 @@ use tari_consensus_types::{
 };
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{
-    optional::Optional,
-    shard::Shard,
     Epoch,
     NodeAddressable,
     NodeHeight,
     NumPreshards,
     ShardGroup,
     ToSubstateAddress,
+    optional::Optional,
+    shard::Shard,
 };
 use tari_ootle_storage::{
+    Ordering,
+    StateStoreReadTransaction,
+    StateStoreWriteTransaction,
+    StorageError,
     consensus_models::{
         Block,
         BlockTransactionExecution,
@@ -82,10 +86,6 @@ use tari_ootle_storage::{
         ValidatorStatsUpdate,
     },
     time,
-    Ordering,
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
-    StorageError,
 };
 use tari_ootle_transaction::TransactionId;
 use tari_state_tree::{Child, Nibble, Node, NodeKey, NodeType, StaleTreeNode, StateTreePayload, Version};
@@ -599,10 +599,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         if let Some(proposed_in_block) = set_proposed_in_block {
             let index_cf = db.cf(foreign_proposal::ProposedInBlockIndex)?;
-            if let Some(prev_id) = fp.proposed_in_block() {
-                if prev_id != proposed_in_block {
-                    index_cf.delete(&(*prev_id, *fp.block_id()), OPERATION)?;
-                }
+            if let Some(prev_id) = fp.proposed_in_block() &&
+                prev_id != proposed_in_block
+            {
+                index_cf.delete(&(*prev_id, *fp.block_id()), OPERATION)?;
             }
             index_cf.put(&(*proposed_in_block, *fp.block_id()), &(), OPERATION)?;
 
@@ -1165,10 +1165,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 // TODO: this could leave the head index in an inconsistent state - I suspect we should implement locks
                 // in-memory instead of in persistence perhaps (or not) persisting the entire lock state asynchronously
                 // as blocks are processed (to account for node restarts)
-                if let Some(head_key) = head_index_cf.get(&key.substate_id, OPERATION).optional()? {
-                    if head_key.transaction_id == key.transaction_id {
-                        head_index_cf.delete(&key.substate_id, OPERATION)?;
-                    }
+                if let Some(head_key) = head_index_cf.get(&key.substate_id, OPERATION).optional()? &&
+                    head_key.transaction_id == key.transaction_id
+                {
+                    head_index_cf.delete(&key.substate_id, OPERATION)?;
                 }
             }
         }
@@ -1190,10 +1190,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             cf.delete(&key, OPERATION)?;
             index_cf.delete(&key, OPERATION)?;
             substate_index_cf.delete(&key, OPERATION)?;
-            if let Some(head_key) = head_index_cf.get(&key.substate_id, OPERATION).optional()? {
-                if head_key.block_id == key.block_id {
-                    head_index_cf.delete(&key.substate_id, OPERATION)?;
-                }
+            if let Some(head_key) = head_index_cf.get(&key.substate_id, OPERATION).optional()? &&
+                head_key.block_id == key.block_id
+            {
+                head_index_cf.delete(&key.substate_id, OPERATION)?;
             }
         }
 

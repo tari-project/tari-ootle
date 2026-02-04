@@ -6,10 +6,10 @@ pub mod helpers;
 use helpers::{build_substate_value, create_random_substate_id, create_rocksdb, transaction_id_from_seed};
 use tari_ootle_common_types::{NumPreshards, ShardGroup, VersionedSubstateId};
 use tari_ootle_storage::{
-    consensus_models::SubstatePledge,
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
+    consensus_models::SubstatePledge,
 };
 
 #[test]

@@ -10,8 +10,6 @@ use tari_consensus::hotstuff::{
 };
 use tari_consensus_types::ShardGroupAccumulatedData;
 use tari_ootle_common_types::{
-    committee::{Committee, CommitteeMember},
-    crypto::create_key_pair_from_seed,
     DerivableFromPublicKey,
     Epoch,
     Network,
@@ -19,10 +17,12 @@ use tari_ootle_common_types::{
     PeerAddress,
     ShardGroup,
     VotePower,
+    committee::{Committee, CommitteeMember},
+    crypto::create_key_pair_from_seed,
 };
 use tari_ootle_storage::consensus_models::Block;
 
-use crate::support::{load_json_fixture, RoundRobinLeaderStrategy};
+use crate::support::{RoundRobinLeaderStrategy, load_json_fixture};
 
 #[test]
 fn dummy_blocks() {

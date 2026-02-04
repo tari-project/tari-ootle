@@ -27,11 +27,6 @@ use tari_template_abi::rust::{
     str::FromStr,
 };
 use tari_template_lib_types::{
-    access_rules::ResourceAccessRules,
-    bytes::Bytes,
-    confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
-    crypto::StealthValueProof,
-    stealth::StealthTransferStatement,
     AuthHook,
     ComponentAddress,
     Metadata,
@@ -42,6 +37,11 @@ use tari_template_lib_types::{
     ResourceType,
     UtxoId,
     VaultId,
+    access_rules::ResourceAccessRules,
+    bytes::Bytes,
+    confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
+    crypto::StealthValueProof,
+    stealth::StealthTransferStatement,
 };
 
 use crate::{
@@ -50,8 +50,8 @@ use crate::{
     prelude::{ComponentAccessRules, TemplateAddress},
     template::BuiltinTemplate,
     types::{
-        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
         Amount,
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     },
 };
 // -------------------------------- LOGS -------------------------------- //

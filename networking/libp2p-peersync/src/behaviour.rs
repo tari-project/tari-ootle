@@ -9,7 +9,10 @@ use std::{
 };
 
 use libp2p::{
-    core::{transport::PortUse, Endpoint},
+    Multiaddr,
+    PeerId,
+    StreamProtocol,
+    core::{Endpoint, transport::PortUse},
     futures::executor::block_on,
     identity::Keypair,
     swarm::{
@@ -24,19 +27,16 @@ use libp2p::{
         THandlerOutEvent,
         ToSwarm,
     },
-    Multiaddr,
-    PeerId,
-    StreamProtocol,
 };
 
 use crate::{
+    Config,
+    LocalPeerRecord,
+    SignedPeerRecord,
     error::Error,
     event::Event,
     handler::{Handler, HandlerAction},
     store::PeerStore,
-    Config,
-    LocalPeerRecord,
-    SignedPeerRecord,
 };
 
 /// Internal threshold for when to shrink the capacity

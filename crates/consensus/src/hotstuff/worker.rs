@@ -21,8 +21,9 @@ use tari_consensus_types::{
     TimeoutCertificate,
 };
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
-use tari_ootle_common_types::{displayable::Displayable, optional::Optional, Epoch, NodeHeight, ShardGroup};
+use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, displayable::Displayable, optional::Optional};
 use tari_ootle_storage::{
+    StateStore,
     consensus_models::{
         Block,
         BookkeepingModel,
@@ -32,7 +33,6 @@ use tari_ootle_storage::{
         TransactionPool,
         TransactionRecord,
     },
-    StateStore,
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_shutdown::ShutdownSignal;
@@ -43,11 +43,11 @@ use tokio::{
 };
 
 use super::{
+    ProposalValidationError,
     calculate_last_dummy_block,
     config::HotstuffConfig,
     get_highest_seen_justified_view,
     on_receive_new_transaction::OnReceiveNewTransaction,
-    ProposalValidationError,
 };
 use crate::{
     hotstuff::{
@@ -76,7 +76,7 @@ use crate::{
     },
     messages::{HotstuffMessage, ProposalMessage},
     tracing::TraceTimer,
-    traits::{hooks::ConsensusHooks, CertificateStore, ConsensusSpec, LeaderStrategy, PeriodicTask},
+    traits::{CertificateStore, ConsensusSpec, LeaderStrategy, PeriodicTask, hooks::ConsensusHooks},
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::worker";

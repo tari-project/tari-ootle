@@ -9,8 +9,8 @@ use tari_engine::{
 };
 use tari_engine_types::published_template::PublishedTemplate;
 use tari_ootle_common_types::{
-    services::template_provider::{TemplateMetadataProvider, TemplateProvider, TemplateProviderMetadata},
     Epoch,
+    services::template_provider::{TemplateMetadataProvider, TemplateProvider, TemplateProviderMetadata},
 };
 use tari_template_builtin::all_builtin_templates;
 use tari_template_lib::prelude::TemplateAddress;

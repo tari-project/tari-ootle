@@ -22,10 +22,10 @@
 
 use std::str::FromStr;
 
-use base64::{prelude::BASE64_STANDARD, Engine};
+use base64::{Engine, prelude::BASE64_STANDARD};
 use clap::{Args, Subcommand};
 use tari_bor::encode;
-use tari_wallet_daemon_client::{types::ConfidentialCreateOutputProofRequest, WalletDaemonClient};
+use tari_wallet_daemon_client::{WalletDaemonClient, types::ConfidentialCreateOutputProofRequest};
 
 #[derive(Debug, Subcommand, Clone)]
 pub enum ProofsSubcommand {

@@ -4,7 +4,7 @@
 use core::ops::{Deref, DerefMut};
 
 use ciborium::tag::Required;
-use serde::{de, ser, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de, ser};
 
 pub trait MaybeTagged {
     fn maybe_tag(&self) -> Option<u64>;
@@ -51,15 +51,15 @@ impl<T, const TAG: u64> BorTag<T, TAG> {
     }
 
     pub const fn inner(&self) -> &T {
-        &self.0 .0
+        &self.0.0
     }
 
     pub const fn inner_mut(&mut self) -> &mut T {
-        &mut self.0 .0
+        &mut self.0.0
     }
 
     pub fn into_inner(self) -> T {
-        self.0 .0
+        self.0.0
     }
 }
 
@@ -80,7 +80,7 @@ impl<V: Serialize, const TAG: u64> Serialize for BorTag<V, TAG> {
     #[inline]
     fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         if serializer.is_human_readable() {
-            V::serialize(&self.0 .0, serializer)
+            V::serialize(&self.0.0, serializer)
         } else {
             self.0.serialize(serializer)
         }
@@ -138,7 +138,7 @@ mod borsh_impl {
 mod ts_impl {
     use std::path::PathBuf;
 
-    use ts_rs::{TypeVisitor, TS};
+    use ts_rs::{TS, TypeVisitor};
 
     use super::*;
 

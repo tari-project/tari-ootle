@@ -7,11 +7,11 @@ use async_trait::async_trait;
 use tari_ootle_transaction::{Transaction, UnsealedTransaction, UnsignedTransaction};
 
 use crate::{
+    Address,
     signer,
     stealth::SignatureRequirements,
-    transaction::{ephemeral_signer::EphemeralKeySigner, TransactionSealSigner},
+    transaction::{TransactionSealSigner, ephemeral_signer::EphemeralKeySigner},
     wallet::{NetworkWallet, OotleWallet, TransactionAuthorization, WalletResult},
-    Address,
 };
 
 pub struct WalletStealthAuthorizer<'a, W: ?Sized> {

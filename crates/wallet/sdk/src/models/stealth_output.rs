@@ -4,7 +4,7 @@
 use tari_ootle_wallet_crypto::memo::Memo;
 use tari_template_lib::{
     prelude::{PedersenCommitmentBytes, ResourceAddress, RistrettoPublicKeyBytes},
-    types::{crypto::UtxoTag, stealth::SpendCondition, Amount, ComponentAddress, EncryptedData, UtxoAddress},
+    types::{Amount, ComponentAddress, EncryptedData, UtxoAddress, crypto::UtxoTag, stealth::SpendCondition},
 };
 
 use crate::models::{KeyId, OutputStatus, WalletLockId};

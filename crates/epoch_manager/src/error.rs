@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_ootle_common_types::{optional::IsNotFoundError, Epoch, SubstateAddress};
+use tari_ootle_common_types::{Epoch, SubstateAddress, optional::IsNotFoundError};
 use tari_ootle_storage::StorageError;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 

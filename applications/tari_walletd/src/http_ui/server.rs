@@ -23,12 +23,12 @@
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
 
 use axum::{
-    http::{header, HeaderValue, Response, StatusCode, Uri},
+    Router,
+    http::{HeaderValue, Response, StatusCode, Uri, header},
     response::IntoResponse,
     routing::get,
-    Router,
 };
-use include_dir::{include_dir, Dir};
+use include_dir::{Dir, include_dir};
 use log::*;
 use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
 use url::Url;

@@ -5,25 +5,25 @@ use std::time::Duration;
 
 use cucumber::{gherkin::Step, then, when};
 use integration_tests::{
+    TariWorld,
     claim_proof::CucumberClaimProof,
     cucumber_log,
     util::transaction_builder,
     wallet_daemon_client,
-    TariWorld,
 };
-use rand::{rngs::OsRng, Rng};
+use rand::{Rng, rngs::OsRng};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::models::KeyBranch;
-use tari_template_lib_types::{bytes::Bytes, constants::XTR, crypto::PedersenCommitmentBytes, Amount};
+use tari_template_lib_types::{Amount, bytes::Bytes, constants::XTR, crypto::PedersenCommitmentBytes};
 use tari_transaction_components::{
     tari_amount::T,
-    transaction_components::{memo_field::TxType, MemoField},
+    transaction_components::{MemoField, memo_field::TxType},
 };
 use tari_wallet_daemon_client::{
-    types::{TransactionSubmitRequest, TransactionWaitResultRequest},
     ComponentAddressOrName,
+    types::{TransactionSubmitRequest, TransactionWaitResultRequest},
 };
 
 async fn claim_burn(
@@ -131,7 +131,7 @@ async fn when_i_run_up_fees(
     let mut fees_total = 0;
 
     loop {
-        let payload = Bytes::from(vec![OsRng.gen::<u8>(); 64 * 1024]);
+        let payload = Bytes::from(vec![OsRng.r#gen::<u8>(); 64 * 1024]);
 
         let transaction = transaction_builder()
             .pay_fee_from_component(*account.component_address(), 100_000u64)

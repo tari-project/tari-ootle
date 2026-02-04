@@ -1,9 +1,9 @@
 //    Copyright 2023 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
+use tari_consensus::traits::ConsensusSpec;
 #[cfg(not(feature = "metrics"))]
 use tari_consensus::traits::hooks::NoopHooks;
-use tari_consensus::traits::ConsensusSpec;
 use tari_engine::state_store::memory::ReadOnlyMemoryStateStore;
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_ootle_app_utilities::transaction_executor::TariTransactionProcessor;
@@ -14,14 +14,14 @@ use tari_rpc_state_sync::RpcStateSyncClientProtocol;
 use crate::consensus::metrics::PrometheusConsensusMetrics;
 use crate::{
     consensus::{
-        leader_selection::RoundRobinLeaderStrategy,
-        signer_service::TariSignatureService,
         ConsensusTransactionValidator,
         TarBlockTransactionExecutor,
+        leader_selection::RoundRobinLeaderStrategy,
+        signer_service::TariSignatureService,
     },
     p2p::{
-        services::messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
         NopLogger,
+        services::messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
     },
     state_store_template_provider::StateStoreTemplateProvider,
 };

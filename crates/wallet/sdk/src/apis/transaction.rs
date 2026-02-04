@@ -9,12 +9,12 @@ use tari_engine_types::{
     substate::{SubstateDiff, SubstateId},
 };
 use tari_ootle_common_types::{
+    VersionedSubstateIdRef,
     optional::{IsNotFoundError, Optional},
     response_status::{ResponseErrorStatus, TransactionStatusResponseError},
-    VersionedSubstateIdRef,
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
-use tari_template_lib::types::{constants::XTR, crypto::RistrettoPublicKeyBytes, ComponentAddress};
+use tari_template_lib::types::{ComponentAddress, constants::XTR, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
     models::{NewAccountData, TransactionStatus, WalletLockId, WalletTransaction, WalletTransactionUpdate},
@@ -106,7 +106,7 @@ where
                         Ok(false)
                     },
                     _ => Err(err.into()),
-                }
+                };
             },
         }
 

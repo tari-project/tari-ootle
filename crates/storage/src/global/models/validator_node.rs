@@ -6,13 +6,13 @@ use std::fmt::Display;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{
-    displayable::Displayable,
-    vn_node_hash,
     Epoch,
     Network,
     NodeAddressable,
     SubstateAddress,
     VotePower,
+    displayable::Displayable,
+    vn_node_hash,
 };
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 

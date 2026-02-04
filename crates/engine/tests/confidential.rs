@@ -12,18 +12,20 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::substate_type::SubstateType;
-use tari_ootle_transaction::{args, call_args, Transaction};
+use tari_ootle_transaction::{Transaction, args, call_args};
 use tari_template_lib::{
     models::Account,
     prelude::ConfidentialOutputStatement,
     types::{
-        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
         Amount,
         ComponentAddress,
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     },
 };
 use tari_template_test_tooling::{
+    TemplateTest,
     support::{
+        GenerateValueLookup,
         assert_error::assert_reject_reason,
         confidential::{
             generate_confidential_output_statement,
@@ -32,9 +34,7 @@ use tari_template_test_tooling::{
             generate_withdraw_proof_with_inputs,
             generate_withdraw_proof_with_view_key,
         },
-        GenerateValueLookup,
     },
-    TemplateTest,
 };
 use tari_transaction_manifest::ManifestValue;
 use tari_utilities::ByteArray;

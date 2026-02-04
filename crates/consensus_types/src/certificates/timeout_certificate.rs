@@ -5,9 +5,9 @@ use std::{fmt::Display, hash::Hash};
 
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
-use tari_ootle_common_types::{hashing::timeout_certificate_id_hasher, Epoch, NodeHeight};
+use tari_ootle_common_types::{Epoch, NodeHeight, hashing::timeout_certificate_id_hasher};
 
-use crate::{validator_signature::ValidatorSignatureBytes, HighTc, TcId};
+use crate::{HighTc, TcId, validator_signature::ValidatorSignatureBytes};
 
 #[derive(Debug, Clone, Hash, Deserialize, Serialize, BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]

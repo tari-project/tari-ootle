@@ -3,13 +3,13 @@
 
 use std::{io::Write, ops::Deref};
 
-use rand::{rngs::OsRng, Rng, RngCore};
+use rand::{Rng, RngCore, rngs::OsRng};
 use tari_bor::cbor;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, Decision, LeafBlock, PcId, ProposalCertificate, ShardGroupAccumulatedData};
 use tari_engine_types::{
     component::{ComponentBody, ComponentHeader},
-    substate::{hash_substate, SubstateId, SubstateValue},
+    substate::{SubstateId, SubstateValue, hash_substate},
 };
 use tari_ootle_common_types::{
     Epoch,
@@ -22,6 +22,8 @@ use tari_ootle_common_types::{
     VersionedSubstateIdRef,
 };
 use tari_ootle_storage::{
+    StateStoreReadTransaction,
+    StateStoreWriteTransaction,
     consensus_models::{
         Block,
         BlockPledge,
@@ -35,22 +37,20 @@ use tari_ootle_storage::{
         SubstateUpdateBatch,
         TransactionAtom,
     },
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
 };
 use tari_ootle_transaction::TransactionId;
 use tari_sidechain::{CommitProofElement, QuorumDecision, SidechainBlockCommitProof, SidechainBlockHeader};
 use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
 use tari_state_tree::Version;
 use tari_template_lib::types::{
-    access_rules::ComponentAccessRules,
-    crypto::SchnorrSignatureBytes,
     ComponentAddress,
     ComponentKey,
     EntityId,
     ObjectKey,
     OwnerRule,
     TemplateAddress,
+    access_rules::ComponentAccessRules,
+    crypto::SchnorrSignatureBytes,
 };
 use tari_utilities::epoch_time::EpochTime;
 use tempfile::TempDir;
@@ -248,7 +248,7 @@ pub fn create_random_block_id() -> BlockId {
 }
 
 pub fn create_random_hash() -> FixedHash {
-    let rand_bytes = OsRng.gen::<[u8; FixedHash::byte_size()]>();
+    let rand_bytes = OsRng.r#gen::<[u8; FixedHash::byte_size()]>();
     FixedHash::new(rand_bytes)
 }
 

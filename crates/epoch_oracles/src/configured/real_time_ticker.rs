@@ -3,7 +3,7 @@
 
 use std::{
     num::NonZeroU64,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
     time::Duration,
 };
 

@@ -25,13 +25,17 @@ use tari_ootle_common_types::{
     VersionedSubstateIdRef,
 };
 use tari_ootle_storage::{
-    consensus_models::{SubstateRecord, SubstateTransition, SubstateUpdateBatch},
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
+    consensus_models::{SubstateRecord, SubstateTransition, SubstateUpdateBatch},
 };
 use tari_state_tree::Version;
 use tari_template_lib::types::{
+    EntityId,
+    Metadata,
+    OwnerRule,
+    ResourceType,
     access_rules::{ComponentAccessRules, ResourceAccessRules},
     constants::{
         NFT_FAUCET_COMPONENT_ADDRESS,
@@ -43,10 +47,6 @@ use tari_template_lib::types::{
         XTR_FAUCET_VAULT_ADDRESS,
     },
     rule,
-    EntityId,
-    Metadata,
-    OwnerRule,
-    ResourceType,
 };
 
 const INITIAL_STATE_VERSION: Version = 0;

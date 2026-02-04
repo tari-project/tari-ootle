@@ -21,9 +21,9 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use anyhow::anyhow;
-use reqwest::{header, header::HeaderMap, IntoUrl, Url};
+use reqwest::{IntoUrl, Url, header, header::HeaderMap};
 use serde::de::DeserializeOwned;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[derive(Debug, Clone)]
 pub struct IndexerGraphQLClient {

@@ -4,13 +4,13 @@
 use std::{str::FromStr, sync::Arc};
 
 use axum::{
-    http::{header, HeaderValue, Response, StatusCode, Uri},
-    response::IntoResponse,
-    routing::get,
     Extension,
     Router,
+    http::{HeaderValue, Response, StatusCode, Uri, header},
+    response::IntoResponse,
+    routing::get,
 };
-use include_dir::{include_dir, Dir};
+use include_dir::{Dir, include_dir};
 use log::*;
 use tari_state_store_rocksdb::column_families;
 use tower_http::cors::CorsLayer;

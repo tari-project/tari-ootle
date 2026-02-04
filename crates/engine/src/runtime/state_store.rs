@@ -5,19 +5,19 @@ use std::{collections::HashMap, mem};
 
 use indexmap::{IndexMap, IndexSet};
 use tari_engine_types::{
+    Utxo,
     component::ComponentHeader,
     lock::{LockFlag, LockId},
     substate::{Substate, SubstateId, SubstateValue},
     vault::Vault,
-    Utxo,
 };
 use tari_ootle_common_types::optional::Optional;
 use tari_template_lib::types::{ComponentAddress, UtxoAddress, VaultId};
 
 use crate::{
     runtime::{
-        locking::{LockError, LockedSubstates},
         RuntimeError,
+        locking::{LockError, LockedSubstates},
     },
     state_store::StateReader,
 };

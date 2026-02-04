@@ -2,11 +2,11 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::published_template::{PublishedTemplate, PublishedTemplateAddress};
-use tari_ootle_common_types::{services::template_provider::TemplateProvider, SubstateAddress};
+use tari_ootle_common_types::{SubstateAddress, services::template_provider::TemplateProvider};
 use tari_ootle_storage::StorageError;
 use tari_template_lib_types::TemplateAddress;
 
-use crate::{column_families::substate::SubstateCf, RocksDbStateStore};
+use crate::{RocksDbStateStore, column_families::substate::SubstateCf};
 
 impl<TAddr: Send + Sync + 'static> TemplateProvider for RocksDbStateStore<TAddr> {
     type Error = StorageError;

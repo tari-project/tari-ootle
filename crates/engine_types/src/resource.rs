@@ -29,13 +29,13 @@ use tari_template_lib::{
     auth::Ownership,
     resource::TOKEN_SYMBOL,
     types::{
-        access_rules::ResourceAccessRules,
-        crypto::RistrettoPublicKeyBytes,
         Amount,
         AuthHook,
         Metadata,
         OwnerRule,
         ResourceType,
+        access_rules::ResourceAccessRules,
+        crypto::RistrettoPublicKeyBytes,
     },
 };
 

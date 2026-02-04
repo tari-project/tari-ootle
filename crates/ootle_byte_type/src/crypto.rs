@@ -3,7 +3,7 @@
 
 use tari_crypto::{
     hashing::DomainSeparation,
-    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey, pedersen::PedersenCommitment},
     signatures::{CommitmentSignature, SchnorrSignature},
     tari_utilities,
     tari_utilities::ByteArray,

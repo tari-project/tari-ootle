@@ -22,12 +22,12 @@ use tari_jellyfish::{
 use tari_ootle_common_types::{ToSubstateAddress, VersionedSubstateId};
 
 use crate::{
+    SPARSE_MERKLE_PLACEHOLDER_HASH,
+    StateTreePayload,
+    TreeStoreBatchWriter,
     error::StateTreeError,
     key_mapper::{DbKeyMapper, HashIdentityKeyMapper, SpreadPrefixKeyMapper},
     memory_store::MemoryTreeStore,
-    StateTreePayload,
-    TreeStoreBatchWriter,
-    SPARSE_MERKLE_PLACEHOLDER_HASH,
 };
 
 const LOG_TARGET: &str = "tari::ootle::state_tree";
@@ -107,10 +107,8 @@ impl<S: TreeStore<StateTreePayload>, M: DbKeyMapper<VersionedSubstateId>> StateT
     }
 }
 
-impl<
-        S: TreeStoreReader<StateTreePayload> + TreeStoreBatchWriter<StateTreePayload>,
-        M: DbKeyMapper<VersionedSubstateId>,
-    > StateTree<'_, S, M>
+impl<S: TreeStoreReader<StateTreePayload> + TreeStoreBatchWriter<StateTreePayload>, M: DbKeyMapper<VersionedSubstateId>>
+    StateTree<'_, S, M>
 {
     /// Stores the substate changes in the state tree and returns the new root hash.
     pub fn batch_put_substate_changes<I: IntoIterator<Item = SubstateTreeChange>>(

@@ -8,9 +8,11 @@ use std::{
 };
 
 use libp2p::{
-    core::{transport::PortUse, Endpoint},
+    Multiaddr,
+    PeerId,
+    StreamProtocol,
+    core::{Endpoint, transport::PortUse},
     swarm::{
-        dial_opts::DialOpts,
         AddressChange,
         ConnectionClosed,
         ConnectionDenied,
@@ -25,21 +27,19 @@ use libp2p::{
         THandlerInEvent,
         THandlerOutEvent,
         ToSwarm,
+        dial_opts::DialOpts,
     },
-    Multiaddr,
-    PeerId,
-    StreamProtocol,
 };
 use smallvec::SmallVec;
 
 use crate::{
+    Config,
     codec::Codec,
     error::Error,
     event::Event,
     handler::Handler,
     stream,
     stream::{MessageSink, MessageStream, StreamId},
-    Config,
 };
 
 /// Internal threshold for when to shrink the capacity
@@ -232,15 +232,15 @@ where TCodec: Codec + Send + Clone + 'static
             return;
         }
 
-        if let Some(peer) = peer_id {
-            if let Some((_sink, stream)) = self.pending_outbound_dials.remove(&peer) {
-                self.pending_events
-                    .push_back(ToSwarm::GenerateEvent(Event::OutboundFailure {
-                        peer_id: peer,
-                        stream_id: stream.stream_id(),
-                        error: Error::DialFailure,
-                    }));
-            }
+        if let Some(peer) = peer_id &&
+            let Some((_sink, stream)) = self.pending_outbound_dials.remove(&peer)
+        {
+            self.pending_events
+                .push_back(ToSwarm::GenerateEvent(Event::OutboundFailure {
+                    peer_id: peer,
+                    stream_id: stream.stream_id(),
+                    error: Error::DialFailure,
+                }));
         }
     }
 
@@ -484,23 +484,11 @@ mod tests {
         assert_eq!(cycle_once(0, 1, Some), None);
         assert_eq!(cycle_once(10, 2, |_| None::<()>), None);
         assert_eq!(
-            cycle_once(10, 2, |i| {
-                if i == 5 {
-                    Some(())
-                } else {
-                    None
-                }
-            }),
+            cycle_once(10, 2, |i| { if i == 5 { Some(()) } else { None } }),
             Some((5, ()))
         );
         assert_eq!(
-            cycle_once(10, 2, |i| {
-                if i == 1 {
-                    Some(())
-                } else {
-                    None
-                }
-            }),
+            cycle_once(10, 2, |i| { if i == 1 { Some(()) } else { None } }),
             Some((1, ()))
         );
     }

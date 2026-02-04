@@ -4,8 +4,8 @@
 use borsh::BorshSerialize;
 use ootle_byte_type::ToByteType;
 use tari_bor::{Deserialize, Serialize};
-use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
-use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, EncryptedData};
+use tari_crypto::ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment};
+use tari_template_lib::types::{EncryptedData, crypto::RistrettoPublicKeyBytes};
 
 use crate::crypto::{ElgamalVerifiableBalance, ElgamalVerifiableBalanceBytes};
 

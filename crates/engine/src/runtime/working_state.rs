@@ -13,6 +13,9 @@ use ootle_byte_type::{ConvertFromByteType, ToByteType};
 use tari_bor::encoded_len;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::{
+    Utxo,
+    UtxoOutput,
+    ValidatorFeeWithdrawal,
     bucket::Bucket,
     component::ComponentHeader,
     events::Event,
@@ -32,20 +35,14 @@ use tari_engine_types::{
     transaction_receipt::{FinalizeOutcome, TransactionReceipt},
     vault::Vault,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
-    Utxo,
-    UtxoOutput,
-    ValidatorFeeWithdrawal,
 };
-use tari_ootle_common_types::{optional::Optional, Epoch};
+use tari_ootle_common_types::{Epoch, optional::Optional};
 use tari_ootle_transaction::ResourceAddressRef;
 use tari_template_lib::{
     args::{MintArg, ResourceDiscriminator, VaultFreezeFlags},
     models::{AddressAllocationId, BucketId, ProofId, ResourceAddressAllocation},
     prelude::ResourceAuthAction,
     types::{
-        constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS},
-        metadata,
-        stealth::{SpendCondition, StealthInput, StealthTransferStatement},
         Amount,
         AuthHookCaller,
         ComponentAddress,
@@ -57,12 +54,20 @@ use tari_template_lib::{
         UtxoAddress,
         ValidatorFeePoolAddress,
         VaultId,
+        constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS},
+        metadata,
+        stealth::{SpendCondition, StealthInput, StealthTransferStatement},
     },
 };
 
 use super::workspace::Workspace;
 use crate::{
     runtime::{
+        ActionIdent,
+        LimitError,
+        NativeAction,
+        RuntimeError,
+        TransactionCommitError,
         address_allocation::AllocatedAddress,
         fee_state::FeeState,
         locking::LockedSubstate,
@@ -70,11 +75,6 @@ use crate::{
         state_store::WorkingStateStore,
         tracker_auth::Authorization,
         validation::check_stealth_transfer_limits,
-        ActionIdent,
-        LimitError,
-        NativeAction,
-        RuntimeError,
-        TransactionCommitError,
     },
     state_store::StateReader,
 };
@@ -1522,18 +1522,17 @@ impl<TStore: StateReader> WorkingState<TStore> {
         }
 
         let revealed_funds_bucket = revealed_funds_bucket_id.map(|id| self.take_bucket(id)).transpose()?;
-        if let Some(ref bucket) = revealed_funds_bucket {
-            if *bucket.resource_address() != resource_address {
-                return Err(RuntimeError::InvalidArgument {
-                    argument: "revealed_funds_bucket",
-                    reason: format!(
-                        "Revealed funds bucket resource address ({}) does not match the statement's resource address \
-                         ({})",
-                        bucket.resource_address(),
-                        resource_address
-                    ),
-                });
-            }
+        if let Some(ref bucket) = revealed_funds_bucket &&
+            *bucket.resource_address() != resource_address
+        {
+            return Err(RuntimeError::InvalidArgument {
+                argument: "revealed_funds_bucket",
+                reason: format!(
+                    "Revealed funds bucket resource address ({}) does not match the statement's resource address ({})",
+                    bucket.resource_address(),
+                    resource_address
+                ),
+            });
         }
 
         match revealed_funds_bucket {

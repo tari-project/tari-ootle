@@ -6,7 +6,7 @@ use ootle_byte_type::FromByteType;
 use tari_common_types::types::CommitmentFactory;
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
-    ristretto::{bulletproofs_plus::BulletproofsPlusService, pedersen::PedersenCommitment, RistrettoSecretKey},
+    ristretto::{RistrettoSecretKey, bulletproofs_plus::BulletproofsPlusService, pedersen::PedersenCommitment},
     tari_utilities::ByteArray,
 };
 use tari_template_lib::{prelude::SchnorrSignatureBytes, types::Amount};

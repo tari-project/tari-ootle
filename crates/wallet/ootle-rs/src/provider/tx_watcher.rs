@@ -5,13 +5,13 @@ use std::{
     collections::{BTreeMap, HashMap},
     future::Future,
     mem,
-    pin::{pin, Pin},
+    pin::{Pin, pin},
     sync::{Arc, Weak},
     task::{Context, Poll},
     time::{Duration, Instant},
 };
 
-use futures::{stream::BoxStream, FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt, stream::BoxStream};
 use tari_indexer_client::{
     error::IndexerRestClientError,
     event::TransactionFinalizedEvent,
@@ -34,8 +34,8 @@ use tokio::{
 };
 
 use crate::{
-    provider::tx_stream::{EventStreamError, Paused},
     TransactionOutcome,
+    provider::tx_stream::{EventStreamError, Paused},
 };
 
 pub struct TransactionWatcher {

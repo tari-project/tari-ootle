@@ -7,10 +7,10 @@ use tari_bor::BorError;
 use tari_ootle_transaction::TransactionSealSignature;
 use tari_ootle_wallet_sdk::OotleAddress;
 use tari_template_lib_types::{
-    bytes::Bytes,
-    crypto::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
     Amount,
     FunctionName,
+    bytes::Bytes,
+    crypto::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
 };
 
 /// The raw transaction bytes. Encoded as CBOR. For human-readable formats (e.g. JSON) the base64 encoding of the CBOR

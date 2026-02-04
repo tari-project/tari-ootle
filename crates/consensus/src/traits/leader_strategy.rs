@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_ootle_common_types::{committee::Committee, NodeHeight};
+use tari_ootle_common_types::{NodeHeight, committee::Committee};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 pub trait LeaderStrategy<TAddr: PartialEq> {

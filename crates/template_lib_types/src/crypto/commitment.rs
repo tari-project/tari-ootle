@@ -8,10 +8,10 @@ use tari_template_abi::rust::{
 };
 
 use crate::{
+    KeyParseError,
     crypto::{InvalidByteLengthError, RistrettoPublicKeyBytes},
     hex::fixed_bytes_from_hex,
     serde_helpers,
-    KeyParseError,
 };
 
 /// A Pedersen Commitment byte contents

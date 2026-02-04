@@ -24,8 +24,9 @@ mod steps;
 use std::{fs, future, io, panic, str::FromStr, time::Duration};
 
 use anyhow::bail;
-use cucumber::{gherkin::Step, given, then, when, writer, writer::Verbosity, ScenarioType, World, WriterExt};
+use cucumber::{ScenarioType, World, WriterExt, gherkin::Step, given, then, when, writer, writer::Verbosity};
 use integration_tests::{
+    TariWorld,
     http_server::MockHttpServer,
     logging::{create_log_config_file, get_base_dir},
     miner::{mine_blocks, register_miner_process},
@@ -33,14 +34,13 @@ use integration_tests::{
     wallet::spawn_minotari_wallet,
     wallet_daemon::spawn_wallet_daemon,
     wallet_daemon_client,
-    TariWorld,
 };
 use libp2p::{
+    Multiaddr,
     futures::{
-        future::{select, Either},
+        future::{Either, select},
         pin_mut,
     },
-    Multiaddr,
 };
 use regex::Regex;
 use tari_common::initialize_logging;

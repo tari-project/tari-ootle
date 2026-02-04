@@ -23,10 +23,6 @@
 use std::fmt::{Debug, Formatter};
 
 use syn::{
-    parse::{Parse, ParseStream},
-    punctuated::Punctuated,
-    spanned::Spanned,
-    token::Comma,
     Error,
     FnArg,
     Ident,
@@ -42,6 +38,10 @@ use syn::{
     TypeTuple,
     UseTree,
     Visibility,
+    parse::{Parse, ParseStream},
+    punctuated::Punctuated,
+    spanned::Spanned,
+    token::Comma,
 };
 
 #[allow(dead_code)]
@@ -73,7 +73,7 @@ impl Parse for TemplateAst {
 
         for item in items {
             match item {
-                Item::Struct(ref mut item) => {
+                Item::Struct(item) => {
                     if !matches!(item.vis, Visibility::Public(_)) {
                         return Err(Error::new(item.ident.span(), "template structs must be public"));
                     }
@@ -85,7 +85,7 @@ impl Parse for TemplateAst {
                         template_name = Some(item.ident.clone());
                     }
                 },
-                Item::Enum(ref mut item) => {
+                Item::Enum(item) => {
                     if !matches!(item.vis, Visibility::Public(_)) {
                         return Err(Error::new(item.ident.span(), "template structs must be public"));
                     }
@@ -114,7 +114,7 @@ impl Parse for TemplateAst {
                                                         fn_item.sig.ident.span(),
                                                         "migration functions must return the new template struct. \
                                                          Found: unit",
-                                                    ))
+                                                    ));
                                                 },
                                                 ReturnType::Type(_, ty) => match &**ty {
                                                     Type::Path(pth) => {
@@ -156,10 +156,10 @@ impl Parse for TemplateAst {
                 },
                 Item::Use(item) => {
                     // Exclude super imports
-                    if let UseTree::Path(path) = &item.tree {
-                        if path.ident == "super" {
-                            continue;
-                        }
+                    if let UseTree::Path(path) = &item.tree &&
+                        path.ident == "super"
+                    {
+                        continue;
                     }
                     uses.push(item.clone());
                 },

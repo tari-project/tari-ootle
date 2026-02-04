@@ -24,11 +24,7 @@ impl<const N: usize> Deref for MaxString<N> {
 impl<const N: usize> MaxString<N> {
     pub fn new_checked(s: impl Into<Box<str>>) -> Option<Self> {
         let s = s.into();
-        if s.len() <= N {
-            Some(Self { s })
-        } else {
-            None
-        }
+        if s.len() <= N { Some(Self { s }) } else { None }
     }
 
     pub fn into_string(self) -> String {

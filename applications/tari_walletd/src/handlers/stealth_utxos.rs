@@ -21,11 +21,11 @@ use tari_wallet_daemon_client::{
     },
 };
 use tokio::{
-    task::{spawn_blocking, AbortHandle},
+    task::{AbortHandle, spawn_blocking},
     time::Instant,
 };
 
-use crate::handlers::{helpers::invalid_params, HandlerContext};
+use crate::handlers::{HandlerContext, helpers::invalid_params};
 
 const LOG_TARGET: &str = "tari::ootle::walletd::handlers::stealth_utxos";
 

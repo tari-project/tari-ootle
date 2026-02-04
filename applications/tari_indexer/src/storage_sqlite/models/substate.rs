@@ -23,7 +23,7 @@
 
 use std::convert::TryFrom;
 
-use tari_ootle_storage::{time::PrimitiveDateTime, StorageError};
+use tari_ootle_storage::{StorageError, time::PrimitiveDateTime};
 
 use crate::{
     storage_sqlite::{

@@ -29,8 +29,6 @@ use std::{
 };
 
 use diesel::{
-    sql_query,
-    sql_types::{BigInt, Bigint},
     BoolExpressionMethods,
     ExpressionMethods,
     JoinOnDsl,
@@ -38,23 +36,25 @@ use diesel::{
     QueryDsl,
     RunQueryDsl,
     SqliteConnection,
+    sql_query,
+    sql_types::{BigInt, Bigint},
 };
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
 use log::debug;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{
-    committee::{Committee, CommitteeMember},
-    hashing::ValidatorNodeBalancedMerkleTree,
     Epoch,
     NodeAddressable,
     ShardGroup,
     SubstateAddress,
     VotePower,
+    committee::{Committee, CommitteeMember},
+    hashing::ValidatorNodeBalancedMerkleTree,
 };
 use tari_ootle_storage::{
+    AtomicDb,
     global::{
-        models::ValidatorNode,
         BlockHeaderModel,
         DbLayer1Transaction,
         DbTemplate,
@@ -62,20 +62,20 @@ use tari_ootle_storage::{
         EpochData,
         GlobalDbAdapter,
         TemplateStatus,
+        models::ValidatorNode,
     },
-    AtomicDb,
 };
-use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
-use tari_utilities::{hex, ByteArray};
+use tari_template_lib::types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
+use tari_utilities::{ByteArray, hex};
 
 use super::{models, models::DbValidatorNode};
 use crate::{
+    SqliteTransaction,
     error::SqliteStorageError,
     global::{
         models::{DbCommittee, MetadataModel, NewTemplateModel, TemplateModel, TemplateUpdateModel},
         serialization::serialize_json,
     },
-    SqliteTransaction,
 };
 
 const LOG_TARGET: &str = "tari::ootle::storage_sqlite::global::backend_adapter";

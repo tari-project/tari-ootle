@@ -24,7 +24,7 @@ use std::convert::{TryFrom, TryInto};
 
 use anyhow::anyhow;
 
-use crate::{proto, TariMessage};
+use crate::{TariMessage, proto};
 
 // -------------------------------- TariMessage -------------------------------- //
 

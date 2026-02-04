@@ -10,16 +10,16 @@ use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, Decision};
-use tari_ootle_common_types::{hashing::command_hasher, Epoch, ShardGroup};
+use tari_ootle_common_types::{Epoch, ShardGroup, hashing::command_hasher};
 use tari_ootle_transaction::TransactionId;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use super::{ForeignProposalAtom, LeaderFee, TransactionRecord};
 use crate::{
-    consensus_models::evidence::Evidence,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
+    consensus_models::evidence::Evidence,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]

@@ -4,8 +4,8 @@
 use tari_common_types::types::FixedHash;
 use tari_epoch_manager::{EpochManagerError, EpochManagerReader};
 use tari_ootle_common_types::{
-    committee::{Committee, CommitteeInfo},
     Epoch,
+    committee::{Committee, CommitteeInfo},
 };
 
 pub struct EpochState<TAddr> {

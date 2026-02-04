@@ -20,10 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use tari_bor::{from_value, to_value};
-use tari_template_abi::{call_engine, EngineOp};
-use tari_template_lib_types::{access_rules::ComponentAccessRules, bytes::Bytes, ComponentAddress, TemplateAddress};
+use tari_template_abi::{EngineOp, call_engine};
+use tari_template_lib_types::{ComponentAddress, TemplateAddress, access_rules::ComponentAccessRules, bytes::Bytes};
 
 use crate::{
     args::{CallAction, CallInvokeArg, CallMethodArg, ComponentAction, ComponentInvokeArg, ComponentRef, InvokeResult},

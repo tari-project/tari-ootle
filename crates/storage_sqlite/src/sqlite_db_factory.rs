@@ -26,11 +26,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use diesel::{sql_query, Connection, RunQueryDsl, SqliteConnection};
+use diesel::{Connection, RunQueryDsl, SqliteConnection, sql_query};
 use tari_ootle_common_types::NodeAddressable;
 use tari_ootle_storage::{
-    global::{DbFactory, GlobalDb},
     StorageError,
+    global::{DbFactory, GlobalDb},
 };
 
 use crate::{error::SqliteStorageError, global::SqliteGlobalDbAdapter};

@@ -3,13 +3,13 @@
 
 use ootle_byte_type::{ConvertFromByteType, FromByteType};
 use tari_crypto::{
-    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey},
+    ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment},
     tari_utilities::ByteArray,
 };
 use tari_template_lib::{prelude::ConfidentialOutputStatement, types::Amount};
 
 use crate::{
-    crypto::{range_proof::validate_bullet_proof, validate_elgamal_verifiable_balance_proof, ValidateOutputBody},
+    crypto::{ValidateOutputBody, range_proof::validate_bullet_proof, validate_elgamal_verifiable_balance_proof},
     resource_container::ResourceError,
 };
 

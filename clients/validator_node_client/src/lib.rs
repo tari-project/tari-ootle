@@ -24,8 +24,8 @@ pub use error::ValidatorNodeClientError;
 
 pub mod types;
 
-use reqwest::{header, header::HeaderMap, IntoUrl, Url};
-use serde::{de::DeserializeOwned, Serialize};
+use reqwest::{IntoUrl, Url, header, header::HeaderMap};
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json as json;
 use serde_json::json;
 

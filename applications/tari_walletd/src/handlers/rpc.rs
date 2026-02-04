@@ -24,7 +24,7 @@ use tari_wallet_daemon_client::{
 
 use crate::{
     config::WalletDaemonAuth,
-    handlers::{auth::Authenticator, HandlerContext},
+    handlers::{HandlerContext, auth::Authenticator},
 };
 
 // NOTE: most of these do not require a bearer token, either because they are not sensitive or because they validate a

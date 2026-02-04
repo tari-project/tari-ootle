@@ -3,10 +3,10 @@
 
 use log::*;
 use tari_consensus_types::Decision;
-use tari_ootle_common_types::{committee::CommitteeInfo, Epoch};
+use tari_ootle_common_types::{Epoch, committee::CommitteeInfo};
 use tari_ootle_storage::{
-    consensus_models::{TransactionPool, TransactionRecord},
     StateStore,
+    consensus_models::{TransactionPool, TransactionRecord},
 };
 use tari_ootle_transaction::TransactionId;
 use tokio::sync::mpsc;

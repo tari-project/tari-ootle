@@ -10,11 +10,11 @@ use std::{
 use anyhow::Context as _;
 use log::*;
 use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle, ValidatorNodeChange};
-use tari_ootle_common_types::{displayable::Displayable, Epoch};
+use tari_ootle_common_types::{Epoch, displayable::Displayable};
 
 use super::config::Config;
 use crate::{
-    configured::{epoch_ticker::EpochTicker, real_time_ticker::RealTimeEpochTicker, EpochTickerData, Validator},
+    configured::{EpochTickerData, Validator, epoch_ticker::EpochTicker, real_time_ticker::RealTimeEpochTicker},
     store::{EpochOracleStore, StoreKey},
 };
 

@@ -4,13 +4,13 @@
 use tari_engine_types::resource::Resource;
 use tari_ootle_common_types::Network;
 use tari_template_lib::types::{
-    access_rules::ResourceAccessRules,
-    constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS, TOKEN_SYMBOL},
-    rule,
     Metadata,
     OwnerRule,
     ResourceAddress,
     ResourceType,
+    access_rules::ResourceAccessRules,
+    constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS, TOKEN_SYMBOL},
+    rule,
 };
 
 pub fn get_public_identity_resource() -> (ResourceAddress, Resource) {

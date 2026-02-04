@@ -27,7 +27,7 @@ use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::task::JoinHandle;
 
 use crate::{
-    service::{config::EpochManagerConfig, epoch_manager_service::EpochManagerService, EpochManagerHandle},
+    service::{EpochManagerHandle, config::EpochManagerConfig, epoch_manager_service::EpochManagerService},
     traits::EpochManagerSpec,
 };
 

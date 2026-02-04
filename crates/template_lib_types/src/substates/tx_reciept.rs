@@ -9,7 +9,7 @@ use std::{
 
 use tari_bor::{BorTag, Deserialize, Serialize, Tagged};
 
-use crate::{address_prefixes, BinaryTag, KeyParseError, ObjectKey};
+use crate::{BinaryTag, KeyParseError, ObjectKey, address_prefixes};
 
 const TAG: u64 = BinaryTag::TransactionReceipt.as_u64();
 

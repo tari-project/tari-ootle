@@ -4,10 +4,10 @@
 use std::collections::HashMap;
 
 use tari_bor::{Deserialize, Serialize};
-use tari_ootle_common_types::{shard::Shard, Epoch, StateVersion};
+use tari_ootle_common_types::{Epoch, StateVersion, shard::Shard};
 use tari_template_lib::types::{
-    crypto::{RistrettoPublicKeyBytes, UtxoTag},
     UtxoId,
+    crypto::{RistrettoPublicKeyBytes, UtxoTag},
 };
 
 #[derive(Debug, Clone)]

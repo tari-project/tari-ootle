@@ -4,7 +4,7 @@
 use std::fmt::Display;
 
 use tari_common_types::types::FixedHash;
-use tari_ootle_common_types::{displayable::Displayable, Epoch, SubstateAddress};
+use tari_ootle_common_types::{Epoch, SubstateAddress, displayable::Displayable};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 #[derive(Debug)]

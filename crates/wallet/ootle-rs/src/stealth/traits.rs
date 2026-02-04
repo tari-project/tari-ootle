@@ -5,9 +5,9 @@ use async_trait::async_trait;
 use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
 use tari_ootle_common_types::engine_types::crypto::OutputBody;
 use tari_ootle_wallet_crypto::DecryptedData;
-use tari_template_lib_types::{crypto::PedersenCommitmentBytes, stealth::StealthOutputsStatement, Amount};
+use tari_template_lib_types::{Amount, crypto::PedersenCommitmentBytes, stealth::StealthOutputsStatement};
 
-use crate::stealth::{error::StealthProviderError, Output};
+use crate::stealth::{Output, error::StealthProviderError};
 
 pub type StealthResult<T> = Result<T, StealthProviderError>;
 

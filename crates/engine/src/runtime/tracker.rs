@@ -40,16 +40,16 @@ use tari_ootle_transaction::TransactionWeight;
 use tari_template_lib::{
     models::ComponentAddressAllocation,
     prelude::ComponentAccessRules,
-    types::{crypto::RistrettoPublicKeyBytes, ComponentAddress, Hash, Metadata, OwnerRule, TemplateAddress},
+    types::{ComponentAddress, Hash, Metadata, OwnerRule, TemplateAddress, crypto::RistrettoPublicKeyBytes},
 };
 
 use crate::{
     runtime::{
+        RuntimeError,
         locking::LockedSubstate,
         scope::{CallScope, PushCallFrame},
         working_state::WorkingState,
         workspace::Workspace,
-        RuntimeError,
     },
     state_store::StateReader,
 };

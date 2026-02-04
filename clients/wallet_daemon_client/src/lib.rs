@@ -30,11 +30,11 @@ use std::borrow::Borrow;
 
 use json::Value;
 use reqwest::{
-    header::{self, HeaderMap, AUTHORIZATION},
     IntoUrl,
     Url,
+    header::{self, AUTHORIZATION, HeaderMap},
 };
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json as json;
 use serde_json::json;
 use tari_ootle_wallet_sdk::models::KeyBranch;

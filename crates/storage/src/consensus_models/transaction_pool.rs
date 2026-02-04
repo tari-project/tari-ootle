@@ -15,32 +15,32 @@ use serde::{Deserialize, Serialize};
 use tari_consensus_types::{BlockId, Decision, LeafBlock};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{
-    committee::CommitteeInfo,
-    displayable::Displayable,
-    optional::IsNotFoundError,
     Epoch,
     NumPreshards,
     ShardGroup,
     SubstateAddress,
     SubstateLockType,
+    committee::CommitteeInfo,
+    displayable::Displayable,
+    optional::IsNotFoundError,
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_template_lib_types::TransactionReceiptAddress;
 
 use crate::{
+    StateStore,
+    StateStoreReadTransaction,
+    StateStoreWriteTransaction,
+    StorageError,
     consensus_models::{
-        calculate_leader_fee,
         BlockTransactionExecution,
         Evidence,
         LeaderFee,
         TransactionAtom,
         TransactionExecution,
         TransactionRecord,
+        calculate_leader_fee,
     },
-    StateStore,
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
-    StorageError,
 };
 
 const LOG_TARGET: &str = "tari::ootle::storage::transaction_pool";
@@ -903,7 +903,7 @@ impl IsNotFoundError for TransactionPoolError {
 
 #[cfg(test)]
 mod tests {
-    use rand::{rngs::OsRng, Rng};
+    use rand::{Rng, rngs::OsRng};
 
     use super::*;
     use crate::consensus_models::LeaderFee;

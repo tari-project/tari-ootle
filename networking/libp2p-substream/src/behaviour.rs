@@ -7,9 +7,11 @@ use std::{
 };
 
 use libp2p::{
-    core::{transport::PortUse, Endpoint},
+    Multiaddr,
+    PeerId,
+    StreamProtocol,
+    core::{Endpoint, transport::PortUse},
     swarm::{
-        dial_opts::DialOpts,
         AddressChange,
         ConnectionClosed,
         ConnectionDenied,
@@ -24,21 +26,19 @@ use libp2p::{
         THandlerInEvent,
         THandlerOutEvent,
         ToSwarm,
+        dial_opts::DialOpts,
     },
-    Multiaddr,
-    PeerId,
-    StreamProtocol,
 };
 use smallvec::SmallVec;
 
 use crate::{
+    Config,
+    FromBehaviourEvent,
+    OpenStreamRequest,
     error::Error,
     event::Event,
     handler::Handler,
     stream::StreamId,
-    Config,
-    FromBehaviourEvent,
-    OpenStreamRequest,
 };
 
 /// Internal threshold for when to shrink the capacity

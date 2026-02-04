@@ -4,7 +4,7 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum_extra::headers::authorization::Bearer;
-use jsonwebtoken::{errors, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, errors};
 use serde::{Deserialize, Serialize};
 use tari_crypto::tari_utilities::SafePassword;
 use tari_ootle_wallet_sdk::storage::{

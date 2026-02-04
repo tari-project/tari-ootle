@@ -41,9 +41,9 @@ use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::task;
 
 use crate::{
+    TariWorld,
     helpers::{check_join_handle, get_address_from_output, get_os_assigned_ports, wait_listener_on_local_port},
     logging::get_base_dir_for_scenario,
-    TariWorld,
 };
 
 #[derive(Debug)]

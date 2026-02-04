@@ -8,10 +8,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use diesel::{sql_query, Connection, RunQueryDsl, SqliteConnection};
+use diesel::{Connection, RunQueryDsl, SqliteConnection, sql_query};
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
 use tari_ootle_storage::StorageError;
-use tari_ootle_storage_sqlite::{error::SqliteStorageError, SqliteTransaction};
+use tari_ootle_storage_sqlite::{SqliteTransaction, error::SqliteStorageError};
 
 use crate::{
     storage_sqlite::{reader::SqliteStoreReadTransaction, writer::SqliteStoreWriteTransaction},

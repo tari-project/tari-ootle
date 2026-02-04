@@ -6,16 +6,16 @@ use log::warn;
 use ootle_byte_type::{ConvertFromByteType, FromByteType, ToByteType};
 use tari_crypto::{
     keys::PublicKey,
-    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey, pedersen::PedersenCommitment},
 };
 use tari_engine_types::{
     crypto::{commit_amount, messages},
     hashing::EngineSchnorrSignature,
 };
 use tari_template_lib_types::{
+    Amount,
     crypto::BalanceProofSignature,
     stealth::{StealthInputsStatement, StealthOutputsStatement},
-    Amount,
 };
 use tari_utilities::ByteArrayError;
 

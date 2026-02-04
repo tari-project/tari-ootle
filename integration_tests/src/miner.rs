@@ -25,19 +25,19 @@ use std::time::Duration;
 use minotari_app_grpc::{
     conversions::transaction_output::grpc_output_with_payref,
     tari_rpc,
-    tari_rpc::{pow_algo::PowAlgos, NewBlockTemplate, NewBlockTemplateRequest, PowAlgo},
+    tari_rpc::{NewBlockTemplate, NewBlockTemplateRequest, PowAlgo, pow_algo::PowAlgos},
 };
 use minotari_node_grpc_client::BaseNodeGrpcClient;
 use tari_common_types::tari_address::TariAddress;
 use tari_transaction_components::{
+    MicroMinotari,
     consensus::ConsensusManager,
     generate_coinbase_with_wallet_output,
     key_manager::{KeyManager, TariKeyId},
     transaction_components::{MemoField, RangeProofType, WalletOutput},
-    MicroMinotari,
 };
 
-use crate::{cucumber_log, TariWorld};
+use crate::{TariWorld, cucumber_log};
 
 type BaseNodeClient = BaseNodeGrpcClient<tonic::transport::Channel>;
 

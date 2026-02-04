@@ -22,20 +22,20 @@
 
 use serde::{Deserialize, Serialize};
 use tari_template_abi::{
+    EngineOp,
     call_engine,
     rust::{
         collections::BTreeSet,
         fmt,
         fmt::{Display, Formatter},
     },
-    EngineOp,
 };
 use tari_template_lib_types::{
-    confidential::ConfidentialWithdrawProof,
-    stealth::StealthTransferStatement,
     NonFungibleId,
     ResourceAddress,
     VaultId,
+    confidential::ConfidentialWithdrawProof,
+    stealth::StealthTransferStatement,
 };
 
 use crate::{

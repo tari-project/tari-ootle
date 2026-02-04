@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use axum::{extract::Query, Extension, Json};
+use axum::{Extension, Json, extract::Query};
 use tari_indexer_client::types::{GetNonFungiblesRequest, GetNonFungiblesResponse};
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};

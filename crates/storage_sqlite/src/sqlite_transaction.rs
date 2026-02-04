@@ -22,7 +22,7 @@
 
 use std::sync::MutexGuard;
 
-use diesel::{sql_query, RunQueryDsl, SqliteConnection};
+use diesel::{RunQueryDsl, SqliteConnection, sql_query};
 
 use crate::error::SqliteStorageError;
 

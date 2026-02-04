@@ -3,7 +3,7 @@
 
 use std::{
     collections::VecDeque,
-    future::{poll_fn, Future},
+    future::{Future, poll_fn},
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
@@ -11,25 +11,25 @@ use std::{
 
 use log::*;
 use tari_base_node_client::{
+    BaseNodeClient,
+    BaseNodeClientError,
     futures_util::TryStreamExt,
     grpc::GrpcBaseNodeClient,
     types::BaseLayerMetadata,
-    BaseNodeClient,
-    BaseNodeClientError,
 };
 use tari_common_types::types::FixedHash;
 use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle};
 use tari_node_components::blocks::BlockHeader;
-use tari_ootle_common_types::{displayable::Displayable, optional::Optional, Epoch, Network};
+use tari_ootle_common_types::{Epoch, Network, displayable::Displayable, optional::Optional};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 use tokio::time;
 
 use crate::{
     base_layer::{
-        header_hasher::hash_header,
         BaseLayerBlockHeaderStore,
         BaseLayerEpochOracleConfig,
         BaseLayerEpochOracleFeatures,
+        header_hasher::hash_header,
     },
     store::{EpochOracleStore, StoreKey},
 };
@@ -233,12 +233,12 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
 
         // Recover the last scanned validator node MR if it is not set yet, i.e the node has scanned BL blocks
         // previously.
-        if self.last_scanned_validator_node_mr.is_none() {
-            if let Some(ref hash) = self.last_scanned_hash {
-                let header = self.base_node_client.get_header_by_hash(hash).await?;
-                self.last_scanned_validator_node_mr = Some(header.validator_node_mr);
-                // cached_header = Some(header);
-            }
+        if self.last_scanned_validator_node_mr.is_none() &&
+            let Some(ref hash) = self.last_scanned_hash
+        {
+            let header = self.base_node_client.get_header_by_hash(hash).await?;
+            self.last_scanned_validator_node_mr = Some(header.validator_node_mr);
+            // cached_header = Some(header);
         }
 
         let constants = self

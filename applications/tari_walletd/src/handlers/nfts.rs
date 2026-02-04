@@ -12,14 +12,14 @@ use tari_engine_types::{
     json_cbor::convert_json_to_cbor,
     substate::SubstateId,
 };
-use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
+use tari_ootle_common_types::{SubstateRequirement, optional::Optional};
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::apis::substate::ValidatorScanResult;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib_types::{
-    constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS},
     ComponentAddress,
     ResourceAddress,
+    constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS},
 };
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
@@ -37,9 +37,9 @@ use tari_wallet_daemon_client::{
 
 use super::{context::HandlerContext, helpers::get_account_or_default};
 use crate::{
+    DEFAULT_FEE,
     handlers::helpers::{application_error, get_account, get_account_with_inputs, invalid_params, wait_for_result},
     jrpc_server::ApplicationErrorCode,
-    DEFAULT_FEE,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::nfts";

@@ -9,9 +9,9 @@ use tari_ootle_common_types::engine_types::crypto::OutputBody;
 use tari_ootle_transaction::{IntoSigned, Transaction, TransactionSignature, UnsealedTransaction, UnsignedTransaction};
 use tari_ootle_wallet_crypto::DecryptedData;
 use tari_template_lib_types::{
+    Amount,
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     stealth::StealthOutputsStatement,
-    Amount,
 };
 
 use crate::{
@@ -19,7 +19,7 @@ use crate::{
     stealth::{Output, SignatureRequirements},
     transaction::TransactionSealSigner,
     types::Address,
-    wallet::{error::WalletError, traits::WalletKeyProvider, NetworkWallet, WalletStealthAuthorizer},
+    wallet::{NetworkWallet, WalletStealthAuthorizer, error::WalletError, traits::WalletKeyProvider},
 };
 
 pub type WalletResult<T> = Result<T, WalletError>;

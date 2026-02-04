@@ -8,14 +8,14 @@ use std::{
 };
 
 use tari_ootle_common_types::{
-    engine_types::substate::{Substate, SubstateId},
     Network,
+    engine_types::substate::{Substate, SubstateId},
 };
 use tari_ootle_transaction::UnsignedTransaction;
 
 use crate::{
-    provider::{ProviderError, WantInput},
     Address,
+    provider::{ProviderError, WantInput},
 };
 
 pub type ProviderResult<T> = Result<T, ProviderError>;

@@ -3,8 +3,8 @@
 
 use std::fs::File;
 
-use anyhow::{anyhow, Context};
-use minotari_node_grpc_client::{grpc, BaseNodeGrpcClient};
+use anyhow::{Context, anyhow};
+use minotari_node_grpc_client::{BaseNodeGrpcClient, grpc};
 
 use crate::process_manager::Instance;
 

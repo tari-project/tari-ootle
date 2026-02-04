@@ -5,15 +5,15 @@ use std::time::Duration;
 
 use tari_consensus::hotstuff::HotStuffError;
 use tari_consensus_types::Decision;
-use tari_ootle_common_types::{optional::Optional, Epoch, NodeHeight};
-use tari_ootle_storage::{consensus_models::SubstateValueFilterFlags, StateStore, StateStoreReadTransaction};
+use tari_ootle_common_types::{Epoch, NodeHeight, optional::Optional};
+use tari_ootle_storage::{StateStore, StateStoreReadTransaction, consensus_models::SubstateValueFilterFlags};
 use tari_state_tree::{
+    SPARSE_MERKLE_PLACEHOLDER_HASH,
     key_mapper::SpreadPrefixKeyMapper,
     memory_store::MemoryTreeStore,
-    SPARSE_MERKLE_PLACEHOLDER_HASH,
 };
 
-use crate::support::{logging::setup_logger, Test, TestAddress, TEST_NUM_PRESHARDS};
+use crate::support::{TEST_NUM_PRESHARDS, Test, TestAddress, logging::setup_logger};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn check_state_transitions() {

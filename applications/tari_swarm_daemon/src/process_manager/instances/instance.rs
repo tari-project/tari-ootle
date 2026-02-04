@@ -113,7 +113,7 @@ impl Instance {
     #[cfg(target_family = "unix")]
     async fn terminate_nix(&mut self, use_sig_int: bool) -> anyhow::Result<()> {
         use nix::{
-            sys::signal::{kill, Signal},
+            sys::signal::{Signal, kill},
             unistd::Pid,
         };
         let Some(pid) = self.child().id() else {

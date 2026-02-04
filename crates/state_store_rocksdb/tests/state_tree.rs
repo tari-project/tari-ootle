@@ -4,7 +4,7 @@
 pub mod helpers;
 
 use helpers::{assert_eq_debug, create_rocksdb};
-use tari_ootle_common_types::{optional::Optional, shard::Shard, ShardGroup};
+use tari_ootle_common_types::{ShardGroup, optional::Optional, shard::Shard};
 use tari_ootle_storage::{StateStore, StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 use tari_state_tree::{NibblePath, Node, NodeKey, StaleTreeNode, StateTreePayload};
 

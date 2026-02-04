@@ -21,10 +21,10 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use axum_jrpc::{
-    error::{JsonRpcError, JsonRpcErrorReason},
     JrpcResult,
     JsonRpcExtractor,
     JsonRpcResponse,
+    error::{JsonRpcError, JsonRpcErrorReason},
 };
 use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use log::*;
@@ -35,11 +35,14 @@ use tari_common_types::types::CompressedPublicKey;
 use tari_consensus::hotstuff::ConsensusCurrentState;
 use tari_consensus_types::{Decision, LeafBlock};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
-use tari_epoch_manager::{service::EpochManagerHandle, traits::LayerOneTransactionSubmitter, EpochManagerReader};
+use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle, traits::LayerOneTransactionSubmitter};
 use tari_epoch_oracles::store::StoreKey;
-use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
+use tari_networking::{NetworkingHandle, NetworkingService, is_supported_multiaddr};
 use tari_ootle_app_utilities::keypair::RistrettoKeypair;
 use tari_ootle_common_types::{
+    Epoch,
+    PeerAddress,
+    SubstateAddress,
     layer_one_transaction::{
         LayerOnePayloadType,
         LayerOneTransactionDef,
@@ -49,17 +52,14 @@ use tari_ootle_common_types::{
     optional::Optional,
     public_key_to_peer_id,
     services::template_provider::{TemplateMetadataProvider, TemplateProvider},
-    Epoch,
-    PeerAddress,
-    SubstateAddress,
 };
 use tari_ootle_p2p::TariMessagingSpec;
 use tari_ootle_storage::{
-    consensus_models::{Block, BookkeepingModel, SubstateRecord, TransactionExecution, TransactionRecord},
-    global::GlobalDb,
     StateStore,
     StateStoreReadTransaction,
     StorageError,
+    consensus_models::{Block, BookkeepingModel, SubstateRecord, TransactionExecution, TransactionRecord},
+    global::GlobalDb,
 };
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_template_lib::prelude::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
@@ -109,13 +109,13 @@ use tari_validator_node_client::types::{
 };
 
 use crate::{
+    ApplicationConfig,
     bootstrap::Services,
-    consensus::{spec::ValidatorNodeStateStore, ConsensusHandle},
+    consensus::{ConsensusHandle, spec::ValidatorNodeStateStore},
     file_l1_submitter::FileLayerOneSubmitter,
     json_rpc::jrpc_errors::{general_error, internal_error, invalid_operation, not_found},
     p2p::services::mempool::MempoolHandle,
     state_store_template_provider::StateStoreTemplateProvider,
-    ApplicationConfig,
 };
 
 const LOG_TARGET: &str = "tari::validator_node::json_rpc::handlers";

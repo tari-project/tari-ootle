@@ -5,9 +5,9 @@ use std::str::FromStr;
 
 use tari_engine_types::{Utxo, UtxoOutput};
 use tari_ootle_common_types::StateVersion;
-use tari_ootle_storage::{time::PrimitiveDateTime, StorageError};
+use tari_ootle_storage::{StorageError, time::PrimitiveDateTime};
 use tari_ootle_wallet_sdk::models::{UtxoBurnt, UtxoSpent, UtxoUnspent, WalletUtxoUpdate};
-use tari_template_lib_types::{crypto::PedersenCommitmentBytes, ResourceAddress, UtxoAddress, UtxoId};
+use tari_template_lib_types::{ResourceAddress, UtxoAddress, UtxoId, crypto::PedersenCommitmentBytes};
 
 use crate::storage_sqlite::{schema::utxos, serialization::deserialize_bincode};
 

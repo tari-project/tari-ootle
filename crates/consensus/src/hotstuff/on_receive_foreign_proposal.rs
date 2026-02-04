@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{HashMap, HashSet, hash_map::Entry},
     time::{Duration, Instant},
 };
 
@@ -10,8 +10,10 @@ use anyhow::anyhow;
 use log::*;
 use tari_consensus_types::{BlockId, ProposalCertificate};
 use tari_epoch_manager::EpochManagerReader;
-use tari_ootle_common_types::{committee::CommitteeInfo, optional::Optional, Epoch, NodeAddressable, ShardGroup};
+use tari_ootle_common_types::{Epoch, NodeAddressable, ShardGroup, committee::CommitteeInfo, optional::Optional};
 use tari_ootle_storage::{
+    StateStore,
+    StateStoreReadTransaction,
     consensus_models::{
         Block,
         CommandOrHash,
@@ -20,17 +22,15 @@ use tari_ootle_storage::{
         ForeignProposalRecord,
         ForeignProposalStatus,
     },
-    StateStore,
-    StateStoreReadTransaction,
 };
 
 use crate::{
     bounded_spawn::BoundedSpawn,
     hotstuff::{
+        ProposalValidationError,
         commit_proofs::generate_block_commit_proof,
         error::HotStuffError,
         pacemaker_handle::PaceMakerHandle,
-        ProposalValidationError,
     },
     messages::{
         ForeignProposalMessage,

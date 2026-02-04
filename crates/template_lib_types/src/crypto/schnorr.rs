@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use tari_template_abi::rust::fmt;
 
-use crate::crypto::{scalar::Scalar32Bytes, InvalidByteLengthError, RistrettoPublicKeyBytes};
+use crate::crypto::{InvalidByteLengthError, RistrettoPublicKeyBytes, scalar::Scalar32Bytes};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]

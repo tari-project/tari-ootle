@@ -7,13 +7,13 @@ use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_ootle_common_types::{base_layer_hashing::encrypted_data_hasher, Network};
-use tari_template_lib_types::{crypto::UtxoTag, ResourceAddress};
-use tari_utilities::{hidden_type, safe_array::SafeArray, Hidden};
+use tari_ootle_common_types::{Network, base_layer_hashing::encrypted_data_hasher};
+use tari_template_lib_types::{ResourceAddress, crypto::UtxoTag};
+use tari_utilities::{Hidden, hidden_type, safe_array::SafeArray};
 use zeroize::Zeroize;
 
 use crate::{
-    hashers::{stealth_output_tag_hasher64, stealth_owner_hasher64, KdfHasher},
+    hashers::{KdfHasher, stealth_output_tag_hasher64, stealth_owner_hasher64},
     safe_key::SafeAeadKey,
 };
 

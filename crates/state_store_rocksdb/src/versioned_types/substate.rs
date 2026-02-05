@@ -48,7 +48,7 @@ mod tests {
     use tari_utilities::hex::Hex;
 
     use super::*;
-    use crate::codecs::{DbCodec, DefaultCodec};
+    use crate::codecs::{DbDecoder, DbEncoder, DefaultCodec};
 
     #[test]
     fn encode_decode() {

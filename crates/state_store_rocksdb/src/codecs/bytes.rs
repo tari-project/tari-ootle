@@ -9,7 +9,7 @@ use std::{
 use anyhow::anyhow;
 
 use crate::{
-    codecs::{DbCodec, EncodeVec},
+    codecs::{DbDecoder, DbEncoder, EncodeVec},
     error::RocksDbStorageError,
     utils::read_to_fixed,
 };
@@ -19,12 +19,7 @@ use crate::{
 #[derive(Default)]
 pub struct BytesCodec;
 
-impl<T> DbCodec<T> for BytesCodec
-where
-    T: AsRef<[u8]>,
-    for<'a> T: TryFrom<&'a [u8]>,
-    for<'a> <T as TryFrom<&'a [u8]>>::Error: std::error::Error,
-{
+impl<T: AsRef<[u8]>> DbEncoder<T> for BytesCodec {
     fn encode_len(&self, value: &T) -> Result<usize, RocksDbStorageError> {
         Ok(value.as_ref().len())
     }
@@ -41,7 +36,13 @@ where
     fn encode(&self, value: &T) -> Result<EncodeVec, RocksDbStorageError> {
         Ok(EncodeVec::from_slice(value.as_ref()))
     }
+}
 
+impl<T> DbDecoder<T> for BytesCodec
+where
+    for<'a> T: TryFrom<&'a [u8]>,
+    for<'a> <T as TryFrom<&'a [u8]>>::Error: std::error::Error,
+{
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<T, RocksDbStorageError> {
         let mut bytes = Vec::new();
         reader
@@ -63,11 +64,7 @@ pub type BlockIdCodec = FixedBytesCodec<32>;
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FixedBytesCodec<const LEN: usize>;
 
-impl<T, const LEN: usize> DbCodec<T> for FixedBytesCodec<LEN>
-where
-    T: AsRef<[u8]>,
-    T: From<[u8; LEN]>,
-{
+impl<T: AsRef<[u8]>, const LEN: usize> DbEncoder<T> for FixedBytesCodec<LEN> {
     fn encode_len(&self, _value: &T) -> Result<usize, RocksDbStorageError> {
         Ok(LEN)
     }
@@ -83,7 +80,11 @@ where
     fn encode(&self, value: &T) -> Result<EncodeVec, RocksDbStorageError> {
         Ok(EncodeVec::from_slice(value.as_ref()))
     }
+}
 
+impl<T, const LEN: usize> DbDecoder<T> for FixedBytesCodec<LEN>
+where T: From<[u8; LEN]>
+{
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<T, RocksDbStorageError> {
         let fixed = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
             source: anyhow!("FixedBytesCodec: Expected {} bytes", LEN),

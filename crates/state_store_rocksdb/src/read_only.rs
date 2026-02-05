@@ -3,7 +3,7 @@
 
 use rocksdb::{AsColumnFamilyRef, DBIteratorWithThreadMode, DBPinnableSlice, Error, IteratorMode, ReadOptions};
 
-use crate::traits::RocksReader;
+use crate::{dbs::iterator::DbRawKeyValueIterator, traits::RocksReader};
 
 #[derive(Debug, Clone)]
 pub struct ReadOnly<TX> {
@@ -35,13 +35,17 @@ impl<TX: RocksReader> RocksReader for ReadOnly<TX> {
         self.inner.iterator_cf(cf_handle, mode)
     }
 
-    fn iterator_cf_opt<'a: 'b, 'b>(
+    fn iterator_cf_opt<'a: 'b, 'b, M, R>(
         &'a self,
         cf_handle: &impl AsColumnFamilyRef,
         readopts: ReadOptions,
         mode: IteratorMode,
-    ) -> DBIteratorWithThreadMode<'b, Self::Db> {
-        self.inner.iterator_cf_opt(cf_handle, readopts, mode)
+        mapper: M,
+    ) -> DbRawKeyValueIterator<'b, Self::Db, M>
+    where
+        for<'c> M: FnMut(Result<(&'c [u8], &'c [u8]), Error>) -> R,
+    {
+        self.inner.iterator_cf_opt(cf_handle, readopts, mode, mapper)
     }
 
     fn multi_get_cf<'a, 'b: 'a, K, I, W>(&'a self, keys: I) -> Vec<Result<Option<Vec<u8>>, Error>>

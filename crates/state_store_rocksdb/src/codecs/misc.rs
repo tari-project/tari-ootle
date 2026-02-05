@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use tari_ootle_common_types::{Epoch, NodeHeight, shard::Shard};
 
 use crate::{
-    codecs::{DbCodec, EncodeVec},
+    codecs::{DbDecoder, DbEncoder, EncodeVec},
     error::RocksDbStorageError,
     utils::read_to_fixed,
 };
@@ -14,7 +14,7 @@ use crate::{
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UnitCodec;
 
-impl DbCodec<()> for UnitCodec {
+impl DbEncoder<()> for UnitCodec {
     fn encode_len(&self, _value: &()) -> Result<usize, RocksDbStorageError> {
         Ok(0)
     }
@@ -26,7 +26,9 @@ impl DbCodec<()> for UnitCodec {
     fn encode(&self, _: &()) -> Result<EncodeVec, RocksDbStorageError> {
         Ok(EncodeVec::empty())
     }
+}
 
+impl DbDecoder<()> for UnitCodec {
     fn decode_reader<R: Read>(&self, _reader: &mut R) -> Result<(), RocksDbStorageError> {
         Ok(())
     }
@@ -35,7 +37,7 @@ impl DbCodec<()> for UnitCodec {
 #[derive(Default)]
 pub struct BoolCodec;
 
-impl DbCodec<bool> for BoolCodec {
+impl DbEncoder<bool> for BoolCodec {
     fn encode_len(&self, _value: &bool) -> Result<usize, RocksDbStorageError> {
         Ok(1)
     }
@@ -52,7 +54,9 @@ impl DbCodec<bool> for BoolCodec {
     fn encode(&self, value: &bool) -> Result<EncodeVec, RocksDbStorageError> {
         Ok(EncodeVec::new_from_array([u8::from(*value)]))
     }
+}
 
+impl DbDecoder<bool> for BoolCodec {
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<bool, RocksDbStorageError> {
         let mut buf = [0u8; 1];
         reader
@@ -74,7 +78,7 @@ pub struct NumberCodec<T> {
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl DbCodec<u8> for NumberCodec<u8> {
+impl DbEncoder<u8> for NumberCodec<u8> {
     fn encode_len(&self, _value: &u8) -> Result<usize, RocksDbStorageError> {
         Ok(1)
     }
@@ -91,7 +95,9 @@ impl DbCodec<u8> for NumberCodec<u8> {
     fn encode(&self, value: &u8) -> Result<EncodeVec, RocksDbStorageError> {
         Ok(EncodeVec::new_from_array([*value]))
     }
+}
 
+impl DbDecoder<u8> for NumberCodec<u8> {
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<u8, RocksDbStorageError> {
         let mut buf = [0u8; 1];
         reader
@@ -104,7 +110,7 @@ impl DbCodec<u8> for NumberCodec<u8> {
     }
 }
 
-impl DbCodec<u32> for NumberCodec<u32> {
+impl DbEncoder<u32> for NumberCodec<u32> {
     fn encode_len(&self, _value: &u32) -> Result<usize, RocksDbStorageError> {
         Ok(size_of::<u32>())
     }
@@ -121,7 +127,9 @@ impl DbCodec<u32> for NumberCodec<u32> {
     fn encode(&self, value: &u32) -> Result<EncodeVec, RocksDbStorageError> {
         Ok(EncodeVec::new_from_array(value.to_be_bytes()))
     }
+}
 
+impl DbDecoder<u32> for NumberCodec<u32> {
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<u32, RocksDbStorageError> {
         let arr = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::MalformedData {
             operation: "decode u32",
@@ -131,7 +139,7 @@ impl DbCodec<u32> for NumberCodec<u32> {
     }
 }
 
-impl DbCodec<u64> for NumberCodec<u64> {
+impl DbEncoder<u64> for NumberCodec<u64> {
     fn encode_len(&self, _value: &u64) -> Result<usize, RocksDbStorageError> {
         Ok(size_of::<u64>())
     }
@@ -148,7 +156,8 @@ impl DbCodec<u64> for NumberCodec<u64> {
     fn encode(&self, value: &u64) -> Result<EncodeVec, RocksDbStorageError> {
         Ok(EncodeVec::new_from_array(value.to_be_bytes()))
     }
-
+}
+impl DbDecoder<u64> for NumberCodec<u64> {
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<u64, RocksDbStorageError> {
         let arr = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::MalformedData {
             operation: "decode u64",
@@ -158,7 +167,7 @@ impl DbCodec<u64> for NumberCodec<u64> {
     }
 }
 
-impl DbCodec<Epoch> for NumberCodec<Epoch> {
+impl DbEncoder<Epoch> for NumberCodec<Epoch> {
     fn encode_len(&self, _value: &Epoch) -> Result<usize, RocksDbStorageError> {
         Ok(size_of::<Epoch>())
     }
@@ -175,7 +184,9 @@ impl DbCodec<Epoch> for NumberCodec<Epoch> {
     fn encode(&self, epoch: &Epoch) -> Result<EncodeVec, RocksDbStorageError> {
         Ok(EncodeVec::new_from_array(epoch.to_be_bytes()))
     }
+}
 
+impl DbDecoder<Epoch> for NumberCodec<Epoch> {
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<Epoch, RocksDbStorageError> {
         let arr = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::MalformedData {
             operation: "decode Epoch",
@@ -186,7 +197,7 @@ impl DbCodec<Epoch> for NumberCodec<Epoch> {
     }
 }
 
-impl DbCodec<NodeHeight> for NumberCodec<NodeHeight> {
+impl DbEncoder<NodeHeight> for NumberCodec<NodeHeight> {
     fn encode_len(&self, _value: &NodeHeight) -> Result<usize, RocksDbStorageError> {
         Ok(size_of::<NodeHeight>())
     }
@@ -203,7 +214,9 @@ impl DbCodec<NodeHeight> for NumberCodec<NodeHeight> {
     fn encode(&self, value: &NodeHeight) -> Result<EncodeVec, RocksDbStorageError> {
         Ok(EncodeVec::new_from_array(value.as_u64().to_be_bytes()))
     }
+}
 
+impl DbDecoder<NodeHeight> for NumberCodec<NodeHeight> {
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<NodeHeight, RocksDbStorageError> {
         let arr = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::MalformedData {
             operation: "decode NodeHeight",
@@ -214,7 +227,7 @@ impl DbCodec<NodeHeight> for NumberCodec<NodeHeight> {
     }
 }
 
-impl DbCodec<Shard> for NumberCodec<Shard> {
+impl DbEncoder<Shard> for NumberCodec<Shard> {
     fn encode_len(&self, _value: &Shard) -> Result<usize, RocksDbStorageError> {
         Ok(size_of::<Shard>())
     }
@@ -231,7 +244,9 @@ impl DbCodec<Shard> for NumberCodec<Shard> {
     fn encode(&self, shard: &Shard) -> Result<EncodeVec, RocksDbStorageError> {
         Ok(EncodeVec::new_from_array(shard.as_u32().to_be_bytes()))
     }
+}
 
+impl DbDecoder<Shard> for NumberCodec<Shard> {
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<Shard, RocksDbStorageError> {
         let arr = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::MalformedData {
             operation: "decode Shard",

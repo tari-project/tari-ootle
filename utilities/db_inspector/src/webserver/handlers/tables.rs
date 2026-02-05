@@ -15,7 +15,7 @@ use serde_json::{json, value::Index};
 use tari_ootle_common_types::displayable::Displayable;
 use tari_ootle_storage::{Ordering, consensus_models::Evidence};
 use tari_state_store_rocksdb::{
-    codecs::{DbCodec, KeyPrefix},
+    codecs::{DbEncoder, KeyPrefix},
     error::RocksDbStorageError,
     traits::Cf,
 };

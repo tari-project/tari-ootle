@@ -38,7 +38,11 @@ use crate::error::RocksDbStorageError;
 /// When the key is smaller than 100 bytes, it will be stack-allocated. Otherwise, it will be heap-allocated.
 pub type EncodeVec = small_bytes::SmallBytes<100>;
 
-pub trait DbCodec<T> {
+pub trait DbCodec<T>: DbEncoder<T> + DbDecoder<T> {}
+
+impl<T, C> DbCodec<T> for C where C: DbEncoder<T> + DbDecoder<T> {}
+
+pub trait DbEncoder<T> {
     fn encode_len(&self, value: &T) -> Result<usize, RocksDbStorageError>;
     fn encode_into<W: io::Write>(&self, value: &T, writer: &mut W) -> Result<(), RocksDbStorageError>;
     fn encode(&self, value: &T) -> Result<EncodeVec, RocksDbStorageError> {
@@ -54,7 +58,9 @@ pub trait DbCodec<T> {
         self.encode_into(value, &mut buf)?;
         Ok(EncodeVec::from_vec(buf))
     }
+}
 
+pub trait DbDecoder<T> {
     fn decode(&self, bytes: &[u8]) -> Result<T, RocksDbStorageError> {
         let reader = &mut &bytes[..];
         self.decode_reader(reader)
@@ -65,4 +71,3 @@ pub trait DbCodec<T> {
 
 pub type DefaultCodec<T> = Bincode<T>;
 pub type DefaultVersionedCodec<T> = VersionedCodec<DefaultCodec<T>, T>;
-pub type DefaultCodecRef<T> = BincodeRef<T>;

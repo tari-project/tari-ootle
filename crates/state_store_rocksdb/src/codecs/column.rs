@@ -10,7 +10,7 @@ use std::{
 use anyhow::anyhow;
 
 use crate::{
-    codecs::{DbCodec, EncodeVec},
+    codecs::{DbDecoder, DbEncoder, EncodeVec},
     error::RocksDbStorageError,
     utils::read_to_fixed,
 };
@@ -45,7 +45,7 @@ impl<const COL: u8> Display for ByteColumn<COL> {
 #[derive(Default)]
 pub struct ColumnCodec;
 
-impl<const COL: u32> DbCodec<Column<COL>> for ColumnCodec {
+impl<const COL: u32> DbEncoder<Column<COL>> for ColumnCodec {
     fn encode_len(&self, _value: &Column<COL>) -> Result<usize, RocksDbStorageError> {
         Ok(size_of::<u32>())
     }
@@ -62,7 +62,9 @@ impl<const COL: u32> DbCodec<Column<COL>> for ColumnCodec {
     fn encode(&self, _value: &Column<COL>) -> Result<EncodeVec, RocksDbStorageError> {
         Ok(EncodeVec::new_from_array(COL.to_be_bytes()))
     }
+}
 
+impl<const COL: u32> DbDecoder<Column<COL>> for ColumnCodec {
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<Column<COL>, RocksDbStorageError> {
         let arr = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
             source: anyhow!("Invalid bytes for ColumnCodec"),
@@ -82,7 +84,7 @@ impl<const COL: u32> DbCodec<Column<COL>> for ColumnCodec {
     }
 }
 
-impl<const COL: u8> DbCodec<ByteColumn<COL>> for ColumnCodec {
+impl<const COL: u8> DbEncoder<ByteColumn<COL>> for ColumnCodec {
     fn encode_len(&self, _value: &ByteColumn<COL>) -> Result<usize, RocksDbStorageError> {
         Ok(1)
     }
@@ -97,7 +99,9 @@ impl<const COL: u8> DbCodec<ByteColumn<COL>> for ColumnCodec {
     fn encode(&self, _value: &ByteColumn<COL>) -> Result<EncodeVec, RocksDbStorageError> {
         Ok(EncodeVec::new_from_array([COL]))
     }
+}
 
+impl<const COL: u8> DbDecoder<ByteColumn<COL>> for ColumnCodec {
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<ByteColumn<COL>, RocksDbStorageError> {
         let mut buf = [0u8; 1];
         reader

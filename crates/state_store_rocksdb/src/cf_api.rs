@@ -13,7 +13,7 @@ use tari_ootle_common_types::displayable::Displayable;
 use tari_ootle_storage::Ordering;
 
 use crate::{
-    codecs::{DbCodec, EncodeVec, PrefixCodec, UnitCodec},
+    codecs::{DbCodec, DbDecoder, DbEncoder, EncodeVec, PrefixCodec, UnitCodec},
     error::RocksDbStorageError,
     traits::{Cf, PrefixedCodec, QueryCf, RocksReader, RocksWriter},
 };
@@ -72,18 +72,22 @@ impl<'db, CF: Cf, DB: RocksReader> CfContext<'db, DB, CF> {
         })
     }
 
-    pub fn get(&self, key: &CF::Key, operation: &'static str) -> Result<CF::Value, RocksDbStorageError> {
-        let key = self.encode_key(key);
+    pub fn get_raw_key(&self, key: &[u8], operation: &'static str) -> Result<CF::Value, RocksDbStorageError> {
         let value = self
             .db
-            .get_pinned_cf(self.handle, &key)
+            .get_pinned_cf(self.handle, key)
             .map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
         let bytes = value.ok_or_else(|| RocksDbStorageError::NotFound {
-            key: Box::new(key),
+            key: Box::new(EncodeVec::from_slice(key)),
             operation,
         })?;
         let value = self.value_codec.decode(&bytes)?;
         Ok(value)
+    }
+
+    pub fn get(&self, key: &CF::Key, operation: &'static str) -> Result<CF::Value, RocksDbStorageError> {
+        let key = self.encode_key(key);
+        self.get_raw_key(key.as_slice(), operation)
     }
 
     pub fn get_raw_pinned(
@@ -101,7 +105,6 @@ impl<'db, CF: Cf, DB: RocksReader> CfContext<'db, DB, CF> {
 
     /// Counts the number of entries in the column family.
     /// WARNING: This operation is O(n) and can be slow for large column families/prefixed tables.
-    /// it also allocates memory for each key/value pair in the column family.
     pub fn count(&self, operation: &'static str) -> Result<usize, RocksDbStorageError> {
         let key_prefix = CF::key_prefix().map(|b| [b]);
         let prefix_bytes = match key_prefix {
@@ -110,10 +113,13 @@ impl<'db, CF: Cf, DB: RocksReader> CfContext<'db, DB, CF> {
         };
         let mut opts = rocksdb::ReadOptions::default();
         opts.set_iterate_range(rocksdb::PrefixRange(prefix_bytes));
-        let iter = self.db.iterator_cf_opt(self.handle, opts, IteratorMode::Start);
+        let iter = self.db.iterator_cf_opt(self.handle, opts, IteratorMode::Start, |x| {
+            x.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })
+                .map(|_| ())
+        });
         let mut count = 0;
         for result in iter {
-            let _unused = result.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
+            let () = result?;
             count += 1;
         }
         Ok(count)
@@ -121,18 +127,20 @@ impl<'db, CF: Cf, DB: RocksReader> CfContext<'db, DB, CF> {
 
     /// Counts the number of entries with the given prefix in the column family.
     /// WARNING: This operation is O(n) and can be slow for large prefixed tables.
-    /// it also allocates memory for each key/value pair in the column family.
     pub fn count_prefix(&self, prefix: &CF::Key) -> Result<usize, RocksDbStorageError> {
         let prefix = self.encode_key(prefix);
         let mut opts = rocksdb::ReadOptions::default();
         opts.set_iterate_range(rocksdb::PrefixRange(prefix));
-        let iter = self.db.iterator_cf_opt(self.handle, opts, IteratorMode::Start);
-        let mut count = 0;
-        for result in iter {
-            result.map_err(|e| RocksDbStorageError::RocksDbError {
+        let iter = self.db.iterator_cf_opt(self.handle, opts, IteratorMode::Start, |x| {
+            x.map_err(|e| RocksDbStorageError::RocksDbError {
                 operation: "count_prefix",
                 source: e,
-            })?;
+            })
+            .map(|_| ())
+        });
+        let mut count = 0;
+        for result in iter {
+            let () = result?;
             count += 1;
         }
         Ok(count)
@@ -153,15 +161,19 @@ impl<'db, CF: Cf, DB: RocksReader> CfContext<'db, DB, CF> {
     }
 
     /// Returns true if any key exists within the given range, otherwise false.
-    /// WARNING: the bounds must encode the prefix correctly according to the column family's key codec.
+    /// WARNING: the caller must encode the prefix correctly in the range bounds according to the column family's key
+    /// codec.
     pub fn any_exists_within_range(&self, range: impl IterateBounds) -> Result<bool, RocksDbStorageError> {
         let mut opts = rocksdb::ReadOptions::default();
         opts.set_iterate_range(range);
-        let mut iter = self.db.iterator_cf_opt(self.handle, opts, IteratorMode::Start);
-        let next = iter.next().transpose().map_err(|e| RocksDbStorageError::RocksDbError {
-            operation: "any_exists_within_range",
-            source: e,
-        })?;
+        let mut iter = self.db.iterator_cf_opt(self.handle, opts, IteratorMode::Start, |res| {
+            res.map_err(|e| RocksDbStorageError::RocksDbError {
+                operation: "any_exists_within_range",
+                source: e,
+            })
+            .map(|_| ())
+        });
+        let next = iter.next().transpose()?;
         Ok(next.is_some())
     }
 
@@ -211,9 +223,9 @@ impl<'db, CF: Cf, DB: RocksReader> CfContext<'db, DB, CF> {
             None => &[],
         };
         let opts = create_prefixed_read_opts(prefix_bytes, mode);
-        self.db.iterator_cf_opt(self.handle, opts, mode).map(move |res| {
+        self.db.iterator_cf_opt(self.handle, opts, mode, move |res| {
             res.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })
-                .and_then(|(k, v)| Ok((self.key_codec.decode(&k)?, self.value_codec.decode(&v)?)))
+                .and_then(|(k, v)| Ok((self.key_codec.decode(k)?, self.value_codec.decode(v)?)))
         })
     }
 
@@ -229,9 +241,9 @@ impl<'db, CF: Cf, DB: RocksReader> CfContext<'db, DB, CF> {
             None => &[],
         };
         let opts = create_prefixed_read_opts(prefix_bytes, mode);
-        self.db.iterator_cf_opt(self.handle, opts, mode).map(move |res| {
+        self.db.iterator_cf_opt(self.handle, opts, mode, move |res| {
             res.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })
-                .and_then(|(k, _)| self.key_codec.decode(&k))
+                .and_then(|(k, _)| self.key_codec.decode(k))
         })
     }
 
@@ -247,9 +259,9 @@ impl<'db, CF: Cf, DB: RocksReader> CfContext<'db, DB, CF> {
             None => &[],
         };
         let opts = create_prefixed_read_opts(prefix_bytes, mode);
-        self.db.iterator_cf_opt(self.handle, opts, mode).map(move |res| {
+        self.db.iterator_cf_opt(self.handle, opts, mode, move |res| {
             res.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })
-                .and_then(|(_, v)| self.value_codec.decode(&v))
+                .and_then(|(_, v)| self.value_codec.decode(v))
         })
     }
 
@@ -260,12 +272,12 @@ impl<'db, CF: Cf, DB: RocksReader> CfContext<'db, DB, CF> {
     ) -> impl Iterator<Item = Result<(CF::Key, CF::Value), RocksDbStorageError>> + '_ {
         let mode = ordering_to_mode(ordering);
         let opts = range_opts::<CF>(range, mode);
-        self.db.iterator_cf_opt(self.handle, opts, mode).map(move |res| {
+        self.db.iterator_cf_opt(self.handle, opts, mode, move |res| {
             res.map_err(|e| RocksDbStorageError::RocksDbError {
                 operation: "range_iterator_with_codecs",
                 source: e,
             })
-            .and_then(|(k, v)| Ok((self.key_codec.decode(&k)?, self.value_codec.decode(&v)?)))
+            .and_then(|(k, v)| Ok((self.key_codec.decode(k)?, self.value_codec.decode(v)?)))
         })
     }
 
@@ -275,17 +287,19 @@ impl<'db, CF: Cf, DB: RocksReader> CfContext<'db, DB, CF> {
         range: impl IterateBounds,
     ) -> impl Iterator<Item = Result<(K, V), RocksDbStorageError>> + 'db
     where
+        K: 'static,
+        V: 'static,
         KC: DbCodec<K> + Default,
         VC: DbCodec<V> + Default,
     {
         let mode = ordering_to_mode(ordering);
         let opts = range_opts::<CF>(range, mode);
-        self.db.iterator_cf_opt(self.handle, opts, mode).map(move |res| {
+        self.db.iterator_cf_opt(self.handle, opts, mode, |res| {
             res.map_err(|e| RocksDbStorageError::RocksDbError {
                 operation: "range_iterator_with_codecs",
                 source: e,
             })
-            .and_then(|(k, v)| Ok((KC::default().decode(&k)?, VC::default().decode(&v)?)))
+            .and_then(|(k, v)| Ok((KC::default().decode(k)?, VC::default().decode(v)?)))
         })
     }
 
@@ -295,6 +309,7 @@ impl<'db, CF: Cf, DB: RocksReader> CfContext<'db, DB, CF> {
         range: impl IterateBounds,
     ) -> impl Iterator<Item = Result<K, RocksDbStorageError>> + 'db
     where
+        K: 'static,
         C: DbCodec<K> + Default,
     {
         let iter = self.range_iterator_with_codecs::<C, K, UnitCodec, ()>(ordering, range);
@@ -379,8 +394,17 @@ impl<CF: Cf, DB: RocksWriter> CfContext<'_, DB, CF> {
     }
 
     pub fn put(&self, key: &CF::Key, value: &CF::Value, operation: &'static str) -> Result<(), RocksDbStorageError> {
-        let key = self.key_codec.encode(key)?;
         let encoded_value = self.value_codec.encode(value)?;
+        self.put_raw_value(key, &encoded_value, operation)
+    }
+
+    pub fn put_raw_value(
+        &self,
+        key: &CF::Key,
+        encoded_value: &[u8],
+        operation: &'static str,
+    ) -> Result<(), RocksDbStorageError> {
+        let key = self.key_codec.encode(key)?;
 
         self.db
             .put_cf(self.handle, &key, encoded_value)

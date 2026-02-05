@@ -8,7 +8,7 @@ use tari_common_types::types::FixedHash;
 use tari_consensus_types::BlockId;
 
 use crate::{
-    codecs::{DbCodec, SubstateIdCodec},
+    codecs::{DbDecoder, DbEncoder, SubstateIdCodec},
     column_families::block_diff::BlockDiffKey,
     error::RocksDbStorageError,
     utils::read_to_fixed,
@@ -24,7 +24,7 @@ pub struct BlockDiffKeyCodec<T> {
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl DbCodec<BlockDiffKey> for BlockDiffKeyCodec<BlockIdSeqSubstateIdVersion> {
+impl DbEncoder<BlockDiffKey> for BlockDiffKeyCodec<BlockIdSeqSubstateIdVersion> {
     fn encode_len(&self, value: &BlockDiffKey) -> Result<usize, RocksDbStorageError> {
         let len = BlockId::byte_size() + // block_id
             4 + // sequence
@@ -62,7 +62,9 @@ impl DbCodec<BlockDiffKey> for BlockDiffKeyCodec<BlockIdSeqSubstateIdVersion> {
             })?;
         Ok(())
     }
+}
 
+impl DbDecoder<BlockDiffKey> for BlockDiffKeyCodec<BlockIdSeqSubstateIdVersion> {
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<BlockDiffKey, RocksDbStorageError> {
         let block_id = FixedHash::new(read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
             source: anyhow!("BlockIdSubstateIdVersionCodec: Invalid bytes for FixedHash",),
@@ -88,7 +90,7 @@ impl DbCodec<BlockDiffKey> for BlockDiffKeyCodec<BlockIdSeqSubstateIdVersion> {
     }
 }
 
-impl DbCodec<BlockDiffKey> for BlockDiffKeyCodec<SubstateIdBlockIdVersionSeq> {
+impl DbEncoder<BlockDiffKey> for BlockDiffKeyCodec<SubstateIdBlockIdVersionSeq> {
     fn encode_len(&self, value: &BlockDiffKey) -> Result<usize, RocksDbStorageError> {
         let len = self.substate_id_codec.encode_len(&value.substate_id)? + // substate_id
             BlockId::byte_size() + // block_id
@@ -131,7 +133,9 @@ impl DbCodec<BlockDiffKey> for BlockDiffKeyCodec<SubstateIdBlockIdVersionSeq> {
             })?;
         Ok(())
     }
+}
 
+impl DbDecoder<BlockDiffKey> for BlockDiffKeyCodec<SubstateIdBlockIdVersionSeq> {
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<BlockDiffKey, RocksDbStorageError> {
         let substate_id = self.substate_id_codec.decode_reader(reader)?;
         let block_id = FixedHash::new(read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {

@@ -2591,7 +2591,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "db_inspector"
+name = "db-inspector"
 version = "0.19.1"
 dependencies = [
  "anyhow",

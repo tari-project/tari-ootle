@@ -8,6 +8,9 @@ pub trait DbKeyMapper<T> {
     fn map_to_leaf_key(id: &T) -> LeafKey;
 }
 
+/// A key mapper that "spreads" keys over the key space by hashing the VersionedSubstateId.
+/// This is done for performance reasons to "spead" the tree out rather than potentially having branches with a high
+/// depth.
 pub struct SpreadPrefixKeyMapper;
 
 impl DbKeyMapper<VersionedSubstateId> for SpreadPrefixKeyMapper {
@@ -17,6 +20,8 @@ impl DbKeyMapper<VersionedSubstateId> for SpreadPrefixKeyMapper {
     }
 }
 
+/// A key mapper that uses the hash directly as the leaf key.
+/// This is useful if the key is already a pseudo-random hash and does not need further spreading.
 pub struct HashIdentityKeyMapper;
 
 impl DbKeyMapper<TreeHash> for HashIdentityKeyMapper {

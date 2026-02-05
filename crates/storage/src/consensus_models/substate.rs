@@ -81,6 +81,10 @@ impl SubstateRecord {
         self.substate_value = None;
     }
 
+    pub fn set_destroyed(&mut self, destroyed: SubstateDestroyed) {
+        self.destroyed = Some(destroyed);
+    }
+
     pub fn into_substate_value(self) -> Option<SubstateValue> {
         self.substate_value
     }
@@ -262,7 +266,7 @@ impl SubstateRecord {
     pub fn prune_downed_values<TTx: StateStoreWriteTransaction>(
         tx: &mut TTx,
         epoch: Epoch,
-    ) -> Result<(), StorageError> {
+    ) -> Result<usize, StorageError> {
         tx.substates_prune_downed_values(epoch)
     }
 }

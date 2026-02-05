@@ -39,8 +39,8 @@ pub mod snapshot;
 
 mod options;
 pub use options::*;
-mod range;
 mod read_only;
+mod state_tree_iterator;
 mod template_provider;
 #[cfg(test)]
 mod tests;

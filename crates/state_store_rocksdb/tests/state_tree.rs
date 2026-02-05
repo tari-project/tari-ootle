@@ -3,16 +3,17 @@
 
 pub mod helpers;
 
-use helpers::{assert_eq_debug, create_rocksdb};
+use helpers::assert_eq_debug;
 use tari_ootle_common_types::{ShardGroup, optional::Optional, shard::Shard};
 use tari_ootle_storage::{StateStore, StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
+use tari_state_store_rocksdb::DatabaseOptions;
 use tari_state_tree::{NibblePath, Node, NodeKey, StaleTreeNode, StateTreePayload};
 
-use crate::helpers::num_preshards;
+use crate::helpers::{create_rocksdb_with_opts, num_preshards};
 
 #[test]
 fn state_tree_rocksdb() {
-    let (db, _tmp) = create_rocksdb();
+    let (db, _tmp) = create_rocksdb_with_opts(DatabaseOptions::default().with_state_history_length(0));
     let timer = std::time::Instant::now();
     state_tree_operations(db, 10_000);
     println!("state_tree_rocksdb: 10_000 nodes: {:?}", timer.elapsed());
@@ -44,11 +45,15 @@ fn state_tree_operations(db: impl StateStore, num_nodes: usize) {
     .unwrap();
 
     db.with_write_tx(|tx| {
-        for (key, _) in &nodes[..100] {
-            let stale_node = StaleTreeNode::Node(key.clone());
-            tx.state_tree_nodes_record_stale_tree_nodes(SHARD, key.version(), vec![stale_node])
-                .unwrap();
-        }
+        tx.state_tree_nodes_record_stale_tree_nodes(
+            SHARD,
+            2,
+            nodes[..100]
+                .iter()
+                .map(|(k, _)| StaleTreeNode::Node(k.clone()))
+                .collect(),
+        )
+        .unwrap();
         for shard in ShardGroup::all_shards(num_preshards()).shard_iter() {
             tx.state_tree_shard_versions_set(shard, 100).unwrap();
         }
@@ -56,14 +61,16 @@ fn state_tree_operations(db: impl StateStore, num_nodes: usize) {
     })
     .unwrap();
 
-    db.with_write_tx(|tx| tx.state_tree_nodes_clear_stale(num_preshards()))
+    let n = db
+        .with_write_tx(|tx| tx.state_tree_nodes_clear_stale(num_preshards()))
         .unwrap();
+    assert_eq!(n, 100);
     db.with_read_tx(|tx| {
-        // TODO: stale nodes are not cleared currently - implement test once this is done
-        // for (key, _) in &nodes[..100] {
-        //     let res = tx.state_tree_nodes_get(SHARD, key).optional().unwrap();
-        //     assert!(res.is_none());
-        // }
+        // Stale nodes are gone
+        for (key, _) in &nodes[..100] {
+            let res = tx.state_tree_nodes_get(SHARD, key).optional().unwrap();
+            assert!(res.is_none());
+        }
         for (key, _) in &nodes[100..] {
             let res = tx.state_tree_nodes_get(SHARD, key).optional().unwrap();
             assert!(res.is_some());

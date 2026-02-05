@@ -20,6 +20,7 @@ use tari_ootle_common_types::{
     ShardGroup,
     VersionedSubstateId,
     VersionedSubstateIdRef,
+    shard::Shard,
 };
 use tari_ootle_storage::{
     StateStoreReadTransaction,
@@ -35,6 +36,7 @@ use tari_ootle_storage::{
         SubstateCreated,
         SubstateRecord,
         SubstateUpdateBatch,
+        SubstateValueOrHash,
         TransactionAtom,
     },
 };
@@ -62,12 +64,13 @@ pub const fn num_preshards() -> NumPreshards {
 /// Create a RocksDbStateStore and a temporary directory
 /// NOTE: this takes around 1.5 s on my machine (AMD Ryzen 9 5950X, SSD)
 pub fn create_rocksdb() -> (RocksDbStateStore<String>, TempDir) {
+    create_rocksdb_with_opts(DatabaseOptions::default())
+}
+
+pub fn create_rocksdb_with_opts(opts: DatabaseOptions) -> (RocksDbStateStore<String>, TempDir) {
     let temp_dir = tempfile::Builder::new().disable_cleanup(false).tempdir().unwrap();
     let db_file = temp_dir.path().join("rocksdb");
-    (
-        RocksDbStateStore::open(db_file, DatabaseOptions::default()).unwrap(),
-        temp_dir,
-    )
+    (RocksDbStateStore::open(db_file, opts).unwrap(), temp_dir)
 }
 
 pub fn create_tx_atom() -> TransactionAtom {
@@ -145,12 +148,10 @@ pub fn build_substate_value(entity_id: Option<EntityId>) -> SubstateValue {
     })
 }
 
-pub fn create_substate_update_batch<'a, I: IntoIterator<Item = &'a SubstateRecord>>(
-    epoch: Epoch,
-    substates: I,
-) -> SubstateUpdateBatch {
+pub fn create_substate_update_batch<'a, I>(epoch: Epoch, changes: I) -> SubstateUpdateBatch
+where I: IntoIterator<Item = &'a SubstateRecord> {
     let mut batch = SubstateUpdateBatch::new(epoch);
-    for substate in substates {
+    for substate in changes {
         if let Some(destroyed) = &substate.destroyed {
             batch
                 .with_transition(
@@ -169,10 +170,14 @@ pub fn create_substate_update_batch<'a, I: IntoIterator<Item = &'a SubstateRecor
                 .push(tari_ootle_storage::consensus_models::SubstateTransition::Up {
                     id: substate.substate_id.clone(),
                     version: substate.version,
-                    substate_or_hash: substate.clone().into_substate_value_or_hash(),
+                    substate_or_hash: substate
+                        .substate_value()
+                        .map(|v| SubstateValueOrHash::Value(Box::new(v.clone())))
+                        .unwrap_or_else(|| SubstateValueOrHash::Hash(*substate.state_hash())),
                 });
         }
     }
+
     batch
 }
 
@@ -200,6 +205,18 @@ pub fn substate_id_seed(seed: u32) -> SubstateId {
     SubstateId::Component(ComponentAddress::new(ObjectKey::new(entity_id, component_key)))
 }
 
+pub fn random_substate_id_for_shard(shard: Shard) -> SubstateId {
+    let seed = shard.as_u32();
+    let mut buf = [0u8; EntityId::LENGTH];
+    let end = size_of::<u32>().min(EntityId::LENGTH);
+    buf[..end].copy_from_slice(&seed.to_be_bytes()[..end]);
+    let entity_id = EntityId::from_array(buf);
+    let mut buf = [0u8; ComponentKey::LENGTH];
+    rand::thread_rng().fill_bytes(&mut buf);
+    let component_key = ComponentKey::new(buf);
+    SubstateId::Component(ComponentAddress::new(ObjectKey::new(entity_id, component_key)))
+}
+
 pub fn substate_value_for_entity(entity_id: EntityId) -> SubstateValue {
     SubstateValue::Component(ComponentHeader {
         template_address: TemplateAddress::default(),
@@ -221,14 +238,32 @@ pub fn substate_value_for_entity(entity_id: EntityId) -> SubstateValue {
 pub fn gen_substates(
     epoch: Epoch,
     state_version: Version,
-    range: impl IntoIterator<Item = u32>,
-    version: u32,
+    shard: Shard,
+    n: usize,
+    substate_version: u32,
 ) -> impl Iterator<Item = SubstateRecord> {
-    range.into_iter().map(move |i| {
+    (0..n).map(move |_| {
+        let substate_id = random_substate_id_for_shard(shard);
+        let value = substate_value_for_entity(substate_id.to_object_key().as_entity_id());
+        SubstateRecord::new(substate_id, substate_version, value, SubstateCreated {
+            at_epoch: epoch,
+            in_shard: shard,
+            at_state_version: state_version,
+        })
+    })
+}
+
+pub fn gen_substates_for_shards(
+    epoch: Epoch,
+    state_version: Version,
+    shard_range: impl IntoIterator<Item = u32>,
+    substate_version: u32,
+) -> impl Iterator<Item = SubstateRecord> {
+    shard_range.into_iter().map(move |i| {
         let substate_id = substate_id_seed(i);
         let value = substate_value_for_entity(substate_id.to_object_key().as_entity_id());
-        let shard = VersionedSubstateIdRef::new(&substate_id, version).to_shard(num_preshards());
-        SubstateRecord::new(substate_id, version, value, SubstateCreated {
+        let shard = VersionedSubstateIdRef::new(&substate_id, substate_version).to_shard(num_preshards());
+        SubstateRecord::new(substate_id, substate_version, value, SubstateCreated {
             at_epoch: epoch,
             in_shard: shard,
             at_state_version: state_version,

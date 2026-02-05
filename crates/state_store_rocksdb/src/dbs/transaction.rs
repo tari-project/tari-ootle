@@ -44,6 +44,11 @@ impl RocksReader for Transaction<'_, TransactionDB> {
         readopts: ReadOptions,
         mode: IteratorMode,
     ) -> DBIteratorWithThreadMode<'b, Self::Db> {
+        // TODO: the crate's iterator copies the data into an allocated buffer. We should consider implementing a
+        // zero-copy iterator as long as we can be sure that the slice is not referenced after iter.next().
+        // Currently, we never do zero-copy decoding so unfortunately we pay the allocation costs for nothing.
+        //
+        // related: https://github.com/rust-rocksdb/rust-rocksdb/issues/919
         self.iterator_cf_opt(cf_handle, readopts, mode)
     }
 

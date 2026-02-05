@@ -1,11 +1,10 @@
-//    Copyright 2024 The Tari Project
-//    SPDX-License-Identifier: BSD-3-Clause
+//   Copyright 2026 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
 
 use std::ops::Deref;
 
-use log::*;
+use log::warn;
 use tari_ootle_common_types::{optional::Optional, shard::Shard};
-use tari_ootle_storage::{StateStoreReadTransaction, StateStoreWriteTransaction};
 use tari_state_tree::{
     JmtStorageError,
     Node,
@@ -17,7 +16,9 @@ use tari_state_tree::{
     Version,
 };
 
-const LOG_TARGET: &str = "tari::ootle::consensus::sharded_state_tree";
+use crate::{StateStoreReadTransaction, StateStoreWriteTransaction};
+
+const LOG_TARGET: &str = "tari::ootle::storage::sharded_state_tree";
 
 /// Tree store that is scoped to a specific shard
 #[derive(Debug)]
@@ -47,7 +48,6 @@ impl<TTx: StateStoreReadTransaction> TreeStoreReader<StateTreePayload> for Shard
             })
     }
 }
-
 #[derive(Debug)]
 pub struct ShardScopedTreeStoreWriter<'a, TTx> {
     shard: Shard,
@@ -59,29 +59,26 @@ impl<'a, TTx: StateStoreWriteTransaction> ShardScopedTreeStoreWriter<'a, TTx> {
         Self { shard, tx }
     }
 
-    pub fn set_state_version(&mut self, version: Version) -> Result<(), tari_state_tree::JmtStorageError> {
+    pub fn set_state_version(&mut self, version: Version) -> Result<(), JmtStorageError> {
         self.tx
             .state_tree_shard_versions_set(self.shard, version)
-            .map_err(|e| tari_state_tree::JmtStorageError::UnexpectedError(e.to_string()))
+            .map_err(|e| JmtStorageError::UnexpectedError(e.to_string()))
     }
 
     pub fn record_stale_tree_nodes(
         &mut self,
         version: Version,
         nodes: Vec<StaleTreeNode>,
-    ) -> Result<(), tari_state_tree::JmtStorageError> {
+    ) -> Result<(), JmtStorageError> {
         self.tx
             .state_tree_nodes_record_stale_tree_nodes(self.shard, version, nodes)
-            .map_err(|e| tari_state_tree::JmtStorageError::UnexpectedError(e.to_string()))
+            .map_err(|e| JmtStorageError::UnexpectedError(e.to_string()))
     }
 
-    pub fn insert_nodes(
-        &mut self,
-        nodes: Vec<(NodeKey, Node<StateTreePayload>)>,
-    ) -> Result<(), tari_state_tree::JmtStorageError> {
+    pub fn insert_nodes(&mut self, nodes: Vec<(NodeKey, Node<StateTreePayload>)>) -> Result<(), JmtStorageError> {
         self.tx
             .state_tree_nodes_batch_insert(self.shard, nodes)
-            .map_err(|e| tari_state_tree::JmtStorageError::UnexpectedError(e.to_string()))
+            .map_err(|e| JmtStorageError::UnexpectedError(e.to_string()))
     }
 
     pub fn transaction(&mut self) -> &mut TTx {
@@ -94,17 +91,17 @@ where
     TTx: StateStoreWriteTransaction + Deref,
     TTx::Target: StateStoreReadTransaction,
 {
-    fn get_node(&self, key: &NodeKey) -> Result<Node<StateTreePayload>, tari_state_tree::JmtStorageError> {
+    fn get_node(&self, key: &NodeKey) -> Result<Node<StateTreePayload>, JmtStorageError> {
         self.tx
             .state_tree_nodes_get(self.shard, key)
             .optional()
-            .map_err(|e| tari_state_tree::JmtStorageError::UnexpectedError(e.to_string()))?
+            .map_err(|e| JmtStorageError::UnexpectedError(e.to_string()))?
             .ok_or_else(|| {
                 warn!(
                     target: LOG_TARGET,
                     "ShardScopedTreeStoreWriter: Node not found in shard {} with key: {}", self.shard, key
                 );
-                tari_state_tree::JmtStorageError::NotFound(key.clone())
+                JmtStorageError::NotFound(key.clone())
             })
     }
 }
@@ -113,12 +110,12 @@ impl<TTx: StateStoreWriteTransaction> TreeStoreBatchWriter<StateTreePayload> for
     fn batch_insert_nodes(&mut self, nodes: Vec<(NodeKey, Node<StateTreePayload>)>) -> Result<(), JmtStorageError> {
         self.tx
             .state_tree_nodes_batch_insert(self.shard, nodes)
-            .map_err(|e| tari_state_tree::JmtStorageError::UnexpectedError(e.to_string()))
+            .map_err(|e| JmtStorageError::UnexpectedError(e.to_string()))
     }
 
     fn record_stale_tree_nodes(&mut self, version: Version, nodes: Vec<StaleTreeNode>) -> Result<(), JmtStorageError> {
         self.tx
             .state_tree_nodes_record_stale_tree_nodes(self.shard, version, nodes)
-            .map_err(|e| tari_state_tree::JmtStorageError::UnexpectedError(e.to_string()))
+            .map_err(|e| JmtStorageError::UnexpectedError(e.to_string()))
     }
 }

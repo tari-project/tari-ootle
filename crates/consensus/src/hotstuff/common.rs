@@ -22,6 +22,7 @@ use tari_ootle_common_types::{
     substate_type::SubstateType,
 };
 use tari_ootle_storage::{
+    ShardScopedTreeStoreReader,
     StateStore,
     StateStoreReadTransaction,
     consensus_models::{
@@ -43,7 +44,7 @@ use crate::{
         HotStuffError,
         block_change_set::ProposedBlockChangeSet,
         commit_proofs::generate_end_of_epoch_commit_proof,
-        substate_store::{PendingSubstateStore, ShardScopedTreeStoreReader, ShardedStateTree},
+        substate_store::{PendingSubstateStore, ShardedStateTree},
     },
     tracing::TraceTimer,
     traits::LeaderStrategy,

@@ -1240,7 +1240,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                             let address = id.to_substate_address();
 
                             let mut substate = cf.get(&address, OPERATION)?;
-                            substate.destroyed = Some(SubstateDestroyed {
+                            substate.set_destroyed(SubstateDestroyed {
                                 at_epoch: update_batch.epoch,
                                 at_state_version: state_version,
                             });
@@ -1263,6 +1263,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                     }
                 }
 
+                // Take note of downed substates for pruning in a separate task
                 if !downed_substate_addresses.is_empty() {
                     unpruned_cf.put(
                         &(update_batch.epoch, shard, state_version),
@@ -1285,7 +1286,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
-    fn substates_prune_downed_values(&mut self, epoch: Epoch) -> Result<(), StorageError> {
+    fn substates_prune_downed_values(&mut self, epoch: Epoch) -> Result<usize, StorageError> {
         const OPERATION: &str = "substates_prune_downed_values";
         let db = self.db();
         let unpruned_query = db.cf(substate::UnprunedDownedValuesEpochQuery)?;
@@ -1301,16 +1302,16 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 let mut substate = substates_cf.get(&substate_addr, OPERATION)?;
                 substate.clear_substate_value();
                 substates_cf.put(&substate_addr, &substate, OPERATION)?;
+                count += 1;
             }
             unpruned_index.delete(&key, OPERATION)?;
-            count += 1;
         }
         info!(
             target: LOG_TARGET,
             "🗑️ Pruned {count} downed substates for epoch {epoch} from unpruned values index"
         );
 
-        Ok(())
+        Ok(count)
     }
 
     fn foreign_substate_pledges_save(
@@ -1431,7 +1432,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
-    fn state_tree_nodes_clear_stale(&mut self, num_preshards: NumPreshards) -> Result<(), StorageError> {
+    fn state_tree_nodes_clear_stale(&mut self, num_preshards: NumPreshards) -> Result<usize, StorageError> {
         const OPERATION: &str = "state_tree_nodes_clear_all_stale";
         /// We buffer deletes to ensure that we delete entire subtrees at once. The number of buffered deletes may
         /// exceed this threshold when flushed, due to whole subtrees being added.
@@ -1440,8 +1441,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let cf = self.db().cf(StateTreeCf)?;
         let versions_cf = self.db().cf(StateTreeShardVersionCf)?;
         let stale_cf = self.db().cf(state_tree::ByStateTreeStaleShardQuery)?;
-        let mut delete_buffer = Vec::with_capacity(DELETE_BUFFER_FLUSH_THRESHOLD); // ~3.3 MB for 100k entries (excl. nibble path vec)
-        for shard in ShardGroup::all_shards(num_preshards).shard_iter() {
+
+        let mut delete_buffer = Vec::new();
+        let mut total_num_deleted = 0usize;
+        let shards = iter::once(Shard::global()).chain(ShardGroup::all_shards(num_preshards).shard_iter());
+        for shard in shards {
             let timer = Instant::now();
             let mut num_deleted = 0;
             let stale_iter = stale_cf.query_prefix_range_iterator(Ordering::Ascending, &shard);
@@ -1461,7 +1465,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                     // Deletes are buffered to ensure that we delete entire subtrees at once.
                     if delete_buffer.len() >= DELETE_BUFFER_FLUSH_THRESHOLD {
                         debug!(target: LOG_TARGET, "Deleting {} stale nodes from shard {}", delete_buffer.len(), shard);
-                        for key in &delete_buffer {
+                        for key in &*delete_buffer {
                             cf.delete(key, OPERATION)?;
                         }
                         num_deleted += delete_buffer.len();
@@ -1471,6 +1475,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                     match node {
                         StaleTreeNode::Node(key) => {
                             trace!(target: LOG_TARGET, "Deleting stale node {key} from shard {shard}", );
+                            // Lazy allocation
+                            if delete_buffer.capacity() == 0 {
+                                delete_buffer.reserve_exact(DELETE_BUFFER_FLUSH_THRESHOLD); // ~3.3 MB for 100k entries (excl. nibble path vec)
+                            }
                             delete_buffer.push((shard, key));
                         },
                         StaleTreeNode::Subtree(parent_key) => {
@@ -1491,6 +1499,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                                 Node::Leaf(_) => {
                                     // Subtree is a single leaf node
                                     trace!(target: LOG_TARGET, "Deleting stale leaf node {parent_key} from shard {shard}", );
+                                    // Lazy allocation
+                                    if delete_buffer.capacity() == 0 {
+                                        delete_buffer.reserve_exact(DELETE_BUFFER_FLUSH_THRESHOLD); // ~3.3 MB for 100k entries (excl. nibble path vec)
+                                    }
                                     delete_buffer.push((shard, parent_key));
                                 },
                                 Node::Null => {},
@@ -1515,6 +1527,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             }
 
             if num_deleted > 0 {
+                total_num_deleted += num_deleted;
                 debug!(
                     target: LOG_TARGET,
                     "Deleted {} stale nodes in shard {} in {:.2?} to version {}",
@@ -1523,7 +1536,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             }
         }
 
-        Ok(())
+        Ok(total_num_deleted)
     }
 
     fn state_tree_shard_versions_set(&mut self, shard: Shard, version: Version) -> Result<(), StorageError> {
@@ -1721,7 +1734,14 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         };
 
         // TODO: this assumes that cleanup is run every epoch - if not, some substates will not be pruned
-        self.substates_prune_downed_values(prune_epoch)?;
+        let n = self.substates_prune_downed_values(prune_epoch)?;
+        if n > 0 {
+            info!(
+                target: LOG_TARGET,
+                "🗑️ Pruned {n} downed substates for epoch {} during epoch cleanup for epoch {}",
+                prune_epoch, epoch
+            );
+        }
 
         let db = self.db();
         cleanup::cleanup_blocks_for_epoch(&db, prune_epoch)?;

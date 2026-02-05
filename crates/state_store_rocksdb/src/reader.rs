@@ -45,7 +45,7 @@ use tari_consensus_types::{
     TcId,
     TimeoutCertificate,
 };
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::substate::{Substate, SubstateId};
 use tari_ootle_common_types::{
     Epoch,
     NodeAddressable,
@@ -151,6 +151,7 @@ use crate::{
     },
     error::RocksDbStorageError,
     read_only::ReadOnly,
+    state_tree_iterator::LatestSubstateStateTreeIterator,
 };
 
 const LOG_TARGET: &str = "tari::ootle::storage::state_store_rocksdb::reader";
@@ -1009,9 +1010,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn block_diffs_get(&self, block_id: &BlockId) -> Result<BlockDiff, StorageError> {
         // const OPERATION: &str = "block_diffs_get";
         let cf = self.db().cf(block_diff::ByBlockIdQuery)?;
-        let count = cf.count_prefix(block_id)?;
         let iter = cf.query_prefix_range_value_iterator(Ordering::default(), block_id);
-        let mut changes = Vec::with_capacity(count);
+        let mut changes = Vec::new();
         for result in iter {
             let change = result?;
             changes.push(change);
@@ -1423,6 +1423,23 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(false)
     }
 
+    fn substate_tree_iter(
+        &self,
+        shard: Shard,
+        starting_from_state_version: Version,
+        value_filters: SubstateValueFilterFlags,
+    ) -> Result<impl Iterator<Item = Result<(Version, SubstateId, Substate), StorageError>>, StorageError> {
+        let query = self.db().cf(state_tree::ByShardStateVersionQuery)?;
+        let substate_cf = self.db().cf(SubstateCf)?;
+        Ok(LatestSubstateStateTreeIterator::new(
+            query,
+            substate_cf,
+            shard,
+            starting_from_state_version,
+            value_filters,
+        ))
+    }
+
     /// Returns all substates that have been locked by a transaction.
     ///
     ///  # Used for:
@@ -1436,8 +1453,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let substates_cf = self.db().cf(SubstateCf)?;
         let query = self.db().cf(substate_locks::ByTransactionIdQuery)?;
 
-        let num_items = query.count_prefix(transaction_id)?;
-        let mut locked_substates = Vec::with_capacity(num_items);
+        let mut locked_substates = Vec::new();
 
         let iter = query.query_prefix_range_iterator(Ordering::default(), transaction_id);
 
@@ -1842,8 +1858,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let query = self.db().cf(foreign_substate_pledge::ByTransactionIdQuery)?;
 
-        let count = query.count_prefix(transaction_id)?;
-        let mut pledges = SubstatePledges::with_capacity(count);
+        let mut pledges = SubstatePledges::new();
         let iter = query.query_prefix_range_iterator(Ordering::default(), transaction_id);
         for result in iter {
             let (_, pledge) = result?;

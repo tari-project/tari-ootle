@@ -6,10 +6,7 @@ use std::{collections::HashMap, time::Instant};
 use anyhow::anyhow;
 use futures::StreamExt;
 use log::*;
-use tari_consensus::{
-    hotstuff::substate_store::{ShardScopedTreeStoreReader, ShardScopedTreeStoreWriter},
-    traits::{ConsensusSpec, SyncManager, SyncStatus},
-};
+use tari_consensus::traits::{ConsensusSpec, SyncManager, SyncStatus};
 use tari_consensus_types::LeafBlock;
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
@@ -25,6 +22,8 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_p2p::proto::rpc::{GetCheckpointsRequest, GetCheckpointsResponse, SyncStateRequest};
 use tari_ootle_storage::{
+    ShardScopedTreeStoreReader,
+    ShardScopedTreeStoreWriter,
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,

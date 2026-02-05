@@ -1,10 +1,12 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+mod shard_scoped_state_tree;
 use std::{collections::HashMap, ops::Deref};
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+pub use shard_scoped_state_tree::*;
 use tari_consensus_types::{
     BlockId,
     Decision,
@@ -23,7 +25,7 @@ use tari_consensus_types::{
     TcId,
     TimeoutCertificate,
 };
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::substate::{Substate, SubstateId};
 use tari_ootle_common_types::{
     Epoch,
     NodeAddressable,
@@ -266,6 +268,20 @@ pub trait StateStoreReadTransaction: Sized {
     fn substates_any_exist<'a, I>(&self, substates: I) -> Result<bool, StorageError>
     where I: IntoIterator<Item = VersionedSubstateIdRef<'a>>;
 
+    /// Returns an iterator of all substates in the given shard, starting from the given state version (inclusive).
+    /// It returns substates, ordered by state version however, the ordering within state versions is by the node key,
+    /// meaning it is essentially random. WARNING: do not use this as it only works when all stale state tree nodes
+    /// have been pruned. TODO: the JMT crate provides an iterator that incorporates JMT logic. This iterator is
+    /// more performant because it iterates in natural key order but returns duplicate results unless stale nodes
+    /// are fully pruned. We should consider implementing a correct iterator that incorporates JMT logic to avoid this
+    /// issue.
+    fn substate_tree_iter(
+        &self,
+        shard: Shard,
+        starting_from_state_version: Version,
+        value_filters: SubstateValueFilterFlags,
+    ) -> Result<impl Iterator<Item = Result<(Version, SubstateId, Substate), StorageError>>, StorageError>;
+
     // -------------------------------- SubstateLocks -------------------------------- //
 
     fn substate_locks_get_locked_substates_for_transaction(
@@ -506,7 +522,7 @@ pub trait StateStoreWriteTransaction {
     // -------------------------------- Substates -------------------------------- //
 
     fn substates_commit_batch(&mut self, update_batch: SubstateUpdateBatch) -> Result<(), StorageError>;
-    fn substates_prune_downed_values(&mut self, epoch: Epoch) -> Result<(), StorageError>;
+    fn substates_prune_downed_values(&mut self, epoch: Epoch) -> Result<usize, StorageError>;
 
     // -------------------------------- Foreign pledges -------------------------------- //
 
@@ -549,7 +565,7 @@ pub trait StateStoreWriteTransaction {
         nodes: Vec<StaleTreeNode>,
     ) -> Result<(), StorageError>;
 
-    fn state_tree_nodes_clear_stale(&mut self, num_preshards: NumPreshards) -> Result<(), StorageError>;
+    fn state_tree_nodes_clear_stale(&mut self, num_preshards: NumPreshards) -> Result<usize, StorageError>;
     fn state_tree_shard_versions_set(&mut self, shard: Shard, version: Version) -> Result<(), StorageError>;
 
     // -------------------------------- Epoch checkpoint -------------------------------- //
@@ -599,6 +615,7 @@ pub trait StateStoreWriteTransaction {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Ordering {
+    // Use default only where you "don't care" about the order. Ascending is more performant so it's the default.
     #[default]
     Ascending,
     Descending,

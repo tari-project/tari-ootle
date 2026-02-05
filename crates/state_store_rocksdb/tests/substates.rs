@@ -6,16 +6,19 @@ use std::collections::HashSet;
 
 use helpers::{assert_eq_debug, build_substate_record, create_rocksdb, create_substate_update_batch};
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::{Epoch, Network, VersionedSubstateId, VersionedSubstateIdRef};
+use tari_ootle_common_types::{Epoch, Network, VersionedSubstateId, VersionedSubstateIdRef, shard::Shard};
 use tari_ootle_storage::{
+    ShardScopedTreeStoreWriter,
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
-    consensus_models::{Block, SubstateUpdateBatch},
+    consensus_models::{Block, SubstateTransition, SubstateUpdateBatch, SubstateValueFilterFlags},
 };
+use tari_state_store_rocksdb::DatabaseOptions;
+use tari_state_tree::{StateTree, SubstateTreeChange, key_mapper::SpreadPrefixKeyMapper};
 use tari_template_lib::types::{ComponentAddress, ObjectKey};
 
-use crate::helpers::num_preshards;
+use crate::helpers::{create_rocksdb_with_opts, gen_substates, num_preshards};
 
 fn substate_id(seed: u8) -> SubstateId {
     let address = ComponentAddress::from_array([seed; ObjectKey::LENGTH]);
@@ -23,12 +26,9 @@ fn substate_id(seed: u8) -> SubstateId {
 }
 
 #[test]
-fn rocksdb() {
+fn basic_operations() {
     let (db, _tmp) = create_rocksdb();
-    operations(db);
-}
 
-fn operations(db: impl StateStore) {
     let mut tx = db.create_write_tx().unwrap();
 
     let zero_block = Block::zero_block(Network::LocalNet, num_preshards());
@@ -140,6 +140,104 @@ fn operations(db: impl StateStore) {
     tx.substates_commit_batch(batch).unwrap();
     let res = tx.substates_get(&substate2_address).unwrap();
     assert!(res.destroyed.is_some());
+
+    tx.rollback().unwrap();
+}
+
+#[test]
+fn substate_head_iter() {
+    type SpreadStateTree<'a, D> = StateTree<'a, D, SpreadPrefixKeyMapper>;
+    const SHARD: Shard = Shard::first();
+
+    let (db, _tmp) = create_rocksdb_with_opts(
+        DatabaseOptions::default()
+            .with_state_history_length(0)
+            .with_epoch_history_length(0),
+    );
+
+    let mut tx = db.create_write_tx().unwrap();
+
+    let zero_block = Block::zero_block(Network::LocalNet, num_preshards());
+    zero_block.insert(&mut tx).unwrap();
+
+    let substates = gen_substates(Epoch::zero(), 1, SHARD, 100, 0).collect::<Vec<_>>();
+
+    let batch = create_substate_update_batch(Epoch::zero(), substates.iter());
+    let changes = substates.iter().map(|s| SubstateTreeChange::Up {
+        id: VersionedSubstateId::new(s.substate_id.clone(), s.version),
+        value_hash: *s.state_hash(),
+    });
+
+    {
+        // Put the tree changes and commit the substates
+        let mut store = ShardScopedTreeStoreWriter::new(&mut tx, SHARD);
+        let _mr = SpreadStateTree::new(&mut store)
+            .batch_put_substate_changes(None, 1, changes)
+            .unwrap();
+    }
+    tx.state_tree_shard_versions_set(SHARD, 1).unwrap();
+    tx.substates_commit_batch(batch).unwrap();
+    let iter = tx
+        .substate_tree_iter(SHARD, 1, SubstateValueFilterFlags::all_substates())
+        .unwrap();
+
+    let count = iter.count();
+    assert_eq!(count, 100);
+
+    let substates_to_update = substates.iter().take(50);
+
+    let downs = substates_to_update.clone().map(|s| SubstateTreeChange::Down {
+        id: VersionedSubstateId::new(s.substate_id.clone(), s.version),
+    });
+    let ups = substates_to_update.clone().map(|s| SubstateTreeChange::Up {
+        id: VersionedSubstateId::new(s.substate_id.clone(), s.version + 1),
+        value_hash: *s.state_hash(),
+    });
+    {
+        let mut store = ShardScopedTreeStoreWriter::new(&mut tx, SHARD);
+        let _mr = SpreadStateTree::new(&mut store)
+            .batch_put_substate_changes(Some(1), 2, downs.chain(ups))
+            .unwrap();
+    }
+    tx.state_tree_shard_versions_set(SHARD, 2).unwrap();
+
+    let mut batch = SubstateUpdateBatch::new(Epoch::zero());
+
+    for s in substates_to_update {
+        // Mark the old substate as destroyed
+        batch.with_transition(SHARD, 2).push(SubstateTransition::Down {
+            id: s.to_versioned_substate_id(),
+        });
+        // Create a new version of the substate
+        batch.with_transition(SHARD, 2).push(SubstateTransition::Up {
+            id: s.substate_id.clone(),
+            version: s.version + 1,
+            substate_or_hash: s.clone().into_substate_value_or_hash(),
+        });
+    }
+
+    tx.substates_commit_batch(batch).unwrap();
+
+    // TODO: substate_head_iter only works correctly after pruning downed values.
+    // This is because we iterate the nodes as a "flat" list, a correct iterator would need to incorporate JMT logic.
+    tx.state_tree_nodes_clear_stale(tari_ootle_common_types::NumPreshards::current())
+        .unwrap();
+
+    let iter = tx
+        .substate_tree_iter(SHARD, 0, SubstateValueFilterFlags::all_substates())
+        .unwrap();
+
+    let mut count = 0;
+    let mut seen = HashSet::new();
+    for (i, r) in iter.enumerate() {
+        let (state_version, id, s) = r.unwrap();
+        if !seen.insert(VersionedSubstateId::new(id.clone(), s.version())) {
+            panic!("{i} {state_version} Duplicate substate id {}v{}", id, s.version());
+        }
+
+        count += 1;
+    }
+    assert_eq!(count, 100);
 
     tx.rollback().unwrap();
 }

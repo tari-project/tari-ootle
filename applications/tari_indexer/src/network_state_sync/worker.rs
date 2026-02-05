@@ -131,7 +131,7 @@ impl NetworkWideStateSync {
         info!(target: LOG_TARGET, "🌍️ Starting network-wide state sync round...");
         let sync_plan = self.initialize_sync_plan().await?;
         if sync_plan.network_description().epoch.is_zero() {
-            info!(target: LOG_TARGET, "🌍️ Current epoch is zero, skipping sync round.");
+            info!(target: LOG_TARGET, "🌍️ Current epoch is zero, nothing to sync.");
             return Ok(());
         }
         self.start_sync(sync_plan).await?;
@@ -235,14 +235,9 @@ impl NetworkWideStateSync {
                 .get_committee_by_shard_group(prev_epoch, shard_group, None, false)
                 .await?;
 
-            // TODO: continue on failure
             for checkpoint in checkpoints {
                 info!(target: LOG_TARGET, "🌍️ Validating checkpoint for shard group {shard_group}: {}", checkpoint.header().calculate_hash());
-                // TODO: we require historical committees to validate older checkpoints. Figure out the best way to
-                //       avoid needing the data (e.g. VN merkle inclusion proof + historic L1 block MR), or,
-                //       decide it is ok to require this data to be locally stored by all indexers. For now, to avoid
-                //       complexity that may be removed later, we'll skip validating them and only validate prev_epochs
-                //       checkpoint.
+
                 let checkpoint_shard_group =
                     checkpoint
                         .checked_shard_group()
@@ -250,6 +245,11 @@ impl NetworkWideStateSync {
                             details: format!("Checkpoint for shard group {} is not valid: {}", shard_group, e),
                         })?;
 
+                // TODO: we require historical committees to validate older checkpoints. Figure out the best way to
+                //       avoid needing the full historical validator data (e.g. VN merkle inclusion proof + historic L1
+                // block MR), or,       decide it is ok to require this data to be locally stored by all
+                // indexers. For now, to avoid       complexity that may be removed later, we'll skip
+                // validating them and only validate prev_epochs       checkpoint.
                 if checkpoint.epoch() == prev_epoch {
                     checkpoint
                         .validate(checkpoint.epoch(), committee.quorum_threshold(), |pk| {
@@ -304,10 +304,15 @@ impl NetworkWideStateSync {
         let mut has_synced_global_shard = false;
 
         for (shard_group, mut pool) in committee_pools {
-            // TODO: make this robust against failures, e.g. if one peer fails, continue with others
             // TODO: consider syncing shards in epoch chunks rather than one after another
             // TODO: consider parallelizing shard syncs within a shard group
-            let mut session = pool.new_session().await?;
+            let mut session = match pool.new_session().await {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!(target: LOG_TARGET, "⚠️ Failed to create session for shard group {}: {}. Continuing with others", shard_group, e);
+                    continue;
+                },
+            };
             if !has_synced_global_shard {
                 self.sync_shard_state(
                     Shard::global(),
@@ -432,7 +437,8 @@ impl NetworkWideStateSync {
                 tx.batch_insert_substate_transitions(shard, state_version, update_buf.drain(..))?;
                 debug!(target: LOG_TARGET, "✅ Committing {} UTXOs for shard {shard} (epoch: {msg_epoch})", utxos_buf.len());
                 tx.batch_insert_utxo_updates(msg_epoch, utxos_buf.drain(..))?;
-                // TODO: there are many ways to do this. This is probably not the best way. This allows wallet to query for validator fee pool values.
+                // There are many ways to do this. This might not be the best way.
+                // This allows wallet to query for validator fee pool values when preparing a claim fee transaction.
                 for substate_data in validator_fee_pools_buf.drain(..) {
                     tx.upsert_substate(&substate_data)?;
                 }
@@ -527,9 +533,6 @@ fn extend_bufs_from_substate_update(
             },
         },
         SubstateUpdateProof::Destroy(destroy) => match &destroy.substate_id {
-            SubstateId::TransactionReceipt(_) => {
-                warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received destroy for transaction receipt substate: {}", destroy.substate_id);
-            },
             SubstateId::Utxo(address) => {
                 utxos_buf.push(UtxoUpdateRecord::Spent(UtxoSpent {
                     address: address.clone(),
@@ -537,6 +540,10 @@ fn extend_bufs_from_substate_update(
                     version: update.version(),
                     state_version,
                 }));
+            },
+
+            other if other.is_read_only() => {
+                warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received destroy for read only substate: {}", destroy.substate_id);
             },
             _ => {},
         },

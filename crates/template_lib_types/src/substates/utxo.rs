@@ -5,6 +5,7 @@ use tari_bor::{BorTag, Deserialize, Serialize};
 use tari_template_abi::rust::{
     fmt,
     fmt::{Display, Formatter},
+    prelude::*,
     str::FromStr,
 };
 
@@ -132,7 +133,7 @@ pub struct UtxoAddressContents {
     pub id: UtxoId,
 }
 
-#[cfg(feature = "borsh")]
+#[cfg(all(feature = "borsh", feature = "std"))]
 mod borsh_impls {
     use super::*;
 

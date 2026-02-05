@@ -1,10 +1,11 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
-
 use tari_template_abi::rust::{
     fmt,
     fmt::Display,
+    format,
     ops::{Deref, DerefMut},
+    prelude::*,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

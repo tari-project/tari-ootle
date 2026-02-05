@@ -4,12 +4,18 @@
 use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
-use tari_template_lib::{
-    auth::Ownership,
-    types::{Amount, OwnerRule, ValidatorFeePoolAddress, constants::XTR, crypto::RistrettoPublicKeyBytes},
+use tari_template_lib::types::{
+    Amount,
+    OwnerRule,
+    ValidatorFeePoolAddress,
+    constants::XTR,
+    crypto::RistrettoPublicKeyBytes,
 };
 
-use crate::resource_container::{ResourceContainer, ResourceError};
+use crate::{
+    ownership::Ownership,
+    resource_container::{ResourceContainer, ResourceError},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]

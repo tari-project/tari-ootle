@@ -4,22 +4,20 @@
 use tari_engine_types::indexed_value::IndexedValue;
 use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::types::ComponentAddress;
-use tari_template_test_tooling::TemplateTest;
+use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 
 #[test]
-fn it_compiles_when_using_no_std() {
+fn it_can_call_a_method() {
     let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/no_std"]);
 
-    let access_rules_template = test.get_template_address("NoStdCounter");
+    let template = test.get_template_address("NoStdCounter");
 
     let result = test.execute_expect_success(
         Transaction::builder_localnet()
             .allocate_component_address("no_std_counter")
-            .call_function(access_rules_template, "with_address", args![Workspace(
-                "no_std_counter"
-            )])
+            .call_function(template, "with_address", args![Workspace("no_std_counter")])
             .call_method("no_std_counter", "increment", args![])
             .build_and_seal(test.secret_key()),
         // Because we deny_all on deposits, we need to supply the owner proof to be able to deposit the initial
@@ -38,4 +36,34 @@ fn it_compiles_when_using_no_std() {
         .unwrap();
 
     assert_eq!(value, 1);
+}
+
+#[test]
+fn it_can_call_a_function() {
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/no_std"]);
+
+    let template = test.get_template_address("NoStdCounter");
+
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_function(template, "simple", args![])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+}
+
+#[test]
+fn it_panics() {
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/no_std"]);
+
+    let template = test.get_template_address("NoStdCounter");
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .call_function(template, "panic_works", args![])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(reason, "Panic works in no_std!");
 }

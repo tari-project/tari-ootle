@@ -5,6 +5,7 @@ use tari_template_abi::rust::{
     fmt,
     fmt::{Display, Formatter},
     ops::{Deref, DerefMut},
+    prelude::*,
     str::FromStr,
 };
 
@@ -109,7 +110,7 @@ impl DerefMut for EntityId {
 }
 
 impl Display for EntityId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         self.write_hex_fmt(f)
     }
 }
@@ -251,7 +252,7 @@ impl DerefMut for ObjectKey {
 }
 
 impl Display for ObjectKey {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write_hex_fmt(f, &self.0)
     }
 }
@@ -264,7 +265,7 @@ pub struct KeyParseError;
 impl std::error::Error for KeyParseError {}
 
 impl Display for KeyParseError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "Failed to parse substate key")
     }
 }

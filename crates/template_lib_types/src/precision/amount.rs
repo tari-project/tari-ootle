@@ -2,9 +2,8 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use bnum::BUint;
-use newtype_ops::newtype_ops;
 use serde::ser::Error;
-use tari_template_abi::rust::{cmp, fmt, fmt::Debug, iter::Sum, ops, str::FromStr, write};
+use tari_template_abi::rust::{cmp, fmt, fmt::Debug, iter::Sum, ops, prelude::*, str::FromStr, write};
 
 use crate::{Amount, impl_from, partial_eq_impl, partial_ord_impl};
 
@@ -424,9 +423,6 @@ impl Default for PrecisionAmount {
     }
 }
 
-newtype_ops! { [PrecisionAmount] {add sub mul div rem neg} {:=} Self Self }
-newtype_ops! { [PrecisionAmount] {add sub mul div rem neg} {:=} &Self &Self }
-
 impl ops::Add<u64> for PrecisionAmount {
     type Output = Self;
 
@@ -561,9 +557,11 @@ impl Sum for PrecisionAmount {
 
 #[cfg(test)]
 mod tests {
+    use std::format;
+
     use serde_json::json;
 
-    use super::PrecisionAmount as Amount;
+    use super::{PrecisionAmount as Amount, *};
 
     #[test]
     fn basic_arithmetic() {

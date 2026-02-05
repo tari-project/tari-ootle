@@ -3,7 +3,7 @@
 //! Access control rules for template-related data like component methods and resources
 
 use serde::{Deserialize, Serialize};
-use tari_template_abi::rust::collections::BTreeMap;
+use tari_template_abi::rust::{collections::BTreeMap, prelude::*};
 
 use crate::{ComponentAddress, NonFungibleAddress, ResourceAddress, TemplateAddress};
 

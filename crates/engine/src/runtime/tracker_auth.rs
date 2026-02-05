@@ -1,19 +1,17 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_lib::{
-    auth::Ownership,
-    types::{
-        NonFungibleAddress,
-        OwnerRule,
-        access_rules::{
-            AccessRule,
-            RequireRule,
-            ResourceAccessRules,
-            ResourceAuthAction,
-            RestrictedAccessRule,
-            RuleRequirement,
-        },
+use tari_engine_types::ownership::Ownership;
+use tari_template_lib::types::{
+    NonFungibleAddress,
+    OwnerRule,
+    access_rules::{
+        AccessRule,
+        RequireRule,
+        ResourceAccessRules,
+        ResourceAuthAction,
+        RestrictedAccessRule,
+        RuleRequirement,
     },
 };
 

@@ -22,7 +22,13 @@
 
 use serde::{Deserialize, Serialize};
 use tari_bor::BorTag;
-use tari_template_abi::rust::{collections::BTreeMap, fmt::Display, str::FromStr};
+use tari_template_abi::rust::{
+    collections::{BTreeMap, btree_map},
+    fmt,
+    fmt::Display,
+    prelude::*,
+    str::FromStr,
+};
 
 use super::BinaryTag;
 
@@ -107,7 +113,7 @@ impl<K: Into<String>, V: Into<String>, const N: usize> From<[(K, V); N]> for Met
 }
 
 impl IntoIterator for Metadata {
-    type IntoIter = std::collections::btree_map::IntoIter<String, String>;
+    type IntoIter = btree_map::IntoIter<String, String>;
     type Item = (String, String);
 
     fn into_iter(self) -> Self::IntoIter {
@@ -130,7 +136,7 @@ impl Default for Metadata {
 }
 
 impl Display for Metadata {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, (key, value)) in self.0.iter().enumerate() {
             write!(f, "{} = {}", key, value)?;
             if i < self.0.len() - 1 {

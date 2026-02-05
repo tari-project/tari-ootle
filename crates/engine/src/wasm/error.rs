@@ -33,8 +33,6 @@ pub enum WasmExecutionError {
     MemoryPointerOutOfRange { size: u64, pointer: u64, len: u64 },
     #[error("Memory allocation too large")]
     MemoryAllocationTooLarge,
-    #[error("Memory export too large")]
-    MemoryExportTooLarge,
     #[error("Memory allocation failed")]
     MemoryAllocationFailed,
     #[error("BUG: memory not set in environment")]
@@ -47,8 +45,6 @@ pub enum WasmExecutionError {
     RuntimeError(#[from] RuntimeError),
     #[error("Failed to decode argument for engine call: {0:?}")]
     EngineArgDecodeFailed(BorError),
-    #[error("maximum module memory size exceeded")]
-    MaxMemorySizeExceeded,
     #[error("Failed to decode ABI: {0:?}")]
     AbiDecodeError(BorError),
     #[error("Unexpected ABI function {name}")]

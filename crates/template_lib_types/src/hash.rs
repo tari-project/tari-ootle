@@ -25,6 +25,7 @@ use tari_template_abi::rust::{
     fmt,
     fmt::{Display, Formatter},
     ops::{Deref, DerefMut},
+    prelude::*,
     str::FromStr,
 };
 
@@ -155,7 +156,7 @@ impl DerefMut for Hash {
 }
 
 impl Display for Hash {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write_hex_fmt(f, &self.0)
     }
 }
@@ -168,7 +169,7 @@ pub struct HashParseError;
 impl std::error::Error for HashParseError {}
 
 impl Display for HashParseError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "Failed to parse hash")
     }
 }

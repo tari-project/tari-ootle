@@ -19,10 +19,9 @@
 //  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 use serde::{Serialize, de::DeserializeOwned};
 use tari_bor::{from_value, to_value};
-use tari_template_abi::{EngineOp, call_engine};
+use tari_template_abi::{EngineOp, call_engine, rust::prelude::*};
 use tari_template_lib_types::{ComponentAddress, TemplateAddress, access_rules::ComponentAccessRules, bytes::Bytes};
 
 use crate::{

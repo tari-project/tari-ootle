@@ -66,13 +66,6 @@ pub fn call_engine<T: Serialize + fmt::Debug, U: DeserializeOwned>(op: EngineOp,
     })
 }
 
-/// Requests the engine to write debug data
-pub fn call_debug<T: AsRef<[u8]>>(data: T) {
-    let ptr = data.as_ref().as_ptr();
-    let len = data.as_ref().len();
-    unsafe { debug(ptr, len) }
-}
-
 /// Allocates a length-prefixed block of memory of length `len` + 4 bytes.
 #[unsafe(no_mangle)]
 pub extern "C" fn tari_alloc(len: u32) -> *mut u8 {

@@ -22,7 +22,7 @@
 
 //! A wrapper for engine calls related to events
 
-use tari_template_abi::{EngineOp, call_engine};
+use tari_template_abi::{EngineOp, call_engine, rust::prelude::*};
 use tari_template_lib_types::Metadata;
 
 use crate::args::EmitEventArg;

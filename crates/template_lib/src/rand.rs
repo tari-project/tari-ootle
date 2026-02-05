@@ -3,7 +3,7 @@
 
 //! Utilities to get random values inside templates
 
-use tari_template_abi::{EngineOp, call_engine};
+use tari_template_abi::{EngineOp, call_engine, rust::prelude::*};
 
 use crate::args::{GenerateRandomAction, GenerateRandomInvokeArg, InvokeResult};
 

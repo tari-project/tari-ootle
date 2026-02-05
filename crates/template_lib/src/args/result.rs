@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tari_bor::{BorError, from_value, to_value};
+use tari_template_abi::rust::prelude::*;
 
 /// The result of an instruction invocation, which is either the CBOR encoded result value or a `String` with an error
 /// message

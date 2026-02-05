@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::fmt;
+use tari_template_abi::rust::{fmt, prelude::*};
 
 use crate::KeyParseError;
 

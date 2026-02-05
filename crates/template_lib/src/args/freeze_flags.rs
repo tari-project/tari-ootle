@@ -2,7 +2,7 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use tari_bor::{Deserialize, Serialize};
-use tari_template_abi::rust::{fmt::Display, iter, ops};
+use tari_template_abi::rust::{fmt, fmt::Display, iter, ops};
 
 const ALL_FLAGS: u8 = VaultFreezeFlag::Deposits as u8 | VaultFreezeFlag::Withdrawals as u8;
 
@@ -57,7 +57,7 @@ impl VaultFreezeFlags {
 }
 
 impl Display for VaultFreezeFlags {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_empty() {
             return write!(f, "<none>");
         }
@@ -102,7 +102,7 @@ impl ops::BitOr for VaultFreezeFlag {
 }
 
 impl Display for VaultFreezeFlag {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Deposits => write!(f, "Deposits"),
             Self::Withdrawals => write!(f, "Withdrawals"),

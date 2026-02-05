@@ -58,3 +58,16 @@ macro_rules! partial_ord_impl {
         }
     };
 }
+
+#[macro_export]
+macro_rules! op_impl {
+    ($item: ident, $trt:ident, $method:ident) => {
+        impl tari_template_abi::rust::ops::$trt for $item {
+            type Output = $item;
+
+            fn $method(self, other: $item) -> $item {
+                $item::new(self.0.$method(other.0))
+            }
+        }
+    };
+}

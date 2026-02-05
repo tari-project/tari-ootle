@@ -48,6 +48,7 @@ pub fn generate_dispatcher(ast: &TemplateAst) -> Result<TokenStream> {
             #[cfg(not(target_arch = "wasm32"))]
             compile_error!("Must compile template with --target wasm32-unknown-unknown");
 
+            // Custom panic hook that invokes the on_panic host function
             register_panic_hook();
 
             if call_info.is_null() {

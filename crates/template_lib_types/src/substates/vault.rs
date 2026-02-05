@@ -24,6 +24,7 @@ use tari_bor::BorTag;
 use tari_template_abi::rust::{
     fmt,
     fmt::{Display, Formatter},
+    prelude::*,
     str::FromStr,
 };
 

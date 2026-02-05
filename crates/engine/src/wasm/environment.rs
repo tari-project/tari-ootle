@@ -222,13 +222,6 @@ impl<T> WasmEnv<T> {
         Ok(callback(slice))
     }
 
-    pub(super) fn memory_size<S: AsStoreRef>(&self, store: &mut S) -> Result<usize, WasmExecutionError> {
-        let memory = self.get_memory()?;
-        let view = memory.view(store);
-        let size = view.data_size();
-        usize::try_from(size).map_err(|_| WasmExecutionError::MaxMemorySizeExceeded)
-    }
-
     pub fn state(&self) -> &T {
         &self.state
     }

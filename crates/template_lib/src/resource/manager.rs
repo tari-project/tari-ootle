@@ -37,12 +37,16 @@
 //! let resource_manager = ResourceManager::get(my_resource_address);
 //! resource_manager.mint_fungible(1000);
 //! ```
-
-use std::collections::BTreeSet;
-
 use serde::{Deserialize, Serialize};
 use tari_bor::to_value;
-use tari_template_abi::{EngineOp, call_engine, rust::collections::BTreeMap};
+use tari_template_abi::{
+    EngineOp,
+    call_engine,
+    rust::{
+        collections::{BTreeMap, BTreeSet},
+        prelude::*,
+    },
+};
 use tari_template_lib_types::{
     AuthHook,
     Metadata,

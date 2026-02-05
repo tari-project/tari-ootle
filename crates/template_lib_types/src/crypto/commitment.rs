@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use tari_template_abi::rust::{
+    fmt,
     fmt::{Display, Formatter},
     ops::Deref,
 };
@@ -94,7 +95,7 @@ impl From<[u8; 32]> for PedersenCommitmentBytes {
 }
 
 impl Display for PedersenCommitmentBytes {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_hash())
     }
 }

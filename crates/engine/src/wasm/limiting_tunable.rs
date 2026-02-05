@@ -46,23 +46,25 @@ impl<T: Tunables> LimitingTunables<T> {
         adjusted
     }
 
-    /// Ensures the a given memory type does not exceed the memory limit.
+    /// Ensures a given memory type does not exceed the memory limit.
     /// Call this after adjusting the memory.
     fn validate_memory(&self, ty: &MemoryType) -> Result<(), MemoryError> {
         if ty.minimum > self.limit {
-            return Err(MemoryError::Generic(
-                "Minimum exceeds the allowed memory limit".to_string(),
-            ));
+            return Err(MemoryError::Generic(format!(
+                "Minimum {} exceeds the allowed memory limit {}",
+                ty.minimum.0, self.limit.0
+            )));
         }
 
         if let Some(max) = ty.maximum {
             if max > self.limit {
-                return Err(MemoryError::Generic(
-                    "Maximum exceeds the allowed memory limit".to_string(),
-                ));
+                return Err(MemoryError::Generic(format!(
+                    "Maximum {} exceeds the allowed memory limit {}",
+                    max.0, self.limit.0
+                )));
             }
         } else {
-            return Err(MemoryError::Generic("Maximum unset".to_string()));
+            return Err(MemoryError::Generic("Maximum not set".to_string()));
         }
 
         Ok(())

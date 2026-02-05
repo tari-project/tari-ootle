@@ -1,7 +1,11 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_abi::rust::ops::{Deref, DerefMut};
+use tari_template_abi::rust::{
+    format,
+    ops::{Deref, DerefMut},
+    prelude::*,
+};
 
 use crate::{
     hex::{bytes_from_hex, bytes_to_hex},
@@ -141,6 +145,8 @@ impl<'de, const N: usize> serde::Deserialize<'de> for MaxBytes<N> {
 
 #[cfg(test)]
 mod tests {
+    use std::vec;
+
     use super::*;
 
     mod new_checked {

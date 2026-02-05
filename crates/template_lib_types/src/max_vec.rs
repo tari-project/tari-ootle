@@ -1,7 +1,12 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_abi::rust::ops::{Deref, DerefMut};
+use tari_template_abi::rust::{
+    format,
+    ops::{Deref, DerefMut},
+    prelude::*,
+    vec,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
@@ -103,7 +108,7 @@ impl<'de, const N: usize, T: serde::Deserialize<'de>> serde::Deserialize<'de> fo
 }
 
 impl<const N: usize, T> IntoIterator for MaxVec<N, T> {
-    type IntoIter = std::vec::IntoIter<T>;
+    type IntoIter = vec::IntoIter<T>;
     type Item = T;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -120,6 +125,8 @@ impl<const N: usize, T> FromIterator<T> for MaxVec<N, T> {
 
 #[cfg(test)]
 mod tests {
+    use std::vec;
+
     use super::*;
 
     mod new_checked {

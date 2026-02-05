@@ -1,13 +1,8 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    fmt,
-    fmt::{Display, Formatter},
-    str::FromStr,
-};
-
 use tari_bor::{BorTag, Deserialize, Serialize, Tagged};
+use tari_template_abi::rust::{fmt, str::FromStr};
 
 use crate::{BinaryTag, KeyParseError, ObjectKey, address_prefixes};
 
@@ -47,8 +42,8 @@ impl<T: Into<crate::Hash>> From<T> for TransactionReceiptAddress {
     }
 }
 
-impl Display for TransactionReceiptAddress {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+impl fmt::Display for TransactionReceiptAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}_{}", address_prefixes::TRANSACTION_RECEIPT, self.as_object_key())
     }
 }

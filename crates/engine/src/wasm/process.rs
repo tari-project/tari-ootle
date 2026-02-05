@@ -78,7 +78,6 @@ impl WasmProcess {
         let imports = imports! {
             "env" => {
                 "tari_engine" => tari_engine,
-                "debug" => Function::new_typed_with_env(store, &fn_env, debug_handler),
                 "on_panic" => Function::new_typed_with_env(store,&fn_env, on_panic_handler),
             }
         };
@@ -380,20 +379,6 @@ impl Invokable<Store> for WasmProcess {
                 error!(target: LOG_TARGET, "Error calling function: {}", err);
                 Err(err.into())
             },
-        }
-    }
-}
-
-fn debug_handler<T: Send + 'static>(mut env: FunctionEnvMut<WasmEnv<T>>, arg_ptr: WasmPtr<u8>, arg_len: u32) {
-    const WASM_DEBUG_LOG_TARGET: &str = "tari::ootle::wasm";
-    let (state, mut store) = env.data_and_store_mut();
-
-    // SAFETY: WasmProcess is not used concurrently
-    unsafe {
-        if let Err(err) = state.with_memory_slice(&mut store, arg_ptr, arg_len, |msg| {
-            eprintln!("DEBUG: {}", String::from_utf8_lossy(msg));
-        }) {
-            log::error!(target: WASM_DEBUG_LOG_TARGET, "Failed to read from memory: {}", err);
         }
     }
 }

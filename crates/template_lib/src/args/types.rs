@@ -19,11 +19,12 @@
 //   SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 use serde::{Deserialize, Serialize};
 use tari_template_abi::rust::{
     collections::{BTreeMap, BTreeSet},
+    fmt,
     fmt::{Display, Formatter},
+    prelude::*,
     str::FromStr,
 };
 use tari_template_lib_types::{
@@ -75,7 +76,7 @@ pub enum LogLevel {
 }
 
 impl Display for LogLevel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             LogLevel::Error => write!(f, "ERROR"),
             LogLevel::Warn => write!(f, "WARN"),
@@ -104,11 +105,12 @@ impl FromStr for LogLevel {
 pub struct LogLevelParseError(String);
 
 impl Display for LogLevelParseError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "Failed to parse log level '{}'", self.0)
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for LogLevelParseError {}
 
 // -------------------------------- Component -------------------------------- //
@@ -148,7 +150,7 @@ impl ComponentRef {
 }
 
 impl Display for ComponentRef {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             ComponentRef::Component => write!(f, "Component"),
             ComponentRef::Ref(addr) => write!(f, "Ref({})", addr),
@@ -207,7 +209,7 @@ impl From<ResourceAddress> for ResourceRef {
 }
 
 impl Display for ResourceRef {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             ResourceRef::Resource => write!(f, "Resource"),
             ResourceRef::Ref(addr) => write!(f, "Ref({})", addr),
@@ -330,7 +332,7 @@ pub enum ResourceDiscriminator {
 }
 
 impl Display for ResourceDiscriminator {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             ResourceDiscriminator::Everything => write!(f, "Everything"),
             ResourceDiscriminator::Fungible { amount } => write!(f, "Fungible({})", amount),
@@ -460,7 +462,7 @@ impl BucketRef {
 }
 
 impl Display for BucketRef {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             BucketRef::Bucket(addr) => write!(f, "Bucket({})", addr),
             BucketRef::Ref(id) => write!(f, "Ref({})", id),
@@ -667,7 +669,7 @@ impl ProofRef {
 }
 
 impl Display for ProofRef {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             ProofRef::Proof(addr) => write!(f, "Proof({})", addr),
             ProofRef::Ref(id) => write!(f, "Ref({})", id),

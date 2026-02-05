@@ -251,8 +251,8 @@ ts-rs = { version = "11.0", features = [
 ] }
 url = "2.4.1"
 urlencoding = "2.1.3"
-wasmer = "6.1.0"
-wasmer-middlewares = "6.1.0"
+wasmer = "7.0.1"
+wasmer-middlewares = "7.0.1"
 zeroize = "1"
 webauthn-rs = { version = "0.5.1", features = ["default"] }
 webauthn-rs-proto = { version = "0.5.1", features = ["default"] }

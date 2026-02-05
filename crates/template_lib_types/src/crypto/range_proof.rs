@@ -2,7 +2,7 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Serialize};
-use tari_template_abi::rust::fmt;
+use tari_template_abi::rust::{fmt, prelude::*};
 
 use crate::serde_helpers;
 

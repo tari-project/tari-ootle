@@ -6,7 +6,7 @@ use tari_bor::BorTag;
 use tari_template_abi::{
     EngineOp,
     call_engine,
-    rust::{fmt, fmt::Display, str::FromStr, write},
+    rust::{fmt, fmt::Display, prelude::*, str::FromStr, write},
 };
 
 use super::{BinaryTag, ResourceAddress};
@@ -325,9 +325,10 @@ impl Display for ParseNonFungibleAddressError {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
+    use std::{format, str::FromStr};
 
     use super::*;
+    use crate::Hash;
 
     mod try_from_string {
         use super::*;
@@ -358,7 +359,6 @@ mod tests {
 
     mod canonical_string {
         use super::*;
-        use crate::Hash;
 
         #[test]
         fn it_generates_the_correct_length_for_ints() {

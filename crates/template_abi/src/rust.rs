@@ -25,11 +25,32 @@ mod no_std {
     extern crate alloc;
 
     pub use alloc::{boxed, format, str, string, vec};
-    pub use core::{any, borrow, cmp, fmt, iter, marker, mem, num, ops, ptr, slice, write, writeln};
+    pub use core::{
+        any,
+        borrow,
+        clone,
+        cmp,
+        convert,
+        default,
+        fmt,
+        iter,
+        marker,
+        mem,
+        num,
+        ops,
+        option,
+        panic,
+        ptr,
+        result,
+        slice,
+        sync,
+        write,
+        writeln,
+    };
 
     pub mod collections {
         extern crate alloc;
-        pub use alloc::collections::{BTreeMap, BTreeSet};
+        pub use alloc::collections::{BTreeMap, BTreeSet, btree_map, btree_set};
 
         #[cfg(feature = "alloc")]
         pub use hashbrown::{HashMap, HashSet};
@@ -45,7 +66,10 @@ mod rust_std {
         any,
         borrow,
         boxed,
+        clone,
         cmp,
+        convert,
+        default,
         fmt,
         format,
         iter,
@@ -53,19 +77,45 @@ mod rust_std {
         mem,
         num,
         ops,
+        option,
+        panic,
         ptr,
+        result,
         slice,
         str,
         string,
+        sync,
         vec,
         write,
         writeln,
     };
 
     pub mod collections {
-        pub use ::std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+        pub use ::std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, btree_map, btree_set};
     }
 }
 
 #[cfg(feature = "std")]
 pub use rust_std::*;
+
+/// An (incomplete) standard rust prelude module. Provides commonly used std library types e.g.
+/// String, Vec etc
+pub mod prelude {
+    // See https://doc.rust-lang.org/std/prelude/index.html
+
+    pub use super::{
+        boxed::Box,
+        clone::Clone,
+        cmp::{Eq, Ord, PartialEq, PartialOrd},
+        convert::{AsMut, AsRef, From, Into, TryFrom, TryInto},
+        default::Default,
+        iter::{DoubleEndedIterator, ExactSizeIterator, Extend, FromIterator, IntoIterator, Iterator},
+        marker::{Copy, Send, Sized, Sync, Unpin},
+        mem::drop,
+        ops::{Drop, Fn, FnMut, FnOnce},
+        option::Option::{self, None, Some},
+        result::Result::{self, Err, Ok},
+        string::{String, ToString},
+        vec::Vec,
+    };
+}

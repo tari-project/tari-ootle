@@ -50,11 +50,11 @@ pub static _ABI_TEMPLATE_DEF: [u8; 53] = [
 ];
 
 #[unsafe(no_mangle)]
-pub extern "C" fn Buggy_main(_call_info: *mut u8, _call_info_len: usize) -> *mut u8 {
+pub unsafe extern "C" fn Buggy_main(_call_info: *mut u8, _call_info_len: usize) -> *mut u8 {
     ptr::null_mut()
 }
 
-extern "C" {
+unsafe extern "C" {
     pub fn tari_engine(op: i32, input_ptr: *const u8, input_len: usize) -> *mut u8;
     pub fn debug(input_ptr: *const u8, input_len: usize);
     pub fn on_panic(msg_ptr: *const u8, msg_len: u32, line: u32, column: u32);

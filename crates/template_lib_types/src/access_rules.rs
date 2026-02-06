@@ -154,6 +154,11 @@ impl ComponentAccessRules {
         self
     }
 
+    /// Add a new access rule for a particular method in the component
+    pub fn method<S: Into<String>>(mut self, name: S, rule: AccessRule) -> Self {
+        self.add_method_rule(name, rule)
+    }
+
     /// Returns the number of custom access rules
     pub fn num_access_rules(&self) -> usize {
         self.method_access.len()

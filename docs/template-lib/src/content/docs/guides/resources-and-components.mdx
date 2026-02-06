@@ -1,0 +1,151 @@
+---
+title: Resources and Components
+description: Manage digital assets and create interactive entities on the Tari Ootle blockchain.
+---
+
+In the Tari Ootle ecosystem, **Resources** represent digital assets, while **Components** are the on-chain entities that manage these assets and implement business logic. Understanding how to create and interact with them is fundamental to building powerful Templates.
+
+### Resources
+
+Resources are digital assets on the Tari blockchain. They can be either **fungible** (interchangeable, like tokens) or **non-fungible** (unique, like NFTs). The `ResourceBuilder` is your primary tool for defining and minting new resources.
+
+#### Creating Fungible Resources
+
+Fungible resources are typically used for tokens, currencies, or any asset where individual units are identical and interchangeable.
+
+```rust
+use tari_template_lib::prelude::*;
+
+fn create_fungible_token() -> ResourceAddress {
+    // Create a new fungible resource with an initial supply of 1,000,000 units.
+    let token_address = ResourceBuilder::public_fungible().with_token_symbol("MFT")
+        .initial_supply(Amount(1_000_000))
+        .with_token_symbol("MFT") // Set the token symbol, typically 3-4 letters.
+        .metadata("name", "My Fungible Token")
+        .build();
+    token_address
+}
+```
+
+-   `ResourceBuilder::public_fungible().with_token_symbol("MFT")`: Starts building a new public fungible resource. The string is the name of the resource.
+-   `.initial_supply(Amount(1_000_000))`: Mints an initial supply of the token. The `Amount` type is crucial for handling large numbers and decimals correctly.
+-   `.metadata("key", "value")`: Allows you to attach arbitrary key-value metadata to your resource.
+
+#### Creating Non-Fungible Resources (NFTs)
+
+Non-fungible resources are unique assets, each with its own distinct identity and optional metadata.
+
+```rust
+use tari_template_lib::prelude::*;
+
+fn create_nft_resource() -> ResourceAddress {
+    // Create a new non-fungible resource
+    let nft_address = ResourceBuilder::non_fungible("MyNFTCollection")
+        .initial_supply_non_fungible(vec![
+            NonFungibleId::from_string("nft1"),
+            NonFungibleId::from_string("nft2"),
+        ])
+        .metadata("collection_name", "My Awesome NFTs")
+        .build();
+    nft_address
+}
+```
+
+-   `ResourceBuilder::non_fungible("MyNFTCollection")`: Initiates the creation of a non-fungible resource.
+-   `.initial_supply_non_fungible(vec![...])`: Mints initial NFTs by providing a list of `NonFungibleId`s. Each `NonFungibleId` represents a unique NFT within the collection.
+-   `NonFungibleId::from_string("nft1")`: Creates a non-fungible ID from a string. Other methods for generating IDs (e.g., from bytes) are also available.
+
+#### Stealth Resources
+
+Stealth resources represent the highest level of confidentiality within the Tari Ootle ecosystem. Unlike other resource types, funds associated with stealth resources are not kept in traditional vaults. Instead, each output is a confidential substate that lives directly on the ledger. This mechanism provides enhanced privacy for transactions and asset holdings.
+
+#### Resource Operations
+
+Once resources exist, templates can perform various operations:
+
+-   **Minting:** Creating new units of a resource (only if defined during resource creation).
+-   **Burning:** Destroying units of a resource.
+-   **Depositing/Withdrawing:** Moving resources into or out of vaults.
+-   **Transferring:** Sending resources between vaults or components.
+
+These operations are typically exposed through methods on `Vault` or direct interaction with resource functions.
+
+### Components
+
+Components are instances of a Template. They are the programmable, stateful entities that exist on the Tari Ootle blockchain and perform actions.
+
+#### Creating Components
+
+Components are instantiated from your Template using the `ComponentBuilder` within your template's constructor (or another public method).
+
+```rust
+use tari_template_lib::prelude::*;
+
+#[template]
+mod template {
+    pub struct MyComponent {  }
+
+    impl MyComponent {
+        // `new_basic` and `new_custom` constructors are functionally equivalent; the `-> Self` syntax is for convenience.
+        // By default, methods of components constructed without specifying access rules will only be accessible by
+        // the Owner (OwnerRule::OwnedBySigner), that is, the transaction signer who created the component.
+        // This can be customized by using the Component builder in `new_custom`.
+        pub fn new_basic() -> Self {
+            MyComponent { }
+        }
+
+        pub fn new_custom(/*  access_rules: ComponentAccessRules */) -> Component<Self> {
+            let component = MyComponent { }; // Create an instance of your component struct
+
+            Component::new(component)
+                // Changes various options of the component e.g
+                // .with_access_rules(access_rules)
+                .create()
+        }
+   }
+}
+```
+
+-   `Component::new(component)`: wraps your component struct in a `Component` builder, allowing you to set various options before creating it on the blockchain.
+-   `.with_access_rules(...)`: Defines the `AccessRules` for the component, controlling who can call its methods. More details in the [Authorization and Access guide](/guides/authorization-and-access/).
+-   `.create()`: Creates the component on the blockchain.
+
+#### Interacting with Components
+
+You interact with deployed components by calling their public methods. This is typically done via transactions sent to the Tari Ootle validator.
+
+```rust
+// Example of how you might conceptually call a component method from a transaction
+// (this is pseudo-code for off-chain interaction or from another template)
+// let component_address: ComponentAddress = ...;
+// let result = component_address.call_method("do_something", &[scd::to_arg(123)]);
+```
+
+Within a template, you can also interact with other components or even yourself by obtaining their `ComponentAddress` and using its methods.
+
+### Vaults
+
+Vaults are secure containers used to hold resources. Every component and user account can have one, many or no vaults.
+A vault belongs to a component and can only be modified within that component.
+
+```rust
+use tari_template_lib::prelude::*;
+
+// Inside a component method:
+pub fn deposit_funds(&mut self, bucket: Bucket) {
+    // Deposit resources from a Bucket (temporary container for resources in a transaction)
+    // into the component's default vault for that resource type.
+    self.vaults_mut().deposit(bucket);
+}
+
+pub fn withdraw_funds(&mut self, amount: Amount, resource_address: ResourceAddress) -> Bucket {
+    // Withdraw resources from a vault into a Bucket
+    self.vaults_mut().withdraw_non_fungible(&resource_address, NonFungibleId::from_string("nft1"))
+}
+```
+
+-   `Bucket`: A temporary container for resources that exist only during a transaction. Resources are often passed between components or into/out of vaults using `Bucket`s.
+-   `self.vaults_mut().deposit(bucket)`: Deposits resources from a `Bucket` into the component's internal vaults. The system automatically creates a vault for a resource type if one doesn't exist.
+-   `self.vaults_mut().withdraw_non_fungible(...)`: Withdraws specific non-fungible resources from a vault. Similar methods exist for fungible resources.
+
+Understanding resources, components, and vaults is key to managing state and assets effectively within the Tari Ootle ecosystem.

@@ -1,0 +1,103 @@
+---
+title: Types Reference
+description: Detailed documentation of core types in the Tari Ootle Template Library.
+---
+
+The `tari_template_lib_types` crate defines a rich set of types that are fundamental to building Tari Ootle Templates. These types are designed to be efficiently serialized and deserialized by the validator engine and provide a safe and structured way to interact with on-chain data.
+
+Many of these types are re-exported through `tari_template_lib::prelude::*`, making them easily accessible in your template code.
+
+### Core Types
+
+#### `Amount`
+
+Represents a quantity of a fungible resource. It is a `u64` wrapper with specialized serialization/deserialization for large numbers and decimal precision (when the `precision` feature is enabled).
+
+-   **Purpose:** Used for all fungible token balances, supplies, and transfer amounts.
+-   **Usage Example:**
+    ```rust
+    use tari_template_lib::prelude::*;
+    let amount = Amount(100_000);
+    let total_supply = Amount(1_000_000_000);
+    ```
+
+#### `ResourceAddress`
+
+A unique identifier for a specific resource type (e.g., a particular fungible token or NFT collection).
+
+-   **Purpose:** To reference a resource globally on the blockchain.
+-   **Usage Example:**
+    ```rust
+    use tari_template_lib::prelude::*;
+    let token_address: ResourceAddress = ResourceBuilder::public_fungible().with_token_symbol("MTK").build();
+    ```
+
+#### `ComponentAddress`
+
+A unique identifier for a deployed component instance.
+
+-   **Purpose:** To reference a component globally on the blockchain.
+-   **Usage Example:**
+    ```rust
+    use tari_template_lib::prelude::*;
+    // Assuming 'my_component' is an instance of your component struct
+    // let component_address: ComponentAddress = ComponentBuilder::new().create_component("MyComponent", my_component);
+    ```
+
+#### `VaultId`
+
+A unique identifier for a vault, which holds resources.
+
+-   **Purpose:** To identify a specific vault instance, usually associated with a component or user.
+
+#### `NonFungibleId`
+
+A unique identifier for a single non-fungible token within a collection.
+
+-   **Purpose:** To precisely identify an individual NFT.
+-   **Usage Example:**
+    ```rust
+    use tari_template_lib::prelude::*;
+    let nft_id = NonFungibleId::from_string("my_unique_nft_id");
+    ```
+
+#### `Hash`
+
+A generic cryptographic hash value. Used for various purposes, including identifying transaction outputs, blocks, or other data structures.
+
+-   **Purpose:** Data integrity and unique identification.
+
+#### `SubstateAddress`
+
+The address of an on-chain substate. Substates are the atomic units of data on the Tari Ootle blockchain (e.g., a component, a resource, a vault).
+
+-   **Purpose:** Directly referencing on-chain data.
+
+### Authorization and Access Control Types
+
+#### `AccessRule`
+
+Defines permission levels for component methods or resource operations.
+
+-   **Variants:** `AllowAll`, `DenyAll`, `Restricted(Vec<Identity>)`, `Owner`.
+-   **Purpose:** Granular control over who can interact with your smart contracts.
+-   **Usage Example:** See [Authorization and Access](/guides/authorization-and-access/) guide.
+
+#### `AccessRules`
+
+A collection of `AccessRule`s applied to a component or resource.
+
+-   **Purpose:** To define the complete access policy.
+
+#### `Identity`
+
+Represents an entity that can be granted or denied access. Can be a `ComponentAddress`, `ResourceAddress`, `TemplateAddress`, or other forms of identity.
+
+### Other Important Types
+
+-   **`Bucket`**: A temporary container for resources used during transactions. Resources are transferred between vaults via buckets.
+-   **`TemplateAddress`**: A unique identifier for a deployed Template.
+-   **`WasmComponent`**: Represents the WASM binary code of a component.
+-   **`Metadata`**: Key-value pairs for attaching arbitrary data to resources or components.
+
+This is not an exhaustive list but covers the most frequently used types. For a complete reference, consult the Rust documentation for the `tari_template_lib_types` crate.

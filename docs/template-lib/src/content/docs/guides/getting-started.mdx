@@ -1,0 +1,93 @@
+---
+title: Getting Started
+description: Set up your development environment and create your first Tari Ootle Template.
+---
+
+This guide will walk you through setting up your development environment and creating a basic "Hello World" template using the Tari Ootle Template Library.
+
+### Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+-   **Rust:** The Rust programming language and Cargo package manager. We recommend using `rustup` to manage your Rust toolchains. You'll need the `wasm32-unknown-unknown` target.
+    ```bash
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+    rustup target add wasm32-unknown-unknown
+    ```
+-   **Tari Ootle CLI (Optional but Recommended):** For local testing and deployment, the Tari Ootle Command Line Interface will be invaluable. Refer to the main Tari documentation for installation instructions.
+
+### 1. Create a New Template Project
+
+We'll start by creating a new Rust library project. This will be our template.
+
+```bash
+cargo new --lib my_first_template
+cd my_first_template
+```
+
+### 2. Configure `Cargo.toml`
+
+Open `Cargo.toml` and add `tari_template_lib` as a dependency. You'll want to enable the `derive` and `macro` features. Ensure you're using the correct version compatible with your Tari Ootle environment.
+
+```toml
+[package]
+name = "my_first_template"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Replace `0.15.0` with the appropriate version
+tari_template_lib = { version = "0.15.0", default-features = false, features = ["macro"] }
+```
+
+### 3. Write Your First Template
+
+Open `src/lib.rs` and add the following code. This simple template will define a component that has one public method, `hello_world`, which simply logs a message.
+
+```rust
+use tari_template_lib::prelude::*;
+
+// Define our template
+#[template]
+mod MyFirstTemplate {
+    pub struct MyFirstTemplate { }
+
+    impl MyFirstTemplate {
+        // Constructor function that creates a new component
+        pub fn new() -> Self {
+            Self {}
+        }
+
+        // A public method that logs a message
+        pub fn hello_world(&self) -> String {
+            info!("Hello from MyFirstTemplate!");
+            "Hello World from Tari Ootle Template!".to_string()
+        }
+    }
+}
+```
+
+#### Explanation:
+
+-   `use tari_template_lib::prelude::*;`: Imports commonly used items from the template library, making development more concise.
+-   `#[template]`: This attribute macro from `tari_template_macros` transforms your Rust module into a Tari Ootle Template. It handles the necessary ABI (Application Binary Interface) boilerplate for the validator engine.
+-   `mod MyFirstTemplate { ... }`: Defines your template module. The name of the module will be used by the validator node to identify your template.
+-   `pub struct MyFirstTemplate { }`: This is the component struct. It holds the component's state. In this simple example, there is no state.
+-   `impl MyFirstTemplate { ... }`: Implements methods for your component.
+-   `pub fn new() -> Self`: This is a constructor. It's conventionally used to create and initialize an instance of your component.
+-   `pub fn hello_world(&self) -> String`: A public method callable from outside the component. `info!` is a macro for logging.
+
+### 4. Compile Your Template
+
+Compile your template to WASM:
+
+```bash
+cargo build --target wasm32-unknown-unknown --release
+```
+
+This will produce a `my_first_template.wasm` file in `target/wasm32-unknown-unknown/release/`. This WASM file is your deployable template.
+
+### Next Steps
+
+-   Learn how to deploy and interact with your template using the Tari Ootle CLI.
+-   Explore more advanced features in the [Writing Templates guide](/guides/writing-templates/).

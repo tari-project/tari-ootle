@@ -11,7 +11,10 @@ use rocksdb::{
     TransactionDB,
 };
 
-use crate::traits::{RocksDatabase, RocksReader, RocksWriter};
+use crate::{
+    dbs::iterator::DbRawKeyValueIterator,
+    traits::{RocksDatabase, RocksReader, RocksWriter},
+};
 
 impl RocksDatabase for TransactionDB {
     fn cf_handle(&self, name: &str) -> Option<&rocksdb::ColumnFamily> {
@@ -38,18 +41,18 @@ impl RocksReader for Transaction<'_, TransactionDB> {
         self.iterator_cf(cf_handle, mode)
     }
 
-    fn iterator_cf_opt<'a: 'b, 'b>(
+    fn iterator_cf_opt<'a: 'b, 'b, M, R>(
         &'a self,
         cf_handle: &impl AsColumnFamilyRef,
         readopts: ReadOptions,
         mode: IteratorMode,
-    ) -> DBIteratorWithThreadMode<'b, Self::Db> {
-        // TODO: the crate's iterator copies the data into an allocated buffer. We should consider implementing a
-        // zero-copy iterator as long as we can be sure that the slice is not referenced after iter.next().
-        // Currently, we never do zero-copy decoding so unfortunately we pay the allocation costs for nothing.
-        //
-        // related: https://github.com/rust-rocksdb/rust-rocksdb/issues/919
-        self.iterator_cf_opt(cf_handle, readopts, mode)
+        mapper: M,
+    ) -> DbRawKeyValueIterator<'b, Self::Db, M>
+    where
+        for<'c> M: FnMut(Result<(&'c [u8], &'c [u8]), rocksdb::Error>) -> R,
+    {
+        let raw = self.raw_iterator_cf_opt(cf_handle, readopts);
+        DbRawKeyValueIterator::new(raw, mode, mapper)
     }
 
     fn multi_get_cf<'a, 'b: 'a, K, I, W>(&'a self, keys: I) -> Vec<Result<Option<Vec<u8>>, rocksdb::Error>>

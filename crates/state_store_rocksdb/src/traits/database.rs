@@ -11,6 +11,8 @@ use rocksdb::{
     ReadOptions,
 };
 
+use crate::dbs::iterator::DbRawKeyValueIterator;
+
 pub trait RocksDatabase {
     fn cf_handle(&self, name: &str) -> Option<&ColumnFamily>;
 }
@@ -28,12 +30,15 @@ pub trait RocksReader {
         mode: IteratorMode,
     ) -> DBIteratorWithThreadMode<'b, Self::Db>;
 
-    fn iterator_cf_opt<'a: 'b, 'b>(
+    fn iterator_cf_opt<'a: 'b, 'b, M, R>(
         &'a self,
         cf_handle: &impl AsColumnFamilyRef,
         readopts: ReadOptions,
         mode: IteratorMode,
-    ) -> DBIteratorWithThreadMode<'b, Self::Db>;
+        mapper: M,
+    ) -> DbRawKeyValueIterator<'b, Self::Db, M>
+    where
+        for<'c> M: FnMut(Result<(&'c [u8], &'c [u8]), Error>) -> R;
 
     fn multi_get_cf<'a, 'b: 'a, K, I, W>(&'a self, keys: I) -> Vec<Result<Option<Vec<u8>>, Error>>
     where

@@ -4,12 +4,12 @@
 use crate::codecs::{DbCodec, PrefixCodec, Prefixed};
 
 pub trait Cf {
-    type Key;
+    type Key: 'static;
 
     type Prefix: Prefixed;
 
     type KeyCodec: Default + DbCodec<Self::Key>;
-    type Value;
+    type Value: 'static;
     type ValueCodec: Default + DbCodec<Self::Value>;
 
     fn name() -> &'static str;
@@ -35,7 +35,8 @@ pub type PrefixedCodec<TCf> = PrefixCodec<<TCf as Cf>::Prefix, <TCf as Cf>::KeyC
 
 pub trait QueryCf {
     type Cf: Cf;
-    type Key;
+    // TODO: ideally we dont restrict to 'static here since that is antithetical to a query
+    type Key: 'static;
 
     type KeyCodec: Default + DbCodec<Self::Key>;
 

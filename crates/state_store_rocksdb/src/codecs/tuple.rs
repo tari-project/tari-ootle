@@ -3,13 +3,16 @@
 
 use std::io::{Read, Write};
 
-use crate::{codecs::DbCodec, error::RocksDbStorageError};
+use crate::{
+    codecs::{DbDecoder, DbEncoder},
+    error::RocksDbStorageError,
+};
 
-impl<A, B, C, CA, CB, CC> DbCodec<(A, B, C)> for (CA, CB, CC)
+impl<A, B, C, CA, CB, CC> DbEncoder<(A, B, C)> for (CA, CB, CC)
 where
-    CA: DbCodec<A>,
-    CB: DbCodec<B>,
-    CC: DbCodec<C>,
+    CA: DbEncoder<A>,
+    CB: DbEncoder<B>,
+    CC: DbEncoder<C>,
 {
     fn encode_len(&self, value: &(A, B, C)) -> Result<usize, RocksDbStorageError> {
         let (ca, cb, cc) = &self;
@@ -26,7 +29,14 @@ where
         cc.encode_into(c, writer)?;
         Ok(())
     }
+}
 
+impl<A, B, C, CA, CB, CC> DbDecoder<(A, B, C)> for (CA, CB, CC)
+where
+    CA: DbDecoder<A>,
+    CB: DbDecoder<B>,
+    CC: DbDecoder<C>,
+{
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<(A, B, C), RocksDbStorageError> {
         let (ca, cb, cc) = &self;
         let a = ca.decode_reader(reader)?;
@@ -36,10 +46,10 @@ where
     }
 }
 
-impl<A, B, CA, CB> DbCodec<(A, B)> for (CA, CB)
+impl<A, B, CA, CB> DbEncoder<(A, B)> for (CA, CB)
 where
-    CA: DbCodec<A>,
-    CB: DbCodec<B>,
+    CA: DbEncoder<A>,
+    CB: DbEncoder<B>,
 {
     fn encode_len(&self, value: &(A, B)) -> Result<usize, RocksDbStorageError> {
         let (ca, cb) = &self;
@@ -54,7 +64,13 @@ where
         cb.encode_into(b, writer)?;
         Ok(())
     }
+}
 
+impl<A, B, CA, CB> DbDecoder<(A, B)> for (CA, CB)
+where
+    CA: DbDecoder<A>,
+    CB: DbDecoder<B>,
+{
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<(A, B), RocksDbStorageError> {
         let (ca, cb) = &self;
         let a = ca.decode_reader(reader)?;

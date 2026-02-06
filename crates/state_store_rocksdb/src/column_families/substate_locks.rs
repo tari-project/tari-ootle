@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{fmt::Display, marker::PhantomData};
+use std::fmt::Display;
 
 use serde::Serialize;
 use tari_consensus_types::BlockId;
@@ -127,11 +127,11 @@ impl QueryCf for ByBlockIdQuery {
 }
 
 #[derive(Default)]
-pub struct ByBlockIdSubstateIdQuery<'a>(PhantomData<&'a ()>);
+pub struct ByBlockIdSubstateIdQuery;
 
-impl<'a> QueryCf for ByBlockIdSubstateIdQuery<'a> {
+impl QueryCf for ByBlockIdSubstateIdQuery {
     type Cf = BlockIdIndex;
-    type Key = (BlockId, &'a SubstateId);
+    type Key = (BlockId, SubstateId);
     type KeyCodec = (BlockIdCodec, SubstateIdCodec);
 }
 

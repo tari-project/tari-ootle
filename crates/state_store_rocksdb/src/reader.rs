@@ -97,6 +97,7 @@ use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     cf_api::DbContext,
+    codecs::DbEncoder,
     column_families::{
         block,
         block::BlockCf,
@@ -136,7 +137,7 @@ use crate::{
         state_transition,
         state_transition::StateTransitionType,
         state_tree,
-        state_tree::StateTreeCfRef,
+        state_tree::StateTreeCf,
         state_tree_shard_versions,
         state_tree_shard_versions::StateTreeShardVersionCf,
         substate,
@@ -152,6 +153,7 @@ use crate::{
     error::RocksDbStorageError,
     read_only::ReadOnly,
     state_tree_iterator::LatestSubstateStateTreeIterator,
+    traits::Cf,
 };
 
 const LOG_TARGET: &str = "tari::ootle::storage::state_store_rocksdb::reader";
@@ -1536,11 +1538,12 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             return Ok(lock);
         }
 
-        let query = self.db().cf(substate_locks::ByBlockIdSubstateIdQuery::default())?;
+        let query = self.db().cf(substate_locks::ByBlockIdSubstateIdQuery)?;
 
         // TODO: this is on the critical path, improve performance
         for block_id in &pending_chain {
-            let mut iter = query.query_prefix_range_key_iterator(Ordering::default(), &(*block_id, substate_id));
+            let mut iter =
+                query.query_prefix_range_key_iterator(Ordering::default(), &(*block_id, substate_id.clone()));
             if let Some(result) = iter.next() {
                 let key = result?;
                 let lock = cf.get(&key, OPERATION)?;
@@ -1713,8 +1716,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn state_tree_nodes_get(&self, shard: Shard, key: &NodeKey) -> Result<Node<StateTreePayload>, StorageError> {
         const OPERATION: &str = "state_tree_nodes_get";
-        let cf = self.db().cf(StateTreeCfRef::default())?;
-        let node = cf.get(&(shard, key), OPERATION)?;
+        let cf = self.db().cf(StateTreeCf)?;
+        // We do this to avoid a clone
+        let codec = StateTreeCf::key_codec();
+        let key = codec.encode(&(shard, key))?;
+        let node = cf.get_raw_key(&key, OPERATION)?;
         Ok(node)
     }
 

@@ -3,7 +3,10 @@
 
 use std::io;
 
-use crate::{codecs::DbCodec, error::RocksDbStorageError};
+use crate::{
+    codecs::{DbDecoder, DbEncoder},
+    error::RocksDbStorageError,
+};
 
 #[derive(Debug, Clone, Copy, strum_macros::FromRepr)]
 #[repr(u8)]
@@ -75,7 +78,7 @@ pub struct PrefixCodec<P, C> {
     inner: C,
 }
 
-impl<C: DbCodec<T>, P: Prefixed, T> DbCodec<T> for PrefixCodec<P, C> {
+impl<C: DbEncoder<T>, P: Prefixed, T> DbEncoder<T> for PrefixCodec<P, C> {
     fn encode_len(&self, value: &T) -> Result<usize, RocksDbStorageError> {
         self.inner
             .encode_len(value)
@@ -90,7 +93,9 @@ impl<C: DbCodec<T>, P: Prefixed, T> DbCodec<T> for PrefixCodec<P, C> {
         }
         self.inner.encode_into(value, writer)
     }
+}
 
+impl<C: DbDecoder<T>, P: Prefixed, T> DbDecoder<T> for PrefixCodec<P, C> {
     fn decode_reader<R: std::io::Read>(&self, reader: &mut R) -> Result<T, RocksDbStorageError> {
         if let Some(p) = P::prefix() {
             let mut prefix = [0u8; 1];

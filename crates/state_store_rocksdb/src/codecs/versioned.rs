@@ -4,7 +4,7 @@
 use std::io::{Read, Write};
 
 use crate::{
-    codecs::{DbCodec, EncodeVec},
+    codecs::{DbDecoder, DbEncoder, EncodeVec},
     error::RocksDbStorageError,
     traits::Versioned,
 };
@@ -14,7 +14,7 @@ pub struct VersionedCodec<C, T> {
     _versioned: std::marker::PhantomData<T>,
 }
 
-impl<C: DbCodec<T>, T: Versioned<Latest = V>, V: Into<T> + Clone> DbCodec<V> for VersionedCodec<C, T> {
+impl<C: DbEncoder<T>, T: Versioned<Latest = V>, V: Into<T> + Clone> DbEncoder<V> for VersionedCodec<C, T> {
     fn encode_len(&self, value: &V) -> Result<usize, RocksDbStorageError> {
         self.codec.encode_len(&value.clone().into())
     }
@@ -27,7 +27,9 @@ impl<C: DbCodec<T>, T: Versioned<Latest = V>, V: Into<T> + Clone> DbCodec<V> for
         let value = value.clone().into();
         self.codec.encode(&value)
     }
+}
 
+impl<C: DbDecoder<T>, T: Versioned<Latest = V>, V: Into<T> + Clone> DbDecoder<V> for VersionedCodec<C, T> {
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<V, RocksDbStorageError> {
         let versioned = self.codec.decode_reader(reader)?;
         Ok(versioned.full_upgrade().into_latest())

@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
-    codecs::{DbCodec, EncodeVec, FixedBytesCodec},
+    codecs::{DbDecoder, DbEncoder, EncodeVec, FixedBytesCodec},
     error::RocksDbStorageError,
 };
 
@@ -15,7 +15,7 @@ pub struct PublicKeyCodec {
     inner: FixedBytesCodec<{ RistrettoPublicKeyBytes::length() }>,
 }
 
-impl DbCodec<RistrettoPublicKeyBytes> for PublicKeyCodec {
+impl DbEncoder<RistrettoPublicKeyBytes> for PublicKeyCodec {
     fn encode_len(&self, value: &RistrettoPublicKeyBytes) -> Result<usize, RocksDbStorageError> {
         self.inner.encode_len(value)
     }
@@ -31,7 +31,9 @@ impl DbCodec<RistrettoPublicKeyBytes> for PublicKeyCodec {
     fn encode(&self, value: &RistrettoPublicKeyBytes) -> Result<EncodeVec, RocksDbStorageError> {
         self.inner.encode(value)
     }
+}
 
+impl DbDecoder<RistrettoPublicKeyBytes> for PublicKeyCodec {
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<RistrettoPublicKeyBytes, RocksDbStorageError> {
         self.inner.decode_reader(reader)
     }

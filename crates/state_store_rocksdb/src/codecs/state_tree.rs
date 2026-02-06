@@ -7,7 +7,7 @@ use anyhow::anyhow;
 use tari_state_tree::{NibblePath, NodeKey, Version};
 
 use crate::{
-    codecs::DbCodec,
+    codecs::{DbDecoder, DbEncoder},
     error::RocksDbStorageError,
     utils::{read_n_bytes, read_to_fixed},
 };
@@ -50,7 +50,7 @@ impl NodeKeyCodec {
     }
 }
 
-impl DbCodec<NodeKey> for NodeKeyCodec {
+impl DbEncoder<NodeKey> for NodeKeyCodec {
     fn encode_len(&self, value: &NodeKey) -> Result<usize, RocksDbStorageError> {
         self.get_node_key_encoded_len(value)
     }
@@ -58,7 +58,9 @@ impl DbCodec<NodeKey> for NodeKeyCodec {
     fn encode_into<W: io::Write>(&self, value: &NodeKey, writer: &mut W) -> Result<(), RocksDbStorageError> {
         self.encode_node_key_into(value, writer)
     }
+}
 
+impl DbDecoder<NodeKey> for NodeKeyCodec {
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<NodeKey, RocksDbStorageError> {
         let buf = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
             source: anyhow!("Invalid version bytes"),
@@ -91,17 +93,13 @@ impl DbCodec<NodeKey> for NodeKeyCodec {
     }
 }
 
-impl<'a> DbCodec<&'a NodeKey> for NodeKeyCodec {
+impl<'a> DbEncoder<&'a NodeKey> for NodeKeyCodec {
     fn encode_len(&self, value: &&'a NodeKey) -> Result<usize, RocksDbStorageError> {
         self.get_node_key_encoded_len(value)
     }
 
     fn encode_into<W: io::Write>(&self, value: &&'a NodeKey, writer: &mut W) -> Result<(), RocksDbStorageError> {
         self.encode_node_key_into(value, writer)
-    }
-
-    fn decode_reader<R: Read>(&self, _reader: &mut R) -> Result<&'a NodeKey, RocksDbStorageError> {
-        unreachable!("decode should not be called on NodeKeyCodec with a reference")
     }
 }
 

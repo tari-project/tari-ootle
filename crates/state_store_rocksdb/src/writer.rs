@@ -93,12 +93,12 @@ use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     cf_api::{CfContext, DbContext},
-    codecs::ByteColumn,
+    codecs::{ByteColumn, DbEncoder, DefaultCodec},
     column_families::{
         block,
         block::BlockCf,
         block_diff,
-        block_diff::{BlockDiffCf, BlockDiffKey, BlockDiffModelRef, BlockDiffRef},
+        block_diff::{BlockDiffCf, BlockDiffKey},
         block_transaction_execution,
         block_transaction_execution::BlockTransactionExecutionCf,
         bookkeeping::{
@@ -133,7 +133,7 @@ use crate::{
         lock_conflict::LockConflictCf,
         missing_transactions,
         missing_transactions::MissingTransactionCf,
-        parked_block::{ParkedBlockCf, ParkedBlockDataRef, ParkedBlockModelRef},
+        parked_block::{ParkedBlockCf, ParkedBlockDataRef},
         pending_state_tree_diff,
         pending_state_tree_diff::PendingStateTreeDiffCf,
         state_transition::{
@@ -209,18 +209,21 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
             });
         }
 
-        let cf = self.db().cf(ParkedBlockModelRef::default())?;
+        let cf = self.db().cf(ParkedBlockCf)?;
         // Idempotent
         if cf.exists(block.id(), OPERATION)? {
             return Ok(());
         }
 
+        let codec = DefaultCodec::<ParkedBlockDataRef<'_>>::default();
+        // We need to clone these because the current design does not allow "encode only" CFs/Codecs
+        // which would not have the 'static lifetime requirement on the value
         let parked_block_data = ParkedBlockDataRef {
             block,
             foreign_proposals,
         };
-
-        cf.put(block.id(), &parked_block_data, OPERATION)?;
+        let data = codec.encode(&parked_block_data)?;
+        cf.put_raw_value(block.id(), &data, OPERATION)?;
 
         Ok(())
     }
@@ -376,7 +379,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn block_diffs_insert(&mut self, block_id: &BlockId, changes: &[SubstateChange]) -> Result<(), StorageError> {
         const OPERATION: &str = "block_diffs_insert";
-        let cf = self.db().cf(BlockDiffModelRef::default())?;
+        let cf = self.db().cf(BlockDiffCf)?;
         let index_cf = self.db().cf(block_diff::SubstateIdIndex)?;
 
         assert!(
@@ -392,7 +395,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 version: change.versioned_substate_id().version(),
                 is_up: change.is_up(),
             };
-            cf.put(&key, &BlockDiffRef { change }, OPERATION)?;
+            cf.put(&key, change, OPERATION)?;
             // Note: the key is encoded with substate id first
             index_cf.put(&key, &(), OPERATION)?;
         }

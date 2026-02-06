@@ -8,7 +8,7 @@ use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::VersionedSubstateIdRef;
 
 use crate::{
-    codecs::{DbCodec, EncodeVec},
+    codecs::{DbDecoder, DbEncoder, EncodeVec},
     error::RocksDbStorageError,
 };
 
@@ -27,7 +27,7 @@ impl SubstateIdCodec {
     }
 }
 
-impl DbCodec<SubstateId> for SubstateIdCodec {
+impl DbEncoder<SubstateId> for SubstateIdCodec {
     fn encode_len(&self, value: &SubstateId) -> Result<usize, RocksDbStorageError> {
         self.get_substate_id_encoded_len(value)
     }
@@ -35,7 +35,9 @@ impl DbCodec<SubstateId> for SubstateIdCodec {
     fn encode_into<W: Write>(&self, value: &SubstateId, writer: &mut W) -> Result<(), RocksDbStorageError> {
         self.encode_substate_id_into(value, writer)
     }
+}
 
+impl DbDecoder<SubstateId> for SubstateIdCodec {
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<SubstateId, RocksDbStorageError> {
         // We use the deserialize_reader here so that no error is returned if there are extra bytes in the buffer
         // in order to use SubstateId as a prefix
@@ -43,7 +45,7 @@ impl DbCodec<SubstateId> for SubstateIdCodec {
     }
 }
 
-impl<'a> DbCodec<&'a SubstateId> for SubstateIdCodec {
+impl<'a> DbEncoder<&'a SubstateId> for SubstateIdCodec {
     fn encode_len(&self, value: &&'a SubstateId) -> Result<usize, RocksDbStorageError> {
         self.get_substate_id_encoded_len(value)
     }
@@ -55,13 +57,9 @@ impl<'a> DbCodec<&'a SubstateId> for SubstateIdCodec {
     fn encode(&self, value: &&'a SubstateId) -> Result<EncodeVec, RocksDbStorageError> {
         SubstateIdCodec.encode(*value)
     }
-
-    fn decode_reader<R: Read>(&self, _reader: &mut R) -> Result<&'a SubstateId, RocksDbStorageError> {
-        unimplemented!("Decoding a reference to a SubstateId is not supported. Use decode_reader for owned values.");
-    }
 }
 
-impl<'a> DbCodec<VersionedSubstateIdRef<'a>> for SubstateIdCodec {
+impl<'a> DbEncoder<VersionedSubstateIdRef<'a>> for SubstateIdCodec {
     fn encode_len(&self, value: &VersionedSubstateIdRef<'a>) -> Result<usize, RocksDbStorageError> {
         self.get_substate_id_encoded_len(value.substate_id())
             .map(|len| len + size_of::<u32>())
@@ -79,10 +77,6 @@ impl<'a> DbCodec<VersionedSubstateIdRef<'a>> for SubstateIdCodec {
                 source: anyhow::anyhow!("VersionedSubstateIdRefCodec: Failed to write version: {}", e),
             })?;
         Ok(())
-    }
-
-    fn decode_reader<R: Read>(&self, _reader: &mut R) -> Result<VersionedSubstateIdRef<'a>, RocksDbStorageError> {
-        unreachable!("Decoding a VersionedSubstateIdRef is not supported. Use decode_reader for owned values.");
     }
 }
 

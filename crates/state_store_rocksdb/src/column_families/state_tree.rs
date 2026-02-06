@@ -45,30 +45,6 @@ impl Cf for StateTreeCf {
     }
 }
 
-pub struct StateTreeCfRef<'a> {
-    _phantom: std::marker::PhantomData<&'a ()>,
-}
-
-impl<'a> Cf for StateTreeCfRef<'a> {
-    type Key = (Shard, &'a NodeKey);
-    type KeyCodec = (ShardCodec, NodeKeyCodec);
-    type Prefix = StateTreePrefix;
-    type Value = Node<StateTreePayload>;
-    type ValueCodec = DefaultCodec<Self::Value>;
-
-    fn name() -> &'static str {
-        StateTreeCf::name()
-    }
-}
-
-impl Default for StateTreeCfRef<'_> {
-    fn default() -> Self {
-        Self {
-            _phantom: std::marker::PhantomData,
-        }
-    }
-}
-
 pub struct ByShardStateVersionQuery;
 
 impl QueryCf for ByShardStateVersionQuery {

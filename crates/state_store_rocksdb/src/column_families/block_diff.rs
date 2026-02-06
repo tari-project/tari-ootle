@@ -12,7 +12,6 @@ use crate::{
         BlockIdCodec,
         BlockIdSeqSubstateIdVersion,
         DefaultCodec,
-        DefaultCodecRef,
         KeyPrefix,
         SubstateIdBlockIdVersionSeq,
         SubstateIdCodec,
@@ -61,30 +60,6 @@ impl Cf for BlockDiffCf {
 
     fn name() -> &'static str {
         BlockCf::name()
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(transparent)]
-pub struct BlockDiffRef<'a> {
-    pub change: &'a SubstateChange,
-}
-
-/// Allows insertions into the block diffs CF without cloning the substate changes.
-#[derive(Default)]
-pub struct BlockDiffModelRef<'a> {
-    _phantom: std::marker::PhantomData<&'a ()>,
-}
-
-impl<'a> Cf for BlockDiffModelRef<'a> {
-    type Key = <BlockDiffCf as Cf>::Key;
-    type KeyCodec = <BlockDiffCf as Cf>::KeyCodec;
-    type Prefix = <BlockDiffCf as Cf>::Prefix;
-    type Value = BlockDiffRef<'a>;
-    type ValueCodec = DefaultCodecRef<Self::Value>;
-
-    fn name() -> &'static str {
-        BlockDiffCf::name()
     }
 }
 

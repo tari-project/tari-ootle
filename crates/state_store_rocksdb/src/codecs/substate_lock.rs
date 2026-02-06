@@ -11,7 +11,7 @@ use tari_ootle_common_types::NodeHeight;
 use tari_ootle_transaction::TransactionId;
 
 use crate::{
-    codecs::{DbCodec, SubstateIdCodec},
+    codecs::{DbDecoder, DbEncoder, SubstateIdCodec},
     column_families::substate_locks::SubstateLockKey,
     error::RocksDbStorageError,
     utils::read_to_fixed,
@@ -61,7 +61,7 @@ impl<T> SubstateLockKeyCodec<T> {
     }
 }
 
-impl DbCodec<SubstateLockKey> for SubstateLockKeyCodec<(TransactionId, SubstateId, BlockId, NodeHeight)> {
+impl DbEncoder<SubstateLockKey> for SubstateLockKeyCodec<(TransactionId, SubstateId, BlockId, NodeHeight)> {
     fn encode_len(&self, value: &SubstateLockKey) -> Result<usize, RocksDbStorageError> {
         self.get_encoded_len(value)
     }
@@ -85,7 +85,9 @@ impl DbCodec<SubstateLockKey> for SubstateLockKeyCodec<(TransactionId, SubstateI
             })?;
         Ok(())
     }
+}
 
+impl DbDecoder<SubstateLockKey> for SubstateLockKeyCodec<(TransactionId, SubstateId, BlockId, NodeHeight)> {
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<SubstateLockKey, RocksDbStorageError> {
         let transaction_id = self.decode_transaction_id(reader)?;
         let substate_id = self.decode_substate_id(reader)?;
@@ -100,7 +102,7 @@ impl DbCodec<SubstateLockKey> for SubstateLockKeyCodec<(TransactionId, SubstateI
     }
 }
 
-impl DbCodec<SubstateLockKey> for SubstateLockKeyCodec<(BlockId, SubstateId, TransactionId, NodeHeight)> {
+impl DbEncoder<SubstateLockKey> for SubstateLockKeyCodec<(BlockId, SubstateId, TransactionId, NodeHeight)> {
     fn encode_len(&self, value: &SubstateLockKey) -> Result<usize, RocksDbStorageError> {
         self.get_encoded_len(value)
     }
@@ -124,7 +126,9 @@ impl DbCodec<SubstateLockKey> for SubstateLockKeyCodec<(BlockId, SubstateId, Tra
             })?;
         Ok(())
     }
+}
 
+impl DbDecoder<SubstateLockKey> for SubstateLockKeyCodec<(BlockId, SubstateId, TransactionId, NodeHeight)> {
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<SubstateLockKey, RocksDbStorageError> {
         let block_id = self.decode_block_id(reader)?;
         let substate_id = self.decode_substate_id(reader)?;
@@ -140,7 +144,7 @@ impl DbCodec<SubstateLockKey> for SubstateLockKeyCodec<(BlockId, SubstateId, Tra
     }
 }
 
-impl DbCodec<SubstateLockKey> for SubstateLockKeyCodec<(SubstateId, TransactionId, BlockId, NodeHeight)> {
+impl DbEncoder<SubstateLockKey> for SubstateLockKeyCodec<(SubstateId, TransactionId, BlockId, NodeHeight)> {
     fn encode_len(&self, value: &SubstateLockKey) -> Result<usize, RocksDbStorageError> {
         self.get_encoded_len(value)
     }
@@ -168,7 +172,9 @@ impl DbCodec<SubstateLockKey> for SubstateLockKeyCodec<(SubstateId, TransactionI
             })?;
         Ok(())
     }
+}
 
+impl DbDecoder<SubstateLockKey> for SubstateLockKeyCodec<(SubstateId, TransactionId, BlockId, NodeHeight)> {
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<SubstateLockKey, RocksDbStorageError> {
         let substate_id = self.decode_substate_id(reader)?;
         let transaction_id = self.decode_transaction_id(reader)?;

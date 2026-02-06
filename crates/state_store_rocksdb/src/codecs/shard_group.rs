@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use tari_ootle_common_types::ShardGroup;
 
 use crate::{
-    codecs::{DbCodec, EncodeVec, ShardCodec},
+    codecs::{DbDecoder, DbEncoder, EncodeVec, ShardCodec},
     error::RocksDbStorageError,
 };
 
@@ -15,7 +15,7 @@ pub struct ShardGroupCodec {
     inner: ShardCodec,
 }
 
-impl DbCodec<ShardGroup> for ShardGroupCodec {
+impl DbEncoder<ShardGroup> for ShardGroupCodec {
     fn encode_len(&self, value: &ShardGroup) -> Result<usize, RocksDbStorageError> {
         let start_len = self.inner.encode_len(&value.start())?;
         let end_len = self.inner.encode_len(&value.end())?;
@@ -33,7 +33,9 @@ impl DbCodec<ShardGroup> for ShardGroupCodec {
         let end = self.inner.encode(&value.end())?;
         Ok(EncodeVec::from_slices(&[start.as_slice(), end.as_slice()]))
     }
+}
 
+impl DbDecoder<ShardGroup> for ShardGroupCodec {
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<ShardGroup, RocksDbStorageError> {
         let start = self.inner.decode_reader(reader)?;
         let end = self.inner.decode_reader(reader)?;

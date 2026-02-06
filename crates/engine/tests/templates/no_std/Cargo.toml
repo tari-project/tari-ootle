@@ -7,7 +7,16 @@ edition = "2024"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tari_template_lib = { path = "../../../../template_lib", default-features = false, features = ["macro"] }
+tari_template_lib = { path = "../../../../template_lib", default-features = false, features = ["macro", "alloc"] }
+
+# WARN: dont use weealloc in production. https://github.com/rustwasm/wee_alloc/issues/106
+# Unfortunately, talc does not seem to work in non-trivial cases # TODO: investigate this further
+#wee_alloc = "0.4.5"
+
+#lol_alloc = "0.4.1"
+
+# Allocator for no_std environment
+talc = { version = "4.4.3", default-features = false, features = ["lock_api"] }
 
 [lib]
 crate-type = ["cdylib", "lib"]

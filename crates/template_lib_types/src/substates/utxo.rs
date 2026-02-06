@@ -5,6 +5,7 @@ use tari_bor::{BorTag, Deserialize, Serialize};
 use tari_template_abi::rust::{
     fmt,
     fmt::{Display, Formatter},
+    prelude::*,
     str::FromStr,
 };
 
@@ -134,16 +135,18 @@ pub struct UtxoAddressContents {
 
 #[cfg(feature = "borsh")]
 mod borsh_impls {
+    use borsh::io;
+
     use super::*;
 
     impl borsh::BorshSerialize for UtxoId {
-        fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        fn serialize<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
             writer.write_all(&self.0)
         }
     }
 
     impl borsh::BorshDeserialize for UtxoId {
-        fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        fn deserialize_reader<R: io::Read>(reader: &mut R) -> io::Result<Self> {
             let mut buf = [0u8; UtxoId::LENGTH];
             reader.read_exact(&mut buf)?;
             Ok(Self(buf))
@@ -151,13 +154,13 @@ mod borsh_impls {
     }
 
     impl borsh::BorshSerialize for UtxoAddress {
-        fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        fn serialize<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
             ::borsh::BorshSerialize::serialize(self.0.inner(), writer)
         }
     }
 
     impl borsh::BorshDeserialize for UtxoAddress {
-        fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        fn deserialize_reader<R: io::Read>(reader: &mut R) -> io::Result<Self> {
             Ok(Self(BorTag::new(borsh::BorshDeserialize::deserialize_reader(reader)?)))
         }
     }

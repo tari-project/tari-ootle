@@ -163,11 +163,13 @@ fn test_composed() {
 #[test]
 fn test_buggy_template() {
     // Uncomment the following lines to print the ABI bytes
-    // let bytes = tari_bor::encode_with_len(&tari_template_abi::TemplateDef::V1(tari_template_abi::TemplateDefV1 {
+    // let bytes = tari_template_abi::TemplateDef::V1(tari_template_abi::TemplateDefV1 {
     //     template_name: "Buggy".to_string(),
     //     abi_version: tari_template_abi::version::MINIMUM_SUPPORTED_WASM_ABI_VERSION,
     //     functions: vec![],
-    // }));
+    // })
+    // .encode_for_wasm_embedding()
+    // .unwrap();
     // println!("pub static _ABI_TEMPLATE_DEF: [u8; {}] = [", bytes.len());
     // for chunk in bytes.chunks(16) {
     //     print!("    ");
@@ -186,7 +188,7 @@ fn test_buggy_template() {
         // The ptr location is non-zero, and the pointer reads a large length that is out of range
         TemplateLoaderError::WasmModuleError(WasmExecutionError::MemoryPointerOutOfRange { .. }) => {},
         // The ptr location is zero, so the decode fails
-        TemplateLoaderError::WasmModuleError(WasmExecutionError::AbiDecodeError { .. }) => {},
+        TemplateLoaderError::WasmModuleError(WasmExecutionError::AbiTemplateDefDecodeError { .. }) => {},
         _ => panic!("Unexpected error: {:?}", err),
     }
 
@@ -205,7 +207,7 @@ fn test_buggy_template() {
         .unwrap_err();
     assert!(matches!(
         err,
-        TemplateLoaderError::WasmModuleError(WasmExecutionError::AbiDecodeError(_))
+        TemplateLoaderError::WasmModuleError(WasmExecutionError::AbiTemplateDefDecodeError(_))
     ));
 
     let err = compile_template("tests/templates/buggy", &["no_template_def"])

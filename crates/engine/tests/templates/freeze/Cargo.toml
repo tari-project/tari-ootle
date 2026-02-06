@@ -6,7 +6,7 @@ edition = "2024"
 
 
 [dependencies]
-tari_template_lib = { path = "../../../../template_lib", default-features = false, features = ["macro"] }
+tari_template_lib = { path = "../../../../template_lib" }
 
 [lib]
 crate-type = ["cdylib", "lib"]

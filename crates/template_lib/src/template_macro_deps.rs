@@ -22,8 +22,8 @@
 
 //! Public types that are available to internal template code.
 
-pub use tari_bor::{decode, decode_exact, encode_with_len, from_value, serde};
-pub use tari_template_abi::{CallInfo, rust, wrap_ptr};
+pub use tari_bor::{decode, decode_exact, from_value, serde};
+pub use tari_template_abi::{CallInfo, OwnedData, alloc_and_encode, rust, wrap_ptr};
 pub use tari_template_lib_types::{OwnerRule, access_rules::ComponentAccessRules};
 
 #[cfg(target_arch = "wasm32")]

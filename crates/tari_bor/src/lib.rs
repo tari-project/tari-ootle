@@ -30,41 +30,6 @@ pub use walker::*;
 
 pub use crate::byte_counter::ByteCounter;
 
-pub fn encode_with_len<T: Serialize>(val: &T) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(512);
-    encode_with_len_to_writer(&mut buf, val).expect("Vec<u8> Write impl is infallible");
-    buf
-}
-
-#[cfg(feature = "std")]
-pub fn encode_with_len_to_writer<T, W>(writer: &mut W, val: &T) -> Result<(), BorError>
-where
-    T: Serialize,
-    W: std::io::Write,
-{
-    let len = encoded_len(val)?;
-    writer
-        .write_all(&(len as u32).to_le_bytes())
-        .map_err(|e| BorError::new(format!("{e:?}")))?;
-    encode_into_writer(val, writer)?;
-    Ok(())
-}
-
-#[cfg(not(feature = "std"))]
-pub fn encode_with_len_to_writer<T, W>(writer: &mut W, val: &T) -> Result<(), BorError>
-where
-    T: Serialize,
-    W: Write,
-    W::Error: fmt::Debug,
-{
-    let len = encoded_len(val)?;
-    writer
-        .write_all(&(len as u32).to_le_bytes())
-        .map_err(|e| BorError::new(format!("{e:?}")))?;
-    encode_into_writer(val, writer)?;
-    Ok(())
-}
-
 #[cfg(feature = "std")]
 pub fn encode_into_writer<T, W>(val: &T, writer: &mut W) -> Result<(), BorError>
 where
@@ -139,17 +104,6 @@ pub fn decode_exact<T: DeserializeOwned>(mut input: &[u8]) -> Result<T, BorError
         )));
     }
     Ok(val)
-}
-
-pub fn decode_len(input: &[u8]) -> Result<usize, BorError> {
-    if input.len() < 4 {
-        return Err(BorError::new("Not enough bytes to decode length".to_string()));
-    }
-
-    let mut buf = [0u8; 4];
-    buf.copy_from_slice(input.get(..4).unwrap());
-    let len = u32::from_le_bytes(buf);
-    Ok(len as usize)
 }
 
 fn to_bor_error<E>(e: E) -> BorError

@@ -1,7 +1,10 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_abi::rust::ops::{Deref, DerefMut};
+use tari_template_abi::rust::{
+    ops::{Deref, DerefMut},
+    prelude::*,
+};
 
 use crate::serde_helpers::BytesVisitor;
 
@@ -90,6 +93,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::vec;
+
     use super::*;
 
     #[test]

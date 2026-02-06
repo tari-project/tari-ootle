@@ -28,7 +28,7 @@ pub unsafe fn tari_engine(_op: i32, _input_ptr: *const u8, _input_len: usize) ->
 
 /// # Safety
 /// This function should not be called
-pub unsafe fn debug(_input_ptr: *const u8, _input_len: usize) {
+pub unsafe fn tari_debug(_input_ptr: *const u8, _input_len: usize) {
     unimplemented!("debug not implemented for non-wasm targets")
 }
 

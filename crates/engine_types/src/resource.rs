@@ -26,7 +26,6 @@ use ootle_byte_type::FromByteType;
 use serde::{Deserialize, Serialize};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArrayError};
 use tari_template_lib::{
-    auth::Ownership,
     resource::TOKEN_SYMBOL,
     types::{
         Amount,
@@ -38,6 +37,8 @@ use tari_template_lib::{
         crypto::RistrettoPublicKeyBytes,
     },
 };
+
+use crate::ownership::Ownership;
 
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]

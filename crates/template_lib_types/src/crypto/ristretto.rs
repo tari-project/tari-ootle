@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use tari_template_abi::rust::{
+    fmt,
     fmt::{Display, Formatter},
     ops::Deref,
     str::FromStr,
@@ -84,7 +85,7 @@ impl From<[u8; 32]> for RistrettoPublicKeyBytes {
 }
 
 impl Display for RistrettoPublicKeyBytes {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_hash())
     }
 }

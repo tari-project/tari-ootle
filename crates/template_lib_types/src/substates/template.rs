@@ -1,7 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::str::FromStr;
+use tari_template_abi::rust::str::FromStr;
 
 use crate::{Hash, address_prefixes};
 

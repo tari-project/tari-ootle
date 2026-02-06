@@ -16,7 +16,7 @@ pub const WASM_LIMITS: WasmLimits = WasmLimits {
     max_function_arguments: 32,
     max_function_name_length: 256,
     max_functions: 8192,
-    max_memory_pages: 20, // ~1.3MiB = 20 * 64KiB
+    max_memory_pages: 32, // ~2MiB = 32 * 64KiB
 };
 
 pub struct EngineLimits {

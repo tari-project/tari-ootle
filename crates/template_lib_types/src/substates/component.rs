@@ -20,12 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{
-    fmt::{Display, Formatter},
-    str::FromStr,
-};
-
 use tari_bor::{BorTag, Tagged};
+use tari_template_abi::rust::{fmt, prelude::*, str::FromStr};
 
 use super::BinaryTag;
 use crate::{EntityId, KeyParseError, ObjectKey, address_prefixes, newtype_struct_serde_impl};
@@ -95,8 +91,8 @@ impl<T: Into<ObjectKey>> From<T> for ComponentAddress {
     }
 }
 
-impl Display for ComponentAddress {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for ComponentAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}_{}", address_prefixes::COMPONENT, *self.0)
     }
 }

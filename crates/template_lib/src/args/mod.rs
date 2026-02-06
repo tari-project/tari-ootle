@@ -24,6 +24,7 @@
 //! Definitions and utilities related to instruction arguments
 
 mod types;
+use tari_template_abi::rust::prelude::*;
 pub use types::*;
 
 mod freeze_flags;

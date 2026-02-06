@@ -20,9 +20,6 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#![no_std]
-extern crate alloc;
-
 use tari_template_lib::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -42,8 +39,6 @@ impl Pool {
 
 #[template]
 mod template {
-    use alloc::string::ToString;
-
     use tari_template_lib::resource::TOKEN_SYMBOL;
 
     use super::*;

@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_abi::rust::fmt;
+use tari_template_abi::rust::{fmt, prelude::*};
 
 /// Represents every possible type of resource in the Tari network.
 ///

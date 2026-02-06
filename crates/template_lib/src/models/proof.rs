@@ -20,11 +20,13 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::BTreeSet;
-
 use serde::{Deserialize, Serialize};
 use tari_bor::BorTag;
-use tari_template_abi::{EngineOp, call_engine, rust::fmt};
+use tari_template_abi::{
+    EngineOp,
+    call_engine,
+    rust::{collections::BTreeSet, fmt, prelude::*},
+};
 use tari_template_lib_types::{BinaryTag, NonFungibleId, ResourceAddress};
 
 use crate::{

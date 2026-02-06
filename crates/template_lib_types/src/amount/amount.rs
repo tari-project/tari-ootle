@@ -1,9 +1,8 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use newtype_ops::newtype_ops;
 use serde::ser::Error;
-use tari_template_abi::rust::{cmp, fmt, fmt::Debug, iter::Sum, num, ops, str::FromStr, write};
+use tari_template_abi::rust::{cmp, fmt, iter::Sum, num, ops, prelude::*, str::FromStr, write};
 
 use crate::{impl_from, impl_try_from, partial_eq_impl, partial_ord_impl};
 
@@ -387,9 +386,6 @@ impl Default for Amount {
     }
 }
 
-newtype_ops! { [Amount] {add sub mul div rem} {:=} Self Self }
-newtype_ops! { [Amount] {add sub mul div rem} {:=} &Self &Self }
-
 impl ops::Add<u64> for Amount {
     type Output = Self;
 
@@ -481,9 +477,9 @@ partial_ord_impl!(Amount, i128);
 
 #[cfg(feature = "borsh")]
 mod borsh_impl {
-    use borsh::BorshSerialize;
+    use borsh::{BorshSerialize, io};
     impl BorshSerialize for super::Amount {
-        fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        fn serialize<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
             self.inner_value().serialize(writer)
         }
     }
@@ -497,6 +493,8 @@ impl Sum for Amount {
 
 #[cfg(test)]
 mod tests {
+    use std::vec;
+
     use serde_json::json;
 
     use super::*;

@@ -22,7 +22,7 @@
 
 use log::*;
 use serde::{Serialize, de::DeserializeOwned};
-use tari_bor::{ByteCounter, decode_exact, encode_with_len_to_writer, encoded_len};
+use tari_bor::{ByteCounter, decode_exact, encode_into_writer, encoded_len};
 use tari_engine_types::{indexed_value::IndexedValue, instruction_result::InstructionResult, limits};
 use tari_template_abi::{CallInfo, EngineOp, FunctionDef, TemplateDef, func_hasher::hash_function_name, version};
 use tari_template_lib::{
@@ -69,8 +69,6 @@ pub struct WasmProcess {
 
 impl WasmProcess {
     pub fn init(store: &mut Store, module: LoadedWasmTemplate, state: Runtime) -> Result<Self, WasmExecutionError> {
-        Self::validate_template_abi_version(module.template_def())?;
-
         let mut env = WasmEnv::new(state);
         let fn_env = FunctionEnv::new(store, env.clone());
         let tari_engine = Function::new_typed_with_env(store, &fn_env, Self::tari_engine_entrypoint);
@@ -78,21 +76,21 @@ impl WasmProcess {
         let imports = imports! {
             "env" => {
                 "tari_engine" => tari_engine,
-                "debug" => Function::new_typed_with_env(store, &fn_env, debug_handler),
+                "tari_debug" => Function::new_typed_with_env(store, &fn_env, debug_handler),
                 "on_panic" => Function::new_typed_with_env(store,&fn_env, on_panic_handler),
             }
         };
         let instance = Instance::new(store, module.wasm_module(), &imports)?;
         let memory = instance.exports.get_memory("memory")?.clone();
-        let mem_alloc = instance.exports.get_typed_function(store, "tari_alloc")?;
-        // let mem_free = instance.exports.get_typed_function(store, "tari_free")?;
+        let tari_alloc = instance.exports.get_typed_function(store, "tari_alloc")?;
+        let tari_free = instance.exports.get_typed_function(store, "tari_free")?;
         fn_env
             .as_mut(store)
             .set_memory(memory.clone())
-            .set_alloc_funcs(mem_alloc.clone());
+            .set_alloc_funcs(tari_alloc.clone(), tari_free.clone());
 
         // Also set these for the local copy
-        env.set_memory(memory).set_alloc_funcs(mem_alloc);
+        env.set_memory(memory).set_alloc_funcs(tari_alloc, tari_free);
 
         Ok(Self { module, env, instance })
     }
@@ -288,7 +286,7 @@ impl WasmProcess {
         let ptr = env_mut.alloc(&mut store, len as u32)?;
         // Encode response directly into the WASM memory. The WASM code is responsible for freeing it.
         let mut writer = env_mut.memory_writer(&mut store, ptr)?;
-        encode_with_len_to_writer(&mut writer, &resp)?;
+        encode_into_writer(&resp, &mut writer)?;
         Ok(ptr)
     }
 
@@ -349,12 +347,11 @@ impl Invokable<Store> for WasmProcess {
                 // SAFETY: WasmProcess is not used concurrently
                 let value = unsafe {
                     self.env
-                        .with_memory_with_embedded_len(store, return_ptr.offset(), IndexedValue::from_raw)??
+                        .with_memory_embedded_len(store, return_ptr.offset(), IndexedValue::from_raw)??
                 };
 
-                // Free allocated memory results in an unreachable error. The memory is cleaned up when the template
-                // instance is dropped. TODO: investigate
-                // self.env.free(store, return_ptr)?;
+                // Free allocated memory containing the result
+                self.env.free(store, return_ptr)?;
 
                 self.env.state().interface().validate_return_value(&value)?;
                 self.env

@@ -1,13 +1,8 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    fmt,
-    fmt::{Display, Formatter},
-    str::FromStr,
-};
-
 use tari_bor::{BorTag, Deserialize, Serialize};
+use tari_template_abi::rust::{fmt, str::FromStr};
 
 use crate::{BinaryTag, Hash, KeyParseError, ObjectKey, address_prefixes};
 
@@ -47,8 +42,8 @@ impl From<[u8; 32]> for ValidatorFeePoolAddress {
     }
 }
 
-impl Display for ValidatorFeePoolAddress {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+impl fmt::Display for ValidatorFeePoolAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}_{}", address_prefixes::VALIDATOR_FEE_POOL, self.as_object_key())
     }
 }

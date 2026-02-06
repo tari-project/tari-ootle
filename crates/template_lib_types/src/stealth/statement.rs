@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Serialize};
+use tari_template_abi::rust::{prelude::*, vec};
 
 use super::StealthUnspentOutput;
 use crate::{

@@ -7,7 +7,7 @@ use ::serde::{
     Serializer,
     de::{Error, Visitor},
 };
-use tari_template_abi::rust::{fmt, marker::PhantomData};
+use tari_template_abi::rust::{any, fmt, format, marker::PhantomData, prelude::*};
 
 // Cow is not available in no_std, so we define our own
 pub enum BytesCow<'a> {
@@ -164,26 +164,20 @@ pub mod dynamic_hex {
         if d.is_human_readable() {
             let hex = Box::<str>::deserialize(d)?;
             let bytes = bytes_from_hex(&hex).map_err(Error::custom)?;
-            return T::try_from(&bytes).map_err(|_| {
-                Error::custom(format!(
-                    "Failed to convert bytes to type: {}",
-                    std::any::type_name::<T>()
-                ))
-            });
+            return T::try_from(&bytes)
+                .map_err(|_| Error::custom(format!("Failed to convert bytes to type: {}", any::type_name::<T>())));
         }
 
         let bytes = d.deserialize_byte_buf(BytesVisitor::default())?;
-        T::try_from(bytes.as_ref()).map_err(|_| {
-            Error::custom(format!(
-                "Failed to convert bytes to type: {}",
-                std::any::type_name::<T>()
-            ))
-        })
+        T::try_from(bytes.as_ref())
+            .map_err(|_| Error::custom(format!("Failed to convert bytes to type: {}", any::type_name::<T>())))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::vec;
+
     use serde::Serialize;
 
     use super::*;

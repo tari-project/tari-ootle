@@ -12,8 +12,7 @@ license.workspace = true
 proc-macro = true
 
 [dependencies]
-tari_template_abi = { workspace = true, features = ["func-hasher"] }
-tari_bor = { workspace = true, default-features = true }
+tari_template_abi = { workspace = true, features = ["std", "func-hasher"] }
 
 proc-macro2 = { workspace = true }
 quote = { workspace = true }

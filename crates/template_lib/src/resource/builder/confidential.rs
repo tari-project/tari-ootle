@@ -1,6 +1,6 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
-
+use tari_template_abi::rust::prelude::*;
 use tari_template_lib_types::{
     AuthHook,
     ComponentAddress,

@@ -14,6 +14,7 @@ use serde::{
     Serializer,
     de::{Error, SeqAccess},
 };
+use tari_template_abi::rust::{fmt, prelude::*};
 
 use super::PrecisionAmount as Amount;
 
@@ -38,7 +39,7 @@ impl<'de> Deserialize<'de> for Amount {
         impl<'de> serde::de::Visitor<'de> for AmountVisitor {
             type Value = Amount;
 
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("a string or an integer representing a Amount")
             }
 

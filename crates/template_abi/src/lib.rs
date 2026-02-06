@@ -38,9 +38,10 @@ pub use ops::*;
 
 pub mod rust;
 
-mod types;
-
-pub use types::*;
+#[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
+mod template_def;
+#[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
+pub use template_def::*;
 
 pub mod version;
 
@@ -49,3 +50,4 @@ pub mod func_hasher;
 
 /// The name of the global export that defines the template definition
 pub const ABI_TEMPLATE_DEF_GLOBAL_NAME: &str = "_ABI_TEMPLATE_DEF";
+pub const WASM_PTR_SIZE: usize = 4; // 32-bit pointers in wasm

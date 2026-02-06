@@ -33,7 +33,6 @@ use wasmer::{
     Pages,
     Store,
     TypedFunction,
-    WASM_PAGE_SIZE,
     WasmPtr,
     imports,
     sys::{BaseTunables, CompilerConfig, Cranelift, CraneliftOptLevel, EngineBuilder, Target},
@@ -70,7 +69,7 @@ impl WasmModule {
         let imports = imports! {
             "env" => {
                 "tari_engine" => Function::new_typed(&mut store, |_op: i32, _arg_ptr: i32, _arg_len: i32| 0i32),
-                "debug" => Function::new_typed(&mut store, |_arg_ptr: i32, _arg_len: i32| {  }),
+                "tari_debug" => Function::new_typed(&mut store, |_arg_ptr: i32, _arg_len: i32| {  }),
                 "on_panic" => Function::new_typed(&mut store, |_msg_ptr: i32, _msg_len: i32, _line: i32, _col: i32| {  }),
             }
         };
@@ -78,14 +77,6 @@ impl WasmModule {
         let mut env = WasmEnv::new(());
         let memory = instance.exports.get_memory("memory")?.clone();
         env.set_memory(memory);
-
-        // Check memory size limit
-        let size = env.memory_size(&mut store)?;
-        if size / WASM_PAGE_SIZE > limits::WASM_LIMITS.max_memory_pages {
-            return Err(TemplateLoaderError::WasmModuleError(
-                WasmExecutionError::MemoryExportTooLarge,
-            ));
-        }
 
         let template = env.load_template_def(&mut store, &instance)?;
         let main_fn = format!("{}_main", template.template_name());
@@ -108,7 +99,7 @@ impl WasmModule {
     }
 
     fn create_engine() -> Engine {
-        const MEMORY_PAGE_LIMIT: Pages = Pages(32); // 2MiB = 32 * 65,536
+        const MEMORY_PAGE_LIMIT: Pages = Pages(limits::WASM_LIMITS.max_memory_pages as u32);
         let base = BaseTunables::for_target(&Target::default());
         let tunables = LimitingTunables::new(base, MEMORY_PAGE_LIMIT);
         let mut compiler = Cranelift::new();
@@ -180,6 +171,10 @@ impl LoadedWasmTemplate {
 
     pub fn template_def(&self) -> &TemplateDef {
         &self.template_def
+    }
+
+    pub fn into_template_def(self) -> TemplateDef {
+        Arc::try_unwrap(self.template_def).unwrap_or_else(|arc| (*arc).clone())
     }
 
     pub fn find_func_by_name(&self, function_name: &str) -> Option<&FunctionDef> {

@@ -1,6 +1,20 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+// Support no_std environments
+#![cfg_attr(not(feature = "std"), no_std)]
+
+// This can be uncommented if you need to check for mistaken use of the std crate
+// TODO: to always use this, we'd need to include the rust prelude where ever ts_rs is used.
+// #![no_std]
+// #[cfg(feature = "std")]
+// extern crate std;
+
+#[cfg(not(any(feature = "std", feature = "alloc")))]
+compile_error!("Either feature `std` or `alloc` must be enabled for this crate.");
+#[cfg(all(target_arch = "wasm32", feature = "std", feature = "alloc"))]
+compile_error!("Feature `std` and `alloc` can't be enabled at the same time.");
+
 #[macro_use]
 mod amount;
 #[macro_use]

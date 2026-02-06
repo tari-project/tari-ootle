@@ -4,6 +4,7 @@
 #[allow(clippy::module_inception)]
 mod amount;
 mod macros;
+mod ops;
 mod serde;
 
 pub use amount::*;

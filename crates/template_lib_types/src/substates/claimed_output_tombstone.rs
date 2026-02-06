@@ -1,13 +1,9 @@
 //  Copyright 2022 The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    fmt::{Display, Formatter},
-    str::FromStr,
-};
-
 use serde::{Deserialize, Serialize};
 use tari_bor::BorTag;
+use tari_template_abi::rust::{fmt, prelude::*, str::FromStr};
 
 use super::BinaryTag;
 use crate::{KeyParseError, ObjectKey, address_prefixes, crypto::PedersenCommitmentBytes};
@@ -68,8 +64,8 @@ impl From<[u8; ObjectKey::LENGTH]> for ClaimedOutputTombstoneAddress {
     }
 }
 
-impl Display for ClaimedOutputTombstoneAddress {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for ClaimedOutputTombstoneAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}_{}", address_prefixes::CLAIMED_OUTPUT_TOMBSTONE, self.0.inner())
     }
 }

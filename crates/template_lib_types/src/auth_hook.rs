@@ -1,7 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_abi::rust::fmt;
+use tari_template_abi::rust::{fmt, prelude::*};
 
 use crate::{ComponentAddress, TemplateAddress};
 

@@ -24,7 +24,6 @@ use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
 use tari_template_lib::{
-    auth::Ownership,
     prelude::{ComponentAccessRules, ComponentAddress},
     types::{EntityId, ObjectKey, OwnerRule, TemplateAddress, crypto::RistrettoPublicKeyBytes},
 };
@@ -32,6 +31,7 @@ use tari_template_lib::{
 use crate::{
     hashing::{EngineHashDomainLabel, hasher32},
     indexed_value::{IndexedValueError, IndexedWellKnownTypes},
+    ownership::Ownership,
     substate::SubstateId,
 };
 

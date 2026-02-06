@@ -22,35 +22,66 @@
 
 //! Hook that implements common behavior when a panic happens during template execution
 
-use tari_template_abi::on_panic;
+#[cfg(feature = "std")]
+mod _panic_handler {
+    use std::boxed::Box;
 
-fn hook(info: &std::panic::PanicHookInfo<'_>) {
-    let error_msg = info
-        .payload()
-        .downcast_ref::<String>()
-        .map(String::as_str)
-        .or_else(|| info.payload().downcast_ref::<&'static str>().copied())
-        .unwrap_or("");
-    let location = info.location();
+    use tari_template_abi::{on_panic, rust::string::String};
 
-    unsafe {
-        match location {
-            Some(loc) => {
-                let line = loc.line();
-                let column = loc.column();
+    fn hook(info: &std::panic::PanicHookInfo<'_>) {
+        let error_msg = info
+            .payload()
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| info.payload().downcast_ref::<&'static str>().copied())
+            .unwrap_or("");
+        let location = info.location();
 
-                on_panic(error_msg.as_ptr(), error_msg.len() as u32, line, column)
-            },
-            None => on_panic(error_msg.as_ptr(), error_msg.len() as u32, 0, 0),
-        };
+        unsafe {
+            match location {
+                Some(loc) => {
+                    let line = loc.line();
+                    let column = loc.column();
+
+                    on_panic(error_msg.as_ptr(), error_msg.len() as u32, line, column)
+                },
+                None => on_panic(error_msg.as_ptr(), error_msg.len() as u32, 0, 0),
+            };
+        }
+    }
+
+    /// Registers a `std::panic` hook that tries to include the error line and column to the error
+    pub fn register_panic_hook() {
+        use std::sync::Once;
+        static SET_HOOK: Once = Once::new();
+        SET_HOOK.call_once(|| {
+            std::panic::set_hook(Box::new(hook));
+        });
     }
 }
 
-/// Registers a `std::panic` hook that tries to include the error line and column to the error
-pub fn register_panic_hook() {
-    use std::sync::Once;
-    static SET_HOOK: Once = Once::new();
-    SET_HOOK.call_once(|| {
-        std::panic::set_hook(Box::new(hook));
-    });
+#[cfg(all(not(feature = "std"), target_arch = "wasm32"))]
+mod _panic_handler {
+    use core::panic::PanicInfo;
+
+    use tari_template_abi::{on_panic, rust::format, wrap_ptr};
+
+    #[panic_handler]
+    fn panic_handler(info: &PanicInfo) -> ! {
+        unsafe {
+            let location = info.location();
+            let (line, column) = location.map(|loc| (loc.line(), loc.column())).unwrap_or((0, 0));
+            let msg = format!("{}", info.message()).into_bytes();
+            let len = msg.len();
+            let error_msg = wrap_ptr(msg);
+            on_panic(error_msg, len as u32, line, column)
+        }
+
+        loop {}
+    }
+
+    /// No-op for no_std WASM targets as the panic handler is registered via the attribute
+    pub fn register_panic_hook() {}
 }
+
+pub use _panic_handler::register_panic_hook;

@@ -5,9 +5,9 @@
 
 pub use tari_template_abi::call_debug;
 
-/// Macro for writing debug messages from inside templates
+/// Macro that calls the engine debug function from inside templates. No-op unless the engine is in debug mode.
 #[macro_export]
-macro_rules! debug {
+macro_rules! engine_debug {
     ($fmt:expr) => {
         $crate::macros::call_debug($fmt)
     };
@@ -24,6 +24,17 @@ macro_rules! log {
     };
     ($lvl:expr, $fmt:expr, $($args:tt)*) => {
         $crate::engine().emit_log($lvl, $crate::template_macro_deps::rust::format!($fmt, $($args)*))
+    };
+}
+
+/// Macro for emitting debug log messages from inside templates
+#[macro_export]
+macro_rules! debug {
+    ($fmt:expr) => {
+        $crate::log!($crate::args::LogLevel::Debug, $fmt)
+    };
+    ($fmt:expr, $($args:tt)*) => {
+        $crate::log!($crate::args::LogLevel::Debug, $fmt, $($args)*)
     };
 }
 

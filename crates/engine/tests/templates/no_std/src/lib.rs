@@ -53,12 +53,12 @@ mod template {
         }
 
         pub fn increment(&mut self) {
-            // debug!("Incrementing counter (current:{})", self.value);
+            debug!("Incrementing counter (current:{})", self.value);
             self.value += 1;
         }
 
         pub fn reset_to(&mut self, value: u128) {
-            // debug!("Changing value from {:?} to {}", self.value, value);
+            debug!("Changing value from {:?} to {}", self.value, value);
             self.value = value;
         }
 

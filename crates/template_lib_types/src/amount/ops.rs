@@ -13,8 +13,7 @@ op_impl!(Amount, Rem, rem);
 
 impl ops::AddAssign<Amount> for Amount {
     fn add_assign(&mut self, other: Amount) {
-        let this = self;
-        this.0.add_assign(other.0)
+        self.0.add_assign(other.0)
     }
 }
 
@@ -25,19 +24,16 @@ impl ops::SubAssign<Amount> for Amount {
 }
 impl ops::MulAssign<Amount> for Amount {
     fn mul_assign(&mut self, other: Amount) {
-        let this = self;
-        this.0.mul_assign(other.0)
+        self.0.mul_assign(other.0)
     }
 }
 impl ops::DivAssign<Amount> for Amount {
     fn div_assign(&mut self, other: Amount) {
-        let this = self;
-        this.0.div_assign(other.0)
+        self.0.div_assign(other.0)
     }
 }
 impl ops::RemAssign<Amount> for Amount {
     fn rem_assign(&mut self, other: Amount) {
-        let this = self;
-        this.0.rem_assign(other.0)
+        self.0.rem_assign(other.0)
     }
 }

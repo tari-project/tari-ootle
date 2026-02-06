@@ -80,6 +80,10 @@ pub struct OwnedData {
 
 impl OwnedData {
     /// Take ownership of the entire allocation (len, data)
+    ///
+    /// # Safety
+    /// Caller must ensure that ptr is a valid pointer to a length-prefixed block of memory allocated by `tari_alloc`
+    /// i.e. with an embedded length prefix size_of::<usize>()
     pub unsafe fn owned_from_ptr(ptr: *mut u8) -> Self {
         if ptr.is_null() {
             return Self {
@@ -146,7 +150,7 @@ pub extern "C" fn tari_alloc(size: usize) -> *mut u8 {
 /// Caller must ensure that ptr must be a valid pointer to a block of memory allocated by `tari_alloc` i.e. with an
 /// embedded length prefix size_of::<usize>() bytes before the pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn tari_free(ptr: *mut u8) {
+pub unsafe extern "C" fn tari_free(ptr: *mut u8) {
     if !ptr.is_null() {
         unsafe {
             // read the length prefix to determine the size of the allocation

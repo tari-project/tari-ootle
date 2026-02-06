@@ -163,11 +163,13 @@ fn test_composed() {
 #[test]
 fn test_buggy_template() {
     // Uncomment the following lines to print the ABI bytes
-    // let bytes = tari_bor::encode_with_len(&tari_template_abi::TemplateDef::V1(tari_template_abi::TemplateDefV1 {
+    // let bytes = tari_template_abi::TemplateDef::V1(tari_template_abi::TemplateDefV1 {
     //     template_name: "Buggy".to_string(),
     //     abi_version: tari_template_abi::version::MINIMUM_SUPPORTED_WASM_ABI_VERSION,
     //     functions: vec![],
-    // }));
+    // })
+    // .encode_for_wasm_embedding()
+    // .unwrap();
     // println!("pub static _ABI_TEMPLATE_DEF: [u8; {}] = [", bytes.len());
     // for chunk in bytes.chunks(16) {
     //     print!("    ");

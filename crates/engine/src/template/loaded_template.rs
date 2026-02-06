@@ -44,6 +44,12 @@ impl LoadedTemplate {
         }
     }
 
+    pub fn into_template_def(self) -> TemplateDef {
+        match self {
+            LoadedTemplate::Wasm(wasm) => wasm.into_template_def(),
+        }
+    }
+
     pub fn code_size(&self) -> usize {
         match self {
             LoadedTemplate::Wasm(wasm) => wasm.code_size(),

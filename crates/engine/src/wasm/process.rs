@@ -69,8 +69,6 @@ pub struct WasmProcess {
 
 impl WasmProcess {
     pub fn init(store: &mut Store, module: LoadedWasmTemplate, state: Runtime) -> Result<Self, WasmExecutionError> {
-        Self::validate_template_abi_version(module.template_def())?;
-
         let mut env = WasmEnv::new(state);
         let fn_env = FunctionEnv::new(store, env.clone());
         let tari_engine = Function::new_typed_with_env(store, &fn_env, Self::tari_engine_entrypoint);

@@ -222,7 +222,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                 template_address: *template_address,
             })?;
 
-        Ok(loaded.template_def().clone())
+        Ok(loaded.into_template_def())
     }
 
     fn validate_return_value(&self, value: &IndexedValue) -> Result<(), RuntimeError> {

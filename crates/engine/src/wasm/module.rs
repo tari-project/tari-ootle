@@ -173,6 +173,10 @@ impl LoadedWasmTemplate {
         &self.template_def
     }
 
+    pub fn into_template_def(self) -> TemplateDef {
+        Arc::try_unwrap(self.template_def).unwrap_or_else(|arc| (*arc).clone())
+    }
+
     pub fn find_func_by_name(&self, function_name: &str) -> Option<&FunctionDef> {
         self.template_def.functions().iter().find(|f| f.name == *function_name)
     }

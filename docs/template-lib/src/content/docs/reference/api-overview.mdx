@@ -1,0 +1,73 @@
+---
+title: API Overview
+description: A high-level overview of the key modules, structs, and functions in the Tari Ootle Template Library.
+---
+
+The `tari_template_lib` provides a comprehensive API for developing Tari Ootle Templates. This document offers a high-level overview of its most important components. For detailed information, always refer to the in-code Rust documentation.
+
+### Modules
+
+The library is organized into several modules, each responsible for a specific aspect of template development:
+
+-   **`prelude`**: The most commonly used module. It re-exports essential types, macros, and functions, making them easily accessible via `use tari_template_lib::prelude::*;`.
+-   **`auth`**: Handles authentication and authorization logic within templates. Provides utilities for working with identities and proofs.
+-   **`args`**: Utilities for working with arguments passed to template methods.
+-   **`component`**: Contains functions and types related to components, including creating new components (`ComponentBuilder`) and accessing the current component's address.
+-   **`consensus`**: Provides access to consensus-related information.
+-   **`events`**: Contains the `emit_event!` macro and other event-related definitions.
+-   **`models`**: Defines various models and data structures used throughout the template library.
+-   **`rand`**: Provides access to a cryptographically secure random number generator.
+-   **`resource`**: Functions and types related to resources, including creating new resources (`ResourceBuilder`).
+-   **`template`**: Functionality specific to the template itself, often related to template-level operations.
+-   **`types`**: (Re-exports `tari_template_lib_types`) Contains all the fundamental on-chain data types like `Amount`, `ResourceAddress`, `ComponentAddress`, `VaultId`, `AccessRule`, etc.
+
+### Key Structs and Builders
+
+-   **`ComponentBuilder`**:
+    -   **Purpose:** Used to define the properties of a new component and deploy it to the blockchain.
+    -   **Methods:** `new()`, `with_access_rules()`, `create_component()`, etc.
+    -   **Usage:**
+        ```rust
+        // ComponentBuilder::new().with_access_rules(...).create_component(...);
+        ```
+-   **`ResourceBuilder`**:
+    -   **Purpose:** Used to define the properties of a new resource (fungible or non-fungible) and mint its initial supply.
+    -   **Methods:** `fungible()`, `non_fungible()`, `initial_supply()`, `initial_supply_non_fungible()`, `metadata()`, `mint_access()`, `burn_access()`, `build()`, etc.
+    -   **Usage:**
+        ```rust
+        // ResourceBuilder::public_fungible().with_token_symbol("TOK").initial_supply(Amount(100)).build();
+        ```
+-   **`AccessRules`**:
+    -   **Purpose:** Defines the authorization policy for component methods or resource operations.
+    -   **Methods:** `new()`, `method()`, `default_access_rule()`, `allow_all()`, etc.
+-   **`Vault`**:
+    -   **Purpose:** A container for resources within a component.
+    -   **Methods:** `deposit()`, `withdraw()`, `balance()`, etc.
+-   **`Bucket`**:
+    -   **Purpose:** A temporary container for resources passed between component methods or to/from vaults during a transaction.
+
+### Global Functions
+
+Several important functions are exposed directly (often via `prelude`) that allow interaction with the Ootle engine's global state or services:
+
+-   **`component::current_component_address()`**: Returns the `ComponentAddress` of the currently executing component.
+-   **`rand::get_blake2b_256()`**: Provides a deterministic Blake2b hash for a given input, useful for various on-chain randomness needs.
+-   **`rand::get_current_block_time()`**: Returns the current block timestamp, useful for time-based logic.
+
+### Macros
+
+-   **`#[template]`**: (Attribute Macro) Transforms a Rust module into a deployable Tari Ootle Template.
+-   **`emit_event!(...)`**: Emits a custom event from the template.
+-   **`info!(...)`, `warn!(...)`, `error!(...)`**: Logging macros that output to the validator's log files.
+
+### Error Handling
+
+The library provides a robust error handling mechanism, typically through `Result` types. Custom error types are defined in `tari_template_lib_types::error`.
+
+### Comparing to Scrypto
+
+`tari_template_lib` shares more than a few conceptual similarities with Scrypto (Radix DLT's smart contract language). This is because we think they've done an
+amazing job designing a developer-friendly smart contract framework, and we wanted to build on those ideas while adapting them to the unique features and
+requirements of Tari Ootle.
+
+Developers familiar with Scrypto will find many patterns and concepts transferable.

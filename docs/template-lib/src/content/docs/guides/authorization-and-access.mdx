@@ -1,0 +1,107 @@
+---
+title: Authorization and Access
+description: Control who can interact with your Tari Ootle Components and Resources.
+---
+
+Authorization and access control are critical aspects of smart contract security. The Tari Ootle Template Library provides flexible mechanisms to define who can execute methods on your Components and interact with your Resources.
+
+### Access Rules
+
+Access rules determine which identities (Components, users, or other templates) are allowed to perform certain actions. They are typically defined when a Component is created or a Resource is minted.
+
+The `AccessRules` struct is used to configure these permissions.
+
+#### Component Access Rules
+
+When you create a Component, you can specify `AccessRules` for its methods.
+
+```rust
+use tari_template_lib::prelude::*;
+
+#[template]
+mod template {
+    pub struct MyComponent {
+        // Component state fields
+    }
+
+    pub fn create_with_access_rules(admin_badge: ResourceAddress) -> ComponentAddress {
+        let component = MyComponent { /* ... */ }; // Your component instance
+
+        let component_address = Component::new(component)
+            .with_access_rules(ComponentAccessRules::new()
+                // Allow anyone to call the 'public_method'
+                .method("public_method", rule!(allow_all))
+                // Only allow the 'admin_component' to call the 'admin_method'
+                .method("admin_method", rule!(require(admin_badge)])
+                // Default rule: anyone can call any method not explicitly defined
+                // If you dont specify a default rule, it will default to `DenyAll`,
+                // meaning no one can call methods other than the owner.
+                .default(rule!(allow_all))
+            )
+            .create_component("my_secured_component", component);
+        component_address
+    }
+}
+```
+
+-   `ComponentAccessRules::new()`: Creates a new set of component access rules.
+-   `.method("method_name", AccessRule)`: Defines an access rule for a specific method.
+-   `AccessRule::AllowAll`: Allows any caller to execute the method.
+-   `AccessRule::Restricted(vec![identity1, identity2, ...])`: Only allows callers whose identity matches one of the provided identities. Identities can be `ComponentAddress`, `ResourceAddress`, `TemplateAddress`, etc.
+-   `AccessRule::DenyAll`: Denies all callers from executing the method.
+-   `AccessRule::Owner`: Only allows the owner of the component to execute the method. (Note: "owner" is a specific concept often tied to the initial deployer or a designated resource holder).
+-   `default_access_rule(AccessRule)`: Sets the default rule for any method not explicitly defined.
+
+#### Resource Access Rules
+
+Resources can also have access rules, typically governing who can mint, burn, or access their metadata.
+
+```rust
+use tari_template_lib::prelude::*;
+
+#[template]
+mod template {
+
+    pub struct MyComponent {
+        resource: ResourceManager
+    }
+
+impl MyComponent {
+    pub  fn create_with_restricted_resource(minter_badge: ResourceAddress) -> ResourceAddress {
+        let resource_address = ResourceBuilder::public_fungible()
+            .with_token_symbol("RTK")
+            .initial_supply(amount!["1000000000000000000000"]) // Mint an initial supply of 100 million tokens
+            .divisibility(10) // Set divisibility to 10 decimal places
+            .mintable(AccessRule::Restricted(vec![minter_address.into()])) // Only minter_address can mint more tokens
+            .burnable(rule![deny_all]) // No one can burn these tokens
+            .build();
+
+        MyComponent { resource: resource_address.into() }
+    }
+}
+```
+
+-   `.mintable(AccessRule)`: Controls who can mint new units of this resource.
+-   `.burnable(AccessRule)`: Controls who can burn units of this resource.
+-   `.withdrawable(AccessRule)`: Controls who can withdraw this resource from vaults.
+-   `.depositable(AccessRule)`: Controls who can deposit this resource into vaults.
+-   `.metadata_access(AccessRule)`: Controls who can read/write resource metadata.
+
+### Identity Management
+
+Callers are identified by various types, depending on the context:
+
+-   `ComponentAddress`: When a component calls another component.
+-   `ResourceAddress`: When a resource grants specific permissions (e.g., holding a specific NFT grants voting rights).
+-   `TemplateAddress`: When a template has specific rights.
+-   User identities: Through the transaction's signers or proofs provided.
+
+The `auth` module in `tari_template_lib` provides utilities for working with identities and proofs within your templates.
+
+### Best Practices
+
+-   **Principle of Least Privilege:** Grant only the necessary permissions. Avoid `AllowAll` unless it's genuinely intended for public methods.
+-   **Clear Ownership:** Define and manage component/resource ownership clearly.
+-   **Test Thoroughly:** Always write comprehensive tests to ensure your access rules behave as expected.
+
+By effectively utilizing access rules, you can ensure the security and integrity of your Tari Ootle Templates and the assets they manage.

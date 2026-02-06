@@ -1,0 +1,120 @@
+---
+title: Writing Templates
+description: Deep dive into the structure and core concepts of writing Tari Ootle Templates.
+---
+
+This guide expands on the basics, providing a deeper understanding of how to structure your Tari Ootle Templates, manage state, and interact with the validator engine.
+
+### Template Structure
+
+A Tari Ootle Template typically follows this structure:
+
+```rust
+use tari_template_lib::prelude::*;
+
+#[template]
+mod MyTemplate {
+    // Component struct definition
+    pub struct MyComponent {
+        // Define your component's state variables here
+        // e.g., my_value: u64,
+        // e.g., my_resource_address: ResourceAddress,
+    }
+
+    impl MyComponent {
+        // Constructor: typically creates and initializes a new component instance
+        pub fn new(initial_state: u64) -> Self {
+            Self {
+                // Initialize state
+                // my_value: initial_state,
+                // my_resource_address: ResourceBuilder::public_fungible().with_token_symbol("TOK")
+                //     .initial_supply(Amount(1000))
+                //     .build()
+            }
+        }
+
+        // Public methods: define the callable functions of your component
+        pub fn do_something(&mut self, value: u64) {
+            // Logic to modify component state or interact with resources
+            // self.my_value += value;
+        }
+
+        // Private helper functions: internal logic not exposed publicly
+        fn calculate_internal(&self) -> u64 {
+            // ...
+            0
+        }
+    }
+}
+```
+
+### The `#[template]` Macro
+
+The `#[template]` attribute macro is the cornerstone of Tari Ootle Template development. It performs several critical functions:
+
+-   **ABI Generation:** It generates the necessary Application Binary Interface (ABI) that allows the Tari Ootle validator engine to understand and interact with your compiled WASM module.
+-   **Method Exposure:** It exposes public functions within your `impl` block as callable methods of the component.
+-   **State Management:** It ensures that your component's state (defined within its `struct`) can be properly serialized, deserialized, and persisted by the validator node.
+
+### Component State Management
+
+The state of your component is defined by the fields within its `struct`. These fields are persisted on the blockchain.
+
+**Important Considerations:**
+
+-   **Serializable Types:** All fields in your component struct must be serializable and deserializable. The `tari_template_lib` provides various types (`Amount`, `ResourceAddress`, etc.) that are already compatible. For custom types, you may need to implement `serde::Serialize` and `serde::Deserialize`.
+-   **Mutability:** To modify component state, methods must take `&mut self`.
+-   **Access:** Component state should generally be managed internally via methods. Direct external access to component fields is not permitted.
+
+### Interacting with the Engine
+
+The `tari_template_lib::prelude::*` imports provide access to global functions and builders for interacting with the Tari Ootle engine:
+
+-   **`ResourceBuilder`:** Used to define and mint new resources (fungible or non-fungible tokens).
+    ```rust
+    use tari_template_lib::prelude::*;
+    let resource_address = ResourceBuilder::public_fungible().with_token_symbol("MFT")
+        .initial_supply(Amount(1_000_000))
+        .build();
+    ```
+-   **`ComponentBuilder`:** Used to define and create new components.
+    ```rust
+    use tari_template_lib::prelude::*;
+    let component_address = ComponentBuilder::new()
+        .with_access_rules(AccessRules::allow_all())
+        .create_component("MyNewComponent", MyComponent::new());
+    ```
+-   **`info!`, `warn!`, `error!`:** Macros for logging messages to the validator node's logs.
+-   **`panic!`:** To halt execution and revert a transaction.
+
+### Constructors
+
+The `new` function in the `impl MyComponent` block serves as the constructor for your component. It's responsible for:
+
+-   Initializing the component's state.
+-   Potentially minting initial resources.
+-   Setting up initial access rules.
+
+```rust
+impl MyComponent {
+    pub fn new(initial_value: u64) -> Self {
+        // Mint a new fungible token controlled by this component
+        let token_address = ResourceBuilder::public_fungible().with_token_symbol("MTK")
+            .initial_supply(Amount(1000))
+            .build();
+
+        Self {
+            value: initial_value,
+            // Store the address of the resource this component manages
+            managed_token: token_address,
+        }
+    }
+}
+```
+
+### Public vs. Private Methods
+
+-   **Public methods (`pub fn`):** These are the entry points for external interaction with your component. They can be called by other components, users via transactions, or off-chain applications.
+-   **Private methods (`fn`):** These are internal helper functions used within your component's implementation. They cannot be called from outside the component.
+
+For more advanced topics like authorization, events, and testing, refer to the other guides.

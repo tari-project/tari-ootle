@@ -1,6 +1,5 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
-#![no_std]
 
 use tari_template_lib::prelude::*;
 

@@ -64,7 +64,12 @@ pub fn generate_abi(ast: &TemplateAst) -> Result<TokenStream> {
             .collect::<Result<_>>()?,
     });
 
-    let template_def_data = tari_bor::encode_with_len(&template_def);
+    let template_def_data = template_def.encode_for_wasm_embedding().map_err(|e| {
+        syn::Error::new_spanned(
+            &ast.template_name,
+            format!("Failed to encode template definition: {}", e),
+        )
+    })?;
     let len = template_def_data.len();
     let template_def_name = format_ident!("{ABI_TEMPLATE_DEF_GLOBAL_NAME}");
 

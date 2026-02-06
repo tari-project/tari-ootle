@@ -186,7 +186,7 @@ fn test_buggy_template() {
         // The ptr location is non-zero, and the pointer reads a large length that is out of range
         TemplateLoaderError::WasmModuleError(WasmExecutionError::MemoryPointerOutOfRange { .. }) => {},
         // The ptr location is zero, so the decode fails
-        TemplateLoaderError::WasmModuleError(WasmExecutionError::AbiDecodeError { .. }) => {},
+        TemplateLoaderError::WasmModuleError(WasmExecutionError::AbiTemplateDefDecodeError { .. }) => {},
         _ => panic!("Unexpected error: {:?}", err),
     }
 
@@ -205,7 +205,7 @@ fn test_buggy_template() {
         .unwrap_err();
     assert!(matches!(
         err,
-        TemplateLoaderError::WasmModuleError(WasmExecutionError::AbiDecodeError(_))
+        TemplateLoaderError::WasmModuleError(WasmExecutionError::AbiTemplateDefDecodeError(_))
     ));
 
     let err = compile_template("tests/templates/buggy", &["no_template_def"])

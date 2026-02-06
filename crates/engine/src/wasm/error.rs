@@ -29,8 +29,8 @@ pub enum WasmExecutionError {
     MemoryAccessError(#[from] MemoryAccessError),
     #[error("memory underflow: {required} bytes required but {remaining} remaining")]
     MemoryUnderflow { required: usize, remaining: usize },
-    #[error("memory pointer out of range: memory size of {size} but pointer is {pointer}")]
-    MemoryPointerOutOfRange { size: u64, pointer: u64, len: u64 },
+    #[error("memory pointer out of range: memory size is {size}, pointer is {pointer} and length is {len}")]
+    MemoryPointerOutOfRange { size: u64, pointer: u32, len: u32 },
     #[error("Memory allocation too large")]
     MemoryAllocationTooLarge,
     #[error("Memory allocation failed")]
@@ -45,8 +45,8 @@ pub enum WasmExecutionError {
     RuntimeError(#[from] RuntimeError),
     #[error("Failed to decode argument for engine call: {0:?}")]
     EngineArgDecodeFailed(BorError),
-    #[error("Failed to decode ABI: {0:?}")]
-    AbiDecodeError(BorError),
+    #[error("Failed to decode template definition: {0:?}")]
+    AbiTemplateDefDecodeError(BorError),
     #[error("Unexpected ABI function {name}")]
     UnexpectedAbiFunction { name: String },
     #[error("Encoding error: {0}")]

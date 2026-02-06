@@ -5,36 +5,21 @@
 
 extern crate alloc;
 
-// use talc::*;
-
-// TODO: could not get single threaded allocator to work (AssumeUnlockable)
-// template errors with unreachable error.
-// #[global_allocator]
-// static ALLOCATOR: Talck<locking::AssumeUnlockable, ErrOnOom> = Talc::new(unsafe {
-//     let a = Span::from_array(core::ptr::addr_of!(ARENA).cast_mut());
-//     ErrOnOom
-// })
-// .lock();
-
-// TODO: investigate this further
-// Unfortunately, talc does not seem to work in non-trivial cases (probably something in our code not theirs)
-
-// const MAX_MEM: usize = (632 - 17) * 64 * 1024; // 20 pages of 64KiB each
-// Use Talc as our global heap allocator.
-// static mut ARENA: [u8; MAX_MEM] = [0; MAX_MEM];
-// #[global_allocator]
-// static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> = Talc::new(unsafe {
-//     // if we're in a hosted environment, the Rust runtime may allocate before
-//     // main() is called, so we need to initialize the arena automatically
-//     ClaimOnOom::new(Span::from_array(core::ptr::addr_of!(ARENA).cast_mut()))
-// })
-// .lock();
-
-// WARN: dont use weealloc in production. https://github.com/rustwasm/wee_alloc/issues/106
-// We use it in the tests because it is the only no_std allocator we could get working.
-// Use `wee_alloc` as the global allocator.
+// Use talc as the global allocator
 #[global_allocator]
-static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+static ALLOCATOR: talc::TalckWasm = unsafe { talc::TalckWasm::new_global() };
+
+// WARN: dont use wee_alloc in production. https://github.com/rustwasm/wee_alloc/issues/106
+// #[global_allocator]
+// static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+
+// or lol_alloc
+// use lol_alloc::{AssumeSingleThreaded, FreeListAllocator};
+
+// SAFETY: Templates only run in a single thread.
+// #[global_allocator]
+// static ALLOCATOR: AssumeSingleThreaded<FreeListAllocator> =
+//     unsafe { AssumeSingleThreaded::new(FreeListAllocator::new()) };
 
 use tari_template_lib::prelude::*;
 
@@ -51,7 +36,7 @@ mod template {
 
     impl NoStdCounter {
         pub fn simple() -> String {
-            format!("Hello from no_std! This is demonstrates allocation.")
+            format!("Hello from no_std! This is demonstrates allocation and the engine deallocating memory correctly.")
         }
 
         pub fn new() -> Component<Self> {

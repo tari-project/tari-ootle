@@ -3,6 +3,19 @@
 
 //! Rust macros that can be used inside templates
 
+pub use tari_template_abi::call_debug;
+
+/// Macro that calls the engine debug function from inside templates. No-op unless the engine is in debug mode.
+#[macro_export]
+macro_rules! engine_debug {
+    ($fmt:expr) => {
+        $crate::macros::call_debug($fmt)
+    };
+    ($fmt:expr, $($args:tt)*) => {
+        $crate::macros::call_debug($crate::template_macro_deps::rust::format!($fmt, $($args)*))
+    };
+}
+
 /// Macro for emitting log messages from inside templates
 #[macro_export]
 macro_rules! log {

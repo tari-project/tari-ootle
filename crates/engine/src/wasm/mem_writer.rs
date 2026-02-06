@@ -16,7 +16,8 @@ impl<'a> MemWriter<'a> {
 
     pub fn write_all_to_mem(&mut self, data: &[u8]) -> Result<(), MemoryAccessError> {
         self.view.write(u64::from(self.ptr.offset()), data)?;
-        self.ptr = self.ptr.add_offset(data.len() as u32)?;
+        let offset = u32::try_from(data.len()).map_err(|_| MemoryAccessError::Overflow)?;
+        self.ptr = self.ptr.add_offset(offset)?;
         Ok(())
     }
 }

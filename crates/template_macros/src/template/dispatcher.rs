@@ -37,7 +37,7 @@ pub fn generate_dispatcher(ast: &TemplateAst) -> Result<TokenStream> {
 
     let output = quote! {
         #[unsafe(no_mangle)]
-        pub unsafe extern "C" fn #dispatcher_function_name(call_info: *mut u8, call_info_len: u32) -> *mut u8 {
+        pub unsafe extern "C" fn #dispatcher_function_name(call_info_ptr: *mut u8, call_info_len: u32) -> *mut u8 {
             use ::tari_template_lib::template_macro_deps::*;
             // include all use statements from the template module here as these may be used in the function arguments.
             #(
@@ -51,21 +51,21 @@ pub fn generate_dispatcher(ast: &TemplateAst) -> Result<TokenStream> {
             // Custom panic hook that invokes the on_panic host function
             register_panic_hook();
 
-            if call_info.is_null() {
-                panic!("call_info is null");
+            if call_info_ptr.is_null() {
+                panic!("CALLINFO_NULL");
             }
 
-            let call_info = unsafe { rust::vec::Vec::from_raw_parts(call_info, call_info_len as usize, call_info_len as usize) };
-            let mut call_info = CallInfo::v1_packed_reader(&call_info);
+            let owned = unsafe { OwnedData::owned_from_ptr(call_info_ptr) };
+            let mut call_info = CallInfo::v1_packed_reader(owned.data());
             let call_header = call_info.decode_header();
 
-            let result;
+            let result_ptr;
             match call_header.func {
                 #( #function_idents => #function_blocks ),*,
-                _ => panic!("invalid function ident {}", call_header.func),
+                _ => panic!("UNKWN_FN {}", call_header.func),
             };
 
-            wrap_ptr(result)
+            result_ptr
         }
     };
 
@@ -205,7 +205,7 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst) -> Expr {
     if ast.is_migration {
         stmts.extend([
             // Empty result
-            parse_quote! { result = encode_with_len(&()); },
+            parse_quote! { result_ptr = alloc_and_encode(&()); },
             // Set the state to the return value
             parse_quote! { component_manager.set_state(rtn); },
         ]);
@@ -215,7 +215,7 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst) -> Expr {
 
         // encode the result value
         stmts.push(parse_quote! {
-            result = encode_with_len(&rtn);
+            result_ptr = alloc_and_encode(&rtn);
         });
 
         // after user function invocation, update the component state

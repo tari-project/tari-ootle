@@ -24,6 +24,10 @@
 mod no_std {
     extern crate alloc;
 
+    pub mod alloc_internal {
+        pub use super::alloc::alloc::{Layout, alloc, alloc_zeroed, dealloc};
+    }
+
     pub use alloc::{boxed, format, str, string, vec};
     pub use core::{
         any,
@@ -89,6 +93,10 @@ mod rust_std {
         write,
         writeln,
     };
+
+    pub mod alloc_internal {
+        pub use ::std::alloc::{Layout, alloc, alloc_zeroed, dealloc};
+    }
 
     pub mod collections {
         pub use ::std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, btree_map, btree_set};

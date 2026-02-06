@@ -22,7 +22,7 @@
 
 use log::*;
 use serde::{Serialize, de::DeserializeOwned};
-use tari_bor::{ByteCounter, decode_exact, encode_with_len_to_writer, encoded_len};
+use tari_bor::{ByteCounter, decode_exact, encode_into_writer, encoded_len};
 use tari_engine_types::{indexed_value::IndexedValue, instruction_result::InstructionResult, limits};
 use tari_template_abi::{CallInfo, EngineOp, FunctionDef, TemplateDef, func_hasher::hash_function_name, version};
 use tari_template_lib::{
@@ -78,20 +78,21 @@ impl WasmProcess {
         let imports = imports! {
             "env" => {
                 "tari_engine" => tari_engine,
+                "tari_debug" => Function::new_typed_with_env(store, &fn_env, debug_handler),
                 "on_panic" => Function::new_typed_with_env(store,&fn_env, on_panic_handler),
             }
         };
         let instance = Instance::new(store, module.wasm_module(), &imports)?;
         let memory = instance.exports.get_memory("memory")?.clone();
-        let mem_alloc = instance.exports.get_typed_function(store, "tari_alloc")?;
-        // let mem_free = instance.exports.get_typed_function(store, "tari_free")?;
+        let tari_alloc = instance.exports.get_typed_function(store, "tari_alloc")?;
+        let tari_free = instance.exports.get_typed_function(store, "tari_free")?;
         fn_env
             .as_mut(store)
             .set_memory(memory.clone())
-            .set_alloc_funcs(mem_alloc.clone());
+            .set_alloc_funcs(tari_alloc.clone(), tari_free.clone());
 
         // Also set these for the local copy
-        env.set_memory(memory).set_alloc_funcs(mem_alloc);
+        env.set_memory(memory).set_alloc_funcs(tari_alloc, tari_free);
 
         Ok(Self { module, env, instance })
     }
@@ -287,7 +288,7 @@ impl WasmProcess {
         let ptr = env_mut.alloc(&mut store, len as u32)?;
         // Encode response directly into the WASM memory. The WASM code is responsible for freeing it.
         let mut writer = env_mut.memory_writer(&mut store, ptr)?;
-        encode_with_len_to_writer(&mut writer, &resp)?;
+        encode_into_writer(&resp, &mut writer)?;
         Ok(ptr)
     }
 
@@ -348,12 +349,11 @@ impl Invokable<Store> for WasmProcess {
                 // SAFETY: WasmProcess is not used concurrently
                 let value = unsafe {
                     self.env
-                        .with_memory_with_embedded_len(store, return_ptr.offset(), IndexedValue::from_raw)??
+                        .with_memory_embedded_len(store, return_ptr.offset(), IndexedValue::from_raw)??
                 };
 
-                // Free allocated memory results in an unreachable error. The memory is cleaned up when the template
-                // instance is dropped. TODO: investigate
-                // self.env.free(store, return_ptr)?;
+                // Free allocated memory containing the result
+                self.env.free(store, return_ptr)?;
 
                 self.env.state().interface().validate_return_value(&value)?;
                 self.env
@@ -379,6 +379,20 @@ impl Invokable<Store> for WasmProcess {
                 error!(target: LOG_TARGET, "Error calling function: {}", err);
                 Err(err.into())
             },
+        }
+    }
+}
+
+fn debug_handler<T: Send + 'static>(mut env: FunctionEnvMut<WasmEnv<T>>, arg_ptr: WasmPtr<u8>, arg_len: u32) {
+    const WASM_DEBUG_LOG_TARGET: &str = "tari::ootle::wasm";
+    let (state, mut store) = env.data_and_store_mut();
+
+    // SAFETY: WasmProcess is not used concurrently
+    unsafe {
+        if let Err(err) = state.with_memory_slice(&mut store, arg_ptr, arg_len, |msg| {
+            eprintln!("DEBUG: {}", String::from_utf8_lossy(msg));
+        }) {
+            log::error!(target: WASM_DEBUG_LOG_TARGET, "Failed to read from memory: {}", err);
         }
     }
 }

@@ -108,7 +108,7 @@ fn serialize_deserialize() {
     let deser_proof = serde_json::from_str(&json).unwrap();
     assert_eq!(proof, deser_proof);
 
-    let cbor = tari_bor::encode_with_len(&proof);
-    let deser_proof = tari_bor::decode_exact(&cbor[4..]).unwrap();
+    let cbor = tari_bor::encode(&proof).unwrap();
+    let deser_proof = tari_bor::decode_exact(&cbor).unwrap();
     assert_eq!(proof, deser_proof);
 }

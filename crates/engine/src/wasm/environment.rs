@@ -25,7 +25,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
 };
 
-use tari_template_abi::{ABI_TEMPLATE_DEF_GLOBAL_NAME, TemplateDef};
+use tari_template_abi::{ABI_TEMPLATE_DEF_GLOBAL_NAME, TemplateDef, WASM_PTR_SIZE};
 use wasmer::{
     AsStoreMut,
     AsStoreRef,
@@ -43,12 +43,15 @@ use crate::{
     wasm::{WasmExecutionError, mem_writer::MemWriter},
 };
 
+pub(crate) type WasmAllocFn = TypedFunction<u32, WasmPtr<u8>>;
+pub(crate) type WasmFreeFn = TypedFunction<WasmPtr<u8>, ()>;
+
 #[derive(Clone)]
 pub struct WasmEnv<T> {
     memory: Option<Memory>,
     state: T,
-    mem_alloc: Option<TypedFunction<u32, WasmPtr<u8>>>,
-    // mem_free: Option<TypedFunction<u32, ()>>,
+    mem_alloc: Option<WasmAllocFn>,
+    mem_free: Option<WasmFreeFn>,
     last_panic: Arc<Mutex<Option<String>>>,
     last_engine_error: Arc<Mutex<Option<RuntimeError>>>,
 }
@@ -59,7 +62,7 @@ impl<T> WasmEnv<T> {
             memory: None,
             state,
             mem_alloc: None,
-            // mem_free: None,
+            mem_free: None,
             last_panic: Arc::new(Mutex::new(None)),
             last_engine_error: Arc::new(Mutex::new(None)),
         }
@@ -78,14 +81,14 @@ impl<T> WasmEnv<T> {
         Ok(ptr)
     }
 
-    // pub(super) fn free<S: AsStoreMut>(&self, store: &mut S, ptr: WasmPtr<u8>) -> Result<(), WasmExecutionError> {
-    //     let mem_free = self
-    //         .mem_free
-    //         .as_ref()
-    //         .ok_or_else(|| WasmExecutionError::MissingAbiFunction { function: "tari_free" })?;
-    //     mem_free.call(store, ptr.offset())?;
-    //     Ok(())
-    // }
+    pub(super) fn free<S: AsStoreMut>(&self, store: &mut S, ptr: WasmPtr<u8>) -> Result<(), WasmExecutionError> {
+        let mem_free = self
+            .mem_free
+            .as_ref()
+            .ok_or_else(|| WasmExecutionError::MissingAbiFunction { function: "tari_free" })?;
+        mem_free.call(store, ptr)?;
+        Ok(())
+    }
 
     fn last_panic_mut(&self) -> MutexGuard<'_, Option<String>> {
         self.last_panic.lock().expect("last_panic poisoned")
@@ -117,14 +120,16 @@ impl<T> WasmEnv<T> {
             .get_global(ABI_TEMPLATE_DEF_GLOBAL_NAME)?
             .get(store)
             .i32()
-            .ok_or(WasmExecutionError::ExportError(ExportError::IncompatibleType))? as u32;
+            .ok_or(WasmExecutionError::ExportError(ExportError::IncompatibleType))?;
 
+        // with_memory_embedded_len expects a pointer to the payload (i.e. after the length prefix), so we need to add
+        // the size of the length prefix to the pointer
+        let offset_ptr = ptr as u32 + WASM_PTR_SIZE as u32;
         // Load ABI from memory
         // SAFETY: WasmEnv is not used concurrently
         unsafe {
-            self.with_memory_with_embedded_len(store, ptr, |data| {
-                tari_bor::decode(data).map_err(WasmExecutionError::AbiDecodeError)
-            })?
+            self.with_memory_embedded_len(store, offset_ptr, tari_bor::decode)?
+                .map_err(WasmExecutionError::AbiTemplateDefDecodeError)
         }
     }
 
@@ -162,16 +167,16 @@ impl<T> WasmEnv<T> {
             .checked_add(len as usize)
             .ok_or(WasmExecutionError::MemoryPointerOutOfRange {
                 size: slice.len() as u64,
-                pointer: u64::from(ptr.offset()),
-                len: u64::from(len),
+                pointer: ptr.offset(),
+                len,
             })?;
 
         let slice = slice
             .get(start..end)
             .ok_or(WasmExecutionError::MemoryPointerOutOfRange {
                 size: slice.len() as u64,
-                pointer: u64::from(ptr.offset()),
-                len: u64::from(len),
+                pointer: ptr.offset(),
+                len,
             })?;
 
         Ok(callback(slice))
@@ -186,7 +191,7 @@ impl<T> WasmEnv<T> {
     /// modified while the slice is in use.
     /// It is undefined behaviour to modify the memory contents in any way including by calling a wasm
     /// function that writes to the memory or by resizing the memory.
-    pub(super) unsafe fn with_memory_with_embedded_len<S: AsStoreRef, F: FnMut(&[u8]) -> R, R>(
+    pub(super) unsafe fn with_memory_embedded_len<S: AsStoreRef, F: FnMut(&[u8]) -> R, R>(
         &self,
         store: &mut S,
         offset: u32,
@@ -194,20 +199,24 @@ impl<T> WasmEnv<T> {
     ) -> Result<R, WasmExecutionError> {
         let memory = self.get_memory()?;
         let view = memory.view(store);
-        let len = read_len_from_memory(&view, offset)?;
-        let start = offset
-            .checked_add(4)
+        let len_prefix_ptr =
+            offset
+                .checked_sub(WASM_PTR_SIZE as u32)
+                .ok_or(WasmExecutionError::MemoryPointerOutOfRange {
+                    size: view.data_size(),
+                    pointer: offset,
+                    len: WASM_PTR_SIZE as u32,
+                })?;
+        // alloc_len = size_of<u32> + payload_len
+        let alloc_len = read_len_from_memory(&view, len_prefix_ptr)?;
+
+        let start = offset;
+        let end = len_prefix_ptr
+            .checked_add(alloc_len)
             .ok_or(WasmExecutionError::MemoryPointerOutOfRange {
                 size: view.data_size(),
-                pointer: u64::from(offset),
-                len: 4,
-            })?;
-        let end = start
-            .checked_add(len)
-            .ok_or(WasmExecutionError::MemoryPointerOutOfRange {
-                size: view.data_size(),
-                pointer: u64::from(start),
-                len: u64::from(len),
+                pointer: start,
+                len: alloc_len,
             })?;
 
         let slice = unsafe { view.data_unchecked() };
@@ -215,8 +224,8 @@ impl<T> WasmEnv<T> {
             .get(start as usize..end as usize)
             .ok_or(WasmExecutionError::MemoryPointerOutOfRange {
                 size: slice.len() as u64,
-                pointer: u64::from(start),
-                len: u64::from(len),
+                pointer: start,
+                len: alloc_len,
             })?;
 
         Ok(callback(slice))
@@ -248,13 +257,9 @@ impl<T> WasmEnv<T> {
         self
     }
 
-    pub fn set_alloc_funcs(
-        &mut self,
-        mem_alloc: TypedFunction<u32, WasmPtr<u8>>,
-        // mem_free: TypedFunction<u32, ()>,
-    ) -> &mut Self {
+    pub fn set_alloc_funcs(&mut self, mem_alloc: WasmAllocFn, mem_free: WasmFreeFn) -> &mut Self {
         self.mem_alloc = Some(mem_alloc);
-        // self.mem_free = Some(mem_free);
+        self.mem_free = Some(mem_free);
         self
     }
 }
@@ -264,6 +269,7 @@ impl<T: Debug> Debug for WasmEnv<T> {
         f.debug_struct("WasmEnv")
             .field("memory", &"LazyInit<Memory>")
             .field("tari_alloc", &" LazyInit<NativeFunc<(i32), (i32)>")
+            .field("tari_free", &" LazyInit<NativeFunc<(i32), ()>")
             .field("state", &self.state)
             .finish()
     }

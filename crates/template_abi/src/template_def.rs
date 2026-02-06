@@ -57,6 +57,27 @@ impl TemplateDef {
             TemplateDef::V1(def) => &def.functions,
         }
     }
+
+    /// Encodes the template definition with a length prefix, which is required for passing data to the engine in wasm.
+    /// The length prefix is a 4-byte little-endian integer representing the total length of the encoded data (including
+    /// the prefix itself).
+    #[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
+    pub fn encode_for_wasm_embedding(&self) -> Result<Vec<u8>, tari_bor::BorError> {
+        use std::io::Write;
+
+        use tari_bor::{encode_into_writer, encoded_len};
+
+        use crate::WASM_PTR_SIZE;
+        let data_len = encoded_len(self)?;
+        // for the length prefix
+        let mut buf = Vec::with_capacity(data_len + WASM_PTR_SIZE);
+        let full_len = data_len + WASM_PTR_SIZE;
+        let writer = &mut buf;
+        // length prefix
+        writer.write_all(&(full_len as u32).to_le_bytes())?;
+        encode_into_writer(self, writer)?;
+        Ok(buf)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

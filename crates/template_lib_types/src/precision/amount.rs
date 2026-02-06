@@ -541,9 +541,10 @@ impl PartialOrd<Amount> for PrecisionAmount {
 
 #[cfg(feature = "borsh")]
 mod borsh_impl {
-    use borsh::BorshSerialize;
+    use borsh::{BorshSerialize, io};
+
     impl BorshSerialize for super::PrecisionAmount {
-        fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        fn serialize<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
             self.inner_value().serialize(writer)
         }
     }

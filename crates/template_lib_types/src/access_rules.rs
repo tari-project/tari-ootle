@@ -155,7 +155,7 @@ impl ComponentAccessRules {
     }
 
     /// Add a new access rule for a particular method in the component
-    pub fn method<S: Into<String>>(mut self, name: S, rule: AccessRule) -> Self {
+    pub fn method<S: Into<String>>(self, name: S, rule: AccessRule) -> Self {
         self.add_method_rule(name, rule)
     }
 

@@ -230,7 +230,7 @@ pub enum ResourceAction {
     UpdateNonFungibleData,
     /// Get the total supply of a resource
     GetTotalSupply,
-    /// Get the [ResourceInfo] of a resource
+    /// Get the [ResourceInfo](tari_template_lib_types::ResourceType) of a resource
     GetResourceInfo,
     /// Gets a non-fungible resource by its ID
     GetNonFungible,

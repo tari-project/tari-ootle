@@ -20,6 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+//! This crate provides the `template` procedural macro which generates the necessary boilerplate code to make a Rust
+//! module work as a Tari Ootle template. The `template` macro generates the template definition, ABI functions and
+//! dispatcher code from annotated template code.
+
 mod template;
 
 use proc_macro::TokenStream;

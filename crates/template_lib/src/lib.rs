@@ -60,11 +60,11 @@
 //!    }
 //!
 //!    impl MyCounter {
-//!     /// A simple constructor.
-//!     /// NOTE: this is a convenience constructor that implicitly creates a component with some defaults. These defaults are restrictive for many use cases
-//!     /// for e.g. all component methods are only callable by the component owner (i.e. the same signer that created the component must sign the transaction
-//!     /// to call any method).
-//!     /// To see how to customise this, see the `custom` constructor below.
+//!      /// A simple constructor.
+//!      /// NOTE: this is a convenience constructor that implicitly creates a component with some defaults. These defaults are restrictive for many use cases
+//!      /// for e.g. all component methods are only callable by the component owner (i.e. the same signer that created the component must sign the transaction
+//!      /// to call any method).
+//!      /// To see how to customise this, see the `custom` constructor below.
 //!      pub fn new() -> Self {
 //!          Self {
 //!             counter: 0,
@@ -73,13 +73,13 @@
 //!          }
 //!      }
 //!
-//!     /// This constructor provides more control over the component configuration.
-//!     ///
-//!     /// ## Arguments
-//!     /// - `address`: An component address allocation. This allows a single transaction to both create and call onto the created component without knowing the component address in advance.
-//!     /// - `access_rules`: Custom method access rules for the component. All methods referenced in the access rules must be defined on the component or the transaction will fail.
-//!     /// - `owner_rule`: Custom owner rule for the component. The owner of a component is able to change access rules and call all methods. Setting `OwnerRule::None` means the component has no owner and all access rules are immutable.
-//!     pub fn custom(address: ComponentAddressAllocation, access_rules: ComponentAccessRules, owner_rule: OwnerRule) -> Component<Self> {
+//!      /// This constructor provides more control over the component configuration.
+//!      ///
+//!      /// ## Arguments
+//!      /// - `address`: An component address allocation. This allows a single transaction to both create and call onto the created component without knowing the component address in advance.
+//!      /// - `access_rules`: Custom method access rules for the component. All methods referenced in the access rules must be defined on the component or the transaction will fail.
+//!      /// - `owner_rule`: Custom owner rule for the component. The owner of a component is able to change access rules and call all methods. Setting `OwnerRule::None` means the component has no owner and all access rules are immutable.
+//!      pub fn custom(address: ComponentAddressAllocation, access_rules: ComponentAccessRules, owner_rule: OwnerRule) -> Component<Self> {
 //!        // Call `new` which initialises the component state. NOTE that this is a completely normal function call. The component
 //!        // is not yet created on-chain.
 //!        let component = Self::new();
@@ -90,19 +90,20 @@
 //!           .with_owner_rule(owner_rule)
 //!           // Create the component on-chain
 //!           .create()
-//!    }
+//!      }
 //!
-//!   /// Increment the counter by 1. The `CallMethod` instruction is used to invoke this method.
-//!   /// This method is callable as per the access rules defined for the component.
-//!   pub fn increment(&mut self) {
-//!     self.counter += 1;
+//!     /// Increment the counter by 1. The `CallMethod` instruction is used to invoke this method.
+//!     /// This method is callable as per the access rules defined for the component.
+//!     pub fn increment(&mut self) {
+//!       self.counter += 1;
+//!     }
+//!
+//!     /// A simple associated function that returns a string. The `CallFunction` instruction is used to invoke this function.
+//!     /// Apart from defining constructors, associated functions can provide any shared functionality callable by anyone.
+//!     pub fn some_function(name: String, number: u64) -> String {
+//!        format!("Hello {name}, the number is {number}")
+//!     }
 //!   }
-//!
-//!    /// A simple associated function that returns a string. The `CallFunction` instruction is used to invoke this function.
-//!    /// Apart from defining constructors, associated functions can provide any shared functionality callable by anyone.
-//!    pub fn some_function(name: String, number: u64) -> String {
-//!       format("Hello {name}, the number is {number}")
-//!    }
 //! }
 //! ```
 //!

@@ -1,6 +1,21 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+//! This crate contains types that are used across the Tari Template ecosystem.
+//!
+//! This includes:
+//! - Substate address types (e.g. `ComponentAddress`, `ResourceAddress`, `NonFungibleAddress` etc.)
+//! - Auth and access rules (e.g. `AccessRule`, `OwnerRule`)
+//! - a 128-bit unsigned `Amount` type and a 192-bit signed `PrecisionAmount` type (if the `precision` feature is
+//!   enabled)
+//! - stealth crypto types and traits (e.g. `EncryptedData`, `StealthTransferStatement` etc.)
+//! - various utility types and traits (e.g. `Metadata`, `Hash`, `MaxBytes`, `MaxString` etc.)
+//!
+//! Include this crate when you need these types but aren't authoring a template (e.g. building a wallet).
+//! For template authors, you typically want to use the `tari_template_lib` crate instead, which re-exports this crate.
+//!
+//! `no_std` is supported by excluding the `std` feature and enabling the `alloc` feature.
+
 // Support no_std environments
 #![cfg_attr(not(feature = "std"), no_std)]
 

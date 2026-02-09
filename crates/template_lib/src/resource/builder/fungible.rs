@@ -315,7 +315,7 @@ impl FungibleResourceBuilder {
     ///    .add_metadata("CharacterLvl", "99")
     /// .build();
     /// ```
-    pub fn metadata<K: Into<String>, V: Into<String>>(mut self, key: K, value: V) -> Self {
+    pub fn metadata<K: Into<String>, V: Into<String>>(self, key: K, value: V) -> Self {
         self.add_metadata(key, value)
     }
 

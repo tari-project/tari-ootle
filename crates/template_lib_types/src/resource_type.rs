@@ -95,6 +95,7 @@ mod parsing {
 #[cfg(feature = "std")]
 pub use parsing::ParseResourceTypeError;
 
+/// Info for a resource, including its type and divisibility.
 #[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct ResourceInfo {
     pub resource_type: ResourceType,

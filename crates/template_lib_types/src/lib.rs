@@ -1,6 +1,14 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+// Support no_std environments
+#![cfg_attr(not(feature = "std"), no_std)]
+// This can be uncommented if you need to check for mistaken use of the std crate
+// Unfortunately, to always use this, we'd need to include the rust prelude where ever ts_rs is used.
+// #![no_std]
+// #[cfg(feature = "std")]
+// extern crate std;
+
 //! This crate contains types that are used across the Tari Template ecosystem.
 //!
 //! This includes:
@@ -15,15 +23,6 @@
 //! For template authors, you typically want to use the `tari_template_lib` crate instead, which re-exports this crate.
 //!
 //! `no_std` is supported by excluding the `std` feature and enabling the `alloc` feature.
-
-// Support no_std environments
-#![cfg_attr(not(feature = "std"), no_std)]
-
-// This can be uncommented if you need to check for mistaken use of the std crate
-// TODO: to always use this, we'd need to include the rust prelude where ever ts_rs is used.
-// #![no_std]
-// #[cfg(feature = "std")]
-// extern crate std;
 
 #[cfg(not(any(feature = "std", feature = "alloc")))]
 compile_error!("Either feature `std` or `alloc` must be enabled for this crate.");

@@ -433,8 +433,7 @@ impl ResourceManager {
     ///
     /// - `T`: The type of the immutable metadata. Must implement [`Serialize`].
     /// - `U`: The type of the mutable data. Must implement [`Serialize`].
-    /// - `F`: A closure that returns [`Some(NonFungibleId)`] for each new token, or [`None`] to stop the minting
-    ///   process.
+    /// - `F`: A closure that returns `Some(NonFungibleId)` for each new token, or [`None`] to stop the minting process.
     ///
     /// # Arguments
     ///
@@ -766,12 +765,14 @@ impl ResourceManager {
     ///
     /// If the resource has total supply tracking enabled, the function will return the total supply of tokens.
     ///
-    /// If you want to check if the resource has total supply tracking enabled, use [`total_supply_opt`].
+    /// If you want to check if the resource has total supply tracking enabled, use
+    /// [`total_supply_opt`](Self::total_supply_opt).
     ///
     /// # Panics
     ///
     /// Panics if:
-    /// * the resource does not have total supply tracking enabled. You can check this with [`total_supply_opt`].
+    /// * the resource does not have total supply tracking enabled. You can check this with
+    ///   [`total_supply_opt`](Self::total_supply_opt).
     ///
     /// # Examples
     ///

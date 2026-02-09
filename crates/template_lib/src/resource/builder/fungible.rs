@@ -28,10 +28,10 @@ use crate::{
 ///
 /// # Usage
 ///
-/// You typically start by creating a new builder via [`ResourceBuilder::public_fungible()`],
-/// then chain configuration methods like `.with_owner_rule()`, `.mintable()`, or
-/// `.with_token_symbol()`, and finally call `.build()` or `.initial_supply()` to create
-/// the resource.
+/// You typically start by creating a new builder via
+/// [`ResourceBuilder::public_fungible()`](super::ResourceBuilder::public_fungible), then chain configuration methods
+/// like `.with_owner_rule()`, `.mintable()`, or `.with_token_symbol()`, and finally call `.build()` or
+/// `.initial_supply()` to create the resource.
 ///
 /// # Examples
 ///

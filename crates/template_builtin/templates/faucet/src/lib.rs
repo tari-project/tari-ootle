@@ -41,7 +41,7 @@ mod template {
             // The faucet adds the revealed amount to the transfer
             let revealed_bucket = self.vault.withdraw(amount);
             self.vault
-                .to_resource_manager()
+                .get_resource_manager()
                 .stealth_transfer_with_opt_input_bucket(transfer, Some(revealed_bucket))
         }
     }

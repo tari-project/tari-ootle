@@ -3,7 +3,10 @@
 
 use std::collections::HashSet;
 
-use tari_ootle_common_types::SubstateRequirement;
+use tari_ootle_common_types::{
+    SubstateRequirement,
+    engine_types::{limits, published_template::TemplateBlob},
+};
 use tari_ootle_transaction::{TransactionBuilder, UnsignedTransaction, args};
 use tari_template_lib_types::{Amount, ResourceAddress, constants::XTR};
 
@@ -107,6 +110,18 @@ impl<'a, P: Provider> AccountInvokeBuilder<'a, P> {
             .call_method(from_component_addr, "withdraw", args![resource_address, amount])
             .put_last_instruction_output_on_workspace(&bucket_name)
             .create_account_with_bucket(*to.account_public_key(), bucket_name);
+        self
+    }
+
+    // TODO: move common builder code into a builder trait
+    pub fn publish_template<T: TryInto<TemplateBlob>>(mut self, template: T) -> Self {
+        let Ok(template) = template.try_into() else {
+            panic!(
+                "Template blob exceeds maximum size of {} bytes",
+                limits::ENGINE_LIMITS.max_template_binary_size_bytes
+            );
+        };
+        self.builder = self.builder.publish_template(template);
         self
     }
 }

@@ -9,12 +9,14 @@ This guide will walk you through setting up your development environment and cre
 
 Before you begin, ensure you have the following installed:
 
--   **Rust:** The Rust programming language and Cargo package manager. We recommend using `rustup` to manage your Rust toolchains. You'll need the `wasm32-unknown-unknown` target.
-    ```bash
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-    rustup target add wasm32-unknown-unknown
+-   **Rust:** The Rust programming language and Cargo package manager. We recommend using [`rustup`](https://rustup.rs) to manage your Rust toolchains.
+You'll need the `wasm32-unknown-unknown` target.
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup target add wasm32-unknown-unknown
     ```
--   **Tari Ootle CLI (Optional but Recommended):** For local testing and deployment, the Tari Ootle Command Line Interface will be invaluable. Refer to the main Tari documentation for installation instructions.
+-   **Tari Ootle CLI (Optional but Recommended):** For local testing and deployment, we suggest using the Tari Ootle CLI.
+     Refer to the [tari CLI repo](https://github.com/tari-project/tari-cli) for installation instructions.
 
 ### 1. Create a New Template Project
 
@@ -27,7 +29,7 @@ cd my_first_template
 
 ### 2. Configure `Cargo.toml`
 
-Open `Cargo.toml` and add `tari_template_lib` as a dependency. You'll want to enable the `derive` and `macro` features. Ensure you're using the correct version compatible with your Tari Ootle environment.
+Open `Cargo.toml` and add `tari_template_lib` as a dependency. Ensure you're using the correct version compatible with your Tari Ootle environment.
 
 ```toml
 [package]
@@ -36,8 +38,21 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# Replace `0.15.0` with the appropriate version
-tari_template_lib = { version = "0.15.0", default-features = false, features = ["macro"] }
+# Replace `0.15.0` with the latest version if necessary
+tari_template_lib = { version = "0.15.0" }
+
+# Important! You must specify the crate type as `cdylib` to compile to WASM
+[lib]
+crate-type = ["cdylib"]
+
+# Optimize for size in release builds.
+[profile.release]
+opt-level = 's'     # Optimize for size.
+lto = true          # Enable Link Time Optimization.
+codegen-units = 1   # Reduce number of codegen units to increase optimizations.
+panic = 'abort'     # Abort on panic.
+strip = "debuginfo" # Strip debug info.
+
 ```
 
 ### 3. Write Your First Template
@@ -50,18 +65,21 @@ use tari_template_lib::prelude::*;
 // Define our template
 #[template]
 mod MyFirstTemplate {
-    pub struct MyFirstTemplate { }
+    use super::*;
+
+    pub struct MyFirstTemplate {
+        name: String
+    }
 
     impl MyFirstTemplate {
         // Constructor function that creates a new component
-        pub fn new() -> Self {
-            Self {}
+        pub fn new(name: String) -> Self {
+            Self { name }
         }
 
         // A public method that logs a message
-        pub fn hello_world(&self) -> String {
-            info!("Hello from MyFirstTemplate!");
-            "Hello World from Tari Ootle Template!".to_string()
+        pub fn hello_world(&self) {
+            info!("Hello {} from MyFirstTemplate!", self.name);
         }
     }
 }
@@ -74,8 +92,8 @@ mod MyFirstTemplate {
 -   `mod MyFirstTemplate { ... }`: Defines your template module. The name of the module will be used by the validator node to identify your template.
 -   `pub struct MyFirstTemplate { }`: This is the component struct. It holds the component's state. In this simple example, there is no state.
 -   `impl MyFirstTemplate { ... }`: Implements methods for your component.
--   `pub fn new() -> Self`: This is a constructor. It's conventionally used to create and initialize an instance of your component.
--   `pub fn hello_world(&self) -> String`: A public method callable from outside the component. `info!` is a macro for logging.
+-   `pub fn new(name: String) -> Self`: This is a constructor that initializes the component with a name. NOTE: all functions that return Self implicitly create a component instance on-chain when invoked.
+-   `pub fn hello_world(&self) -> String`: A public method callable using the CallMethod transaction instruction. `info!` is a macro that creates a log entry in the transaction receipt.
 
 ### 4. Compile Your Template
 
@@ -85,9 +103,10 @@ Compile your template to WASM:
 cargo build --target wasm32-unknown-unknown --release
 ```
 
-This will produce a `my_first_template.wasm` file in `target/wasm32-unknown-unknown/release/`. This WASM file is your deployable template.
+This will produce a `my_first_template.wasm` file in `target/wasm32-unknown-unknown/release/`. This WASM file is your deployable template. To deploy a template you'll need to create a transaction that has the `PublishTemplate` instruction and pays the necessary fees. The Tari Ootle CLI can handle this for you,
+or you can use [ootle.rs](https://docs.rs/ootle-rs/latest/ootle-rs/) to create and sign transactions programmatically.
 
 ### Next Steps
 
--   Learn how to deploy and interact with your template using the Tari Ootle CLI.
+-   Learn how to create, build and deploy your template using the [Tari Ootle CLI](/guides/cli).
 -   Explore more advanced features in the [Writing Templates guide](/guides/writing-templates/).

@@ -70,8 +70,12 @@ pub use crate::{
     caller_context::CallerContext,
     component::{Component, ComponentManager},
     consensus::Consensus,
+    debug,
+    error,
     events::emit_event,
+    info,
     invoke_args as args,
+    log,
     models::{
         Account,
         Bucket,
@@ -90,6 +94,5 @@ pub use crate::{
     template::{BuiltinTemplate, TemplateManager},
     types,
     types::{Amount, amount, crypto},
+    warn,
 };
-#[cfg(target_arch = "wasm32")]
-pub use crate::{debug, error, info, log, warn};

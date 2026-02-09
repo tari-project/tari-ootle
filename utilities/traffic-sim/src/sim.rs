@@ -292,7 +292,7 @@ impl TrafficSim {
             .for_network(exchange_wallet.network.as_byte())
             .pay_fee_from_component(*account.component_address(), 2000u64)
             .call_function(stablecoin_template, "instantiate", args![
-                amount!["10000000000000000000000000000"],
+                amount![10000000000000000000000000000],
                 "SSC",
                 metadata!(
                     "provider_name" => "Simcoin",

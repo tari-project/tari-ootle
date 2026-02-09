@@ -12,4 +12,4 @@ serde = { version = "1.0", default-features = false, features = ["derive", "allo
 
 
 [lib]
-crate-type = ["cdylib", "lib"]
+crate-type = ["cdylib"]

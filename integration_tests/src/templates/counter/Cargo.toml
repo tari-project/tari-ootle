@@ -17,6 +17,6 @@ panic = 'abort'     # Abort on panic.
 strip = "debuginfo" # Strip debug info.
 
 [lib]
-crate-type = ["cdylib", "lib"]
+crate-type = ["cdylib"]
 
 

@@ -17,8 +17,9 @@ export default defineConfig({
 					label: 'Guides',
 					items: [
 						{ label: 'Getting Started', link: '/guides/getting-started/' },
+						{ label: 'Tari Cli', link: '/guides/cli/' },
 						{ label: 'Writing Templates', link: '/guides/writing-templates/' },
-						{ label: 'Resources and Components', link: '/guides/resources-and-components/' },
+						{ label: 'Resources', link: '/guides/resources/' },
 						{ label: 'Authorization and Access', link: '/guides/authorization-and-access/' },
 						{ label: 'Handling Events', link: '/guides/handling-events/' },
 					],

@@ -290,7 +290,7 @@ impl FungibleResourceBuilder {
     /// ResourceBuilder::public_fungible()
     ///    .add_metadata("CharacterName", "Tari")
     ///    .add_metadata("CharacterType", "Mascot")
-    ///    .add_metadata("CharacterLvl", "99")
+    ///    .add_metadata("CharacterLvl", "98")
     /// .build();
     /// ```
     pub fn add_metadata<K: Into<String>, V: Into<String>>(mut self, key: K, value: V) -> Self {
@@ -301,18 +301,19 @@ impl FungibleResourceBuilder {
     /// Adds a new metadata entry to the resource
     ///
     /// Allows you to add a key-value pair to the resource's metadata.
+    /// This is an alias for `.add_metadata()`.
     ///
     /// # Notes
     ///
-    /// `.add_metadata()` will override any existing metadata with the same key.
+    /// `.metadata()` will override any existing metadata with the same key.
     ///
     /// # Examples
     /// ```rust, ignore
     /// use tari_template_lib::resource::builder::ResourceBuilder;
     /// ResourceBuilder::public_fungible()
-    ///    .add_metadata("CharacterName", "Tari")
-    ///    .add_metadata("CharacterType", "Mascot")
-    ///    .add_metadata("CharacterLvl", "99")
+    ///    .metadata("CharacterName", "Tari")
+    ///    .metadata("CharacterType", "Mascot")
+    ///    .metadata("CharacterLvl", "99")
     /// .build();
     /// ```
     pub fn metadata<K: Into<String>, V: Into<String>>(self, key: K, value: V) -> Self {

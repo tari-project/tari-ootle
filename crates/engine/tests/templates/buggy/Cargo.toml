@@ -11,7 +11,7 @@ tari_template_abi = { path = "../../../../template_abi", default-features = fals
 lol_alloc = "0.4.0"
 
 [lib]
-crate-type = ["cdylib", "lib"]
+crate-type = ["cdylib"]
 
 [features]
 no_template_def = []

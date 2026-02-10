@@ -33,7 +33,7 @@ use tari_ootle_common_types::{
     committee::Committee,
     hashing::ValidatorNodeBalancedMerkleTree,
 };
-use tari_template_lib_types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
+use tari_template_lib_types::{Hash, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 use super::{BlockHeaderModel, EpochData, TemplateStatus};
 use crate::{
@@ -220,7 +220,7 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         &self,
         tx: &mut Self::DbTransaction<'_>,
         max_epoch: Epoch,
-        block_hash: &FixedHash,
+        block_hash: &Hash,
     ) -> Result<BlockHeaderModel, Self::Error>;
     fn get_first_block_header_by_epoch(
         &self,

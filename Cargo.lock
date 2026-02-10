@@ -6487,7 +6487,7 @@ dependencies = [
  "tari_core",
  "tari_crypto",
  "tari_features",
- "tari_hashing",
+ "tari_hashing 5.2.1-pre.2",
  "tari_p2p",
  "tari_script",
  "tari_shutdown",
@@ -6651,7 +6651,7 @@ dependencies = [
  "tari_comms",
  "tari_comms_dht",
  "tari_crypto",
- "tari_hashing",
+ "tari_hashing 5.2.1-pre.2",
  "tari_max_size",
  "tari_p2p",
  "tari_script",
@@ -10709,7 +10709,7 @@ dependencies = [
  "subtle",
  "tari_common",
  "tari_crypto",
- "tari_hashing",
+ "tari_hashing 5.2.1-pre.2",
  "tari_max_size",
  "tari_utilities",
  "thiserror 2.0.17",
@@ -10843,7 +10843,7 @@ dependencies = [
  "tari_common_types",
  "tari_crypto",
  "tari_engine_types",
- "tari_hashing",
+ "tari_hashing 5.2.1-pre.2",
  "tari_ootle_common_types",
  "tari_sidechain",
  "tari_template_lib",
@@ -10893,7 +10893,7 @@ dependencies = [
  "tari_comms_rpc_macros",
  "tari_crypto",
  "tari_features",
- "tari_hashing",
+ "tari_hashing 5.2.1-pre.2",
  "tari_max_size",
  "tari_mmr",
  "tari_node_components",
@@ -10982,9 +10982,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tari_bor",
- "tari_common_types",
  "tari_crypto",
- "tari_hashing",
+ "tari_hashing 5.1.0",
  "tari_template_abi",
  "tari_template_lib",
  "thiserror 2.0.17",
@@ -11024,7 +11023,7 @@ dependencies = [
  "tari_base_node_client",
  "tari_common_types",
  "tari_epoch_manager",
- "tari_hashing",
+ "tari_hashing 5.2.1-pre.2",
  "tari_node_components",
  "tari_ootle_common_types",
  "tari_ootle_storage",
@@ -11040,6 +11039,18 @@ dependencies = [
 name = "tari_features"
 version = "5.2.1-pre.2"
 source = "git+https://github.com/tari-project/tari.git?rev=71c73ccfc47258f9451ae3250897d07241ce3e48#71c73ccfc47258f9451ae3250897d07241ce3e48"
+
+[[package]]
+name = "tari_hashing"
+version = "5.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24d04f19c9d313064405dc86e202c28322d724f451785fc72c2ce1bf36be5866"
+dependencies = [
+ "blake2",
+ "borsh",
+ "digest 0.10.7",
+ "tari_crypto",
+]
 
 [[package]]
 name = "tari_hashing"
@@ -11181,7 +11192,7 @@ dependencies = [
  "indexmap 2.13.0",
  "serde",
  "tari_crypto",
- "tari_hashing",
+ "tari_hashing 5.2.1-pre.2",
  "thiserror 2.0.17",
 ]
 
@@ -11263,7 +11274,7 @@ dependencies = [
  "primitive-types",
  "serde",
  "tari_common_types",
- "tari_hashing",
+ "tari_hashing 5.2.1-pre.2",
  "tari_transaction_components",
  "tari_utilities",
  "thiserror 2.0.17",
@@ -11309,7 +11320,7 @@ dependencies = [
  "tari_engine",
  "tari_engine_types",
  "tari_epoch_oracles",
- "tari_hashing",
+ "tari_hashing 5.2.1-pre.2",
  "tari_mmr",
  "tari_networking",
  "tari_ootle_common_types",
@@ -11345,7 +11356,7 @@ dependencies = [
  "tari_common_types",
  "tari_crypto",
  "tari_engine_types",
- "tari_hashing",
+ "tari_hashing 5.2.1-pre.2",
  "tari_mmr",
  "tari_template_lib",
  "tari_template_lib_types",
@@ -11443,7 +11454,7 @@ dependencies = [
  "tari_bor",
  "tari_crypto",
  "tari_engine_types",
- "tari_hashing",
+ "tari_hashing 5.2.1-pre.2",
  "tari_ootle_common_types",
  "tari_template_lib",
  "thiserror 2.0.17",
@@ -11499,7 +11510,7 @@ dependencies = [
  "tari_bor",
  "tari_crypto",
  "tari_engine_types",
- "tari_hashing",
+ "tari_hashing 5.2.1-pre.2",
  "tari_ootle_common_types",
  "tari_template_lib_types",
  "tari_utilities",
@@ -11786,7 +11797,7 @@ dependencies = [
  "serde",
  "tari_common_types",
  "tari_crypto",
- "tari_hashing",
+ "tari_hashing 5.2.1-pre.2",
  "tari_jellyfish",
  "tari_utilities",
  "thiserror 2.0.17",
@@ -11830,7 +11841,6 @@ dependencies = [
  "indexmap 2.13.0",
  "log",
  "serde",
- "tari_common_types",
  "tari_engine_types",
  "tari_jellyfish",
  "tari_ootle_common_types",
@@ -12041,7 +12051,7 @@ dependencies = [
  "tari_common",
  "tari_common_types",
  "tari_crypto",
- "tari_hashing",
+ "tari_hashing 5.2.1-pre.2",
  "tari_max_size",
  "tari_script",
  "tari_sidechain",
@@ -12076,7 +12086,7 @@ dependencies = [
  "tari_common_sqlite",
  "tari_common_types",
  "tari_crypto",
- "tari_hashing",
+ "tari_hashing 5.2.1-pre.2",
  "tari_script",
  "tari_service_framework",
  "tari_transaction_components",

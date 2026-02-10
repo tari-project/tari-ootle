@@ -30,7 +30,6 @@ use std::{
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use tari_bor::{BorError, decode, decode_exact, encode};
-use tari_common_types::types::FixedHash;
 use tari_template_lib::{
     prelude::STEALTH_TARI_RESOURCE_ADDRESS,
     types::{
@@ -103,7 +102,7 @@ impl Substate {
         decode(bytes)
     }
 
-    pub fn to_value_hash(&self) -> FixedHash {
+    pub fn to_value_hash(&self) -> Hash {
         hash_substate(self.substate_value(), self.version)
     }
 
@@ -112,7 +111,7 @@ impl Substate {
     }
 }
 
-pub fn hash_substate(substate: &SubstateValue, version: u32) -> FixedHash {
+pub fn hash_substate(substate: &SubstateValue, version: u32) -> Hash {
     substate_value_hasher32()
         .chain(substate)
         .chain(&version)

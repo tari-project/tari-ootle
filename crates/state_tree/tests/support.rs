@@ -1,7 +1,6 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_common_types::types::FixedHash;
 use tari_engine_types::{hashing::substate_value_hasher32, substate::SubstateId};
 use tari_jellyfish::{LeafKey, TreeHash, TreeStore, Version};
 use tari_ootle_common_types::VersionedSubstateId;
@@ -12,7 +11,7 @@ use tari_state_tree::{
     key_mapper::DbKeyMapper,
     memory_store::MemoryTreeStore,
 };
-use tari_template_lib_types::{ComponentAddress, ObjectKey};
+use tari_template_lib_types::{ComponentAddress, Hash, ObjectKey};
 
 pub fn make_value(seed: u8) -> VersionedSubstateId {
     VersionedSubstateId::new(
@@ -37,7 +36,7 @@ pub fn change_exact(substate_id: VersionedSubstateId, value: Option<Vec<u8>>) ->
     value
         .map(|value| SubstateTreeChange::Up {
             id: substate_id.clone(),
-            value_hash: FixedHash::new(hash_value(&value).into_array()),
+            value_hash: Hash::from(hash_value(&value).into_array()),
         })
         .unwrap_or_else(|| SubstateTreeChange::Down { id: substate_id })
 }

@@ -3,10 +3,13 @@
 
 use lazy_static::lazy_static;
 use ootle_byte_type::FromByteType;
-use tari_common_types::types::CommitmentFactory;
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
-    ristretto::{RistrettoSecretKey, bulletproofs_plus::BulletproofsPlusService, pedersen::PedersenCommitment},
+    ristretto::{
+        RistrettoSecretKey,
+        bulletproofs_plus::BulletproofsPlusService,
+        pedersen::{PedersenCommitment, extended_commitment_factory::ExtendedPedersenCommitmentFactory},
+    },
     tari_utilities::ByteArray,
 };
 use tari_template_lib::{prelude::SchnorrSignatureBytes, types::Amount};
@@ -23,16 +26,16 @@ pub const MAX_LAZY_BP_AGG_FACTORS: usize = 8;
 
 lazy_static! {
     /// Static reference to the default commitment factory. Each instance of CommitmentFactory requires a number of heap allocations.
-    static ref COMMITMENT_FACTORY: CommitmentFactory = CommitmentFactory::default();
+    static ref COMMITMENT_FACTORY: ExtendedPedersenCommitmentFactory = ExtendedPedersenCommitmentFactory::default();
     /// Static reference to the default range proof service. Each instance of RangeProofService requires a number of heap allocations.
     static ref RANGE_PROOF_AGG_1_SERVICE: BulletproofsPlusService =
-        BulletproofsPlusService::init(BP_BIT_LENGTH, 1, CommitmentFactory::default()).unwrap();
+        BulletproofsPlusService::init(BP_BIT_LENGTH, 1, ExtendedPedersenCommitmentFactory::default()).unwrap();
     static ref RANGE_PROOF_AGG_2_SERVICE: BulletproofsPlusService =
-        BulletproofsPlusService::init(BP_BIT_LENGTH, 2, CommitmentFactory::default()).unwrap();
+        BulletproofsPlusService::init(BP_BIT_LENGTH, 2, ExtendedPedersenCommitmentFactory::default()).unwrap();
     static ref RANGE_PROOF_AGG_4_SERVICE: BulletproofsPlusService =
-        BulletproofsPlusService::init(BP_BIT_LENGTH, 4, CommitmentFactory::default()).unwrap();
+        BulletproofsPlusService::init(BP_BIT_LENGTH, 4, ExtendedPedersenCommitmentFactory::default()).unwrap();
     static ref RANGE_PROOF_AGG_8_SERVICE: BulletproofsPlusService =
-        BulletproofsPlusService::init(BP_BIT_LENGTH, 8, CommitmentFactory::default()).unwrap();
+        BulletproofsPlusService::init(BP_BIT_LENGTH, 8, ExtendedPedersenCommitmentFactory::default()).unwrap();
 }
 
 pub fn get_static_range_proof_service(aggregation_factor: usize) -> &'static BulletproofsPlusService {
@@ -48,7 +51,7 @@ pub fn get_static_range_proof_service(aggregation_factor: usize) -> &'static Bul
     }
 }
 
-pub fn get_commitment_factory() -> &'static CommitmentFactory {
+pub fn get_commitment_factory() -> &'static ExtendedPedersenCommitmentFactory {
     &COMMITMENT_FACTORY
 }
 

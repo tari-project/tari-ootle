@@ -65,7 +65,7 @@ use tari_ootle_storage::{
         models::ValidatorNode,
     },
 };
-use tari_template_lib::types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
+use tari_template_lib::types::{Hash, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 use tari_utilities::{ByteArray, hex};
 
 use super::{models, models::DbValidatorNode};
@@ -945,7 +945,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         &self,
         tx: &mut Self::DbTransaction<'_>,
         max_epoch: Epoch,
-        block_hash: &FixedHash,
+        block_hash: &Hash,
     ) -> Result<BlockHeaderModel, Self::Error> {
         use crate::global::schema::block_headers;
 

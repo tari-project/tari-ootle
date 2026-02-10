@@ -4,10 +4,9 @@
 use std::{fmt, fmt::Display};
 
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::FixedHash;
 use tari_template_lib::{
     prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes},
-    types::EncryptedData,
+    types::{EncryptedData, Hash},
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
@@ -50,8 +49,7 @@ pub struct ClaimBurnOutputData {
 pub struct EncodedMerkleProof {
     #[serde(with = "ootle_serde::base64")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[borsh(serialize_with = "serialize_bytes")]
-    pub block_hash: FixedHash,
+    pub block_hash: Hash,
     #[serde(with = "ootle_serde::base64")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[borsh(serialize_with = "serialize_bytes")]

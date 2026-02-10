@@ -1,0 +1,139 @@
+---
+title: Using the Tari Ootle CLI
+description: Create, build, and deploy your Tari Ootle Templates using the command-line interface.
+---
+
+This guide will walk you through installing the Tari Ootle CLI and using it to create, build, and deploy your first Tari Ootle Template.
+The CLI is a convenient tool for managing your templates.
+
+### Installation
+
+To install the Tari Ootle CLI, you can use Cargo, the Rust package manager. Run the following command in your terminal:
+
+```bash
+cargo install tari-cli
+```
+
+### Creating a New Template Project
+
+To create a new template project workspace using the CLI, run the following command:
+
+```bash
+tari create my_first_template
+```
+
+The cli will prompt you to select a template type. For this example, choose the "basic" template.
+This template provides a simple starting point to help you get familiar with the structure of a Tari Ootle Template project.
+
+This will create a new directory called `my_first_template` with the necessary files and structure for a Tari Ootle Template project.
+
+### Adding a template to the workspace
+
+To add a template to your workspace, navigate to the `my_first_template` directory and run the following command:
+
+```bash
+tari add hello_world
+```
+
+Select the "empty" template type when prompted. This will create a new template called `hello_world` in the `templates` directory of your workspace.
+
+### Writing Your Template
+
+Open the `src/lib.rs` file in the `hello_world` template directory and replace it with the following code:
+
+```rust
+use tari_template_lib::prelude::*;
+
+
+#[template]
+mod hello_world {
+    use super::*;
+
+    pub struct HelloWorld {
+        // Add fields here
+        name: String
+    }
+
+    impl HelloWorld {
+        pub fn new(alloc: ComponentAddressAllocation, name: String) -> Component<Self> {
+            Component::new(Self { name }).with_address_allocation(alloc).create()
+        }
+
+        pub fn greet(&self) {
+            #[cfg(not(test))]
+            info!("Hello {}", self.name);
+        }
+    }
+}
+```
+
+NOTES:
+-  The `new` function is a constructor that creates a new component instance on-chain when invoked.
+- It takes a `ComponentAddressAllocation` argument. It is optional but recommended for templates to include this argument. It allows a caller to both instantiate the component and call it in one transaction without knowing the address ahead of time.
+- The `greet` method logs a greeting message that includes the name provided when the component was created. Logs are added to the transaction receipt and are publicly visible on the blockchain.
+
+### Testing Your Template
+
+Update the existing test in `tests/test.rs` to pass in a name when creating the `HelloWorld` component and call the `greet` method:
+
+```rust
+use tari_template_test_tooling::{TemplateTest, transaction::{args, Transaction}};
+
+#[test]
+fn it_works() {
+    let mut test = TemplateTest::new(".", ["."]);
+    //let mut test = TemplateTest::my_crate();
+
+    let template = test.get_template_address("HelloWorld");
+
+    let _result = test.execute_expect_success(
+        Transaction::builder_localnet()
+            .allocate_component_address("hello_world_component")
+            // **UPDATE** 1. Call the constructor function `new` with a name argument
+            .call_function(template, "new", args![Workspace("hello_world_component"), "Alice"])
+            .call_method("hello_world_component", "greet", args![])
+            .build_and_seal(test.secret_key()),
+        vec![test.owner_proof()]
+    );
+}
+```
+
+Run `cargo test` to execute the test and ensure that your template is working correctly.
+
+### Building and Deploying Your Template
+
+**PREREQUISITE**:
+Ensure you have a local Wallet daemon running with a default account funded with some XTR. You may have to configure `tari.config.toml` with the correct RPC endpoint
+if your wallet daemon is listening on a port other than 9000.
+
+```toml
+[network]
+# 9000 is the default port for the Wallet daemon's JSON-RPC interface
+wallet-daemon-jrpc-address = "http://127.0.0.1:9000/json_rpc"
+```
+
+NOTE: that the CLI only supports deploying to a Wallet daemon JSON-RPC for now. In future, we may implement signing using an HSM or Tari Universe.
+
+To build and deploy your template, run the following command in the root directory of your workspace:
+
+```bash
+tari publish hello_world
+```
+
+Output:
+```
+✅ Init configuration and directories
+✅ Refresh project templates repository
+✅ Refresh wasm templates repository
+✅ Building WASM template project tmptmp_2
+🔗 Connected to wallet version 0.20.0 (network: localnet)
+❓ No Account specified. Using default account: component_bb20db18ecb78711583aefe1523afac6b7e2df7afddd50bd452a3de8b0d770cd
+✅ WASM size: 148 KiB
+⚠️ Deploying this template costs 67599 XTR (estimated), are you sure to continue? yes
+✅ Publishing template. This may take while...
+⭐ Your new template's address: 3bba17783b1c1a3c76d1a70cfac1bb159352b5b109f38a71c405c40e8cd5d2d3
+```
+
+### Next Steps
+
+-   Explore more advanced features in the [Writing Templates guide](/guides/writing-templates/).

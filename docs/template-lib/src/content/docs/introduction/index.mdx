@@ -3,23 +3,19 @@ title: Overview
 description: An introduction to the Tari Ootle Template Library.
 ---
 
-The Tari Ootle Template Library (`tari_template_lib`) provides a set of ergonomic abstractions written in Rust that allow developers to build WebAssembly (WASM) smart contracts, referred to as **Templates**, for the Tari Ootle validator engine. This library simplifies interaction with the underlying Tari blockchain, enabling the creation of custom components, resources, and complex decentralized applications.
+The Tari Ootle Template Library (`tari_template_lib`) provides a set of ergonomic abstractions written in Rust that allow
+developers to build WebAssembly (WASM) smart contracts, referred to as **Templates**, for the Tari Ootle validator engine.
+This library simplifies interaction with the underlying Ootle blockchain, enabling the creation of custom components,
+resources, and complex decentralized applications.
 
 ### Key Concepts
 
--   **Templates:** In Tari Ootle, smart contracts are deployed as "Templates." These are WASM binaries that define logic and state. A Template can define stateless logic functions or be instantiated multiple times to create **Components** which tie on-chain state and template logic.
--   **Components:** Components are instances of a Template. They represent the on-chain entities that hold state and expose methods for interaction. For example, a "DeX Template" might be used to create multiple "DeX Components," each representing a distinct exchange instance.
--   **Resources:** Resources are digital assets managed by Components. These can be fungible (e.g., tokens) or non-fungible (e.g., NFTs). The library provides tools to define, mint, burn, and manage these resources.
--   **Vaults:** Resources are held within "Vaults," which are secure containers associated with Components or user accounts.
+-   **Templates:** smart contracts are deployed as "Templates." These are WASM binaries that define logic and state. A Template can define stateless logic functions or be instantiated multiple times to create **Components** which tie on-chain state and template logic.
+-   **Components:** Components are on-chain instances of the state defined within a Template. They represent the on-chain entities that hold state and expose methods for interaction. For example, a "DeX Template" might be used to create multiple "DeX Components," each representing a distinct exchange instance.
+-   **Resources:** Resources are digital assets. These can be fungible or non-fungible (e.g., NFTs). The library provides tools to define, mint, burn, and manage these resources.
+-   **Vaults:** Resources are held within "Vaults," which are secure containers associated with Components.
 -   **Substates:** The Tari Ootle engine manages state as "Substates." These are atomic units of data that represent various on-chain entities, including Components, Resources, and Vaults. Templates interact with the blockchain by manipulating these substates.
 -   **Access Rules:** Templates can define granular access rules to control who can interact with their Components and Resources, and under what conditions.
-
-### Why Tari Ootle Template Library?
-
--   **Rust-Native Development:** Leverage the power, safety, and performance of Rust for smart contract development.
--   **Ergonomic Abstractions:** Focus on your application logic rather than low-level blockchain interactions, thanks to high-level Rust APIs.
--   **Interoperability:** Designed to seamlessly integrate with the Tari Ootle validator engine and the broader Tari ecosystem.
--   **Comprehensive Tooling:** Built with features for resource management, component creation, authorization, event handling, and more.
 
 ### Getting Started
 

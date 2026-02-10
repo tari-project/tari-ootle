@@ -38,8 +38,13 @@ impl Amount {
     pub const ZERO: Self = Self(0);
 
     /// Creates a new `Amount` from an integer value.
-    pub fn new<T: Into<u128>>(amount: T) -> Self {
-        Self(amount.into())
+    pub const fn new(amount: u128) -> Self {
+        Self(amount)
+    }
+
+    /// Creates a new `Amount` from an integer value.
+    pub fn from_integer<T: Into<u128>>(amount: T) -> Self {
+        Self::new(amount.into())
     }
 
     pub const fn from_usize(value: usize) -> Self {
@@ -361,7 +366,7 @@ impl Amount {
 
     #[cfg(feature = "precision")]
     pub fn into_precision_amount(self) -> crate::precision::PrecisionAmount {
-        crate::precision::PrecisionAmount::new(self.into_inner_value())
+        crate::precision::PrecisionAmount::from_integer(self.into_inner_value())
     }
 }
 

@@ -15,23 +15,21 @@ pub mod public_macros {
     /// at compile time.
     ///
     /// # Examples
-    /// ```rust,ignore
+    /// ```rust
     /// # use crate::models::{amount, Amount};
-    /// const AMOUNT: Amount = amount!("1234567890");
-    /// assert_eq!(AMOUNT, Amount::from(1234567890u64));
-    /// const NEGATIVE_AMOUNT: Amount = amount!("-1234567890");
-    ///  assert_eq!(NEGATIVE_AMOUNT, Amount::from(-1234567890));
+    /// const AMOUNT: Amount = amount!(1234567890);
+    /// assert_eq!(AMOUNT, 1234567890);
     ///  ```
     #[macro_export]
     macro_rules! amount {
-        ($int:expr) => {{ $crate::Amount::from_str_radix($int, 10) }};
+        ($int:expr) => {{ $crate::Amount::new($int as u128) }};
     }
 
     #[cfg(test)]
     mod tests {
         use crate::amount::Amount;
 
-        const POSITIVE: Amount = amount!("1234567890");
+        const POSITIVE: Amount = amount!(1234567890);
         #[test]
         fn consts() {
             assert_eq!(POSITIVE, Amount::from(1234567890u64));

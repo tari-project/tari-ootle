@@ -50,7 +50,7 @@ use crate::{
     },
     models::{Bucket, NonFungible, Proof, ProofAuth},
     resource::ResourceManager,
-    types::{Amount, ResourceType},
+    types::Amount,
 };
 
 /// Encapsulates all the ways that a vault can be referenced
@@ -283,13 +283,8 @@ impl Vault {
     }
 
     /// Returns the [ResourceManager] for the resource that this vault holds.
-    pub fn to_resource_manager(&self) -> ResourceManager {
+    pub fn get_resource_manager(&self) -> ResourceManager {
         ResourceManager::get(self.resource_address())
-    }
-
-    /// Returns the the type of resource that this vault holds.
-    pub fn resource_type(&self) -> ResourceType {
-        self.to_resource_manager().resource_type()
     }
 
     /// Pay a transaction fee with revealed funds present in the vault.

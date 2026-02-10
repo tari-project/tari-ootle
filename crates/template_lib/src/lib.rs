@@ -178,5 +178,4 @@ pub use prelude::template;
 pub use tari_bor::to_value;
 
 #[macro_use]
-#[cfg(target_arch = "wasm32")]
 pub mod macros;

@@ -99,6 +99,14 @@ impl TemplateTest {
     /// The initial balance of a funded account created by `create_funded_account`.
     pub const FUNDED_ACCOUNT_INITIAL_BALANCE: u64 = 1_000_000_000;
 
+    /// Creates a new `TemplateTest` with the template in the current crate. This is useful for tests within a template
+    /// crate.
+    pub fn my_crate() -> Self {
+        Self::new(".", ["."])
+    }
+
+    /// Creates a new `TemplateTest` with templates relative to the given base path.
+    /// All template_paths are resolved relative to the base path.
     pub fn new<P: AsRef<Path>, I: IntoIterator<Item = T>, T: Into<TemplateSpec>>(
         base_path: P,
         template_paths: I,

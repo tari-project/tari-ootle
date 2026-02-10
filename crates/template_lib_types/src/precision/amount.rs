@@ -47,8 +47,13 @@ impl PrecisionAmount {
     /// This is internal but needs to be public for macros
     pub const _U64_BYTE_SHIFT: usize = Self::_U64_BYTES.trailing_zeros() as usize;
 
-    /// Creates a new `Amount` from an integer value.
-    pub fn new<T: Into<I192>>(amount: T) -> Self {
+    /// Creates a new `PrecisionAmount` from an integer value.
+    pub const fn new(amount: I192) -> Self {
+        Self(amount)
+    }
+
+    /// Creates a new `PrecisionAmount` from an integer value.
+    pub fn from_integer<T: Into<I192>>(amount: T) -> Self {
         Self(amount.into())
     }
 

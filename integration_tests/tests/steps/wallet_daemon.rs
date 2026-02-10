@@ -449,7 +449,7 @@ async fn when_transfer_via_wallet_daemon(
     outputs_name: String,
 ) {
     cucumber_log!("==== Step: {}", step.value);
-    let amount = Amount::new(amount);
+    let amount = Amount::from(amount);
 
     let resource_address = world
         .get_output_fq(&resource_name)

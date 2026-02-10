@@ -11,4 +11,4 @@ tari_template_lib = { path = "../../../../template_lib" }
 
 
 [lib]
-crate-type = ["cdylib", "lib"]
+crate-type = ["cdylib"]

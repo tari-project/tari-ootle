@@ -27,7 +27,7 @@ use tari_template_test_tooling::{
 const TEMPLATE_PATHS: &[&str] = &["tests/templates/signature"];
 const TEMPLATE_NAME: &str = "SignatureTest";
 const MESSAGE: &[u8] = b"Some message that binds to something important";
-const INITIAL_SUPPLY: Amount = amount!("1000000000000000000000");
+const INITIAL_SUPPLY: Amount = amount!(1000000000000000000000);
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 
 const TEST_DOMAIN: &[u8] = b"tari.test.signature domain for tests";
@@ -91,7 +91,7 @@ fn claim_with_valid_signature() {
     assert_eq!(utxos.len(), 1);
     assert!(utxos[0].output().is_some());
     let vault = test.read_only_state_store().get_vault(&vault_id).unwrap();
-    assert_eq!(vault.balance(), INITIAL_SUPPLY - amount!("1000000000000"));
+    assert_eq!(vault.balance(), INITIAL_SUPPLY - amount!(1000000000000));
 }
 
 #[test]

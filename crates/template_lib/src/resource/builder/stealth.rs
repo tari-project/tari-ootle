@@ -166,7 +166,30 @@ impl StealthResourceBuilder {
         self
     }
 
-    /// Sets up all the metadata entries of the resource
+    /// Adds a new metadata entry to the resource
+    ///
+    /// Allows you to add a key-value pair to the resource's metadata.
+    /// This is an alias for `.add_metadata()`.
+    ///
+    /// # Notes
+    ///
+    /// `.metadata()` will override any existing metadata with the same key.
+    ///
+    /// # Examples
+    /// ```rust, ignore
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::stealth()
+    ///    .metadata("CharacterName", "Tari")
+    ///    .metadata("CharacterType", "Mascot")
+    ///    .metadata("CharacterLvl", "99")
+    /// .build();
+    /// ```
+    pub fn metadata<K: Into<String>, V: Into<String>>(self, key: K, value: V) -> Self {
+        self.add_metadata(key, value)
+    }
+
+    /// Sets up all the metadata entries of the resource.
+    /// WARNING: this will overwrite any previously set metadata.
     pub fn with_metadata(mut self, metadata: Metadata) -> Self {
         self.metadata = metadata;
         self

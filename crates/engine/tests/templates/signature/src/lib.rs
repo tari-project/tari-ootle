@@ -25,7 +25,7 @@ mod template {
                 .with_token_symbol("SIGCOIN")
                 .with_divisibility(9)
                 .mintable(rule!(allow_all))
-                .initial_supply(amount!("1000000000000000000000"));
+                .initial_supply(amount!(1000000000000000000000));
 
             let resource_address = bucket.resource_address();
             let supply_vault = Vault::from_bucket(bucket);

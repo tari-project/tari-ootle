@@ -276,7 +276,8 @@ impl ResourceAccessRules {
         self
     }
 
-    /// Sets up who can freeze a vault containing this resource, preventing withdrawals.
+    /// Sets up who can freeze a vault (or UTXO in the case of stealth) containing this resource, preventing
+    /// withdrawals.
     pub fn freezable(mut self, rule: AccessRule) -> Self {
         self.freeze = rule;
         self

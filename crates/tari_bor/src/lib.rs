@@ -40,7 +40,7 @@ where
 }
 
 #[cfg(not(feature = "std"))]
-pub fn encode_into_writer<T, W>(val: &T, writer: &mut W) -> Result<(), BorError>
+pub fn encode_into_writer<T, W>(val: &T, writer: W) -> Result<(), BorError>
 where
     T: Serialize + ?Sized,
     W: Write,

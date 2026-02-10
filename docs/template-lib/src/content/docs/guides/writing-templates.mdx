@@ -13,7 +13,9 @@ A Tari Ootle Template typically follows this structure:
 use tari_template_lib::prelude::*;
 
 #[template]
-mod MyTemplate {
+mod template {
+    use super::*;
+
     // Component struct definition
     pub struct MyComponent {
         // Define your component's state variables here
@@ -22,13 +24,14 @@ mod MyTemplate {
     }
 
     impl MyComponent {
-        // Constructor: typically creates and initializes a new component instance
+        // Constructor: initializes and creates a new component instance
         pub fn new(initial_state: u64) -> Self {
             Self {
                 // Initialize state
                 // my_value: initial_state,
-                // my_resource_address: ResourceBuilder::public_fungible().with_token_symbol("TOK")
-                //     .initial_supply(Amount(1000))
+                // Create a new resource with no initial supply
+                // my_resource_address: ResourceBuilder::public_fungible()
+                //     .with_token_symbol("TOK")
                 //     .build()
             }
         }
@@ -59,62 +62,71 @@ The `#[template]` attribute macro is the cornerstone of Tari Ootle Template deve
 ### Component State Management
 
 The state of your component is defined by the fields within its `struct`. These fields are persisted on the blockchain.
+NOTE: that a component can also be an `enum`.
 
 **Important Considerations:**
 
--   **Serializable Types:** All fields in your component struct must be serializable and deserializable. The `tari_template_lib` provides various types (`Amount`, `ResourceAddress`, etc.) that are already compatible. For custom types, you may need to implement `serde::Serialize` and `serde::Deserialize`.
+-   **Serializable Types:** All fields in your component struct must be `serde` serializable and deserializable. The `tari_template_lib` provides various types (`Amount`, `ResourceAddress`, etc.) that are already compatible. For custom types, you may need to implement `serde::Serialize` and `serde::Deserialize`.
 -   **Mutability:** To modify component state, methods must take `&mut self`.
--   **Access:** Component state should generally be managed internally via methods. Direct external access to component fields is not permitted.
+-   **Access:** Component state should generally be managed internally via methods. Access to component state from another template is possible (if the requisite transaction signatures are provided), but is generally discouraged.
 
-### Interacting with the Engine
+### Errors
 
-The `tari_template_lib::prelude::*` imports provide access to global functions and builders for interacting with the Tari Ootle engine:
-
--   **`ResourceBuilder`:** Used to define and mint new resources (fungible or non-fungible tokens).
-    ```rust
-    use tari_template_lib::prelude::*;
-    let resource_address = ResourceBuilder::public_fungible().with_token_symbol("MFT")
-        .initial_supply(Amount(1_000_000))
-        .build();
-    ```
--   **`ComponentBuilder`:** Used to define and create new components.
-    ```rust
-    use tari_template_lib::prelude::*;
-    let component_address = ComponentBuilder::new()
-        .with_access_rules(AccessRules::allow_all())
-        .create_component("MyNewComponent", MyComponent::new());
-    ```
--   **`info!`, `warn!`, `error!`:** Macros for logging messages to the validator node's logs.
--   **`panic!`:** To halt execution and revert a transaction.
-
-### Constructors
-
-The `new` function in the `impl MyComponent` block serves as the constructor for your component. It's responsible for:
-
--   Initializing the component's state.
--   Potentially minting initial resources.
--   Setting up initial access rules.
+Error handling in Tari Ootle Templates is done by panicking. When a panic occurs, the transaction will fail and no state changes will be committed.
 
 ```rust
-impl MyComponent {
-    pub fn new(initial_value: u64) -> Self {
-        // Mint a new fungible token controlled by this component
-        let token_address = ResourceBuilder::public_fungible().with_token_symbol("MTK")
-            .initial_supply(Amount(1000))
-            .build();
+pub fn do_something(value: u64) {
+    assert_ne!(value, 0, "Value cannot be zero");
+    if !value.is_power_of_two() || value > 1024 {
+      panic!("Value must be a power of two and less than 1024");
+    }
 
-        Self {
-            value: initial_value,
-            // Store the address of the resource this component manages
-            managed_token: token_address,
-        }
+    self.my_value += value;
+}
+```
+
+### Component constructors
+
+Constructors are normal template functions that create the component on-chain.
+
+```rust
+// Any function that returns Self will implicitly create a component instance on-chain when invoked.
+pub fn new(initial_value: u64) -> Self {
+    Self {
+        my_value: initial_value,
     }
 }
+
+// This function explicitly creates a component instance on-chain. This is equivalent to the implicit constructor above.
+pub fn explicit_constructor() -> Component<Self> {
+    Component::new(Self {
+        my_value: 42,
+    }).create()
+}
+
+pub fn custom(addr: ComponentAddressAllocation) -> Component<Self> {
+    Component::new(Self {
+        my_value: 42,
+    })
+    .with_address_allocation(addr)
+    .with_access_rules(ComponentAccessRules::new()
+        .method("do_something", rule![allow_all]) // Allow anyone to call the do_something method
+        .default(rule![deny_all])
+    )
+    .with_owner_rule(OwnerRule::OwnedBySigner) // This is the default
+    .create()
+}
+
 ```
 
 ### Public vs. Private Methods
 
 -   **Public methods (`pub fn`):** These are the entry points for external interaction with your component. They can be called by other components, users via transactions, or off-chain applications.
--   **Private methods (`fn`):** These are internal helper functions used within your component's implementation. They cannot be called from outside the component.
+-   **Private methods (`fn`):** These are regular private rust functions used within your component's implementation. They cannot be called from outside the component.
 
 For more advanced topics like authorization, events, and testing, refer to the other guides.
+
+### Next Steps
+
+-  Deep dive into [Resource Management](/guides/resources/) to learn how to create and manage fungible and non-fungible tokens in your templates.
+-  Deep dive into [Authorization and Access Control](/guides/authorization-and-access/) to learn how to manage permissions for your component's methods.

@@ -3,6 +3,12 @@ title: Handling Events
 description: Emit and subscribe to custom events within your Tari Ootle Templates.
 ---
 
+import { Aside } from '@astrojs/starlight/components';
+
+<Aside type="caution">
+  This API is not implemented (yet). Events can only be emitted by calling the `emit_event` function.
+</Aside>
+
 Events provide a powerful mechanism for your Templates to communicate with the outside world and for different parts of your decentralized application to react to state changes without direct method calls. The Tari Ootle Template Library supports custom event emission and handling.
 
 ### Emitting Events
@@ -14,7 +20,8 @@ use tari_template_lib::prelude::*;
 use tari_template_lib_types::ComponentAddress;
 
 // Define a struct for your event data
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, OotleEvent)]
+#[event(topic = "my-topic")]
 struct MyCustomEvent {
     component_address: ComponentAddress,
     value: u64,

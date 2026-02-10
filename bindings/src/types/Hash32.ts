@@ -3,4 +3,4 @@
 /**
  * Representation of a 32-byte hash value
  */
-export type Hash = string;
+export type Hash32 = string;

@@ -11375,7 +11375,6 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "tari_bor",
- "tari_common_types",
  "tari_consensus",
  "tari_consensus_types",
  "tari_crypto",

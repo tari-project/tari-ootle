@@ -47,6 +47,7 @@ pub struct ClaimBurnOutputData {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct EncodedMerkleProof {
+    #[borsh(serialize_with = "serialize_bytes")]
     #[serde(with = "ootle_serde::base64")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub block_hash: Hash32,

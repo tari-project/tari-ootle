@@ -950,7 +950,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         use crate::global::schema::block_headers;
 
         let header = block_headers::table
-            .filter(block_headers::block_hash.eq(block_hash.as_bytes()))
+            .filter(block_headers::block_hash.eq(block_hash.as_ref()))
             .filter(block_headers::epoch.le(max_epoch.as_u64() as i64))
             .first::<models::BlockHeaderModel>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {

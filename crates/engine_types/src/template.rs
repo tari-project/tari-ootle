@@ -25,6 +25,5 @@ use tari_template_lib::types::Hash32;
 use crate::hashing::{EngineHashDomainLabel, hasher32};
 
 pub fn calculate_template_binary_hash(wasm_code: &[u8]) -> Hash32 {
-    let hash = hasher32(EngineHashDomainLabel::Template).chain(wasm_code).result();
-    Hash32::from(hash.into_array())
+    hasher32(EngineHashDomainLabel::Template).chain(wasm_code).result()
 }

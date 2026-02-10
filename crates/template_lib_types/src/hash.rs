@@ -98,10 +98,6 @@ impl Hash32 {
             .try_into()
             .unwrap()
     }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
 }
 
 impl AsRef<[u8]> for Hash32 {

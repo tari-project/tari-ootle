@@ -4,6 +4,7 @@ description: Comprehensive documentation for building on-chain applications with
 ---
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
+import { basePath } from '../../helpers/path';
 
 Welcome to the **Tari Ootle Template Library Documentation**!
 
@@ -18,17 +19,17 @@ Ootle engine interactions. It is designed to be highly secure, performant, and f
 <CardGrid>
   <Card title="Introduction" icon="pencil">
     Start here to understand the core concepts of the Tari Ootle Template Library.
-    <a href="/introduction/">Read the Introduction</a>
+    <a href={basePath("/introduction/")}>Read the Introduction</a>
   </Card>
   <Card title="Guides" icon="document">
     Step-by-step tutorials and practical examples to help you build, test, and deploy your Ootle Templates. Learn how to
     write templates, manage resources, handle events, and implement access control.
-    <a href="/guides/getting-started/">Explore the Guides</a>
+    <a href={basePath("/guides/getting-started/")}> Explore the Guides</a>
   </Card>
   <Card title="Reference" icon="setting">
     Detailed API documentation for all the types, macros, and modules provided by the `tari_template_lib` and
     `tari_template_lib_types` crates.
-    <a href="/reference/api-overview/">View the Reference</a>
+    <a href={basePath("/reference/api-overview/")}>View the Reference</a>
   </Card>
   <Card title="Crate Docs" icon="setting">
     <a href="https://docs.rs/tari_template_lib/latest/tari_template_lib/" target="_blank">View on crates.io</a>
@@ -42,9 +43,9 @@ WebAssembly (WASM) and defines the logic and state transitions for on-chain appl
 
 ## Key Features
 
--   **Rust-Native Development**: Leverage the power and safety of Rust to write your on-chain logic.
--   **Ergonomic**: Simplified interfaces for interacting with the Tari Ootle engine, including resource management, component creation, and event emission.
--   **Interoperability**: Designed to integrate seamlessly within the broader Tari ecosystem.
--   **Security-Focused**: Built with security best practices in mind, providing tools to help developers write secure code.
+  -   **Rust-Native Development**: Leverage the power and safety of Rust to write your on-chain logic.
+  -   **Ergonomic**: Simplified interfaces for interacting with the Tari Ootle engine, including resource management, component creation, and event emission.
+  -   **Interoperability**: Designed to integrate seamlessly within the broader Tari ecosystem.
+  -   **Security-Focused**: Built with security best practices in mind, providing tools to help developers write secure code.
 
 We encourage you to explore the documentation, experiment with the examples, and join our community to contribute and get support.

@@ -111,6 +111,7 @@ pub async fn health(Extension(context): Extension<HandlerContext>) -> impl IntoR
         "epoch_manager_ok": epoch_manager_ok,
         "network_ok": network_ok,
         "db_ok": db_ok,
+        "version": env!("CARGO_PKG_VERSION"),
     });
 
     if is_ok {

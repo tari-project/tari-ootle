@@ -4,9 +4,11 @@ import starlight from '@astrojs/starlight';
 
 // https://astro.build/config
 export default defineConfig({
+	site: 'https://tari-project.github.io',
+	base: '/tari-ootle',
 	integrations: [
 		starlight({
-			title: 'Tari Ootle Template Lib Documentation',
+			title: 'Tari Ootle Documentation',
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/tari-project/tari-ootle' }],
 			sidebar: [
 				{

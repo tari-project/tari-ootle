@@ -16,6 +16,7 @@ cucumber-output-junit.xml
 .vscode/
 *.code-workspace
 tags
+.run
 
 # Ignore OS files
 .DS_Store

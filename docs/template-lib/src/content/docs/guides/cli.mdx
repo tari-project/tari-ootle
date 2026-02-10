@@ -103,8 +103,24 @@ Run `cargo test` to execute the test and ensure that your template is working co
 ### Building and Deploying Your Template
 
 **PREREQUISITE**:
-Ensure you have a local Wallet daemon running with a default account funded with some XTR. You may have to configure `tari.config.toml` with the correct RPC endpoint
-if your wallet daemon is listening on a port other than 9000.
+
+Ensure you have a local Wallet daemon running with a default account funded with some XTR.
+
+Basic steps:
+1. Head over to https://github.com/tari-project/tari-ootle/releases and download the latest release of the Tari Ootle Wallet daemon for your operating system.
+2. Place the tari_ootle_walletd binary where you want and run it.
+3. Run the wallet daemon with the following command:
+
+```bash
+# Show usage
+./tari_ootle_walletd --help
+# Run the wallet daemon on the Esme testnet
+./tari_ootle_walletd --network esme
+```
+
+By default, the wallet daemon listens for JSON-RPC requests on port 9000.
+You'll have to configure `tari.config.toml` with the correct RPC endpoint if your wallet daemon is
+listening on a port other than 9000.
 
 ```toml
 [network]
@@ -112,7 +128,8 @@ if your wallet daemon is listening on a port other than 9000.
 wallet-daemon-jrpc-address = "http://127.0.0.1:9000/json_rpc"
 ```
 
-NOTE: that the CLI only supports deploying to a Wallet daemon JSON-RPC for now. In future, we may implement signing using an HSM or Tari Universe.
+NOTE: that the CLI only supports deploying to a Wallet daemon JSON-RPC for now. In future, we may
+implement template publishing using an HSM and/or Tari Universe.
 
 To build and deploy your template, run the following command in the root directory of your workspace:
 

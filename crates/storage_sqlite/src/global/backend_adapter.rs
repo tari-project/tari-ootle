@@ -65,7 +65,7 @@ use tari_ootle_storage::{
         models::ValidatorNode,
     },
 };
-use tari_template_lib::types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
+use tari_template_lib::types::{Hash32, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 use tari_utilities::{ByteArray, hex};
 
 use super::{models, models::DbValidatorNode};
@@ -945,12 +945,12 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         &self,
         tx: &mut Self::DbTransaction<'_>,
         max_epoch: Epoch,
-        block_hash: &FixedHash,
+        block_hash: &Hash32,
     ) -> Result<BlockHeaderModel, Self::Error> {
         use crate::global::schema::block_headers;
 
         let header = block_headers::table
-            .filter(block_headers::block_hash.eq(block_hash.as_bytes()))
+            .filter(block_headers::block_hash.eq(block_hash.as_ref()))
             .filter(block_headers::epoch.le(max_epoch.as_u64() as i64))
             .first::<models::BlockHeaderModel>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {

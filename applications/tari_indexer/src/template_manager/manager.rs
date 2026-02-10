@@ -329,7 +329,7 @@ fn convert_builtin_template(name: &str, address: TemplateAddress) -> Template {
         metadata: TemplateMetadata {
             name: name.to_string(),
             address,
-            binary_sha,
+            binary_sha: binary_sha.into_array().into(),
             author_public_key: Default::default(),
             code_size: code.len(),
             epoch: Epoch::zero(),

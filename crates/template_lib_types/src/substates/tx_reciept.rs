@@ -18,7 +18,7 @@ impl Tagged for TransactionReceiptAddress {
 }
 
 impl TransactionReceiptAddress {
-    pub const fn from_hash(hash: crate::Hash) -> Self {
+    pub const fn from_hash(hash: crate::Hash32) -> Self {
         Self::from_array(hash.into_array())
     }
 
@@ -36,7 +36,7 @@ impl TransactionReceiptAddress {
     }
 }
 
-impl<T: Into<crate::Hash>> From<T> for TransactionReceiptAddress {
+impl<T: Into<crate::Hash32>> From<T> for TransactionReceiptAddress {
     fn from(address: T) -> Self {
         Self::from_hash(address.into())
     }

@@ -1,7 +1,6 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_common_types::types::PrivateKey;
 use tari_crypto::ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment};
 use tari_template_lib::{prelude::ConfidentialWithdrawProof, types::Amount};
 
@@ -82,7 +81,7 @@ pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Pede
 
     // 0.G + v.H - users may convert revealed funds to confidential outputs so this must be part of the balance proof
     // We already checked that input_revealed_amount is non-negative, but not that
-    let revealed_input_commitment = commit_amount(&PrivateKey::default(), input_revealed_amount).ok_or_else(|| {
+    let revealed_input_commitment = commit_amount(&Default::default(), input_revealed_amount).ok_or_else(|| {
         ResourceError::InvalidBalanceProof {
             details: "Input revealed amount is too large to commit".to_string(),
         }
@@ -93,7 +92,7 @@ pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Pede
 
     // 0.G + v.H
     let revealed_output_commitment =
-        commit_amount(&PrivateKey::default(), total_output_revealed_amount).ok_or_else(|| {
+        commit_amount(&Default::default(), total_output_revealed_amount).ok_or_else(|| {
             ResourceError::InvalidBalanceProof {
                 details: "Total output revealed amount is too large to commit".to_string(),
             }

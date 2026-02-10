@@ -11,7 +11,7 @@ use tari_template_lib::{
     types::{
         BinaryTag,
         ClaimedOutputTombstoneAddress,
-        Hash,
+        Hash32,
         NonFungibleAddressContents,
         ObjectKey,
         ResourceAddress,
@@ -414,7 +414,7 @@ impl FromTagAndValue for WellKnownTariValue {
                 Ok(Self::ResourceAddress(resource_address.into()))
             },
             BinaryTag::TransactionReceipt => {
-                let tx_receipt_hash: Hash = value.deserialized().map_err(BorError::from)?;
+                let tx_receipt_hash: Hash32 = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::TransactionReceiptAddress(tx_receipt_hash.into()))
             },
             BinaryTag::NonFungibleAddress => {
@@ -438,7 +438,7 @@ impl FromTagAndValue for WellKnownTariValue {
                 Ok(Self::ClaimedOutputTombstoneAddress(value.into()))
             },
             BinaryTag::TemplateAddress => {
-                let value: Hash = value.deserialized().map_err(BorError::from)?;
+                let value: Hash32 = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::PublishedTemplateAddress(value.into()))
             },
             BinaryTag::ValidatorNodeFeePool => {

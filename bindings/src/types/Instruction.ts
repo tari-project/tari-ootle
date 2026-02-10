@@ -4,7 +4,7 @@ import type { Amount } from "./Amount";
 import type { ClaimBurnOutputData } from "./ClaimBurnOutputData";
 import type { ComponentAccessRules } from "./ComponentAccessRules";
 import type { ComponentReference } from "./ComponentReference";
-import type { Hash } from "./Hash";
+import type { Hash32 } from "./Hash32";
 import type { InstructionArg } from "./InstructionArg";
 import type { LogLevel } from "./LogLevel";
 import type { MigrateFunction } from "./MigrateFunction";
@@ -26,7 +26,7 @@ export type Instruction =
         bucket_workspace_id: WorkspaceOffsetId | null;
       };
     }
-  | { CallFunction: { address: Hash; function: string; args: Array<InstructionArg> } }
+  | { CallFunction: { address: Hash32; function: string; args: Array<InstructionArg> } }
   | { CallMethod: { call: ComponentReference; method: string; args: Array<InstructionArg> } }
   | { PutLastInstructionOutputOnWorkspace: { key: number } }
   | { EmitLog: { level: LogLevel; message: string } }
@@ -46,4 +46,6 @@ export type Instruction =
     }
   | { PayFeeStealth: { statement: StealthTransferStatement; revealed_input_bucket: WorkspaceOffsetId | null } }
   | { PayFeeFromBucket: { bucket: WorkspaceOffsetId } }
-  | { UpdateComponentTemplate: { component: ComponentReference; migrate: MigrateFunction | null; new_template: Hash } };
+  | {
+      UpdateComponentTemplate: { component: ComponentReference; migrate: MigrateFunction | null; new_template: Hash32 };
+    };

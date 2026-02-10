@@ -4,8 +4,8 @@
  * A wrapper around a byte buffer that implements efficient serde serialisation.
  *
  * Unfortunately, because we cannot implement a specialized version of serde::Serialize (impl serde::Serialize for
- * Vec<u8>) ciborium will represent bytes as `Array(vec![Integer(u8), ....])` instead of `Bytes(vec![u8, ...])`. which
- * results in a significant size overhead. This wrapper uses the `Value::Bytes` variant (similar to `serde_as(as =
- * "Bytes")`).
+ * `Vec<u8>`) ciborium will represent bytes as `Array(vec![Integer(u8), ....])` instead of `Bytes(vec![u8, ...])`.
+ * which results in a significant size overhead. This wrapper uses the `Value::Bytes` variant (similar to `serde_as(as
+ * = "Bytes")`).
  */
 export type Bytes = Uint8Array;

@@ -5,7 +5,6 @@ use borsh::BorshSerialize;
 use log::info;
 use ootle_byte_type::{ConvertFromByteType, ToByteType};
 use tari_bor::{Deserialize, Serialize};
-use tari_common_types::types::PrivateKey;
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
     keys::{PublicKey, SecretKey},
@@ -81,16 +80,20 @@ pub fn validate_elgamal_verifiable_balance_proof(
         }
     })?;
 
-    let s_v = PrivateKey::from_canonical_bytes(&*proof.s_v).map_err(|_| ResourceError::InvalidConfidentialProof {
-        details: "Invalid private key for s_v".to_string(),
-    })?;
+    let s_v =
+        RistrettoSecretKey::from_canonical_bytes(&*proof.s_v).map_err(|_| ResourceError::InvalidConfidentialProof {
+            details: "Invalid private key for s_v".to_string(),
+        })?;
 
-    let s_m = PrivateKey::from_canonical_bytes(&*proof.s_m).map_err(|_| ResourceError::InvalidConfidentialProof {
-        details: "Invalid private key for s_m".to_string(),
-    })?;
+    let s_m =
+        RistrettoSecretKey::from_canonical_bytes(&*proof.s_m).map_err(|_| ResourceError::InvalidConfidentialProof {
+            details: "Invalid private key for s_m".to_string(),
+        })?;
 
-    let s_r = &PrivateKey::from_canonical_bytes(&*proof.s_r).map_err(|_| ResourceError::InvalidConfidentialProof {
-        details: "Invalid private key for s_r".to_string(),
+    let s_r = &RistrettoSecretKey::from_canonical_bytes(&*proof.s_r).map_err(|_| {
+        ResourceError::InvalidConfidentialProof {
+            details: "Invalid private key for s_r".to_string(),
+        }
     })?;
 
     // Fiat-Shamir challenge

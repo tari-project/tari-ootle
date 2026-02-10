@@ -2,7 +2,7 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::FixedHash;
+use tari_template_lib::types::Hash32;
 
 use crate::{
     ValidatorFeeWithdrawal,
@@ -98,7 +98,5 @@ impl From<&SubstateDiff> for DiffSummary {
 pub struct UpSubstate {
     pub substate_id: SubstateId,
     pub version: u32,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "ootle_serde::hex")]
-    pub value_hash: FixedHash,
+    pub value_hash: Hash32,
 }

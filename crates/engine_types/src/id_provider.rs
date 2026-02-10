@@ -10,7 +10,7 @@ use tari_template_lib::{
         ComponentAddress,
         ComponentKey,
         EntityId,
-        Hash,
+        Hash32,
         ObjectKey,
         ResourceAddress,
         VaultId,
@@ -26,7 +26,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct IdProvider<'a> {
     entity_id: EntityId,
-    transaction_hash: Hash,
+    transaction_hash: Hash32,
     object_ids: &'a ObjectIds,
 }
 
@@ -39,7 +39,7 @@ pub enum IdProviderError {
 }
 
 impl<'a> IdProvider<'a> {
-    pub fn new(entity_id: EntityId, transaction_hash: Hash, object_ids: &'a ObjectIds) -> Self {
+    pub fn new(entity_id: EntityId, transaction_hash: Hash32, object_ids: &'a ObjectIds) -> Self {
         Self {
             entity_id,
             transaction_hash,
@@ -119,7 +119,7 @@ impl<'a> IdProvider<'a> {
     }
 }
 
-fn generate_output_id(transaction_hash: &Hash, n: u32) -> Hash {
+fn generate_output_id(transaction_hash: &Hash32, n: u32) -> Hash32 {
     hasher32(EngineHashDomainLabel::Output)
         .chain(transaction_hash)
         .chain(&n)
@@ -183,10 +183,10 @@ mod tests {
     #[test]
     fn it_fails_if_generating_more_ids_than_the_max() {
         let object_ids = ObjectIds::new(0);
-        let id_provider = IdProvider::new(EntityId::default(), Hash::default(), &object_ids);
+        let id_provider = IdProvider::new(EntityId::default(), Hash32::default(), &object_ids);
         id_provider.next_object_key().unwrap_err();
         let object_ids = ObjectIds::new(1);
-        let id_provider = IdProvider::new(EntityId::default(), Hash::default(), &object_ids);
+        let id_provider = IdProvider::new(EntityId::default(), Hash32::default(), &object_ids);
         id_provider.next_object_key().unwrap();
         id_provider.next_object_key().unwrap_err();
     }
@@ -194,7 +194,7 @@ mod tests {
     #[test]
     fn get_random_bytes() {
         let object_ids = ObjectIds::new(0);
-        let id_provider = IdProvider::new(EntityId::default(), Hash::default(), &object_ids);
+        let id_provider = IdProvider::new(EntityId::default(), Hash32::default(), &object_ids);
         const CASES: [usize; 7] = [0, 4, 32, 33, 64, 65, 129];
         for len in CASES {
             let b = id_provider.get_random_bytes(len).unwrap();

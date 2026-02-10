@@ -4,7 +4,7 @@
 use tari_bor::{BorTag, Deserialize, Serialize};
 use tari_template_abi::rust::{fmt, str::FromStr};
 
-use crate::{BinaryTag, Hash, KeyParseError, ObjectKey, address_prefixes};
+use crate::{BinaryTag, Hash32, KeyParseError, ObjectKey, address_prefixes};
 
 const TAG: u64 = BinaryTag::ValidatorNodeFeePool.as_u64();
 
@@ -31,8 +31,8 @@ impl ValidatorFeePoolAddress {
         Ok(Self(BorTag::new(ObjectKey::from_hex(hex)?)))
     }
 
-    pub fn as_hash(&self) -> Hash {
-        Hash::from_array(self.as_object_key().into_array())
+    pub fn as_hash(&self) -> Hash32 {
+        Hash32::from_array(self.as_object_key().into_array())
     }
 }
 

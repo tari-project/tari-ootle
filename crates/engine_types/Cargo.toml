@@ -9,9 +9,8 @@ license.workspace = true
 
 [dependencies]
 tari_bor = { workspace = true, features = ["std", "json_encoding"] }
-tari_common_types = { workspace = true }
 tari_crypto = { workspace = true, features = ["borsh"] }
-tari_hashing = { workspace = true }
+tari_hashing = "5.1.0"
 tari_template_abi = { workspace = true, features = ["std"] }
 tari_template_lib = { workspace = true, features = ["borsh", "precision"] }
 ootle_serde = { workspace = true, features = ["base64", "bincode-compat"] }

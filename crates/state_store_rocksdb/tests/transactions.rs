@@ -29,7 +29,7 @@ use tari_ootle_storage::{
     },
 };
 use tari_ootle_transaction::{Instruction, Transaction};
-use tari_template_lib::{prelude::SchnorrSignatureBytes, types::Hash};
+use tari_template_lib::{prelude::SchnorrSignatureBytes, types::Hash32};
 use tari_utilities::epoch_time::EpochTime;
 
 mod confirm_all_transitions {
@@ -261,7 +261,7 @@ mod transaction_execution_operations {
             *tx1.id(),
             ExecuteResult {
                 finalize: FinalizeResult::new(
-                    Hash::default(),
+                    Hash32::default(),
                     vec![],
                     vec![],
                     TransactionResult::Accept(SubstateDiff::new()),
@@ -288,7 +288,7 @@ mod transaction_execution_operations {
             *tx2.id(),
             ExecuteResult {
                 finalize: FinalizeResult::new(
-                    Hash::default(),
+                    Hash32::default(),
                     vec![],
                     vec![],
                     TransactionResult::Accept(SubstateDiff::new()),

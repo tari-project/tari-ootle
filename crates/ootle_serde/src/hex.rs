@@ -126,7 +126,7 @@ pub mod option {
 #[cfg(test)]
 mod tests {
     use serde::Serialize;
-    use tari_template_lib::types::Hash;
+    use tari_template_lib::types::Hash32;
 
     use super::*;
 
@@ -137,7 +137,7 @@ mod tests {
         #[serde(with = "super")]
         vec: Vec<u8>,
         #[serde(with = "super")]
-        hash: Hash,
+        hash: Hash32,
     }
 
     // Test it
@@ -146,7 +146,7 @@ mod tests {
         let data = TestCase {
             fixed: [1; 32],
             vec: vec![5; 100],
-            hash: Hash::from_array([2; 32]),
+            hash: Hash32::from_array([2; 32]),
         };
         let serialized = serde_json::to_vec(&data).unwrap();
         let deserialized: TestCase = serde_json::from_slice(&serialized).unwrap();

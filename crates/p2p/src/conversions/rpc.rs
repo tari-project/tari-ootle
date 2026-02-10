@@ -4,7 +4,6 @@
 use std::convert::{TryFrom, TryInto};
 
 use anyhow::{Context, anyhow};
-use tari_common_types::types::FixedHash;
 use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_jellyfish::TreeHash;
 use tari_ootle_common_types::shard::Shard;
@@ -17,6 +16,7 @@ use tari_ootle_storage::consensus_models::{
     SubstateValueOrHash,
     TreeRootSummary,
 };
+use tari_template_lib::types::Hash32;
 
 use crate::{
     encoding::{decode_from_slice, encode_to_vec},
@@ -133,7 +133,7 @@ impl TryFrom<proto::rpc::substate_data::SubstateValueOrHash> for SubstateValueOr
                 SubstateValue::from_bytes(&v).context("SubstateValueOrHash::Value")?,
             ))),
             proto::rpc::substate_data::SubstateValueOrHash::Hash(h) => Ok(SubstateValueOrHash::Hash(
-                FixedHash::try_from(h).context("SubstateValueOrHash::Hash")?,
+                Hash32::try_from(h).context("SubstateValueOrHash::Hash")?,
             )),
         }
     }

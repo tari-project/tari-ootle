@@ -38,14 +38,13 @@ impl From<SubstateRecord> for VersionedSubstateRecord {
 #[cfg(test)]
 mod tests {
     use tari_bor::Value;
-    use tari_common_types::types::FixedHash;
     use tari_engine_types::{
         component::{ComponentBody, ComponentHeader},
         substate::SubstateValue,
     };
     use tari_ootle_common_types::{Epoch, shard::Shard};
     use tari_ootle_storage::consensus_models::{SubstateCreated, SubstateDestroyed};
-    use tari_utilities::hex::Hex;
+    use tari_template_lib_types::Hash32;
 
     use super::*;
     use crate::codecs::{DbDecoder, DbEncoder, DefaultCodec};
@@ -69,8 +68,7 @@ mod tests {
                 entity_id: Default::default(),
                 body: ComponentBody { state: Value::Null },
             })),
-            state_hash: FixedHash::from_hex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
-                .unwrap(),
+            state_hash: Hash32::from_hex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef").unwrap(),
             created: SubstateCreated {
                 at_epoch: Epoch(123),
                 in_shard: Shard::first(),

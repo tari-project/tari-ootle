@@ -10,7 +10,7 @@ use std::{
 use tari_bor::{BorTag, Deserialize, Serialize, Tagged};
 use tari_template_lib::types::{
     BinaryTag,
-    Hash,
+    Hash32,
     KeyParseError,
     MaxBytes,
     ObjectKey,
@@ -48,12 +48,12 @@ impl Tagged for PublishedTemplateAddress {
 }
 
 impl PublishedTemplateAddress {
-    pub const fn from_hash(hash: Hash) -> Self {
+    pub const fn from_hash(hash: Hash32) -> Self {
         let key = ObjectKey::from_array(hash.into_array());
         Self(BorTag::new(key))
     }
 
-    pub fn from_author_and_binary_hash(author_public_key: &RistrettoPublicKeyBytes, binary_hash: &Hash) -> Self {
+    pub fn from_author_and_binary_hash(author_public_key: &RistrettoPublicKeyBytes, binary_hash: &Hash32) -> Self {
         let hash = template_hasher32().chain(author_public_key).chain(binary_hash).result();
         Self::from_hash(hash)
     }
@@ -70,8 +70,8 @@ impl PublishedTemplateAddress {
         self.0.inner()
     }
 
-    pub fn as_hash(&self) -> Hash {
-        Hash::from_array(self.as_object_key().into_array())
+    pub fn as_hash(&self) -> Hash32 {
+        Hash32::from_array(self.as_object_key().into_array())
     }
 
     pub fn as_template_address(&self) -> TemplateAddress {
@@ -79,7 +79,7 @@ impl PublishedTemplateAddress {
     }
 }
 
-impl<T: Into<Hash>> From<T> for PublishedTemplateAddress {
+impl<T: Into<Hash32>> From<T> for PublishedTemplateAddress {
     fn from(address: T) -> Self {
         Self::from_hash(address.into())
     }
@@ -116,7 +116,7 @@ pub struct PublishedTemplate {
 }
 
 impl PublishedTemplate {
-    pub fn to_binary_hash(&self) -> Hash {
+    pub fn to_binary_hash(&self) -> Hash32 {
         hash_template_code(&self.binary)
     }
 }

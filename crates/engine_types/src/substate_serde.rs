@@ -233,7 +233,7 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
 
 #[cfg(test)]
 mod tests {
-    use tari_template_lib::types::{Hash, NonFungibleId, ObjectKey, UtxoAddress, UtxoId};
+    use tari_template_lib::types::{Hash32, NonFungibleId, ObjectKey, UtxoAddress, UtxoId};
 
     use super::*;
 
@@ -257,8 +257,9 @@ mod tests {
         let transaction_receipt_id =
             SubstateId::TransactionReceipt(TransactionReceiptAddress::from_array([123; ObjectKey::LENGTH]));
         check(&transaction_receipt_id);
-        let template_id =
-            SubstateId::Template(PublishedTemplateAddress::from_hash(Hash::from_array([6; Hash::LENGTH])));
+        let template_id = SubstateId::Template(PublishedTemplateAddress::from_hash(Hash32::from_array(
+            [6; Hash32::LENGTH],
+        )));
         check(&template_id);
         let validator_fee_pool_id = SubstateId::ValidatorFeePool(ValidatorFeePoolAddress::from_array([7; 32]));
         check(&validator_fee_pool_id);

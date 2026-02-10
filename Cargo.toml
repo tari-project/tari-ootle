@@ -46,6 +46,7 @@ members = [
     "crates/wallet/sdk",
     "crates/wallet/sdk_services",
     "crates/wallet/storage_sqlite",
+    "crates/wallet/tari-ledger-client",
     "crates/ootle_address",
     "crates/ootle_serde",
     "crates/ootle_byte_type",
@@ -145,6 +146,9 @@ tari_p2p = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre
 
 tari_crypto = "0.22.0"
 tari_utilities = "0.8.0"
+
+## Ledger
+minotari_ledger_wallet_common = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
 
 # networking crates
 proto_builder = { path = "networking/proto_builder" }

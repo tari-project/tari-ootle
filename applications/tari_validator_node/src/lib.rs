@@ -48,7 +48,8 @@ use tari_engine_types::crypto::{MAX_LAZY_BP_AGG_FACTORS, get_commitment_factory,
 use tari_epoch_manager::traits::EpochManagerSpec;
 use tari_epoch_oracles::EpochOracle;
 use tari_ootle_app_utilities::keypair::RistrettoKeypair;
-use tari_ootle_common_types::{PeerAddress, SubstateAddress};
+use tari_ootle_common_types::SubstateAddress;
+use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::global::{DbFactory, GlobalDb};
 use tari_ootle_storage_sqlite::{SqliteDbFactory, global::SqliteGlobalDbAdapter};
 use tari_shutdown::Shutdown;

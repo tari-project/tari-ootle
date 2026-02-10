@@ -26,7 +26,7 @@ mod state_sync_task;
 
 pub use rpc_impl::ValidatorNodeRpcServiceImpl;
 use tari_epoch_manager::service::EpochManagerHandle;
-use tari_ootle_common_types::PeerAddress;
+use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::StateStore;
 use tari_validator_node_rpc::rpc_service::ValidatorNodeRpcServer;
 

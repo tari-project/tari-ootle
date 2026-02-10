@@ -22,5 +22,6 @@ serde = { workspace = true, default-features = true }
 
 [dev-dependencies]
 ootle_byte_type = { workspace = true, features = ["crypto"] }
+tari_ootle_p2p = { workspace = true }
 rand = { workspace = true }
 tari_crypto = { workspace = true }

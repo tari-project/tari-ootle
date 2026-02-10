@@ -11,8 +11,8 @@ use std::{
 use log::*;
 use tari_epoch_manager::{EpochManagerError, EpochManagerReader, service::EpochManagerHandle};
 use tari_networking::NetworkingHandle;
-use tari_ootle_common_types::{PeerAddress, ShardGroup, ToPeerId, optional::Optional};
-use tari_ootle_p2p::TariMessagingSpec;
+use tari_ootle_common_types::{ShardGroup, optional::Optional};
+use tari_ootle_p2p::{PeerAddress, TariMessagingSpec, ToPeerId};
 use tari_validator_node_rpc::{ValidatorNodeRpcClientError, client::RpcMultiPool, rpc_service};
 
 const LOG_TARGET: &str = "tari::indexer::network_state_sync::committee_client";

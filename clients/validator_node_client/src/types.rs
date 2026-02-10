@@ -36,12 +36,12 @@ use tari_engine_types::{
 use tari_ootle_common_types::{
     Epoch,
     NodeHeight,
-    PeerAddress,
     StateVersion,
     SubstateAddress,
     committee::{Committee, CommitteeInfo},
     shard::Shard,
 };
+use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::{
     Ordering,
     consensus_models::{Block, TransactionExecution, TransactionPoolRecord},

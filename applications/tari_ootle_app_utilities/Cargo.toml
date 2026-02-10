@@ -23,6 +23,7 @@ tari_mmr = { workspace = true }
 tari_networking = { workspace = true }
 tari_transaction_components = { workspace = true }
 tari_hashing = { workspace = true }
+tari_ootle_p2p = { workspace = true }
 ootle_serde = { workspace = true }
 ootle_byte_type = { workspace = true, features = ["crypto"] }
 

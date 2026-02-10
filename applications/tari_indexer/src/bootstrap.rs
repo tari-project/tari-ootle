@@ -56,8 +56,8 @@ use tari_ootle_app_utilities::{
     seed_peer::SeedPeer,
     shared_consts::TXTR_FAUCET_INITIAL_SUPPLY,
 };
-use tari_ootle_common_types::{Network, PeerAddress, optional::Optional};
-use tari_ootle_p2p::TariMessagingSpec;
+use tari_ootle_common_types::{Network, optional::Optional};
+use tari_ootle_p2p::{PeerAddress, TariMessagingSpec};
 use tari_ootle_storage::global::GlobalDb;
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_shutdown::ShutdownSignal;
@@ -124,7 +124,7 @@ pub async fn spawn_services(
                     .expect("Failed to parse listener address"),
             ],
             swarm: SwarmConfig {
-                protocol_version: format!("/tari/{}/0.0.1", config.network).parse().unwrap(),
+                protocol_version: format!("/tari/{}/0.0.1", config.network).parse().expect("Failed to parse protocol version"),
                 user_agent: "/tari/indexer/0.0.1".to_string(),
                 enable_mdns: config.indexer.p2p.enable_mdns,
                 enable_relay: true,

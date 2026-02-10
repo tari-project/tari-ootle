@@ -52,7 +52,7 @@ use tari_crypto::{
     keys::{PublicKey as _, SecretKey as _},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_ootle_common_types::PeerAddress;
+use tari_ootle_p2p::PeerAddress;
 
 const REQUIRED_IDENTITY_PERMS: u32 = 0o100600;
 const LOG_TARGET: &str = "tari::identity";

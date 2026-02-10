@@ -35,13 +35,13 @@ use tari_ootle_common_types::{
     Epoch,
     NodeHeight,
     NumPreshards,
-    PeerAddress,
     SubstateRequirement,
     displayable::Displayable,
     optional::Optional,
     shard::Shard,
 };
 use tari_ootle_p2p::{
+    PeerAddress,
     proto,
     proto::rpc::{
         GetCheckpointsRequest,

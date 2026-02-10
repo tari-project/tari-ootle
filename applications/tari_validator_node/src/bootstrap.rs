@@ -64,8 +64,8 @@ use tari_ootle_app_utilities::{
     seed_peer::SeedPeer,
     transaction_executor::TariTransactionProcessor,
 };
-use tari_ootle_common_types::{Network, PeerAddress, services::template_provider::TemplateProvider};
-use tari_ootle_p2p::TariMessagingSpec;
+use tari_ootle_common_types::{Network, services::template_provider::TemplateProvider};
+use tari_ootle_p2p::{PeerAddress, TariMessagingSpec};
 use tari_ootle_storage::{StateStore, global::GlobalDb};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_ootle_transaction::Transaction;

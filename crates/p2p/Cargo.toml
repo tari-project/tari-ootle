@@ -21,9 +21,15 @@ tari_template_lib = { workspace = true }
 tari_ootle_transaction = { workspace = true }
 tari_jellyfish = { workspace = true }
 
+libp2p-identity = { workspace = true, features = ["sr25519", "serde", "peerid"] }
+
 anyhow = { workspace = true }
 serde = { workspace = true, default-features = true }
 prost = { workspace = true }
+ts-rs = { workspace = true, optional = true }
+
+[dev-dependencies]
+rand = { workspace = true }
 
 [build-dependencies]
 proto_builder = { workspace = true }
@@ -33,3 +39,6 @@ ignored = [
     # Used via OUT_DIR macro, not detectable
     "prost",
 ]
+
+[features]
+ts = ["ts-rs"]

@@ -11,6 +11,7 @@ tari_ootle_storage = { workspace = true }
 tari_state_store_rocksdb = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_jellyfish = { workspace = true }
+tari_ootle_p2p = { workspace = true }
 
 anyhow = { workspace = true }
 axum = { workspace = true }

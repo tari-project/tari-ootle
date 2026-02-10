@@ -41,7 +41,6 @@ use tari_networking::{NetworkingHandle, NetworkingService, is_supported_multiadd
 use tari_ootle_app_utilities::keypair::RistrettoKeypair;
 use tari_ootle_common_types::{
     Epoch,
-    PeerAddress,
     SubstateAddress,
     layer_one_transaction::{
         LayerOnePayloadType,
@@ -50,10 +49,9 @@ use tari_ootle_common_types::{
         ValidatorRegistrationParams,
     },
     optional::Optional,
-    public_key_to_peer_id,
     services::template_provider::{TemplateMetadataProvider, TemplateProvider},
 };
-use tari_ootle_p2p::TariMessagingSpec;
+use tari_ootle_p2p::{PeerAddress, TariMessagingSpec, public_key_to_peer_id};
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,

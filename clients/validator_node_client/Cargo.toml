@@ -10,6 +10,7 @@ license.workspace = true
 [dependencies]
 tari_base_node_client = { workspace = true }
 tari_ootle_common_types = { workspace = true }
+tari_ootle_p2p = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_common_types = { workspace = true }
 tari_ootle_transaction = { workspace = true }
@@ -28,4 +29,4 @@ thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 
 [features]
-ts = ["ts-rs"]
+ts = ["ts-rs", "tari_ootle_p2p/ts", "tari_ootle_transaction/ts", "tari_ootle_storage/ts", "tari_template_lib_types/ts", "tari_consensus_types/ts", "tari_template_abi/ts"]

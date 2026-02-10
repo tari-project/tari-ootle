@@ -34,11 +34,11 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{
     Epoch,
-    PeerAddress,
     SubstateRequirementRef,
     optional::Optional,
     services::template_provider::TemplateProvider,
 };
+use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::{
     global::{DbTemplate, DbTemplateType, GlobalDb, TemplateStatus},
     time::{OffsetDateTime, PrimitiveDateTime},

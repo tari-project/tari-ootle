@@ -30,14 +30,8 @@ use tari_engine_types::{
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate};
 use tari_indexer_lib::{cached_substate_manager::CachedSubstateManager, error::IndexerError};
-use tari_ootle_common_types::{
-    Epoch,
-    PeerAddress,
-    StateVersion,
-    SubstateRequirementRef,
-    shard::Shard,
-    substate_type::SubstateType,
-};
+use tari_ootle_common_types::{Epoch, StateVersion, SubstateRequirementRef, shard::Shard, substate_type::SubstateType};
+use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::StorageError;
 use tari_ootle_wallet_sdk::models::UtxoStateUpdateSet;
 use tari_template_lib_types::{

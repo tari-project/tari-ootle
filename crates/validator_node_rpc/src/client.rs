@@ -13,9 +13,10 @@ use tari_engine_types::{
     substate::{Substate, SubstateId, SubstateValue},
 };
 use tari_networking::{MessageSpec, NetworkingHandle, PeerId};
-use tari_ootle_common_types::{NodeAddressable, SubstateRequirementRef, ToPeerId};
+use tari_ootle_common_types::{NodeAddressable, SubstateRequirementRef};
 use tari_ootle_p2p::{
     TariMessagingSpec,
+    ToPeerId,
     proto,
     proto::rpc::{GetTransactionResultRequest, PayloadResultStatus, SubmitTransactionRequest, SubstateStatus},
 };

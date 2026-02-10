@@ -14,12 +14,12 @@ use tari_ootle_common_types::{
     Epoch,
     Network,
     NodeHeight,
-    PeerAddress,
     ShardGroup,
     VotePower,
     committee::{Committee, CommitteeMember},
     crypto::create_key_pair_from_seed,
 };
+use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::consensus_models::Block;
 
 use crate::support::{RoundRobinLeaderStrategy, load_json_fixture};

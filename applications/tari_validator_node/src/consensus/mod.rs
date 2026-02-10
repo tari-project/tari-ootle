@@ -8,7 +8,7 @@ use tari_consensus::{
     traits::ConsensusSpec,
 };
 use tari_epoch_manager::service::EpochManagerHandle;
-use tari_ootle_common_types::{Network, PeerAddress};
+use tari_ootle_common_types::Network;
 use tari_ootle_storage::consensus_models::TransactionPool;
 use tari_ootle_transaction::Transaction;
 use tari_rpc_state_sync::RpcStateSyncClientProtocol;
@@ -39,6 +39,7 @@ pub use block_transaction_executor::*;
 pub use handle::*;
 pub use signer_service::*;
 use tari_consensus::{consensus_constants::ConsensusConstants, hotstuff::HotstuffEvent};
+use tari_ootle_p2p::PeerAddress;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 
 use crate::{

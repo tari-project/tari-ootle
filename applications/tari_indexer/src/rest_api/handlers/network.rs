@@ -20,7 +20,8 @@ use tari_indexer_client::{
     },
 };
 use tari_networking::{DialOpts, NetworkingService, is_supported_multiaddr};
-use tari_ootle_common_types::{optional::Optional, public_key_to_peer_id};
+use tari_ootle_common_types::optional::Optional;
+use tari_ootle_p2p::public_key_to_peer_id;
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
 

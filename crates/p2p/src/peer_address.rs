@@ -1,4 +1,4 @@
-//   Copyright 2023 The Tari Project
+//   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{fmt::Display, hash::Hash};
@@ -6,10 +6,9 @@ use std::{fmt::Display, hash::Hash};
 use libp2p_identity as identity;
 use libp2p_identity::PeerId;
 use tari_crypto::ristretto::RistrettoPublicKey;
+use tari_ootle_common_types::{DerivableFromPublicKey, NodeAddressable};
 #[cfg(feature = "ts")]
 use ts_rs::TS;
-
-use crate::{DerivableFromPublicKey, NodeAddressable, ToPeerId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(TS), ts(export))]
@@ -88,6 +87,10 @@ impl DerivableFromPublicKey for PeerAddress {}
 
 pub fn public_key_to_peer_id(public_key: RistrettoPublicKey) -> PeerId {
     identity::PublicKey::from(identity::sr25519::PublicKey::from(public_key)).to_peer_id()
+}
+
+pub trait ToPeerId {
+    fn to_peer_id(&self) -> PeerId;
 }
 
 #[cfg(test)]

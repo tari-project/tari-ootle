@@ -34,7 +34,8 @@ use tari_engine_types::{
 };
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
 use tari_ootle_app_utilities::transaction_executor::{TariTransactionProcessor, TransactionExecutor as _};
-use tari_ootle_common_types::{Epoch, PeerAddress};
+use tari_ootle_common_types::Epoch;
+use tari_ootle_p2p::PeerAddress;
 use tari_ootle_transaction::Transaction;
 use tokio::task;
 

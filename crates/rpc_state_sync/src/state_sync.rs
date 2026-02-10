@@ -11,7 +11,6 @@ use tari_consensus_types::LeafBlock;
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     Epoch,
-    PeerAddress,
     ShardGroup,
     VersionedSubstateId,
     VotePower,
@@ -20,7 +19,10 @@ use tari_ootle_common_types::{
     optional::Optional,
     shard::Shard,
 };
-use tari_ootle_p2p::proto::rpc::{GetCheckpointsRequest, GetCheckpointsResponse, SyncStateRequest};
+use tari_ootle_p2p::{
+    PeerAddress,
+    proto::rpc::{GetCheckpointsRequest, GetCheckpointsResponse, SyncStateRequest},
+};
 use tari_ootle_storage::{
     ShardScopedTreeStoreReader,
     ShardScopedTreeStoreWriter,

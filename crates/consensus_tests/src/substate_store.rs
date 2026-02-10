@@ -15,12 +15,12 @@ use tari_ootle_common_types::{
     Network,
     NodeHeight,
     NumPreshards,
-    PeerAddress,
     ShardGroup,
     SubstateLockType,
     VersionedSubstateId,
     shard::Shard,
 };
+use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::{
     StateStore,
     consensus_models::{

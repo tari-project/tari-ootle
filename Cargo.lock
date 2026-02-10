@@ -1691,6 +1691,7 @@ dependencies = [
  "tari_epoch_manager",
  "tari_ootle_app_utilities",
  "tari_ootle_common_types",
+ "tari_ootle_p2p",
  "tari_ootle_storage",
  "tari_ootle_transaction",
  "tari_shutdown",
@@ -2624,6 +2625,7 @@ dependencies = [
  "serde_json",
  "tari_jellyfish",
  "tari_ootle_common_types",
+ "tari_ootle_p2p",
  "tari_ootle_storage",
  "tari_state_store_rocksdb",
  "tokio",
@@ -11311,6 +11313,7 @@ dependencies = [
  "tari_mmr",
  "tari_networking",
  "tari_ootle_common_types",
+ "tari_ootle_p2p",
  "tari_ootle_storage",
  "tari_ootle_transaction",
  "tari_template_lib",
@@ -11331,7 +11334,6 @@ dependencies = [
  "digest 0.10.7",
  "ethnum",
  "indexmap 2.13.0",
- "libp2p-identity",
  "newtype-ops",
  "ootle_byte_type",
  "ootle_serde",
@@ -11356,8 +11358,10 @@ name = "tari_ootle_p2p"
 version = "0.20.0"
 dependencies = [
  "anyhow",
+ "libp2p-identity",
  "prost 0.14.3",
  "proto_builder",
+ "rand 0.8.5",
  "serde",
  "tari_bor",
  "tari_common_types",
@@ -11371,6 +11375,7 @@ dependencies = [
  "tari_ootle_storage",
  "tari_ootle_transaction",
  "tari_template_lib",
+ "ts-rs",
 ]
 
 [[package]]
@@ -11414,6 +11419,7 @@ dependencies = [
  "tari_common_types",
  "tari_crypto",
  "tari_ootle_common_types",
+ "tari_ootle_p2p",
  "tari_ootle_storage",
  "tari_template_lib",
  "tari_utilities",
@@ -12195,6 +12201,7 @@ dependencies = [
  "tari_consensus_types",
  "tari_engine_types",
  "tari_ootle_common_types",
+ "tari_ootle_p2p",
  "tari_ootle_storage",
  "tari_ootle_transaction",
  "tari_sidechain",

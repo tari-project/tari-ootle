@@ -4,7 +4,7 @@
 use std::fs;
 
 use anyhow::{Context, anyhow};
-use tari_ootle_common_types::PeerAddress;
+use tari_ootle_p2p::PeerAddress;
 use tari_state_store_rocksdb::{RocksDbReadOnlyStateStore, RocksDbStateStore};
 
 use crate::config::DatabaseConfig;

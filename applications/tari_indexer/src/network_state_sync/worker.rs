@@ -12,16 +12,8 @@ use tari_engine_types::{
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader, service::EpochManagerHandle};
 use tari_indexer_client::event::{IndexerEvent, NewEpochEvent, TransactionFinalizedEvent};
 use tari_networking::NetworkingHandle;
-use tari_ootle_common_types::{
-    Epoch,
-    PeerAddress,
-    ShardGroup,
-    StateVersion,
-    VotePower,
-    optional::Optional,
-    shard::Shard,
-};
-use tari_ootle_p2p::{TariMessagingSpec, proto::rpc};
+use tari_ootle_common_types::{Epoch, ShardGroup, StateVersion, VotePower, optional::Optional, shard::Shard};
+use tari_ootle_p2p::{PeerAddress, TariMessagingSpec, proto::rpc};
 use tari_ootle_storage::{
     StorageError,
     consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof, SubstateValueFilterFlags},

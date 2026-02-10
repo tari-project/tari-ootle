@@ -6,7 +6,6 @@ use std::{
     hash::Hash,
 };
 
-use libp2p_identity::PeerId;
 use ootle_byte_type::ToByteType;
 use serde::{Serialize, de::DeserializeOwned};
 use tari_crypto::ristretto::RistrettoPublicKey;
@@ -54,7 +53,3 @@ pub trait DerivableFromPublicKey: NodeAddressable {
 }
 
 impl DerivableFromPublicKey for RistrettoPublicKeyBytes {}
-
-pub trait ToPeerId {
-    fn to_peer_id(&self) -> PeerId;
-}

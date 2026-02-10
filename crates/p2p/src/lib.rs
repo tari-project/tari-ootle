@@ -3,13 +3,12 @@
 
 mod block_sync;
 mod conversions;
+mod encoding;
+mod message;
+mod message_spec;
+mod peer_address;
 pub mod proto;
 
-mod message;
 pub use message::*;
-
-mod message_spec;
 pub use message_spec::*;
-
-mod encoding;
-// mod utils;
+pub use peer_address::*;

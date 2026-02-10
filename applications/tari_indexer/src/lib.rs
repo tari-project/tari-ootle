@@ -61,7 +61,8 @@ use tari_epoch_manager::{
 use tari_epoch_oracles::EpochOracle;
 use tari_networking::NetworkingService;
 use tari_ootle_app_utilities::keypair::setup_keypair_prompt;
-use tari_ootle_common_types::{PeerAddress, layer_one_transaction::LayerOneTransactionDef};
+use tari_ootle_common_types::layer_one_transaction::LayerOneTransactionDef;
+use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::global::{DbFactory, GlobalDb};
 use tari_ootle_storage_sqlite::{SqliteDbFactory, global::SqliteGlobalDbAdapter};
 use tari_shutdown::ShutdownSignal;

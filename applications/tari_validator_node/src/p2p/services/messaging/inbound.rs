@@ -3,8 +3,7 @@
 
 use libp2p::PeerId;
 use tari_consensus::{messages::HotstuffMessage, traits::InboundMessagingError};
-use tari_ootle_common_types::PeerAddress;
-use tari_ootle_p2p::proto;
+use tari_ootle_p2p::{PeerAddress, proto};
 use tokio::sync::mpsc;
 
 use crate::p2p::logging::MessageLogger;

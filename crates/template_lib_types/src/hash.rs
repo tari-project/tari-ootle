@@ -39,13 +39,13 @@ use crate::{
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[serde(transparent)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct Hash(
+pub struct Hash32(
     #[serde(with = "serde_helpers::fixed_hex")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     [u8; Self::LENGTH],
 );
 
-impl Hash {
+impl Hash32 {
     pub const LENGTH: usize = 32;
 
     pub const fn from_array(bytes: [u8; Self::LENGTH]) -> Self {
@@ -62,7 +62,7 @@ impl Hash {
 
     pub fn from_hex(s: &str) -> Result<Self, HashParseError> {
         let hash = fixed_bytes_from_hex(s).map_err(|_| HashParseError)?;
-        Ok(Hash(hash))
+        Ok(Hash32(hash))
     }
 
     pub fn write_hex_fmt<W: fmt::Write>(&self, writer: &mut W) -> fmt::Result {
@@ -104,27 +104,27 @@ impl Hash {
     }
 }
 
-impl AsRef<[u8]> for Hash {
+impl AsRef<[u8]> for Hash32 {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
     }
 }
 
-impl From<[u8; Self::LENGTH]> for Hash {
+impl From<[u8; Self::LENGTH]> for Hash32 {
     fn from(hash: [u8; Self::LENGTH]) -> Self {
         Self::from_array(hash)
     }
 }
 
-impl FromStr for Hash {
+impl FromStr for Hash32 {
     type Err = HashParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Hash::from_hex(s)
+        Hash32::from_hex(s)
     }
 }
 
-impl TryFrom<&[u8]> for Hash {
+impl TryFrom<&[u8]> for Hash32 {
     type Error = HashParseError;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
@@ -133,19 +133,19 @@ impl TryFrom<&[u8]> for Hash {
         }
         let mut hash = [0u8; Self::LENGTH];
         hash.copy_from_slice(value);
-        Ok(Hash::from_array(hash))
+        Ok(Hash32::from_array(hash))
     }
 }
 
-impl TryFrom<Vec<u8>> for Hash {
+impl TryFrom<Vec<u8>> for Hash32 {
     type Error = HashParseError;
 
     fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
-        Hash::try_from(value.as_slice())
+        Hash32::try_from(value.as_slice())
     }
 }
 
-impl Deref for Hash {
+impl Deref for Hash32 {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -153,13 +153,13 @@ impl Deref for Hash {
     }
 }
 
-impl DerefMut for Hash {
+impl DerefMut for Hash32 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl Display for Hash {
+impl Display for Hash32 {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write_hex_fmt(f, &self.0)
     }
@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn serialize_deserialize() {
-        let hash = Hash::default();
+        let hash = Hash32::default();
         let mut buf = Vec::new();
         tari_bor::encode_into_writer(&hash, &mut buf).unwrap();
         let hash2 = tari_bor::decode(&buf).unwrap();

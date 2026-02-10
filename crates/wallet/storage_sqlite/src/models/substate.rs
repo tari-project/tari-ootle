@@ -7,7 +7,7 @@ use diesel::{Identifiable, Queryable};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::VersionedSubstateId;
 use tari_ootle_wallet_sdk::{models::SubstateModel, storage::WalletStorageError};
-use tari_template_lib_types::Hash;
+use tari_template_lib_types::Hash32;
 use time::PrimitiveDateTime;
 
 use crate::{schema::substates, serialization::deserialize_json};
@@ -35,7 +35,7 @@ impl Substate {
             template_address: self
                 .template_address
                 .as_ref()
-                .map(|s| Hash::from_hex(s))
+                .map(|s| Hash32::from_hex(s))
                 .transpose()
                 .map_err(|e| WalletStorageError::DecodingError {
                     operation: "try_to_record",

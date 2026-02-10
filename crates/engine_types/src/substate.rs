@@ -35,7 +35,7 @@ use tari_template_lib::{
     types::{
         ClaimedOutputTombstoneAddress,
         ComponentAddress,
-        Hash,
+        Hash32,
         NonFungibleAddress,
         ObjectKey,
         ResourceAddress,
@@ -102,7 +102,7 @@ impl Substate {
         decode(bytes)
     }
 
-    pub fn to_value_hash(&self) -> Hash {
+    pub fn to_value_hash(&self) -> Hash32 {
         hash_substate(self.substate_value(), self.version)
     }
 
@@ -111,7 +111,7 @@ impl Substate {
     }
 }
 
-pub fn hash_substate(substate: &SubstateValue, version: u32) -> Hash {
+pub fn hash_substate(substate: &SubstateValue, version: u32) -> Hash32 {
     substate_value_hasher32()
         .chain(substate)
         .chain(&version)
@@ -531,7 +531,7 @@ impl FromStr for SubstateId {
                 Ok(SubstateId::TransactionReceipt(tx_receipt_addr))
             },
             Some((address_prefixes::TEMPLATE, addr)) => {
-                let addr = Hash::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
+                let addr = Hash32::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
                 Ok(SubstateId::Template(addr.into()))
             },
             Some((address_prefixes::VALIDATOR_FEE_POOL, addr)) => {

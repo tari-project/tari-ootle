@@ -3,13 +3,13 @@
 
 use std::sync::{Arc, atomic::AtomicU32};
 
-use tari_template_lib::types::{EntityId, Hash};
+use tari_template_lib::types::{EntityId, Hash32};
 
 use crate::hashing::{EngineHashDomainLabel, hasher32};
 
 #[derive(Debug, Clone)]
 pub struct EntityIdProvider {
-    transaction_hash: Hash,
+    transaction_hash: Hash32,
     max_ids: u32,
     current_id: Arc<AtomicU32>,
 }
@@ -23,7 +23,7 @@ pub enum EntityIdProviderError {
 }
 
 impl EntityIdProvider {
-    pub fn new(transaction_hash: Hash, max_ids: u32) -> Self {
+    pub fn new(transaction_hash: Hash32, max_ids: u32) -> Self {
         Self {
             transaction_hash,
             max_ids,
@@ -39,7 +39,7 @@ impl EntityIdProvider {
         Ok(id)
     }
 
-    pub fn transaction_hash(&self) -> Hash {
+    pub fn transaction_hash(&self) -> Hash32 {
         self.transaction_hash
     }
 
@@ -50,7 +50,7 @@ impl EntityIdProvider {
     }
 }
 
-fn generate_entity_id(hash: &Hash, n: u32) -> EntityId {
+fn generate_entity_id(hash: &Hash32, n: u32) -> EntityId {
     let hash = hasher32(EngineHashDomainLabel::EntityId).chain(hash).chain(&n).result();
     EntityId::new(hash.trailing_bytes())
 }

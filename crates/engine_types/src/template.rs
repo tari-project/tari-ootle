@@ -20,11 +20,11 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_template_lib::types::Hash;
+use tari_template_lib::types::Hash32;
 
 use crate::hashing::{EngineHashDomainLabel, hasher32};
 
-pub fn calculate_template_binary_hash(wasm_code: &[u8]) -> Hash {
+pub fn calculate_template_binary_hash(wasm_code: &[u8]) -> Hash32 {
     let hash = hasher32(EngineHashDomainLabel::Template).chain(wasm_code).result();
-    Hash::from(hash.into_array())
+    Hash32::from(hash.into_array())
 }

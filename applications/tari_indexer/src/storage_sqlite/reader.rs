@@ -36,7 +36,7 @@ use tari_ootle_storage_sqlite::SqliteTransaction;
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_ootle_wallet_sdk::models::UtxoStateUpdateSet;
 use tari_template_lib_types::{
-    Hash,
+    Hash32,
     ResourceAddress,
     TemplateAddress,
     TransactionReceiptAddress,
@@ -289,13 +289,13 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                             ),
                         })?;
                     let template_address =
-                        Hash::from_hex(&row.template_address).map_err(|e| StorageError::DataInconsistency {
+                        Hash32::from_hex(&row.template_address).map_err(|e| StorageError::DataInconsistency {
                             details: format!(
                                 "Invalid template_address {} in events table: {}",
                                 row.template_address, e
                             ),
                         })?;
-                    let tx_hash = Hash::from_hex(&row.tx_hash).map_err(|e| StorageError::DataInconsistency {
+                    let tx_hash = Hash32::from_hex(&row.tx_hash).map_err(|e| StorageError::DataInconsistency {
                         details: format!("Invalid tx_hash {} in events table: {}", row.tx_hash, e),
                     })?;
                     let topic = row.topic;

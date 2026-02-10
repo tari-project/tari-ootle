@@ -16,7 +16,7 @@ use tari_ootle_storage::consensus_models::{
     SubstateValueOrHash,
     TreeRootSummary,
 };
-use tari_template_lib::types::Hash;
+use tari_template_lib::types::Hash32;
 
 use crate::{
     encoding::{decode_from_slice, encode_to_vec},
@@ -133,7 +133,7 @@ impl TryFrom<proto::rpc::substate_data::SubstateValueOrHash> for SubstateValueOr
                 SubstateValue::from_bytes(&v).context("SubstateValueOrHash::Value")?,
             ))),
             proto::rpc::substate_data::SubstateValueOrHash::Hash(h) => Ok(SubstateValueOrHash::Hash(
-                Hash::try_from(h).context("SubstateValueOrHash::Hash")?,
+                Hash32::try_from(h).context("SubstateValueOrHash::Hash")?,
             )),
         }
     }

@@ -69,8 +69,8 @@ impl PedersenCommitmentBytes {
         self.0
     }
 
-    pub const fn as_hash(&self) -> crate::Hash {
-        crate::Hash::from_array(self.0)
+    pub const fn as_hash(&self) -> crate::Hash32 {
+        crate::Hash32::from_array(self.0)
     }
 }
 

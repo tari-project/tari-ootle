@@ -17,7 +17,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_transaction::TransactionId;
 use tari_state_tree::{SubstateTreeChange, Version};
-use tari_template_lib_types::Hash;
+use tari_template_lib_types::Hash32;
 
 use crate::{
     StateStoreReadTransaction,
@@ -34,7 +34,7 @@ pub struct SubstateRecord {
     pub substate_value: Option<SubstateValue>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "ootle_serde::hex")]
-    pub state_hash: Hash,
+    pub state_hash: Hash32,
     pub created: SubstateCreated,
     pub destroyed: Option<SubstateDestroyed>,
 }
@@ -126,7 +126,7 @@ impl SubstateRecord {
         !self.is_destroyed()
     }
 
-    pub fn state_hash(&self) -> &Hash {
+    pub fn state_hash(&self) -> &Hash32 {
         &self.state_hash
     }
 
@@ -308,7 +308,7 @@ pub struct SubstateDestroyed {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SubstateValueOrHash {
     Value(Box<SubstateValue>),
-    Hash(Hash),
+    Hash(Hash32),
 }
 
 impl SubstateValueOrHash {
@@ -326,14 +326,14 @@ impl SubstateValueOrHash {
         }
     }
 
-    pub fn hash(&self) -> Option<&Hash> {
+    pub fn hash(&self) -> Option<&Hash32> {
         match self {
             SubstateValueOrHash::Value(_) => None,
             SubstateValueOrHash::Hash(hash) => Some(hash),
         }
     }
 
-    pub fn to_value_hash(&self, version: u32) -> Hash {
+    pub fn to_value_hash(&self, version: u32) -> Hash32 {
         match &self {
             SubstateValueOrHash::Value(v) => hash_substate(v, version),
             SubstateValueOrHash::Hash(hash) => *hash,
@@ -347,8 +347,8 @@ impl From<SubstateValue> for SubstateValueOrHash {
     }
 }
 
-impl From<Hash> for SubstateValueOrHash {
-    fn from(hash: Hash) -> Self {
+impl From<Hash32> for SubstateValueOrHash {
+    fn from(hash: Hash32) -> Self {
         Self::Hash(hash)
     }
 }
@@ -369,7 +369,7 @@ impl SubstateData {
         VersionedSubstateIdRef::new(&self.substate_id, self.version)
     }
 
-    pub fn to_value_hash(&self) -> Hash {
+    pub fn to_value_hash(&self) -> Hash32 {
         self.value.to_value_hash(self.version)
     }
 

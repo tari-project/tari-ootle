@@ -26,7 +26,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use tari_template_lib::types::{ComponentAddress, Hash, ResourceAddress, TemplateAddress};
+use tari_template_lib::types::{ComponentAddress, Hash32, ResourceAddress, TemplateAddress};
 
 use crate::{
     events::Event,
@@ -52,7 +52,7 @@ pub struct ExecuteResult {
 }
 
 impl ExecuteResult {
-    pub fn new_rejected(transaction_hash: Hash, reason: RejectReason, execute_epoch: Option<u64>) -> Self {
+    pub fn new_rejected(transaction_hash: Hash32, reason: RejectReason, execute_epoch: Option<u64>) -> Self {
         Self {
             finalize: FinalizeResult::new_rejected(transaction_hash, reason),
             execution_time: Duration::default(),
@@ -138,7 +138,7 @@ impl ExecuteResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct FinalizeResult {
-    pub transaction_hash: Hash,
+    pub transaction_hash: Hash32,
     pub events: Vec<Event>,
     pub logs: Vec<LogEntry>,
     pub execution_results: Vec<InstructionResult>,
@@ -148,7 +148,7 @@ pub struct FinalizeResult {
 
 impl FinalizeResult {
     pub fn new(
-        transaction_hash: Hash,
+        transaction_hash: Hash32,
         logs: Vec<LogEntry>,
         events: Vec<Event>,
         result: TransactionResult,
@@ -164,7 +164,7 @@ impl FinalizeResult {
         }
     }
 
-    pub fn new_rejected(transaction_hash: Hash, reason: RejectReason) -> Self {
+    pub fn new_rejected(transaction_hash: Hash32, reason: RejectReason) -> Self {
         Self {
             transaction_hash,
             logs: vec![],

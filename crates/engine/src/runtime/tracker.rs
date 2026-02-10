@@ -40,7 +40,7 @@ use tari_ootle_transaction::TransactionWeight;
 use tari_template_lib::{
     models::ComponentAddressAllocation,
     prelude::ComponentAccessRules,
-    types::{ComponentAddress, Hash, Metadata, OwnerRule, TemplateAddress, crypto::RistrettoPublicKeyBytes},
+    types::{ComponentAddress, Hash32, Metadata, OwnerRule, TemplateAddress, crypto::RistrettoPublicKeyBytes},
 };
 
 use crate::{
@@ -68,7 +68,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         state_store: TStore,
         virtual_substates: VirtualSubstates,
         initial_call_scope: CallScope,
-        transaction_hash: Hash,
+        transaction_hash: Hash32,
         transaction_weight: TransactionWeight,
     ) -> Self {
         Self {

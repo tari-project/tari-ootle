@@ -47,7 +47,7 @@ use tari_template_lib::{
         AuthHookCaller,
         ComponentAddress,
         EntityId,
-        Hash,
+        Hash32,
         NonFungibleAddress,
         ResourceAddress,
         TemplateAddress,
@@ -83,7 +83,7 @@ const LOG_TARGET: &str = "dan::engine::runtime::working_state";
 
 #[derive(Debug, Clone)]
 pub(super) struct WorkingState<TStore> {
-    transaction_hash: Hash,
+    transaction_hash: Hash32,
     events: Vec<Event>,
     logs: Vec<LogEntry>,
     buckets: HashMap<BucketId, Bucket>,
@@ -111,7 +111,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         state_store: TStore,
         virtual_substates: VirtualSubstates,
         initial_call_scope: CallScope,
-        transaction_hash: Hash,
+        transaction_hash: Hash32,
     ) -> Self {
         Self {
             transaction_hash,
@@ -137,7 +137,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         }
     }
 
-    pub fn transaction_hash(&self) -> Hash {
+    pub fn transaction_hash(&self) -> Hash32 {
         self.transaction_hash
     }
 

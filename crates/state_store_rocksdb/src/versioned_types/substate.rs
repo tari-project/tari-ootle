@@ -44,7 +44,7 @@ mod tests {
     };
     use tari_ootle_common_types::{Epoch, shard::Shard};
     use tari_ootle_storage::consensus_models::{SubstateCreated, SubstateDestroyed};
-    use tari_template_lib_types::Hash;
+    use tari_template_lib_types::Hash32;
 
     use super::*;
     use crate::codecs::{DbDecoder, DbEncoder, DefaultCodec};
@@ -68,7 +68,7 @@ mod tests {
                 entity_id: Default::default(),
                 body: ComponentBody { state: Value::Null },
             })),
-            state_hash: Hash::from_hex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef").unwrap(),
+            state_hash: Hash32::from_hex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef").unwrap(),
             created: SubstateCreated {
                 at_epoch: Epoch(123),
                 in_shard: Shard::first(),

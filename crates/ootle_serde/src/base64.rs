@@ -43,7 +43,7 @@ where
 #[cfg(test)]
 mod tests {
     use serde::Serialize;
-    use tari_template_lib::types::Hash;
+    use tari_template_lib::types::Hash32;
 
     use super::*;
 
@@ -52,14 +52,14 @@ mod tests {
         #[serde(with = "super")]
         data: Vec<u8>,
         #[serde(with = "super")]
-        hash: Hash,
+        hash: Hash32,
     }
 
     #[test]
     fn it_encodes_and_decodes_from_base64() {
         let original = SampleData {
             data: vec![1, 2, 3, 4, 5],
-            hash: Hash::from_array([123u8; 32]),
+            hash: Hash32::from_array([123u8; 32]),
         };
 
         // Serialize to JSON (human-readable)

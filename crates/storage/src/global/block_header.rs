@@ -22,7 +22,7 @@
 
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::Epoch;
-use tari_template_lib_types::Hash;
+use tari_template_lib_types::Hash32;
 
 use crate::global::GlobalDbAdapter;
 
@@ -40,7 +40,7 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> BlockHeaderDb<'a, 'tx, TGlobalD
         self.backend.insert_block_header(self.tx, header)
     }
 
-    pub fn get_by_hash(&mut self, epoch: Epoch, hash: &Hash) -> Result<BlockHeaderModel, TGlobalDbAdapter::Error> {
+    pub fn get_by_hash(&mut self, epoch: Epoch, hash: &Hash32) -> Result<BlockHeaderModel, TGlobalDbAdapter::Error> {
         self.backend.get_block_header_by_hash(self.tx, epoch, hash)
     }
 

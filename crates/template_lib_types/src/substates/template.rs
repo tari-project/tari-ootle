@@ -3,11 +3,11 @@
 
 use tari_template_abi::rust::str::FromStr;
 
-use crate::{Hash, address_prefixes};
+use crate::{Hash32, address_prefixes};
 
 /// The address of a Template
 // TODO: should we refactor TemplateAddress as a newtype ?
-pub type TemplateAddress = Hash;
+pub type TemplateAddress = Hash32;
 
 pub fn parse_template_address(s: &str) -> Option<TemplateAddress> {
     if let Some(hash_str) = s.strip_prefix(address_prefixes::TEMPLATE) &&

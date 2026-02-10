@@ -328,7 +328,7 @@ mod tests {
     use std::{format, str::FromStr};
 
     use super::*;
-    use crate::Hash;
+    use crate::Hash32;
 
     mod try_from_string {
         use super::*;
@@ -413,7 +413,7 @@ mod tests {
             // uuid
             assert_eq!(
                 NonFungibleId::from_u256(
-                    Hash::from_hex("736bab0c3af393a0423c578ddcf7e19b81086f6ecbbc148713e95da75ef8171d")
+                    Hash32::from_hex("736bab0c3af393a0423c578ddcf7e19b81086f6ecbbc148713e95da75ef8171d")
                         .unwrap()
                         .into_array()
                 )

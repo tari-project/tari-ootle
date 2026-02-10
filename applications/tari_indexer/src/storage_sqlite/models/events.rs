@@ -26,7 +26,7 @@ use std::convert::TryFrom;
 use diesel::sql_types::{Nullable, Text};
 use serde::{Deserialize, Serialize};
 use tari_ootle_storage::time::PrimitiveDateTime;
-use tari_template_lib_types::Hash;
+use tari_template_lib_types::Hash32;
 
 use crate::storage_sqlite::schema::*;
 
@@ -73,9 +73,9 @@ impl TryFrom<EventData> for crate::graphql::model::events::Event {
     fn try_from(event_data: EventData) -> Result<Self, Self::Error> {
         let substate_id = event_data.substate_id;
 
-        let template_address = Hash::from_hex(&event_data.template_address)?.into_array();
+        let template_address = Hash32::from_hex(&event_data.template_address)?.into_array();
 
-        let tx_hash = Hash::from_hex(&event_data.tx_hash)?.into_array();
+        let tx_hash = Hash32::from_hex(&event_data.tx_hash)?.into_array();
 
         let payload = serde_json::from_str(event_data.payload.as_str())?;
 

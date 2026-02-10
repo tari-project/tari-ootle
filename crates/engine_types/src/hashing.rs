@@ -31,7 +31,7 @@ use tari_crypto::{
     signatures::SchnorrSignature,
 };
 use tari_hashing::DomainSeparatedBorshHasher;
-use tari_template_lib::types::Hash;
+use tari_template_lib::types::Hash32;
 
 hash_domain!(TariEngineHashDomain, "com.tari.ootle.engine", 0);
 
@@ -51,7 +51,7 @@ pub fn template_hasher32() -> TariHasher32 {
     hasher32(EngineHashDomainLabel::Template)
 }
 
-pub fn hash_template_code(code: &[u8]) -> Hash {
+pub fn hash_template_code(code: &[u8]) -> Hash32 {
     template_hasher32().chain(&code).result()
 }
 
@@ -75,7 +75,7 @@ impl TariHasher32 {
         self
     }
 
-    pub fn result(self) -> Hash {
+    pub fn result(self) -> Hash32 {
         self.hasher.finalize_into_array().into()
     }
 }

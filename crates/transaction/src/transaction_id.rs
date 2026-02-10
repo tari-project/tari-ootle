@@ -10,7 +10,7 @@ use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::{SubstateAddress, ToSubstateAddress};
 use tari_template_lib::types::{
-    Hash,
+    Hash32,
     KeyParseError,
     TransactionReceiptAddress,
     hex::{fixed_bytes_from_hex, write_hex_fmt},
@@ -38,8 +38,8 @@ impl TransactionId {
         self.0
     }
 
-    pub fn as_hash(&self) -> Hash {
-        Hash::from(self.0)
+    pub fn as_hash(&self) -> Hash32 {
+        Hash32::from(self.0)
     }
 
     pub fn from_hex(hex: &str) -> Result<Self, KeyParseError> {
@@ -115,14 +115,14 @@ impl From<[u8; 32]> for TransactionId {
     }
 }
 
-impl From<TransactionId> for Hash {
+impl From<TransactionId> for Hash32 {
     fn from(id: TransactionId) -> Self {
-        Hash::from(id.0)
+        Hash32::from(id.0)
     }
 }
 
-impl From<Hash> for TransactionId {
-    fn from(hash: Hash) -> Self {
+impl From<Hash32> for TransactionId {
+    fn from(hash: Hash32) -> Self {
         Self::new(hash.into_array())
     }
 }

@@ -19,7 +19,7 @@ use tari_jellyfish::{
     Version,
 };
 use tari_ootle_common_types::{ToSubstateAddress, VersionedSubstateId};
-use tari_template_lib_types::Hash;
+use tari_template_lib_types::Hash32;
 
 use crate::{
     SPARSE_MERKLE_PLACEHOLDER_HASH,
@@ -197,8 +197,13 @@ fn calculate_substate_changes<
 }
 
 pub enum SubstateTreeChange {
-    Up { id: VersionedSubstateId, value_hash: Hash },
-    Down { id: VersionedSubstateId },
+    Up {
+        id: VersionedSubstateId,
+        value_hash: Hash32,
+    },
+    Down {
+        id: VersionedSubstateId,
+    },
 }
 
 impl SubstateTreeChange {

@@ -19,7 +19,10 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_transaction::{Transaction, args};
 use tari_ootle_wallet_sdk::{
-    apis::{confidential_transfer::UtxoInputSelection, stealth_transfer::TransferOutput},
+    apis::{
+        confidential_transfer::UtxoInputSelection,
+        stealth_transfer::{TransferFeeParams, TransferOutput},
+    },
     crypto::{memo::Memo, pay_to::PayTo},
     models::{AccountWithAddress, KeyBranch},
 };
@@ -218,7 +221,7 @@ impl TrafficSim {
         let resp = sender_client
             .accounts_stealth_transfer(StealthTransferRequest {
                 owner_account: (*sender_account.component_address()).into(),
-                fee_input_selection: UtxoInputSelection::PreferConfidential,
+                fee_params: TransferFeeParams::new(UtxoInputSelection::PreferConfidential),
                 input_selection: UtxoInputSelection::ConfidentialOnly,
                 resource_address,
                 badge_usage: Default::default(),

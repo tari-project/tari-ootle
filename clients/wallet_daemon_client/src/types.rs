@@ -40,7 +40,7 @@ use tari_ootle_transaction::{Instruction, Transaction, TransactionId, UnsignedTr
 use tari_ootle_wallet_sdk::{
     apis::{
         confidential_transfer::UtxoInputSelection,
-        stealth_transfer::{BadgeUsage, TransferOutput},
+        stealth_transfer::{BadgeUsage, TransferFeeParams, TransferOutput},
     },
     crypto::{memo::Memo, pay_to::PayTo},
     models::{
@@ -1120,7 +1120,7 @@ pub struct AccountsCreateStealthTransferStatementResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct StealthTransferRequest {
     pub owner_account: ComponentAddressOrName,
-    pub fee_input_selection: UtxoInputSelection,
+    pub fee_params: TransferFeeParams,
     pub input_selection: UtxoInputSelection,
     pub resource_address: ResourceAddress,
     #[serde(default, skip_serializing_if = "BadgeUsage::is_none")]

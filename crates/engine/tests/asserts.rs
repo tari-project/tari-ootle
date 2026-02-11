@@ -70,7 +70,7 @@ fn successful_assert() {
         Transaction::builder_localnet()
             .call_method(test.faucet_component, "take_free_coins", args![])
             .put_last_instruction_output_on_workspace("faucet_bucket")
-            .assert_bucket_contains("faucet_bucket", test.faucet_resource, FAUCET_WITHDRAWAL_AMOUNT)
+            .assert_bucket_contains_at_least("faucet_bucket", test.faucet_resource, FAUCET_WITHDRAWAL_AMOUNT)
             .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
             .build_and_seal(&test.account_key),
         vec![test.account_proof.clone()],
@@ -88,7 +88,7 @@ fn it_fails_with_invalid_resource() {
         Transaction::builder_localnet()
             .call_method(test.faucet_component, "take_free_coins", args![])
             .put_last_instruction_output_on_workspace("faucet_bucket")
-            .assert_bucket_contains("faucet_bucket", invalid_resource_address, FAUCET_WITHDRAWAL_AMOUNT)
+            .assert_bucket_contains_at_least("faucet_bucket", invalid_resource_address, FAUCET_WITHDRAWAL_AMOUNT)
             .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
             .build_and_seal(&test.account_key),
         vec![test.account_proof.clone()],
@@ -114,7 +114,7 @@ fn it_fails_with_invalid_amount() {
         Transaction::builder_localnet()
             .call_method(test.faucet_component, "take_free_coins", args![])
             .put_last_instruction_output_on_workspace("faucet_bucket")
-            .assert_bucket_contains("faucet_bucket", test.faucet_resource, min_amount)
+            .assert_bucket_contains_at_least("faucet_bucket", test.faucet_resource, min_amount)
             .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
             .build_and_seal(&test.account_key),
         vec![test.account_proof.clone()],
@@ -139,7 +139,7 @@ fn it_fails_with_invalid_bucket() {
             // we are going to assert a workspace value that is NOT a bucket
             .call_method(test.account, "get_balances", args![])
             .put_last_instruction_output_on_workspace("invalid_bucket")
-            .assert_bucket_contains("invalid_bucket", test.faucet_resource, FAUCET_WITHDRAWAL_AMOUNT)
+            .assert_bucket_contains_at_least("invalid_bucket", test.faucet_resource, FAUCET_WITHDRAWAL_AMOUNT)
             .call_method(test.account, "deposit", args![Workspace("invalid_bucket")])
             .build_and_seal(&test.account_key),
         vec![test.account_proof.clone()],

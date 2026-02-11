@@ -375,9 +375,18 @@ impl<TStore: StateReader> StateTracker<TStore> {
 
 impl<TStore: StateReader + Clone> StateTracker<TStore> {
     pub fn fee_checkpoint(&mut self) -> Result<(), RuntimeError> {
-        let state = self.read_with(|state| {
+        let state = self.write_with(|state| {
             // Check that the checkpoint is in a valid state
-            state.validate_finalized().map(|_| state.clone())
+            state.validate_finalized()?;
+            let checkpoint_state = state.clone();
+
+            // After checkpointing, the main intent has a cleared workspace
+            state.workspace_mut().clear_items();
+            let proofs = state.workspace_mut().drain_all_proofs();
+            for proof_id in proofs {
+                state.drop_proof(proof_id)?;
+            }
+            Ok::<_, RuntimeError>(checkpoint_state)
         })?;
 
         self.fee_checkpoint = Some(state);

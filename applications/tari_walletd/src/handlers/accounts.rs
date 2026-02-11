@@ -990,7 +990,7 @@ pub async fn handle_stealth_transfer(
         .collect::<anyhow::Result<_>>()?;
 
     let params = StealthTransferParams {
-        fee_input_selection: req.fee_input_selection,
+        fee_params: req.fee_params,
         input_selection: req.input_selection,
         resource_address: req.resource_address,
         max_fee: req.max_fee,

@@ -26,6 +26,7 @@ use tokio::{sync::Semaphore, task::block_in_place};
 
 use super::{
     BadgeUsage,
+    TransferFeeParams,
     error::StealthTransferApiError,
     params::StealthTransferParams,
     types::{InputsToSpend, StealthOutputToCreate, StealthTransferOutput},
@@ -276,9 +277,20 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         lock_id: WalletLockId,
         owner_account_address: &ComponentAddress,
         max_fee: A,
-        input_selection: UtxoInputSelection,
+        fee_params: &TransferFeeParams,
     ) -> Result<InputsToSpend, StealthTransferApiError> {
-        self.lock_inputs_for_transfer(lock_id, owner_account_address, XTR, max_fee.into(), input_selection)
+        let resource = fee_params
+            .pay_fee_with_swap
+            .as_ref()
+            .map(|swap| swap.input_resource)
+            .unwrap_or(XTR);
+        self.lock_inputs_for_transfer(
+            lock_id,
+            owner_account_address,
+            resource,
+            max_fee.into(),
+            fee_params.input_selection,
+        )
     }
 
     #[allow(clippy::too_many_lines)]
@@ -348,7 +360,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 lock.id(),
                 owner_account.component_address(),
                 params.max_fee,
-                params.fee_input_selection,
+                &params.fee_params,
             )?;
 
             debug!(
@@ -372,13 +384,15 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 })?;
 
             // Generate fee change outputs if required
-            let fee_change_output = Some(StealthOutputToCreate {
-                owner_address: owner_address.clone(),
-                amount: fee_stealth_change_amt,
-                memo: None,
-                pay_to: PayTo::StealthPublicKey,
-            })
-            .filter(|o| o.amount > 0);
+            let fee_change_output =
+                Some(fee_stealth_change_amt)
+                    .filter(|amt| *amt > 0)
+                    .map(|amt| StealthOutputToCreate {
+                        owner_address: owner_address.clone(),
+                        amount: amt,
+                        memo: None,
+                        pay_to: PayTo::StealthPublicKey,
+                    });
 
             // Figure out which signing key to use - if there are revealed funds, we need to use an account
             // withdraw auth signature, otherwise we can use a "throw-away" and private nonce.
@@ -390,10 +404,16 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             };
             let fee_signer = self.key_manager_api.get_public_key(signing_key_id)?;
 
+            let fee_resource = params
+                .fee_params
+                .pay_fee_with_swap
+                .as_ref()
+                .map(|swap| swap.input_resource)
+                .unwrap_or(XTR);
             // Generate fee transfer statement
             let fee_transfer_statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
                 view_only_key_id: owner_account.view_only_key_id(),
-                resource_address: &params.resource_address,
+                resource_address: &fee_resource,
                 resource_view_key: None,
                 inputs: &fee_inputs_to_spend.inputs,
                 input_revealed_amount: fee_inputs_to_spend.revealed,
@@ -413,7 +433,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 self.add_unconfirmed_output_from_statement(
                     lock.id(),
                     &owner_account,
-                    XTR,
+                    fee_resource,
                     output,
                     fee_stealth_change_amt,
                     None,
@@ -545,10 +565,10 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 fee_inputs_to_spend
                     .inputs
                     .iter()
-                    // If spending XTR, we may lock the fee change UTXO for spending, however since this does not exist yet, we do not include it as a tx input
+                    // We may lock the fee change UTXO for spending, however since this does not exist yet, we do not include it as a tx input
                     .filter(|i| i.is_on_chain)
                     .map(|i| &i.commitment)
-                    .map(|commitment| UtxoAddress::new(XTR, (*commitment).into()))
+                    .map(|commitment| UtxoAddress::new(fee_resource, (*commitment).into()))
                     .map(SubstateRequirement::unversioned),
             );
 
@@ -560,6 +580,21 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                     .map(|i| &i.commitment)
                     .map(|commitment| UtxoAddress::new(params.resource_address, (*commitment).into()))
                     .map(SubstateRequirement::unversioned),
+            );
+
+            // Add any swap-related inputs if any
+            substate_inputs.extend(
+                params
+                    .fee_params
+                    .pay_fee_with_swap
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|swap| {
+                        [
+                            SubstateRequirement::unversioned(swap.input_resource),
+                            SubstateRequirement::unversioned(swap.pool_address),
+                        ]
+                    }),
             );
 
             // Add badge vault if needed
@@ -706,7 +741,28 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             .for_network(network.as_byte())
             .with_dry_run(params.is_dry_run)
             .with_fee_instructions_builder(|builder| {
-                if fee_transfer_statement.inputs_statement.revealed_amount.is_positive() {
+                if let Some(swap) = params.fee_params.pay_fee_with_swap.as_ref() {
+                    if fee_transfer_statement.inputs_statement.revealed_amount.is_positive() {
+                        builder
+                            // Withdraw from the owner's account to perform the swap
+                            .call_method(*owner_account.component_address(), "withdraw", args![
+                                swap.input_resource,
+                                fee_transfer_statement.inputs_statement.revealed_amount
+                            ])
+                            .put_last_instruction_output_on_workspace("fee_other_resx_input_bucket")
+                            // Transfer
+                            .stealth_transfer_with_input_bucket(swap.input_resource, fee_transfer_statement, "fee_other_resx_input_bucket")
+                            .put_last_instruction_output_on_workspace("fee_swap_input_bucket")
+                            // Swap
+                            .call_method(swap.pool_address, "swap", args![Workspace("fee_swap_input_bucket")])
+                    } else {
+                        builder.stealth_transfer(swap.input_resource, fee_transfer_statement)
+                    }
+                    .put_last_instruction_output_on_workspace("fee_input_bucket")
+                    // Slippage protection - ensure that the output from the swap is at least the minimum fee amount
+                    .assert_bucket_contains_at_least("fee_input_bucket", XTR, swap.min_xtr_output_amount)
+                    .pay_fee_from_bucket("fee_input_bucket")
+                } else if fee_transfer_statement.inputs_statement.revealed_amount.is_positive() {
                     builder
                         .call_method(*owner_account.component_address(), "withdraw", args![
                             XTR,
@@ -774,7 +830,6 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                             }
                             let needs_to_split = params.outputs.len() > 1;
 
-                            // let need_to_create_account = accounts_to_create.contains(&dest_account);
                             if needs_to_split {
                                 let sub_bucket_name = format!("output-sub-bucket-{i}");
                                 builder

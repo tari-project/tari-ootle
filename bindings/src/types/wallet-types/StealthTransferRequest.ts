@@ -4,10 +4,11 @@ import type { UtxoInputSelection } from "../UtxoInputSelection";
 import type { BadgeUsage } from "./BadgeUsage";
 import type { ComponentAddressOrName } from "./ComponentAddressOrName";
 import type { StealthTransfer } from "./StealthTransfer";
+import type { TransferFeeParams } from "./TransferFeeParams";
 
 export type StealthTransferRequest = {
   owner_account: ComponentAddressOrName;
-  fee_input_selection: UtxoInputSelection;
+  fee_params: TransferFeeParams;
   input_selection: UtxoInputSelection;
   resource_address: ResourceAddress;
   badge_usage?: BadgeUsage;

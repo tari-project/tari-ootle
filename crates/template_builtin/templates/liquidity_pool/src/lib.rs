@@ -288,6 +288,12 @@ mod template {
             self.get_pool_vault(pool).withdraw(amount)
         }
 
+        /// A simple swap method that uses a constant product formula without fees.
+        /// This method makes the liquidity pool conform to the swap interface
+        pub fn swap(&mut self, input_bucket: Bucket) -> Bucket {
+            self.swap_constant_product(input_bucket)
+        }
+
         /// A simple constant product swap implementation without fees. This is provided as a convenience but
         /// may not be generally useful.
         /// Users of this template can implement their own swap logic with fees as needed and use an instance of this

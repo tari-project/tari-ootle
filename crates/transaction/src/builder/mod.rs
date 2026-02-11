@@ -470,7 +470,7 @@ impl<D> TransactionBuilder<D> {
     }
 
     pub fn stealth_transfer<R: Into<NamedResourceRef>>(self, resource: R, statement: StealthTransferStatement) -> Self {
-        self.stealth_transfer_with_opt_bucket(resource, statement, None::<String>)
+        self.stealth_transfer_with_opt_input_bucket(resource, statement, None::<String>)
     }
 
     pub fn stealth_transfer_with_input_bucket<B: Into<String>, R: Into<NamedResourceRef>>(
@@ -479,10 +479,10 @@ impl<D> TransactionBuilder<D> {
         statement: StealthTransferStatement,
         bucket: B,
     ) -> Self {
-        self.stealth_transfer_with_opt_bucket(resource_address, statement, Some(bucket))
+        self.stealth_transfer_with_opt_input_bucket(resource_address, statement, Some(bucket))
     }
 
-    pub fn stealth_transfer_with_opt_bucket<B: Into<String>, R: Into<NamedResourceRef>>(
+    pub fn stealth_transfer_with_opt_input_bucket<B: Into<String>, R: Into<NamedResourceRef>>(
         self,
         resource: R,
         statement: StealthTransferStatement,
@@ -521,7 +521,7 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
-    pub fn assert_bucket_contains<T: AsRef<str>, A: Into<Amount>>(
+    pub fn assert_bucket_contains_at_least<T: AsRef<str>, A: Into<Amount>>(
         self,
         label: T,
         resource_address: ResourceAddress,

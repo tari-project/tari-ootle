@@ -36,7 +36,7 @@ log = { workspace = true }
 fern = { workspace = true, features = ["colored"] }
 tonic = { workspace = true }
 serde_json5 = { workspace = true }
-reqwest = { workspace = true, features = ["json", "blocking", "rustls-tls"] }
+reqwest = { workspace = true, features = ["json", "blocking"] }
 serde_json = { workspace = true }
 
 toml = "0.8.12"

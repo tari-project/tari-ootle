@@ -6,7 +6,7 @@ import type { RistrettoPublicKeyBytes } from "../RistrettoPublicKeyBytes";
 export type TemplateMetadata = {
   name: string;
   address: Hash32;
-  binary_sha: string;
+  binary_sha: Hash32;
   author_public_key: RistrettoPublicKeyBytes;
   code_size: number;
   epoch: Epoch;

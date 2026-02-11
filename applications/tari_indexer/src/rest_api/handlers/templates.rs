@@ -25,7 +25,12 @@ use crate::{
 #[utoipa::path(
     get,
     path = "/templates/{template_id}",
-    description = "Fetch a template definition by its address"
+    description = "Fetch a template definition by its address",
+    responses(
+        (status = 200, description = "Template definition", body = GetTemplateDefinitionResponse),
+        (status = 404, description = "Template not found or still pending", body = ErrorResponse),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to fetch template definition", body = ErrorResponse),
+    ),
 )]
 pub async fn get_template_definition(
     Extension(context): Extension<HandlerContext>,
@@ -65,6 +70,10 @@ pub async fn get_template_definition(
     description = "List all template cached by this indexer",
     params(
         ("limit" = Option<u32>, Query, description = "Limit the number of results returned"),
+    ),
+    responses(
+        (status = 200, description = "List of cached templates", body = ListTemplatesResponse),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to list cached templates", body = ErrorResponse),
     ),
 )]
 pub async fn list_cached_templates(

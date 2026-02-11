@@ -50,6 +50,7 @@ mod transaction_manager;
 use std::{convert::Infallible, fs, future, future::Future};
 
 use log::*;
+pub use rest_api::ApiDoc;
 use serde::Serialize;
 use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_consensus::consensus_constants::ConsensusConstants;

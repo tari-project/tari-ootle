@@ -6,6 +6,8 @@ You can read about the technical specifications of the Ootle in the [RFCs](https
 
 If you're looking for the core Tari base layer code, it's in [this repository](https://github.com/tari-project/tari)
 
+[Documentation](https://tari-project.github.io/tari-ootle/)
+
 ## Prerequisites
 
 You will require the following tools and dependencies to successfully build the Ootle and/or run the Ootle locally via
@@ -64,7 +66,8 @@ Navigate to http://127.0.0.1:5100 to create an account, claim test tokens and st
 
 ## Running a Small Ootle Network Locally (Localnet)
 
-NOTE: This repository is under heavy development. We'll try to keep instructions up to date, but they may become outdated. 
+NOTE: This repository is under heavy development. We'll try to keep instructions up to date, but they may become
+outdated.
 
 Confirm you have installed all the prerequisites listed in the **Prerequisites** section (Rust, Node.js, npm, linux
 dependencies)

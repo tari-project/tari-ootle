@@ -33,6 +33,10 @@ use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::H
         ("limit" = Option<u32>, Query, description = "Limit the number of results returned"),
         ("offset" = Option<u32>, Query, description = "Offset the results by this amount"),
     ),
+    responses(
+        (status = 200, description = "List of substates matching the filters", body = ListSubstatesResponse),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to list substates", body = ErrorResponse),
+    )
 )]
 pub async fn list_substates(
     Extension(context): Extension<HandlerContext>,
@@ -63,6 +67,12 @@ pub async fn list_substates(
         ("local_search_only" = bool, Query, description = "If true, only search local storage for the substate"),
         ("version" = Option<u32>, Query, description = "Minimum version of the substate to fetch"),
     ),
+    responses(
+        (status = 200, description = "Substate details", body = GetSubstateResponse),
+        (status = 404, description = "Substate not found", body = ErrorResponse),
+        (status = SERVICE_UNAVAILABLE, description = "Indexer is still syncing", body = ErrorResponse),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to fetch substate", body = ErrorResponse),
+    )
 )]
 pub async fn get_substate(
     Extension(context): Extension<HandlerContext>,
@@ -111,7 +121,13 @@ pub async fn get_substate(
 #[utoipa::path(
     post,
     path = "/substates/fetch",
-    description = "Fetches several substates by their IDs"
+    description = "Fetches several substates by their IDs",
+    responses(
+        (status = 200, description = "Substates details", body = GetSubstatesResponse),
+        (status = BAD_REQUEST, description = "Too many substates requested", body = ErrorResponse),
+        (status = SERVICE_UNAVAILABLE, description = "Indexer is still syncing", body = ErrorResponse),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to fetch substates", body = ErrorResponse),
+    ),
 )]
 pub async fn fetch_substates(
     Extension(context): Extension<HandlerContext>,

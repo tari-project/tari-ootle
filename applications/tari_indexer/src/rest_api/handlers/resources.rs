@@ -14,7 +14,13 @@ use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::H
 #[utoipa::path(
     get,
     path = "/resources/{resource_address}",
-    description = "Fetches a resource by ID"
+    description = "Fetches a resource by ID",
+    responses(
+        (status = 200, description = "Resource details", body = GetResourceResponse),
+        (status = 404, description = "Resource not found", body = ErrorResponse),
+        (status = SERVICE_UNAVAILABLE, description = "Indexer is still syncing", body = ErrorResponse),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to fetch resource", body = ErrorResponse),
+    ),
 )]
 pub async fn get_resource(
     Extension(context): Extension<HandlerContext>,

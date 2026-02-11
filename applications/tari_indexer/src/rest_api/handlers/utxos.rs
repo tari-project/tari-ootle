@@ -29,7 +29,14 @@ use crate::rest_api::{
 
 const LOG_TARGET: &str = "tari::ootle::indexer::rest_api::handlers::utxos";
 
-#[utoipa::path(post, path = "/utxos/updates", description = "Streams UTXO updates")]
+#[utoipa::path(post, path = "/utxos/updates", description = "Streams UTXO updates",
+    request_body = GetUtxoUpdatesRequest,
+    responses(
+        (status = 200, description = "Stream of UTXO updates"),
+        (status = BAD_REQUEST, description = "Invalid request parameters", body = ErrorResponse),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to start UTXO update stream", body = ErrorResponse),
+    )
+)]
 pub async fn stream_utxo_updates(
     headers: HeaderMap,
     Extension(context): Extension<HandlerContext>,
@@ -95,7 +102,13 @@ pub async fn stream_utxo_updates(
 #[utoipa::path(
     post,
     path = "/utxos/fetch",
-    description = "Gets full UTXO data for a list of UTXO IDs"
+    description = "Gets full UTXO data for a list of UTXO IDs",
+    request_body = GetUtxosRequest,
+    responses(
+        (status = 200, description = "UTXO details", body = GetUtxosResponse),
+        (status = BAD_REQUEST, description = "Too many UTXOs requested or invalid parameters", body = ErrorResponse),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to fetch UTXOs", body = ErrorResponse),
+    )
 )]
 pub async fn fetch_utxos(
     Extension(context): Extension<HandlerContext>,
@@ -112,7 +125,12 @@ pub async fn fetch_utxos(
     Ok(Json(GetUtxosResponse { utxos }))
 }
 
-#[utoipa::path(get, path = "/utxos", description = "List full UTXO data")]
+#[utoipa::path(get, path = "/utxos", description = "List full UTXO data",
+responses(
+    (status = 200, description = "List of UTXOs", body = ListUtxosResponse),
+    (status = BAD_REQUEST, description = "Invalid request parameters", body = ErrorResponse),
+    (status = INTERNAL_SERVER_ERROR, description = "Failed to list UTXOs", body = ErrorResponse),
+))]
 pub async fn list_utxos(
     Extension(context): Extension<HandlerContext>,
     Query(req): Query<ListUtxosRequest>,

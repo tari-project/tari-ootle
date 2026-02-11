@@ -698,15 +698,16 @@ jobs:
         shell: bash
         run: |
           set -xo pipefail
-          cp -v "${{ github.workspace }}${{ env.TS_DIST }}/tari_ootle_walletd${{ env.TS_EXT }}" \
-            "${{ github.workspace }}${{ env.TS_DIST }}/tari_ootle_walletd-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}${{ env.TS_EXT }}"
+          cd "${{ env.MTS_SOURCE }}"
+          cp -v "tari_ootle_walletd${{ env.TS_EXT }}" \
+            "tari_ootle_walletd-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}${{ env.TS_EXT }}"
           echo "Compute files shasum"
-          ${SHARUN} "${{ github.workspace }}${{ env.TS_DIST }}/tari_ootle_walletd-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}${{ env.TS_EXT }}" \
-            >> "${{ github.workspace }}${{ env.TS_DIST }}/tari_ootle_walletd-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}${{ env.TS_EXT }}.sha256"
+          ${SHARUN} "tari_ootle_walletd-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}${{ env.TS_EXT }}" \
+            >> "tari_ootle_walletd-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}${{ env.TS_EXT }}.sha256"
           echo "Show the shasum"
-          cat "${{ github.workspace }}${{ env.TS_DIST }}/tari_ootle_walletd-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}${{ env.TS_EXT }}.sha256"
+          cat "tari_ootle_walletd-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}${{ env.TS_EXT }}.sha256"
           echo "Checksum verification archive is "
-          ${SHARUN} --check "${{ github.workspace }}${{ env.TS_DIST }}/tari_ootle_walletd-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}${{ env.TS_EXT }}.sha256"
+          ${SHARUN} --check "tari_ootle_walletd-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}${{ env.TS_EXT }}.sha256"
 
       - name: Artifact upload for Standalone tari_ootle_walletd binary
         uses: actions/upload-artifact@v6
@@ -945,8 +946,12 @@ jobs:
           if [ -f "${{ env.TS_FILENAME }}-${{ env.TARI_VERSION }}.${{ env.TS_SIG_FN }}" ] ; then
             rm -fv "${{ env.TS_FILENAME }}-${{ env.TARI_VERSION }}.${{ env.TS_SIG_FN }}"
           fi
+
           # Merge all sha256 files into one
-          find . -name "*.sha256" -type f -print | xargs cat >> "${{ env.TS_FILENAME }}-${{ env.TARI_VERSION }}.${{ env.TS_SIG_FN }}"
+          find . -name "*.sha256" -type f -print | \
+            xargs cat >> "${{ env.TS_FILENAME }}-${{ env.TARI_VERSION }}.${{ env.TS_SIG_FN }}"
+
+          # Remove any Windows carriage returns that may have been introduced by Windows runners
           dos2unix --quiet "${{ env.TS_FILENAME }}-${{ env.TARI_VERSION }}.${{ env.TS_SIG_FN }}"
           cat "${{ env.TS_FILENAME }}-${{ env.TARI_VERSION }}.${{ env.TS_SIG_FN }}"
           sha256sum --ignore-missing --check "${{ env.TS_FILENAME }}-${{ env.TARI_VERSION }}.${{ env.TS_SIG_FN }}"

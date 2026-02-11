@@ -2,46 +2,25 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use tari_bor::json_encoding::{CborValueJsonSerializeWrapper, CiboruimValueDeserializeFixWrapper};
+use tari_bor::cbor_value_encoding_fix::{CborValueDeserializeFixWrapper, CborValueSerializeFixWrapper};
 
 pub fn serialize<S: Serializer>(v: &tari_bor::Value, s: S) -> Result<S::Ok, S::Error> {
-    if s.is_human_readable() {
-        // This uses a wrapper type to serialize the CBOR value to a JSON-compatible format
-        // We cannot use this wrapper for non-human-readable formats because then the resulting CBOR would be would not
-        // be valid CBOR binary data
-        CborValueJsonSerializeWrapper(v).serialize(s)
+    if cfg!(feature = "bincode-compat") || s.is_human_readable() {
+        // This uses a wrapper type to serialize the CBOR value to a JSON and bincode-compatible format
+        // We cannot use this wrapper for cbor encoding itself (non-human readable) because then the result
+        // would be would not be valid CBOR binary data.
+        CborValueSerializeFixWrapper(v).serialize(s)
     } else {
-        #[cfg(feature = "bincode-compat")]
-        {
-            // This is to support bincode since the default ciborium serde implementation uses deserialize_any instead
-            // // of serializing the cbor::Value enum directly
-            // - unfortunately, when using CBOR, Value::Bytes will be used instead of the actual CBOR representation.
-            // NOTE: this increases fees (see FeeModule::on_before_finalize)
-            // Other solutions include:
-            // - switching to cbor4ii, implementing to_value and from_value and a serializer that supports
-            //   deserialize_any
-            // - storing a Vec<u8> and incurring the extra encode/decode steps (what this does)
-            let vec = tari_bor::encode(v).map_err(serde::ser::Error::custom)?;
-            s.serialize_bytes(&vec)
-        }
-        #[cfg(not(feature = "bincode-compat"))]
         v.serialize(s)
     }
 }
 
 pub fn deserialize<'de, D>(d: D) -> Result<tari_bor::Value, D::Error>
 where D: Deserializer<'de> {
-    if d.is_human_readable() {
-        let wrapper = CiboruimValueDeserializeFixWrapper::deserialize(d)?;
+    if cfg!(feature = "bincode-compat") || d.is_human_readable() {
+        let wrapper = CborValueDeserializeFixWrapper::deserialize(d)?;
         Ok(wrapper.0)
     } else {
-        #[cfg(feature = "bincode-compat")]
-        {
-            use crate::visitor::BytesVisitor;
-            let bytes = d.deserialize_byte_buf(BytesVisitor::new())?;
-            tari_bor::decode_exact(bytes.as_ref()).map_err(serde::de::Error::custom)
-        }
-        #[cfg(not(feature = "bincode-compat"))]
         tari_bor::Value::deserialize(d)
     }
 }
@@ -92,6 +71,25 @@ mod tests {
             })
             .unwrap(),
         };
+
+        // These assertions only work with bincode-compat disabled
+        // The check that the resulting Value is the CBOR of the Test struct, not the
+        // Value enum itself encoded as CBOR
+        #[cfg(not(feature = "bincode-compat"))]
+        {
+            use tari_bor::Tagged;
+            let value = tari_bor::to_value(&test).unwrap();
+            let (k, v) = value.as_map().expect("expected map").get(0).expect("expected value");
+            assert_eq!(k.as_text().expect("expected string"), "value");
+
+            let (k, v) = v.as_map().expect("expected map").get(1).expect("expected message");
+            assert_eq!(k.as_text().expect("expected string"), "message");
+            let (t, v) = v.as_tag().expect("expected resource tag");
+            assert_eq!(t, ResourceAddress::TAG);
+            v.as_bytes().expect("expected bytes");
+            let t = tari_bor::from_value::<Test>(&value).unwrap();
+            assert_eq!(test, t);
+        }
 
         let bytes = tari_bor::encode(&test).unwrap();
         let t = tari_bor::decode_exact::<Test>(&bytes).unwrap();

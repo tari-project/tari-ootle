@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_bor::BorTag;
+use tari_bor::{BorTag, Tagged};
 use tari_template_abi::rust::{
     fmt,
     fmt::{Display, Formatter},
@@ -101,6 +101,10 @@ impl AsRef<[u8]> for ResourceAddress {
 }
 
 newtype_struct_serde_impl!(ResourceAddress, BorTag<ObjectKey, TAG>);
+
+impl Tagged for ResourceAddress {
+    const TAG: u64 = TAG;
+}
 
 #[cfg(test)]
 mod tests {

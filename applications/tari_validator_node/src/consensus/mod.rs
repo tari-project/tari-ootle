@@ -40,7 +40,7 @@ pub use handle::*;
 pub use signer_service::*;
 use tari_consensus::{consensus_constants::ConsensusConstants, hotstuff::HotstuffEvent};
 use tari_ootle_p2p::PeerAddress;
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     config::ConsensusConfig,

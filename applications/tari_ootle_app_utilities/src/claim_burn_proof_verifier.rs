@@ -23,7 +23,7 @@ use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
 };
 use tari_ootle_storage::global::{GlobalDb, GlobalDbAdapter};
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction_components::{
     consensus::DomainSeparatedConsensusHasher,
     transaction_components::{KernelFeatures, TransactionKernel},

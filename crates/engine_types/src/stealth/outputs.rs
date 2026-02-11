@@ -3,9 +3,9 @@
 
 use ootle_byte_type::ConvertFromByteType;
 use tari_crypto::ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment};
-use tari_template_lib::{
-    prelude::StealthOutputsStatement,
-    types::{crypto::UtxoTag, stealth::SpendCondition},
+use tari_template_lib::types::{
+    crypto::UtxoTag,
+    stealth::{SpendCondition, StealthOutputsStatement},
 };
 
 use crate::{

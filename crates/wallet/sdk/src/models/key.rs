@@ -12,7 +12,7 @@ use tari_crypto::{
 };
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_transaction::Signable;
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]

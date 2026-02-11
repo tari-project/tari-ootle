@@ -23,10 +23,7 @@
 use tari_common_types::types::FixedHashSizeError;
 use tari_ootle_common_types::Epoch;
 use tari_ootle_storage::{global::DbTemplate, time::PrimitiveDateTime};
-use tari_template_lib::{
-    prelude::RistrettoPublicKeyBytes,
-    types::{HashParseError, TemplateAddress},
-};
+use tari_template_lib::types::{HashParseError, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 use thiserror::Error;
 
 use crate::global::schema::*;

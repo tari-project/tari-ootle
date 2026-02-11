@@ -23,10 +23,10 @@
 use serde::Serialize;
 use tari_bor::to_value;
 use tari_template_abi::{EngineOp, call_engine, rust::prelude::*};
-use tari_template_lib_types::{ComponentAddress, OwnerRule, access_rules::ComponentAccessRules};
+use tari_template_lib_types::{ComponentAddress, LogLevel, OwnerRule, access_rules::ComponentAccessRules};
 
 use crate::{
-    args::{ComponentAction, ComponentInvokeArg, ComponentRef, CreateComponentArg, EmitLogArg, InvokeResult, LogLevel},
+    args::{ComponentAction, ComponentInvokeArg, ComponentRef, CreateComponentArg, EmitLogArg, InvokeResult},
     component::ComponentManager,
     models::ComponentAddressAllocation,
 };

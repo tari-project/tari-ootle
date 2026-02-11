@@ -44,7 +44,7 @@ macro_rules! __expr_counter {
 /// Low-level macro used for encoding the arguments of engine calls. Not intended for general usage
 #[macro_export]
 macro_rules! invoke_arg {
-    ($args:expr) => {{ $crate::types::bytes::Bytes::from_vec($crate::prelude::tari_bor::encode(&$args).unwrap()) }};
+    ($args:expr) => {{ $crate::types::bytes::Bytes::from_vec($crate::args::__reexport::tari_bor::encode(&$args).unwrap()) }};
 }
 
 /// Low-level macro used for encoding the arguments of engine calls. Not intended for general usage
@@ -67,4 +67,8 @@ macro_rules! invoke_args {
 #[inline(always)]
 pub fn __push<T>(v: &mut Vec<T>, arg: T) {
     v.push(arg);
+}
+
+pub mod __reexport {
+    pub use tari_bor;
 }

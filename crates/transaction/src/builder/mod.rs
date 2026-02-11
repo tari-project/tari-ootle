@@ -18,18 +18,17 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
-use tari_template_lib::{
-    prelude::{AccessRules, StealthTransferStatement},
-    types::{
-        Amount,
-        FunctionName,
-        OwnerRule,
-        ResourceAddress,
-        TemplateAddress,
-        ValidatorFeePoolAddress,
-        constants::XTR,
-        crypto::RistrettoPublicKeyBytes,
-    },
+use tari_template_lib_types::{
+    Amount,
+    FunctionName,
+    OwnerRule,
+    ResourceAddress,
+    TemplateAddress,
+    ValidatorFeePoolAddress,
+    access_rules::ComponentAccessRules,
+    constants::XTR,
+    crypto::RistrettoPublicKeyBytes,
+    stealth::StealthTransferStatement,
 };
 
 use crate::{
@@ -406,7 +405,7 @@ impl<D> TransactionBuilder<D> {
         self,
         public_key_address: RistrettoPublicKeyBytes,
         owner_rule: Option<OwnerRule>,
-        access_rules: Option<AccessRules>,
+        access_rules: Option<ComponentAccessRules>,
         bucket_workspace_id: Option<T>,
     ) -> Self {
         let bucket_workspace_id = bucket_workspace_id.map(|id| self.get_workspace_offset_id_from_named_arg(id));

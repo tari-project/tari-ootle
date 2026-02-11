@@ -37,13 +37,12 @@ use tari_template_lib::{
         EmitEventArg,
         EmitLogArg,
         GenerateRandomInvokeArg,
-        LogLevel,
         NonFungibleInvokeArg,
         ProofInvokeArg,
         ResourceInvokeArg,
         VaultInvokeArg,
     },
-    types::engine_args::SignatureInvokeArg,
+    types::{LogLevel, engine_args::SignatureInvokeArg},
 };
 use wasmer::{AsStoreMut, Function, FunctionEnv, FunctionEnvMut, Instance, Store, StoreMut, WasmPtr, imports};
 

@@ -10,7 +10,7 @@ use multiaddr::Multiaddr;
 use ootle_byte_type::ToByteType;
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::hex::Hex};
 use tari_ootle_common_types::displayable::Displayable;
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 /// Parsed information from a peer seed string
 #[derive(Debug, Clone)]

@@ -21,7 +21,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::consensus_models::VersionedSubstateIdLockIntent;
 use tari_ootle_transaction::Transaction;
-use tari_template_lib::prelude::NonFungibleAddress;
+use tari_template_lib::types::NonFungibleAddress;
 
 const _LOG_TARGET: &str = "tari::ootle::transaction_executor";
 

@@ -22,11 +22,9 @@
 
 use serde::{Deserialize, Serialize};
 use tari_template_abi::{EngineOp, call_engine};
+use tari_template_lib_types::TemplateAddress;
 
-use crate::{
-    args::{BuiltinTemplateAction, BuiltinTemplateInvokeArg, InvokeResult},
-    prelude::TemplateAddress,
-};
+use crate::args::{BuiltinTemplateAction, BuiltinTemplateInvokeArg, InvokeResult};
 
 /// All the templates that are included by default in the Tari network
 #[derive(Debug, Clone, Serialize, Deserialize)]

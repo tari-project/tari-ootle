@@ -10,17 +10,15 @@ use tari_crypto::{
     tari_utilities::ByteArray,
 };
 use tari_template_abi::rust::collections::BTreeSet;
-use tari_template_lib::{
-    prelude::{ConfidentialOutputStatement, ConfidentialWithdrawProof, RistrettoPublicKeyBytes},
-    types::{
-        Amount,
-        NonFungibleAddress,
-        NonFungibleId,
-        ResourceAddress,
-        ResourceType,
-        UtxoId,
-        crypto::PedersenCommitmentBytes,
-    },
+use tari_template_lib::types::{
+    Amount,
+    NonFungibleAddress,
+    NonFungibleId,
+    ResourceAddress,
+    ResourceType,
+    UtxoId,
+    confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
 };
 
 use crate::{confidential, crypto::OutputBody, substate::SubstateId};

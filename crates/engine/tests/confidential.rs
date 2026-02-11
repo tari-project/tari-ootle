@@ -15,10 +15,10 @@ use tari_ootle_common_types::substate_type::SubstateType;
 use tari_ootle_transaction::{Transaction, args, call_args};
 use tari_template_lib::{
     models::Account,
-    prelude::ConfidentialOutputStatement,
     types::{
         Amount,
         ComponentAddress,
+        confidential::ConfidentialOutputStatement,
         crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     },
 };

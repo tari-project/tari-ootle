@@ -4,7 +4,7 @@
 use std::fmt::{Display, Formatter};
 
 use tari_bor::{Deserialize, Serialize};
-use tari_template_lib::types::ResourceAddress;
+use tari_template_lib_types::ResourceAddress;
 
 use crate::args::{WorkspaceId, WorkspaceOffsetId};
 

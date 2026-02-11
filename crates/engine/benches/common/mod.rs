@@ -11,10 +11,16 @@ use tari_engine_types::{
     vault::Vault,
 };
 use tari_template_builtin::XTR_FAUCET_TEMPLATE_ADDRESS;
-use tari_template_lib::{
-    prelude::{ComponentAddress, OwnerRule, ResourceAccessRules, VaultId, XTR},
-    template_macro_deps::ComponentAccessRules,
-    types::{Amount, ObjectKey, ResourceType, metadata},
+use tari_template_lib::types::{
+    Amount,
+    ComponentAddress,
+    ObjectKey,
+    OwnerRule,
+    ResourceType,
+    VaultId,
+    access_rules::{ComponentAccessRules, ResourceAccessRules},
+    constants::XTR,
+    metadata,
 };
 
 pub const FAUCET_COMPONENT_ADDRESS: ComponentAddress = ComponentAddress::from_array([0u8; 32]);

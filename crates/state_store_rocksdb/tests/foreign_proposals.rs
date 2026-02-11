@@ -13,7 +13,7 @@ use tari_ootle_storage::{
     StateStoreWriteTransaction,
     consensus_models::{Block, BookkeepingModel, Command, ForeignProposalStatus},
 };
-use tari_template_lib::prelude::SchnorrSignatureBytes;
+use tari_template_lib_types::crypto::SchnorrSignatureBytes;
 use tari_utilities::epoch_time::EpochTime;
 
 #[test]

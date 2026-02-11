@@ -79,7 +79,7 @@ use tari_ootle_storage::{
     },
 };
 use tari_ootle_transaction::TransactionId;
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     encoding::{decode_from_slice, encode_to_vec},

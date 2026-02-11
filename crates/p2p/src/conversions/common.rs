@@ -28,15 +28,15 @@ use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{Epoch, SubstateAddress, SubstateRequirement, SubstateRequirementRef};
 use tari_ootle_transaction::TransactionSignature;
-use tari_template_lib::{
-    prelude::{
+use tari_template_lib::types::{
+    Amount,
+    crypto::{
+        CommitmentSignatureBytes,
         PedersenCommitmentBytes,
         RistrettoPublicKeyBytes,
         Scalar32Bytes,
         SchnorrSignatureBytes,
-        crypto::CommitmentSignatureBytes,
     },
-    types::Amount,
 };
 
 use crate::{proto, proto::common::OptionalVersion};

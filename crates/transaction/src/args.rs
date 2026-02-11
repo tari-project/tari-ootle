@@ -5,7 +5,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use tari_bor::encode;
-use tari_template_lib::prelude::Bytes;
+use tari_template_lib_types::bytes::Bytes;
 
 pub type WorkspaceId = u16;
 

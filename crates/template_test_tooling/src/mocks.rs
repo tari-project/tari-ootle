@@ -10,7 +10,7 @@ impl ClaimProofVerifier for AlwaysPassesProofVerifier {
     fn verify_claim_proof(
         &self,
         _epoch: Epoch,
-        _claimant: &tari_template_lib::prelude::RistrettoPublicKeyBytes,
+        _claimant: &tari_template_lib::types::crypto::RistrettoPublicKeyBytes,
         _claim_proof: &tari_engine_types::confidential::MinotariBurnClaimProof,
     ) -> Result<(), String> {
         Ok(())

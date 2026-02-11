@@ -23,7 +23,7 @@
 use tari_engine_types::{confidential::MinotariBurnClaimProof, instruction_result::InstructionResult};
 use tari_ootle_common_types::Epoch;
 use tari_template_abi::FunctionDef;
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 pub trait Invokable<S> {
     type Error;

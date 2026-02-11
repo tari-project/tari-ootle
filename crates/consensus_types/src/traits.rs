@@ -4,7 +4,7 @@
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{Epoch, NodeHeight};
 use tari_sidechain::QuorumDecision;
-use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
+use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
 pub trait ToSignatureMessage {
     fn to_signature_message(&self) -> FixedHash;

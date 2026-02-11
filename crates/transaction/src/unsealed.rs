@@ -3,7 +3,7 @@
 
 use tari_bor::{Deserialize, Serialize};
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{IntoSigned, Signable, Transaction, TransactionSealSignature, TransactionSignature, UnsealedTransactionV1};
 

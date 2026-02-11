@@ -26,8 +26,7 @@ use serde::{Deserialize, Serialize};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_template_lib::{
     models::BucketId,
-    prelude::ConfidentialWithdrawProof,
-    types::{Amount, NonFungibleId, ResourceAddress, ResourceType},
+    types::{Amount, NonFungibleId, ResourceAddress, ResourceType, confidential::ConfidentialWithdrawProof},
 };
 
 use crate::{

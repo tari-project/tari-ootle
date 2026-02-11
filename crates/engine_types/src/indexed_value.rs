@@ -7,11 +7,13 @@ use serde::{Deserialize, Serialize};
 use tari_bor::{BorError, FromTagAndValue, ValueVisitor, decode};
 use tari_template_lib::{
     models::{BucketId, ComponentAddressAllocation, ProofId, ResourceAddressAllocation},
-    prelude::{ComponentAddress, Metadata, NonFungibleAddress},
     types::{
         BinaryTag,
         ClaimedOutputTombstoneAddress,
+        ComponentAddress,
         Hash32,
+        Metadata,
+        NonFungibleAddress,
         NonFungibleAddressContents,
         ObjectKey,
         ResourceAddress,

@@ -8,13 +8,13 @@ use tari_template_lib_types::{
     OwnerRule,
     ResourceAddress,
     access_rules::{AccessRule, ResourceAccessRules},
+    confidential::ConfidentialOutputStatement,
     constants::{DEFAULT_DIVISIBILITY, IMAGE_URL, TOKEN_SYMBOL},
 };
 
 use crate::{
     args::MintArg,
     models::{Bucket, ResourceAddressAllocation},
-    prelude::ConfidentialOutputStatement,
     resource::ResourceManager,
     types::{ResourceType, crypto::RistrettoPublicKeyBytes},
 };

@@ -11,14 +11,11 @@ use tari_crypto::{
 };
 use tari_engine_types::crypto::{commit_amount, messages};
 use tari_ootle_wallet_crypto::{MaskAndValue, OutputWitness, StealthInputWitness, StealthOutputWitness, stealth};
-use tari_template_lib::{
-    prelude::StealthTransferStatement,
-    types::{
-        Amount,
-        EncryptedData,
-        crypto::{RistrettoPublicKeyBytes, StealthValueProof, UtxoTag, ValueKnowledgeProof},
-        stealth::{SpendCondition, StealthOutputsStatement},
-    },
+use tari_template_lib::types::{
+    Amount,
+    EncryptedData,
+    crypto::{RistrettoPublicKeyBytes, StealthValueProof, UtxoTag, ValueKnowledgeProof},
+    stealth::{SpendCondition, StealthOutputsStatement, StealthTransferStatement},
 };
 
 use crate::support::spec::{InputSpec, OutputSpec, SpendConditionSpec};

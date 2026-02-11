@@ -99,8 +99,6 @@ tari_state_tree = { path = "crates/state_tree" }
 tari_template_builtin = { path = "crates/template_builtin" }
 tari_template_test_tooling = { path = "crates/template_test_tooling" }
 tari_ootle_transaction = { path = "crates/transaction" }
-ootle_byte_type = { path = "crates/ootle_byte_type", version = "0.1.0" }
-ootle_serde = { path = "crates/ootle_serde", version = "0.1.0" }
 tari_transaction_manifest = { path = "crates/transaction_manifest" }
 tari_validator_node_rpc = { path = "crates/validator_node_rpc" }
 sqlite_message_logger = { path = "networking/sqlite_message_logger" }
@@ -115,40 +113,43 @@ tari_wallet_daemon_client = { path = "clients/wallet_daemon_client" }
 transaction_generator = { path = "utilities/transaction_generator" }
 
 # Template lib
-tari_template_lib = { path = "crates/template_lib" }
-tari_template_lib_types = { version = "0.16.0", path = "crates/template_lib_types", default-features = false }
-tari_template_abi = { version = "0.15.0", path = "crates/template_abi", default-features = false }
-tari_template_macros = { version = "0.15.0", path = "crates/template_macros" }
-tari_bor = { version = "0.12.0", path = "crates/tari_bor", default-features = false }
+tari_template_lib = { version = "0.19", path = "crates/template_lib" }
+tari_template_lib_types = { version = "0.19", path = "crates/template_lib_types", default-features = false }
+tari_template_abi = { version = "0.15", path = "crates/template_abi", default-features = false }
+tari_template_macros = { version = "0.15", path = "crates/template_macros" }
+tari_bor = { version = "0.12", path = "crates/tari_bor", default-features = false }
+
+ootle_byte_type = { path = "crates/ootle_byte_type", version = "0.2" }
+ootle_serde = { path = "crates/ootle_serde", version = "0.1" }
 
 # external minotari/tari dependencies
-minotari_app_grpc = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
-minotari_app_utilities = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
-minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
-minotari_wallet_grpc_client = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
-tari_common = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
-tari_common_sqlite = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
-tari_common_types = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
-tari_hashing = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
-tari_jellyfish = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
-tari_metrics = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
-tari_mmr = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
-tari_node_components = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
-tari_shutdown = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
-tari_sidechain = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
-tari_transaction_components = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
-minotari_console_wallet = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
-minotari_node = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
-minotari_wallet = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
-tari_comms = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
-tari_comms_dht = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
-tari_p2p = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
+minotari_app_grpc = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
+minotari_app_utilities = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
+minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
+minotari_wallet_grpc_client = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
+tari_common = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
+tari_common_sqlite = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
+tari_common_types = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
+tari_jellyfish = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
+tari_metrics = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
+tari_mmr = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
+tari_node_components = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
+tari_shutdown = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
+tari_sidechain = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
+tari_transaction_components = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
+minotari_console_wallet = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
+minotari_node = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
+minotari_wallet = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
+tari_comms = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
+tari_comms_dht = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
+tari_p2p = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
 
-tari_crypto = "0.22.0"
-tari_utilities = "0.8.0"
+tari_crypto = "0.22"
+tari_utilities = "0.8"
+tari_hashing = "5.2"
 
 ## Ledger
-minotari_ledger_wallet_common = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.0" }
+minotari_ledger_wallet_common = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.1" }
 
 # networking crates
 proto_builder = { path = "networking/proto_builder" }
@@ -297,7 +298,6 @@ overflow-checks = true
 #minotari_node = { git = "https://github.com/account/tari.git", branch = "my-branch" }
 #tari_metrics = { git = "https://github.com/account/tari.git", branch = "my-branch" }
 #tari_libtor = { git = "https://github.com/account/tari.git", branch = "my-branch" }
-#tari_hashing = { git = "https://github.com/account/tari.git", branch = "my-branch" }
 #tari_sidechain = { git = "https://github.com/account/tari.git", branch = "my-branch" }
 #tari_jellyfish = { git = "https://github.com/account/tari.git", branch = "my-branch" }
 
@@ -317,7 +317,6 @@ overflow-checks = true
 # tari_p2p = { path = "../tari/base_layer/p2p" }
 # tari_shutdown = { path = "../tari/infrastructure/shutdown" }
 # tari_script = { path = "../tari/infrastructure/tari_script" }
-# tari_hashing = { path = "../tari/hashing" }
 # minotari_wallet = { path = "../tari/base_layer/wallet" }
 # minotari_console_wallet = { path = "../tari/applications/minotari_console_wallet" }
 # minotari_app_utilities = { path = "../tari/applications/minotari_app_utilities" }

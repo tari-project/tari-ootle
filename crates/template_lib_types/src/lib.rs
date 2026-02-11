@@ -24,7 +24,7 @@
 //!
 //! `no_std` is supported by excluding the `std` feature and enabling the `alloc` feature.
 
-#[cfg(not(any(feature = "std", feature = "alloc")))]
+#[cfg(all(target_arch = "wasm32", not(any(feature = "std", feature = "alloc"))))]
 compile_error!("Either feature `std` or `alloc` must be enabled for this crate.");
 #[cfg(all(target_arch = "wasm32", feature = "std", feature = "alloc"))]
 compile_error!("Feature `std` and `alloc` can't be enabled at the same time.");
@@ -54,6 +54,7 @@ pub mod access_rules;
 pub mod address_prefixes;
 mod auth_hook;
 pub mod confidential;
+mod log_level;
 mod owner_rule;
 #[cfg(feature = "precision")]
 pub mod precision;
@@ -66,6 +67,7 @@ pub use encrypted_data::*;
 pub use entity_id::*;
 pub use error::*;
 pub use hash::*;
+pub use log_level::*;
 pub use max_bytes::*;
 pub use max_string::*;
 pub use max_vec::*;

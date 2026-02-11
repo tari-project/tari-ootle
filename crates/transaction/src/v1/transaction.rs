@@ -13,10 +13,7 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement, SubstateRequirementRef};
-use tari_template_lib::{
-    prelude::StealthTransferStatement,
-    types::{ComponentAddress, constants::XTR},
-};
+use tari_template_lib_types::{ComponentAddress, constants::XTR, stealth::StealthTransferStatement};
 
 use crate::{
     Instruction,

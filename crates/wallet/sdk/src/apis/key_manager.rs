@@ -21,7 +21,7 @@ use tari_ootle_wallet_crypto::{
     StealthCryptoApi,
     encryption::{CipherError, decrypt_with_password, encrypt_with_password},
 };
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     apis::password_manager::{PasswordManagerApi, PasswordManagerApiError},

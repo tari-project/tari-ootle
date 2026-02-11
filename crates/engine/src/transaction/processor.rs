@@ -51,7 +51,6 @@ use tari_template_lib::{
     args::{AllocateAddressResult, BucketAction, BucketGetAmountArg, BucketRef, WorkspaceAction},
     invoke_args,
     models::Bucket,
-    prelude::StealthTransferStatement,
     types::{
         Amount,
         ComponentAddress,
@@ -61,6 +60,7 @@ use tari_template_lib::{
         access_rules::ComponentAccessRules,
         constants::STEALTH_TARI_RESOURCE_ADDRESS,
         crypto::RistrettoPublicKeyBytes,
+        stealth::StealthTransferStatement,
     },
 };
 

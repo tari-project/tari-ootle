@@ -82,9 +82,9 @@ use crate::{
         VaultFreezeFlags,
     },
     models::{Bucket, BucketId, NonFungible, ResourceAddressAllocation},
-    prelude::ResourceType,
     types::{
         Amount,
+        ResourceType,
         crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     },
 };

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use tari_template_abi::TemplateDef;
-use tari_template_lib::{prelude::RistrettoPublicKeyBytes, types::TemplateAddress};
+use tari_template_lib::types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
     apis::transaction::TransactionApiError,

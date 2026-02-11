@@ -13,8 +13,14 @@ use tari_ootle_transaction::{Transaction, UnsignedTransaction, args};
 use tari_ootle_wallet_crypto::{memo::Memo, pay_to::PayTo};
 use tari_template_lib::{
     models::Account as BuiltinAccount,
-    prelude::StealthTransferStatement,
-    types::{Amount, ComponentAddress, ResourceAddress, UtxoAddress, constants::XTR, stealth::StealthUnspentOutput},
+    types::{
+        Amount,
+        ComponentAddress,
+        ResourceAddress,
+        UtxoAddress,
+        constants::XTR,
+        stealth::{StealthTransferStatement, StealthUnspentOutput},
+    },
 };
 use tokio::{sync::Semaphore, task::block_in_place};
 

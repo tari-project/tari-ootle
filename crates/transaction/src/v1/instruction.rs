@@ -10,20 +10,18 @@ use tari_engine_types::{
     published_template::TemplateBlob,
 };
 use tari_ootle_common_types::displayable::Displayable;
-use tari_template_lib::{
-    args::LogLevel,
-    types::{
-        Amount,
-        FunctionName,
-        MaxString,
-        OwnerRule,
-        ResourceAddress,
-        TemplateAddress,
-        ValidatorFeePoolAddress,
-        access_rules::ComponentAccessRules,
-        crypto::RistrettoPublicKeyBytes,
-        stealth::StealthTransferStatement,
-    },
+use tari_template_lib_types::{
+    Amount,
+    FunctionName,
+    LogLevel,
+    MaxString,
+    OwnerRule,
+    ResourceAddress,
+    TemplateAddress,
+    ValidatorFeePoolAddress,
+    access_rules::ComponentAccessRules,
+    crypto::RistrettoPublicKeyBytes,
+    stealth::StealthTransferStatement,
 };
 
 use crate::{
@@ -306,7 +304,7 @@ impl Display for MigrateFunction {
 
 #[cfg(test)]
 mod tests {
-    use tari_template_lib::types::constants::XTR;
+    use tari_template_lib_types::constants::XTR;
 
     use super::*;
     use crate::call_args;

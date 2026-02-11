@@ -22,7 +22,7 @@ use tari_ootle_common_types::{
     VersionedSubstateId,
     committee::CommitteeInfo,
 };
-use tari_template_lib::types::{ClaimedOutputTombstoneAddress, ComponentAddress, TemplateAddress};
+use tari_template_lib_types::{ClaimedOutputTombstoneAddress, ComponentAddress, TemplateAddress};
 
 use crate::{
     Instruction,
@@ -310,7 +310,7 @@ mod tests {
         ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     };
     use tari_ootle_common_types::crypto::create_key_pair;
-    use tari_template_lib::{prelude::Bytes, types::TemplateAddress};
+    use tari_template_lib_types::{TemplateAddress, bytes::Bytes};
 
     use super::*;
     use crate::{args, call_args};

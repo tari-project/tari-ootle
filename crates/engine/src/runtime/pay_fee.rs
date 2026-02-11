@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_transaction::args::WorkspaceOffsetId;
-use tari_template_lib::prelude::StealthTransferStatement;
+use tari_template_lib::types::stealth::StealthTransferStatement;
 
 pub enum PayFee {
     FromStealth {

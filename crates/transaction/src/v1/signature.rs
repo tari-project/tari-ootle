@@ -12,7 +12,7 @@ use tari_crypto::{
     tari_utilities::ByteArray,
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement, signature::SignatureOutput};
-use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
+use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
 use crate::{
     Instruction,

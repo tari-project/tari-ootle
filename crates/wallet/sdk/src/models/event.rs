@@ -5,7 +5,7 @@ use std::fmt::Display;
 
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_transaction::TransactionId;
-use tari_template_lib::{prelude::ComponentAddress, types::UtxoAddress};
+use tari_template_lib::types::{ComponentAddress, UtxoAddress};
 
 use crate::models::{Account, NewAccountData, TransactionStatus};
 

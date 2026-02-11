@@ -21,12 +21,9 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 use serde::de::DeserializeOwned;
 use tari_template_abi::{EngineOp, call_engine, rust::prelude::*};
-use tari_template_lib_types::bytes::Bytes;
+use tari_template_lib_types::{TemplateAddress, bytes::Bytes};
 
-use crate::{
-    args::{CallAction, CallFunctionArg, CallInvokeArg, InvokeResult},
-    prelude::TemplateAddress,
-};
+use crate::args::{CallAction, CallFunctionArg, CallInvokeArg, InvokeResult};
 
 /// Utility to allow template code to call functions from other templates (i.e., composability)
 #[derive(Debug)]

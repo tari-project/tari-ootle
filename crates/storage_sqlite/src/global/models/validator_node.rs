@@ -22,7 +22,7 @@
 
 use tari_ootle_common_types::{Epoch, NodeAddressable, SubstateAddress, VotePower};
 use tari_ootle_storage::global::models::ValidatorNode;
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     error::SqliteStorageError,

@@ -27,7 +27,7 @@ use std::{
 
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::Epoch;
-use tari_template_lib_types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
+use tari_template_lib_types::{Hash32, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 use time::{OffsetDateTime, PrimitiveDateTime};
 
 use crate::global::GlobalDbAdapter;
@@ -87,7 +87,7 @@ pub struct DbTemplate {
     pub author_public_key: RistrettoPublicKeyBytes,
     pub template_address: TemplateAddress,
     pub template_name: String,
-    pub binary_hash: FixedHash,
+    pub binary_hash: Hash32,
     pub epoch: Epoch,
     pub template_type: DbTemplateType,
     pub code: Option<Vec<u8>>,
@@ -106,7 +106,7 @@ impl DbTemplate {
             author_public_key,
             template_name: String::new(),
             template_address,
-            binary_hash: FixedHash::zero(),
+            binary_hash: Hash32::zero(),
             status: TemplateStatus::Pending,
             code: None,
             added_at: now(),

@@ -33,7 +33,13 @@ const LOG_TARGET: &str = "tari::indexer::rest_api::handlers::transactions";
 #[utoipa::path(
     post,
     path = "/transactions",
-    description = "Submit a transaction to validators responsible for the involved shards"
+    description = "Submit a transaction to validators responsible for the involved shards",
+    responses(
+        (status = 200, description = "Transaction submitted successfully", body = SubmitTransactionResponse),
+        (status = BAD_REQUEST, description = "Invalid transaction or request parameters", body = ErrorResponse),
+        (status = SERVICE_UNAVAILABLE, description = "All validators failed to process the transaction", body = ErrorResponse),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to submit transaction due to an internal error", body = ErrorResponse),
+    )
 )]
 pub async fn submit_transaction(
     Extension(context): Extension<HandlerContext>,
@@ -96,7 +102,12 @@ pub async fn submit_transaction(
 #[utoipa::path(
     post,
     path = "/transactions/dry-run",
-    description = "Submit a transaction as a dry-run"
+    description = "Submit a transaction as a dry-run",
+    responses(
+        (status = 200, description = "Dry-run transaction processed successfully", body = SubmitTransactionDryRunResponse),
+        (status = BAD_REQUEST, description = "Invalid transaction or request parameters", body = ErrorResponse),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to process dry-run transaction due to an internal error", body = ErrorResponse),
+    )
 )]
 pub async fn submit_transaction_dry_run(
     Extension(context): Extension<HandlerContext>,
@@ -129,7 +140,13 @@ pub async fn submit_transaction_dry_run(
     }))
 }
 
-#[utoipa::path(get, path = "/transactions/recent", description = "List recent transactions")]
+#[utoipa::path(get, path = "/transactions/recent", description = "List recent transactions",
+    responses(
+        (status = 200, description = "List of recent transactions", body = ListRecentTransactionsResponse),
+        (status = BAD_REQUEST, description = "Invalid request parameters", body = ErrorResponse),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to list recent transactions", body = ErrorResponse),
+    )
+)]
 pub async fn list_recent_transactions(
     Extension(context): Extension<HandlerContext>,
     Query(req): Query<ListRecentTransactionsRequest>,
@@ -152,7 +169,12 @@ pub async fn list_recent_transactions(
 #[utoipa::path(
     get,
     path = "/transactions/{transaction_id}/result",
-    description = "Get the result of a submitted transaction (by transaction ID)"
+    description = "Get the result of a submitted transaction (by transaction ID)",
+    responses(
+        (status = 200, description = "Transaction result found", body = GetTransactionResultResponse),
+        (status = 404, description = "Transaction result not found", body = ErrorResponse),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to fetch transaction result", body = ErrorResponse),
+    )
 )]
 pub async fn get_transaction_result(
     Extension(context): Extension<HandlerContext>,

@@ -2,4 +2,14 @@
 import type { ExecuteResult } from "../ExecuteResult";
 import type { TransactionId } from "../TransactionId";
 
-export type IndexerSubmitTransactionResponse = { transaction_id: TransactionId; result: ExecuteResult };
+export type IndexerSubmitTransactionResponse = {
+  /**
+   * The ID of the transaction that was dry-run
+   */
+  transaction_id: TransactionId;
+  /**
+   * The result of the dry-run execution, including any emitted events and state changes, but without a final
+   * decision or commitment to the ledger
+   */
+  result: ExecuteResult;
+};

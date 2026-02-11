@@ -6,7 +6,14 @@ use tari_indexer_client::types::{GetNonFungiblesRequest, GetNonFungiblesResponse
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
 
-#[utoipa::path(post, path = "/non-fungibles", description = "Get non-fungibles by resource address")]
+#[utoipa::path(post, path = "/non-fungibles", description = "Get non-fungibles by resource address",
+    request_body = GetNonFungiblesRequest,
+    responses(
+        (status = 200, body = GetNonFungiblesResponse),
+        (status = BAD_REQUEST, body = ErrorResponse),
+        (status = INTERNAL_SERVER_ERROR, body = ErrorResponse),
+    )
+)]
 pub async fn get_non_fungibles(
     Extension(context): Extension<HandlerContext>,
     Query(req): Query<GetNonFungiblesRequest>,

@@ -9,10 +9,7 @@ use axum::{
 use serde_json::json;
 use tari_epoch_manager::EpochManagerReader;
 use tari_epoch_oracles::store::StoreKey;
-use tari_indexer_client::{
-    rest_api::types::GetIdentityResponse,
-    types::{GetEpochManagerStatsResponse, IndexerReadyResponse},
-};
+use tari_indexer_client::types::{GetEpochManagerStatsResponse, GetIdentityResponse, IndexerReadyResponse};
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
 
@@ -58,7 +55,12 @@ pub async fn wait_until_ready(
     Ok(Json(IndexerReadyResponse {}))
 }
 
-#[utoipa::path(get, path = "/epoch-manager/stats", description = "Get epoch manager stats")]
+#[utoipa::path(get, path = "/epoch-manager/stats", description = "Get epoch manager stats",
+    responses(
+        (status = 200, body = GetEpochManagerStatsResponse),
+        (status = INTERNAL_SERVER_ERROR, body = ErrorResponse),
+    ),
+)]
 pub async fn get_epoch_manager_stats(
     Extension(context): Extension<HandlerContext>,
 ) -> HandlerResult<Json<GetEpochManagerStatsResponse>> {
@@ -83,7 +85,7 @@ pub async fn get_epoch_manager_stats(
     let response = GetEpochManagerStatsResponse {
         current_epoch,
         current_block_height: current_block_height.unwrap_or(0),
-        current_block_hash: current_epoch_hash,
+        current_block_hash: current_epoch_hash.into_array().into(),
     };
     Ok(Json(response))
 }

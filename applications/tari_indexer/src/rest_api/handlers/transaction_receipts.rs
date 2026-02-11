@@ -17,7 +17,12 @@ use tari_template_lib_types::TransactionReceiptAddress;
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
 
-#[utoipa::path(get, path = "/transaction-receipts", description = "List transaction receipts")]
+#[utoipa::path(get, path = "/transaction-receipts", description = "List transaction receipts",
+responses(
+    (status = 200, description = "List of transaction receipts", body = ListTransactionReceiptsResponse),
+    (status = BAD_REQUEST, description = "Invalid request parameters", body = ErrorResponse),
+    (status = INTERNAL_SERVER_ERROR, description = "Failed to list transaction receipts", body = ErrorResponse),
+))]
 pub async fn list_transaction_receipts(
     Extension(context): Extension<HandlerContext>,
     Query(req): Query<ListTransactionReceiptsRequest>,
@@ -40,7 +45,12 @@ pub async fn list_transaction_receipts(
 #[utoipa::path(
     get,
     path = "/transaction-receipt/{transaction_id}",
-    description = "Get the transaction receipt by transaction ID"
+    description = "Get the transaction receipt by transaction ID",
+    responses(
+        (status = 200, description = "Transaction receipt found", body = GetTransactionReceiptResponse),
+        (status = 404, description = "Transaction receipt not found", body = ErrorResponse),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to fetch transaction receipt", body = ErrorResponse),
+    )
 )]
 pub async fn get_transaction_receipt(
     Extension(context): Extension<HandlerContext>,

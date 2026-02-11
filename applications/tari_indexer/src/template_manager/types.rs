@@ -3,18 +3,17 @@
 
 use std::borrow::Cow;
 
-use tari_common_types::types::FixedHash;
 use tari_engine::{abi::TemplateDef, template::LoadedTemplate};
 use tari_ootle_common_types::Epoch;
 use tari_ootle_storage::{StorageError, global::DbTemplate};
-use tari_template_lib_types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
+use tari_template_lib_types::{Hash32, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TemplateMetadata {
     pub name: String,
     pub address: TemplateAddress,
     /// SHA hash of binary
-    pub binary_sha: FixedHash,
+    pub binary_sha: Hash32,
     pub author_public_key: RistrettoPublicKeyBytes,
     pub code_size: usize,
     pub epoch: Epoch,

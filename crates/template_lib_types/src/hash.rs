@@ -48,6 +48,10 @@ pub struct Hash32(
 impl Hash32 {
     pub const LENGTH: usize = 32;
 
+    pub const fn zero() -> Self {
+        Self([0u8; Self::LENGTH])
+    }
+
     pub const fn from_array(bytes: [u8; Self::LENGTH]) -> Self {
         Self(bytes)
     }

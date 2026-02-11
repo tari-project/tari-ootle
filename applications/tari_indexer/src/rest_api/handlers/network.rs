@@ -38,7 +38,12 @@ pub async fn get(Extension(context): Extension<HandlerContext>) -> HandlerResult
     Ok(Json(response))
 }
 
-#[utoipa::path(get, path = "/network/stats", description = "Get network sync stats")]
+#[utoipa::path(get, path = "/network/stats", description = "Get network sync stats",
+    responses(
+        (status = 200, body = GetNetworkSyncStateResponse),
+        (status = INTERNAL_SERVER_ERROR, body = ErrorResponse),
+    ),
+)]
 pub async fn get_network_sync_stats(
     Extension(context): Extension<HandlerContext>,
 ) -> HandlerResult<Json<GetNetworkSyncStateResponse>> {
@@ -72,7 +77,12 @@ pub async fn get_network_sync_stats(
     Ok(Json(response))
 }
 
-#[utoipa::path(get, path = "/network/connections", description = "Get active peer connections")]
+#[utoipa::path(get, path = "/network/connections", description = "Get active peer connections",
+    responses(
+        (status = 200, body = GetConnectionsResponse),
+        (status = INTERNAL_SERVER_ERROR, body = ErrorResponse),
+    ),
+)]
 pub async fn get_connections(Extension(context): Extension<HandlerContext>) -> HandlerResult<Response> {
     let active_connections = context
         .networking()
@@ -100,7 +110,14 @@ pub async fn get_connections(Extension(context): Extension<HandlerContext>) -> H
     Ok(context.apply_cache_control(Json(GetConnectionsResponse { connections }), 10))
 }
 
-#[utoipa::path(post, path = "/network/connections", description = "Add a new peer connection")]
+#[utoipa::path(post, path = "/network/connections", description = "Add a new peer connection",
+    request_body = AddPeerRequest,
+    responses(
+        (status = 200, body = AddPeerResponse),
+        (status = BAD_REQUEST, body = ErrorResponse),
+        (status = INTERNAL_SERVER_ERROR, body = ErrorResponse),
+    ),
+)]
 pub async fn add_connection(
     Extension(context): Extension<HandlerContext>,
     Json(req): Json<AddPeerRequest>,

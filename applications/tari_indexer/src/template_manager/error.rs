@@ -22,7 +22,6 @@
 
 use std::string::FromUtf8Error;
 
-use tari_common_types::types::FixedHashSizeError;
 use tari_engine::template::TemplateLoaderError;
 use tari_epoch_manager::EpochManagerError;
 use tari_ootle_common_types::{displayable::Displayable, optional::IsNotFoundError};
@@ -52,8 +51,6 @@ pub enum TemplateManagerError {
     FlowJsonNotValidUtf8(#[from] FromUtf8Error),
     #[error("The flow was not valid JSON: {0}")]
     InvalidJson(#[from] serde_json::Error),
-    #[error("FixedHashSizeError: {0}")]
-    FixedHashSizeError(#[from] FixedHashSizeError),
     #[error("Epoch manager error: {0}")]
     EpochManager(#[from] EpochManagerError),
     #[error("Validator Node RPC client error: {0}")]

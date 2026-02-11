@@ -12,7 +12,6 @@ minotari_app_utilities = { workspace = true }
 tari_base_node_client = { workspace = true }
 tari_bor = { workspace = true }
 tari_common = { workspace = true }
-tari_common_types = { workspace = true }
 tari_consensus = { workspace = true }
 tari_template_builtin = { workspace = true, features = ["templates"] }
 tari_crypto = { workspace = true }
@@ -20,7 +19,7 @@ tari_engine = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_epoch_manager = { workspace = true, features = ["service"] }
 tari_epoch_oracles = { workspace = true, features = ["base_layer"] }
-tari_indexer_client = { workspace = true, default-features = false, features = ["utoipa", "eth_types"] }
+tari_indexer_client = { workspace = true, default-features = false, features = ["utoipa"] }
 tari_indexer_lib = { workspace = true }
 tari_networking = { workspace = true }
 tari_ootle_app_utilities = { workspace = true }

@@ -23,15 +23,12 @@
 mod conversions;
 #[cfg(feature = "client")]
 pub mod error;
-#[cfg(feature = "eth_types")]
-pub mod eth_types;
 pub mod event;
 #[cfg(feature = "client")]
 pub mod graphql_client;
 pub mod protobuf;
 #[cfg(feature = "client")]
 pub mod protobuf_stream;
-pub mod rest_api;
 #[cfg(feature = "client")]
 pub mod rest_api_client;
 #[cfg(feature = "client")]

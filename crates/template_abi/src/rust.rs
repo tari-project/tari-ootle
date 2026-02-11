@@ -47,7 +47,6 @@ mod no_std {
         ptr,
         result,
         slice,
-        str,
         sync,
         write,
         writeln,

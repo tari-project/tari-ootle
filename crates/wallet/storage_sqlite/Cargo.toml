@@ -8,7 +8,7 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-tari_bor = { workspace = true, features = ["json_encoding"] }
+tari_bor = { workspace = true, features = ["cbor_value_encoding_fix"] }
 tari_ootle_common_types = { workspace = true }
 tari_ootle_wallet_sdk = { workspace = true }
 tari_engine_types = { workspace = true }

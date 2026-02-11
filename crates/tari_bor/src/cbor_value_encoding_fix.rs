@@ -11,27 +11,27 @@ use core::{fmt, fmt::Formatter, marker::PhantomData};
 use ciborium::{Value, value::Integer};
 use serde::{de::VariantAccess, ser::SerializeTupleVariant};
 
-pub struct CborValueJsonSerializeWrapper<'a>(pub &'a Value);
+pub struct CborValueSerializeFixWrapper<'a>(pub &'a Value);
 
-impl serde::Serialize for CborValueJsonSerializeWrapper<'_> {
+impl serde::Serialize for CborValueSerializeFixWrapper<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where S: serde::Serializer {
         match &self.0 {
-            Value::Integer(__field0) => {
-                let value = i128::from(*__field0);
-                serializer.serialize_newtype_variant("Value", 1u32, "Integer", &value)
+            Value::Integer(field0) => {
+                let value = i128::from(*field0);
+                serializer.serialize_newtype_variant("Value", 0u32, "Integer", &value)
             },
-            Value::Bytes(__field0) => {
-                serde::Serializer::serialize_newtype_variant(serializer, "Value", 1u32, "Bytes", __field0)
+            Value::Bytes(field0) => {
+                serde::Serializer::serialize_newtype_variant(serializer, "Value", 1u32, "Bytes", field0)
             },
-            Value::Float(__field0) => {
-                serde::Serializer::serialize_newtype_variant(serializer, "Value", 2u32, "Float", __field0)
+            Value::Float(field0) => {
+                serde::Serializer::serialize_newtype_variant(serializer, "Value", 2u32, "Float", field0)
             },
-            Value::Text(__field0) => {
-                serde::Serializer::serialize_newtype_variant(serializer, "Value", 3u32, "Text", __field0)
+            Value::Text(field0) => {
+                serde::Serializer::serialize_newtype_variant(serializer, "Value", 3u32, "Text", field0)
             },
-            Value::Bool(__field0) => {
-                serde::Serializer::serialize_newtype_variant(serializer, "Value", 4u32, "Bool", __field0)
+            Value::Bool(field0) => {
+                serde::Serializer::serialize_newtype_variant(serializer, "Value", 4u32, "Bool", field0)
             },
             Value::Null => serde::Serializer::serialize_unit_variant(serializer, "Value", 5u32, "Null"),
             Value::Tag(tag, value) => {
@@ -53,15 +53,15 @@ impl serde::Serialize for CborValueJsonSerializeWrapper<'_> {
     }
 }
 
-pub struct CiboruimValueDeserializeFixWrapper(pub Value);
+pub struct CborValueDeserializeFixWrapper(pub Value);
 
-impl CiboruimValueDeserializeFixWrapper {
+impl CborValueDeserializeFixWrapper {
     pub fn into_inner(self) -> Value {
         self.0
     }
 }
 
-impl<'de> serde::Deserialize<'de> for CiboruimValueDeserializeFixWrapper {
+impl<'de> serde::Deserialize<'de> for CborValueDeserializeFixWrapper {
     #[allow(clippy::too_many_lines)]
     fn deserialize<__D>(__deserializer: __D) -> Result<Self, __D::Error>
     where __D: serde::Deserializer<'de> {
@@ -150,11 +150,11 @@ impl<'de> serde::Deserialize<'de> for CiboruimValueDeserializeFixWrapper {
         }
         #[doc(hidden)]
         struct __Visitor<'de> {
-            marker: PhantomData<CiboruimValueDeserializeFixWrapper>,
+            marker: PhantomData<CborValueDeserializeFixWrapper>,
             lifetime: PhantomData<&'de ()>,
         }
         impl<'de> serde::de::Visitor<'de> for __Visitor<'de> {
-            type Value = CiboruimValueDeserializeFixWrapper;
+            type Value = CborValueDeserializeFixWrapper;
 
             fn expecting(&self, __formatter: &mut Formatter) -> fmt::Result {
                 Formatter::write_str(__formatter, "enum Value")
@@ -163,40 +163,40 @@ impl<'de> serde::Deserialize<'de> for CiboruimValueDeserializeFixWrapper {
             fn visit_enum<__A>(self, __data: __A) -> Result<Self::Value, __A::Error>
             where __A: serde::de::EnumAccess<'de> {
                 match serde::de::EnumAccess::variant(__data)? {
-                    (__Field::Integer, __variant) => {
-                        let a = __variant.newtype_variant::<i128>()?;
-                        Ok(CiboruimValueDeserializeFixWrapper(Value::Integer(
-                            Integer::try_from(a).map_err(serde::de::Error::custom)?,
+                    (__Field::Integer, variant) => {
+                        let int = variant.newtype_variant::<i128>()?;
+                        Ok(CborValueDeserializeFixWrapper(Value::Integer(
+                            Integer::try_from(int).map_err(serde::de::Error::custom)?,
                         )))
                     },
-                    (__Field::Bytes, __variant) => __variant
+                    (__Field::Bytes, variant) => variant
                         .newtype_variant()
                         .map(Value::Bytes)
-                        .map(CiboruimValueDeserializeFixWrapper),
-                    (__Field::Float, __variant) => __variant
+                        .map(CborValueDeserializeFixWrapper),
+                    (__Field::Float, variant) => variant
                         .newtype_variant()
                         .map(Value::Float)
-                        .map(CiboruimValueDeserializeFixWrapper),
-                    (__Field::Text, __variant) => __variant
+                        .map(CborValueDeserializeFixWrapper),
+                    (__Field::Text, variant) => variant
                         .newtype_variant()
                         .map(Value::Text)
-                        .map(CiboruimValueDeserializeFixWrapper),
-                    (__Field::Bool, __variant) => __variant
+                        .map(CborValueDeserializeFixWrapper),
+                    (__Field::Bool, variant) => variant
                         .newtype_variant()
                         .map(Value::Bool)
-                        .map(CiboruimValueDeserializeFixWrapper),
-                    (__Field::Null, __variant) => {
-                        __variant.unit_variant()?;
-                        Ok(CiboruimValueDeserializeFixWrapper(Value::Null))
+                        .map(CborValueDeserializeFixWrapper),
+                    (__Field::Null, variant) => {
+                        variant.unit_variant()?;
+                        Ok(CborValueDeserializeFixWrapper(Value::Null))
                     },
-                    (__Field::Tag, __variant) => {
+                    (__Field::Tag, variant) => {
                         #[doc(hidden)]
                         struct __Visitor<'de> {
-                            marker: PhantomData<CiboruimValueDeserializeFixWrapper>,
+                            marker: PhantomData<CborValueDeserializeFixWrapper>,
                             lifetime: PhantomData<&'de ()>,
                         }
                         impl<'de> serde::de::Visitor<'de> for __Visitor<'de> {
-                            type Value = CiboruimValueDeserializeFixWrapper;
+                            type Value = CborValueDeserializeFixWrapper;
 
                             fn expecting(&self, __formatter: &mut Formatter) -> fmt::Result {
                                 Formatter::write_str(__formatter, "tuple variant Value::Tag")
@@ -214,36 +214,36 @@ impl<'de> serde::Deserialize<'de> for CiboruimValueDeserializeFixWrapper {
                                         ));
                                     },
                                 };
-                                let wrapped = serde::de::SeqAccess::next_element::<CiboruimValueDeserializeFixWrapper>(
-                                    &mut __seq,
-                                )?
-                                .ok_or_else(|| {
-                                    serde::de::Error::invalid_length(
-                                        1usize,
-                                        &"tuple variant Value::Tag with 2 elements",
-                                    )
-                                })?;
-                                Ok(CiboruimValueDeserializeFixWrapper(Value::Tag(
+                                let wrapped =
+                                    serde::de::SeqAccess::next_element::<CborValueDeserializeFixWrapper>(&mut __seq)?
+                                        .ok_or_else(|| {
+                                        serde::de::Error::invalid_length(
+                                            1usize,
+                                            &"tuple variant Value::Tag with 2 elements",
+                                        )
+                                    })?;
+                                Ok(CborValueDeserializeFixWrapper(Value::Tag(
                                     __field0,
                                     Box::new(wrapped.0),
                                 )))
                             }
                         }
-                        VariantAccess::tuple_variant(__variant, 2usize, __Visitor {
+                        VariantAccess::tuple_variant(variant, 2usize, __Visitor {
                             marker: PhantomData,
                             lifetime: PhantomData,
                         })
                     },
                     (__Field::Array, __variant) => {
-                        let values = __variant.newtype_variant::<Vec<CiboruimValueDeserializeFixWrapper>>()?;
-                        Ok(CiboruimValueDeserializeFixWrapper(Value::Array(
+                        let values = __variant.newtype_variant::<Vec<CborValueDeserializeFixWrapper>>()?;
+                        Ok(CborValueDeserializeFixWrapper(Value::Array(
                             values.into_iter().map(|v| v.0).collect(),
                         )))
                     },
                     (__Field::Map, __variant) => {
                         let values = __variant
-                            .newtype_variant::<Vec<(CiboruimValueDeserializeFixWrapper, CiboruimValueDeserializeFixWrapper)>>()?;
-                        Ok(CiboruimValueDeserializeFixWrapper(Value::Map(
+                            .newtype_variant::<Vec<(CborValueDeserializeFixWrapper, CborValueDeserializeFixWrapper)>>(
+                            )?;
+                        Ok(CborValueDeserializeFixWrapper(Value::Map(
                             values.into_iter().map(|(k, v)| (k.0, v.0)).collect(),
                         )))
                     },
@@ -267,10 +267,9 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn decode_encode() {
+    fn sample() -> Value {
         let bytes = [1u8; 32];
-        let sample = cbor!({
+        cbor!({
             "code" => 415,
             "message" => null,
             "continue" => false,
@@ -279,12 +278,31 @@ mod tests {
             "array" => [{()=>1}, {123=>2}, {cbor!({"A"=>1}).unwrap()=>3}],
             "extra" => { "numbers" => [8.2341e+4, 0.251425] },
         })
-        .unwrap();
-        let s1 = serde_json::to_string(&CborValueJsonSerializeWrapper(&sample)).unwrap();
-        let decoded = serde_json::from_str::<CiboruimValueDeserializeFixWrapper>(&s1).unwrap();
+        .unwrap()
+    }
+
+    #[test]
+    fn decode_encode() {
+        let sample = sample();
+        let s1 = serde_json::to_string(&CborValueSerializeFixWrapper(&sample)).unwrap();
+        let decoded = serde_json::from_str::<CborValueDeserializeFixWrapper>(&s1).unwrap();
         // Decoded value matches original
         assert_eq!(sample, decoded.0);
-        let s2 = serde_json::to_string(&CborValueJsonSerializeWrapper(&decoded.0)).unwrap();
+        let s2 = serde_json::to_string(&CborValueSerializeFixWrapper(&decoded.0)).unwrap();
+        // Re-encode to string, which should be identical to the previously encoded JSON string
+        assert_eq!(s1, s2);
+    }
+
+    #[test]
+    fn decode_encode_bincode() {
+        const BINCODE_STD: bincode::config::Configuration = bincode::config::standard();
+        let sample = sample();
+        let s1 = bincode::serde::encode_to_vec(CborValueSerializeFixWrapper(&sample), BINCODE_STD).unwrap();
+        let (decoded, _) =
+            bincode::serde::decode_from_slice::<CborValueDeserializeFixWrapper, _>(&s1, BINCODE_STD).unwrap();
+        // Decoded value matches original
+        assert_eq!(sample, decoded.0);
+        let s2 = bincode::serde::encode_to_vec(CborValueSerializeFixWrapper(&decoded.0), BINCODE_STD).unwrap();
         // Re-encode to string, which should be identical to the previously encoded JSON string
         assert_eq!(s1, s2);
     }

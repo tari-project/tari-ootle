@@ -16,9 +16,9 @@ mod tag;
 pub use tag::*;
 
 mod byte_counter;
+#[cfg(all(feature = "std", feature = "cbor_value_encoding_fix"))]
+pub mod cbor_value_encoding_fix;
 mod error;
-#[cfg(all(feature = "std", feature = "json_encoding"))]
-pub mod json_encoding;
 mod walker;
 
 pub use ciborium::{cbor, value::Value};

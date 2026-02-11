@@ -21,7 +21,7 @@ use diesel::{
 };
 use log::*;
 use serde::Serialize;
-use tari_bor::json_encoding::CborValueJsonSerializeWrapper;
+use tari_bor::cbor_value_encoding_fix::CborValueSerializeFixWrapper;
 use tari_engine_types::{
     resource::Resource,
     substate::{SubstateDiff, SubstateId},
@@ -1494,7 +1494,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
     fn non_fungible_token_upsert(&mut self, non_fungible_token: &NonFungibleToken) -> Result<(), WalletStorageError> {
         use crate::schema::{non_fungible_tokens, vaults};
 
-        let data = serde_json::to_string(&CborValueJsonSerializeWrapper(&non_fungible_token.data)).map_err(|e| {
+        let data = serde_json::to_string(&CborValueSerializeFixWrapper(&non_fungible_token.data)).map_err(|e| {
             WalletStorageError::DecodingError {
                 operation: "non_fungible_token_upsert",
                 item: "non_fungible_tokens.data",
@@ -1502,7 +1502,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             }
         })?;
 
-        let mutable_data = serde_json::to_string(&CborValueJsonSerializeWrapper(&non_fungible_token.mutable_data))
+        let mutable_data = serde_json::to_string(&CborValueSerializeFixWrapper(&non_fungible_token.mutable_data))
             .map_err(|e| WalletStorageError::DecodingError {
                 operation: "non_fungible_token_upsert",
                 item: "non_fungible_tokens.mutable_data",

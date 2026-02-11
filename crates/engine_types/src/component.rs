@@ -23,9 +23,14 @@
 use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
-use tari_template_lib::{
-    prelude::{ComponentAccessRules, ComponentAddress},
-    types::{EntityId, ObjectKey, OwnerRule, TemplateAddress, crypto::RistrettoPublicKeyBytes},
+use tari_template_lib::types::{
+    ComponentAddress,
+    EntityId,
+    ObjectKey,
+    OwnerRule,
+    TemplateAddress,
+    access_rules::ComponentAccessRules,
+    crypto::RistrettoPublicKeyBytes,
 };
 
 use crate::{

@@ -2,9 +2,10 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use tari_crypto::ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment};
-use tari_template_lib::{
-    prelude::{PedersenCommitmentBytes, StealthInputsStatement, StealthOutputsStatement},
-    types::{Amount, stealth::ViewableBalanceProofMessageFields},
+use tari_template_lib::types::{
+    Amount,
+    crypto::PedersenCommitmentBytes,
+    stealth::{StealthInputsStatement, StealthOutputsStatement, ViewableBalanceProofMessageFields},
 };
 
 use crate::{

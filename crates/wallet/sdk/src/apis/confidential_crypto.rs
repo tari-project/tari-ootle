@@ -14,9 +14,11 @@ use tari_ootle_wallet_crypto::{
     kdfs,
     memo::Memo,
 };
-use tari_template_lib::{
-    prelude::{ConfidentialOutputStatement, ConfidentialWithdrawProof, PedersenCommitmentBytes},
-    types::{Amount, EncryptedData},
+use tari_template_lib::types::{
+    Amount,
+    EncryptedData,
+    confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
+    crypto::PedersenCommitmentBytes,
 };
 
 pub struct ConfidentialCryptoApi;

@@ -2,9 +2,14 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_wallet_crypto::memo::Memo;
-use tari_template_lib::{
-    prelude::{PedersenCommitmentBytes, ResourceAddress, RistrettoPublicKeyBytes},
-    types::{Amount, ComponentAddress, EncryptedData, UtxoAddress, crypto::UtxoTag, stealth::SpendCondition},
+use tari_template_lib::types::{
+    Amount,
+    ComponentAddress,
+    EncryptedData,
+    ResourceAddress,
+    UtxoAddress,
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
+    stealth::SpendCondition,
 };
 
 use crate::models::{KeyId, OutputStatus, WalletLockId};

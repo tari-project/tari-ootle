@@ -8,7 +8,7 @@ use tari_common_types::types::FixedHash;
 use tari_hashing::layer2;
 use tari_ootle_common_types::{Epoch, NodeHeight};
 use tari_sidechain::{ProposalCertificateSignatureFields, QuorumDecision};
-use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
+use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
 use crate::{SignedMessage, ToSignatureMessage, Vote, ids::BlockId, validator_signature::ValidatorSignatureBytes};
 

@@ -138,7 +138,10 @@
 // #![no_std]
 // #[cfg(feature = "std")]
 // extern crate std;
-#[cfg(not(any(feature = "std", feature = "alloc")))]
+
+// Some helpful compile-time messages to ensure that the crate is used with either `std` or `alloc` when targeting
+// wasm32, but not both at the same time.
+#[cfg(all(target_arch = "wasm32", not(any(feature = "std", feature = "alloc"))))]
 compile_error!("Either feature `std` or `alloc` must be enabled for this crate.");
 #[cfg(all(target_arch = "wasm32", feature = "std", feature = "alloc"))]
 compile_error!("Feature `std` and `alloc` can't be enabled at the same time.");
@@ -165,15 +168,15 @@ pub use tari_template_lib_types as types;
 
 // ---------------------------------------- WASM target exports ------------------------------------------------
 
+#[cfg(target_arch = "wasm32")]
 pub mod template_macro_deps;
 
 mod engine;
 pub use engine::engine;
 
 pub mod panic_hook;
+#[cfg(target_arch = "wasm32")]
 pub mod prelude;
-#[cfg(all(feature = "macro", target_arch = "wasm32"))]
-pub use prelude::template;
 // Re-export for macro
 pub use tari_bor::to_value;
 

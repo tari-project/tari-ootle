@@ -23,7 +23,7 @@
 use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
-pub use tari_template_lib::args::LogLevel;
+use tari_template_lib::types::LogLevel;
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 

@@ -7,7 +7,7 @@ use std::{
 };
 
 use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, SubstateAddress};
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Config {

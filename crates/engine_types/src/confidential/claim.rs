@@ -4,9 +4,10 @@
 use std::{fmt, fmt::Display};
 
 use serde::{Deserialize, Serialize};
-use tari_template_lib::{
-    prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes},
-    types::{EncryptedData, Hash32},
+use tari_template_lib::types::{
+    EncryptedData,
+    Hash32,
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes},
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]

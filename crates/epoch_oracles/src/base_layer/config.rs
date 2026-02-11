@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 #[derive(Debug, Clone)]
 pub struct BaseLayerEpochOracleConfig {

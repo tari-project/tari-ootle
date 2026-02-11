@@ -3,7 +3,7 @@
 
 use tari_ootle_common_types::SubstateRequirementRef;
 use tari_ootle_transaction::{Transaction, TransactionId, TransactionWeight};
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 use crate::executables::{Executable, Instructions, WeightedExecutable};
 

@@ -4,10 +4,7 @@
 use ootle_byte_type::ToByteType;
 use tari_engine_types::{crypto::commit_amount, vault::Vault};
 use tari_ootle_transaction::{Transaction, args};
-use tari_template_lib::{
-    prelude::{ComponentAddress, ResourceType},
-    types::Amount,
-};
+use tari_template_lib::types::{Amount, ComponentAddress, ResourceType};
 use tari_template_test_tooling::{
     TemplateTest,
     support::confidential::{generate_confidential_output_statement, generate_withdraw_proof_with_inputs},

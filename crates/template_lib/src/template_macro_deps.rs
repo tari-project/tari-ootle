@@ -28,4 +28,4 @@ pub use tari_template_lib_types::{OwnerRule, access_rules::ComponentAccessRules}
 
 #[cfg(target_arch = "wasm32")]
 pub use crate::debug;
-pub use crate::{args::LogLevel, engine, panic_hook::register_panic_hook};
+pub use crate::{engine, panic_hook::register_panic_hook};

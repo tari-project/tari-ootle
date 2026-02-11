@@ -9,7 +9,7 @@ use std::{
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::{SubstateAddress, ToSubstateAddress};
-use tari_template_lib::types::{
+use tari_template_lib_types::{
     Hash32,
     KeyParseError,
     TransactionReceiptAddress,

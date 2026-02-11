@@ -29,10 +29,12 @@ use tari_ootle_storage::{
     },
 };
 use tari_ootle_transaction::{Instruction, Transaction};
-use tari_template_lib::{prelude::SchnorrSignatureBytes, types::Hash32};
+use tari_template_lib::types::Hash32;
 use tari_utilities::epoch_time::EpochTime;
 
 mod confirm_all_transitions {
+    use tari_template_lib_types::crypto::SchnorrSignatureBytes;
+
     use super::*;
     use crate::helpers::num_preshards;
 

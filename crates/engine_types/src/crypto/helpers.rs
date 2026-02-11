@@ -12,7 +12,7 @@ use tari_crypto::{
     },
     tari_utilities::ByteArray,
 };
-use tari_template_lib::{prelude::SchnorrSignatureBytes, types::Amount};
+use tari_template_lib::types::{Amount, crypto::SchnorrSignatureBytes};
 
 use crate::hashing::EngineSchnorrSignature;
 

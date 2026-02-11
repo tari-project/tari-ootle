@@ -54,7 +54,7 @@ mod tests {
         UnsealedTransactionV1,
         UnsignedTransactionV1,
     };
-    use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
+    use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
     use crate::{
         transaction_validators::{TransactionNetworkValidator, TransactionValidationError},

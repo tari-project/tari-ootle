@@ -3,7 +3,9 @@
 
 //! Rust macros that can be used inside templates
 
-pub use tari_template_abi::call_debug;
+pub use tari_template_abi::{call_debug, rust};
+
+pub use crate::types::LogLevel;
 
 /// Macro that calls the engine debug function from inside templates. No-op unless the engine is in debug mode.
 #[macro_export]
@@ -12,7 +14,7 @@ macro_rules! engine_debug {
         $crate::macros::call_debug($fmt)
     };
     ($fmt:expr, $($args:tt)*) => {
-        $crate::macros::call_debug($crate::template_macro_deps::rust::format!($fmt, $($args)*))
+        $crate::macros::call_debug($crate::macros::rust::format!($fmt, $($args)*))
     };
 }
 
@@ -20,10 +22,10 @@ macro_rules! engine_debug {
 #[macro_export]
 macro_rules! log {
     ($lvl:expr, $fmt:expr) => {
-        $crate::engine().emit_log($lvl, $crate::template_macro_deps::rust::format!($fmt))
+        $crate::engine().emit_log($lvl, $crate::macros::rust::format!($fmt))
     };
     ($lvl:expr, $fmt:expr, $($args:tt)*) => {
-        $crate::engine().emit_log($lvl, $crate::template_macro_deps::rust::format!($fmt, $($args)*))
+        $crate::engine().emit_log($lvl, $crate::macros::rust::format!($fmt, $($args)*))
     };
 }
 
@@ -31,10 +33,10 @@ macro_rules! log {
 #[macro_export]
 macro_rules! debug {
     ($fmt:expr) => {
-        $crate::log!($crate::args::LogLevel::Debug, $fmt)
+        $crate::log!($crate::macros::LogLevel::Debug, $fmt)
     };
     ($fmt:expr, $($args:tt)*) => {
-        $crate::log!($crate::args::LogLevel::Debug, $fmt, $($args)*)
+        $crate::log!($crate::macros::LogLevel::Debug, $fmt, $($args)*)
     };
 }
 
@@ -42,10 +44,10 @@ macro_rules! debug {
 #[macro_export]
 macro_rules! info {
     ($fmt:expr) => {
-        $crate::log!($crate::args::LogLevel::Info, $fmt)
+        $crate::log!($crate::macros::LogLevel::Info, $fmt)
     };
     ($fmt:expr, $($args:tt)*) => {
-        $crate::log!($crate::args::LogLevel::Info, $fmt, $($args)*)
+        $crate::log!($crate::macros::LogLevel::Info, $fmt, $($args)*)
     };
 }
 
@@ -53,10 +55,10 @@ macro_rules! info {
 #[macro_export]
 macro_rules! warn {
     ($fmt:expr) => {
-        $crate::log!($crate::args::LogLevel::Warn, $fmt)
+        $crate::log!($crate::macros::LogLevel::Warn, $fmt)
     };
     ($fmt:expr, $($args:tt)*) => {
-        $crate::log!($crate::args::LogLevel::Warn, $fmt, $($args)*)
+        $crate::log!($crate::macros::LogLevel::Warn, $fmt, $($args)*)
     };
 }
 
@@ -64,9 +66,9 @@ macro_rules! warn {
 #[macro_export]
 macro_rules! error {
     ($fmt:expr) => {
-        $crate::log!($crate::args::LogLevel::Error, $fmt)
+        $crate::log!($crate::macros::LogLevel::Error, $fmt)
     };
     ($fmt:expr, $($args:tt)*) => {
-        $crate::log!($crate::args::LogLevel::Error, $fmt, $($args)*)
+        $crate::log!($crate::macros::LogLevel::Error, $fmt, $($args)*)
     };
 }

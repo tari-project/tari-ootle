@@ -13,7 +13,7 @@ use tari_ootle_common_types::{
     services::template_provider::{TemplateMetadataProvider, TemplateProvider, TemplateProviderMetadata},
 };
 use tari_template_builtin::all_builtin_templates;
-use tari_template_lib::prelude::TemplateAddress;
+use tari_template_lib::types::TemplateAddress;
 
 use crate::cmap_semaphore;
 

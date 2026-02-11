@@ -26,7 +26,7 @@ use tari_ootle_storage::{
 };
 use tari_sidechain::{CommandCommitProof, QuorumDecision, SidechainBlockCommitProof, SidechainBlockHeader};
 use tari_state_tree::{TreeHash, compute_proof_for_hashes};
-use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
+use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
 use crate::helpers::num_preshards;
 

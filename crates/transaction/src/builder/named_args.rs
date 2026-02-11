@@ -149,7 +149,7 @@ macro_rules! args {
 }
 
 pub mod __macro_exports {
-    pub use tari_template_lib::types::Amount;
+    pub use tari_template_lib_types::Amount;
 }
 
 // This is a workaround for a false positive for `clippy::vec_init_then_push` with this macro. We cannot ignore this

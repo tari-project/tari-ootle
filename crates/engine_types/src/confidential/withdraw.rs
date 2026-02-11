@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_crypto::ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment};
-use tari_template_lib::{prelude::ConfidentialWithdrawProof, types::Amount};
+use tari_template_lib::types::{Amount, confidential::ConfidentialWithdrawProof};
 
 use super::validate_confidential_statement;
 use crate::{

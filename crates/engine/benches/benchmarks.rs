@@ -15,7 +15,7 @@ use tari_engine::{
 use tari_engine_types::virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates};
 use tari_ootle_common_types::SubstateRequirementRef;
 use tari_ootle_transaction::{Instruction, TransactionId, TransactionWeight, args::WorkspaceOffsetId, call_args};
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 use tari_template_test_tooling::{Package, mocks::AlwaysPassesProofVerifier};
 
 use crate::common::{FAUCET_COMPONENT_ADDRESS, setup_store};

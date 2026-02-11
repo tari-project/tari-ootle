@@ -30,23 +30,20 @@ use std::{
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use tari_bor::{BorError, decode, decode_exact, encode};
-use tari_template_lib::{
-    prelude::STEALTH_TARI_RESOURCE_ADDRESS,
-    types::{
-        ClaimedOutputTombstoneAddress,
-        ComponentAddress,
-        Hash32,
-        NonFungibleAddress,
-        ObjectKey,
-        ResourceAddress,
-        TemplateAddress,
-        TransactionReceiptAddress,
-        UtxoAddress,
-        ValidatorFeePoolAddress,
-        VaultId,
-        address_prefixes,
-        constants::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
-    },
+use tari_template_lib::types::{
+    ClaimedOutputTombstoneAddress,
+    ComponentAddress,
+    Hash32,
+    NonFungibleAddress,
+    ObjectKey,
+    ResourceAddress,
+    TemplateAddress,
+    TransactionReceiptAddress,
+    UtxoAddress,
+    ValidatorFeePoolAddress,
+    VaultId,
+    address_prefixes,
+    constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS},
 };
 
 use crate::{

@@ -6,7 +6,7 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment},
     tari_utilities::ByteArray,
 };
-use tari_template_lib::{prelude::ConfidentialOutputStatement, types::Amount};
+use tari_template_lib::types::{Amount, confidential::ConfidentialOutputStatement};
 
 use crate::{
     crypto::{ValidateOutputBody, range_proof::validate_bullet_proof, validate_elgamal_verifiable_balance_proof},

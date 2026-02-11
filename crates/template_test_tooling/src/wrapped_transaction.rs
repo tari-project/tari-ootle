@@ -3,6 +3,7 @@
 
 use tari_engine::executables::{Executable, Instructions, WeightedExecutable};
 use tari_ootle_common_types::SubstateRequirement;
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 pub struct WrappedTransaction {
     transaction: tari_ootle_transaction::Transaction,
@@ -36,11 +37,11 @@ impl Executable for WrappedTransaction {
             .chain(self.inputs.iter().map(|id| id.as_ref()))
     }
 
-    fn main_signer(&self) -> Option<tari_template_lib::prelude::RistrettoPublicKeyBytes> {
+    fn main_signer(&self) -> Option<RistrettoPublicKeyBytes> {
         self.transaction.main_signer()
     }
 
-    fn signers_iter(&self) -> impl Iterator<Item = &tari_template_lib::prelude::RistrettoPublicKeyBytes> {
+    fn signers_iter(&self) -> impl Iterator<Item = &RistrettoPublicKeyBytes> {
         self.transaction.signers_iter()
     }
 

@@ -41,7 +41,6 @@ use tari_ootle_transaction::ResourceAddressRef;
 use tari_template_lib::{
     args::{MintArg, ResourceDiscriminator, VaultFreezeFlags},
     models::{AddressAllocationId, BucketId, ProofId, ResourceAddressAllocation},
-    prelude::ResourceAuthAction,
     types::{
         Amount,
         AuthHookCaller,
@@ -54,6 +53,7 @@ use tari_template_lib::{
         UtxoAddress,
         ValidatorFeePoolAddress,
         VaultId,
+        access_rules::ResourceAuthAction,
         constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS},
         metadata,
         stealth::{SpendCondition, StealthInput, StealthTransferStatement},

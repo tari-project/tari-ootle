@@ -26,8 +26,15 @@ use serde::{Deserialize, Serialize};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_template_lib::{
     args::VaultFreezeFlags,
-    prelude::{ConfidentialWithdrawProof, ResourceAddress},
-    types::{Amount, NonFungibleId, ResourceType, VaultId, crypto::PedersenCommitmentBytes},
+    types::{
+        Amount,
+        NonFungibleId,
+        ResourceAddress,
+        ResourceType,
+        VaultId,
+        confidential::ConfidentialWithdrawProof,
+        crypto::PedersenCommitmentBytes,
+    },
 };
 
 use crate::{

@@ -83,7 +83,6 @@ use tari_template_lib::{
         ConsensusAction,
         GenerateRandomAction,
         InvokeResult,
-        LogLevel,
         NonFungibleAction,
         ProofAction,
         ProofRef,
@@ -93,15 +92,16 @@ use tari_template_lib::{
         WorkspaceAction,
     },
     models::{BucketId, VaultRef},
-    prelude::StealthTransferStatement,
     types::{
         ComponentAddress,
         EntityId,
+        LogLevel,
         Metadata,
         NonFungibleAddress,
         TemplateAddress,
         ValidatorFeePoolAddress,
         engine_args::SignatureAction,
+        stealth::StealthTransferStatement,
     },
 };
 pub use tracker::StateTracker;

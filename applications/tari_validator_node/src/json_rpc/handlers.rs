@@ -60,7 +60,7 @@ use tari_ootle_storage::{
     global::GlobalDb,
 };
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_template_lib::prelude::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
+use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
 use tari_transaction_components::transaction_components::ValidatorNodeSignature;
 use tari_validator_node_client::types::{
     self,

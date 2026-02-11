@@ -5,7 +5,6 @@ use std::sync::{atomic, atomic::AtomicU32};
 
 use tari_template_lib::{
     models::{BucketId, ProofId},
-    prelude::TemplateAddress,
     types::{
         ComponentAddress,
         ComponentKey,
@@ -13,6 +12,7 @@ use tari_template_lib::{
         Hash32,
         ObjectKey,
         ResourceAddress,
+        TemplateAddress,
         VaultId,
         crypto::RistrettoPublicKeyBytes,
     },

@@ -1,0 +1,1709 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "tari_indexer",
+    "description": "The Tari indexer implementation",
+    "contact": {
+      "name": "The Tari Development Community"
+    },
+    "license": {
+      "name": "BSD-3-Clause",
+      "identifier": "BSD-3-Clause"
+    },
+    "version": "0.21.0"
+  },
+  "paths": {
+    "/epoch-manager/stats": {
+      "get": {
+        "tags": [
+          "handlers::misc"
+        ],
+        "description": "Get epoch manager stats",
+        "operationId": "get_epoch_manager_stats",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetEpochManagerStatsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/identity": {
+      "get": {
+        "tags": [
+          "handlers::misc"
+        ],
+        "description": "Get indexer network identity information",
+        "operationId": "get_identity",
+        "responses": {
+          "200": {
+            "description": "Indexer network identity info",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetIdentityResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to get identity info",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/network": {
+      "get": {
+        "tags": [
+          "handlers::network"
+        ],
+        "description": "Get network info",
+        "operationId": "get",
+        "responses": {}
+      }
+    },
+    "/network/connections": {
+      "get": {
+        "tags": [
+          "handlers::network"
+        ],
+        "description": "Get active peer connections",
+        "operationId": "get_connections",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetConnectionsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "handlers::network"
+        ],
+        "description": "Add a new peer connection",
+        "operationId": "add_connection",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddPeerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddPeerResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/network/stats": {
+      "get": {
+        "tags": [
+          "handlers::network"
+        ],
+        "description": "Get network sync stats",
+        "operationId": "get_network_sync_stats",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetNetworkSyncStateResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/non-fungibles": {
+      "post": {
+        "tags": [
+          "handlers::nfts"
+        ],
+        "description": "Get non-fungibles by resource address",
+        "operationId": "get_non_fungibles",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetNonFungiblesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetNonFungiblesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/resources/{resource_address}": {
+      "get": {
+        "tags": [
+          "handlers::resources"
+        ],
+        "description": "Fetches a resource by ID",
+        "operationId": "get_resource",
+        "responses": {
+          "200": {
+            "description": "Resource details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetResourceResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to fetch resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Indexer is still syncing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/substates": {
+      "get": {
+        "tags": [
+          "handlers::substates"
+        ],
+        "description": "List substates, optionally filtered by type or template",
+        "operationId": "list_substates",
+        "parameters": [
+          {
+            "name": "filter_by_type",
+            "in": "query",
+            "description": "Filter substates by type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "filter_by_template",
+            "in": "query",
+            "description": "Filter substates by template address",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Limit the number of results returned",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Offset the results by this amount",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of substates matching the filters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSubstatesResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to list substates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/substates/fetch": {
+      "post": {
+        "tags": [
+          "handlers::substates"
+        ],
+        "description": "Fetches several substates by their IDs",
+        "operationId": "fetch_substates",
+        "responses": {
+          "200": {
+            "description": "Substates details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSubstatesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Too many substates requested",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to fetch substates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Indexer is still syncing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/substates/{substate_id}": {
+      "get": {
+        "tags": [
+          "handlers::substates"
+        ],
+        "description": "Fetches a substate by ID",
+        "operationId": "get_substate",
+        "parameters": [
+          {
+            "name": "substate_id",
+            "in": "path",
+            "description": "The substate ID to fetch",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "local_search_only",
+            "in": "query",
+            "description": "If true, only search local storage for the substate",
+            "required": true,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "Minimum version of the substate to fetch",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Substate details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSubstateResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Substate not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to fetch substate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Indexer is still syncing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/templates/cached": {
+      "get": {
+        "tags": [
+          "handlers::templates"
+        ],
+        "description": "List all template cached by this indexer",
+        "operationId": "list_cached_templates",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Limit the number of results returned",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of cached templates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTemplatesResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to list cached templates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/templates/{template_id}": {
+      "get": {
+        "tags": [
+          "handlers::templates"
+        ],
+        "description": "Fetch a template definition by its address",
+        "operationId": "get_template_definition",
+        "responses": {
+          "200": {
+            "description": "Template definition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTemplateDefinitionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Template not found or still pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to fetch template definition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transaction-receipt/{transaction_id}": {
+      "get": {
+        "tags": [
+          "handlers::transaction_receipts"
+        ],
+        "description": "Get the transaction receipt by transaction ID",
+        "operationId": "get_transaction_receipt",
+        "responses": {
+          "200": {
+            "description": "Transaction receipt found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTransactionReceiptResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Transaction receipt not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to fetch transaction receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transaction-receipts": {
+      "get": {
+        "tags": [
+          "handlers::transaction_receipts"
+        ],
+        "description": "List transaction receipts",
+        "operationId": "list_transaction_receipts",
+        "responses": {
+          "200": {
+            "description": "List of transaction receipts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTransactionReceiptsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to list transaction receipts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transactions": {
+      "post": {
+        "tags": [
+          "handlers::transactions"
+        ],
+        "description": "Submit a transaction to validators responsible for the involved shards",
+        "operationId": "submit_transaction",
+        "responses": {
+          "200": {
+            "description": "Transaction submitted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitTransactionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid transaction or request parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to submit transaction due to an internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "All validators failed to process the transaction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transactions/dry-run": {
+      "post": {
+        "tags": [
+          "handlers::transactions"
+        ],
+        "description": "Submit a transaction as a dry-run",
+        "operationId": "submit_transaction_dry_run",
+        "responses": {
+          "200": {
+            "description": "Dry-run transaction processed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitTransactionDryRunResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid transaction or request parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to process dry-run transaction due to an internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transactions/recent": {
+      "get": {
+        "tags": [
+          "handlers::transactions"
+        ],
+        "description": "List recent transactions",
+        "operationId": "list_recent_transactions",
+        "responses": {
+          "200": {
+            "description": "List of recent transactions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListRecentTransactionsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to list recent transactions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transactions/{transaction_id}/result": {
+      "get": {
+        "tags": [
+          "handlers::transactions"
+        ],
+        "description": "Get the result of a submitted transaction (by transaction ID)",
+        "operationId": "get_transaction_result",
+        "responses": {
+          "200": {
+            "description": "Transaction result found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTransactionResultResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Transaction result not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to fetch transaction result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/utxos": {
+      "get": {
+        "tags": [
+          "handlers::utxos"
+        ],
+        "description": "List full UTXO data",
+        "operationId": "list_utxos",
+        "responses": {
+          "200": {
+            "description": "List of UTXOs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListUtxosResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to list UTXOs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/utxos/fetch": {
+      "post": {
+        "tags": [
+          "handlers::utxos"
+        ],
+        "description": "Gets full UTXO data for a list of UTXO IDs",
+        "operationId": "fetch_utxos",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetUtxosRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "UTXO details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetUtxosResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Too many UTXOs requested or invalid parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to fetch UTXOs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/utxos/updates": {
+      "post": {
+        "tags": [
+          "handlers::utxos"
+        ],
+        "description": "Streams UTXO updates",
+        "operationId": "stream_utxo_updates",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetUtxoUpdatesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Stream of UTXO updates"
+          },
+          "400": {
+            "description": "Invalid request parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to start UTXO update stream",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/wait-until-ready": {
+      "get": {
+        "tags": [
+          "handlers::misc"
+        ],
+        "description": "Request will return an empty result when the indexer is ready to serve requests. This may take an indefinite amount of time after startup.",
+        "operationId": "wait_until_ready",
+        "responses": {}
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AddPeerRequest": {
+        "type": "object",
+        "required": [
+          "public_key",
+          "addresses",
+          "wait_for_dial"
+        ],
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "public_key": {
+            "type": "string"
+          },
+          "wait_for_dial": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AddPeerResponse": {
+        "type": "object"
+      },
+      "Connection": {
+        "type": "object",
+        "required": [
+          "connection_id",
+          "peer_id",
+          "address",
+          "direction",
+          "age"
+        ],
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "age": {
+            "type": "string"
+          },
+          "connection_id": {
+            "type": "string"
+          },
+          "direction": {
+            "type": "string"
+          },
+          "peer_id": {
+            "type": "string"
+          },
+          "ping_latency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "user_agent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "GetConnectionsResponse": {
+        "type": "object",
+        "required": [
+          "connections"
+        ],
+        "properties": {
+          "connections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Connection"
+            }
+          }
+        }
+      },
+      "GetEpochManagerStatsResponse": {
+        "type": "object",
+        "required": [
+          "current_epoch",
+          "current_block_height",
+          "current_block_hash"
+        ],
+        "properties": {
+          "current_block_hash": {
+            "type": "string"
+          },
+          "current_block_height": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "current_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The current epoch according to the indexer's epoch oracle view",
+            "minimum": 0
+          }
+        }
+      },
+      "GetIdentityResponse": {
+        "type": "object",
+        "required": [
+          "peer_id",
+          "public_key",
+          "public_addresses"
+        ],
+        "properties": {
+          "peer_id": {
+            "type": "string"
+          },
+          "public_addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "public_key": {
+            "type": "string"
+          }
+        }
+      },
+      "GetNetworkSyncStateResponse": {
+        "type": "object",
+        "required": [
+          "network_desc"
+        ],
+        "properties": {
+          "network_desc": {
+            "$ref": "#/components/schemas/NetworkDescription"
+          },
+          "sync_progress": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SyncProgress"
+              }
+            ]
+          }
+        }
+      },
+      "GetNonFungiblesRequest": {
+        "type": "object",
+        "required": [
+          "address",
+          "start_index",
+          "end_index"
+        ],
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "end_index": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "start_index": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "GetNonFungiblesResponse": {
+        "type": "object",
+        "required": [
+          "non_fungibles"
+        ],
+        "properties": {
+          "non_fungibles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NonFungibleSubstate"
+            }
+          }
+        }
+      },
+      "GetResourceResponse": {
+        "type": "object",
+        "required": [
+          "resource",
+          "version"
+        ],
+        "properties": {
+          "resource": {
+            "type": "object"
+          },
+          "total_supply": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "GetSubstateResponse": {
+        "type": "object",
+        "required": [
+          "version",
+          "substate"
+        ],
+        "properties": {
+          "substate": {
+            "type": "object"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "GetSubstatesResponse": {
+        "type": "object",
+        "required": [
+          "substates"
+        ],
+        "properties": {
+          "substates": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "GetTemplateDefinitionResponse": {
+        "type": "object",
+        "required": [
+          "name",
+          "definition",
+          "code_size"
+        ],
+        "properties": {
+          "code_size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "definition": {
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "GetTransactionReceiptResponse": {
+        "type": "object",
+        "required": [
+          "receipt"
+        ],
+        "properties": {
+          "receipt": {
+            "type": "object"
+          }
+        }
+      },
+      "GetTransactionResultResponse": {
+        "type": "object",
+        "required": [
+          "result"
+        ],
+        "properties": {
+          "result": {
+            "type": "object",
+            "description": "The result of the transaction, which may be pending (not yet finalized) or finalized with details such as the\nfinal decision, execution result, and timestamps"
+          }
+        }
+      },
+      "GetUtxoUpdatesRequest": {
+        "type": "object",
+        "required": [
+          "shard_state_versions",
+          "resource_address",
+          "per_shard_limit"
+        ],
+        "properties": {
+          "from_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "per_shard_limit": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "resource_address": {
+            "type": "string"
+          },
+          "shard_state_versions": {
+            "type": "array",
+            "items": false,
+            "prefixItems": [
+              {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            ]
+          },
+          "unspent_only": {
+            "type": "boolean"
+          }
+        }
+      },
+      "GetUtxosRequest": {
+        "type": "object",
+        "required": [
+          "tag_and_nonce_pairs",
+          "resource_address"
+        ],
+        "properties": {
+          "resource_address": {
+            "type": "string"
+          },
+          "tag_and_nonce_pairs": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": false,
+              "prefixItems": [
+                {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "GetUtxosResponse": {
+        "type": "object",
+        "required": [
+          "utxos"
+        ],
+        "properties": {
+          "utxos": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": false,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "ListRecentTransactionsResponse": {
+        "type": "object",
+        "required": [
+          "transactions"
+        ],
+        "properties": {
+          "transactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TransactionEntry"
+            }
+          }
+        }
+      },
+      "ListSubstateItem": {
+        "type": "object",
+        "required": [
+          "substate_id",
+          "version",
+          "timestamp"
+        ],
+        "properties": {
+          "module_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "substate_id": {
+            "type": "string"
+          },
+          "template_address": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "ListSubstatesResponse": {
+        "type": "object",
+        "required": [
+          "substates"
+        ],
+        "properties": {
+          "substates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ListSubstateItem"
+            }
+          }
+        }
+      },
+      "ListTemplatesResponse": {
+        "type": "object",
+        "required": [
+          "templates"
+        ],
+        "properties": {
+          "templates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TemplateMetadata"
+            }
+          }
+        }
+      },
+      "ListTransactionReceiptsResponse": {
+        "type": "object",
+        "required": [
+          "receipts"
+        ],
+        "properties": {
+          "receipts": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": false,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "ListUtxosResponse": {
+        "type": "object",
+        "required": [
+          "utxos"
+        ],
+        "properties": {
+          "utxos": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": false,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "NetworkDescription": {
+        "type": "object",
+        "required": [
+          "epoch",
+          "shard_groups",
+          "num_preshards"
+        ],
+        "properties": {
+          "epoch": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "num_preshards": {
+            "type": "string"
+          },
+          "shard_groups": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": false,
+              "prefixItems": [
+                {
+                  "type": "object"
+                },
+                {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              ]
+            }
+          }
+        }
+      },
+      "NonFungibleSubstate": {
+        "type": "object",
+        "required": [
+          "address",
+          "version",
+          "substate"
+        ],
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "substate": {
+            "type": "object"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "SubmitTransactionDryRunResponse": {
+        "type": "object",
+        "required": [
+          "transaction_id",
+          "result"
+        ],
+        "properties": {
+          "result": {
+            "type": "object",
+            "description": "The result of the dry-run execution, including any emitted events and state changes, but without a final\ndecision or commitment to the ledger"
+          },
+          "transaction_id": {
+            "type": "string",
+            "description": "The ID of the transaction that was dry-run"
+          }
+        }
+      },
+      "SubmitTransactionResponse": {
+        "type": "object",
+        "required": [
+          "transaction_id"
+        ],
+        "properties": {
+          "transaction_id": {
+            "type": "string",
+            "description": "The ID of the submitted transaction"
+          }
+        }
+      },
+      "SyncProgress": {
+        "type": "object",
+        "required": [
+          "last_epoch",
+          "checkpoint_progress",
+          "last_state_versions"
+        ],
+        "properties": {
+          "checkpoint_progress": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": false,
+              "prefixItems": [
+                {
+                  "type": "object"
+                },
+                {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                }
+              ]
+            }
+          },
+          "last_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "last_state_versions": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": false,
+              "prefixItems": [
+                {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                {
+                  "type": "array",
+                  "items": false,
+                  "prefixItems": [
+                    {
+                      "type": "integer",
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "integer",
+                      "format": "int64",
+                      "minimum": 0
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "TemplateMetadata": {
+        "type": "object",
+        "required": [
+          "name",
+          "address",
+          "binary_sha",
+          "author_public_key",
+          "code_size",
+          "epoch"
+        ],
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "author_public_key": {
+            "type": "string"
+          },
+          "binary_sha": {
+            "type": "string"
+          },
+          "code_size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "epoch": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "TransactionEntry": {
+        "type": "object",
+        "required": [
+          "transaction_id",
+          "transaction",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "transaction": {
+            "type": "object"
+          },
+          "transaction_id": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

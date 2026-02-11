@@ -7,6 +7,14 @@ authors.workspace = true
 repository.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "tari_indexer"
+path = "src/bin/main.rs"
+
+[[bin]]
+name = "indexer-gen-openapi"
+path = "src/bin/indexer_gen_openapi.rs"
+
 [dependencies]
 minotari_app_utilities = { workspace = true }
 tari_base_node_client = { workspace = true }

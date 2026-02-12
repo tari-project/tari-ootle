@@ -97,8 +97,8 @@ impl Display for CheckOrd {
 pub enum NftCheck {
     AnyOf,
     AllOf,
-    NoneOfAll,
-    NoneOfAny,
+    NoneOf,
+    NotAllOf,
 }
 
 impl Display for NftCheck {
@@ -106,8 +106,8 @@ impl Display for NftCheck {
         let s = match self {
             Self::AnyOf => "any of",
             Self::AllOf => "all of",
-            Self::NoneOfAll => "none of all",
-            Self::NoneOfAny => "none of any",
+            Self::NoneOf => "none of",
+            Self::NotAllOf => "not all of",
         };
         write!(f, "{s}")
     }

@@ -1246,14 +1246,14 @@ impl<TStore: StateReader> WorkingState<TStore> {
                                 ));
                             }
                         },
-                        NftCheck::NoneOfAll => {
+                        NftCheck::NoneOf => {
                             if contains {
                                 return Err(RuntimeError::AssertError(
                                     AssertError::BucketContainsNonFungiblesAssertionFail { nft: token_id, check },
                                 ));
                             }
                         },
-                        NftCheck::NoneOfAny => {
+                        NftCheck::NotAllOf => {
                             if !contains {
                                 return Ok(());
                             }
@@ -1262,14 +1262,8 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 }
 
                 match check {
-                    NftCheck::AnyOf => {
+                    NftCheck::AnyOf | NftCheck::NotAllOf => {
                         // If AnyOf reaches here, we've failed
-                        return Err(RuntimeError::AssertError(
-                            AssertError::BucketContainsNonFungiblesAnyAssertionFail { check },
-                        ));
-                    },
-                    NftCheck::NoneOfAny => {
-                        // If we get here, then for NoneOfAny we succeeded and for NoneOfAny we failed, so we return Err
                         return Err(RuntimeError::AssertError(
                             AssertError::BucketContainsNonFungiblesAnyAssertionFail { check },
                         ));

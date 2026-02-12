@@ -519,22 +519,22 @@ impl<D> TransactionBuilder<D> {
         self.assert_bucket_contains_non_fungibles(label, resource_address, NftCheck::AnyOf, nfts)
     }
 
-    pub fn assert_bucket_contains_non_fungibles_none_all<T: AsRef<str>, N: TryInto<NftAssertVec>>(
+    pub fn assert_bucket_contains_non_fungibles_none_of<T: AsRef<str>, N: TryInto<NftAssertVec>>(
         self,
         label: T,
         resource_address: ResourceAddress,
         nfts: N,
     ) -> Self {
-        self.assert_bucket_contains_non_fungibles(label, resource_address, NftCheck::NoneOfAll, nfts)
+        self.assert_bucket_contains_non_fungibles(label, resource_address, NftCheck::NoneOf, nfts)
     }
 
-    pub fn assert_bucket_contains_non_fungibles_none_any<T: AsRef<str>, N: TryInto<NftAssertVec>>(
+    pub fn assert_bucket_contains_non_fungibles_not_any_of<T: AsRef<str>, N: TryInto<NftAssertVec>>(
         self,
         label: T,
         resource_address: ResourceAddress,
         nfts: N,
     ) -> Self {
-        self.assert_bucket_contains_non_fungibles(label, resource_address, NftCheck::NoneOfAny, nfts)
+        self.assert_bucket_contains_non_fungibles(label, resource_address, NftCheck::NotAllOf, nfts)
     }
 
     pub fn assert_bucket_contains_non_fungibles<T: AsRef<str>, N: TryInto<NftAssertVec>>(

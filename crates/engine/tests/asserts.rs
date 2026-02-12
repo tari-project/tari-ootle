@@ -277,11 +277,11 @@ mod assert_bucket_contains_non_fungibles {
                     NonFungibleId::Uint64(3),
                     NonFungibleId::Uint64(100),
                 ])
-                .assert_bucket_contains_non_fungibles_none_all("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
+                .assert_bucket_contains_non_fungibles_none_of("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
                     NonFungibleId::Uint64(5),
                     NonFungibleId::Uint64(100),
                 ])
-                .assert_bucket_contains_non_fungibles_none_any("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
+                .assert_bucket_contains_non_fungibles_not_any_of("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
                     NonFungibleId::Uint64(1),
                     NonFungibleId::Uint64(100),
                 ])
@@ -321,6 +321,7 @@ mod assert_bucket_contains_non_fungibles {
                 .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![5, tari_bor::Value::Null])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
                 .assert_bucket_contains_non_fungibles_all("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
+                    NonFungibleId::Uint64(0),
                     NonFungibleId::Uint64(5),
                 ])
                 .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
@@ -364,7 +365,7 @@ mod assert_bucket_contains_non_fungibles {
             Transaction::builder_localnet()
                 .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![5, tari_bor::Value::Null])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
-                .assert_bucket_contains_non_fungibles_none_all("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
+                .assert_bucket_contains_non_fungibles_none_of("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
                     NonFungibleId::Uint64(0),
                     NonFungibleId::Uint64(6),
                 ])
@@ -375,7 +376,7 @@ mod assert_bucket_contains_non_fungibles {
 
         assert_reject_reason(reason, AssertError::BucketContainsNonFungiblesAssertionFail {
             nft: NonFungibleId::Uint64(0),
-            check: NftCheck::NoneOfAll,
+            check: NftCheck::NoneOf,
         });
     }
 
@@ -387,7 +388,7 @@ mod assert_bucket_contains_non_fungibles {
             Transaction::builder_localnet()
                 .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![5, tari_bor::Value::Null])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
-                .assert_bucket_contains_non_fungibles_none_any("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
+                .assert_bucket_contains_non_fungibles_not_any_of("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
                     NonFungibleId::Uint64(1),
                     NonFungibleId::Uint64(0),
                 ])
@@ -397,7 +398,7 @@ mod assert_bucket_contains_non_fungibles {
         );
 
         assert_reject_reason(reason, AssertError::BucketContainsNonFungiblesAnyAssertionFail {
-            check: NftCheck::NoneOfAny,
+            check: NftCheck::NotAllOf,
         });
     }
 }

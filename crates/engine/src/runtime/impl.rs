@@ -35,7 +35,7 @@ use tari_engine_types::{
     entity_id_provider::EntityIdProvider,
     events::Event,
     hashing::hash_template_code,
-    indexed_value::{IndexedValue, IndexedWellKnownTypes},
+    indexed_value::IndexedValue,
     instruction_result::InstructionResult,
     limits,
     lock::LockFlag,
@@ -50,6 +50,7 @@ use tari_engine_types::{
 use tari_ootle_common_types::{GetVerifier, services::template_provider::TemplateProvider};
 use tari_ootle_transaction::{
     AllocatableAddressType,
+    Assertion,
     ComponentReference,
     ResourceAddressRef,
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
@@ -110,7 +111,6 @@ use tari_template_lib::{
         Metadata,
         NonFungibleAddress,
         OwnerRule,
-        ResourceAddress,
         ResourceInfo,
         ResourceType,
         TemplateAddress,
@@ -132,7 +132,7 @@ use crate::{
         RuntimeError,
         RuntimeInterface,
         engine_args::EngineArgs,
-        error::{ArgumentValidationError, AssertError},
+        error::ArgumentValidationError,
         locking::{LockError, LockedSubstate},
         pay_fee::PayFee,
         scope::PushCallFrame,
@@ -2380,45 +2380,13 @@ where
                     Ok(InvokeResult::unit())
                 })
             },
-            WorkspaceAction::AssertBucketContains => {
-                args.assert_n_args(3)?;
+            WorkspaceAction::Assert => {
+                args.assert_n_args(2)?;
                 let key: WorkspaceOffsetId = args.get(0)?;
-                let resource_address: ResourceAddress = args.get(1)?;
-                let min_amount: Amount = args.get(2)?;
+                let assertion: Assertion = args.get(1)?;
 
-                // get the bucket from the workspace
                 self.tracker.read_with(|state| {
-                    let value = state
-                        .workspace()
-                        .get(key)?
-                        .ok_or_else(|| RuntimeError::ItemNotOnWorkspace {
-                            id: key,
-                            existing_ids: state.workspace().all_ids_iter().collect(),
-                        })?;
-                    let indexed = IndexedWellKnownTypes::from_value(value)?;
-                    let bucket_id = indexed
-                        .bucket_ids()
-                        .first()
-                        .ok_or(RuntimeError::AssertError(AssertError::InvalidBucket))?;
-
-                    let bucket = state.get_bucket(*bucket_id)?;
-
-                    // validate the bucket resource
-                    if *bucket.resource_address() != resource_address {
-                        return Err(RuntimeError::AssertError(AssertError::InvalidResource {
-                            expected: resource_address,
-                            got: *bucket.resource_address(),
-                        }));
-                    }
-
-                    // validate the bucket amount
-                    if bucket.unlocked_amount() < min_amount {
-                        return Err(RuntimeError::AssertError(AssertError::InvalidAmount {
-                            expected: min_amount,
-                            got: bucket.unlocked_amount(),
-                        }));
-                    }
-
+                    state.workspace_assert(key, assertion)?;
                     Ok(InvokeResult::unit())
                 })
             },

@@ -88,6 +88,10 @@ impl Bucket {
         self.resource_container.non_fungible_token_ids()
     }
 
+    pub fn contains_non_fungible_id(&self, id: &NonFungibleId) -> bool {
+        self.resource_container.non_fungible_token_ids().contains(id)
+    }
+
     pub fn take(&mut self, amount: Amount) -> Result<ResourceContainer, ResourceError> {
         self.resource_container.withdraw(amount)
     }

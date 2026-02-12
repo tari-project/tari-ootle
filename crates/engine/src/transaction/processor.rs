@@ -327,15 +327,10 @@ where
                 runtime.interface_mut().claim_validator_fees(address)?;
                 Ok(InstructionResult::empty())
             },
-            Instruction::AssertBucketContains {
-                key,
-                resource_address,
-                min_amount,
-            } => {
-                runtime.interface_mut().workspace_invoke(
-                    WorkspaceAction::AssertBucketContains,
-                    invoke_args![key, resource_address, min_amount].into(),
-                )?;
+            Instruction::Assert { key, assertion } => {
+                runtime
+                    .interface_mut()
+                    .workspace_invoke(WorkspaceAction::Assert, invoke_args![key, assertion].into())?;
                 Ok(InstructionResult::empty())
             },
             Instruction::TakeFromBucket {

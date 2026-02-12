@@ -158,6 +158,7 @@ impl<T: Display> Displayable for Vec<T> {
         (*self.as_slice()).display()
     }
 }
+
 impl<T: Display> Displayable for VecDeque<T> {
     type Item = VecDeque<T>;
 

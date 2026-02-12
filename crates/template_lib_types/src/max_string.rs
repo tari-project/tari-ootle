@@ -8,8 +8,8 @@ use tari_template_abi::rust::{
     prelude::*,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct MaxString<const N: usize> {
     s: Box<str>,
 }
@@ -26,6 +26,16 @@ impl<const N: usize> MaxString<N> {
     pub fn new_checked(s: impl Into<Box<str>>) -> Option<Self> {
         let s = s.into();
         if s.len() <= N { Some(Self { s }) } else { None }
+    }
+
+    /// Creates a new `MaxString` without checking the length.
+    ///
+    /// # Safety
+    /// The caller must ensure that the length of the string does not exceed `N`.
+    pub unsafe fn new_unchecked(s: impl Into<Box<str>>) -> Self {
+        let s = s.into();
+        debug_assert!(s.len() <= N, "string length exceeds maximum of {}: got {}", N, s.len());
+        Self { s }
     }
 
     pub fn into_string(self) -> String {

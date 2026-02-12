@@ -435,8 +435,8 @@ mod resource_access_rules {
                 .call_method(user_account, "create_proof_by_non_fungible_ids", args![
                     badge_resource,
                     vec![
-                        NonFungibleId::from_string("withdraw"),
-                        NonFungibleId::from_string("deposit")
+                        NonFungibleId::try_from_string("withdraw").unwrap(),
+                        NonFungibleId::try_from_string("deposit").unwrap()
                     ]
                 ])
                 .put_last_instruction_output_on_workspace("proof")
@@ -776,8 +776,8 @@ mod resource_access_rules {
                     args![
                         badge_resource,
                         vec![
-                            NonFungibleId::from_string("withdraw"),
-                            NonFungibleId::from_string("deposit")
+                            NonFungibleId::try_from_string("withdraw").unwrap(),
+                            NonFungibleId::try_from_string("deposit").unwrap()
                         ]
                     ],
                 )
@@ -818,8 +818,8 @@ mod resource_access_rules {
                     args![
                         badge_resource,
                         vec![
-                            NonFungibleId::from_string("withdraw"),
-                            NonFungibleId::from_string("deposit")
+                            NonFungibleId::try_from_string("withdraw").unwrap(),
+                            NonFungibleId::try_from_string("deposit").unwrap()
                         ]
                     ],
                 )

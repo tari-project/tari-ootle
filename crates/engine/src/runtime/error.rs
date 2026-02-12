@@ -33,7 +33,11 @@ use tari_engine_types::{
     virtual_substate::VirtualSubstateId,
 };
 use tari_ootle_common_types::{displayable::Displayable, optional::IsNotFoundError};
-use tari_ootle_transaction::args::{WorkspaceId, WorkspaceOffsetId};
+use tari_ootle_transaction::{
+    CheckOrd,
+    NftCheck,
+    args::{WorkspaceId, WorkspaceOffsetId},
+};
 use tari_template_lib::{
     args::{CallAction, VaultFreezeFlag},
     models::{AddressAllocationId, BucketId, ProofId},
@@ -43,6 +47,7 @@ use tari_template_lib::{
         ComponentAddress,
         NonFungibleId,
         ResourceAddress,
+        ResourceType,
         TemplateAddress,
         TransactionReceiptAddress,
         VaultId,
@@ -327,15 +332,27 @@ impl IsNotFoundError for RuntimeError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum AssertError {
-    #[error("The workspace value is not a bucket")]
-    InvalidBucket,
-    #[error("Assert expected bucket to have resource {expected} but has {got}")]
+    #[error("The workspace value at {key} is not a bucket")]
+    NotABucket { key: WorkspaceOffsetId },
+    #[error("Assertion expected bucket to have resource {expected} but has {got}")]
     InvalidResource {
         expected: ResourceAddress,
         got: ResourceAddress,
     },
-    #[error("Assert expected bucket to have at least {expected} tokens but only has {got}")]
-    InvalidAmount { expected: Amount, got: Amount },
+    #[error("Assertion expected bucket to have resource type {expected} but has {got}")]
+    InvalidResourceType { expected: ResourceType, got: ResourceType },
+    #[error("Assertion failed: expected bucket amount {got} to be {check} {expected}")]
+    BucketAmountAssertionFail {
+        expected: Amount,
+        check: CheckOrd,
+        got: Amount,
+    },
+    #[error("Assertion failed: expected bucket to contain {check} {nft}")]
+    BucketContainsNonFungiblesAssertionFail { nft: NonFungibleId, check: NftCheck },
+    #[error("Assertion failed: expected bucket to contain {check} of the non-fungibles but it does not")]
+    BucketContainsNonFungiblesAnyAssertionFail { check: NftCheck },
+    #[error("Value is null but expected non-null")]
+    ValueIsNull,
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -54,17 +54,23 @@ impl NonFungibleId {
         Self::Uint64(id)
     }
 
-    pub fn try_from_string<T: Into<String>>(id: T) -> Result<Self, ParseNonFungibleIdError> {
-        let id = id.into();
-        validate_nft_id_str(&id)?;
-
+    /// Creates a NonFungibleId from a string, the string must be between 1 and 64 characters long. It can contain any
+    /// UTF-8 character. Panics if the string is empty or longer than 64 characters.
+    pub fn from_string<T: Into<String>>(id: T) -> Self {
         // Avoid long strings in WASM to reduce bin size
         #[cfg(not(target_arch = "wasm32"))]
-        const EXPECT_MSG: &str = "Invariant violated: String length validated above";
+        const EXPECT_MSG: &str = "Invariant violated: String cannot be empty or longer than 64 characters";
         #[cfg(target_arch = "wasm32")]
         const EXPECT_MSG: &str = "NFTSTRLEN";
 
-        Ok(NonFungibleId::String(id.try_into().expect(EXPECT_MSG)))
+        Self::try_from_string(id).expect(EXPECT_MSG)
+    }
+
+    pub fn try_from_string<T: Into<String>>(id: T) -> Result<Self, ParseNonFungibleIdError> {
+        let id = id.into();
+        validate_nft_id_str(&id)?;
+        // SAFETY: length checked
+        Ok(NonFungibleId::String(unsafe { MaxString::new_unchecked(id) }))
     }
 
     /// A string in one of the following formats
@@ -80,7 +86,9 @@ impl NonFungibleId {
 
         match self {
             NonFungibleId::U256(uuid) => {
-                write_hex_fmt(&mut s, uuid).expect("Invariant violated: String write is infallible");
+                // PANIC: the length of the string is pre-allocated and the function writes exactly 64 characters, so
+                // this cannot fail
+                write_hex_fmt(&mut s, uuid).unwrap()
             },
             NonFungibleId::String(st) => {
                 s.push_str(st);

@@ -251,7 +251,7 @@ mod tests {
         check(&unclaimed_output_id);
         let non_fungible_id = SubstateId::NonFungible(NonFungibleAddress::new(
             resource_id.as_resource_address().unwrap(),
-            NonFungibleId::from_string("hello"),
+            NonFungibleId::try_from_string("hello").unwrap(),
         ));
         check(&non_fungible_id);
         let transaction_receipt_id =

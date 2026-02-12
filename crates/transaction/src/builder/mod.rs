@@ -21,6 +21,7 @@ use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib_types::{
     Amount,
     FunctionName,
+    NonFungibleId,
     OwnerRule,
     ResourceAddress,
     TemplateAddress,
@@ -33,6 +34,8 @@ use tari_template_lib_types::{
 
 use crate::{
     AllocatableAddressType,
+    Assertion,
+    CheckOrd,
     ComponentReference,
     Instruction,
     IntoSigned,
@@ -447,18 +450,79 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
+    pub fn assert_bucket_contains_any<T: AsRef<str>>(self, label: T, resource_address: ResourceAddress) -> Self {
+        self.assert_bucket_amount(label, resource_address, CheckOrd::Gt, Amount::zero())
+    }
+
     pub fn assert_bucket_contains_at_least<T: AsRef<str>, A: Into<Amount>>(
         self,
         label: T,
         resource_address: ResourceAddress,
         min_amount: A,
     ) -> Self {
+        self.assert_bucket_amount(label, resource_address, CheckOrd::Gte, min_amount)
+    }
+
+    pub fn assert_bucket_contains_exactly<T: AsRef<str>, A: Into<Amount>>(
+        self,
+        label: T,
+        resource_address: ResourceAddress,
+        amount: A,
+    ) -> Self {
+        self.assert_bucket_amount(label, resource_address, CheckOrd::Eq, amount)
+    }
+
+    pub fn assert_bucket_contains_at_most<T: AsRef<str>, A: Into<Amount>>(
+        self,
+        label: T,
+        resource_address: ResourceAddress,
+        max_amount: A,
+    ) -> Self {
+        self.assert_bucket_amount(label, resource_address, CheckOrd::Lte, max_amount)
+    }
+
+    pub fn assert_bucket_amount<T: AsRef<str>, A: Into<Amount>>(
+        self,
+        label: T,
+        resource_address: ResourceAddress,
+        is: CheckOrd,
+        amount: A,
+    ) -> Self {
         let key = self.get_workspace_offset_id_from_named_arg(label.as_ref());
 
-        self.add_instruction(Instruction::AssertBucketContains {
+        self.add_instruction(Instruction::Assert {
             key,
-            resource_address,
-            min_amount: min_amount.into(),
+            assertion: Assertion::BucketAmount {
+                resource_address,
+                is,
+                amount: amount.into(),
+            },
+        })
+    }
+
+    pub fn assert_bucket_contains_non_fungibles<T: AsRef<str>, N: Into<Box<[NonFungibleId]>>>(
+        self,
+        label: T,
+        resource_address: ResourceAddress,
+        nfts: N,
+    ) -> Self {
+        let key = self.get_workspace_offset_id_from_named_arg(label.as_ref());
+
+        self.add_instruction(Instruction::Assert {
+            key,
+            assertion: Assertion::BucketContainsNonFungibles {
+                resource_address,
+                nfts: nfts.into(),
+            },
+        })
+    }
+
+    pub fn assert_workspace_item_is_not_null<T: AsRef<str>>(self, label: T) -> Self {
+        let key = self.get_workspace_offset_id_from_named_arg(label.as_ref());
+
+        self.add_instruction(Instruction::Assert {
+            key,
+            assertion: Assertion::IsNotNull,
         })
     }
 
@@ -601,7 +665,12 @@ impl<D> TransactionBuilder<D> {
             Instruction::ClaimValidatorFees { address } => {
                 self.unsigned_transaction.inputs_mut().insert((*address).into());
             },
-            Instruction::AssertBucketContains { resource_address, .. } => {
+            Instruction::Assert {
+                assertion:
+                    Assertion::BucketAmount { resource_address, .. } |
+                    Assertion::BucketContainsNonFungibles { resource_address, .. },
+                ..
+            } => {
                 if *resource_address != XTR {
                     self.unsigned_transaction
                         .inputs_mut()
@@ -611,6 +680,10 @@ impl<D> TransactionBuilder<D> {
             Instruction::UpdateComponentTemplate { component, .. } => {
                 self.add_input_for_component_ref(component);
             },
+            Instruction::Assert {
+                assertion: Assertion::IsNotNull,
+                ..
+            } |
             Instruction::CreateAccount { .. } |
             Instruction::PutLastInstructionOutputOnWorkspace { .. } |
             Instruction::EmitLog { .. } |

@@ -11,12 +11,15 @@ use tari_template_abi::{
 
 use super::{BinaryTag, ResourceAddress};
 use crate::{
+    MaxString,
     address_prefixes,
     constants::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
     crypto::RistrettoPublicKeyBytes,
     hex::{fixed_bytes_from_hex, write_hex_fmt},
     serde_helpers,
 };
+
+const NON_FUNGIBLE_ID_STR_MAX_LEN: usize = 64;
 
 /// The unique identification of a non-fungible token inside it's parent resource
 #[derive(Debug, Clone, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize, Hash)]
@@ -28,8 +31,7 @@ pub enum NonFungibleId {
         #[serde(with = "serde_helpers::fixed_hex")]
         [u8; 32],
     ),
-    // TODO: limit size
-    String(String),
+    String(#[cfg_attr(feature = "ts", ts(type = "string"))] MaxString<NON_FUNGIBLE_ID_STR_MAX_LEN>),
     Uint32(u32),
     Uint64(#[cfg_attr(feature = "ts", ts(type = "number"))] u64),
 }
@@ -52,14 +54,17 @@ impl NonFungibleId {
         Self::Uint64(id)
     }
 
-    pub fn from_string<T: Into<String>>(id: T) -> Self {
-        Self::String(id.into())
-    }
-
     pub fn try_from_string<T: Into<String>>(id: T) -> Result<Self, ParseNonFungibleIdError> {
         let id = id.into();
         validate_nft_id_str(&id)?;
-        Ok(NonFungibleId::String(id))
+
+        // Avoid long strings in WASM to reduce bin size
+        #[cfg(not(target_arch = "wasm32"))]
+        const EXPECT_MSG: &str = "Invariant violated: String length validated above";
+        #[cfg(target_arch = "wasm32")]
+        const EXPECT_MSG: &str = "NFTSTRLEN";
+
+        Ok(NonFungibleId::String(id.try_into().expect(EXPECT_MSG)))
     }
 
     /// A string in one of the following formats
@@ -136,7 +141,10 @@ impl NonFungibleId {
             )),
             "str" => {
                 validate_nft_id_str(id)?;
-                Ok(NonFungibleId::String(id.to_string()))
+                // SAFETY: length checked
+                Ok(NonFungibleId::String(unsafe {
+                    MaxString::new_unchecked(id.to_string())
+                }))
             },
             "u32" => Ok(NonFungibleId::Uint32(
                 id.parse().map_err(|_| ParseNonFungibleIdError::InvalidUint32)?,
@@ -178,7 +186,7 @@ impl NonFungibleId {
 }
 
 fn validate_nft_id_str(s: &str) -> Result<(), ParseNonFungibleIdError> {
-    if s.is_empty() || s.len() > 64 {
+    if s.is_empty() || s.len() > NON_FUNGIBLE_ID_STR_MAX_LEN {
         return Err(ParseNonFungibleIdError::InvalidStringLength);
     }
     Ok(())
@@ -446,7 +454,7 @@ mod tests {
         fn string_serialization_and_deserialization() {
             let resx_str = "resource_0000000000000000000000000000000000000000000000000000000000000000";
             let resource = ResourceAddress::from_str(resx_str).unwrap();
-            let v = NonFungibleAddress::new(resource, NonFungibleId::String("hello".to_string()));
+            let v = NonFungibleAddress::new(resource, NonFungibleId::try_from_string("hello").unwrap());
             let json = serde_json::to_string_pretty(&v).unwrap();
             assert!(json.contains(resx_str));
 

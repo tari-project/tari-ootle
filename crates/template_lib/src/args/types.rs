@@ -461,15 +461,8 @@ pub enum WorkspaceAction {
     PutLastInstructionOutput,
     Get,
     DropAllProofs,
-    AssertBucketContains,
+    Assert,
     DropAll,
-}
-
-/// A workspace operation argument
-#[derive(Clone, Debug)]
-pub struct WorkspaceInvokeArg {
-    pub action: WorkspaceAction,
-    pub args: Vec<Bytes>,
 }
 
 // -------------------------------- NonFungible -------------------------------- //

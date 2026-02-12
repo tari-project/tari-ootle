@@ -16,7 +16,6 @@ use tari_template_lib_types::{
     LogLevel,
     MaxString,
     OwnerRule,
-    ResourceAddress,
     TemplateAddress,
     ValidatorFeePoolAddress,
     access_rules::ComponentAccessRules,
@@ -26,6 +25,7 @@ use tari_template_lib_types::{
 
 use crate::{
     AllocatableAddressType,
+    Assertion,
     ComponentReference,
     ResourceAddressRef,
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
@@ -68,10 +68,9 @@ pub enum Instruction {
         address: ValidatorFeePoolAddress,
     },
     DropAllProofsInWorkspace,
-    AssertBucketContains {
+    Assert {
         key: WorkspaceOffsetId,
-        resource_address: ResourceAddress,
-        min_amount: Amount,
+        assertion: Assertion,
     },
     TakeFromBucket {
         input_bucket: WorkspaceOffsetId,
@@ -202,16 +201,8 @@ impl Display for Instruction {
             Self::DropAllProofsInWorkspace => {
                 write!(f, "DropAllProofsInWorkspace")
             },
-            Self::AssertBucketContains {
-                key,
-                resource_address,
-                min_amount,
-            } => {
-                write!(
-                    f,
-                    "AssertBucketContains {{ key: {:?}, resource_address: {}, min_amount: {} }}",
-                    key, resource_address, min_amount
-                )
+            Self::Assert { key, assertion } => {
+                write!(f, "Assert {{ key: {}, assertion: {} }}", key, assertion)
             },
 
             Self::TakeFromBucket {

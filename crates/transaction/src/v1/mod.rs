@@ -1,6 +1,7 @@
 //    Copyright 2024 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
+mod assertion;
 mod component_reference;
 mod instruction;
 mod resource_address_ref;
@@ -10,6 +11,7 @@ mod types;
 mod unsealed;
 mod unsigned;
 
+pub use assertion::*;
 pub use component_reference::*;
 pub use instruction::*;
 pub use resource_address_ref::*;

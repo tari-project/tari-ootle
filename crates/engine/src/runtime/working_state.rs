@@ -37,7 +37,7 @@ use tari_engine_types::{
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
 use tari_ootle_common_types::{Epoch, optional::Optional};
-use tari_ootle_transaction::ResourceAddressRef;
+use tari_ootle_transaction::{Assertion, ResourceAddressRef, args::WorkspaceOffsetId};
 use tari_template_lib::{
     args::{MintArg, ResourceDiscriminator, VaultFreezeFlags},
     models::{AddressAllocationId, BucketId, ProofId, ResourceAddressAllocation},
@@ -49,6 +49,7 @@ use tari_template_lib::{
         Hash32,
         NonFungibleAddress,
         ResourceAddress,
+        ResourceType,
         TemplateAddress,
         UtxoAddress,
         ValidatorFeePoolAddress,
@@ -64,6 +65,7 @@ use super::workspace::Workspace;
 use crate::{
     runtime::{
         ActionIdent,
+        AssertError,
         LimitError,
         NativeAction,
         RuntimeError,
@@ -1163,6 +1165,83 @@ impl<TStore: StateReader> WorkingState<TStore> {
 
     pub fn workspace_mut(&mut self) -> &mut Workspace {
         &mut self.workspace
+    }
+
+    pub fn workspace_assert(&self, key: WorkspaceOffsetId, assertion: Assertion) -> Result<(), RuntimeError> {
+        let value = self
+            .workspace()
+            .get(key)?
+            .ok_or_else(|| RuntimeError::ItemNotOnWorkspace {
+                id: key,
+                existing_ids: self.workspace().all_ids_iter().collect(),
+            })?;
+
+        match assertion {
+            Assertion::BucketAmount {
+                resource_address,
+                is,
+                amount,
+            } => {
+                let indexed = IndexedWellKnownTypes::from_value(value)?;
+                let bucket_id = indexed.bucket_ids().first().ok_or(AssertError::NotABucket)?;
+
+                let bucket = self.get_bucket(*bucket_id)?;
+
+                // validate the bucket resource
+                if *bucket.resource_address() != resource_address {
+                    return Err(RuntimeError::AssertError(AssertError::InvalidResource {
+                        expected: resource_address,
+                        got: *bucket.resource_address(),
+                    }));
+                }
+
+                // validate the bucket amount
+                if !is.check(bucket.unlocked_amount(), amount) {
+                    return Err(RuntimeError::AssertError(AssertError::BucketAmountAssertionFail {
+                        expected: amount,
+                        check: is,
+                        got: bucket.unlocked_amount(),
+                    }));
+                }
+            },
+            Assertion::IsNotNull => {
+                if value.is_null() {
+                    return Err(RuntimeError::AssertError(AssertError::ValueIsNull));
+                }
+            },
+            Assertion::BucketContainsNonFungibles { resource_address, nfts } => {
+                let indexed = IndexedWellKnownTypes::from_value(value)?;
+                let bucket_id = indexed.bucket_ids().first().ok_or(AssertError::NotABucket)?;
+
+                let bucket = self.get_bucket(*bucket_id)?;
+
+                // validate the bucket resource
+                if *bucket.resource_address() != resource_address {
+                    return Err(RuntimeError::AssertError(AssertError::InvalidResource {
+                        expected: resource_address,
+                        got: *bucket.resource_address(),
+                    }));
+                }
+
+                if !bucket.resource_type().is_non_fungible() {
+                    return Err(RuntimeError::AssertError(AssertError::InvalidResourceType {
+                        expected: ResourceType::NonFungible,
+                        got: bucket.resource_type(),
+                    }));
+                }
+
+                // validate the bucket contains the specified NFTs
+                for token_id in nfts {
+                    if !bucket.contains_non_fungible_id(&token_id) {
+                        return Err(RuntimeError::AssertError(
+                            AssertError::BucketContainsNonFungiblesAssertionFail { missing_nft: token_id },
+                        ));
+                    }
+                }
+            },
+        }
+
+        Ok(())
     }
 
     pub fn resolve_resource_address_ref(&self, addr_ref: ResourceAddressRef) -> Result<ResourceAddress, RuntimeError> {

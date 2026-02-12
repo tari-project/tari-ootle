@@ -201,7 +201,6 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::PublishTemplate { binary } => binary.len() as u64 / BINARY_WEIGHT_DIVISOR,
         Instruction::AllocateAddress { .. } => 1,
         Instruction::StealthTransfer { statement, .. } => calc_stealth_statement_weight(statement),
-        Instruction::PayFeeStealth { statement, .. } => calc_stealth_statement_weight(statement),
         Instruction::PayFeeFromBucket { .. } => 1,
         Instruction::UpdateComponentTemplate { migrate, .. } => {
             1 + migrate.as_ref().map(|m| calc_args_weight(&m.args)).unwrap_or(0)

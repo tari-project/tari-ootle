@@ -733,7 +733,6 @@ impl<D> TransactionBuilder<D> {
             Instruction::TakeFromBucket { .. } |
             Instruction::PublishTemplate { .. } |
             Instruction::AllocateAddress { .. } |
-            Instruction::PayFeeStealth { .. } |
             Instruction::PayFeeFromBucket { .. } => {},
         }
     }

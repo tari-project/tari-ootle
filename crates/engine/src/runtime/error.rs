@@ -349,7 +349,7 @@ pub enum AssertError {
     },
     #[error("Assertion failed: expected bucket to contain {check} {nft}")]
     BucketContainsNonFungiblesAssertionFail { nft: NonFungibleId, check: NftCheck },
-    #[error("Assertion failed: expected bucket to contain {check} of the non-fungibles but it does not")]
+    #[error("Assertion failed: expected bucket to contain {check} the non-fungibles")]
     BucketContainsNonFungiblesAnyAssertionFail { check: NftCheck },
     #[error("Value is null but expected non-null")]
     ValueIsNull,

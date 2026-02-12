@@ -1263,12 +1263,11 @@ impl<TStore: StateReader> WorkingState<TStore> {
 
                 match check {
                     NftCheck::AnyOf | NftCheck::NotAllOf => {
-                        // If AnyOf reaches here, we've failed
                         return Err(RuntimeError::AssertError(
                             AssertError::BucketContainsNonFungiblesAnyAssertionFail { check },
                         ));
                     },
-                    _ => {},
+                    NftCheck::AllOf | NftCheck::NoneOf => {},
                 }
             },
         }

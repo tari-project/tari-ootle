@@ -368,10 +368,6 @@ where
                 statement,
                 revealed_input_bucket,
             } => Self::stealth_transfer(runtime, resource_address, statement, revealed_input_bucket),
-            Instruction::PayFeeStealth {
-                statement,
-                revealed_input_bucket,
-            } => Self::pay_fee_stealth(runtime, statement, revealed_input_bucket),
             Instruction::PayFeeFromBucket { bucket } => Self::pay_fee_from_bucket(runtime, bucket),
             Instruction::UpdateComponentTemplate {
                 component,
@@ -486,18 +482,6 @@ where
 
         runtime.interface_mut().pop_call_frame()?;
 
-        Ok(InstructionResult::empty())
-    }
-
-    fn pay_fee_stealth(
-        runtime: &mut Runtime,
-        statement: StealthTransferStatement,
-        revealed_funds_bucket: Option<WorkspaceOffsetId>,
-    ) -> Result<InstructionResult, TransactionErrorKind> {
-        runtime.interface_mut().pay_fee(PayFee::FromStealth {
-            statement,
-            input_bucket: revealed_funds_bucket,
-        })?;
         Ok(InstructionResult::empty())
     }
 

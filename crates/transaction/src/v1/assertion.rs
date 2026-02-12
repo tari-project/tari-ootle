@@ -32,7 +32,7 @@ impl Display for Assertion {
                 is,
                 amount,
             } => {
-                write!(f, "BucketAtLeast({} {is} {})", resource_address, amount)
+                write!(f, "BucketAmount({} {is} {})", resource_address, amount)
             },
             Self::IsNotNull => write!(f, "IsNotNull"),
             Self::BucketContainsNonFungibles {

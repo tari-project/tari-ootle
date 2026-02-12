@@ -165,7 +165,12 @@ mod assert_bucket_contains {
             vec![test.account_proof.clone()],
         );
 
-        assert_reject_reason(reason, RuntimeError::AssertError(AssertError::NotABucket));
+        assert_reject_reason(
+            reason,
+            RuntimeError::AssertError(AssertError::NotABucket {
+                key: WorkspaceOffsetId::new(0),
+            }),
+        );
     }
 
     #[test]

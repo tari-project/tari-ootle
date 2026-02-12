@@ -1182,10 +1182,8 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 is,
                 amount,
             } => {
-                let indexed = IndexedWellKnownTypes::from_value(value)?;
-                let bucket_id = indexed.bucket_ids().first().ok_or(AssertError::NotABucket)?;
-
-                let bucket = self.get_bucket(*bucket_id)?;
+                let bucket_id = tari_bor::from_value::<BucketId>(value).map_err(|_| AssertError::NotABucket { key })?;
+                let bucket = self.get_bucket(bucket_id)?;
 
                 // validate the bucket resource
                 if *bucket.resource_address() != resource_address {
@@ -1210,10 +1208,8 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 }
             },
             Assertion::BucketContainsNonFungibles { resource_address, nfts } => {
-                let indexed = IndexedWellKnownTypes::from_value(value)?;
-                let bucket_id = indexed.bucket_ids().first().ok_or(AssertError::NotABucket)?;
-
-                let bucket = self.get_bucket(*bucket_id)?;
+                let bucket_id = tari_bor::from_value::<BucketId>(value).map_err(|_| AssertError::NotABucket { key })?;
+                let bucket = self.get_bucket(bucket_id)?;
 
                 // validate the bucket resource
                 if *bucket.resource_address() != resource_address {

@@ -331,8 +331,8 @@ impl IsNotFoundError for RuntimeError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum AssertError {
-    #[error("The workspace value is not a bucket")]
-    NotABucket,
+    #[error("The workspace value at {key} is not a bucket")]
+    NotABucket { key: WorkspaceOffsetId },
     #[error("Assertion expected bucket to have resource {expected} but has {got}")]
     InvalidResource {
         expected: ResourceAddress,
@@ -346,7 +346,7 @@ pub enum AssertError {
         check: CheckOrd,
         got: Amount,
     },
-    #[error("Assertion failed:expected bucket to contain non-fungible {missing_nft}")]
+    #[error("Assertion failed: expected bucket to contain non-fungible {missing_nft}")]
     BucketContainsNonFungiblesAssertionFail { missing_nft: NonFungibleId },
     #[error("Value is null but expected non-null")]
     ValueIsNull,

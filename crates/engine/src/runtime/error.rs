@@ -35,6 +35,7 @@ use tari_engine_types::{
 use tari_ootle_common_types::{displayable::Displayable, optional::IsNotFoundError};
 use tari_ootle_transaction::{
     CheckOrd,
+    NftCheck,
     args::{WorkspaceId, WorkspaceOffsetId},
 };
 use tari_template_lib::{
@@ -346,8 +347,10 @@ pub enum AssertError {
         check: CheckOrd,
         got: Amount,
     },
-    #[error("Assertion failed: expected bucket to contain non-fungible {missing_nft}")]
-    BucketContainsNonFungiblesAssertionFail { missing_nft: NonFungibleId },
+    #[error("Assertion failed: expected bucket to contain {check} {nft}")]
+    BucketContainsNonFungiblesAssertionFail { nft: NonFungibleId, check: NftCheck },
+    #[error("Assertion failed: expected bucket to contain {check} of the non-fungibles but it does not")]
+    BucketContainsNonFungiblesAnyAssertionFail { check: NftCheck },
     #[error("Value is null but expected non-null")]
     ValueIsNull,
 }

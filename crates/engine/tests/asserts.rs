@@ -250,6 +250,8 @@ mod assert_is_not_null {
 }
 
 mod assert_bucket_contains_non_fungibles {
+    use tari_ootle_transaction::NftCheck;
+
     use super::*;
 
     #[test]
@@ -260,17 +262,29 @@ mod assert_bucket_contains_non_fungibles {
             Transaction::builder_localnet()
                 .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![5, tari_bor::Value::Null])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
-                .assert_bucket_contains_non_fungibles("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
+                .assert_bucket_contains_non_fungibles_all("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
                     NonFungibleId::Uint64(0),
                     NonFungibleId::Uint64(1),
                     NonFungibleId::Uint64(2),
                 ])
-                .assert_bucket_contains_non_fungibles("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
+                .assert_bucket_contains_non_fungibles_all("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
                     NonFungibleId::Uint64(3),
                     NonFungibleId::Uint64(4),
                 ])
                 // This essentially asserts that the resource is a particular nft resource
-                .assert_bucket_contains_non_fungibles("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![])
+                .assert_bucket_contains_non_fungibles_all("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![])
+                .assert_bucket_contains_non_fungibles_any("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
+                    NonFungibleId::Uint64(3),
+                    NonFungibleId::Uint64(100),
+                ])
+                .assert_bucket_contains_non_fungibles_none_all("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
+                    NonFungibleId::Uint64(5),
+                    NonFungibleId::Uint64(100),
+                ])
+                .assert_bucket_contains_non_fungibles_none_any("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
+                    NonFungibleId::Uint64(1),
+                    NonFungibleId::Uint64(100),
+                ])
                 .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
                 .build_and_seal(&test.account_key),
             vec![test.account_proof.clone()],
@@ -286,7 +300,7 @@ mod assert_bucket_contains_non_fungibles {
             Transaction::builder_localnet()
                 .call_method(test.faucet_component, "take_free_coins", args![])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
-                .assert_bucket_contains_non_fungibles("faucet_bucket", test.faucet_resource, vec![])
+                .assert_bucket_contains_non_fungibles_all("faucet_bucket", test.faucet_resource, vec![])
                 .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
                 .build_and_seal(&test.account_key),
             vec![test.account_proof.clone()],
@@ -306,7 +320,7 @@ mod assert_bucket_contains_non_fungibles {
             Transaction::builder_localnet()
                 .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![5, tari_bor::Value::Null])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
-                .assert_bucket_contains_non_fungibles("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
+                .assert_bucket_contains_non_fungibles_all("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
                     NonFungibleId::Uint64(5),
                 ])
                 .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
@@ -315,7 +329,75 @@ mod assert_bucket_contains_non_fungibles {
         );
 
         assert_reject_reason(reason, AssertError::BucketContainsNonFungiblesAssertionFail {
-            missing_nft: NonFungibleId::Uint64(5),
+            nft: NonFungibleId::Uint64(5),
+            check: NftCheck::AllOf,
+        });
+    }
+
+    #[test]
+    fn it_fails_if_nft_none_present() {
+        let mut test: AssertTest = setup();
+
+        let reason = test.template_test.execute_expect_failure(
+            Transaction::builder_localnet()
+                .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![5, tari_bor::Value::Null])
+                .put_last_instruction_output_on_workspace("faucet_bucket")
+                .assert_bucket_contains_non_fungibles_any("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
+                    NonFungibleId::Uint64(5),
+                    NonFungibleId::Uint64(6),
+                ])
+                .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
+                .build_and_seal(&test.account_key),
+            vec![test.account_proof.clone()],
+        );
+
+        assert_reject_reason(reason, AssertError::BucketContainsNonFungiblesAnyAssertionFail {
+            check: NftCheck::AnyOf,
+        });
+    }
+
+    #[test]
+    fn it_fails_if_assertion_none_of_all_fails() {
+        let mut test: AssertTest = setup();
+
+        let reason = test.template_test.execute_expect_failure(
+            Transaction::builder_localnet()
+                .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![5, tari_bor::Value::Null])
+                .put_last_instruction_output_on_workspace("faucet_bucket")
+                .assert_bucket_contains_non_fungibles_none_all("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
+                    NonFungibleId::Uint64(0),
+                    NonFungibleId::Uint64(6),
+                ])
+                .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
+                .build_and_seal(&test.account_key),
+            vec![test.account_proof.clone()],
+        );
+
+        assert_reject_reason(reason, AssertError::BucketContainsNonFungiblesAssertionFail {
+            nft: NonFungibleId::Uint64(0),
+            check: NftCheck::NoneOfAll,
+        });
+    }
+
+    #[test]
+    fn it_fails_if_assertion_none_of_any_fails() {
+        let mut test: AssertTest = setup();
+
+        let reason = test.template_test.execute_expect_failure(
+            Transaction::builder_localnet()
+                .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![5, tari_bor::Value::Null])
+                .put_last_instruction_output_on_workspace("faucet_bucket")
+                .assert_bucket_contains_non_fungibles_none_any("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
+                    NonFungibleId::Uint64(1),
+                    NonFungibleId::Uint64(0),
+                ])
+                .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
+                .build_and_seal(&test.account_key),
+            vec![test.account_proof.clone()],
+        );
+
+        assert_reject_reason(reason, AssertError::BucketContainsNonFungiblesAnyAssertionFail {
+            check: NftCheck::NoneOfAny,
         });
     }
 }

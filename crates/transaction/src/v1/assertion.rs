@@ -4,23 +4,28 @@
 use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
-use tari_template_lib_types::{Amount, NonFungibleId, ResourceAddress};
+use tari_ootle_common_types::displayable::Displayable;
+use tari_template_lib_types::{Amount, MaxVec, NonFungibleId, ResourceAddress};
+
+pub type NftAssertVec = MaxVec<32, NonFungibleId>;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Assertion {
-    #[serde(rename = "bkt_amt")]
+    #[serde(rename = "BktAmt")]
     BucketAmount {
         resource_address: ResourceAddress,
         is: CheckOrd,
         amount: Amount,
     },
-    #[serde(rename = "nt_nil")]
+    #[serde(rename = "NtNil")]
     IsNotNull,
-    #[serde(rename = "bkt_ctn_nft")]
+    #[serde(rename = "BktCtnNft")]
     BucketContainsNonFungibles {
         resource_address: ResourceAddress,
-        nfts: Box<[NonFungibleId]>,
+        check: NftCheck,
+        #[cfg_attr(feature = "ts", ts(as = "Vec<NonFungibleId>"))]
+        nfts: NftAssertVec,
     },
 }
 
@@ -37,17 +42,15 @@ impl Display for Assertion {
             Self::IsNotNull => write!(f, "IsNotNull"),
             Self::BucketContainsNonFungibles {
                 resource_address,
+                check,
                 nfts: non_fungible_addresses,
             } => {
                 write!(
                     f,
-                    "BucketContainsNonFungibles({}, [{}])",
+                    "BucketContainsNonFungibles({} {} [{}])",
                     resource_address,
-                    non_fungible_addresses
-                        .iter()
-                        .map(|id| id.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                    check,
+                    non_fungible_addresses.display()
                 )
             },
         }
@@ -84,6 +87,27 @@ impl Display for CheckOrd {
             Self::Lt => "<",
             Self::Lte => "<=",
             Self::Eq => "==",
+        };
+        write!(f, "{s}")
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum NftCheck {
+    AnyOf,
+    AllOf,
+    NoneOfAll,
+    NoneOfAny,
+}
+
+impl Display for NftCheck {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::AnyOf => "any of",
+            Self::AllOf => "all of",
+            Self::NoneOfAll => "none of all",
+            Self::NoneOfAny => "none of any",
         };
         write!(f, "{s}")
     }

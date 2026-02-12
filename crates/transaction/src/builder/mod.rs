@@ -21,7 +21,6 @@ use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib_types::{
     Amount,
     FunctionName,
-    NonFungibleId,
     OwnerRule,
     ResourceAddress,
     TemplateAddress,
@@ -40,6 +39,8 @@ use crate::{
     Instruction,
     IntoSigned,
     MigrateFunction,
+    NftAssertVec,
+    NftCheck,
     ResourceAddressRef,
     Signable,
     Transaction,
@@ -500,10 +501,47 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
-    pub fn assert_bucket_contains_non_fungibles<T: AsRef<str>, N: Into<Box<[NonFungibleId]>>>(
+    pub fn assert_bucket_contains_non_fungibles_all<T: AsRef<str>, N: TryInto<NftAssertVec>>(
         self,
         label: T,
         resource_address: ResourceAddress,
+        nfts: N,
+    ) -> Self {
+        self.assert_bucket_contains_non_fungibles(label, resource_address, NftCheck::AllOf, nfts)
+    }
+
+    pub fn assert_bucket_contains_non_fungibles_any<T: AsRef<str>, N: TryInto<NftAssertVec>>(
+        self,
+        label: T,
+        resource_address: ResourceAddress,
+        nfts: N,
+    ) -> Self {
+        self.assert_bucket_contains_non_fungibles(label, resource_address, NftCheck::AnyOf, nfts)
+    }
+
+    pub fn assert_bucket_contains_non_fungibles_none_all<T: AsRef<str>, N: TryInto<NftAssertVec>>(
+        self,
+        label: T,
+        resource_address: ResourceAddress,
+        nfts: N,
+    ) -> Self {
+        self.assert_bucket_contains_non_fungibles(label, resource_address, NftCheck::NoneOfAll, nfts)
+    }
+
+    pub fn assert_bucket_contains_non_fungibles_none_any<T: AsRef<str>, N: TryInto<NftAssertVec>>(
+        self,
+        label: T,
+        resource_address: ResourceAddress,
+        nfts: N,
+    ) -> Self {
+        self.assert_bucket_contains_non_fungibles(label, resource_address, NftCheck::NoneOfAny, nfts)
+    }
+
+    pub fn assert_bucket_contains_non_fungibles<T: AsRef<str>, N: TryInto<NftAssertVec>>(
+        self,
+        label: T,
+        resource_address: ResourceAddress,
+        check: NftCheck,
         nfts: N,
     ) -> Self {
         let key = self.get_workspace_offset_id_from_named_arg(label.as_ref());
@@ -512,7 +550,10 @@ impl<D> TransactionBuilder<D> {
             key,
             assertion: Assertion::BucketContainsNonFungibles {
                 resource_address,
-                nfts: nfts.into(),
+                check,
+                nfts: nfts.try_into().unwrap_or_else(|_| {
+                    panic!("Oops! The provided non-fungible list contains more items than the limit")
+                }),
             },
         })
     }

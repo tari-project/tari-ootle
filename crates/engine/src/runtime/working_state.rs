@@ -37,7 +37,7 @@ use tari_engine_types::{
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
 use tari_ootle_common_types::{Epoch, optional::Optional};
-use tari_ootle_transaction::{Assertion, ResourceAddressRef, args::WorkspaceOffsetId};
+use tari_ootle_transaction::{Assertion, NftCheck, ResourceAddressRef, args::WorkspaceOffsetId};
 use tari_template_lib::{
     args::{MintArg, ResourceDiscriminator, VaultFreezeFlags},
     models::{AddressAllocationId, BucketId, ProofId, ResourceAddressAllocation},
@@ -1207,7 +1207,11 @@ impl<TStore: StateReader> WorkingState<TStore> {
                     return Err(RuntimeError::AssertError(AssertError::ValueIsNull));
                 }
             },
-            Assertion::BucketContainsNonFungibles { resource_address, nfts } => {
+            Assertion::BucketContainsNonFungibles {
+                resource_address,
+                check,
+                nfts,
+            } => {
                 let bucket_id = tari_bor::from_value::<BucketId>(value).map_err(|_| AssertError::NotABucket { key })?;
                 let bucket = self.get_bucket(bucket_id)?;
 
@@ -1228,11 +1232,49 @@ impl<TStore: StateReader> WorkingState<TStore> {
 
                 // validate the bucket contains the specified NFTs
                 for token_id in nfts {
-                    if !bucket.contains_non_fungible_id(&token_id) {
-                        return Err(RuntimeError::AssertError(
-                            AssertError::BucketContainsNonFungiblesAssertionFail { missing_nft: token_id },
-                        ));
+                    let contains = bucket.contains_non_fungible_id(&token_id);
+                    match check {
+                        NftCheck::AnyOf => {
+                            if contains {
+                                return Ok(());
+                            }
+                        },
+                        NftCheck::AllOf => {
+                            if !contains {
+                                return Err(RuntimeError::AssertError(
+                                    AssertError::BucketContainsNonFungiblesAssertionFail { nft: token_id, check },
+                                ));
+                            }
+                        },
+                        NftCheck::NoneOfAll => {
+                            if contains {
+                                return Err(RuntimeError::AssertError(
+                                    AssertError::BucketContainsNonFungiblesAssertionFail { nft: token_id, check },
+                                ));
+                            }
+                        },
+                        NftCheck::NoneOfAny => {
+                            if !contains {
+                                return Ok(());
+                            }
+                        },
                     }
+                }
+
+                match check {
+                    NftCheck::AnyOf => {
+                        // If AnyOf reaches here, we've failed
+                        return Err(RuntimeError::AssertError(
+                            AssertError::BucketContainsNonFungiblesAnyAssertionFail { check },
+                        ));
+                    },
+                    NftCheck::NoneOfAny => {
+                        // If we get here, then for NoneOfAny we succeeded and for NoneOfAny we failed, so we return Err
+                        return Err(RuntimeError::AssertError(
+                            AssertError::BucketContainsNonFungiblesAnyAssertionFail { check },
+                        ));
+                    },
+                    _ => {},
                 }
             },
         }

@@ -19,8 +19,8 @@ pub struct Vault {
     pub address: String,
     pub resource_address: String,
     pub resource_type: String,
-    pub revealed_balance: i64,
-    pub confidential_balance: i64,
+    pub revealed_balance: String,
+    pub confidential_balance: String,
     pub token_symbol: Option<String>,
     pub divisibility: i32,
     pub created_at: PrimitiveDateTime,
@@ -55,14 +55,28 @@ impl Vault {
                 }
             })?,
             token_symbol: self.token_symbol,
-            revealed_balance: Amount::from(self.revealed_balance as u64),
+            revealed_balance: self
+                .revealed_balance
+                .parse()
+                .map_err(|e| WalletStorageError::DecodingError {
+                    operation: "try_into_vault",
+                    item: "vault.revealed_balance",
+                    details: format!("Invalid revealed balance: {}", e),
+                })?,
             locked_revealed_balance: Amount::from(
                 locked_revealed_balance
                     .to_u128()
                     // Should be impossible because sqlite is limited to i64
                     .expect("locked more than u128::MAX funds"),
             ),
-            confidential_balance: Amount::from(self.confidential_balance as u64),
+            confidential_balance: self
+                .confidential_balance
+                .parse()
+                .map_err(|e| WalletStorageError::DecodingError {
+                    operation: "try_into_vault",
+                    item: "vault.confidential_balance",
+                    details: format!("Invalid confidential balance: {}", e),
+                })?,
             divisibility: u8::try_from(self.divisibility as u32).map_err(|e| WalletStorageError::DecodingError {
                 operation: "try_into_vault",
                 item: "vault.divisibility",

@@ -4,7 +4,7 @@
 use std::{
     collections::HashSet,
     iter,
-    ops::{Add, Deref, DerefMut, Sub},
+    ops::{Add, Deref, DerefMut},
     str::FromStr,
     sync::MutexGuard,
     time::Duration,
@@ -12,6 +12,7 @@ use std::{
 
 use diesel::{
     BoolExpressionMethods,
+    JoinOnDsl,
     NullableExpressionMethods,
     OptionalExtension,
     QueryDsl,
@@ -783,15 +784,8 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         let values = (
             vaults::account_id.eq(account_id),
             vaults::address.eq(vault.id.to_string()),
-            // TODO: consider migrating to a string
-            vaults::revealed_balance.eq(vault
-                .revealed_balance
-                .to_u64_checked()
-                .expect("revealed balance is too large") as i64),
-            vaults::confidential_balance.eq(vault
-                .confidential_balance
-                .to_u64_checked()
-                .expect("confidential balance is too large") as i64),
+            vaults::revealed_balance.eq(vault.revealed_balance.to_string()),
+            vaults::confidential_balance.eq(vault.confidential_balance.to_string()),
             vaults::resource_address.eq(vault.resource_address.to_string()),
             vaults::resource_type.eq(format!("{:?}", vault.resource_type)),
             vaults::token_symbol.eq(vault.token_symbol),
@@ -814,12 +808,8 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         use crate::schema::vaults;
 
         let changeset = (
-            vaults::revealed_balance.eq(revealed_balance
-                .to_u64_checked()
-                .expect("revealed balance is too large") as i64),
-            vaults::confidential_balance.eq(confidential_balance
-                .to_u64_checked()
-                .expect("revealed balance is too large") as i64),
+            vaults::revealed_balance.eq(revealed_balance.to_string()),
+            vaults::confidential_balance.eq(confidential_balance.to_string()),
         );
 
         let num_rows = diesel::update(vaults::table)
@@ -918,10 +908,11 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         use crate::schema::{vault_locks, vaults};
 
         // Fetch the vault locked by this lock_id
-        let (vault_id, amount) = vault_locks::table
-            .select((vault_locks::vault_id, vault_locks::amount))
+        let (vault_id, amount, revealed_balance) = vault_locks::table
+            .inner_join(vaults::table.on(vaults::id.eq(vault_locks::vault_id)))
+            .select((vault_locks::vault_id, vault_locks::amount, vaults::revealed_balance))
             .filter(vault_locks::lock_id.eq(lock_id))
-            .first::<(i32, i64)>(self.connection())
+            .first::<(i32, i64, String)>(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general(OPERATION, e))?
             .ok_or_else(|| WalletStorageError::NotFound {
@@ -936,8 +927,26 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
+        let revealed_amount =
+            Amount::from_str(&revealed_balance).map_err(|e| WalletStorageError::DataInconsistent {
+                operation: OPERATION,
+                details: format!(
+                    "Corrupt db: unable to convert revealed balance '{revealed_balance}' to Amount for vault_id \
+                     {vault_id}: {e}"
+                ),
+            })?;
+        let new_balance = revealed_amount
+            .checked_sub(Amount::from_u64(amount as u64))
+            .ok_or_else(|| WalletStorageError::OperationError {
+                operation: OPERATION,
+                details: format!(
+                    "Corrupt db: revealed balance {revealed_balance} is less than locked amount {amount} for vault_id \
+                     {vault_id}"
+                ),
+            })?;
+
         let num_rows = diesel::update(vaults::table)
-            .set(vaults::revealed_balance.eq(vaults::revealed_balance.sub(amount)))
+            .set(vaults::revealed_balance.eq(new_balance.to_string()))
             .filter(vaults::id.eq(vault_id))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;

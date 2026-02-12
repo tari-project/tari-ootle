@@ -15,10 +15,10 @@ use crate::runtime::RuntimeError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorkspaceError {
-    // #[error("Value decoding error: {0}")]
-    // ValueDecodingError(#[from] BorError),
     #[error("Indexed value error: {0}")]
     IndexedValueError(#[from] IndexedValueError),
+    #[error("Workspace ID {0} already exists in the workspace")]
+    WorkspaceIdAlreadyExists(WorkspaceId),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -49,6 +49,10 @@ impl Workspace {
         if !value.proof_ids().is_empty() {
             self.proofs.extend(value.proof_ids().iter().copied());
         }
+        if self.items.contains_key(&id) {
+            return Err(WorkspaceError::WorkspaceIdAlreadyExists(id));
+        }
+
         self.items.insert(id, value);
         Ok(())
     }

@@ -7,7 +7,7 @@ use tari_engine_types::crypto::MAX_LAZY_BP_AGG_FACTORS;
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::Network;
 use tari_ootle_wallet_crypto::{memo::Memo, pay_to::PayTo};
-use tari_template_lib::types::{Amount, NonFungibleAddress, ResourceAddress};
+use tari_template_lib::types::{Amount, ComponentAddress, NonFungibleAddress, ResourceAddress};
 
 use crate::apis::{
     confidential_transfer::UtxoInputSelection,
@@ -17,8 +17,8 @@ use crate::apis::{
 
 #[derive(Debug)]
 pub struct StealthTransferParams {
-    /// Strategy for input selection
-    pub fee_input_selection: UtxoInputSelection,
+    /// Parameters related to fee payment
+    pub fee_params: TransferFeeParams,
     /// Strategy for input selection
     pub input_selection: UtxoInputSelection,
     pub outputs: Vec<TransferOutput>,
@@ -163,4 +163,34 @@ impl BadgeUsage {
     pub fn is_none(&self) -> bool {
         matches!(self, BadgeUsage::None)
     }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct TransferFeeParams {
+    pub input_selection: UtxoInputSelection,
+    pub pay_fee_with_swap: Option<PayFeeWithSwapParams>,
+}
+
+impl TransferFeeParams {
+    pub fn new(input_selection: UtxoInputSelection) -> Self {
+        Self {
+            input_selection,
+            pay_fee_with_swap: None,
+        }
+    }
+
+    pub fn with_pay_fee_with_swap(mut self, params: PayFeeWithSwapParams) -> Self {
+        self.pay_fee_with_swap = Some(params);
+        self
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct PayFeeWithSwapParams {
+    pub pool_address: ComponentAddress,
+    pub input_resource: ResourceAddress,
+    pub input_amount: Amount,
+    pub min_xtr_output_amount: Amount,
 }

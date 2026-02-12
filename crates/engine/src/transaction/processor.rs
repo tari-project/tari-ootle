@@ -308,7 +308,7 @@ where
             // Basically names an output on the workspace so that you can refer to it as an
             // Arg::Variable
             Instruction::PutLastInstructionOutputOnWorkspace { key } => {
-                Self::put_output_on_workspace_with_name(runtime, key)?;
+                Self::put_output_on_workspace_with_id(runtime, key)?;
                 Ok(InstructionResult::empty())
             },
             Instruction::DropAllProofsInWorkspace => {
@@ -540,7 +540,7 @@ where
         Ok(InstructionResult::empty())
     }
 
-    fn put_output_on_workspace_with_name(runtime: &mut Runtime, key: WorkspaceId) -> Result<(), TransactionErrorKind> {
+    fn put_output_on_workspace_with_id(runtime: &mut Runtime, key: WorkspaceId) -> Result<(), TransactionErrorKind> {
         runtime
             .interface_mut()
             .workspace_invoke(WorkspaceAction::PutLastInstructionOutput, invoke_args![key].into())?;

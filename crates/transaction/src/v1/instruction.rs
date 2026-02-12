@@ -92,6 +92,8 @@ pub enum Instruction {
         statement: StealthTransferStatement,
         revealed_input_bucket: Option<WorkspaceOffsetId>,
     },
+    // TODO: this is the same as stealth_transfer -> put on workspace -> pay_fee_with_bucket. Remove to limit
+    // instruction API surface?
     PayFeeStealth {
         statement: StealthTransferStatement,
         revealed_input_bucket: Option<WorkspaceOffsetId>,
@@ -129,7 +131,7 @@ impl Instruction {
     }
 
     pub fn is_pay_fee(&self) -> bool {
-        matches!(self, Self::PayFeeStealth { .. })
+        matches!(self, Self::PayFeeStealth { .. } | Self::PayFeeFromBucket { .. })
     }
 
     pub fn allocated_workspace_id(&self) -> Option<WorkspaceId> {

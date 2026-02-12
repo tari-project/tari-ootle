@@ -29,7 +29,10 @@ use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_ootle_transaction::UnsignedTransaction;
 use tari_ootle_wallet_sdk::{
-    apis::{confidential_transfer::UtxoInputSelection, stealth_transfer::BadgeUsage},
+    apis::{
+        confidential_transfer::UtxoInputSelection,
+        stealth_transfer::{BadgeUsage, TransferFeeParams},
+    },
     crypto::pay_to::PayTo,
     models::{Account, AccountWithAddress, NonFungibleToken},
 };
@@ -119,7 +122,7 @@ pub async fn transfer_stealth(
     let resp = client
         .accounts_stealth_transfer(StealthTransferRequest {
             owner_account: source_account_name,
-            fee_input_selection: UtxoInputSelection::PreferRevealed,
+            fee_params: TransferFeeParams::new(UtxoInputSelection::PreferRevealed),
             input_selection: UtxoInputSelection::PreferRevealed,
             resource_address,
             badge_usage: BadgeUsage::None,

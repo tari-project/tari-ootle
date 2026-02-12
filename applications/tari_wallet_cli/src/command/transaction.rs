@@ -260,7 +260,11 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
 
     let mut builder = Transaction::builder_localnet()
         .for_network(network.byte)
-        .pay_fee_from_component(fee_account.component_address, common.max_fee.unwrap_or(1000))
+        .call_method(fee_account.component_address, "withdraw", args![
+            common.max_fee.unwrap_or(1000)
+        ])
+        .put_last_instruction_output_on_workspace("fee_bucket")
+        .pay_fee_from_bucket("fee_bucket")
         .add_instruction(instruction)
         .with_inputs(common.inputs)
         .with_min_epoch(common.min_epoch.map(Epoch))

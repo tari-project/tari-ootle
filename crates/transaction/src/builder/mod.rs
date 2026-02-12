@@ -101,47 +101,13 @@ impl TransactionBuilder<MainIntent> {
         }
     }
 
-    /// Pays fees using a stealth transfer statement. The statement must reveal sufficient funds to cover the fee.
-    /// NOTE: fees paid are not refunded, so any overpayment is kept by validators.
-    pub fn pay_fee_stealth(self, statement: StealthTransferStatement) -> Self {
-        self.with_fee_instructions_builder(|builder| builder.pay_fee_stealth(statement))
-    }
-
-    /// Adds a fee instruction that calls the "take_fee" method on a component.
-    /// This method must exist and return a Bucket with containing revealed confidential XTR resource.
-    /// This allows the fee to originate from sources other than the transaction sender's account.
+    /// Adds a fee instruction that calls the "pay_fee" method on a component.
+    /// This method must exist and return a Bucket with containing revealed XTR resource.
     /// The fee instruction will lock up the "max_fee" amount for the duration of the transaction.
+    /// The builtin Account component supports "pay_fee" but any component that implements the method can be used (think
+    /// duck-typing).
     pub fn pay_fee_from_component<C: Into<NamedComponentCall>, A: Into<Amount>>(self, call: C, max_fee: A) -> Self {
         self.with_fee_instructions_builder(|builder| builder.pay_fee_from_component(call, max_fee))
-    }
-
-    /// Adds a fee instruction that calls the "pay_fee_stealth" method on a component.
-    /// This method should call either `Vault::pay_fee_stealth` or `ResourceManager::pay_fee_stealth` and result in a
-    /// sufficient amount of revealed funds used to pay fees.
-    pub fn pay_fee_stealth_from_component<A: Into<NamedComponentCall>>(
-        self,
-        call: A,
-        statement: StealthTransferStatement,
-    ) -> Self {
-        self.with_fee_instructions_builder(|builder| builder.call_method(call, "pay_fee_stealth", args![statement]))
-    }
-
-    pub fn pay_fee_stealth_with_input_bucket<B: Into<String>>(
-        self,
-        statement: StealthTransferStatement,
-        input_bucket: B,
-    ) -> Self {
-        self.pay_fee_stealth_with_opt_input_bucket(statement, Some(input_bucket))
-    }
-
-    pub fn pay_fee_stealth_with_opt_input_bucket<B: Into<String>>(
-        self,
-        statement: StealthTransferStatement,
-        input_bucket: Option<B>,
-    ) -> Self {
-        self.with_fee_instructions_builder(|builder| {
-            builder.pay_fee_stealth_with_opt_input_bucket(statement, input_bucket)
-        })
     }
 
     /// Pays fees using the specified bucket in the workspace.
@@ -279,52 +245,12 @@ impl TransactionBuilder<MainIntent> {
 }
 
 impl TransactionBuilder<FeeIntent> {
-    /// Pays fees using a stealth transfer statement. The statement must reveal sufficient funds to cover the fee.
-    /// NOTE: fees paid are not refunded, so any overpayment is kept by validators.
-    pub fn pay_fee_stealth(self, statement: StealthTransferStatement) -> Self {
-        self.add_instruction(Instruction::PayFeeStealth {
-            statement,
-            revealed_input_bucket: None,
-        })
-    }
-
     /// Adds a fee instruction that calls the "take_fee" method on a component.
     /// This method must exist and return a Bucket with containing revealed confidential XTR resource.
     /// This allows the fee to originate from sources other than the transaction sender's account.
     /// The fee instruction will lock up the "max_fee" amount for the duration of the transaction.
     pub fn pay_fee_from_component<C: Into<NamedComponentCall>, A: Into<Amount>>(self, call: C, max_fee: A) -> Self {
         self.call_method(call, "pay_fee", args![max_fee.into()])
-    }
-
-    /// Adds a fee instruction that calls the "pay_fee_stealth" method on a component.
-    /// This method should call either `Vault::pay_fee_stealth` or `ResourceManager::pay_fee_stealth` and result in a
-    /// sufficient amount of revealed funds used to pay fees.
-    pub fn pay_fee_stealth_from_component<A: Into<NamedComponentCall>>(
-        self,
-        call: A,
-        statement: StealthTransferStatement,
-    ) -> Self {
-        self.call_method(call, "pay_fee_stealth", args![statement])
-    }
-
-    pub fn pay_fee_stealth_with_input_bucket<B: Into<String>>(
-        self,
-        statement: StealthTransferStatement,
-        input_bucket: B,
-    ) -> Self {
-        self.pay_fee_stealth_with_opt_input_bucket(statement, Some(input_bucket))
-    }
-
-    pub fn pay_fee_stealth_with_opt_input_bucket<B: Into<String>>(
-        self,
-        statement: StealthTransferStatement,
-        input_bucket: Option<B>,
-    ) -> Self {
-        let revealed_input_bucket = input_bucket.map(|bucket| self.get_workspace_offset_id_from_named_arg(bucket));
-        self.add_instruction(Instruction::PayFeeStealth {
-            statement,
-            revealed_input_bucket,
-        })
     }
 
     /// Pays fees using the specified bucket in the workspace.
@@ -470,7 +396,7 @@ impl<D> TransactionBuilder<D> {
     }
 
     pub fn stealth_transfer<R: Into<NamedResourceRef>>(self, resource: R, statement: StealthTransferStatement) -> Self {
-        self.stealth_transfer_with_opt_bucket(resource, statement, None::<String>)
+        self.stealth_transfer_with_opt_input_bucket(resource, statement, None::<String>)
     }
 
     pub fn stealth_transfer_with_input_bucket<B: Into<String>, R: Into<NamedResourceRef>>(
@@ -479,10 +405,10 @@ impl<D> TransactionBuilder<D> {
         statement: StealthTransferStatement,
         bucket: B,
     ) -> Self {
-        self.stealth_transfer_with_opt_bucket(resource_address, statement, Some(bucket))
+        self.stealth_transfer_with_opt_input_bucket(resource_address, statement, Some(bucket))
     }
 
-    pub fn stealth_transfer_with_opt_bucket<B: Into<String>, R: Into<NamedResourceRef>>(
+    pub fn stealth_transfer_with_opt_input_bucket<B: Into<String>, R: Into<NamedResourceRef>>(
         self,
         resource: R,
         statement: StealthTransferStatement,
@@ -521,7 +447,7 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
-    pub fn assert_bucket_contains<T: AsRef<str>, A: Into<Amount>>(
+    pub fn assert_bucket_contains_at_least<T: AsRef<str>, A: Into<Amount>>(
         self,
         label: T,
         resource_address: ResourceAddress,

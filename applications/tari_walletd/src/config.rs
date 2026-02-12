@@ -20,8 +20,15 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{net::SocketAddr, path::PathBuf, time::Duration};
+use std::{
+    fmt::{Display, Formatter},
+    net::SocketAddr,
+    path::PathBuf,
+    str::FromStr,
+    time::Duration,
+};
 
+use anyhow::anyhow;
 use config::Config;
 use serde::{Deserialize, Serialize};
 use tari_common::{ConfigurationError, DefaultConfigLoader, SubConfigPath, configuration::CommonConfig};
@@ -125,4 +132,25 @@ pub enum WalletDaemonAuth {
     #[default]
     None,
     WebAuthn,
+}
+
+impl Display for WalletDaemonAuth {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WalletDaemonAuth::None => write!(f, "none"),
+            WalletDaemonAuth::WebAuthn => write!(f, "webauthn"),
+        }
+    }
+}
+
+impl FromStr for WalletDaemonAuth {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "none" => Ok(WalletDaemonAuth::None),
+            "webauthn" => Ok(WalletDaemonAuth::WebAuthn),
+            _ => Err(anyhow!("Invalid authentication method: {}", s)),
+        }
+    }
 }

@@ -527,6 +527,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
     }
 
     fn transactions_update(&mut self, update: WalletTransactionUpdate<'_>) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "transactions_update";
         use crate::schema::transactions;
 
         let num_rows = diesel::update(transactions::table)
@@ -544,11 +545,11 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             ))
             .filter(transactions::transaction_id.eq(update.transaction_id.to_string()))
             .execute(self.connection())
-            .map_err(|e| WalletStorageError::general("transactions_set_result_and_status", e))?;
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
         if num_rows == 0 {
             return Err(WalletStorageError::NotFound {
-                operation: "transactions_set_result_and_status",
+                operation: OPERATION,
                 entity: "transaction".to_string(),
                 key: update.transaction_id.to_string(),
             });

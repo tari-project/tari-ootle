@@ -31,6 +31,8 @@ use tari_ootle_app_utilities::configuration::convert_l1_network_to_network;
 use tari_ootle_common_types::Network;
 use url::Url;
 
+use crate::config::WalletDaemonAuth;
+
 #[derive(Args, Debug)]
 pub struct WalletRestoreArgs {
     /// Seed words of a wallet to be restored.
@@ -65,6 +67,9 @@ pub struct Cli {
     /// NOTE: Once this is set, it must always be set to access the wallet.
     #[clap(long)]
     pub override_keyring_password: Option<SafePassword>,
+    /// The authentication method to use for the wallet daemon. This controls how clients must authenticate when making
+    /// requests to the wallet daemon.
+    pub authentication: Option<WalletDaemonAuth>,
     /// The path to the value lookup table binary file used for brute force value lookups. This setting
     /// is only used when attempting to view confidential balances in confidential resources that use a view key
     /// controlled by this wallet. The binary file can be generated using the generate_ristretto_value_lookup
@@ -124,6 +129,12 @@ impl ConfigOverrideProvider for Cli {
             overrides.push((
                 format!("{}.ootle_wallet_daemon.web_ui_address", network),
                 listen_addr.to_string(),
+            ));
+        }
+        if let Some(ref auth) = self.authentication {
+            overrides.push((
+                format!("{}.ootle_wallet_daemon.authentication", network),
+                auth.to_string(),
             ));
         }
         overrides

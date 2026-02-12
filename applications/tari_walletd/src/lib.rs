@@ -118,6 +118,11 @@ pub async fn run_tari_ootle_walletd(
 
     // webauthn
 
+    info!(
+        target: LOG_TARGET,
+        "🔐 Authentication method set to {:?}",
+        config.ootle_wallet_daemon.authentication
+    );
     let authenticator = create_authenticator(&config.ootle_wallet_daemon, wallet_store.clone())?;
 
     let handlers = HandlerContext::new(

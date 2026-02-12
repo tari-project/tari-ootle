@@ -15,5 +15,6 @@
 # Indexer API url (default: http://127.0.0.1:18200)
 # indexer_api_url = "http://127.0.0.1:18200"
 [esmeralda.ootle_wallet_daemon]
+#authentication = "webauthn"
 # Indexer API url for Esme.
 indexer_api_url = "http://217.182.93.35:50124/"

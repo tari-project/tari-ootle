@@ -118,7 +118,7 @@ use tari_template_lib::{
         ValidatorFeePoolAddress,
         access_rules::{ComponentAccessRules, ResourceAccessRules, ResourceAuthAction},
         bytes::Bytes,
-        constants::{IMAGE_URL, STEALTH_TARI_RESOURCE_ADDRESS, TOKEN_SYMBOL, XTR},
+        constants::{IMAGE_URL, TOKEN_SYMBOL, XTR},
         crypto::{RistrettoPublicKeyBytes, UtxoTag},
         engine_args::{SignatureAction, SignatureVerifyArg},
         metadata,
@@ -2889,37 +2889,6 @@ where
 
         self.tracker.write_with(|state_mut| {
             match pay_fee {
-                PayFee::FromStealth {
-                    statement,
-                    input_bucket,
-                } => {
-                    let input_bucket = input_bucket
-                        .and_then(|workspace_id| state_mut.workspace().get(workspace_id).transpose())
-                        .map(|value| {
-                            value.and_then(|v| {
-                                tari_bor::from_value::<BucketId>(v).map_err(|e| RuntimeError::InvalidArgument {
-                                    argument: "input_bucket",
-                                    reason: format!(
-                                        "PayFee::FromStealth: Expected workspace ID to contain a BucketId: {e}"
-                                    ),
-                                })
-                            })
-                        })
-                        .transpose()?;
-                    let Some(container) = state_mut.execute_stealth_transfer(
-                        STEALTH_TARI_RESOURCE_ADDRESS.into(),
-                        statement,
-                        input_bucket,
-                    )?
-                    else {
-                        return Err(RuntimeError::NoFeesPaid {
-                            details: "Stealth transfer did not reveal any funds to pay fees".to_string(),
-                        });
-                    };
-                    // No refunds
-                    state_mut.pay_fee(container, None)?;
-                    Ok(())
-                },
                 PayFee::FromBucket { bucket } => {
                     let value = state_mut
                         .workspace()

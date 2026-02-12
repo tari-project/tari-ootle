@@ -142,9 +142,15 @@ where
                     execution_time,
                     ..
                 } => {
+                    if query.transaction_id != tx_id {
+                        // This could indicate that there has been some breaking change that caused the indexer to
+                        // calculate a different transaction ID
+                        warn!(target: LOG_TARGET, "⚠️ Transaction ID mismatch in dry run response. Expected {}, got {}. Updating transaction status to DryRunFailed.", tx_id, query.transaction_id);
+                    }
+
                     self.store.with_write_tx(|tx| {
                         tx.transactions_update(
-                            WalletTransactionUpdate::new(query.transaction_id)
+                            WalletTransactionUpdate::new(tx_id)
                                 .with_result(execution_result.as_ref().map(|e| &e.finalize))
                                 .with_final_fee(
                                     execution_result

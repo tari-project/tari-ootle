@@ -10,7 +10,7 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
-use tari_template_lib_types::{ComponentAddress, UtxoAddress, constants::XTR, crypto::RistrettoPublicKeyBytes};
+use tari_template_lib_types::{ComponentAddress, UtxoAddress, crypto::RistrettoPublicKeyBytes};
 
 use crate::{ComponentReference, Instruction, ResourceAddressRef, Signable, TransactionSignature};
 
@@ -162,17 +162,6 @@ impl UnsignedTransactionV1 {
                             .inputs
                             .iter()
                             .map(|i| UtxoAddress::new(*addr, i.commitment.into()))
-                            .map(SubstateId::Utxo),
-                    );
-                },
-                Instruction::PayFeeStealth { statement, .. } => {
-                    substates.insert(SubstateId::Resource(XTR));
-                    substates.extend(
-                        statement
-                            .inputs_statement
-                            .inputs
-                            .iter()
-                            .map(|i| UtxoAddress::new(XTR, i.commitment.into()))
                             .map(SubstateId::Utxo),
                     );
                 },

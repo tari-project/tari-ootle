@@ -1201,11 +1201,13 @@ impl<TStore: StateReader> WorkingState<TStore> {
                         got: bucket.unlocked_amount(),
                     }));
                 }
+                Ok(())
             },
             Assertion::IsNotNull => {
                 if value.is_null() {
                     return Err(RuntimeError::AssertError(AssertError::ValueIsNull));
                 }
+                Ok(())
             },
             Assertion::BucketContainsNonFungibles {
                 resource_address,
@@ -1262,18 +1264,13 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 }
 
                 match check {
-                    NftCheck::AnyOf | NftCheck::NotAllOf => {
-                        // If AnyOf reaches here, we've failed
-                        return Err(RuntimeError::AssertError(
-                            AssertError::BucketContainsNonFungiblesAnyAssertionFail { check },
-                        ));
-                    },
-                    _ => {},
+                    NftCheck::AnyOf | NftCheck::NotAllOf => Err(RuntimeError::AssertError(
+                        AssertError::BucketContainsNonFungiblesAnyAssertionFail { check },
+                    )),
+                    NftCheck::AllOf | NftCheck::NoneOf => Ok(()),
                 }
             },
         }
-
-        Ok(())
     }
 
     pub fn resolve_resource_address_ref(&self, addr_ref: ResourceAddressRef) -> Result<ResourceAddress, RuntimeError> {

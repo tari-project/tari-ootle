@@ -91,12 +91,6 @@ pub enum Instruction {
         statement: StealthTransferStatement,
         revealed_input_bucket: Option<WorkspaceOffsetId>,
     },
-    // TODO: this is the same as stealth_transfer -> put on workspace -> pay_fee_with_bucket. Remove to limit
-    // instruction API surface?
-    PayFeeStealth {
-        statement: StealthTransferStatement,
-        revealed_input_bucket: Option<WorkspaceOffsetId>,
-    },
     PayFeeFromBucket {
         bucket: WorkspaceOffsetId,
     },
@@ -130,7 +124,7 @@ impl Instruction {
     }
 
     pub fn is_pay_fee(&self) -> bool {
-        matches!(self, Self::PayFeeStealth { .. } | Self::PayFeeFromBucket { .. })
+        matches!(self, Self::PayFeeFromBucket { .. })
     }
 
     pub fn allocated_workspace_id(&self) -> Option<WorkspaceId> {
@@ -237,22 +231,6 @@ impl Display for Instruction {
                     f,
                     "StealthTransfer {{ resource_address: {}, output(s): {}, rp-size: {}",
                     resource_address,
-                    statement.outputs_statement.outputs.len(),
-                    statement.outputs_statement.agg_range_proof.len(),
-                )?;
-                match bucket {
-                    Some(id) => write!(f, ", revealed_input_bucket: Some({}) }}", id),
-                    None => write!(f, ", revealed_input_bucket: None }}"),
-                }
-            },
-            Self::PayFeeStealth {
-                statement,
-                revealed_input_bucket: bucket,
-            } => {
-                write!(
-                    f,
-                    "PayFee {{ revealed_input: {}, output(s): {}, rp-size: {}",
-                    statement.inputs_statement.revealed_amount,
                     statement.outputs_statement.outputs.len(),
                     statement.outputs_statement.agg_range_proof.len(),
                 )?;

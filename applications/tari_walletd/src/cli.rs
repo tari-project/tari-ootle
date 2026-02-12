@@ -69,6 +69,7 @@ pub struct Cli {
     pub override_keyring_password: Option<SafePassword>,
     /// The authentication method to use for the wallet daemon. This controls how clients must authenticate when making
     /// requests to the wallet daemon.
+    #[clap(long, alias = "auth")]
     pub authentication: Option<WalletDaemonAuth>,
     /// The path to the value lookup table binary file used for brute force value lookups. This setting
     /// is only used when attempting to view confidential balances in confidential resources that use a view key

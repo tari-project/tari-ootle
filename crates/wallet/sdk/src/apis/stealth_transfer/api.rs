@@ -741,38 +741,34 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             .for_network(network.as_byte())
             .with_dry_run(params.is_dry_run)
             .with_fee_instructions_builder(|builder| {
-                if let Some(swap) = params.fee_params.pay_fee_with_swap.as_ref() {
-                    if fee_transfer_statement.inputs_statement.revealed_amount.is_positive() {
-                        builder
-                            // Withdraw from the owner's account to perform the swap
-                            .call_method(*owner_account.component_address(), "withdraw", args![
-                                swap.input_resource,
+                let fee_resource = params.fee_params.pay_fee_with_swap.as_ref().map(|swap| swap.input_resource).unwrap_or(XTR);
+                builder
+                    .then(|b| {
+                        if fee_transfer_statement.inputs_statement.revealed_amount.is_positive() {
+                            // Withdraw from the owner's account
+                            b.call_method(*owner_account.component_address(), "withdraw", args![
+                                fee_resource,
                                 fee_transfer_statement.inputs_statement.revealed_amount
                             ])
                             .put_last_instruction_output_on_workspace("fee_other_resx_input_bucket")
                             // Transfer
-                            .stealth_transfer_with_input_bucket(swap.input_resource, fee_transfer_statement, "fee_other_resx_input_bucket")
-                            .put_last_instruction_output_on_workspace("fee_swap_input_bucket")
-                            // Swap
-                            .call_method(swap.pool_address, "swap", args![Workspace("fee_swap_input_bucket")])
-                    } else {
-                        builder.stealth_transfer(swap.input_resource, fee_transfer_statement)
-                    }
-                    .put_last_instruction_output_on_workspace("fee_input_bucket")
-                    // Slippage protection - ensure that the output from the swap is at least the minimum fee amount
-                    .assert_bucket_contains_at_least("fee_input_bucket", XTR, swap.min_xtr_output_amount)
+                            .stealth_transfer_with_input_bucket(fee_resource, fee_transfer_statement, "fee_other_resx_input_bucket")
+                        } else {
+                            b.stealth_transfer(fee_resource, fee_transfer_statement)
+                        }
+                    })
+                    .then(|b| {
+                        if let Some(swap) = params.fee_params.pay_fee_with_swap.as_ref() {
+                            b.put_last_instruction_output_on_workspace("fee_swap_input_bucket")
+                             .call_method(swap.pool_address, "swap", args![Workspace("fee_swap_input_bucket")])
+                             .put_last_instruction_output_on_workspace("fee_input_bucket")
+                             // Slippage protection - ensure that the output from the swap is at least the minimum fee amount
+                             .assert_bucket_contains_at_least("fee_input_bucket", XTR, swap.min_xtr_output_amount)
+                        } else {
+                            b.put_last_instruction_output_on_workspace("fee_input_bucket")
+                        }
+                    })
                     .pay_fee_from_bucket("fee_input_bucket")
-                } else if fee_transfer_statement.inputs_statement.revealed_amount.is_positive() {
-                    builder
-                        .call_method(*owner_account.component_address(), "withdraw", args![
-                            XTR,
-                            fee_transfer_statement.inputs_statement.revealed_amount
-                        ])
-                        .put_last_instruction_output_on_workspace("fee_input_bucket")
-                        .pay_fee_stealth_with_input_bucket(fee_transfer_statement, "fee_input_bucket")
-                } else {
-                    builder.pay_fee_stealth(fee_transfer_statement)
-                }
             })
             .then(|builder| {
                 // Badge if required

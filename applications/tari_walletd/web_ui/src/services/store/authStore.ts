@@ -2,32 +2,28 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
-import { AUTH_TOKEN_FOR_NONE_AUTH } from "@routes/Auth/Auth";
+import { setClientAuthToken } from "@utils/json_rpc";
+
+export type AuthToken = string;
 
 interface Store {
   username: string;
-  authToken: string;
-  setAuthToken: (token: string) => void;
+  authToken?: AuthToken;
+  setAuthToken: (token: AuthToken) => void;
   clearToken: () => void;
 }
 
-const useAuthStore = create<Store>()(
-  persist<Store>(
-    (set) => ({
-      username: "tari-wallet-webui",
-      authToken: "",
-      setAuthToken: (token) => set({ authToken: token }),
-      clearToken: () =>
-        set((s) => {
-          if (s.authToken === AUTH_TOKEN_FOR_NONE_AUTH) {
-            return {};
-          }
-          return { authToken: "" };
-        }),
+const useAuthStore = create<Store>()((set) => ({
+  username: "tari-wallet-webui",
+  authToken: undefined,
+  setAuthToken: (token) => {
+    let _promise = setClientAuthToken(token);
+    return set({ authToken: token });
+  },
+  clearToken: () =>
+    set((_) => {
+      return {};
     }),
-    { name: "tari-auth" },
-  ),
-);
+}));
 
 export default useAuthStore;

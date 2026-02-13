@@ -189,37 +189,6 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   const { mutateAsync: calculateFeeEstimate } = useNftsTransfer(feeEstimateParams);
   const { mutateAsync: sendTransferNftsTx } = useNftsTransfer(transferParams);
 
-  const estimateFeeWithTargetAccount = async (targetAccount: string) => {
-    if (!account || isEstimatingFee || !targetAccount.trim()) {
-      return;
-    }
-
-    setIsEstimatingFee(true);
-
-    // Ensure the form state is updated for fee estimation
-    setTransferFormState({ targetAccountAddress: targetAccount });
-
-    try {
-      // Use a small delay to ensure state is updated
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      const result = await calculateFeeEstimate?.();
-
-      if (result && "Accept" in result.result.result) {
-        setTransferFormState({ maxFee: result.fee.toString() });
-        return result.fee;
-      } else {
-        console.error("Fee estimation rejected:", result);
-        throw new Error("Could not estimate transfer fee");
-      }
-    } catch (e: any) {
-      console.error("Fee estimation error:", e);
-      throw e;
-    } finally {
-      setIsEstimatingFee(false);
-    }
-  };
-
   const estimateFee = async () => {
     if (!account || isEstimatingFee || !transferFormState.targetAccountAddress.trim()) {
       return;

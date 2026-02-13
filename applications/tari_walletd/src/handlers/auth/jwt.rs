@@ -5,7 +5,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum_extra::headers::authorization::Bearer;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, errors};
-use serde::{Deserialize, Serialize};
 use tari_crypto::tari_utilities::SafePassword;
 use tari_ootle_wallet_sdk::storage::{
     CommittableStore,
@@ -22,29 +21,14 @@ use tari_wallet_daemon_client::{
 pub struct JwtApi<'a, TStore> {
     store: &'a TStore,
     default_expiry: Duration,
-    auth_secret_key: SafePassword,
-    jwt_secret_key: SafePassword,
-}
-
-// This is used when you request permission.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AuthClaims {
-    id: u64,
-    permissions: JrpcPermissions,
-    exp: u64,
+    jwt_secret_key: &'a SafePassword,
 }
 
 impl<'a, TStore: WalletStore> JwtApi<'a, TStore> {
-    pub(crate) fn new(
-        store: &'a TStore,
-        default_expiry: Duration,
-        auth_secret_key: SafePassword,
-        jwt_secret_key: SafePassword,
-    ) -> Self {
+    pub(crate) fn new(store: &'a TStore, default_expiry: Duration, jwt_secret_key: &'a SafePassword) -> Self {
         Self {
             store,
             default_expiry,
-            auth_secret_key,
             jwt_secret_key,
         }
     }
@@ -57,39 +41,18 @@ impl<'a, TStore: WalletStore> JwtApi<'a, TStore> {
         Ok(index)
     }
 
-    pub fn generate_auth_token(
-        &self,
-        permissions: JrpcPermissions,
-        duration: Option<Duration>,
-    ) -> Result<(EncodedJwtString, Duration), JwtApiError> {
+    pub fn generate_auth_claims(&self, name: String, permissions: JrpcPermissions) -> Result<Claims, JwtApiError> {
         let id = self.get_index()?;
-        let valid_till = SystemTime::now() + duration.unwrap_or(self.default_expiry);
+        let valid_till = SystemTime::now() + self.default_expiry;
         let exp = valid_till
             .duration_since(UNIX_EPOCH)
             .map_err(|_| JwtApiError::InvalidExpiry)?;
-        let my_claims = AuthClaims {
+        Ok(Claims {
+            name,
             id,
             permissions,
             exp: exp.as_secs(),
-        };
-        let auth_token = jsonwebtoken::encode(
-            &Header::default(),
-            &my_claims,
-            // TODO: jsonwebtoken leaks the secret in memory after drop (https://github.com/Keats/jsonwebtoken/issues/337)
-            // This **should** be not that bad since the secret we use is changed on each startup. However, if the user
-            // can set their own secret key, this is bad.
-            &EncodingKey::from_secret(self.auth_secret_key.reveal()),
-        )?;
-        Ok((auth_token.into(), exp))
-    }
-
-    fn check_auth_token(&self, auth_token: &str) -> Result<AuthClaims, JwtApiError> {
-        let auth_token_data = jsonwebtoken::decode::<AuthClaims>(
-            auth_token,
-            &DecodingKey::from_secret(self.auth_secret_key.reveal()),
-            &Validation::default(),
-        )?;
-        Ok(auth_token_data.claims)
+        })
     }
 
     fn get_token_claims(&self, token: &str) -> Result<Claims, JwtApiError> {
@@ -106,32 +69,17 @@ impl<'a, TStore: WalletStore> JwtApi<'a, TStore> {
         self.get_token_claims(token.token()).map(|claims| claims.permissions)
     }
 
-    pub fn grant(&self, name: String, auth_token: &str) -> Result<EncodedJwtString, JwtApiError> {
-        let auth_claims = self.check_auth_token(auth_token)?;
-        let my_claims = Claims {
-            id: auth_claims.id,
-            name,
-            permissions: auth_claims.permissions,
-            exp: auth_claims.exp,
-        };
+    pub fn grant(&self, claims: &Claims) -> Result<EncodedJwtString, JwtApiError> {
         let permissions_token = jsonwebtoken::encode(
             &Header::default(),
-            &my_claims,
+            claims,
             &EncodingKey::from_secret(self.jwt_secret_key.reveal()),
         )?;
-        let mut tx = self.store.create_write_tx()?;
 
-        tx.jwt_store_decision(auth_claims.id, Some(&permissions_token))?;
+        let mut tx = self.store.create_write_tx()?;
+        tx.jwt_store_token(claims.id, Some(&permissions_token))?;
         tx.commit()?;
         Ok(permissions_token.into())
-    }
-
-    pub fn deny(&self, auth_token: &str) -> Result<(), JwtApiError> {
-        let auth_claims = self.check_auth_token(auth_token)?;
-        let mut tx = self.store.create_write_tx()?;
-        tx.jwt_store_decision(auth_claims.id, None)?;
-        tx.commit()?;
-        Ok(())
     }
 
     fn is_token_revoked(&self, token: &Bearer) -> Result<bool, JwtApiError> {
@@ -183,7 +131,7 @@ impl<'a, TStore: WalletStore> JwtApi<'a, TStore> {
 pub enum JwtApiError {
     #[error("Store error: {0}")]
     StoreError(#[from] WalletStorageError),
-    #[error("JWT error : {0}")]
+    #[error("JWT error: {0}")]
     JwtError(#[from] errors::Error),
     #[error("Access denied. No bearer token provided")]
     AccessDeniedNoBearerToken,

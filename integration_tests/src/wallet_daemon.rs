@@ -39,7 +39,7 @@ use tari_wallet_daemon_client::{
     WalletDaemonClient,
     error::WalletDaemonClientError,
     types::{
-        AuthLoginAcceptRequest,
+        AuthCredentials,
         AuthLoginRequest,
         AuthLoginResponse,
         ClaimBurnProof,
@@ -126,23 +126,16 @@ impl TariWalletDaemonProcess {
         cucumber_log!("Authenticating wallet daemon {}", self.name);
         let mut client = self.get_client();
         // authentication
-        let AuthLoginResponse { auth_token, .. } = client
+        let AuthLoginResponse { token } = client
             .auth_request(AuthLoginRequest {
-                permissions: vec!["Admin".to_string()],
-                duration: None,
-                webauthn_finish_auth_request: None,
-            })
-            .await
-            .unwrap();
-        let auth_response = client
-            .auth_accept(AuthLoginAcceptRequest {
-                auth_token,
+                permissions: vec!["Admin".parse().unwrap()],
                 name: "Testing Token".to_string(),
+                credentials: AuthCredentials::None,
             })
             .await
             .unwrap();
         cucumber_log!("Authenticated wallet daemon {}", self.name);
-        client.set_auth_token(auth_response.permissions_token);
+        client.set_auth_token(token);
         client
     }
 

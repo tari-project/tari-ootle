@@ -7,6 +7,8 @@ import { authGetMethod } from "@utils/json_rpc";
 export const useAuthMethod = () => {
   return useQuery({
     queryKey: ["auth_method"],
+    refetchOnMount: false,
+    staleTime: Infinity,
     queryFn: () => {
       return authGetMethod();
     },

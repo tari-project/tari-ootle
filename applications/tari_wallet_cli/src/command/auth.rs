@@ -20,44 +20,24 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::time::Duration;
-
 use clap::{Args, Subcommand};
 use tari_wallet_daemon_client::{
     WalletDaemonClient,
-    types::{
-        AuthGetAllJwtRequest,
-        AuthLoginAcceptRequest,
-        AuthLoginDenyRequest,
-        AuthLoginRequest,
-        AuthRevokeTokenRequest,
-    },
+    permissions::JrpcPermission,
+    types::{AuthCredentials, AuthGetAllJwtRequest, AuthLoginRequest, AuthRevokeTokenRequest},
 };
 
 #[derive(Debug, Subcommand, Clone)]
 pub enum AuthSubcommand {
     Request(RequestArgs),
-    Grant(GrantArgs),
-    Deny(DenyArgs),
     Revoke(RevokeArgs),
     List,
 }
 
 #[derive(Debug, Args, Clone)]
 pub struct RequestArgs {
-    permissions: Vec<String>,
-    validity_in_seconds: Option<u64>,
-}
-
-#[derive(Debug, Args, Clone)]
-pub struct GrantArgs {
-    auth_token: String,
+    permissions: Vec<JrpcPermission>,
     name: String,
-}
-
-#[derive(Debug, Args, Clone)]
-pub struct DenyArgs {
-    auth_token: String,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -74,32 +54,15 @@ impl AuthSubcommand {
                 if args.permissions.is_empty() {
                     println!("You forgot add permissions");
                 } else {
-                    let resp = client
+                    let _resp = client
                         .auth_request(AuthLoginRequest {
                             permissions: args.permissions,
-                            duration: args.validity_in_seconds.map(Duration::from_secs),
-                            webauthn_finish_auth_request: None,
+                            name: args.name,
+                            credentials: AuthCredentials::None,
                         })
                         .await?;
-                    println!("Auth token {}", resp.auth_token.as_str());
+                    println!("Access granted");
                 }
-            },
-            Grant(args) => {
-                let resp = client
-                    .auth_accept(AuthLoginAcceptRequest {
-                        auth_token: args.auth_token.into(),
-                        name: args.name,
-                    })
-                    .await?;
-                println!("Access granted. Your JRPC token : {}", resp.permissions_token.as_str());
-            },
-            Deny(args) => {
-                client
-                    .auth_deny(AuthLoginDenyRequest {
-                        auth_token: args.auth_token.into(),
-                    })
-                    .await?;
-                println!("Access denied!");
             },
             Revoke(args) => {
                 client

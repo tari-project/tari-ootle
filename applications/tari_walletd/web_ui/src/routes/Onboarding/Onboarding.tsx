@@ -20,8 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { FormEvent, useState } from "react";
-import { Form } from "react-router-dom";
+import { FormEvent, useEffect, useState } from "react";
+import { Form, Navigate } from "react-router-dom";
 import TextField from "@mui/material/TextField/TextField";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -29,17 +29,34 @@ import Grid from "@mui/material/Grid";
 import Typography from "@mui/material/Typography";
 import { useTheme } from "@mui/material/styles";
 import Loading from "@components/Loading";
-import { useAccountsCreate } from "@api/hooks/useAccounts";
+import { refreshAccountsBalances, useAccountsCreate, useAccountsGetDefault } from "@api/hooks/useAccounts";
 import useAccountStore from "@store/accountStore";
 
 function Onboarding() {
-  const { mutate, status } = useAccountsCreate();
-  const { setAccount, setOotleAddress, setPopup } = useAccountStore();
+  console.log("Onboarding rendered");
+  const { mutate, isPending } = useAccountsCreate();
+  const { account, setAccount, setOotleAddress, setPopup } = useAccountStore();
   const theme = useTheme();
-
   const [accountFormState, setAccountFormState] = useState({
     accountName: "",
   });
+  const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
+  // const authStore = useAuthStore();
+
+  useEffect(() => {
+    if (defaultAccount) {
+      setAccount(defaultAccount.account);
+      setOotleAddress(defaultAccount.address);
+    }
+  }, [account, defaultAccount]);
+
+  if (isLoading) {
+    return <Loading />;
+  }
+
+  if (defaultAccount) {
+    return <Navigate replace to={"/"} />;
+  }
 
   const handleCreateAccount = (e: FormEvent) => {
     e.preventDefault();
@@ -66,7 +83,7 @@ function Onboarding() {
     });
   };
 
-  if (status === "pending") {
+  if (isPending) {
     return <Loading />;
   }
 

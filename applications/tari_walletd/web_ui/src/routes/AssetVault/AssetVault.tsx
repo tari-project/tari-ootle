@@ -29,11 +29,9 @@ import FetchStatusCheck from "@components/FetchStatusCheck";
 import useAuthStore from "@store/authStore";
 
 function AssetVault() {
-  const account = useAccountStore((state) => state.account);
-  const setAccount = useAccountStore((state) => state.setAccount);
-  const setOotleAddress = useAccountStore((state) => state.setOotleAddress);
+  const { account, setAccount, setOotleAddress } = useAccountStore();
   const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
-  const authStore = useAuthStore();
+  // const authStore = useAuthStore();
 
   useEffect(() => {
     if (!isError && defaultAccount) {
@@ -42,9 +40,9 @@ function AssetVault() {
     }
 
     if (error) {
-      // This can happen when the token is invalid
+      // This can happen for several reasons including if there is no default account set or the token is invalid
       console.error(error);
-      authStore.clearToken();
+      //   authStore.clearToken();
     }
   }, [defaultAccount, isError]);
 

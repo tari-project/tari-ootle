@@ -35,7 +35,7 @@ use tari_wallet_daemon_client::{
         AccountsCreateRequest,
         AccountsCreateStealthTransferStatementRequest,
         AccountsGetBalancesRequest,
-        AuthLoginAcceptRequest,
+        AuthCredentials,
         AuthLoginRequest,
         InputSelection,
         StealthTransfer,
@@ -61,18 +61,12 @@ impl Wallet {
         let mut client = WalletDaemonClient::connect(address, None)?;
         let resp = client
             .auth_request(AuthLoginRequest {
-                permissions: vec!["Admin".to_string()],
-                duration: Some(Duration::from_secs(3600)),
-                webauthn_finish_auth_request: None,
-            })
-            .await?;
-        let resp = client
-            .auth_accept(AuthLoginAcceptRequest {
-                auth_token: resp.auth_token,
+                permissions: vec!["Admin".parse()?],
                 name: "sim".to_string(),
+                credentials: AuthCredentials::None,
             })
             .await?;
-        client.set_auth_token(resp.permissions_token);
+        client.set_auth_token(resp.token);
         let settings = client.get_settings().await?;
         Ok(Self {
             name,

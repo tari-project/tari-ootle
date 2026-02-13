@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashMap, time::Duration};
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{
@@ -85,7 +85,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     ComponentAddressOrName,
-    permissions::Claims,
+    permissions::{Claims, JrpcPermission},
     serialize::{opt_string_or_struct, string_or_struct},
 };
 
@@ -653,10 +653,34 @@ pub struct WebRtcStartResponse {}
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AuthLoginRequest {
-    pub permissions: Vec<String>,
-    #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number} | null"))]
-    pub duration: Option<Duration>,
-    pub webauthn_finish_auth_request: Option<WebauthnFinishAuthRequest>,
+    pub permissions: Vec<JrpcPermission>,
+    pub credentials: AuthCredentials,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub enum AuthCredentials {
+    /// Credentials for 'none' auth mode
+    None,
+    /// Credentials for WebAuthN auth mode. Contains the request from the client to finish the auth.
+    WebAuthN(Box<WebauthnFinishAuthRequest>),
+}
+
+impl AuthCredentials {
+    pub fn as_none(&self) -> Option<()> {
+        match self {
+            Self::None => Some(()),
+            _ => None,
+        }
+    }
+
+    pub fn as_webauthn(&self) -> Option<&WebauthnFinishAuthRequest> {
+        match self {
+            Self::WebAuthN(req) => Some(req),
+            _ => None,
+        }
+    }
 }
 
 /// Represents a JWT token. The token is zeroized from memory on drop.
@@ -666,36 +690,8 @@ pub type EncodedJwtString = Zeroizing<String>;
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AuthLoginResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub auth_token: EncodedJwtString,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub valid_for_secs: u64,
+    pub token: EncodedJwtString,
 }
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub struct AuthLoginAcceptRequest {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub auth_token: EncodedJwtString,
-    pub name: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub struct AuthLoginAcceptResponse {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub permissions_token: EncodedJwtString,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub struct AuthLoginDenyRequest {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub auth_token: EncodedJwtString,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub struct AuthLoginDenyResponse {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]

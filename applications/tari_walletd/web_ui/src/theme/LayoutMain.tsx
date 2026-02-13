@@ -129,15 +129,9 @@ export default function Layout() {
   return (
     <ThemeProvider theme={theme}>
       <Dialog open={popup?.visible ?? false} onClose={handleClose}>
-        <DialogTitle>
-          {popup?.error ? (
-            <h2 style={{ color: "red" }}>{popup?.title}</h2>
-          ) : (
-            <h2>
-              <Check style={{ color: "green" }} />
-              {popup?.title}
-            </h2>
-          )}
+        <DialogTitle style={{ color: popup?.error ? theme.palette.error.main : theme.palette.success.main }}>
+          {popup?.error ? null : <Check style={{ color: "green" }} />}
+          {popup?.title}
         </DialogTitle>
         <DialogContent className="dialog-content">{popup?.message}</DialogContent>
       </Dialog>

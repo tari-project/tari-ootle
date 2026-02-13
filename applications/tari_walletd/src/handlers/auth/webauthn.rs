@@ -35,7 +35,7 @@ impl<TStore: WalletStore + Debug + Send + Sync> WebAuthnAuth<TStore> {
 
 impl<TStore: WalletStore + Debug + Send + Sync> Authenticator for WebAuthnAuth<TStore> {
     async fn authenticate(&self, request: &AuthLoginRequest) -> Result<(), anyhow::Error> {
-        match &request.webauthn_finish_auth_request {
+        match request.credentials.as_webauthn() {
             Some(req) => {
                 let credential = &req.credential;
                 let auth_passkey = self.webauthn_service.auth_passkey(req.session_id.as_str()).await?;

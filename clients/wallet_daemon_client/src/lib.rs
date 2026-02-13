@@ -43,10 +43,6 @@ use types::{
     AccountsCreateFreeTestCoinsResponse,
     AccountsTransferRequest,
     AccountsTransferResponse,
-    AuthLoginAcceptRequest,
-    AuthLoginAcceptResponse,
-    AuthLoginDenyRequest,
-    AuthLoginDenyResponse,
     AuthLoginRequest,
     AuthLoginResponse,
     ClaimBurnRequest,
@@ -445,20 +441,6 @@ impl WalletDaemonClient {
         req: T,
     ) -> Result<AuthLoginResponse, WalletDaemonClientError> {
         self.send_request("auth.request", req.borrow()).await
-    }
-
-    pub async fn auth_accept<T: Borrow<AuthLoginAcceptRequest>>(
-        &mut self,
-        req: T,
-    ) -> Result<AuthLoginAcceptResponse, WalletDaemonClientError> {
-        self.send_request("auth.accept", req.borrow()).await
-    }
-
-    pub async fn auth_deny<T: Borrow<AuthLoginDenyRequest>>(
-        &mut self,
-        req: T,
-    ) -> Result<AuthLoginDenyResponse, WalletDaemonClientError> {
-        self.send_request("auth.deny", req.borrow()).await
     }
 
     pub async fn auth_revoke<T: Borrow<AuthRevokeTokenRequest>>(

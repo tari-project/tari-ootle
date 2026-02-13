@@ -23,7 +23,6 @@
 import { ChangeEvent } from "react";
 import type { Amount, SubstateId, NonFungibleId } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/constants";
-import useCurrencyStore from "@store/currencyStore";
 
 export const renderJson = (json: any) => {
   if (Array.isArray(json)) {
@@ -252,9 +251,7 @@ export function bigintToDecimalString(int: bigint | Amount, decimalPlaces: numbe
   return `${wholeValues}.${padding}${fractionalValues}`;
 }
 
-export const formatCurrency = (amount: number | bigint | Amount): string => {
-  const { currencySymbol } = useCurrencyStore.getState();
-
+export const formatCurrency = (amount: number | bigint | Amount, currencySymbol: string | null): string => {
   if (typeof amount === "bigint") {
     const divisor = BigInt(XTR_CURRENCY.DIVISOR);
     const integerPart = amount / divisor;

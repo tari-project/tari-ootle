@@ -81,6 +81,7 @@ pub struct WalletDaemonConfig {
     pub jwt_secret_key: SafePassword,
     /// The address of the Web UI
     pub web_ui_address: Option<SocketAddr>,
+    pub webauthn: WebAuthnConfig,
     /// The path to the value lookup table binary file used for brute force value lookups. This setting
     /// is only used when attempting to view confidential balances in confidential resources that use a view key
     /// controlled by this wallet. The binary file can be generated using the generate_ristretto_value_lookup
@@ -95,7 +96,7 @@ pub struct WalletDaemonConfig {
 
 fn return_default_jwt_expiry() -> Duration {
     // Suggested expiry for access tokens is between 5min and 1h
-    Duration::from_secs(60 * 60)
+    Duration::from_secs(15 * 60)
 }
 
 impl Default for WalletDaemonConfig {
@@ -115,6 +116,11 @@ impl Default for WalletDaemonConfig {
             web_ui_address: Some("127.0.0.1:5100".parse().unwrap()),
             value_lookup_table_file: None,
             recovery_abandon_count: 10,
+            webauthn: WebAuthnConfig {
+                rp_origin: None,
+                rp_id: "localhost".to_string(),
+                session_ttl: Duration::from_secs(60 * 60),
+            },
             override_keyring_password: None,
         }
     }
@@ -124,6 +130,16 @@ impl SubConfigPath for WalletDaemonConfig {
     fn main_key_prefix() -> &'static str {
         "ootle_wallet_daemon"
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct WebAuthnConfig {
+    /// if not set, rp_origin will be set to http://localhost:{web_ui_address.port()}
+    pub rp_origin: Option<Url>,
+    pub rp_id: String,
+    #[serde(with = "humantime_serde")]
+    pub session_ttl: Duration,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]

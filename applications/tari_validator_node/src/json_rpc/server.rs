@@ -139,6 +139,7 @@ async fn health_check(Extension(handlers): Extension<Arc<JsonRpcHandlers>>) -> i
         "status": if is_ok { "ok" } else { "error" },
         "networking_ok": is_net_ok,
         "consensus_status": status,
+        "version": env!("CARGO_PKG_VERSION"),
     });
 
     if is_ok {

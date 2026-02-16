@@ -34,7 +34,7 @@ import {
   TableRow,
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import TransactionsStatusChip from "@components/TransactionsStatusChip";
@@ -43,6 +43,7 @@ import { useGetAllTransactions } from "@api/hooks/useTransactions";
 import { emptyRows, handleChangePage, handleChangeRowsPerPage, formatCurrency } from "@utils/helpers";
 import { Account, WalletTransaction } from "@tari-project/ootle-ts-bindings";
 import TimeChip from "./TimeChip";
+import { XTR_CURRENCY } from "@utils/constants";
 
 export default function Transactions({ account }: { account: Account }) {
   const [page, setPage] = useState(0);
@@ -55,9 +56,7 @@ export default function Transactions({ account }: { account: Account }) {
     // Stealth transaction are not able to be identified by signer public key, so for simplicity we fetch all transactions.
     signer_public_key: null,
   });
-  useEffect(() => {
-    refetch();
-  }, [account]);
+
   const theme = useTheme();
 
   return (
@@ -103,7 +102,9 @@ export default function Transactions({ account }: { account: Account }) {
                         <TransactionsStatusChip status={status} showTitle />
                       </DataTableCell>
                       <DataTableCell>
-                        {fee_receipt?.total_fees_paid ? formatCurrency(fee_receipt.total_fees_paid) : "--"}
+                        {fee_receipt?.total_fees_paid
+                          ? formatCurrency(fee_receipt.total_fees_paid, XTR_CURRENCY.SYMBOL)
+                          : "--"}
                       </DataTableCell>
                       <DataTableCell>
                         <IconButton

@@ -10,10 +10,6 @@ use tari_wallet_daemon_client::{
         AuthGetAllJwtResponse,
         AuthGetMethodRequest,
         AuthGetMethodResponse,
-        AuthLoginAcceptRequest,
-        AuthLoginAcceptResponse,
-        AuthLoginDenyRequest,
-        AuthLoginDenyResponse,
         AuthLoginRequest,
         AuthLoginResponse,
         AuthMethod,
@@ -41,37 +37,16 @@ pub async fn handle_discover(
 pub async fn handle_login_request(
     context: &HandlerContext,
     _token: Option<&Bearer>,
-    auth_request: AuthLoginRequest,
+    request: AuthLoginRequest,
 ) -> Result<AuthLoginResponse, anyhow::Error> {
-    context.authenticator().authenticate(&auth_request).await?;
+    context.authenticator().authenticate(&request).await?;
     let jwt = context.jwt_api();
-    let (auth_token, valid_for) =
-        jwt.generate_auth_token(auth_request.permissions.as_slice().try_into()?, auth_request.duration)?;
+    let claims = jwt.generate_auth_claims(request.name, request.permissions.into())?;
+    let permissions_token = jwt.grant(&claims)?;
     context.notifier().notify(AuthLoginRequestEvent);
     Ok(AuthLoginResponse {
-        auth_token,
-        valid_for_secs: valid_for.as_secs(),
+        token: permissions_token,
     })
-}
-
-pub async fn handle_login_accept(
-    context: &HandlerContext,
-    _token: Option<&Bearer>,
-    auth_accept_request: AuthLoginAcceptRequest,
-) -> Result<AuthLoginAcceptResponse, anyhow::Error> {
-    let jwt = context.jwt_api();
-    let permissions_token = jwt.grant(auth_accept_request.name, &auth_accept_request.auth_token)?;
-    Ok(AuthLoginAcceptResponse { permissions_token })
-}
-
-pub async fn handle_login_deny(
-    context: &HandlerContext,
-    _token: Option<&Bearer>,
-    auth_deny_request: AuthLoginDenyRequest,
-) -> Result<AuthLoginDenyResponse, anyhow::Error> {
-    let jwt = context.jwt_api();
-    jwt.deny(&auth_deny_request.auth_token)?;
-    Ok(AuthLoginDenyResponse {})
 }
 
 pub async fn handle_revoke(

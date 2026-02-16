@@ -303,23 +303,27 @@ export const useAccountsGetBalances = (account?: ComponentAddress, refresh: bool
   });
 };
 
-export const refreshAccountsBalances = (account: ComponentAddress) => {
+export const refreshAccountsBalances = () => {
   return useMutation({
-    mutationFn: () => accountsGetBalances({ account: { ComponentAddress: account }, refresh: true }),
+    mutationFn: (account: ComponentAddress) =>
+      accountsGetBalances({ account: { ComponentAddress: account }, refresh: true }),
     onError: (error: ApiError) => {
       error;
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["accounts_balances_" + account] });
+    onSettled: (resp) => {
+      if (resp) {
+        return queryClient.invalidateQueries({ queryKey: ["accounts_balances_" + resp.address] });
+      }
     },
   });
 };
 
-export const useAccountsGetDefault = () => {
+export const useAccountsGetDefault = (refetch: boolean = false) => {
   return useQuery({
     queryKey: ["accounts_get_default"],
     queryFn: () => accountsGetDefault({}),
     refetchInterval: false,
+    refetchOnMount: "always",
     notifyOnChangeProps: ["data", "error"],
     retryOnMount: false,
     retry: false,

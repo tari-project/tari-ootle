@@ -23,11 +23,12 @@ import type {
   AccountsRenameRequest,
   AccountsRenameResponse,
   AccountsTransferRequest,
-  AccountsTransferResponse,
+  AccountsTransferResponse, AuthCredentials,
   AuthGetAllJwtRequest,
   AuthGetAllJwtResponse,
   AuthGetMethodResponse,
   AuthLoginRequest,
+  AuthLoginResponse,
   AuthRevokeTokenRequest,
   AuthRevokeTokenResponse,
   ClaimBurnRequest,
@@ -39,7 +40,7 @@ import type {
   ConfidentialViewVaultBalanceRequest,
   ConfidentialViewVaultBalanceResponse,
   GetValidatorFeesRequest,
-  GetValidatorFeesResponse,
+  GetValidatorFeesResponse, JrpcPermission,
   KeysCreateRequest,
   KeysCreateResponse,
   KeysListRequest,
@@ -130,11 +131,15 @@ export class WalletDaemonClient {
   }
 
   public isAuthenticated() {
-    return this.token !== null;
+    return Boolean(this.token);
   }
 
   public setToken(token: string) {
     this.token = token;
+  }
+
+  public getToken(): string | null {
+    return this.token;
   }
 
   public authGetMethod(): Promise<AuthGetMethodResponse> {
@@ -146,23 +151,18 @@ export class WalletDaemonClient {
   }
 
   public async authRequest(
-    permissions: string[],
-    webauthnFinishAuthRequest?: WebauthnFinishAuthRequest,
+    name: string,
+    permissions: JrpcPermission[],
+    credentials: AuthCredentials
   ): Promise<string> {
-    // TODO: Exchange some secret credentials for a JWT
     let request: AuthLoginRequest = {
+      name,
       permissions: permissions,
-      duration: null,
-      webauthn_finish_auth_request: webauthnFinishAuthRequest,
+      credentials,
     };
-    let resp = await this.__invokeRpc("auth.request", request);
-    return resp.auth_token;
-  }
-
-  public async authAccept(adminToken: string, name: string): Promise<string> {
-    let resp = await this.__invokeRpc("auth.accept", { auth_token: adminToken, name });
-    this.token = resp.permissions_token;
-    return this.token;
+    let resp = await this.__invokeRpc<AuthLoginResponse>("auth.request", request);
+    this.token = resp.token;
+    return resp.token;
   }
 
   public authRevoke(params: AuthRevokeTokenRequest): Promise<AuthRevokeTokenResponse> {
@@ -354,7 +354,7 @@ export class WalletDaemonClient {
     return this.__invokeRpc("stealth_utxos.decrypt_value", params);
   }
 
-  async __invokeRpc(method: string, params: object = null) {
+  async __invokeRpc<T>(method: string, params: object = null) : Promise<T> {
     const id = this.id++;
     const response = await this.transport.sendRequest<any>(
       {

@@ -6,7 +6,7 @@ use tari_ootle_wallet_sdk::models::KeyBranch;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_wallet_daemon_client::{
     WalletDaemonClient,
-    types::{AuthLoginAcceptRequest, AuthLoginRequest, AuthLoginResponse, WebauthnFinishAuthRequest},
+    types::{AuthCredentials, AuthLoginRequest, AuthLoginResponse, WebauthnFinishAuthRequest},
 };
 
 use crate::process_manager::Instance;
@@ -30,20 +30,16 @@ impl WalletDaemonProcess {
             .get("jrpc")
             .ok_or_else(|| anyhow!("No wallet JSON-RPC port allocated"))?;
         let mut client = WalletDaemonClient::connect(format!("http://localhost:{port}/json_rpc"), None)?;
-        let AuthLoginResponse { auth_token, .. } = client
+        let AuthLoginResponse { token } = client
             .auth_request(AuthLoginRequest {
-                permissions: vec!["Admin".to_string()],
-                duration: None,
-                webauthn_finish_auth_request,
-            })
-            .await?;
-        let auth_response = client
-            .auth_accept(AuthLoginAcceptRequest {
-                auth_token,
+                permissions: vec!["Admin".parse()?],
                 name: "Testing Token".to_string(),
+                credentials: webauthn_finish_auth_request
+                    .map(|r| AuthCredentials::WebAuthN(Box::new(r)))
+                    .unwrap_or(AuthCredentials::None),
             })
             .await?;
-        client.set_auth_token(auth_response.permissions_token);
+        client.set_auth_token(token);
 
         Ok(client)
     }

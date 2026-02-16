@@ -3,13 +3,13 @@
 
 import { useTheme } from "@mui/material/styles";
 import { FormEvent, useState } from "react";
-import { Form, useNavigate, useSearchParams } from "react-router-dom";
+import { Form, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import Loading from "@components/Loading";
 import Typography from "@mui/material/Typography";
 import Grid from "@mui/material/Grid";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import { unauthenticated_client, webauthnStartAuth } from "../../../utils/json_rpc";
+import { clientNoAuth, webauthnStartAuth } from "@utils/json_rpc";
 import { Buffer } from "buffer";
 import { WebauthnFinishAuthRequest } from "@tari-project/ootle-ts-bindings";
 import useAuthStore from "@store/authStore";
@@ -26,19 +26,17 @@ const getCredential = async (challenge: any, allowCredentials: any) => {
   });
 };
 
-function WebauthnLogin() {
+function WebauthnLogin({ redirect }: { redirect: string }) {
   const theme = useTheme();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const navigate = useNavigate();
   const { setAuthToken, username } = useAuthStore();
-  const [searchParams] = useSearchParams();
-  const redirectQuery = searchParams.get("redirect");
-  const redirect = redirectQuery ? redirectQuery : "/";
 
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError("");
 
     try {
       // start authentication by getting challenge
@@ -69,26 +67,27 @@ function WebauthnLogin() {
         throw new Error("Failed to get credential");
       }
 
-      const client = await unauthenticated_client();
+      const client = await clientNoAuth();
       const webauthnFinishAuthRequest: WebauthnFinishAuthRequest = {
         credential,
         session_id: loginSessionId,
       };
-      const authToken = await client.authRequest(["Admin"], webauthnFinishAuthRequest);
+      const token = await client.authRequest("walletd-web-ui", ["Admin"], { WebAuthN: webauthnFinishAuthRequest });
 
-      if (!authToken) {
-        throw new Error("Failed to get auth token");
+      if (!token) {
+        throw new Error("Failed to get JWT");
       }
 
-      const acceptToken = await client.authAccept(authToken, authToken);
-      setAuthToken(acceptToken);
+      setAuthToken(token);
       navigate(redirect);
     } catch (error) {
       console.error(error);
       if (error instanceof Error) {
         setError(error.message);
+      } else if (typeof error === "string") {
+        setError(error);
       } else {
-        setError(error as string);
+        setError("An unknown error occurred: " + JSON.stringify(error as any));
       }
     } finally {
       setLoading(false);
@@ -106,8 +105,6 @@ function WebauthnLogin() {
       {error.toString()}
     </Typography>
   ) : null;
-
-  const loadingBar = loading ? <Loading /> : null;
 
   return (
     <>
@@ -148,7 +145,7 @@ function WebauthnLogin() {
                 textAlign: "center",
               }}
             >
-              Please login to get access to your wallet
+              Please login with your passkey
             </Typography>
             {errorMessage}
             <Form
@@ -160,9 +157,9 @@ function WebauthnLogin() {
               }}
             >
               <Button variant="contained" type="submit" disabled={loading}>
-                Login
+                Use Passkey
               </Button>
-              {loadingBar}
+              {loading ? <Loading /> : null}
             </Form>
           </Box>
         </Box>

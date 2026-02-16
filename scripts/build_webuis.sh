@@ -94,11 +94,11 @@ echo "Building Indexer client..."
 build clients/javascript/indexer_client
 
 # Build webuis
-echo "Building Validator Node Web UI..."
-build applications/tari_validator_node/web_ui
-
 echo "Building Wallet Web UI..."
 build applications/tari_walletd/web_ui
 
 echo "Building Indexer Web UI..."
 build applications/tari_indexer/web_ui
+
+echo "Building Validator Node Web UI..."
+build applications/tari_validator_node/web_ui

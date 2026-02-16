@@ -126,7 +126,7 @@ export default function ConfirmationStep({
               <Typography variant="subtitle2" color="text.secondary">
                 Transaction Fee:
               </Typography>
-              <Typography>{formatCurrency(parseInt(transferFormState.maxFee))}</Typography>
+              <Typography>{formatCurrency(parseInt(transferFormState.maxFee), null)}</Typography>
             </Box>
 
             <Box>

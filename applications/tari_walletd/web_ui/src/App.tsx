@@ -30,21 +30,22 @@ import Layout from "@theme/LayoutMain";
 import AccessTokensLayout from "@routes/AccessTokens/AccessTokens";
 import Transactions from "@routes/Transactions/TransactionsLayout";
 import TransactionDetails from "@routes/Transactions/TransactionDetails";
-import AssetVault from "@routes/AssetVault/AssetVault";
 import SettingsPage from "@routes/Settings/Settings";
-import Auth, { AUTH_TOKEN_FOR_NONE_AUTH } from "@routes/Auth/Auth";
-import Webauthn from "@routes/WebauthnRegistration/Webauthn";
-import useAuthStore from "./services/store/authStore";
-import { useEffect } from "react";
+import Webauthn from "@routes/Webauthn/Webauthn";
+import { useEffect, useState } from "react";
 import { useAuthMethod } from "@api/hooks/useAuth";
 import AccessToken from "@routes/AccessToken/AccessToken";
-import { jwtDecode } from "jwt-decode";
 import Templates from "@routes/Templates/Templates";
 import Manifest from "@routes/Manifest/Manifest";
 import FlowEditor from "@routes/FlowEditor/FlowEditor";
 import StealthUtxoListPage from "@/routes/StealthUtxoList/StealthUtxoListPage";
-import { useCurrencySync } from "@store/hooks/useCurrencySync";
 import { ErrorNotificationProvider } from "./contexts/ErrorNotificationContext";
+import Loading from "@components/Loading";
+import Onboarding from "@routes/Onboarding/Onboarding";
+import MyAssets from "@routes/AssetVault/Components/MyAssets";
+import { isValidJwt, setClientAuthToken } from "@utils/json_rpc";
+import useAuthStore from "@store/authStore";
+import { AuthNone } from "@routes/AuthNone";
 
 export const breadcrumbRoutes = [
   {
@@ -129,169 +130,84 @@ export const breadcrumbRoutes = [
   },
 ];
 
-const isTokenExpired = (token: any) => {
-  if (!token) return true;
-  try {
-    const decodedToken = jwtDecode(token);
-    if (!decodedToken.exp) {
-      return true;
-    }
-    const currentTime = Date.now() / 1000;
-    return decodedToken.exp < currentTime;
-  } catch (error) {
-    console.warn("Failed to decode token:", error);
-    return true;
-  }
-};
-
 interface GuardedRouteProps {
   component: React.ComponentType<any>;
   redirect?: string;
-  isAuthenticated: boolean;
 
   [key: string]: any;
 }
 
 // @ts-ignore
-const GuardedRoute = ({
-  component: Component,
-  redirect = "/",
-  isAuthenticated = false,
-  ...rest
-}: GuardedRouteProps) => {
-  return isAuthenticated ? <Component {...rest} /> : <Navigate replace to={"/auth?redirect=" + redirect} />;
+const GuardedRoute = ({ component: Component, redirect = "/", ...rest }: GuardedRouteProps) => {
+  const { authToken } = useAuthStore();
+  const { data: authMethod, isError: authMethodsIsError, error: authMethodsError, isLoading } = useAuthMethod();
+  const [hasSetAuthToken, setHasSetAuthToken] = useState(false);
+
+  useEffect(() => {
+    if (authToken && isValidJwt(authToken)) {
+      setClientAuthToken(authToken).then(() => {
+        setHasSetAuthToken(true);
+      });
+    }
+  }, [authToken]);
+
+  if (isLoading || !authMethod) {
+    return <Loading />;
+  }
+
+  if (authMethodsIsError) {
+    console.error("Error fetching auth method:", authMethodsError);
+    return <div>Error fetching authentication method: {authMethodsError?.message || "Unknown error"}</div>;
+  }
+
+  const hasAuthToken = isValidJwt(authToken);
+  console.log("GuardedRoute: hasAuthToken =", hasAuthToken, "hasSetAuthToken =", hasSetAuthToken);
+  if (!hasAuthToken) {
+    return <Navigate replace to={`/auth/${authMethod.method}?redirect=${redirect}`} />;
+  }
+
+  if (!hasSetAuthToken) {
+    return <Loading />;
+  }
+
+  return <Component {...rest} />;
 };
 
 function App() {
-  const { data: authMethod, isError: authMethodsIsError, error: authMethodsError } = useAuthMethod();
-  const authStore = useAuthStore();
-  const { authToken } = authStore;
-  let isAuthenticated = !!authToken;
-
-  useCurrencySync();
-
-  useEffect(() => {
-    if (isTokenExpired(authToken) && authToken !== AUTH_TOKEN_FOR_NONE_AUTH) {
-      authStore.clearToken();
-    }
-  }, [authToken]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (authToken !== AUTH_TOKEN_FOR_NONE_AUTH && isTokenExpired(authToken)) {
-        authStore.clearToken();
-      }
-    }, 10000);
-
-    return () => clearInterval(interval);
-  }, [authToken]);
-
-  useEffect(() => {
-    if (!authMethodsIsError && authMethod) {
-      if (authMethod.method !== "none" && authToken === AUTH_TOKEN_FOR_NONE_AUTH) {
-        authStore.clearToken();
-      }
-
-      if (authMethod.method === "none") {
-        authStore.setAuthToken(AUTH_TOKEN_FOR_NONE_AUTH);
-      }
-    }
-
-    if (authMethodsError) {
-      console.error(authMethodsError);
-    }
-  }, [authMethod, authMethodsIsError]);
-
   return (
     <ErrorNotificationProvider>
-      <div>
-        <Routes>
-          <Route path="/" element={<Layout />}>
-            <Route index element={<GuardedRoute component={AssetVault} isAuthenticated={isAuthenticated} />} />
-            <Route path="auth" element={<Auth />} />
-            <Route path="auth/webauthn" element={<Webauthn />} />
-            <Route
-              path="access-token"
-              element={
-                <GuardedRoute isAuthenticated={isAuthenticated} redirect="/access-token" component={AccessToken} />
-              }
-            />
-            <Route
-              path="accounts"
-              element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/accounts" component={Accounts} />}
-            />
-            <Route
-              path="accounts/:id"
-              element={
-                <GuardedRoute isAuthenticated={isAuthenticated} redirect="/accounts" component={AccountDetails} />
-              }
-            />
-            <Route
-              path="keys"
-              element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/keys" component={Keys} />}
-            />
-            <Route
-              path="access-tokens"
-              element={
-                <GuardedRoute
-                  redirect="/access-tokens"
-                  isAuthenticated={isAuthenticated}
-                  component={AccessTokensLayout}
-                />
-              }
-            />
-            <Route
-              path="transactions"
-              element={
-                <GuardedRoute isAuthenticated={isAuthenticated} redirect="/transactions" component={Transactions} />
-              }
-            />
-            <Route
-              path="wallet"
-              element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/wallet" component={Wallet} />}
-            />
-            <Route
-              path="transactions/:id"
-              element={
-                <GuardedRoute
-                  isAuthenticated={isAuthenticated}
-                  redirect="/transactions"
-                  component={TransactionDetails}
-                />
-              }
-            />
-            <Route
-              path="settings"
-              element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/settings" component={SettingsPage} />}
-            />
-            <Route
-              path="templates"
-              element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/templates" component={Templates} />}
-            />
-            <Route
-              path="manifest"
-              element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/manifest" component={Manifest} />}
-            />
-            <Route
-              path="flow-editor"
-              element={
-                <GuardedRoute isAuthenticated={isAuthenticated} redirect="/flow-editor" component={FlowEditor} />
-              }
-            />
-            <Route
-              path="stealth-utxos/:resource_address"
-              element={
-                <GuardedRoute
-                  isAuthenticated={isAuthenticated}
-                  redirect="/stealth-utxos"
-                  component={StealthUtxoListPage}
-                />
-              }
-            />
-            <Route path="*" element={<ErrorPage />} />
-          </Route>
-        </Routes>
-      </div>
+      <Routes>
+        <Route path="/" element={<Layout />}>
+          <Route index element={<GuardedRoute component={MyAssets} />} />
+          <Route path="onboarding" element={<GuardedRoute component={Onboarding} />} />
+          {/*<Route path="auth" element={<Auth />} />*/}
+          <Route path="auth/webauthn" element={<Webauthn />} />
+          <Route path="auth/none" element={<AuthNone />} />
+          <Route path="access-token" element={<GuardedRoute redirect="/access-token" component={AccessToken} />} />
+          <Route path="accounts" element={<GuardedRoute redirect="/accounts" component={Accounts} />} />
+          <Route path="accounts/:id" element={<GuardedRoute redirect="/accounts" component={AccountDetails} />} />
+          <Route path="keys" element={<GuardedRoute redirect="/keys" component={Keys} />} />
+          <Route
+            path="access-tokens"
+            element={<GuardedRoute redirect="/access-tokens" component={AccessTokensLayout} />}
+          />
+          <Route path="transactions" element={<GuardedRoute redirect="/transactions" component={Transactions} />} />
+          <Route path="wallet" element={<GuardedRoute redirect="/wallet" component={Wallet} />} />
+          <Route
+            path="transactions/:id"
+            element={<GuardedRoute redirect="/transactions" component={TransactionDetails} />}
+          />
+          <Route path="settings" element={<GuardedRoute redirect="/settings" component={SettingsPage} />} />
+          <Route path="templates" element={<GuardedRoute redirect="/templates" component={Templates} />} />
+          <Route path="manifest" element={<GuardedRoute redirect="/manifest" component={Manifest} />} />
+          <Route path="flow-editor" element={<GuardedRoute redirect="/flow-editor" component={FlowEditor} />} />
+          <Route
+            path="stealth-utxos/:resource_address"
+            element={<GuardedRoute redirect="/stealth-utxos" component={StealthUtxoListPage} />}
+          />
+          <Route path="*" element={<ErrorPage />} />
+        </Route>
+      </Routes>
     </ErrorNotificationProvider>
   );
 }

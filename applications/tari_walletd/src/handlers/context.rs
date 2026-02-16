@@ -72,9 +72,7 @@ impl HandlerContext {
         JwtApi::new(
             self.wallet_sdk.store(),
             self.config().jwt_expiry,
-            // TODO: these are the same
-            self.config().jwt_secret_key.clone(),
-            self.config().jwt_secret_key.clone(),
+            &self.config().jwt_secret_key,
         )
     }
 

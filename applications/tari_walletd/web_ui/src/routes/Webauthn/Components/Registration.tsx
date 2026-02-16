@@ -63,7 +63,7 @@ const createCredential = async (
   });
 };
 
-function WebauthnRegistration() {
+function WebauthnRegistration({ redirect }: { redirect: string }) {
   const theme = useTheme();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -111,7 +111,7 @@ function WebauthnRegistration() {
         session_id: regSessionId,
       });
 
-      navigate("/auth");
+      navigate(redirect);
     } catch (error) {
       console.error("Error registering WebAuthn key:", error);
       if (error instanceof Error) {
@@ -179,7 +179,7 @@ function WebauthnRegistration() {
             >
               Register your{" "}
               <a href="https://webauthn.io/" target="_blank">
-                WebAuthn
+                passkey
               </a>{" "}
               key to get started
             </Typography>

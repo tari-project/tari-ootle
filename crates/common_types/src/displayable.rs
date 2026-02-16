@@ -198,13 +198,3 @@ impl Displayable for Duration {
         DisplayContainer { value: self }
     }
 }
-
-pub struct DisplayDuration {
-    value: Duration,
-}
-
-impl Display for DisplayDuration {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:.2?}", self.value)
-    }
-}

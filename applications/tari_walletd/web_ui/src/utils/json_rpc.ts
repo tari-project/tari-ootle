@@ -110,10 +110,11 @@ import type {
   StealthUtxosDecryptValueRequest,
   StealthUtxosDecryptValueResponse,
   TransactionSubmitDryRunResponse,
+  AuthCredentials,
 } from "@tari-project/ootle-ts-bindings";
 import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
 import useAuthStore from "@store/authStore";
-import { AUTH_TOKEN_FOR_NONE_AUTH } from "@routes/Auth/Auth";
+import { jwtDecode } from "jwt-decode";
 
 let clientInstance: WalletDaemonClient | null = null;
 let pendingClientInstance: Promise<WalletDaemonClient> | null = null;
@@ -144,37 +145,19 @@ export async function getClientAddress(): Promise<URL> {
   return DEFAULT_WALLET_ADDRESS;
 }
 
-function getAuthToken() {
-  const authToken = useAuthStore.getState().authToken;
-  return authToken && authToken !== AUTH_TOKEN_FOR_NONE_AUTH ? authToken : null;
-}
-
-async function client() {
-  const authToken = getAuthToken();
-
+export function client() {
   if (pendingClientInstance) {
     return pendingClientInstance;
   }
 
   if (clientInstance) {
-    if (authToken) {
-      clientInstance.setToken(authToken);
-    }
-    if (!clientInstance.isAuthenticated()) {
-      return await authenticateClient(clientInstance).then(() => clientInstance!);
-    }
     return Promise.resolve(clientInstance);
   }
 
-  const getAddress = !outerAddress ? getClientAddress() : Promise.resolve(DEFAULT_WALLET_ADDRESS);
+  const getAddress = outerAddress ? Promise.resolve(outerAddress) : getClientAddress();
 
   pendingClientInstance = getAddress.then(async (addr) => {
     const client = WalletDaemonClient.usingFetchTransport(addr.toString());
-    if (authToken) {
-      client.setToken(authToken);
-    } else {
-      await authenticateClient(client);
-    }
     outerAddress = addr;
     clientInstance = client;
     pendingClientInstance = null;
@@ -184,40 +167,80 @@ async function client() {
   return pendingClientInstance;
 }
 
-export async function unauthenticated_client() {
-  if (unAuthenticatedClient) {
-    return unAuthenticatedClient;
+export const isValidJwt = (token?: string | null) => {
+  if (!token) return false;
+  try {
+    const decodedToken = jwtDecode(token);
+    if (!decodedToken.exp) {
+      return true;
+    }
+    const currentTime = Date.now() / 1000;
+    return decodedToken.exp >= currentTime;
+  } catch (error) {
+    console.warn("Failed to decode token:", error);
+    return false;
   }
+};
 
-  const getAddress = !outerAddress ? getClientAddress() : Promise.resolve(DEFAULT_WALLET_ADDRESS);
-  unAuthenticatedClient = getAddress.then(async (addr) => {
-    return WalletDaemonClient.usingFetchTransport(addr.toString());
-  });
-  return unAuthenticatedClient;
+export async function setClientAuthToken(token: string) {
+  if (clientInstance) {
+    console.log("Setting client auth token");
+    clientInstance.setToken(token);
+    return true;
+  }
+  const addr = await (outerAddress ? Promise.resolve(outerAddress) : getClientAddress());
+  outerAddress = addr;
+
+  const client = WalletDaemonClient.usingFetchTransport(addr.toString());
+  client.setToken(token);
+  clientInstance = client;
+
+  console.log("Set client auth token for new client instance");
+  return false;
 }
 
-async function authenticateClient(client: WalletDaemonClient, webauthnFinishAuthRequest?: WebauthnFinishAuthRequest) {
-  const auth_token = await client.authRequest(["Admin"], webauthnFinishAuthRequest);
-  await client.authAccept(auth_token, auth_token);
+export function clientNoAuth() {
+  // TODO: clean this up. client no longer does auth
+  return client();
 }
 
-export const authGetMethod = (): Promise<AuthGetMethodResponse> =>
-  unauthenticated_client().then((c) => c.authGetMethod());
+async function getClientInstance(): Promise<WalletDaemonClient> {
+  if (clientInstance) {
+    return clientInstance;
+  }
+  const addr = await (outerAddress ? Promise.resolve(outerAddress) : getClientAddress());
+  outerAddress = addr;
+
+  const client = WalletDaemonClient.usingFetchTransport(addr.toString());
+  clientInstance = client;
+  return client;
+}
+
+export async function authenticateClient(credentials: AuthCredentials) {
+  let client = await getClientInstance();
+  await requestAuthentication(client, credentials);
+  return client;
+}
+
+async function requestAuthentication(client: WalletDaemonClient, credentials: AuthCredentials) {
+  return await client.authRequest("walletd-web-ui", ["Admin"], credentials);
+}
+
+export const authGetMethod = (): Promise<AuthGetMethodResponse> => clientNoAuth().then((c) => c.authGetMethod());
 
 export const webauthnAlreadyRegistered = (username: string): Promise<WebauthnAlreadyRegisteredResponse> =>
-  unauthenticated_client().then((c) => c.webauthnAlreadyRegistered({ username }));
+  clientNoAuth().then((c) => c.webauthnAlreadyRegistered({ username }));
 
 export const webauthnStartRegistration = (
   request: WebauthnStartRegisterRequest,
-): Promise<WebauthnStartRegisterResponse> => unauthenticated_client().then((c) => c.webauthnStartRegistration(request));
+): Promise<WebauthnStartRegisterResponse> => clientNoAuth().then((c) => c.webauthnStartRegistration(request));
 
 export const webauthnFinishRegistration = (
   request: WebauthnFinishRegisterRequest,
-): Promise<WebauthnFinishRegisterResponse> =>
-  unauthenticated_client().then((c) => c.webauthnFinishRegistration(request));
+): Promise<WebauthnFinishRegisterResponse> => clientNoAuth().then((c) => c.webauthnFinishRegistration(request));
 
 export const webauthnStartAuth = (request: WebauthnStartAuthRequest): Promise<WebauthnStartAuthResponse> =>
-  unauthenticated_client().then((c) => c.webauthnAuthStart(request));
+  clientNoAuth().then((c) => c.webauthnAuthStart(request));
 
 export const authRevoke = (request: AuthRevokeTokenRequest): Promise<AuthRevokeTokenResponse> =>
   client().then((c) =>

@@ -57,6 +57,7 @@ import { FinalizeResult, TransactionResult } from "@tari-project/ootle-ts-bindin
 import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tari-project/ootle-ts-bindings";
 import { BsQuestionCircle } from "react-icons/bs";
 import { formatCurrency } from "@/utils/helpers";
+import { XTR_CURRENCY } from "@utils/constants";
 
 export default function TransactionDetails() {
   const [expandedPanels, setExpandedPanels] = useState<string[]>([]);
@@ -158,11 +159,11 @@ export default function TransactionDetails() {
                   <TableRow>
                     <TableCell>Total Fees</TableCell>
                     <DataTableCell>
-                      {feeReceipt ? formatCurrency(feeReceipt.total_fees_paid) : "0"}
+                      {feeReceipt ? formatCurrency(feeReceipt.total_fees_paid, XTR_CURRENCY.SYMBOL) : "0"}
                       {feeReceipt?.total_fee_overcharge ? (
                         <>
                           {" "}
-                          ({formatCurrency(feeReceipt.total_fee_overcharge)} overcharge{" "}
+                          ({formatCurrency(feeReceipt.total_fee_overcharge, XTR_CURRENCY.SYMBOL)} overcharge{" "}
                           <Tooltip title="An overcharge occurs when paying more fees than required using stealth transfers. To preserve privacy, there is no vault to refund excess fees, therefore the fees are given to validators in their entirety.">
                             <BsQuestionCircle style={{ display: "inline" }} />
                           </Tooltip>

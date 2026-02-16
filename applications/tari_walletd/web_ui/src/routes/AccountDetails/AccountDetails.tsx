@@ -54,8 +54,8 @@ function BalanceRow(props: BalanceEntry) {
         <CopyAddress address={props.resource_address} display={props.token_symbol || props.resource_address} />
       </DataTableCell>
       <DataTableCell>{props.resource_type}</DataTableCell>
-      <DataTableCell>{formatCurrency(props.balance)}</DataTableCell>
-      <DataTableCell>{formatCurrency(props.confidential_balance)}</DataTableCell>
+      <DataTableCell>{formatCurrency(props.balance, props.token_symbol)}</DataTableCell>
+      <DataTableCell>{formatCurrency(props.confidential_balance, props.token_symbol)}</DataTableCell>
     </TableRow>
   );
 }

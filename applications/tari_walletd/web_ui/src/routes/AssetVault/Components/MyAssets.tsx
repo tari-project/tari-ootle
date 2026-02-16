@@ -24,7 +24,7 @@ import Grid from "@mui/material/Grid";
 import IconButton from "@mui/material/IconButton";
 import { useTheme } from "@mui/material/styles";
 import { InnerHeading, StyledPaper } from "@components/StyledComponents";
-import { refreshAccountsBalances } from "@api/hooks/useAccounts";
+import { refreshAccountsBalances, useAccountsGetDefault } from "@api/hooks/useAccounts";
 import useAccountStore from "@store/accountStore";
 import Transactions from "@routes/Transactions/Transactions";
 import AccountDetails from "./AccountDetails";
@@ -34,18 +34,36 @@ import { substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { Refresh } from "@mui/icons-material";
 import queryClient from "@api/queryClient";
 import PageHeader from "@components/PageHeader";
+import { useEffect } from "react";
+import Loading from "@components/Loading";
+import { Navigate } from "react-router-dom";
 
 function MyAssets() {
   const theme = useTheme();
-  const { account } = useAccountStore();
+  const { account, setAccount, setOotleAddress } = useAccountStore();
+  const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
+  const refreshBalances = refreshAccountsBalances();
+  // const authStore = useAuthStore();
 
-  if (!account) {
-    return <>Loading...</>;
+  useEffect(() => {
+    if (!account && defaultAccount) {
+      setAccount(defaultAccount.account);
+      setOotleAddress(defaultAccount.address);
+    }
+  }, [account, defaultAccount]);
+
+  if (error) {
+    console.error(error);
+    // authStore.clearToken();
+    return <Navigate replace to={"/onboarding"} />;
   }
 
-  const refreshBalances = refreshAccountsBalances(substateIdToString(account.component_address));
+  if (!account) {
+    return <Loading />;
+  }
+
   const handleRefreshClicked = () => {
-    refreshBalances.mutate();
+    refreshBalances.mutate(substateIdToString(account.component_address));
     queryClient.invalidateQueries({
       predicate: (query) => {
         const key = query.queryKey[0];

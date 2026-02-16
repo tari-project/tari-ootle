@@ -25,6 +25,7 @@ import type { ResourceAddress, ResourceType } from "@tari-project/ootle-ts-bindi
 import CopyAddress from "@components/CopyAddress";
 import { formatCurrency } from "@utils/helpers";
 import { SendMoneyFormState } from "./FormStep";
+import { XTR_CURRENCY } from "@utils/constants";
 
 interface ConfirmationStepProps {
   resource_address?: ResourceAddress;
@@ -69,7 +70,9 @@ export default function ConfirmationStep({
           <Typography variant="subtitle2" color="text.secondary">
             Transaction Fee:
           </Typography>
-          <Typography variant="body1">{formatCurrency(parseInt(transferFormState.fee) || 0)}</Typography>
+          <Typography variant="body1">
+            {formatCurrency(parseInt(transferFormState.fee) || 0, XTR_CURRENCY.SYMBOL)}
+          </Typography>
         </Box>
 
         <Box>

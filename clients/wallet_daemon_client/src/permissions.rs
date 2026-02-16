@@ -136,6 +136,12 @@ impl TryFrom<&[String]> for JrpcPermissions {
     }
 }
 
+impl From<Vec<JrpcPermission>> for JrpcPermissions {
+    fn from(value: Vec<JrpcPermission>) -> Self {
+        JrpcPermissions(value.into_iter().collect())
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Claims {

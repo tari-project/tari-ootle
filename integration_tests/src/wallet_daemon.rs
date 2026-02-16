@@ -85,7 +85,7 @@ pub async fn spawn_wallet_daemon(world: &mut TariWorld, wallet_daemon_name: Stri
     };
 
     config.common.base_path.clone_from(&base_dir);
-    config.ootle_wallet_daemon.json_rpc_address = Some(json_rpc_address);
+    config.ootle_wallet_daemon.json_rpc_address = json_rpc_address;
     config.ootle_wallet_daemon.signaling_server_address = Some(signaling_server_addr);
     config.ootle_wallet_daemon.indexer_api_url = indexer_url.parse().unwrap();
     config.ootle_wallet_daemon.network = Network::LocalNet;
@@ -129,7 +129,6 @@ impl TariWalletDaemonProcess {
         let AuthLoginResponse { token } = client
             .auth_request(AuthLoginRequest {
                 permissions: vec!["Admin".parse().unwrap()],
-                name: "Testing Token".to_string(),
                 credentials: AuthCredentials::None,
             })
             .await

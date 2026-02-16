@@ -187,16 +187,6 @@ CREATE TABLE locks
 
 CREATE UNIQUE INDEX locks_uniq_transaction_id ON locks (transaction_id) WHERE transaction_id IS NOT NULL;
 
--- Auth token, we don't store the auth token, the token in this table is the jwt token that is granted when user accepts the auth login request.
-CREATE TABLE auth_status
-(
-    id           INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-    user_decided BOOLEAN                           NOT NULL,
-    granted      BOOLEAN                           NOT NULL,
-    token        TEXT                              NULL,
-    revoked      BOOLEAN                           NOT NULL DEFAULT FALSE
-);
-
 -- NFTs
 CREATE TABLE non_fungible_tokens
 (

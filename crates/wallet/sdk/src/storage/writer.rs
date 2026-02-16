@@ -45,12 +45,6 @@ use crate::{
 };
 
 pub trait WalletStoreWriter: CommittableStore {
-    // JWT
-    fn jwt_add_empty_token(&mut self) -> Result<u64, WalletStorageError>;
-    fn jwt_store_token(&mut self, id: u64, permissions_token: Option<&str>) -> Result<(), WalletStorageError>;
-    fn jwt_is_revoked(&mut self, token: &str) -> Result<bool, WalletStorageError>;
-    fn jwt_revoke(&mut self, token_id: i32) -> Result<(), WalletStorageError>;
-
     // Key manager
     fn key_manager_insert_or_ignore(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
     fn key_manager_set_active_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;

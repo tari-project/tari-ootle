@@ -5,7 +5,7 @@ use std::{fmt::Debug, sync::Arc};
 
 use anyhow::anyhow;
 use tari_ootle_wallet_sdk::storage::WalletStore;
-use tari_wallet_daemon_client::types::AuthLoginRequest;
+use tari_wallet_daemon_client::types::AuthCredentials;
 use webauthn_rs::Webauthn;
 
 use crate::{handlers::auth::Authenticator, services::WebauthnService};
@@ -34,8 +34,8 @@ impl<TStore: WalletStore + Debug + Send + Sync> WebAuthnAuth<TStore> {
 }
 
 impl<TStore: WalletStore + Debug + Send + Sync> Authenticator for WebAuthnAuth<TStore> {
-    async fn authenticate(&self, request: &AuthLoginRequest) -> Result<(), anyhow::Error> {
-        match request.credentials.as_webauthn() {
+    async fn authenticate(&self, credentials: &AuthCredentials) -> Result<(), anyhow::Error> {
+        match credentials.as_webauthn() {
             Some(req) => {
                 let credential = &req.credential;
                 let auth_passkey = self.webauthn_service.auth_passkey(req.session_id.as_str()).await?;

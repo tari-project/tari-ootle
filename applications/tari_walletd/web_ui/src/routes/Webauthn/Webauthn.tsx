@@ -8,17 +8,18 @@ import { useWebauthnAlreadyRegistered } from "@api/hooks/useWebauthn";
 import Loading from "@components/Loading";
 import useAuthStore from "@store/authStore";
 import { useSearchParams } from "react-router-dom";
+import { JrpcPermission } from "@tari-project/ootle-ts-bindings";
 
+export const APP_NAME: string = "tari-wallet-webui";
+export const DEFAULT_PERMISSIONS: JrpcPermission[] = ["Admin"];
 function Webauthn() {
-  console.log("Rendering Webauthn component");
   const [registered, setRegistered] = useState(false);
-  const { username } = useAuthStore();
   const {
     data: alreadyRegisteredResponse,
     isLoading: alreadyRegisteredIsLoading,
     isError: alreadyRegisteredIsError,
     error: alreadyRegisteredError,
-  } = useWebauthnAlreadyRegistered(username);
+  } = useWebauthnAlreadyRegistered(APP_NAME);
   const [searchParams] = useSearchParams();
   const redirectQuery = searchParams.get("redirect");
   const redirect = redirectQuery ? redirectQuery : "/";

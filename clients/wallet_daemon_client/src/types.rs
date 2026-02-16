@@ -20,8 +20,9 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display, str::FromStr};
 
+use hex::FromHexError;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult},
@@ -85,7 +86,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     ComponentAddressOrName,
-    permissions::{Claims, JrpcPermission},
+    permissions::JrpcPermission,
     serialize::{opt_string_or_struct, string_or_struct},
 };
 
@@ -643,7 +644,6 @@ pub struct WebRtcStartRequest {
     pub signaling_server_token: String,
     #[cfg_attr(feature = "ts", ts(type = "object"))]
     pub permissions: serde_json::Value,
-    pub name: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -652,10 +652,20 @@ pub struct WebRtcStartResponse {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthRefreshRequest {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthRefreshResponse {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub token: EncodedJwtString,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AuthLoginRequest {
     pub permissions: Vec<JrpcPermission>,
     pub credentials: AuthCredentials,
-    pub name: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -696,7 +706,37 @@ pub struct AuthLoginResponse {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AuthRevokeTokenRequest {
-    pub permission_token_id: i32,
+    pub refresh_token_id: RefreshTokenHash,
+}
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct RefreshTokenHash(
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "ootle_serde::hex")]
+    [u8; 32],
+);
+
+impl RefreshTokenHash {
+    pub const fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl FromStr for RefreshTokenHash {
+    type Err = FromHexError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut bytes = [0u8; 32];
+        hex::decode_to_slice(s, &mut bytes)?;
+        Ok(Self(bytes))
+    }
+}
+
+impl Display for RefreshTokenHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", hex::encode(self.0))
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -750,12 +790,20 @@ pub struct ListNftsResponse {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub struct AuthGetAllJwtRequest {}
+pub struct AuthListSessionsRequest {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub struct AuthGetAllJwtResponse {
-    pub jwt: Vec<Claims>,
+pub struct AuthListSessionsResponse {
+    pub sessions: Vec<AuthSessionInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthSessionInfo {
+    pub id: RefreshTokenHash,
+    pub permissions: Vec<JrpcPermission>,
+    pub exp: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -982,14 +1030,19 @@ pub struct WebauthnStartRegisterResponse {
 pub struct WebauthnFinishRegisterRequest {
     /// Session ID received from [`WebauthnStartRegisterResponse`].
     pub session_id: String,
-    /// [`RegisterPublicKeyCredential`] serialized as JSON.
+    /// [`RegisterPublicKeyCredential`]
     #[cfg_attr(feature = "ts", ts(type = "object"))]
     pub credential: RegisterPublicKeyCredential,
+    /// Permissions requested by the client to be associated with the registered credential.
+    pub requested_permissions: Vec<JrpcPermission>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub struct WebauthnFinishRegisterResponse {}
+pub struct WebauthnFinishRegisterResponse {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub token: EncodedJwtString,
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]

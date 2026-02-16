@@ -3,18 +3,19 @@
 
 import { useTheme } from "@mui/material/styles";
 import { FormEvent, useState } from "react";
-import { Form, Navigate, useNavigate, useSearchParams } from "react-router-dom";
+import { Form, useNavigate } from "react-router-dom";
 import Loading from "@components/Loading";
 import Typography from "@mui/material/Typography";
 import Grid from "@mui/material/Grid";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import { clientNoAuth, webauthnStartAuth } from "@utils/json_rpc";
+import { getClientInstance, webauthnStartAuth } from "@utils/json_rpc";
 import { Buffer } from "buffer";
 import { WebauthnFinishAuthRequest } from "@tari-project/ootle-ts-bindings";
 import useAuthStore from "@store/authStore";
+import { APP_NAME, DEFAULT_PERMISSIONS } from "@routes/Webauthn/Webauthn";
 
-const getCredential = async (challenge: any, allowCredentials: any) => {
+export const getCredential = async (challenge: any, allowCredentials: any) => {
   const publicKeyCredentialRequestOptions: PublicKeyCredentialRequestOptions = {
     challenge: challenge,
     allowCredentials: allowCredentials,
@@ -27,11 +28,11 @@ const getCredential = async (challenge: any, allowCredentials: any) => {
 };
 
 function WebauthnLogin({ redirect }: { redirect: string }) {
+  const { setLoggedIn } = useAuthStore();
   const theme = useTheme();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const navigate = useNavigate();
-  const { setAuthToken, username } = useAuthStore();
 
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
@@ -40,7 +41,7 @@ function WebauthnLogin({ redirect }: { redirect: string }) {
 
     try {
       // start authentication by getting challenge
-      const startAuthResponse = await webauthnStartAuth({ username });
+      const startAuthResponse = await webauthnStartAuth({ username: APP_NAME });
 
       if (!startAuthResponse) {
         throw new Error("Failed to start authentication");
@@ -67,18 +68,16 @@ function WebauthnLogin({ redirect }: { redirect: string }) {
         throw new Error("Failed to get credential");
       }
 
-      const client = await clientNoAuth();
+      const client = await getClientInstance();
       const webauthnFinishAuthRequest: WebauthnFinishAuthRequest = {
         credential,
         session_id: loginSessionId,
       };
-      const token = await client.authRequest("walletd-web-ui", ["Admin"], { WebAuthN: webauthnFinishAuthRequest });
 
-      if (!token) {
-        throw new Error("Failed to get JWT");
-      }
+      const token = await client.authRequest(DEFAULT_PERMISSIONS, { WebAuthN: webauthnFinishAuthRequest });
+      client.setToken(token);
 
-      setAuthToken(token);
+      setLoggedIn(true);
       navigate(redirect);
     } catch (error) {
       console.error(error);

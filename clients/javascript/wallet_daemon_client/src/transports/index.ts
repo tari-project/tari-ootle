@@ -8,7 +8,7 @@ import FetchRpcTransport from "./fetch";
 export { FetchRpcTransport };
 
 export interface RpcTransport {
-  sendRequest<T>(request: RpcRequest, options: RpcTransportOptions): Promise<T>;
+  sendRequest<T>(request: RpcRequest, options?: RpcTransportOptions): Promise<RpcResponse<T>>;
 }
 
 export interface RpcTransportOptions {
@@ -21,4 +21,15 @@ export interface RpcRequest {
   jsonrpc: string;
   method: string;
   params: any;
+}
+
+export interface RpcResponse<T> {
+  id: number;
+  jsonrpc: string;
+  result?: T;
+  error?: {
+    code: number;
+    message: string;
+    data?: any;
+  };
 }

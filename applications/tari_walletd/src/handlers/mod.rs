@@ -9,7 +9,6 @@ pub mod error;
 mod helpers;
 pub mod keys;
 pub mod nfts;
-pub mod rpc;
 pub mod settings;
 pub mod stealth_utxos;
 pub mod substates;
@@ -17,13 +16,15 @@ pub mod templates;
 pub mod transaction;
 pub mod validator;
 pub mod wallet;
+#[cfg(feature = "web_ui")]
+pub mod web_ui;
 pub mod webauthn;
 pub mod webrtc;
 
 use std::future::Future;
 
 use async_trait::async_trait;
-use axum_extra::headers::authorization::Bearer;
+use axum_extra::{extract::CookieJar, headers::authorization::Bearer};
 pub use context::HandlerContext;
 use error::HandlerError;
 
@@ -36,6 +37,7 @@ pub trait Handler<'a, TReq> {
         &mut self,
         context: &'a HandlerContext,
         token: Option<&'a Bearer>,
+        cookie: Option<CookieJar>,
         req: TReq,
     ) -> Result<Self::Response, HandlerError>;
 }
@@ -54,9 +56,45 @@ where
         &mut self,
         context: &'a HandlerContext,
         token: Option<&'a Bearer>,
+        _cookie: Option<CookieJar>,
         req: TReq,
     ) -> Result<Self::Response, HandlerError> {
         let resp = self(context, token, req).await.map_err(Into::into)?;
+        Ok(resp)
+    }
+}
+
+// TODO: little hacky
+pub struct HandlerWithCookie<F> {
+    with_cookie: F,
+}
+
+impl<F> HandlerWithCookie<F> {
+    pub fn new(with_cookie: F) -> Self {
+        Self { with_cookie }
+    }
+}
+
+#[async_trait]
+impl<'a, F, TReq, TResp, TFut, TErr> Handler<'a, TReq> for HandlerWithCookie<F>
+where
+    F: FnMut(&'a HandlerContext, Option<&'a Bearer>, Option<CookieJar>, TReq) -> TFut + Sync + Send,
+    TFut: Future<Output = Result<TResp, TErr>> + Send,
+    TReq: Send + 'static,
+    TErr: Into<HandlerError>,
+{
+    type Response = TResp;
+
+    async fn handle(
+        &mut self,
+        context: &'a HandlerContext,
+        token: Option<&'a Bearer>,
+        cookie: Option<CookieJar>,
+        req: TReq,
+    ) -> Result<Self::Response, HandlerError> {
+        let resp = (self.with_cookie)(context, token, cookie, req)
+            .await
+            .map_err(Into::into)?;
         Ok(resp)
     }
 }

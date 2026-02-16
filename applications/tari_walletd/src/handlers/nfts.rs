@@ -39,7 +39,7 @@ use super::{context::HandlerContext, helpers::get_account_or_default};
 use crate::{
     DEFAULT_FEE,
     handlers::helpers::{application_error, get_account, get_account_with_inputs, invalid_params, wait_for_result},
-    jrpc_server::ApplicationErrorCode,
+    server::ApplicationErrorCode,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::nfts";

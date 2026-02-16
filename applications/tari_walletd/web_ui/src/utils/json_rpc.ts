@@ -40,8 +40,8 @@ import type {
   AccountsListResponse,
   AccountsTransferRequest,
   AccountsTransferResponse,
-  AuthGetAllJwtRequest,
-  AuthGetAllJwtResponse,
+  AuthListSessionsRequest,
+  AuthListSessionsResponse,
   AuthGetMethodResponse,
   AuthRevokeTokenRequest,
   AuthRevokeTokenResponse,
@@ -98,7 +98,6 @@ import type {
   TransferNftResponse,
   WalletGetInfoResponse,
   WebauthnAlreadyRegisteredResponse,
-  WebauthnFinishAuthRequest,
   WebauthnFinishRegisterRequest,
   WebauthnFinishRegisterResponse,
   WebauthnStartAuthRequest,
@@ -117,55 +116,11 @@ import useAuthStore from "@store/authStore";
 import { jwtDecode } from "jwt-decode";
 
 let clientInstance: WalletDaemonClient | null = null;
-let pendingClientInstance: Promise<WalletDaemonClient> | null = null;
-let unAuthenticatedClient: Promise<WalletDaemonClient> | null = null;
-let outerAddress: URL | null = null;
-const DEFAULT_WALLET_ADDRESS = new URL(
+const WALLET_JRPC_URL =
   import.meta.env.VITE_DAEMON_JRPC_ADDRESS ||
-    import.meta.env.VITE_JSON_RPC_ADDRESS ||
-    import.meta.env.VITE_JRPC_ADDRESS ||
-    "http://localhost:9000",
-);
-
-export async function getClientAddress(): Promise<URL> {
-  try {
-    let resp = await fetch("/json_rpc_address");
-    if (resp.status === 200) {
-      const url = await resp.text();
-      try {
-        return new URL(url);
-      } catch (e) {
-        throw new Error(`Invalid URL: ${url} : {e}`);
-      }
-    }
-  } catch (e) {
-    console.warn(e);
-  }
-
-  return DEFAULT_WALLET_ADDRESS;
-}
-
-export function client() {
-  if (pendingClientInstance) {
-    return pendingClientInstance;
-  }
-
-  if (clientInstance) {
-    return Promise.resolve(clientInstance);
-  }
-
-  const getAddress = outerAddress ? Promise.resolve(outerAddress) : getClientAddress();
-
-  pendingClientInstance = getAddress.then(async (addr) => {
-    const client = WalletDaemonClient.usingFetchTransport(addr.toString());
-    outerAddress = addr;
-    clientInstance = client;
-    pendingClientInstance = null;
-    return client;
-  });
-
-  return pendingClientInstance;
-}
+  import.meta.env.VITE_JSON_RPC_ADDRESS ||
+  import.meta.env.VITE_JRPC_ADDRESS ||
+  "/json_rpc";
 
 export const isValidJwt = (token?: string | null) => {
   if (!token) return false;
@@ -183,76 +138,46 @@ export const isValidJwt = (token?: string | null) => {
 };
 
 export async function setClientAuthToken(token: string) {
-  if (clientInstance) {
-    console.log("Setting client auth token");
-    clientInstance.setToken(token);
-    return true;
-  }
-  const addr = await (outerAddress ? Promise.resolve(outerAddress) : getClientAddress());
-  outerAddress = addr;
-
-  const client = WalletDaemonClient.usingFetchTransport(addr.toString());
+  const client = await getClientInstance();
   client.setToken(token);
-  clientInstance = client;
-
-  console.log("Set client auth token for new client instance");
   return false;
 }
 
-export function clientNoAuth() {
-  // TODO: clean this up. client no longer does auth
-  return client();
-}
-
-async function getClientInstance(): Promise<WalletDaemonClient> {
+export async function getClientInstance(): Promise<WalletDaemonClient> {
   if (clientInstance) {
     return clientInstance;
   }
-  const addr = await (outerAddress ? Promise.resolve(outerAddress) : getClientAddress());
-  outerAddress = addr;
 
-  const client = WalletDaemonClient.usingFetchTransport(addr.toString());
+  // This returning a promise was because of the need to first fetch the JSON-RPC address. Not needed now, but we'll
+  // keep it this way to avoid having to change a lot of code and, it is more future-proof.
+  const client = WalletDaemonClient.usingFetchTransport(WALLET_JRPC_URL);
   clientInstance = client;
   return client;
 }
 
-export async function authenticateClient(credentials: AuthCredentials) {
-  let client = await getClientInstance();
-  await requestAuthentication(client, credentials);
-  return client;
-}
+// Alias
+const client = getClientInstance;
 
-async function requestAuthentication(client: WalletDaemonClient, credentials: AuthCredentials) {
-  return await client.authRequest("walletd-web-ui", ["Admin"], credentials);
-}
-
-export const authGetMethod = (): Promise<AuthGetMethodResponse> => clientNoAuth().then((c) => c.authGetMethod());
+export const authGetMethod = (): Promise<AuthGetMethodResponse> => client().then((c) => c.authGetMethod());
 
 export const webauthnAlreadyRegistered = (username: string): Promise<WebauthnAlreadyRegisteredResponse> =>
-  clientNoAuth().then((c) => c.webauthnAlreadyRegistered({ username }));
+  client().then((c) => c.webauthnAlreadyRegistered({ username }));
 
 export const webauthnStartRegistration = (
   request: WebauthnStartRegisterRequest,
-): Promise<WebauthnStartRegisterResponse> => clientNoAuth().then((c) => c.webauthnStartRegistration(request));
+): Promise<WebauthnStartRegisterResponse> => client().then((c) => c.webauthnStartRegistration(request));
 
 export const webauthnFinishRegistration = (
   request: WebauthnFinishRegisterRequest,
-): Promise<WebauthnFinishRegisterResponse> => clientNoAuth().then((c) => c.webauthnFinishRegistration(request));
+): Promise<WebauthnFinishRegisterResponse> => client().then((c) => c.webauthnFinishRegistration(request));
 
 export const webauthnStartAuth = (request: WebauthnStartAuthRequest): Promise<WebauthnStartAuthResponse> =>
-  clientNoAuth().then((c) => c.webauthnAuthStart(request));
+  client().then((c) => c.webauthnAuthStart(request));
 
 export const authRevoke = (request: AuthRevokeTokenRequest): Promise<AuthRevokeTokenResponse> =>
-  client().then((c) =>
-    c.authRevoke(request).then((response) => {
-      if (response) {
-        useAuthStore.getState().setAuthToken("");
-      }
-      return response;
-    }),
-  );
-export const authGetAllJwt = (request: AuthGetAllJwtRequest): Promise<AuthGetAllJwtResponse> =>
-  client().then((c) => c.authGetAllJwt(request));
+  client().then((c) => c.authRevoke(request));
+export const authGetAllJwt = (request: AuthListSessionsRequest): Promise<AuthListSessionsResponse> =>
+  client().then((c) => c.authListSessions(request));
 
 // settings
 export const settingsGet = (): Promise<SettingsGetResponse> => client().then((c) => c.settingsGet());
@@ -262,9 +187,6 @@ export const settingsSet = (request: SettingsSetRequest): Promise<SettingsSetRes
 // webrtc
 export const webrtcStart = (request: WebRtcStartRequest): Promise<WebRtcStartResponse> =>
   client().then((c) => c.webrtcStart(request));
-
-// rpc
-export const rpcDiscover = (): Promise<string> => client().then((c) => c.rpcDiscover());
 
 // keys
 export const keysCreate = (request: KeysCreateRequest): Promise<KeysCreateResponse> =>

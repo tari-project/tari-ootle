@@ -31,4 +31,4 @@ time = { workspace = true }
 thiserror = { workspace = true }
 tokio = { version = "1", features = ["macros"] }
 url = { workspace = true }
-urlencoding = { workspace = true }
+urlencoding = "2.1.3"

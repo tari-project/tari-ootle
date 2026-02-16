@@ -37,7 +37,6 @@ pub struct StartArgs {
     pub signaling_server_url: Option<Url>,
     pub signaling_server_token: Option<String>,
     pub webrtc_permissions_token: Option<serde_json::Value>,
-    pub token_name: Option<String>,
 }
 
 impl WebRtcSubcommand {
@@ -54,14 +53,12 @@ impl WebRtcSubcommand {
                     let token = parts.next().ok_or_else(|| anyhow!("Malformed Tari URL"))?;
                     let token = urlencoding::decode(token)?;
                     args.webrtc_permissions_token = Some(serde_json::from_str(token.as_ref())?);
-                    args.token_name = Some(parts.next().ok_or_else(|| anyhow!("Malformed Tari URL"))?.to_string());
                 }
 
                 let _resp = client
                     .webrtc_start(WebRtcStartRequest {
                         signaling_server_token: args.signaling_server_token.unwrap(),
                         permissions: args.webrtc_permissions_token.unwrap(),
-                        name: args.token_name.unwrap(),
                     })
                     .await?;
             },

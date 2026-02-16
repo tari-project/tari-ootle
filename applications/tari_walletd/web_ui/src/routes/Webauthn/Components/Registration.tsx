@@ -8,10 +8,11 @@ import Button from "@mui/material/Button";
 import Grid from "@mui/material/Grid";
 import { useTheme } from "@mui/material/styles";
 import { FormEvent, useState } from "react";
-import { webauthnFinishRegistration, webauthnStartRegistration } from "../../../utils/json_rpc";
+import { getClientInstance, webauthnFinishRegistration, webauthnStartRegistration } from "../../../utils/json_rpc";
 import { Buffer } from "buffer";
 import Loading from "@components/Loading";
 import useAuthStore from "@store/authStore";
+import { APP_NAME, DEFAULT_PERMISSIONS } from "@routes/Webauthn/Webauthn";
 
 const WEBAUTHN_RP_ID = import.meta.env.VITE_DAEMON_WEBAUTHN_RP_ID || window.location.hostname;
 
@@ -64,10 +65,10 @@ const createCredential = async (
 };
 
 function WebauthnRegistration({ redirect }: { redirect: string }) {
+  const { setLoggedIn } = useAuthStore();
   const theme = useTheme();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const { username } = useAuthStore();
   const navigate = useNavigate();
 
   const handleRegister = async (e: FormEvent) => {
@@ -78,7 +79,7 @@ function WebauthnRegistration({ redirect }: { redirect: string }) {
     try {
       // start registration by getting challenge
       const startRegisterResponse = await webauthnStartRegistration({
-        username,
+        username: APP_NAME,
       });
 
       if (!startRegisterResponse) {
@@ -96,9 +97,9 @@ function WebauthnRegistration({ redirect }: { redirect: string }) {
       const credential = await createCredential(
         {
           rpId: WEBAUTHN_RP_ID,
-          rpName: "Tari Ootle Wallet",
+          rpName: "Tari Ootle Wallet Web UI",
         },
-        username,
+        APP_NAME,
         challenge,
       );
 
@@ -106,10 +107,16 @@ function WebauthnRegistration({ redirect }: { redirect: string }) {
         throw new Error("Failed to create credential");
       }
 
-      await webauthnFinishRegistration({
+      const { token } = await webauthnFinishRegistration({
         credential,
         session_id: regSessionId,
+        requested_permissions: DEFAULT_PERMISSIONS,
       });
+
+      let client = await getClientInstance();
+      client.setToken(token);
+
+      setLoggedIn(true);
 
       navigate(redirect);
     } catch (error) {

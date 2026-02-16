@@ -47,12 +47,8 @@ pub struct WalletRestoreArgs {
 pub struct Cli {
     #[clap(flatten)]
     pub common: CommonCliArgs,
-    #[clap(long, alias = "endpoint", env = "JRPC_ENDPOINT")]
-    pub json_rpc_address: Option<SocketAddr>,
-    #[clap(long, env = "TARI_WALLET_WEB_UI_JSON_RPC_PUBLIC_URL")]
-    pub web_ui_public_json_rpc_url: Option<String>,
-    #[clap(short = 'w', long, env = "TARI_WALLET_WEB_UI_JSON_RPC_PUBLIC_URL")]
-    pub web_ui_listen_addr: Option<SocketAddr>,
+    #[clap(long, short = 'l', alias = "listen-on", env = "JRPC_LISTEN_ON")]
+    pub listen_on: Option<SocketAddr>,
     #[clap(long, env = "SIGNALING_SERVER_ADDRESS")]
     pub signaling_server_address: Option<SocketAddr>,
     #[clap(long, short = 'i', alias = "indexer-url")]
@@ -78,6 +74,11 @@ pub struct Cli {
     /// performance cost when brute forcing high-value outputs.
     #[clap(long, alias = "lookup-file")]
     pub value_lookup_table_file: Option<PathBuf>,
+    /// If set, the wallet daemon will enable permissive CORS, and set webauthn.rp_origin to http://localhost:{enable_vite_dev_port}
+    /// to allow authentication from a local development server (e.g. npm run dev).
+    /// This is useful for development and testing, but should not be used in production.
+    #[clap(long, alias = "vite-dev")]
+    pub enable_vite_dev_port: Option<u16>,
     #[clap(subcommand)]
     pub command: Option<Subcommand>,
 }
@@ -96,16 +97,10 @@ impl ConfigOverrideProvider for Cli {
     fn get_config_property_overrides(&self, network: &L1Network) -> Vec<(String, String)> {
         let mut overrides = self.common.get_config_property_overrides(network);
         overrides.push(("ootle_wallet_daemon.override_from".to_string(), network.to_string()));
-        if let Some(json_rpc_address) = self.json_rpc_address {
+        if let Some(json_rpc_address) = self.listen_on {
             overrides.push((
                 format!("{}.ootle_wallet_daemon.json_rpc_address", network),
                 json_rpc_address.to_string(),
-            ));
-        }
-        if let Some(ref json_rpc_url) = self.web_ui_public_json_rpc_url {
-            overrides.push((
-                format!("{}.ootle_wallet_daemon.web_ui_public_json_rpc_url", network),
-                json_rpc_url.to_string(),
             ));
         }
         if let Some(ref signaling_server_address) = self.signaling_server_address {
@@ -126,17 +121,23 @@ impl ConfigOverrideProvider for Cli {
                 file.display().to_string(),
             ));
         }
-        if let Some(ref listen_addr) = self.web_ui_listen_addr {
-            overrides.push((
-                format!("{}.ootle_wallet_daemon.web_ui_address", network),
-                listen_addr.to_string(),
-            ));
-        }
         if let Some(ref auth) = self.authentication {
             overrides.push((
                 format!("{}.ootle_wallet_daemon.authentication", network),
                 auth.to_string(),
             ));
+        }
+        if let Some(port) = self.enable_vite_dev_port {
+            overrides.extend([
+                (
+                    format!("{}.ootle_wallet_daemon.enable_permissive_cors", network),
+                    "true".to_string(),
+                ),
+                (
+                    format!("{}.ootle_wallet_daemon.webauthn.rp_origin", network),
+                    format!("http://localhost:{port}"),
+                ),
+            ]);
         }
         overrides
     }

@@ -34,7 +34,6 @@ import SettingsPage from "@routes/Settings/Settings";
 import Webauthn from "@routes/Webauthn/Webauthn";
 import { useEffect, useState } from "react";
 import { useAuthMethod } from "@api/hooks/useAuth";
-import AccessToken from "@routes/AccessToken/AccessToken";
 import Templates from "@routes/Templates/Templates";
 import Manifest from "@routes/Manifest/Manifest";
 import FlowEditor from "@routes/FlowEditor/FlowEditor";
@@ -43,9 +42,9 @@ import { ErrorNotificationProvider } from "./contexts/ErrorNotificationContext";
 import Loading from "@components/Loading";
 import Onboarding from "@routes/Onboarding/Onboarding";
 import MyAssets from "@routes/AssetVault/Components/MyAssets";
-import { isValidJwt, setClientAuthToken } from "@utils/json_rpc";
-import useAuthStore from "@store/authStore";
+import { getClientInstance } from "@utils/json_rpc";
 import { AuthNone } from "@routes/AuthNone";
+import useAuthStore from "@store/authStore";
 
 export const breadcrumbRoutes = [
   {
@@ -139,19 +138,17 @@ interface GuardedRouteProps {
 
 // @ts-ignore
 const GuardedRoute = ({ component: Component, redirect = "/", ...rest }: GuardedRouteProps) => {
-  const { authToken } = useAuthStore();
+  const { loggedIn } = useAuthStore();
   const { data: authMethod, isError: authMethodsIsError, error: authMethodsError, isLoading } = useAuthMethod();
-  const [hasSetAuthToken, setHasSetAuthToken] = useState(false);
+  const [hasToken, setHasToken] = useState<boolean | null>(null);
 
   useEffect(() => {
-    if (authToken && isValidJwt(authToken)) {
-      setClientAuthToken(authToken).then(() => {
-        setHasSetAuthToken(true);
-      });
-    }
-  }, [authToken]);
+    getClientInstance().then((client) => {
+      setHasToken(client.isAuthenticated());
+    });
+  }, []);
 
-  if (isLoading || !authMethod) {
+  if (isLoading || !authMethod || hasToken === null) {
     return <Loading />;
   }
 
@@ -160,14 +157,8 @@ const GuardedRoute = ({ component: Component, redirect = "/", ...rest }: Guarded
     return <div>Error fetching authentication method: {authMethodsError?.message || "Unknown error"}</div>;
   }
 
-  const hasAuthToken = isValidJwt(authToken);
-  console.log("GuardedRoute: hasAuthToken =", hasAuthToken, "hasSetAuthToken =", hasSetAuthToken);
-  if (!hasAuthToken) {
+  if (!hasToken || !loggedIn) {
     return <Navigate replace to={`/auth/${authMethod.method}?redirect=${redirect}`} />;
-  }
-
-  if (!hasSetAuthToken) {
-    return <Loading />;
   }
 
   return <Component {...rest} />;
@@ -183,7 +174,6 @@ function App() {
           {/*<Route path="auth" element={<Auth />} />*/}
           <Route path="auth/webauthn" element={<Webauthn />} />
           <Route path="auth/none" element={<AuthNone />} />
-          <Route path="access-token" element={<GuardedRoute redirect="/access-token" component={AccessToken} />} />
           <Route path="accounts" element={<GuardedRoute redirect="/accounts" component={Accounts} />} />
           <Route path="accounts/:id" element={<GuardedRoute redirect="/accounts" component={AccountDetails} />} />
           <Route path="keys" element={<GuardedRoute redirect="/keys" component={Keys} />} />

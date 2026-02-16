@@ -1,18 +1,21 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+pub use refresh_token_store::*;
+pub use webauthn_session_store::*;
+
 pub mod wasm_optimizer;
 
 mod webauthn;
 pub use webauthn::*;
 
-mod session_store;
+mod refresh_token_store;
 mod template_monitor;
+mod webauthn_session_store;
 
 // -------------------------------- Spawn -------------------------------- //
 use anyhow::anyhow;
 use futures::{FutureExt, future, future::BoxFuture};
-pub use session_store::*;
 use tari_ootle_wallet_sdk::{WalletSdk, models::WalletEvent};
 use tari_ootle_wallet_sdk_services::{
     account_monitor::{AccountMonitor, AccountMonitorHandle},

@@ -122,6 +122,10 @@ impl JrpcPermissions {
     pub fn has_permission(&self, permission: &JrpcPermission) -> bool {
         self.0.contains(permission)
     }
+
+    pub fn into_vec(self) -> Vec<JrpcPermission> {
+        self.0.into_iter().collect()
+    }
 }
 
 impl TryFrom<&[String]> for JrpcPermissions {
@@ -145,9 +149,6 @@ impl From<Vec<JrpcPermission>> for JrpcPermissions {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Claims {
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub id: u64,
-    pub name: String,
     pub permissions: JrpcPermissions,
     pub exp: u64,
 }

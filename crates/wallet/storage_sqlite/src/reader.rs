@@ -244,18 +244,6 @@ impl WalletStoreReader for ReadTransaction<'_> {
         Ok(exists > 0)
     }
 
-    // -------------------------------- JWT -------------------------------- //
-    fn jwt_get_all(&mut self) -> Result<Vec<(i32, Option<String>)>, WalletStorageError> {
-        use crate::schema::auth_status;
-        let res = auth_status::table
-            .select((auth_status::id, auth_status::token))
-            .filter(auth_status::granted.eq(true))
-            .filter(auth_status::revoked.eq(false))
-            .get_results::<(i32, Option<String>)>(self.connection())
-            .map_err(|e| WalletStorageError::general("jwt_get_all", e))?;
-        Ok(res)
-    }
-
     // -------------------------------- Transactions -------------------------------- //
     fn transactions_get(&mut self, transaction_id: TransactionId) -> Result<WalletTransaction, WalletStorageError> {
         use crate::schema::transactions;

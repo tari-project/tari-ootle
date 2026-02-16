@@ -24,6 +24,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { ApiError } from "@api/helpers/types";
 import queryClient from "@api/queryClient";
 import { authGetAllJwt, authRevoke } from "@utils/json_rpc";
+import type { RefreshTokenHash } from "@tari-project/ootle-ts-bindings";
 
 export const useGetAllTokens = () => {
   return useQuery({
@@ -35,9 +36,8 @@ export const useGetAllTokens = () => {
 };
 
 export const useAuthRevokeToken = () => {
-  const revokeToken = async (token: number) => {
-    const result = await authRevoke({ permission_token_id: token });
-    return result;
+  const revokeToken = async (token: RefreshTokenHash) => {
+    return await authRevoke({ refresh_token_id: token });
   };
   return useMutation({
     mutationFn: revokeToken,

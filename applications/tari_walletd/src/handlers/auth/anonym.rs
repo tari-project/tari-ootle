@@ -1,7 +1,7 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use tari_wallet_daemon_client::types::AuthLoginRequest;
+use tari_wallet_daemon_client::types::AuthCredentials;
 
 use crate::handlers::auth::Authenticator;
 
@@ -15,7 +15,10 @@ impl AnonymousAuth {
 }
 
 impl Authenticator for AnonymousAuth {
-    async fn authenticate(&self, _request: &AuthLoginRequest) -> Result<(), anyhow::Error> {
-        Ok(())
+    async fn authenticate(&self, cred: &AuthCredentials) -> Result<(), anyhow::Error> {
+        match cred {
+            AuthCredentials::None => Ok(()),
+            _ => Err(anyhow::anyhow!("Invalid credentials for anonymous authentication!")),
+        }
     }
 }

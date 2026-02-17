@@ -40,7 +40,6 @@ import { Navigate } from "react-router-dom";
 import useAuthStore from "@store/authStore";
 
 function MyAssets() {
-  console.log("MyAssets rendered");
   const theme = useTheme();
   const { account, setAccount, setOotleAddress } = useAccountStore();
   const { data: defaultAccount, error, refetch } = useAccountsGetDefault(false);

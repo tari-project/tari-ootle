@@ -34,7 +34,6 @@ import useAccountStore from "@store/accountStore";
 import useAuthStore from "@store/authStore";
 
 function Onboarding() {
-  console.log("Onboarding rendered");
   const { mutate, isPending } = useAccountsCreate();
   const { account, setAccount, setOotleAddress, setPopup } = useAccountStore();
   const theme = useTheme();

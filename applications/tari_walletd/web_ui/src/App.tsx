@@ -36,7 +36,7 @@ import { useEffect, useState } from "react";
 import { useAuthMethod } from "@api/hooks/useAuth";
 import Templates from "@routes/Templates/Templates";
 import Manifest from "@routes/Manifest/Manifest";
-import FlowEditor from "@routes/FlowEditor/FlowEditor";
+// import FlowEditor from "@routes/FlowEditor/FlowEditor";
 import StealthUtxoListPage from "@/routes/StealthUtxoList/StealthUtxoListPage";
 import { ErrorNotificationProvider } from "./contexts/ErrorNotificationContext";
 import Loading from "@components/Loading";
@@ -117,11 +117,11 @@ export const breadcrumbRoutes = [
     path: "/manifest",
     dynamic: false,
   },
-  {
-    label: "Flow Editor",
-    path: "/flow-editor",
-    dynamic: false,
-  },
+  // {
+  //   label: "Flow Editor",
+  //   path: "/flow-editor",
+  //   dynamic: false,
+  // },
   {
     label: "Stealth UTXOs",
     path: "/stealth-utxos/:resource_address",
@@ -192,7 +192,7 @@ function App() {
           <Route path="settings" element={<GuardedRoute redirect="/settings" component={SettingsPage} />} />
           <Route path="templates" element={<GuardedRoute redirect="/templates" component={Templates} />} />
           <Route path="manifest" element={<GuardedRoute redirect="/manifest" component={Manifest} />} />
-          <Route path="flow-editor" element={<GuardedRoute redirect="/flow-editor" component={FlowEditor} />} />
+          {/*<Route path="flow-editor" element={<GuardedRoute redirect="/flow-editor" component={FlowEditor} />} />*/}
           <Route
             path="stealth-utxos/:resource_address"
             element={<GuardedRoute redirect="/stealth-utxos" component={StealthUtxoListPage} />}

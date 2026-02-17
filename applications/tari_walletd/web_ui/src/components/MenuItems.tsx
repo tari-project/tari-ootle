@@ -86,14 +86,14 @@ function MainListItems() {
       link: "manifest",
     });
   }
-  if (features.includes("flowEditor")) {
-    mainItems.push({
-      title: "Flow Editor",
-      icon: <IoGitMerge style={iconStyle} />,
-      activeIcon: <IoGitMerge style={activeIconStyle} />,
-      link: "flow-editor",
-    });
-  }
+  // if (features.includes("flowEditor")) {
+  //   mainItems.push({
+  //     title: "Flow Editor",
+  //     icon: <IoGitMerge style={iconStyle} />,
+  //     activeIcon: <IoGitMerge style={activeIconStyle} />,
+  //     link: "flow-editor",
+  //   });
+  // }
 
   return (
     <Box

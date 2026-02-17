@@ -331,6 +331,13 @@ jobs:
           pnpm install
           pnpm run build
 
+      - name: Build Dependencies - Node (wallet_daemon_client)
+        shell: bash
+        working-directory: ${{ github.workspace }}/clients/javascript/wallet_daemon_client
+        run: |
+          pnpm install
+          pnpm run build
+
       - name: Build Dependencies - applications (indexer)
         shell: bash
         working-directory: ${{ github.workspace }}/applications/tari_indexer/web_ui
@@ -341,6 +348,13 @@ jobs:
       - name: Build Dependencies - applications (validator_node)
         shell: bash
         working-directory: ${{ github.workspace }}/applications/tari_validator_node/web_ui
+        run: |
+          pnpm install
+          pnpm run build
+
+      - name: Build Dependencies - applications (tari_walletd)
+        shell: bash
+        working-directory: ${{ github.workspace }}/applications/tari_walletd/web_ui
         run: |
           pnpm install
           pnpm run build

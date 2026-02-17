@@ -365,7 +365,7 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
     // If we get an unauthorized error, try refreshing the token and retrying the request once
     if (response?.error && response.error.code === 401) {
       // Refresh failed with 401. No point in trying it again
-      if (method === "auth.refresh") {
+      if (method.startsWith("auth.")) {
         console.warn("Token refresh failed");
         this.token = null;
         throw new Error(`RPC Error ${response.error.code}: ${response.error.message}`, {cause: AUTH_FAIL});
@@ -381,7 +381,7 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
           },
         ) as RpcResponse<AuthLoginResponse>;
         if (refreshResp.error) {
-          throw new Error(`Auth refresh failed: ${refreshResp.error.code} - ${refreshResp.error.message}`, {cause: AUTH_FAIL});
+          throw new Error(`Auth refresh failed: ${refreshResp.error.code} - ${refreshResp.error.message}`, {cause: refreshResp.error});
         }
 
         this.token = refreshResp.result.token;

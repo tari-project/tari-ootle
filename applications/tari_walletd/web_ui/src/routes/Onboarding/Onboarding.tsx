@@ -29,41 +29,47 @@ import Grid from "@mui/material/Grid";
 import Typography from "@mui/material/Typography";
 import { useTheme } from "@mui/material/styles";
 import Loading from "@components/Loading";
-import { refreshAccountsBalances, useAccountsCreate, useAccountsGetDefault } from "@api/hooks/useAccounts";
+import { useAccountsCreate, useAccountsGetDefault } from "@api/hooks/useAccounts";
 import useAccountStore from "@store/accountStore";
 import useAuthStore from "@store/authStore";
 
 function Onboarding() {
-  console.log("Onboarding rendered");
   const { mutate, isPending } = useAccountsCreate();
   const { account, setAccount, setOotleAddress, setPopup } = useAccountStore();
   const theme = useTheme();
   const [accountFormState, setAccountFormState] = useState({
     accountName: "",
   });
-  const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
+  const { data: defaultAccount, isLoading, error, refetch } = useAccountsGetDefault(false);
   const authStore = useAuthStore();
 
   useEffect(() => {
+    refetch();
     if (defaultAccount) {
       setAccount(defaultAccount.account);
       setOotleAddress(defaultAccount.address);
     }
   }, [account, defaultAccount]);
 
-  // Handle 401 errors by redirecting to onboarding and marking the user as logged out
+  // Handle 401 errors by marking the user as logged out
   // TODO: figure out how to do this for every request
-  if (error && (error.cause as any)?.status === 401) {
+  if (error && (error.cause as any)?.code === 401) {
     console.error(error, "Not logged in or session expired");
     authStore.setLoggedIn(false);
-    return <Navigate replace to={"/"} />;
+    return <Loading />;
+  }
+
+  // Any error other than not found, display it.
+  if (error && (error.cause as any)?.code !== 404) {
+    console.error(error);
+    return <Typography variant="h6">Error loading account: {error.message}</Typography>;
   }
 
   if (isLoading) {
     return <Loading />;
   }
 
-  if (defaultAccount) {
+  if (defaultAccount || account) {
     return <Navigate replace to={"/"} />;
   }
 

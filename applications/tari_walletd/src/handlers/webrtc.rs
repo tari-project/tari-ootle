@@ -17,7 +17,7 @@ use tari_wallet_daemon_client::{
 };
 
 use super::HandlerContext;
-use crate::webrtc::webrtc_start_session;
+use crate::{server::ApplicationErrorCode, webrtc::webrtc_start_session};
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::json_rpc";
 
@@ -32,7 +32,7 @@ pub fn handle_start(
         JsonRpcResponse::error(
             answer_id.clone(),
             JsonRpcError::new(
-                JsonRpcErrorReason::ApplicationError(401),
+                JsonRpcErrorReason::ApplicationError(ApplicationErrorCode::Unauthorized as i32),
                 format!("Not authorized: {e}"),
                 serde_json::Value::Null,
             ),

@@ -318,10 +318,12 @@ export const refreshAccountsBalances = () => {
   });
 };
 
-export const useAccountsGetDefault = (refetch: boolean = false) => {
+export const useAccountsGetDefault = (enabled: boolean = true) => {
   return useQuery({
+    enabled,
     queryKey: ["accounts_get_default"],
     queryFn: () => accountsGetDefault({}),
+    staleTime: 0,
     refetchInterval: false,
     refetchOnMount: "always",
     notifyOnChangeProps: ["data", "error"],

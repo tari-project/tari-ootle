@@ -23,17 +23,18 @@ export function AuthNone() {
       client.setToken(token);
     }
 
-    if (!loggedIn) {
+    if (!loggedIn && !error) {
       authenticate()
         .then(() => {
           setLoggedIn(true);
-          navigate(redirect);
+          navigate(redirect, { replace: true });
         })
         .catch((error) => {
+          setLoggedIn(false);
           setError(error);
         });
     }
-  }, [loggedIn]);
+  }, [loggedIn, error]);
 
   if (error) {
     return <div>Error: {error.message}</div>;

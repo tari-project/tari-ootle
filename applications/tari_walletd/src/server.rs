@@ -312,7 +312,7 @@ fn resolve_any_error(answer_id: axum_jrpc::Id, e: &anyhow::Error) -> JsonRpcResp
         JsonRpcResponse::error(
             answer_id,
             JsonRpcError::new(
-                JsonRpcErrorReason::ApplicationError(401),
+                JsonRpcErrorReason::ApplicationError(ApplicationErrorCode::Unauthorized as i32),
                 error.to_string(),
                 serde_json::Value::Null,
             ),
@@ -333,6 +333,7 @@ fn resolve_any_error(answer_id: axum_jrpc::Id, e: &anyhow::Error) -> JsonRpcResp
 pub enum ApplicationErrorCode {
     NotFound = 404,
     InvalidRequest = 400,
+    Unauthorized = 401,
     TransactionRejected = 1000,
     GeneralError = 500,
 }

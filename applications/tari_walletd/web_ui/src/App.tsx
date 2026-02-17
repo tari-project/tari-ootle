@@ -161,6 +161,7 @@ const GuardedRoute = ({ component: Component, redirect = "/", ...rest }: Guarded
   }
 
   if (!hasToken || !loggedIn) {
+    console.log(`User not authenticated, redirecting to auth method: ${authMethod.method}`);
     return <Navigate replace to={`/auth/${authMethod.method}?redirect=${redirect}`} />;
   }
 

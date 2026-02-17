@@ -13,6 +13,7 @@ pub const WALLET_DAEMON_AUTH_SETTINGS_KEY: &str = "wallet_daemon_auth";
 pub const WALLET_DAEMON_SEED_WORDS_SETTINGS_KEY: &str = "wallet_daemon_seed_words";
 pub const WALLET_DAEMON_INDEXER_URL_SETTINGS_KEY: &str = "indexer_url";
 pub const OVERRIDE_KEYRING_PASSWORD_SETTINGS_KEY: &str = "override_keyring_password";
+pub const ENABLE_VITE_DEV_SETTINGS_KEY: &str = "enable_vite_dev";
 const ARGS_SETTINGS_KEY: &str = "args";
 const WALLET_DAEMON_AUTH_DEFAULT: &str = "none";
 
@@ -36,8 +37,8 @@ impl ProcessDefinition for WalletDaemon {
 
         let json_rpc_address = format!("{listen_ip}:{jrpc_port}");
         let vite_dev_port = context
-            .get_setting("enable_vite_dev")
-            .and_then(|s| u16::from_str_radix(s, 10).ok());
+            .get_setting(ENABLE_VITE_DEV_SETTINGS_KEY)
+            .and_then(|s| s.parse::<u16>().ok());
 
         let indexer_url = context
             .get_setting(WALLET_DAEMON_INDEXER_URL_SETTINGS_KEY)

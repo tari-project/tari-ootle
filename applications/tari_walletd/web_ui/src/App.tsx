@@ -42,7 +42,7 @@ import { ErrorNotificationProvider } from "./contexts/ErrorNotificationContext";
 import Loading from "@components/Loading";
 import Onboarding from "@routes/Onboarding/Onboarding";
 import MyAssets from "@routes/AssetVault/Components/MyAssets";
-import { getClientInstance } from "@utils/json_rpc";
+import { getClientInstance, isValidJwt } from "@utils/json_rpc";
 import { AuthNone } from "@routes/AuthNone";
 import useAuthStore from "@store/authStore";
 
@@ -138,13 +138,16 @@ interface GuardedRouteProps {
 
 // @ts-ignore
 const GuardedRoute = ({ component: Component, redirect = "/", ...rest }: GuardedRouteProps) => {
-  const { loggedIn } = useAuthStore();
+  const { loggedIn, setLoggedIn } = useAuthStore();
   const { data: authMethod, isError: authMethodsIsError, error: authMethodsError, isLoading } = useAuthMethod();
   const [hasToken, setHasToken] = useState<boolean | null>(null);
 
   useEffect(() => {
     getClientInstance().then((client) => {
-      setHasToken(client.isAuthenticated());
+      let token = client.getToken();
+      const isAuthenticated = Boolean(token) && isValidJwt(token);
+      setHasToken(isAuthenticated);
+      setLoggedIn(isAuthenticated);
     });
   }, []);
 
@@ -171,7 +174,6 @@ function App() {
         <Route path="/" element={<Layout />}>
           <Route index element={<GuardedRoute component={MyAssets} />} />
           <Route path="onboarding" element={<GuardedRoute component={Onboarding} />} />
-          {/*<Route path="auth" element={<Auth />} />*/}
           <Route path="auth/webauthn" element={<Webauthn />} />
           <Route path="auth/none" element={<AuthNone />} />
           <Route path="accounts" element={<GuardedRoute redirect="/accounts" component={Accounts} />} />

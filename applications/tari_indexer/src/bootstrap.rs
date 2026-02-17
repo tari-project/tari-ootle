@@ -25,7 +25,6 @@ use std::{fs, io, str::FromStr, sync::Arc};
 use anyhow::{Context, anyhow};
 use libp2p::identity;
 use log::warn;
-use minotari_app_utilities::identity_management;
 use ootle_byte_type::ToByteType;
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common::configuration::bootstrap::{ApplicationType, grpc_default_port};
@@ -48,10 +47,10 @@ use tari_indexer_client::event::IndexerEvent;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_ootle_app_utilities::{
     claim_burn_proof_verifier::TariClaimBurnProofVerifier,
-    common::verify_correct_network,
     configuration::convert_network_to_l1_network,
     epoch_oracle_config::EpochOracleType,
     fee_tables::get_fee_table_by_network,
+    identity_management,
     keypair::RistrettoKeypair,
     seed_peer::SeedPeer,
     shared_consts::TXTR_FAUCET_INITIAL_SUPPLY,
@@ -68,6 +67,7 @@ use crate::{
     ApplicationConfig,
     IndexerEpochManagerSpec,
     Noop,
+    base_layer::verify_correct_network,
     dry_run::processor::DryRunTransactionProcessor,
     network_client::TariNetworkClient,
     network_state_sync,

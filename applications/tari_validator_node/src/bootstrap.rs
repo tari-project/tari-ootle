@@ -26,7 +26,6 @@ use anyhow::{Context, anyhow};
 use futures::{FutureExt, future};
 use libp2p::identity;
 use log::*;
-use minotari_app_utilities::identity_management;
 use ootle_byte_type::ToByteType;
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common::{
@@ -56,10 +55,10 @@ use tari_epoch_oracles::{
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_ootle_app_utilities::{
     claim_burn_proof_verifier::TariClaimBurnProofVerifier,
-    common::verify_correct_network,
     configuration::convert_network_to_l1_network,
     epoch_oracle_config::{BaseLayerOracleConfig, EpochOracleType},
     fee_tables::get_fee_table_by_network,
+    identity_management,
     keypair::RistrettoKeypair,
     seed_peer::SeedPeer,
     transaction_executor::TariTransactionProcessor,
@@ -84,6 +83,7 @@ use crate::{
     ApplicationConfig,
     ValidatorNodeEpochManagerSpec,
     ValidatorNodeStateStore,
+    base_layer::verify_correct_network,
     consensus::{self, ConsensusHandle, TarBlockTransactionExecutor, ValidationContext},
     file_l1_submitter::FileLayerOneSubmitter,
     genesis_state::create_genesis_state,

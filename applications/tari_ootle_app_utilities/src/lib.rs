@@ -21,11 +21,12 @@
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 pub mod claim_burn_proof_verifier;
-pub mod common;
+pub mod common_cli_args;
 pub mod configuration;
 pub mod epoch_oracle_config;
 pub mod fee_tables;
 pub mod genesis_resources;
+pub mod identity_management;
 pub mod keypair;
 pub mod p2p_config;
 pub mod seed_peer;

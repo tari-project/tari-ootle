@@ -23,11 +23,10 @@
 use std::{net::SocketAddr, path::PathBuf};
 
 use clap::{Args, Parser};
-use minotari_app_utilities::common_cli_args::CommonCliArgs;
 use tari_common::configuration::{ConfigOverrideProvider, Network as L1Network};
 use tari_common_types::seeds::seed_words::SeedWords;
 use tari_crypto::tari_utilities::SafePassword;
-use tari_ootle_app_utilities::configuration::convert_l1_network_to_network;
+use tari_ootle_app_utilities::{common_cli_args::CommonCliArgs, configuration::convert_l1_network_to_network};
 use tari_ootle_common_types::Network;
 use url::Url;
 

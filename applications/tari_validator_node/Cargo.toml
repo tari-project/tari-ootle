@@ -15,7 +15,6 @@ tokio_debug = ["console-subscriber"]
 web_ui = []
 
 [dependencies]
-minotari_app_utilities = { workspace = true }
 tari_common = { workspace = true }
 tari_common_types = { workspace = true }
 tari_transaction_components = { workspace = true }

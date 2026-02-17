@@ -18,8 +18,6 @@
     "@reown/walletkit": "^1.2.10",
     "@tanstack/react-query": "^5.85.7",
     "@tanstack/react-query-devtools": "^5.85.7",
-    "@tari-project/tari-extension-common": "^0.0.14",
-    "@tari-project/tari-extension-query-builder": "^0.0.15",
     "@tari-project/tari-permissions": "0.14.4",
     "@tari-project/ootle-ts-bindings": "link:../../../bindings",
     "@tari-project/wallet_jrpc_client": "workspace:*",

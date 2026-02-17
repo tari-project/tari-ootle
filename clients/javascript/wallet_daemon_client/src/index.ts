@@ -386,9 +386,9 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
         this.token = refreshResp.result.token;
       } catch (err) {
-        console.warn("Token refresh failed, clearing token and returning original error", err);
+        console.warn("Token refresh failed, clearing token", err);
         this.token = null;
-        throw new Error(`RPC Error ${response.error.code}: ${response.error.message}`, {cause: AUTH_FAIL});
+        throw err;
       }
 
       // Retry the original request with the new token

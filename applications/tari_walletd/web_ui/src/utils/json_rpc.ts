@@ -137,12 +137,6 @@ export const isValidJwt = (token?: string | null) => {
   }
 };
 
-export async function setClientAuthToken(token: string) {
-  const client = await getClientInstance();
-  client.setToken(token);
-  return false;
-}
-
 export async function getClientInstance(): Promise<WalletDaemonClient> {
   if (clientInstance) {
     return clientInstance;

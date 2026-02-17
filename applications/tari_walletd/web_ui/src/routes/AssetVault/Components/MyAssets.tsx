@@ -40,28 +40,32 @@ import { Navigate } from "react-router-dom";
 import useAuthStore from "@store/authStore";
 
 function MyAssets() {
+  console.log("MyAssets rendered");
   const theme = useTheme();
   const { account, setAccount, setOotleAddress } = useAccountStore();
-  const { data: defaultAccount, error } = useAccountsGetDefault();
+  const { data: defaultAccount, error, refetch } = useAccountsGetDefault(false);
   const refreshBalances = refreshAccountsBalances();
   const authStore = useAuthStore();
 
   useEffect(() => {
+    refetch();
+
     if (!account && defaultAccount) {
       setAccount(defaultAccount.account);
       setOotleAddress(defaultAccount.address);
     }
   }, [account, defaultAccount]);
 
-  // Handle 401 errors by redirecting to onboarding and marking the user as logged out
+  // Handle 401 errors by marking the user as logged out
   // TODO: figure out how to do this for every request
-  if (error && (error.cause as any)?.status === 401) {
+  if (error && (error.cause as any)?.code === 401) {
     console.error(error, "Not logged in or session expired");
     authStore.setLoggedIn(false);
-    return <Navigate replace to={"/"} />;
+    return <Loading />;
   }
 
-  if (error) {
+  // Default account not found. Redirect to onboarding
+  if (error && (error.cause as any)?.code === 404) {
     console.error(error);
     // authStore.clearToken();
     return <Navigate replace to={"/onboarding"} />;

@@ -26,7 +26,11 @@ use tari_wallet_daemon_client::{
 
 use crate::{
     config::WalletDaemonAuth,
-    handlers::{HandlerContext, auth::Authenticator, helpers::invalid_request},
+    handlers::{
+        HandlerContext,
+        auth::Authenticator,
+        helpers::{invalid_request, unauthorized},
+    },
 };
 
 pub const REFRESH_TOKEN_COOKIE: &str = "r-tkn";
@@ -60,20 +64,20 @@ pub async fn handle_token_refresh(
 ) -> Result<AuthLoginResponse, anyhow::Error> {
     let refresh_token = cookies
         .as_ref()
-        .ok_or_else(|| invalid_request("No cookies"))?
+        .ok_or_else(|| unauthorized("No cookies"))?
         .get(REFRESH_TOKEN_COOKIE)
-        .ok_or_else(|| invalid_request("No refresh token"))?;
+        .ok_or_else(|| unauthorized("No refresh token"))?;
     let Some(claim) = context
         .refresh_token_store()
         .validate_token_str(refresh_token.value())
         .await
     else {
-        return Err(invalid_request("Invalid refresh token"));
+        return Err(unauthorized("Invalid or expired refresh token"));
     };
 
     let jwt = context.jwt_api();
-    let claims = jwt.generate_auth_claims(claim.permissions)?;
-    let permissions_token = jwt.grant(&claims)?;
+    let claims = jwt.generate_auth_claims(claim.permissions).map_err(unauthorized)?;
+    let permissions_token = jwt.grant(&claims).map_err(unauthorized)?;
     context.notifier().notify(AuthLoginRequestEvent);
     Ok(AuthLoginResponse {
         token: permissions_token,

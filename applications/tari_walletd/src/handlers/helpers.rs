@@ -177,6 +177,13 @@ pub(super) fn invalid_request<T: Display>(details: T) -> anyhow::Error {
     )
 }
 
+pub(super) fn unauthorized<T: Display>(details: T) -> anyhow::Error {
+    application_error(
+        ApplicationErrorCode::InvalidRequest,
+        format!("Invalid request: {details}"),
+    )
+}
+
 pub(super) fn transaction_rejected<T: Display>(details: T) -> anyhow::Error {
     application_error(
         ApplicationErrorCode::TransactionRejected,

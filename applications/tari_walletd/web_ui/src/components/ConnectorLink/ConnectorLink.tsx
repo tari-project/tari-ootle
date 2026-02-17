@@ -48,7 +48,6 @@ const ConnectorDialog = () => {
   const [signalingServerJWT, setSignalingServerJWT] = useState("");
   const [permissions, setPermissions] = useState([]);
   const [optionalPermissions, setOptionalPermissions] = useState([]);
-  const [name, setName] = useState("");
   const [chosenOptionalPermissions, setChosenOptionalPermissions] = useState<boolean[]>([]);
   const [activeStep, setActiveStep] = useState(0);
   const linkRef = useRef<HTMLInputElement>(null);
@@ -58,7 +57,7 @@ const ConnectorDialog = () => {
     const re = /tari:\/\/([^\\]*)\/([a-zA-Z0-9\-_]+\.[a-zA-Z0-9\-_]+\.[a-zA-Z0-9\-_]+)\/(.*)\/(.*)/i;
     let groups;
     if ((groups = re.exec(value))) {
-      setName(decodeURIComponent(groups[1]));
+      // setName(decodeURIComponent(groups[1]));
       setSignalingServerJWT(groups[2]);
       setPermissions(JSON.parse(groups[3]).map((permission: any) => parse(permission)));
       setOptionalPermissions(JSON.parse(groups[4]).map((permission: any) => parse(permission)));
@@ -112,7 +111,6 @@ const ConnectorDialog = () => {
     webrtcStart({
       signaling_server_token: signalingServerJWT,
       permissions: allowedPermissions,
-      name: name,
     }).then((resp) => {
       setPage(page + 1);
     });
@@ -199,15 +197,6 @@ const ConnectorDialog = () => {
       case 3:
         return (
           <div className="dialog-inner">
-            Name
-            <input
-              name="Name"
-              id="name"
-              autoFocus={true}
-              placeholder="Name the token e.g. 'that website'"
-              defaultValue={name}
-            />
-            {/* <TextField name="name" label="Name" inputRef={linkRef} fullWidth /> */}
             <DialogActions>
               <Button onClick={handleClose} variant="outlined">
                 Cancel

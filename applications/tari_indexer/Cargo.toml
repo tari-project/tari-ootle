@@ -16,7 +16,6 @@ name = "indexer-gen-openapi"
 path = "src/bin/indexer_gen_openapi.rs"
 
 [dependencies]
-minotari_app_utilities = { workspace = true }
 tari_base_node_client = { workspace = true }
 tari_bor = { workspace = true }
 tari_common = { workspace = true }

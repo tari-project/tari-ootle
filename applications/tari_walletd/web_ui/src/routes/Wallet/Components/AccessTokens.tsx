@@ -47,11 +47,15 @@ import { IoCloseCircleOutline } from "react-icons/io5";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import { AccordionIconButton, CodeBlock, DataTableCell } from "@components/StyledComponents";
 import { useAuthRevokeToken, useGetAllTokens } from "@api/hooks/useTokens";
-import type { Claims, JrpcPermission, JrpcPermissions } from "@tari-project/ootle-ts-bindings";
+import type {
+  AuthSessionInfo,
+  JrpcPermission,
+  JrpcPermissions,
+  RefreshTokenHash,
+} from "@tari-project/ootle-ts-bindings";
 import { jrpcPermissionToString } from "@tari-project/ootle-ts-bindings";
-import CopyAddress from "@components/CopyAddress";
 
-function AlertDialog({ fn, row }: any) {
+function AlertDialog({ fn }: any) {
   const [open, setOpen] = useState(false);
 
   const handleClickOpen = () => {
@@ -101,11 +105,11 @@ export default function AccessTokens() {
   const { data, isLoading, error, isError } = useGetAllTokens();
   const { mutate } = useAuthRevokeToken();
 
-  const handleRevoke = async (id: number) => {
+  const handleRevoke = async (id: RefreshTokenHash) => {
     mutate(id);
   };
 
-  const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - (data?.jwt.length || 0)) : 0;
+  const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - (data?.sessions.length || 0)) : 0;
 
   const handleChangePage = (_event: unknown, newPage: number) => {
     setPage(newPage);
@@ -118,12 +122,10 @@ export default function AccessTokens() {
 
   function RowData({
     id,
-    name,
     permissions,
     formattedDate,
   }: {
-    id: number;
-    name: string;
+    id: RefreshTokenHash;
     permissions: JrpcPermissions;
     formattedDate: string;
   }) {
@@ -144,13 +146,6 @@ export default function AccessTokens() {
               borderBottom: "none",
             }}
           >
-            <CopyAddress address={name} />
-          </DataTableCell>
-          <DataTableCell
-            style={{
-              borderBottom: "none",
-            }}
-          >
             {formattedDate}
           </DataTableCell>
           <DataTableCell sx={{ borderBottom: "none", textAlign: "center" }}>
@@ -165,7 +160,7 @@ export default function AccessTokens() {
             </AccordionIconButton>
           </DataTableCell>
           <DataTableCell sx={{ borderBottom: "none", textAlign: "center" }}>
-            <AlertDialog fn={() => handleRevoke(id)} row={name} />
+            <AlertDialog fn={() => handleRevoke(id)} />
           </DataTableCell>
         </TableRow>
         <TableRow>
@@ -201,7 +196,6 @@ export default function AccessTokens() {
             <TableHead>
               <TableRow>
                 <TableCell>ID</TableCell>
-                <TableCell>Token Name</TableCell>
                 <TableCell>Expiry Date</TableCell>
                 <TableCell align="center">Permissions</TableCell>
                 <TableCell width="100" align="center">
@@ -210,14 +204,12 @@ export default function AccessTokens() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {data?.jwt
+              {data?.sessions
                 ?.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-                .map(({ id, name, permissions, exp }: Claims) => {
+                .map(({ id, permissions, exp }: AuthSessionInfo) => {
                   const date = new Date(Number(exp) * 1000);
                   const formattedDate = `${date.toISOString().slice(0, 10)} ${date.toISOString().slice(11, 16)}`;
-                  return (
-                    <RowData key={id} id={id} name={name} permissions={permissions} formattedDate={formattedDate} />
-                  );
+                  return <RowData key={id} id={id} permissions={permissions} formattedDate={formattedDate} />;
                 })}
 
               {emptyRows > 0 && (
@@ -227,11 +219,11 @@ export default function AccessTokens() {
               )}
             </TableBody>
           </Table>
-          {data?.jwt && (
+          {data?.sessions && (
             <TablePagination
               rowsPerPageOptions={[10, 25, 50]}
               component="div"
-              count={data.jwt.length}
+              count={data.sessions.length}
               rowsPerPage={rowsPerPage}
               page={page}
               onPageChange={handleChangePage}

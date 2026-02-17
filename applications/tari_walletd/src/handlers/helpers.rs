@@ -18,7 +18,7 @@ use tari_template_lib_types::ComponentAddress;
 use tari_wallet_daemon_client::ComponentAddressOrName;
 use tokio::sync::broadcast;
 
-use crate::jrpc_server::ApplicationErrorCode;
+use crate::server::ApplicationErrorCode;
 
 pub async fn wait_for_result(
     events: &mut broadcast::Receiver<WalletEvent>,

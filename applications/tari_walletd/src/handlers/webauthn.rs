@@ -1,7 +1,9 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use axum_extra::headers::authorization::Bearer;
+use axum_extra::{extract::CookieJar, headers::authorization::Bearer};
+use axum_jrpc::JsonRpcResponse;
+use tari_ootle_wallet_sdk::models::AuthLoginRequestEvent;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_wallet_daemon_client::types::{
     WebauthnAlreadyRegisteredRequest,
@@ -17,7 +19,7 @@ use uuid::Uuid;
 use webauthn_rs::Webauthn;
 
 use crate::{
-    handlers::{HandlerContext, helpers::invalid_request},
+    handlers::{HandlerContext, auth::REFRESH_TOKEN_COOKIE, helpers::invalid_request},
     services::WebauthnService,
 };
 
@@ -83,8 +85,9 @@ pub async fn handle_start_registration(
 pub async fn handle_finish_registration(
     context: &HandlerContext,
     _token: Option<&Bearer>,
-    request: WebauthnFinishRegisterRequest,
-) -> Result<WebauthnFinishRegisterResponse, anyhow::Error> {
+    request: (axum_jrpc::Id, WebauthnFinishRegisterRequest),
+) -> Result<(CookieJar, JsonRpcResponse), anyhow::Error> {
+    let (answer_id, request) = request;
     let webauthn = webauthn(context)?;
     let webauthn_service = webauthn_service(context)?;
     let session_data = webauthn_service.get_session(&request.session_id).await?;
@@ -93,7 +96,21 @@ pub async fn handle_finish_registration(
     webauthn_service
         .finish_registration(request.session_id, passkey)
         .await?;
-    Ok(WebauthnFinishRegisterResponse {})
+
+    let jwt = context.jwt_api();
+    let claims = jwt.generate_auth_claims(request.requested_permissions.into())?;
+    let token = jwt.grant(&claims)?;
+    let refresh_token = context
+        .refresh_token_store()
+        .new_token(claims.permissions, claims.exp)
+        .await;
+    let refresh_cookie = refresh_token.into_cookie(REFRESH_TOKEN_COOKIE);
+    let cookie = CookieJar::new().add(refresh_cookie);
+    context.notifier().notify(AuthLoginRequestEvent);
+    Ok((
+        cookie,
+        JsonRpcResponse::success(answer_id, WebauthnFinishRegisterResponse { token }),
+    ))
 }
 
 pub async fn handle_start_auth(

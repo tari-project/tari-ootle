@@ -1,6 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::time::Duration;
+
 use axum_extra::headers::authorization::Bearer;
 use tari_ootle_transaction::{Transaction, TransactionBuilder};
 use tari_ootle_wallet_sdk::models::WalletEvent;
@@ -11,6 +13,7 @@ use tari_ootle_wallet_sdk_services::{
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_shutdown::ShutdownSignal;
+use tari_utilities::SafePassword;
 use tari_wallet_daemon_client::permissions::JrpcPermission;
 use webauthn_rs::Webauthn;
 
@@ -21,7 +24,7 @@ use crate::{
         WalletAuthenticator,
         jwt::{JwtApi, JwtApiError},
     },
-    services::WebauthnService,
+    services::{RefreshTokenStore, WebauthnService},
 };
 
 #[derive(Debug, Clone)]
@@ -31,7 +34,9 @@ pub struct HandlerContext {
     transaction_service: TransactionServiceHandle,
     account_monitor: AccountMonitorHandle,
     config: WalletDaemonConfig,
+    jwt_secret: SafePassword,
     authenticator: WalletAuthenticator,
+    refresh_token_store: RefreshTokenStore,
     shutdown_signal: ShutdownSignal,
 }
 
@@ -43,6 +48,7 @@ impl HandlerContext {
         account_monitor: AccountMonitorHandle,
         config: WalletDaemonConfig,
         authenticator: WalletAuthenticator,
+        jwt_secret: SafePassword,
         shutdown_signal: ShutdownSignal,
     ) -> Self {
         Self {
@@ -52,6 +58,8 @@ impl HandlerContext {
             account_monitor,
             config,
             authenticator,
+            refresh_token_store: RefreshTokenStore::new(Duration::from_secs(60 * 60)),
+            jwt_secret,
             shutdown_signal,
         }
     }
@@ -68,12 +76,8 @@ impl HandlerContext {
         self.jwt_api().check_auth(token, permissions)
     }
 
-    pub fn jwt_api(&self) -> JwtApi<'_, SqliteWalletStore> {
-        JwtApi::new(
-            self.wallet_sdk.store(),
-            self.config().jwt_expiry,
-            &self.config().jwt_secret_key,
-        )
+    pub fn jwt_api(&self) -> JwtApi<'_> {
+        JwtApi::new(self.config().jwt_expiry, &self.jwt_secret)
     }
 
     pub fn shutdown_signal(&self) -> &ShutdownSignal {
@@ -94,6 +98,10 @@ impl HandlerContext {
 
     pub fn authenticator(&self) -> &WalletAuthenticator {
         &self.authenticator
+    }
+
+    pub fn refresh_token_store(&self) -> &RefreshTokenStore {
+        &self.refresh_token_store
     }
 
     pub fn webauthn_service(&self) -> Option<&WebauthnService<SqliteWalletStore>> {

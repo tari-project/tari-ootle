@@ -69,10 +69,11 @@ function NetworkSettings() {
   const [network, setNetwork] = useState("");
 
   useEffect(() => {
+    if (network) return;
     settingsGet().then((res) => {
       setNetwork(res.network.name);
     });
-  }, []);
+  }, [network]);
 
   return <Typography>{network}</Typography>;
 }

@@ -78,6 +78,11 @@ impl AllocatedPorts {
         self.current_port.fetch_add(1, atomic::Ordering::SeqCst)
     }
 
+    /// Prefer get_or_next_port for most use cases, but this can be used to set a specific port for a name.
+    pub fn set_port(&mut self, name: &'static str, port: u16) {
+        self.ports.insert(name, port);
+    }
+
     pub async fn get_or_next_port(&mut self, name: &'static str) -> u16 {
         if let Some(port) = self.ports.get(name) {
             return *port;

@@ -33,7 +33,6 @@ impl WalletDaemonProcess {
         let AuthLoginResponse { token } = client
             .auth_request(AuthLoginRequest {
                 permissions: vec!["Admin".parse()?],
-                name: "Testing Token".to_string(),
                 credentials: webauthn_finish_auth_request
                     .map(|r| AuthCredentials::WebAuthN(Box::new(r)))
                     .unwrap_or(AuthCredentials::None),

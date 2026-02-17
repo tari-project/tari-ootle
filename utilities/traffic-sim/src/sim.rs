@@ -62,7 +62,6 @@ impl Wallet {
         let resp = client
             .auth_request(AuthLoginRequest {
                 permissions: vec!["Admin".parse()?],
-                name: "sim".to_string(),
                 credentials: AuthCredentials::None,
             })
             .await?;

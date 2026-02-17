@@ -33,7 +33,7 @@ use config::Config;
 use serde::{Deserialize, Serialize};
 use tari_common::{ConfigurationError, DefaultConfigLoader, SubConfigPath, configuration::CommonConfig};
 use tari_crypto::tari_utilities::SafePassword;
-use tari_ootle_common_types::{Network, crypto::create_secret_password};
+use tari_ootle_common_types::Network;
 use url::Url;
 
 #[derive(Debug, Clone)]
@@ -65,9 +65,8 @@ pub struct WalletDaemonConfig {
     /// Authentication method.
     pub authentication: WalletDaemonAuth,
     /// The wallet daemon listening address
-    pub json_rpc_address: Option<SocketAddr>,
-    /// The public URL to JSON-RPC server used by the web UI. If not specified, the json_rpc_address is used.
-    pub web_ui_public_json_rpc_url: Option<String>,
+    #[serde(default = "return_default_rpc_address")]
+    pub json_rpc_address: SocketAddr,
     /// The signaling server address for the webrtc
     pub signaling_server_address: Option<SocketAddr>,
     /// The indexer API url
@@ -76,11 +75,9 @@ pub struct WalletDaemonConfig {
     #[serde(with = "humantime_serde")]
     #[serde(default = "return_default_jwt_expiry")]
     pub jwt_expiry: Duration,
-    /// Secret key for the JWT token.
-    #[serde(default = "create_secret_password")]
-    pub jwt_secret_key: SafePassword,
-    /// The address of the Web UI
-    pub web_ui_address: Option<SocketAddr>,
+    /// If true, the wallet daemon will allow CORS requests from any origin. This is useful for development and
+    /// testing, but should be disabled in production.
+    pub enable_permissive_cors: bool,
     pub webauthn: WebAuthnConfig,
     /// The path to the value lookup table binary file used for brute force value lookups. This setting
     /// is only used when attempting to view confidential balances in confidential resources that use a view key
@@ -96,7 +93,11 @@ pub struct WalletDaemonConfig {
 
 fn return_default_jwt_expiry() -> Duration {
     // Suggested expiry for access tokens is between 5min and 1h
-    Duration::from_secs(15 * 60)
+    Duration::from_secs(5 * 60)
+}
+
+fn return_default_rpc_address() -> SocketAddr {
+    SocketAddr::from(([127u8, 0, 0, 1], 5100))
 }
 
 impl Default for WalletDaemonConfig {
@@ -105,15 +106,13 @@ impl Default for WalletDaemonConfig {
             override_from: None,
             network: Network::Igor,
             authentication: WalletDaemonAuth::default(),
-            json_rpc_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9000))),
-            web_ui_public_json_rpc_url: None,
+            json_rpc_address: return_default_rpc_address(),
             signaling_server_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9100))),
             indexer_api_url: "http://127.0.0.1:18300"
                 .parse()
                 .expect("failed to parse default indexer_api_url"),
             jwt_expiry: return_default_jwt_expiry(),
-            jwt_secret_key: create_secret_password(),
-            web_ui_address: Some("127.0.0.1:5100".parse().unwrap()),
+            enable_permissive_cors: false,
             value_lookup_table_file: None,
             recovery_abandon_count: 10,
             webauthn: WebAuthnConfig {

@@ -18,16 +18,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    auth_status (id) {
-        id -> Integer,
-        user_decided -> Bool,
-        granted -> Bool,
-        token -> Nullable<Text>,
-        revoked -> Bool,
-    }
-}
-
-diesel::table! {
     authored_templates (id) {
         id -> Integer,
         author_public_key -> Text,
@@ -289,7 +279,6 @@ diesel::joinable!(webauthn_registration_passkeys -> webauthn_registrations (regi
 
 diesel::allow_tables_to_appear_in_same_query!(
     accounts,
-    auth_status,
     authored_templates,
     confidential_outputs,
     config,

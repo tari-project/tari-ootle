@@ -3,7 +3,7 @@
  * //  SPDX-License-Identifier: BSD-3-Clause
  */
 
-import { RpcRequest, RpcTransport, RpcTransportOptions } from "./index";
+import { RpcRequest, RpcResponse, RpcTransport, RpcTransportOptions } from "./index";
 
 export default class FetchRpcTransport implements RpcTransport {
   private url: string;
@@ -16,7 +16,7 @@ export default class FetchRpcTransport implements RpcTransport {
     return new FetchRpcTransport(url);
   }
 
-  async sendRequest<T>(data: RpcRequest, options: RpcTransportOptions): Promise<T> {
+  async sendRequest<T>(data: RpcRequest, options?: RpcTransportOptions): Promise<RpcResponse<T>> {
     const headers = {
       "Content-Type": "application/json",
     };
@@ -27,7 +27,7 @@ export default class FetchRpcTransport implements RpcTransport {
     let controller = new AbortController();
     let signal = controller.signal;
 
-    const timeoutId = options.timeout_millis
+    const timeoutId = options?.timeout_millis
       ? setTimeout(() => {
         controller.abort("Timeout");
       }, options.timeout_millis)
@@ -43,14 +43,13 @@ export default class FetchRpcTransport implements RpcTransport {
       clearTimeout(timeoutId);
     }
 
+    // HTTP errors are handled in the transport layer
     if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`HTTP ${response.status}: ${response.statusText}${text ? ` - ${text}` : ""}`);
+      const errorText = await response.text();
+      throw new Error(`HTTP error ${response.status}: ${errorText}`);
     }
-    const json = await response.json();
-    if (json.error) {
-      throw new Error(`${json.error.code}: ${json.error.message}`);
-    }
-    return json.result;
+
+    let resp = await response.json();
+    return resp;
   }
 }

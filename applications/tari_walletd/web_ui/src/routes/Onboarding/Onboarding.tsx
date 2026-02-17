@@ -31,6 +31,7 @@ import { useTheme } from "@mui/material/styles";
 import Loading from "@components/Loading";
 import { refreshAccountsBalances, useAccountsCreate, useAccountsGetDefault } from "@api/hooks/useAccounts";
 import useAccountStore from "@store/accountStore";
+import useAuthStore from "@store/authStore";
 
 function Onboarding() {
   console.log("Onboarding rendered");
@@ -41,7 +42,7 @@ function Onboarding() {
     accountName: "",
   });
   const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
-  // const authStore = useAuthStore();
+  const authStore = useAuthStore();
 
   useEffect(() => {
     if (defaultAccount) {
@@ -49,6 +50,14 @@ function Onboarding() {
       setOotleAddress(defaultAccount.address);
     }
   }, [account, defaultAccount]);
+
+  // Handle 401 errors by redirecting to onboarding and marking the user as logged out
+  // TODO: figure out how to do this for every request
+  if (error && (error.cause as any)?.status === 401) {
+    console.error(error, "Not logged in or session expired");
+    authStore.setLoggedIn(false);
+    return <Navigate replace to={"/"} />;
+  }
 
   if (isLoading) {
     return <Loading />;

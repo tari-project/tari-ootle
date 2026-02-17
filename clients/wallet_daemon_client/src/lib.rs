@@ -86,8 +86,8 @@ use crate::{
         AccountsListResponse,
         AccountsRenameRequest,
         AccountsRenameResponse,
-        AuthGetAllJwtRequest,
-        AuthGetAllJwtResponse,
+        AuthListSessionsRequest,
+        AuthListSessionsResponse,
         AuthRevokeTokenRequest,
         AuthRevokeTokenResponse,
         ClaimValidatorFeesRequest,
@@ -450,10 +450,10 @@ impl WalletDaemonClient {
         self.send_request("auth.revoke", req.borrow()).await
     }
 
-    pub async fn auth_get_all_jwt<T: Borrow<AuthGetAllJwtRequest>>(
+    pub async fn auth_list_sessions<T: Borrow<AuthListSessionsRequest>>(
         &mut self,
         req: T,
-    ) -> Result<AuthGetAllJwtResponse, WalletDaemonClientError> {
+    ) -> Result<AuthListSessionsResponse, WalletDaemonClientError> {
         self.send_request("auth.get_all_jwt", req.borrow()).await
     }
 

@@ -23,16 +23,16 @@
 pub mod cli;
 pub mod config;
 mod handlers;
-#[cfg(feature = "web_ui")]
-mod http_ui;
-mod jrpc_server;
+mod server;
 mod services;
 mod webrtc;
 
 use std::{fs, panic, pin, process};
 
+use jsonwebtoken::signature::rand_core::OsRng;
 use log::*;
 use tari_common_types::seeds::seed_words::SeedWords;
+use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
 use tari_ootle_app_utilities::genesis_resources::{get_public_identity_resource, get_stealth_tari_resource};
 use tari_ootle_common_types::{Network, NumPreshards, optional::Optional};
 use tari_ootle_wallet_sdk::{
@@ -51,6 +51,7 @@ use tari_ootle_wallet_sdk_services::{
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_shutdown::ShutdownSignal;
+use tari_utilities::{SafePassword, hex::Hex};
 
 use crate::{
     config::ApplicationConfig,
@@ -113,7 +114,7 @@ pub async fn run_tari_ootle_walletd(
         });
     }
 
-    let jrpc_address = config.ootle_wallet_daemon.json_rpc_address.unwrap();
+    let jrpc_address = config.ootle_wallet_daemon.json_rpc_address;
     let signaling_server_address = config.ootle_wallet_daemon.signaling_server_address.unwrap();
 
     // webauthn
@@ -125,6 +126,8 @@ pub async fn run_tari_ootle_walletd(
     );
     let authenticator = create_authenticator(&config.ootle_wallet_daemon, wallet_store.clone())?;
 
+    // Generate a new secret each time the daemon starts. This means that all JWT tokens will be invalidated on restart.
+    let jwt_secret = create_secret_password();
     let handlers = HandlerContext::new(
         wallet_sdk.clone(),
         notify,
@@ -132,29 +135,11 @@ pub async fn run_tari_ootle_walletd(
         services.account_monitor_handle.clone(),
         config.ootle_wallet_daemon.clone(),
         authenticator,
+        jwt_secret,
         shutdown_signal,
     );
-    let (jrpc_address, listen_fut) =
-        jrpc_server::spawn_listener(jrpc_address, signaling_server_address, handlers).await?;
+    let (_jrpc_address, listen_fut) = server::spawn_listener(jrpc_address, signaling_server_address, handlers).await?;
 
-    // Run the web ui
-    #[cfg(feature = "web_ui")]
-    if let Some(web_listener_address) = config.ootle_wallet_daemon.web_ui_address {
-        let mut public_jrpc_url = config
-            .ootle_wallet_daemon
-            .web_ui_public_json_rpc_url
-            .unwrap_or_else(|| jrpc_address.to_string());
-        if !public_jrpc_url.starts_with("http://") && !public_jrpc_url.starts_with("https://") {
-            public_jrpc_url = format!("http://{}", public_jrpc_url);
-        }
-
-        let public_jrpc_url = url::Url::parse(&public_jrpc_url)?;
-
-        tokio::spawn(http_ui::server::run_http_ui_server(
-            web_listener_address,
-            public_jrpc_url,
-        ));
-    }
     #[cfg(not(feature = "web_ui"))]
     info!(
         target: LOG_TARGET,
@@ -222,4 +207,10 @@ const fn get_epoch_birthday(network: Network) -> EpochBirthday {
         Network::Igor => EpochBirthday::far_future(),
         Network::Esmeralda => EpochBirthday::far_future(),
     }
+}
+
+fn create_secret_password() -> SafePassword {
+    let secret = RistrettoSecretKey::random(&mut OsRng);
+    // It is safe to use to_hex() since the String's underlying Vec is moved directly into SafePassword
+    SafePassword::from(secret.to_hex())
 }

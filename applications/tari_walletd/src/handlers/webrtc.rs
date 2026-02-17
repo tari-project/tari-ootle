@@ -50,18 +50,16 @@ pub fn handle_start(
         )
     })?;
     let jwt = context.jwt_api();
-    let claim = jwt
-        .generate_auth_claims(webrtc_start_request.name, permissions)
-        .map_err(|e| {
-            JsonRpcResponse::error(
-                answer_id.clone(),
-                JsonRpcError::new(
-                    JsonRpcErrorReason::InternalError,
-                    e.to_string(),
-                    serde_json::Value::Null,
-                ),
-            )
-        })?;
+    let claim = jwt.generate_auth_claims(permissions).map_err(|e| {
+        JsonRpcResponse::error(
+            answer_id.clone(),
+            JsonRpcError::new(
+                JsonRpcErrorReason::InternalError,
+                e.to_string(),
+                serde_json::Value::Null,
+            ),
+        )
+    })?;
     let permissions_token = jwt.grant(&claim).map_err(|e| {
         JsonRpcResponse::error(
             answer_id.clone(),

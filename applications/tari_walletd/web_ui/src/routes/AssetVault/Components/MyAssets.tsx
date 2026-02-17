@@ -37,13 +37,14 @@ import PageHeader from "@components/PageHeader";
 import { useEffect } from "react";
 import Loading from "@components/Loading";
 import { Navigate } from "react-router-dom";
+import useAuthStore from "@store/authStore";
 
 function MyAssets() {
   const theme = useTheme();
   const { account, setAccount, setOotleAddress } = useAccountStore();
-  const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
+  const { data: defaultAccount, error } = useAccountsGetDefault();
   const refreshBalances = refreshAccountsBalances();
-  // const authStore = useAuthStore();
+  const authStore = useAuthStore();
 
   useEffect(() => {
     if (!account && defaultAccount) {
@@ -51,6 +52,14 @@ function MyAssets() {
       setOotleAddress(defaultAccount.address);
     }
   }, [account, defaultAccount]);
+
+  // Handle 401 errors by redirecting to onboarding and marking the user as logged out
+  // TODO: figure out how to do this for every request
+  if (error && (error.cause as any)?.status === 401) {
+    console.error(error, "Not logged in or session expired");
+    authStore.setLoggedIn(false);
+    return <Navigate replace to={"/"} />;
+  }
 
   if (error) {
     console.error(error);

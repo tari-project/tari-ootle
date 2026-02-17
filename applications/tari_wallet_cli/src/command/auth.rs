@@ -21,10 +21,11 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use clap::{Args, Subcommand};
+use tari_ootle_common_types::displayable::Displayable;
 use tari_wallet_daemon_client::{
     WalletDaemonClient,
     permissions::JrpcPermission,
-    types::{AuthCredentials, AuthGetAllJwtRequest, AuthLoginRequest, AuthRevokeTokenRequest},
+    types::{AuthCredentials, AuthListSessionsRequest, AuthLoginRequest, AuthRevokeTokenRequest},
 };
 
 #[derive(Debug, Subcommand, Clone)]
@@ -37,12 +38,11 @@ pub enum AuthSubcommand {
 #[derive(Debug, Args, Clone)]
 pub struct RequestArgs {
     permissions: Vec<JrpcPermission>,
-    name: String,
 }
 
 #[derive(Debug, Args, Clone)]
 pub struct RevokeArgs {
-    permission_token_id: i32,
+    permission_token_id: String,
 }
 
 impl AuthSubcommand {
@@ -57,7 +57,6 @@ impl AuthSubcommand {
                     let _resp = client
                         .auth_request(AuthLoginRequest {
                             permissions: args.permissions,
-                            name: args.name,
                             credentials: AuthCredentials::None,
                         })
                         .await?;
@@ -67,15 +66,15 @@ impl AuthSubcommand {
             Revoke(args) => {
                 client
                     .auth_revoke(AuthRevokeTokenRequest {
-                        permission_token_id: args.permission_token_id,
+                        refresh_token_id: args.permission_token_id.parse()?,
                     })
                     .await?;
                 println!("Token revoked!");
             },
             List => {
-                let tokens = client.auth_get_all_jwt(AuthGetAllJwtRequest {}).await?;
-                for claims in &tokens.jwt {
-                    println!("Id {} name {}", claims.id, claims.name);
+                let resp = client.auth_list_sessions(AuthListSessionsRequest {}).await?;
+                for session in &resp.sessions {
+                    println!("Id {} name {}", session.id, session.permissions.display());
                 }
             },
         }

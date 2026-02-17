@@ -108,7 +108,7 @@ export default function Layout() {
   const { themeMode } = useThemeStore();
   const popup = useAccountStore((state) => state.popup);
   const setPopup = useAccountStore((state) => state.setPopup);
-  const { authToken } = useAuthStore();
+  const { loggedIn } = useAuthStore();
 
   const handleClose = () => {
     setPopup({ visible: false });
@@ -181,8 +181,8 @@ export default function Layout() {
                 <Logo fill={theme.palette.text.primary} />
               </Link>
               <Stack direction="row" spacing={1}>
-                {authToken ? <ConnectorLink /> : null}
-                {authToken ? <WalletConnectLink /> : null}
+                {loggedIn ? <ConnectorLink /> : null}
+                {loggedIn ? <WalletConnectLink /> : null}
               </Stack>
             </Box>
           </Toolbar>

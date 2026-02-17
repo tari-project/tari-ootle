@@ -15,7 +15,6 @@ tari_engine = { workspace = true }
 tari_ootle_storage = { workspace = true }
 tari_epoch_oracles = { workspace = true }
 tari_engine_types = { workspace = true }
-tari_base_node_client = { workspace = true }
 tari_template_lib = { workspace = true }
 tari_ootle_transaction = { workspace = true }
 tari_bor = { workspace = true, default-features = true }
@@ -30,6 +29,7 @@ ootle_byte_type = { workspace = true, features = ["crypto"] }
 anyhow = { workspace = true }
 blake2 = { workspace = true }
 bincode = { workspace = true, features = ["serde"] }
+clap = { workspace = true }
 libp2p-identity = { workspace = true }
 log = { workspace = true, features = ["std"] }
 multiaddr = { workspace = true }

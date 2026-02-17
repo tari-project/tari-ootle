@@ -152,6 +152,10 @@ impl<'a> ProcessContext<'a> {
         Ok(self.port_allocator.get_or_next_port(name).await)
     }
 
+    pub fn port_allocator_mut(&mut self) -> &mut AllocatedPorts {
+        self.port_allocator
+    }
+
     pub fn listen_ip(&self) -> &IpAddr {
         &self.listen_ip
     }

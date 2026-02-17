@@ -34,6 +34,7 @@ mod rest_api;
 #[cfg(feature = "web_ui")]
 mod web_ui;
 
+mod base_layer;
 mod event_manager;
 #[cfg(feature = "metrics")]
 mod metrics;

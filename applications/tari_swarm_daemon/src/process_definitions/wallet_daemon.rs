@@ -13,6 +13,7 @@ pub const WALLET_DAEMON_AUTH_SETTINGS_KEY: &str = "wallet_daemon_auth";
 pub const WALLET_DAEMON_SEED_WORDS_SETTINGS_KEY: &str = "wallet_daemon_seed_words";
 pub const WALLET_DAEMON_INDEXER_URL_SETTINGS_KEY: &str = "indexer_url";
 pub const OVERRIDE_KEYRING_PASSWORD_SETTINGS_KEY: &str = "override_keyring_password";
+pub const ENABLE_VITE_DEV_SETTINGS_KEY: &str = "enable_vite_dev";
 const ARGS_SETTINGS_KEY: &str = "args";
 const WALLET_DAEMON_AUTH_DEFAULT: &str = "none";
 
@@ -30,12 +31,14 @@ impl ProcessDefinition for WalletDaemon {
     async fn get_command(&self, mut context: ProcessContext<'_>) -> anyhow::Result<Command> {
         let mut command = Command::new(context.bin());
         let jrpc_port = context.get_free_port("jrpc").await?;
-        let web_ui_port = context.get_free_port("web").await?;
+        // The web and JRPC ports are the same. Some other components expect a "web" port.
+        context.port_allocator_mut().set_port("web", jrpc_port);
         let listen_ip = context.listen_ip();
 
-        let json_rpc_public_url = context.get_public_json_rpc_url();
         let json_rpc_address = format!("{listen_ip}:{jrpc_port}");
-        let web_ui_address = format!("{listen_ip}:{web_ui_port}");
+        let vite_dev_port = context
+            .get_setting(ENABLE_VITE_DEV_SETTINGS_KEY)
+            .and_then(|s| s.parse::<u16>().ok());
 
         let indexer_url = context
             .get_setting(WALLET_DAEMON_INDEXER_URL_SETTINGS_KEY)
@@ -67,11 +70,13 @@ impl ProcessDefinition for WalletDaemon {
             .arg(context.base_path())
             .arg("--network")
             .arg(context.network().to_string())
-            .arg(format!("--json-rpc-address={json_rpc_address}"))
+            .arg(format!("--listen-on={json_rpc_address}"))
             .arg(format!("--indexer-url={indexer_url}"))
-            .arg(format!("--web-ui-public-json-rpc-url={json_rpc_public_url}"))
-            .arg(format!("-pootle_wallet_daemon.web_ui_address={web_ui_address}"))
             .arg(format!("-pootle_wallet_daemon.authentication={auth}"));
+
+        if let Some(port) = vite_dev_port {
+            command.arg(format!("--vite-dev={}", port));
+        }
 
         if let Some(seed_words) = context.get_setting(WALLET_DAEMON_SEED_WORDS_SETTINGS_KEY) {
             command.arg(format!("--seed-words={seed_words}"));

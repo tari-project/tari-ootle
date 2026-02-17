@@ -23,13 +23,13 @@
 use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
-use minotari_app_utilities::common_cli_args::CommonCliArgs;
 use tari_common::{
     SubConfigPath,
     configuration::{ConfigOverrideProvider, Network as L1Network},
 };
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_app_utilities::{
+    common_cli_args::CommonCliArgs,
     configuration::convert_l1_network_to_network,
     p2p_config::{PeerSeedsConfig, ReachabilityMode},
 };

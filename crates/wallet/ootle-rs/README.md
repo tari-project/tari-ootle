@@ -1,20 +1,14 @@
-# ootle-billon
+# ootle.rs
 
-[![Crates.io](https://img.shields.io/crates/v/ootle-billon.svg)](https://crates.io/crates/ootle-billon)
-[![Documentation](https://docs.rs/ootle-billon/badge.svg)](https://docs.rs/ootle-billon)
+[![Crates.io](https://img.shields.io/crates/v/ootle-rs.svg)](https://crates.io/crates/ootle-rs)
+[![Documentation](https://docs.rs/ootle-rs/badge.svg)](https://docs.rs/ootle-rs)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-APACHE)
 
 **High-performance, familiar interaction with the Tari Ootle (Layer 2) network.**
 
-`ootle-billon` is a pure Rust library designed to be the standard interface for interacting with Tari Ootle. It is
+`ootle.rs` is a pure Rust library designed to be the standard interface for interacting with Tari Ootle. It is
 architected to mirror the interface of [alloy-rs](https://github.com/alloy-rs/alloy), providing a seamless developer
 experience for those transitioning from Ethereum or generic blockchain development to the Tari ecosystem.
-
-## 🪙 Why "Billon"?
-
-**Billon** is an ancient alloy historically used for everyday transactions. The metaphor:
-if Minotari (L1) is digital gold, Ootle (L2) is the **Billon**—built for speed and utility. The name also pays homage to
-the `alloy-rs` library which this library emulates.
 
 ## ✨ Features
 
@@ -29,7 +23,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ootle-billon = "0.1.0"
+ootle-rs = "0.1.0"
 ```
 
 ## 🚀 Quick Start
@@ -37,40 +31,51 @@ ootle-billon = "0.1.0"
 Connect to a local Ootle indexer, create a wallet, and send a transaction.
 
 ```rust
-use ootle_billon::prelude::*;
-use ootle_billon::providers::ProviderBuilder;
+use ootle_rs::{
+    address,
+    builtin_templates::account::IAccount,
+    key_provider::PrivateKeyProvider,
+    provider::ProviderBuilder,
+    wallet::OotleWallet,
+    TransactionRequest,
+};
+use tari_ootle_common_types::Network;
+use tari_template_lib_types::constants::XTR;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Setup a signer (Burner wallet or standard key)
-    let signer = PrivateKeySigner::random();
-    let address = signer.address();
-    let wallet = OotleWallet::new(signer);
-    let indexer_api_url = "http://localhost:12000";
+    let network = Network::LocalNet;
+    let indexer_api_url = "http://127.0.0.1:12500";
 
-    // 2. Create a provider with the Ootle network configuration
+    // 1. Setup a wallet with a random key
+    let signer = PrivateKeyProvider::random(network);
+    let wallet = OotleWallet::from(signer);
+
+    // 2. Create a provider
     let provider = ProviderBuilder::new()
-        .with_recommended_fillers()
+        .with_network(network)
         .wallet(wallet)
-        .on_ootle_testnet()
         .connect(indexer_api_url)
         .await?;
 
-    println!("🤖 Ootle Agent active at: {}", address);
-
-    // 3. Craft a transaction (e.g., calling a template method)
-    let tx_id = provider
-        .send_transaction(
-            TransactionRequest::default()
-                .to(some_recipient_address)
-                .with_amount(100_u64)
-                .with_template_call("transfer", args![])
-        )
-        .await?;
-    provider.get_transaction_receipt(tx_id)
+    // 3. Craft and send a transaction (e.g., using IAccount for a transfer)
+    let recipient = address!("otl_loc_10mc0v2lyy43kldl0ft4c2x5pe7j0ckduv8zej6jgr2z2g9m07fz7gl96ar5wwgu0qu0atmr5tl53ye7n38xr5u7ytlmudq0ruxcau0gge7rxk");
+    
+    let unsigned_tx = IAccount::new(&provider)
+        .pay_fee(1000u64)
+        .public_transfer(&recipient, XTR, 1_000_000u64)
+        .prepare()
         .await?;
 
-    println!("✅ Transaction confirmed: {:?}", tx_hash);
+    let tx = TransactionRequest::default()
+        .with_transaction(unsigned_tx)
+        .build(provider.wallet())
+        .await?;
+
+    let pending_tx = provider.send_transaction(tx).await?;
+    let outcome = pending_tx.watch().await?;
+
+    println!("✅ Transaction confirmed: {:?}", outcome);
 
     Ok(())
 }
@@ -78,10 +83,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## 🏗 Architecture
 
-ootle-billon follows the modular design of alloy:
+ootle.rs follows the modular design of alloy:
 
 - Core: Defines the primitive types (Addresses, Signatures, Confidential Commitments) specific to Tari.
-- Transport: Handles the JSON-RPC (or gRPC) communication with Ootle Validator Nodes (VNs).
+- Transport: Handles communication with Ootle Indexers and Validator Nodes (VNs).
 - Provider: The high-level API for sending requests and managing state.
 - Signer: Abstractions for signing transactions (support for Ristretto keys).
 

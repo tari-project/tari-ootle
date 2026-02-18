@@ -26,11 +26,7 @@ use tari_wallet_daemon_client::{
 
 use crate::{
     config::WalletDaemonAuth,
-    handlers::{
-        HandlerContext,
-        auth::Authenticator,
-        helpers::{invalid_request, unauthorized},
-    },
+    handlers::{HandlerContext, auth::Authenticator, helpers::unauthorized},
 };
 
 pub const REFRESH_TOKEN_COOKIE: &str = "r-tkn";

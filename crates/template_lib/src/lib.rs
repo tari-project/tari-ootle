@@ -166,9 +166,8 @@ pub mod template;
 
 pub use tari_template_lib_types as types;
 
-// ---------------------------------------- WASM target exports ------------------------------------------------
+// ---------------------------------------- WASM exports ------------------------------------------------
 
-#[cfg(target_arch = "wasm32")]
 pub mod template_macro_deps;
 
 mod engine;

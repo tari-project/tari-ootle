@@ -175,7 +175,6 @@ mod engine;
 pub use engine::engine;
 
 pub mod panic_hook;
-#[cfg(target_arch = "wasm32")]
 pub mod prelude;
 // Re-export for macro
 pub use tari_bor::to_value;

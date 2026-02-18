@@ -21,7 +21,7 @@ use tracing::debug;
 
 use crate::{macros::_macro_exports::ResourceAddress, provider::WantInput};
 
-const LOG_TARGET: &str = "ootle_billon::wallet::provider::input_resolver";
+const LOG_TARGET: &str = "ootle_rs::wallet::provider::input_resolver";
 
 #[derive(Debug, thiserror::Error)]
 pub enum TransactionInputResolverError {

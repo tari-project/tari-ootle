@@ -22,14 +22,14 @@ impl ProviderBuilder<NoWallet> {
             wallet: NoWallet,
         }
     }
-}
 
-impl<Wallet> ProviderBuilder<Wallet> {
     pub fn with_network(mut self, network: Network) -> Self {
         self.network = network;
         self
     }
+}
 
+impl<Wallet> ProviderBuilder<Wallet> {
     pub fn wallet<W: NetworkWallet>(self, wallet: W) -> ProviderBuilder<W> {
         ProviderBuilder {
             network: wallet.default_address().network(),

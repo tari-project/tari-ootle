@@ -20,11 +20,13 @@ export default defineConfig({
 				{
 					label: 'Guides',
 					items: [
-						{ label: 'Setup a Wallet', link: '/guides/setup-a-wallet/' },
 						{ label: 'Getting Started', link: '/guides/getting-started/' },
-						{ label: 'Templates Overview', link: '/guides/writing-templates/' },
+						{ label: 'Setup a Wallet', link: '/guides/setup-a-wallet/' },
+						{ label: 'Templates Overview', link: '/guides/template-overview/' },
 						{ label: 'Building a Guessing Game', link: '/guides/guessing-game/' },
-						{ label: 'Publishing Templates', link: '/guides/publishing-templates/' },
+						{ label: 'Publish the Guessing Game', link: '/guides/publishing-templates/' },
+						{ label: 'Play the Guessing Game', link: '/guides/play-the-guessing-game/' },
+						{ label: 'Transaction Overview', link: '/guides/transaction-overview/' },
 						{ label: 'Tari Cli', link: '/guides/cli/' },
 						{ label: 'Resources', link: '/guides/resources/' },
 						{ label: 'Authorization and Access', link: '/guides/authorization-and-access/' },

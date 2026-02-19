@@ -1,11 +1,22 @@
 ---
 title: Building a Guessing Game Template
-description: Build a simple guessing game template to demonstrate the core concepts of writing Tari Ootle Templates.
+description: Build a simple guessing game template to learn important concepts of writing Tari Ootle Templates.
 ---
 
 import Emgithub from '../../../components/Emgithub.astro';
 import { basePath } from '../../../helpers/path';
 import { Aside } from "@astrojs/starlight/components";
+
+### Covered in this guide
+
+In this guide, you will:
+- Create a new Tari Ootle template crate using `cargo-generate`.
+- Design and implement the state and logic for a decentralized guessing game.
+- Understand how to create and manage resources.
+- Learn how to use `Vaults` and `Buckets` for holding and transferring assets.
+- Implement custom `ComponentAccessRules`.
+- Learn about random number generation in a deterministic environment.
+- Have a working guessing game template
 
 <Aside type="tip">
   If you'd like to skip the implementation details and just see the full code for the guessing game template, you can
@@ -44,7 +55,7 @@ This generates a new Rust library crate with the bare-bones structure and depend
 You should have a new directory called `guessing_game` with the following structure:
 ```
 guessing_game
-├── Cargo.toml
+├── Cargo.toml <-- dependencies
 └── src
     └── lib.rs  <-- source code for your template goes here
 └── tests
@@ -60,7 +71,11 @@ test it_works ... ok
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 31.76s
 ```
 
-This template doesn't do much yet. So let's change that!
+**What we did:**
+- We used `cargo-generate` to create a new starter Rust crate for our template.
+- Ran a test that invokes your (empty) template function
+
+This template doesn't do anything yet. So let's change that!
 
 ## Implementing the Guessing Game Logic
 
@@ -143,23 +158,37 @@ impl GuessingGame {
 - We created a new empty vault that will hold the prize for our game.
 - We created a component that holds the state for our game
 
-<Aside type="tip">
-  A vault can only hold one and only one resource. If you try to deposit a different resource in the
-  vault, the call will panic.
-</Aside>
-
 ## Create a Resource
 
-We'll need a non-fungible resource for our prize. Let's create that now.
+Now for the prize. We want to give out a unique NFT for each round.
+For this, we'll create a new non-fungible resource that uniquely represents a prize for our game.
+Later we'll use this resource to mint a prize for each round.
+
+We can do this using the `ResourceBuilder` in the constructor:
 
 ```rust
-  let prize_resource = ResourceBuilder::non_fungible()
-      // Optionally give it a name
-      .metadata("name", "Guessing Game Prize")
-      // Optionally, provide a token symbol that exchanges and explorers will display for the new resource
-      .with_token_symbol("🎲")
-      // Create the resource with no supply (use `.initial_supply(...)` to mint new NFTs in the builder)
-      .build();
+
+impl GuessingGame {
+  pub fn new() -> Component<Self> {
+      // ADD THIS
+      let prize_resource = ResourceBuilder::non_fungible()
+        // Optionally give it a name
+        .metadata("name", "Guessing Game Prize")
+        // Optionally, provide a token symbol that exchanges and explorers will display for the new resource
+        .with_token_symbol("🎲")
+        // Create the resource with no supply (use `.initial_supply(...)` to mint new NFTs in the builder)
+        .build();
+
+      let prize_vault = Vault::new_empty(prize_resource);
+
+      Component::new(Self {
+          prize_vault,
+          guesses: HashMap::new(),
+          round_number: 0,
+      })
+      .create()
+  }
+}
 ```
 
 <Aside type="tip">
@@ -171,10 +200,20 @@ We'll need a non-fungible resource for our prize. Let's create that now.
   `Vault::from_bucket`.
 </Aside>
 
+<Aside type="note">
+  By default, only the resource owner can mint new tokens for a resource. You can change this, but for this example,
+  this is exactly what we want.
+</Aside>
+
+<Aside type="tip">
+  A vault can only hold one and only one resource. If you or anyone else later try to deposit a different resource in
+  the vault, the transaction will fail.
+</Aside>
+
+
 **What we did:**
 - We created a new non-fungible resource that uniquely identifies the prize for our game.
-- We gave it some metadata, including a name and token symbol (optional but recommended).
-- We set `prize_resource` to the `ResourceAddress` (passed to `Vault::new_empty`).
+- We gave it some metadata, including a name and token symbol.
 
 ## Starting a new round
 
@@ -186,7 +225,7 @@ pub fn start_game(&mut self, prize: NonFungibleId) {
   // To mint the prize, we need a ResourceManager. For convenience, a Vault provides the
   // `get_resource_manager` method that returns a resource manager for the resource it holds.
   let manager = self.prize_vault.get_resource_manager();
-  // Mine the prize. Each NFT has immutable (cannot be changed) data and mutable (holder can change) data.
+  // Mint the prize. Each NFT has immutable (cannot be changed) data and mutable (holder can change) data.
   // We pass in the round number as the immutable data to mint this round in NFT history
   // and empty (unit) for the mutable data.
   let prize = manager.mint_non_fungible(prize, &metadata!["round" => self.round_number.to_string()], &());
@@ -369,9 +408,9 @@ The test harness will compile your template to WASM and run the tests against it
 Replace `Cargo.toml`, `src/lib.rs` and `tests/test.rs` files (respectively) in your new crate the following code
 and run `cargo test` to check that everything works:
 
-<Emgithub src="https://github.com/tari-project/wasm-template/blob/main/examples/guessing_game/Cargo.toml" />
-<Emgithub src="https://github.com/tari-project/wasm-template/blob/main/examples/guessing_game/src/lib.rs" />
-<Emgithub src="https://github.com/tari-project/wasm-template/blob/main/examples/guessing_game/tests/test.rs" />
+<Emgithub src="https://github.com/tari-project/wasm-template/blob/main/examples/guessing_game/template/Cargo.toml" />
+<Emgithub src="https://github.com/tari-project/wasm-template/blob/main/examples/guessing_game/template/src/lib.rs" />
+<Emgithub src="https://github.com/tari-project/wasm-template/blob/main/examples/guessing_game/template/tests/test.rs" />
 
 ### Next Steps
 

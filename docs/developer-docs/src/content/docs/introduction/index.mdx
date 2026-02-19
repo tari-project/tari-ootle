@@ -9,15 +9,22 @@ developers to build WebAssembly (WASM) smart contracts, referred to as **Templat
 This library simplifies interaction with the underlying Ootle blockchain, enabling the creation of custom components,
 resources, and complex decentralized applications.
 
-### Key Concepts
+### Learning Objectives
 
--   **Templates:** smart contracts are deployed as "Templates." These are WASM binaries that define logic and state. A Template can define stateless logic functions or be instantiated multiple times to create **Components** which tie on-chain state and template logic.
--   **Components:** Components are on-chain instances of the state defined within a Template. They represent the on-chain entities that hold state and expose methods for interaction. For example, a "DeX Template" might be used to create multiple "DeX Components," each representing a distinct exchange instance.
--   **Resources:** Resources are digital assets. These can be fungible or non-fungible (e.g., NFTs). The library provides tools to define, mint, burn, and manage these resources.
--   **Vaults:** Resources are held within "Vaults," which are secure containers associated with Components.
--   **Substates:** The Tari Ootle engine manages state as "Substates." These are atomic units of data that represent various on-chain entities, including Components, Resources, and Vaults. Templates interact with the blockchain by manipulating these substates.
--   **Access Rules:** Templates can define granular access rules to control who can interact with their Components and Resources, and under what conditions.
+In this documentation, you will learn how to:
+
+-   **Set up a wallet:** Connect a wallet to the `esmeralda` testnet.
+-   **Learn Template Development Basics:** Understand the abstractions and structure of the Ootle template library.
+-   **Build Your First Template:** Follow a step-by-step code walkthrough to create a functional template (smart contract).
+-   **Publish to the Network:** Learn the process of deploying your templates to the Ootle network.
+-   **Execute Transactions:** Use your published templates by executing them within transactions.
+
+### What You'll Achieve
+
+By the end of this guide, you will have a solid foundation in Tari Ootle development. You'll be able to write,
+test, and deploy Rust-based smart contracts, interact with the Ootle network, and understand how to manage
+digital assets and state on-chain.
 
 ### Getting Started
 
-To begin building with the Tari Ootle Template Library, proceed to the <a href={basePath("/guides/getting-started/")}>Getting Started guide</a>.
+To begin, proceed to the <a href={basePath("/guides/getting-started/")}>Getting Started guide</a>.

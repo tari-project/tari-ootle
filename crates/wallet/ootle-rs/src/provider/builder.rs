@@ -4,7 +4,10 @@
 use tari_indexer_client::error::IndexerRestClientError;
 use tari_ootle_common_types::Network;
 
-use crate::{provider::indexer::IndexerProvider, wallet::NoWallet};
+use crate::{
+    provider::indexer::IndexerProvider,
+    wallet::{NetworkWallet, NoWallet},
+};
 
 #[derive(Debug)]
 pub struct ProviderBuilder<Wallet = NoWallet> {
@@ -19,18 +22,18 @@ impl ProviderBuilder<NoWallet> {
             wallet: NoWallet,
         }
     }
-}
 
-impl<Wallet> ProviderBuilder<Wallet> {
     pub fn with_network(mut self, network: Network) -> Self {
         self.network = network;
         self
     }
+}
 
-    pub fn wallet<W>(self, wallet: W) -> ProviderBuilder<W> {
+impl<Wallet> ProviderBuilder<Wallet> {
+    pub fn wallet<W: NetworkWallet>(self, wallet: W) -> ProviderBuilder<W> {
         ProviderBuilder {
+            network: wallet.default_address().network(),
             wallet,
-            network: self.network,
         }
     }
 

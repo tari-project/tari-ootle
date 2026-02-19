@@ -50,7 +50,6 @@ async fn main() {
     let wallet = OotleWallet::from(sender_secret.clone());
 
     let mut provider = ProviderBuilder::new()
-        .with_network(NETWORK)
         .wallet(wallet)
         .connect(INDEXER_API_URL)
         .await

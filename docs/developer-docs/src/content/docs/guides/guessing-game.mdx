@@ -319,8 +319,10 @@ For that we'll create a normal rust helper function. Place this outside of the `
 ```rust
 fn generate_number() -> u8 {
     use tari_template_lib::rand::random_bytes;
-    let num = random_bytes(1)[0] as f32;
-    // Squish it to between 0 and 10
+    // random_bytes calls into the execution engine to generate random bytes
+    // Like all other engine calls, this incurs a small fee.
+    let num = random_bytes(1)[0];
+    // Naively squish it to between 0 and 10
     num % 11
 }
 ```
@@ -359,15 +361,17 @@ The test harness will compile your template to WASM and run the tests against it
 
 ## Full annotated code
 
-<a href="https://github.com/tari-project/wasm-template/tree/main/examples/guessing_game" target="_blank">Guessing Game
-  crate on Github</a>
+<p>
+  <a href="https://github.com/tari-project/wasm-template/tree/main/examples/guessing_game" target="_blank">Guessing Game
+    crate on Github</a>
+</p>
 
 Replace `Cargo.toml`, `src/lib.rs` and `tests/test.rs` files (respectively) in your new crate the following code
 and run `cargo test` to check that everything works:
 
-<Emgithub target="https://github.com/tari-project/wasm-template/blob/main/examples/guessing_game/Cargo.toml" />
-<Emgithub target="https://github.com/tari-project/wasm-template/blob/main/examples/guessing_game/src/lib.rs" />
-<Emgithub target="https://github.com/tari-project/wasm-template/blob/main/examples/guessing_game/tests/test.rs" />
+<Emgithub src="https://github.com/tari-project/wasm-template/blob/main/examples/guessing_game/Cargo.toml" />
+<Emgithub src="https://github.com/tari-project/wasm-template/blob/main/examples/guessing_game/src/lib.rs" />
+<Emgithub src="https://github.com/tari-project/wasm-template/blob/main/examples/guessing_game/tests/test.rs" />
 
 ### Next Steps
 

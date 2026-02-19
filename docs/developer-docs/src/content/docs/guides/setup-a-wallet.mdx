@@ -27,14 +27,16 @@ Once downloaded, place the executable in a directory of your choice (probably so
 On Linux and MacOS, you may need to set execute permission before running it. You can do this with the following command:
 
 ```bash
-mv tari_ootle_walletd-0.23.0-3e169e5-linux-x86_64 tari_ootle_walletd
+# Rename the downloaded file to tari_ootle_walletd for convenience
+mv [downloaded-file] tari_ootle_walletd
+# Set execute permission
 chmod +x tari_ootle_walletd
 ```
 
 Run the wallet daemon with the following command:
 
 ```bash
-# The network is mainnet by default. To connect to the esmeralda testnet, use the --network flag:
+# To connect to the esmeralda testnet, use the --network flag:
 ./tari_ootle_walletd --network esme
 ```
 

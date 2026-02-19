@@ -267,7 +267,62 @@ impl PendingTransaction {
 
     pub async fn watch(&self) -> Result<TransactionOutcome, PendingTransactionError> {
         match self.register(self.default_timeout).await?.await {
-            Ok(outcome) => Ok(outcome.into()),
+            Ok(FinalizeOutcome::Commit) => Ok(TransactionOutcome::Commit),
+            Ok(FinalizeOutcome::FeeIntentCommit) => {
+                // The transaction was accepted but the main transaction was not committed. This can occur when the
+                // transaction was rejected after the fee intent was committed, or if the transaction is still pending
+                // but the fee intent was committed. In either case, we need to query the transaction result to
+                // determine the actual outcome.
+                tracing::warn!(
+                    "Transaction fee intent committed but main transaction not committed for tx_id: {}. Querying \
+                     transaction result to determine actual outcome.",
+                    self.tx_id
+                );
+                match self.try_get_transaction_result().await {
+                    Ok(Some(IndexerTransactionFinalizedResult::Pending)) => {
+                        // Indexer bug?
+                        Err(PendingTransactionError::IndexerClientError(
+                            IndexerRestClientError::InvalidResponse {
+                                message: format!(
+                                    "Transaction {} is still pending after fee intent commit. This may indicate an \
+                                     indexer issue.",
+                                    self.tx_id
+                                ),
+                            },
+                        ))
+                    },
+                    Ok(Some(IndexerTransactionFinalizedResult::Finalized {
+                        execution_result,
+                        abort_details,
+                        ..
+                    })) => {
+                        if let Some(result) = execution_result {
+                            return match result.finalize.result {
+                                TransactionResult::Accept(_) => Ok(TransactionOutcome::Commit),
+                                TransactionResult::AcceptFeeRejectRest(_, reason) => {
+                                    Ok(TransactionOutcome::OnlyFeeCommit(reason))
+                                },
+                                TransactionResult::Reject(reason) => Ok(TransactionOutcome::Reject(reason)),
+                            };
+                        }
+
+                        // Any commit case would have been handled above, so this is a rejection
+                        let reason = abort_details.unwrap_or_else(|| "Unknown".to_string());
+                        Err(PendingTransactionError::TransactionRejected {
+                            tx_id: self.tx_id,
+                            reason,
+                        })
+                    },
+                    Ok(None) => {
+                        tracing::error!("Transaction result not found after fee reject: {}", self.tx_id);
+                        Err(PendingTransactionError::Timeout { tx_id: self.tx_id })
+                    },
+                    Err(e) => {
+                        tracing::error!("Failed to get transaction result after fee reject: {}", e);
+                        Err(PendingTransactionError::Timeout { tx_id: self.tx_id })
+                    },
+                }
+            },
             Err(PendingTransactionError::Timeout { .. }) => {
                 tracing::warn!("Transaction watch timed out, attempting direct query: {}", self.tx_id);
                 match self.try_get_transaction_result().await {
@@ -283,7 +338,9 @@ impl PendingTransaction {
                         if let Some(result) = execution_result {
                             return match result.finalize.result {
                                 TransactionResult::Accept(_) => Ok(TransactionOutcome::Commit),
-                                TransactionResult::AcceptFeeRejectRest(_, _) => Ok(TransactionOutcome::OnlyFeeCommit),
+                                TransactionResult::AcceptFeeRejectRest(_, reason) => {
+                                    Ok(TransactionOutcome::OnlyFeeCommit(reason))
+                                },
                                 TransactionResult::Reject(reason) => Ok(TransactionOutcome::Reject(reason)),
                             };
                         }

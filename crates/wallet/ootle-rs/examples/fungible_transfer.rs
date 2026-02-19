@@ -45,7 +45,6 @@ async fn main() {
     wallet.register_key_provider(another_signer);
 
     let mut provider = ProviderBuilder::new()
-        .with_network(Network::LocalNet)
         .wallet(wallet)
         .connect(INDEXER_API_URL)
         .await

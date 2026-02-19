@@ -2,6 +2,7 @@
 title: Resources
 description: Deep dive into Resources.
 ---
+import { basePath } from '../../../helpers/path';
 
 In the Tari Ootle ecosystem, **Resources** represent digital assets, while **Components** are the on-chain entities that manage these
 assets and implement business logic. Understanding how to create and interact with them is fundamental to building powerful Templates.
@@ -11,7 +12,7 @@ Resources are digital assets on the Tari blockchain. There are four resource typ
 - **Public Fungible:** Interchangeable assets where each unit is identical (e.g., tokens). These resources are not private and can be viewed by anyone on the blockchain in the same way as Bitcoin, Ethereum etc.
 - **Public Non-Fungible:** Unique assets where each unit has distinct properties (e.g., NFTs). These resources are not private and can be viewed by anyone on the blockchain.
 - **Confidential:** Tokens can be transferred in confidential outputs. These outputs are stored within vaults, and therefore only hide the amounts i.e. everyone can see this vault holds some amount of a resource, but the actual amount is hidden.
-- **Stealth:** Tokens can be transferred in confidential UTXOs. The native XTR token is an example of a stealth resource. Stealth resources provide enhanced privacy for asset holdings. Learn more about stealth resources in the [Stealth Resources guide](/guides/stealth-resources/).
+- **Stealth:** Tokens can be transferred in confidential UTXOs. The native XTR token is an example of a stealth resource. Stealth resources provide enhanced privacy for asset holdings. Learn more about stealth resources in the <a href={basePath("/guides/stealth-resources/")}>Stealth Resources guide</a>.
 
 #### Creating Fungible Resources
 

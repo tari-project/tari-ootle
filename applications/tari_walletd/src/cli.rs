@@ -47,6 +47,7 @@ pub struct Cli {
     #[clap(flatten)]
     pub common: CommonCliArgs,
     #[clap(long, short = 'l', alias = "listen-on", env = "JRPC_LISTEN_ON")]
+    /// The address to listen on for Web and JSON-RPC requests. Defaults to localhost:5100.
     pub listen_on: Option<SocketAddr>,
     #[clap(long, env = "SIGNALING_SERVER_ADDRESS")]
     pub signaling_server_address: Option<SocketAddr>,

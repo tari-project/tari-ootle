@@ -1,0 +1,32 @@
+---
+title: Publishing Templates
+description: Publishing a template to the Tari Ootle network and making it available for use.
+---
+
+import { basePath } from '../../../helpers/path';
+import { Aside } from "@astrojs/starlight/components";
+
+This guide assumes you have already read <a href={basePath("/guides/writing-templates/")}>Writing Templates</a>.
+
+### Compiling Your Template
+
+To publish your template, you first need to compile it to WebAssembly (WASM).
+
+Run the following command in your terminal:
+
+```bash
+cargo build --target wasm32-unknown-unknown --release
+```
+
+<Aside type="tip">
+  The compiled WASM file will be located at `target/wasm32-unknown-unknown/release/your_template_name.wasm`. This is the
+  file you will deploy to the Tari Ootle network.
+</Aside>
+
+### Publishing Your Template
+
+To publish your template, you need to create a transaction that includes the `PublishTemplate` instruction.
+This transaction will deploy your compiled WASM template to the Tari Ootle network.
+
+The <a href={basePath("/guides/setup-a-wallet/")}>Tari Ootle Walletd</a> provides a convenient way to publish your template
+by clicking a button in the web interface.

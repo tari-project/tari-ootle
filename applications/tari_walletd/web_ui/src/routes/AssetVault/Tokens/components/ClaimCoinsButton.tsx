@@ -60,7 +60,7 @@ function ClaimCoinsButton() {
         },
         onError: (error: any) => {
           console.error("Error claiming coins:", error);
-          const errorMessage = error?.message || "Failed to claim testnet coins. Please try again.";
+          const errorMessage = error?.message || "Failed to claim testnet funds. Please try again.";
           showError(errorMessage);
         },
       },
@@ -69,7 +69,7 @@ function ClaimCoinsButton() {
 
   return (
     <Button variant="outlined" onClick={() => onClaimFreeCoins()} disabled={isPending}>
-      {isPending ? "Claiming..." : "Claim Testnet Coins"}
+      {isPending ? "Claiming..." : "Claim Testnet Funds"}
     </Button>
   );
 }

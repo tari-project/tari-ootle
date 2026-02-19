@@ -67,10 +67,10 @@ pub async fn spawn_listener(
     let server = server.with_graceful_shutdown(shutdown_signal);
     let task = tokio::spawn(async move {
         server.await?;
+        info!(target: LOG_TARGET, "💤 Stopping RPC");
         Ok(())
     });
 
-    info!(target: LOG_TARGET, "💤 Stopping RPC");
     Ok((listen_addr, task))
 }
 

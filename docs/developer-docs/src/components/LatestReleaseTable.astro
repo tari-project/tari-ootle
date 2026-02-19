@@ -1,0 +1,83 @@
+---
+const repo = "tari-project/tari-ootle";
+const apiUrl = `https://api.github.com/repos/${repo}/releases`;
+
+let release = null;
+let error = null;
+
+try {
+  const response = await fetch(apiUrl, {
+    headers: {
+      'User-Agent': 'Tari-Docs-Builder'
+    }
+  });
+  
+  if (!response.ok) {
+    throw new Error(`Failed to fetch releases: ${response.status} ${response.statusText}`);
+  }
+  
+  const releases = await response.json();
+  if (Array.isArray(releases) && releases.length > 0) {
+    release = releases.filter((release) => !release.draft)[0];
+  } else {
+    error = "No releases found.";
+  }
+} catch (e) {
+  error = (e as any)?.message || e;
+}
+
+const assets = (release?.assets || []).filter((asset: any) => asset.name.startsWith("tari_ootle_walletd") && !asset.name.endsWith(".sha256"));
+const tagName = release?.tag_name || "Unknown";
+const publishedAt = release?.published_at ? new Date(release.published_at).toLocaleDateString() : "Unknown";
+---
+
+{error ? (
+  <div class="not-content">
+    <p style="color: var(--sl-color-red-high);">Error loading latest release: {error}</p>
+  </div>
+) : release ? (
+  <div class="not-content">
+    <p><strong>Latest Release: </strong><a href={release.html_url} target="_blank">{tagName}</a> ({publishedAt})</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Asset Name</th>
+          <th>Size</th>
+          <th>Link</th>
+        </tr>
+      </thead>
+      <tbody>
+        {assets.map((asset:any) => (
+          <tr>
+            <td><code>{asset.name}</code></td>
+            <td>{(asset.size / 1024 / 1024).toFixed(2)} MB</td>
+            <td><a href={asset.browser_download_url} target="_blank" rel="noopener noreferrer">Download</a></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+) : (
+  <p>No release information available.</p>
+)}
+
+<style>
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: var(--sl-text-sm);
+  }
+  th, td {
+    text-align: left;
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--sl-color-gray-5);
+  }
+  th {
+    background-color: var(--sl-color-gray-6);
+    font-weight: 600;
+  }
+  code {
+      font-size: 0.85em;
+  }
+</style>

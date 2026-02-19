@@ -2,6 +2,7 @@
 title: Types Reference
 description: Detailed documentation of core types in the Tari Ootle Template Library.
 ---
+import { basePath } from '../../../helpers/path';
 
 The `tari_template_lib_types` crate defines a rich set of types that are fundamental to building Tari Ootle Templates. These types are designed to be efficiently serialized and deserialized by the validator engine and provide a safe and structured way to interact with on-chain data.
 
@@ -81,7 +82,7 @@ Defines permission levels for component methods or resource operations.
 
 -   **Variants:** `AllowAll`, `DenyAll`, `Restricted(Vec<Identity>)`, `Owner`.
 -   **Purpose:** Granular control over who can interact with your smart contracts.
--   **Usage Example:** See [Authorization and Access](/guides/authorization-and-access/) guide.
+-   **Usage Example:** See <a href={basePath("/guides/authorization-and-access/")}>Authorization and Access</a> guide.
 
 #### `AccessRules`
 

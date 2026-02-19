@@ -1,0 +1,128 @@
+---
+title: Wallet Setup
+description: Set up a wallet
+---
+
+import { Image } from "astro:assets";
+import { Aside } from "@astrojs/starlight/components";
+import { basePath } from '../../../helpers/path';
+import LatestReleaseTable from '../../../components/LatestReleaseTable.astro';
+
+import img_empty_account from "../../../assets/wallet-empty-account.png";
+import img_claim_funds from "../../../assets/wallet-claim-funds.png";
+import img_address from "../../../assets/wallet-address.png";
+
+
+This guide will walk you through setting up a wallet daemon and connecting it to the `esmeralda` testnet.
+This wallet will allow you to manage your funds and interact with the Tari L2 network.
+
+## 1. Running a Wallet Daemon
+
+Download the latest release of the wallet daemon for your platform:
+
+<LatestReleaseTable />
+
+Once downloaded, place the executable in a directory of your choice (probably somewhere in your `PATH`).
+
+On Linux and MacOS, you may need to set execute permission before running it. You can do this with the following command:
+
+```bash
+# Rename the downloaded file to tari_ootle_walletd for convenience
+mv [downloaded-file] tari_ootle_walletd
+# Set execute permission
+chmod +x tari_ootle_walletd
+```
+
+Run the wallet daemon with the following command:
+
+```bash
+# To connect to the esmeralda testnet, use the --network flag:
+./tari_ootle_walletd --network esme
+```
+
+<Aside type="tip">
+  The first time you run the wallet, it will create a directory/directories for your new wallet. This includes
+  configuration and the wallet SQLite database. The location depends on your platform.
+  You can specify a specific location with the `--base-path`/`-b` flag.
+</Aside>
+
+
+<Aside type="note">
+  By specifying the "esme"(ralda) network, your wallet will connect to a esmeralda testnet indexer. An indexer provides
+  a view into the state of the blockchain, allowing your wallet to see transactions, balances, and other on-chain data.
+</Aside>
+
+The wallet will serve a web UI by default at `http://localhost:5100`. You can open this in your browser to manage your wallet and view transactions.
+You can change this by using the `--listen-on` flag when starting the wallet daemon.
+
+```bash
+# Listens on 127.0.0.1:12345 instead of the default
+./tari_ootle_walletd --network esme --listen-on 127.0.0.1:12345
+```
+
+You can get cli usage help by running:
+
+```bash
+./tari_ootle_walletd --help
+```
+
+<Aside type="caution">
+  The Wallet Daemon is not necessarily how you'd want to work with mainnet funds as a user. It's primary purpose
+  is to provide a RPC service in a secure environment e.g. an exchange could use the wallet daemon internally.
+  Other wallets suited for end users are in the works.
+</Aside>
+
+## 2. Creating your first account
+
+When you first start the wallet, it will prompt you to create a new "default" account. The only step is to name it.
+This account represents a secret key and associated address that you can use to send and receive funds.
+You can create multiple accounts if you wish, but for this guide we'll just use the default account.
+
+Once you create the account, you should see it in the wallet UI with a balance of 0.
+
+<Image src={img_empty_account} alt="Wallet UI empty account"
+       className="w-full rounded-lg shadow-md" />
+
+## 3. Get funds from the faucet
+
+Once your wallet is running, you'll need some funds to pay for transactions. You can get funds from the testnet faucet.
+The wallet has built-in support for the faucet, so you can request funds directly from the wallet UI.
+
+Simply click the "Claim Testnet Funds" button.
+
+<Image src={img_claim_funds} alt="Wallet UI claim funds" className="w-full rounded-lg shadow-md" />
+
+This will submit a transaction to the testnet faucet component, and create a new vault that contains your funds.
+
+You're good to go! You can now use your wallet to send funds to your friends, publish templates, and explore the Tari L2 network.
+
+## 4. Sending and Receiving funds
+
+To send funds, click the "Send" button in the wallet UI. This will open a form where you can enter the recipient's address and the amount you want to send.
+
+To receive funds, simply share your wallet address with the sender. You can find your wallet address under `Account details > Address` in the wallet UI.
+
+<Image src={img_address} alt="Wallet UI address" className="w-full rounded-lg shadow-md" />
+
+<Aside type="tip">
+  You can send funds within accounts in the same wallet, or to other wallets on the same network.
+</Aside>
+
+## 5. A Note on Authentication
+
+You may have noticed that the wallet didn't require any authentication. This is because the wallet daemon currently
+defaults to no auth. This will surely change in future.
+
+If you would like to enable authentication, pass `--auth webauthn` when starting the wallet daemon.
+This will require you to register a passkey for the wallet.
+
+```bash
+./tari_ootle_walletd --network esme --auth webauthn
+```
+
+# Next Steps
+
+Now that you have a running wallet, you can start exploring the Tari L2 network. Here are some next steps:
+-   Explore the wallet UI and get familiar with its features.
+-   Try sending and receiving funds with your wallet.
+-   If you're ready to start learning about template development, head over to <a href={basePath("/guides/writing-templates/")}>Writing Templates guide</a>.

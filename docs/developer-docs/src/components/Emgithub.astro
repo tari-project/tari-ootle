@@ -1,0 +1,7 @@
+---
+const {src} = Astro.props;
+const encodedTarget = encodeURI(src);
+const url = `https://emgithub.com/embed-v2.js?target=${encodedTarget}&style=default&type=code&showBorder=on&showLineNumbers=on&showFileMeta=on&showFullPath=on&showCopy=on`;
+---
+
+<script src={url}></script>

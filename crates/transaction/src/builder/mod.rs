@@ -167,7 +167,7 @@ impl TransactionBuilder<MainIntent> {
         })
     }
 
-    pub fn update_component_template_address<C: Into<NamedComponentCall>>(
+    pub fn update_component_template<C: Into<NamedComponentCall>>(
         self,
         component: C,
         new_template: TemplateAddress,

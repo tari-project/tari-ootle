@@ -15,6 +15,7 @@ use tari_engine_types::{
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     models::Account,
+    prelude::RistrettoPublicKeyBytes,
     types::{ComponentAddress, ResourceAddress, TemplateAddress, UtxoAddress, VaultId},
 };
 
@@ -91,6 +92,22 @@ impl<'a> ReadOnlyStateStore<'a> {
             if let SubstateId::Resource(resource_address) = id {
                 let resource = substate.substate_value().as_resource().unwrap();
                 resources.insert(*resource_address, resource.clone());
+            }
+        })?;
+        Ok(resources)
+    }
+
+    pub fn get_resources_by_owner(
+        &self,
+        owner: &RistrettoPublicKeyBytes,
+    ) -> Result<Vec<(ResourceAddress, Resource)>, StateStoreError> {
+        let mut resources = Vec::new();
+        self.with_substates(|id, substate| {
+            if let SubstateId::Resource(resource_address) = id &&
+                let Some(resource) = substate.substate_value().as_resource() &&
+                resource.as_ownership().owner_key == Some(owner)
+            {
+                resources.push((*resource_address, resource.clone()));
             }
         })?;
         Ok(resources)

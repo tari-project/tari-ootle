@@ -37,7 +37,12 @@ use tari_engine_types::{
     substate::{SubstateDiff, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId},
 };
-use tari_ootle_common_types::{SubstateRequirement, crypto::create_key_pair_from_seed, substate_type::SubstateType};
+use tari_ootle_common_types::{
+    Network,
+    SubstateRequirement,
+    crypto::create_key_pair_from_seed,
+    substate_type::SubstateType,
+};
 use tari_ootle_transaction::{
     Instruction,
     Transaction,
@@ -654,6 +659,10 @@ impl TemplateTest {
         }
 
         result
+    }
+
+    pub fn transaction(&self) -> TransactionBuilder<MainIntent> {
+        Transaction::builder(Network::LocalNet)
     }
 
     /// Executes a transaction. Panics if the transaction is not finalized (fee transaction fails). Does not panic if

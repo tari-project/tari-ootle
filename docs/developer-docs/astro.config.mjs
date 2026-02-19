@@ -13,14 +13,19 @@ export default defineConfig({
 			sidebar: [
 				{
 					label: 'Introduction',
-					items: [{ label: 'Overview', link: '/introduction/' }],
+					items: [
+						{ label: 'Overview', link: '/introduction/' },
+					],
 				},
 				{
 					label: 'Guides',
 					items: [
+						{ label: 'Setup a Wallet', link: '/guides/setup-a-wallet/' },
 						{ label: 'Getting Started', link: '/guides/getting-started/' },
+						{ label: 'Templates Overview', link: '/guides/writing-templates/' },
+						{ label: 'Building a Guessing Game', link: '/guides/guessing-game/' },
+						{ label: 'Publishing Templates', link: '/guides/publishing-templates/' },
 						{ label: 'Tari Cli', link: '/guides/cli/' },
-						{ label: 'Writing Templates', link: '/guides/writing-templates/' },
 						{ label: 'Resources', link: '/guides/resources/' },
 						{ label: 'Authorization and Access', link: '/guides/authorization-and-access/' },
 						{ label: 'Handling Events', link: '/guides/handling-events/' },

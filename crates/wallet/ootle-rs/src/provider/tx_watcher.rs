@@ -319,7 +319,7 @@ impl PendingTransaction {
                     },
                     Err(e) => {
                         tracing::error!("Failed to get transaction result after fee reject: {}", e);
-                        Err(PendingTransactionError::Timeout { tx_id: self.tx_id })
+                        Err(e)
                     },
                 }
             },

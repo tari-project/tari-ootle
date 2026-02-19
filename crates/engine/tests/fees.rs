@@ -19,7 +19,7 @@ fn deducts_fees_from_payments_and_refunds_the_rest() {
 
     let result = test.execute_expect_success(
         Transaction::builder_localnet()
-            .pay_fee_from_component(account, Amount::from(1000u64))
+            .pay_fee_from_component(account, 1000u64)
             .call_function(test.get_template_address("State"), "new", args![])
             .build_and_seal(&private_key),
         vec![owner_token],

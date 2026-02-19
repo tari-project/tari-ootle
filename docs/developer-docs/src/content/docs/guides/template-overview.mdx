@@ -1,18 +1,28 @@
 ---
 title: Templates Overview
-description: Deep dive into the structure and core concepts of writing Tari Ootle Templates.
+description: Deep dive into the structure and concepts of writing Tari Ootle Templates.
 ---
 
 import { basePath } from '../../../helpers/path';
 import { Aside } from "@astrojs/starlight/components";
 
-This guide expands on the basics, providing a deeper understanding of how to structure your Tari Ootle Templates.
+### Covered in this guide
+
+In this guide, you will:
+- Understand the basic structure of a Tari Ootle template.
+- Learn some high-level details of what the `#[template]` macro does and why it's needed.
+- Learn about component instantiation.
+- Learn some basics: constructors, methods and functions.
+- Learn about error handling in templates.
+
+<Aside type="tip">
+  This guide provides a foundational understanding of Tari Ootle Templates.
+  If you want, you can skip to the next guide: <a href={basePath("/guides/guessing-game")}>Building a Guessing Game</a>.
+</Aside>
 
 Templates are compiled to WASM and deployed to the Tari L2 network. They define the logic and structure for components, which are the on-chain instances
 that hold state.
 
-This guide explains some details that are useful to know when writing templates.
-If you just want to get started, you can skip to the next guide: <a href={basePath("/guides/guessing-game")}>Building a Guessing Game</a>.
 
 ### Template Structure
 
@@ -70,9 +80,9 @@ mod template {
 
 ### The `#[template]` Macro
 
-<Aside type="note">
-  TL;DR add this macro to your template module to make it work. Knowing the internal details is not necessary to write
-  templates.
+<Aside type="tip">
+  TL;DR add this macro to your template module to make it work. Some details below that are useful to know, but you can
+  get started without it.
 </Aside>
 
 The `#[template]` attribute macro performs several critical functions:
@@ -81,7 +91,7 @@ The `#[template]` attribute macro performs several critical functions:
 -   **Method Exposure:** It exposes public functions within your `impl` block as callable methods of the component.
 -   **State Management:** It ensures that your component's state (defined within its `struct`) is properly encoded and communicated to the Ootle validator engine.
 
-### Component State Management
+### Component State
 
 The state of your component is defined by the fields within its `struct`. These fields are persisted on the blockchain.
 NOTE: that a component can also be an `enum`.

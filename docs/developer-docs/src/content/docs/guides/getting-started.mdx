@@ -4,8 +4,6 @@ description: Set up your development environment and create your first Tari Ootl
 ---
 import { basePath } from '../../../helpers/path';
 
-This guide will walk you through setting up your development environment and creating a basic "Hello World" template using the Tari Ootle Template Library.
-
 ### Prerequisites
 
 Before you begin, ensure you have the following installed:
@@ -15,99 +13,13 @@ You'll need the `wasm32-unknown-unknown` target.
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 rustup target add wasm32-unknown-unknown
-    ```
+```
+
+<span style={{ display: 'none' }}>
 -   **Tari Ootle CLI (Optional but Recommended):** For local testing and deployment, we suggest using the Tari Ootle CLI.
-     Refer to the [tari CLI repo](https://github.com/tari-project/tari-cli) for installation instructions.
-
-### 1. Create a New Template Project
-
-We'll start by creating a new Rust library project. This will be our template.
-
-```bash
-cargo new --lib my_first_template
-cd my_first_template
-```
-
-### 2. Configure `Cargo.toml`
-
-Open `Cargo.toml` and add `tari_template_lib` as a dependency. Ensure you're using the correct version compatible with your Tari Ootle environment.
-
-```toml
-[package]
-name = "my_first_template"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-# Uses the latest version of the Tari Template Library. You can specify a specific version as needed.
-tari_template_lib = { version = "*" }
-
-# Important! You must specify the crate type as `cdylib` to compile to WASM
-[lib]
-crate-type = ["cdylib"]
-
-# Optimize for size in release builds.
-[profile.release]
-opt-level = 's'     # Optimize for size.
-lto = true          # Enable Link Time Optimization.
-codegen-units = 1   # Reduce number of codegen units to increase optimizations.
-panic = 'abort'     # Abort on panic.
-strip = "debuginfo" # Strip debug info.
-
-```
-
-### 3. Write Your First Template
-
-Open `src/lib.rs` and add the following code. This simple template will define a component that has one public method, `hello_world`, which simply logs a message.
-
-```rust
-use tari_template_lib::prelude::*;
-
-// Define our template
-#[template]
-mod MyFirstTemplate {
-    use super::*;
-
-    pub struct MyFirstTemplate {
-        name: String
-    }
-
-    impl MyFirstTemplate {
-        // Constructor function that creates a new component
-        pub fn new(name: String) -> Self {
-            Self { name }
-        }
-
-        // A public method that logs a message
-        pub fn hello_world(&self) {
-            info!("Hello {} from MyFirstTemplate!", self.name);
-        }
-    }
-}
-```
-
-#### Explanation:
-
--   `use tari_template_lib::prelude::*;`: Imports commonly used items from the template library, making development more concise.
--   `#[template]`: This attribute macro from `tari_template_macros` transforms your Rust module into a Tari Ootle Template. It handles the necessary ABI (Application Binary Interface) boilerplate for the validator engine.
--   `mod MyFirstTemplate { ... }`: Defines your template module. The name of the module will be used by the validator node to identify your template.
--   `pub struct MyFirstTemplate { }`: This is the component struct. It holds the component's state. In this simple example, there is no state.
--   `impl MyFirstTemplate { ... }`: Implements methods for your component.
--   `pub fn new(name: String) -> Self`: This is a constructor that initializes the component with a name. NOTE: all functions that return Self implicitly create a component instance on-chain when invoked.
--   `pub fn hello_world(&self) -> String`: A public method callable using the CallMethod transaction instruction. `info!` is a macro that creates a log entry in the transaction receipt.
-
-### 4. Compile Your Template
-
-Compile your template to WASM:
-
-```bash
-cargo build --target wasm32-unknown-unknown --release
-```
-
-This will produce a `my_first_template.wasm` file in `target/wasm32-unknown-unknown/release/`. This WASM file is your deployable template. To deploy a template you'll need to create a transaction that has the `PublishTemplate` instruction and pays the necessary fees. The Tari Ootle CLI can handle this for you,
-or you can use [ootle.rs](https://docs.rs/ootle-rs/latest/ootle-rs/) to create and sign transactions programmatically.
+Refer to the [tari CLI repo](https://github.com/tari-project/tari-cli) for installation instructions.
+</span>
 
 ### Next Steps
 
--   Learn how to create, build and deploy your template using the <a href={basePath("/guides/cli")}>Tari Ootle CLI</a>.
--   Explore more advanced features in the <a href={basePath("/guides/writing-templates/")}>Writing Templates guide</a>.
+-   Set up a wallet to interact with the Ootle network. Follow our <a href={basePath("/guides/setup-a-wallet/")}>Wallet Setup guide</a> to get started.

@@ -29,6 +29,15 @@ pub struct OotleSecretKey {
 }
 
 impl OotleSecretKey {
+    /// Create an OotleSecretKey from existing raw Ristretto secret keys.
+    pub fn new(network: Network, account_secret: RistrettoSecretKey, view_only_secret: RistrettoSecretKey) -> Self {
+        Self {
+            network,
+            account_secret,
+            view_only_secret,
+        }
+    }
+
     pub fn random(network: Network) -> Self {
         let mut rng = rand::thread_rng();
         Self::random_with(&mut rng, network)

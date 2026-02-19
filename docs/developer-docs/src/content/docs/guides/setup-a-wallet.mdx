@@ -12,6 +12,13 @@ import img_empty_account from "../../../assets/wallet-empty-account.png";
 import img_claim_funds from "../../../assets/wallet-claim-funds.png";
 import img_address from "../../../assets/wallet-address.png";
 
+### Covered in this guide
+
+In this guide, you will:
+- Download and install the Tari Ootle Wallet daemon.
+- Connect your wallet to the `esmeralda` testnet.
+- Create a default account for managing your keys and funds.
+- Claim testnet funds from the built-in faucet to pay for transactions.
 
 This guide will walk you through setting up a wallet daemon and connecting it to the `esmeralda` testnet.
 This wallet will allow you to manage your funds and interact with the Tari L2 network.
@@ -33,7 +40,13 @@ mv [downloaded-file] tari_ootle_walletd
 chmod +x tari_ootle_walletd
 ```
 
-Run the wallet daemon with the following command:
+Check that it works by running:
+
+```bash
+./tari_ootle_walletd --help
+```
+
+Start the wallet daemon with the following command:
 
 ```bash
 # To connect to the esmeralda testnet, use the --network flag:
@@ -46,7 +59,6 @@ Run the wallet daemon with the following command:
   You can specify a specific location with the `--base-path`/`-b` flag.
 </Aside>
 
-
 <Aside type="note">
   By specifying the "esme"(ralda) network, your wallet will connect to a esmeralda testnet indexer. An indexer provides
   a view into the state of the blockchain, allowing your wallet to see transactions, balances, and other on-chain data.
@@ -58,12 +70,6 @@ You can change this by using the `--listen-on` flag when starting the wallet dae
 ```bash
 # Listens on 127.0.0.1:12345 instead of the default
 ./tari_ootle_walletd --network esme --listen-on 127.0.0.1:12345
-```
-
-You can get cli usage help by running:
-
-```bash
-./tari_ootle_walletd --help
 ```
 
 <Aside type="caution">
@@ -120,9 +126,13 @@ This will require you to register a passkey for the wallet.
 ./tari_ootle_walletd --network esme --auth webauthn
 ```
 
+## We're done
+
+Congratulations! If everything went smoothly you've successfully set up a wallet and connected it to the `esmeralda` testnet.
+
 # Next Steps
 
 Now that you have a running wallet, you can start exploring the Tari L2 network. Here are some next steps:
 -   Explore the wallet UI and get familiar with its features.
 -   Try sending and receiving funds with your wallet.
--   If you're ready to start learning about template development, head over to <a href={basePath("/guides/writing-templates/")}>Writing Templates guide</a>.
+-   If you're ready to start learning about template development, head over to <a href={basePath("/guides/template-overview/")}>Templates Overview guide</a>.

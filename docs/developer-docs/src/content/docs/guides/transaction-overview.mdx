@@ -1,0 +1,401 @@
+---
+title: Transaction Overview
+description: How to build custom transactions that interact with Tari Ootle templates and components.
+---
+
+import { basePath } from '../../../helpers/path';
+import { Aside } from "@astrojs/starlight/components";
+
+### Covered in this guide
+
+In this guide, you will:
+- Understand what a Tari Ootle transaction is and how it works.
+- Learn about instructions, the workspace, and fees.
+- Learn how to use the `TransactionBuilder` to construct transactions.
+- See real examples of calling template functions, invoking component methods, and passing values between instructions.
+
+---
+
+## What is a Transaction?
+
+A Tari Ootle transaction is an ordered sequence of **instructions** that the network executes atomically. Like a database transaction, either all instructions succeed and their state changes are committed on-chain, or all fail and nothing changes. There is no partial execution.
+
+You typically construct a transaction to:
+- Invoke functions on a template for e.g. to create a new component.
+- Invoke a method on an existing component.
+- Transfer tokens between accounts or components.
+- Chain multiple of the above together in a single atomic operation.
+
+---
+
+## Instructions
+
+An instruction is the smallest unit of work in a transaction. The Ootle engine supports the following instructions:
+
+| Instruction                                                            | What it does                                                                      |
+|------------------------------------------------------------------------|-----------------------------------------------------------------------------------|
+| `CallFunction(address, function_name, args)`                           | Calls a function (e.g. a constructor) on a deployed template                      |
+| `CallMethod(component, method_name, args)`                             | Calls a method on an existing component                                           |
+| `PutLastInstructionOutputOnWorkspace(key)`                             | Saves the return value of the previous instruction to the workspace under a label |
+| `TakeFromBucket(input, amount, output)`                                | Splits a bucket, writing a new bucket with the given amount back to the workspace |
+| `CreateAccount(owner_public_key, owner_rule?, access_rules?, bucket?)` | Creates a built-in account component for a given public key (idempotent)          |
+| `Assert(key, assertion)`                                               | Verifies a condition about a workspace item, failing the transaction if not met   |
+| `AllocateAddress(type, workspace_id)`                                  | Pre-allocates a component or resource address, placing it on the workspace        |
+| `PublishTemplate(binary)`                                              | Publishes a new WASM template to the network                                      |
+| `DropAllProofsInWorkspace`                                             | Drops all proofs currently held in the workspace                                  |
+| `ClaimBurn(claim_proof, output_data)`                                  | Claims a burn proof from the Minotari layer-1 chain                               |
+| `ClaimValidatorFees(address)`                                          | Claims accumulated validator fees from a fee pool                                 |
+
+---
+
+## The Workspace
+
+The **workspace** is a temporary scratchpad that exists only for the duration of a transaction.
+It allows you to pass values — such as buckets, addresses, or component references — from one instruction to the next.
+
+When an instruction returns a value (for example, a `Bucket` from calling `withdraw` on an account),
+you use the `PutLastInstructionOutputOnWorkspace` instruction to save it under a label (called a `WorkspaceId`).
+Subsequent instructions can then reference it using `Workspace("label")` in the `args![]` macro.
+
+```
+Instruction 1: call account.withdraw(resource, 100) → returns Bucket
+Instruction 2: put result on workspace as <payment>
+Instruction 3: call component.deposit(Workspace(<payment>)) → consumes bucket
+```
+
+The workspace is not persisted — it disappears when the transaction finishes.
+
+<Aside type="tip">
+  Workspace labels are like variables that you pass around in programs. Under the hood they are not strings but numeric
+  IDs. The `TransactionBuilder` keeps track of the mapping between labels and IDs for you, and adds instructions with
+  the correct IDs to the final transaction.
+</Aside>
+
+---
+
+## Fees
+
+Every transaction must pay fees to validators. Fee instructions are a separate sequence that runs **before** the main instructions. They lock up a maximum amount of XTR (the native token) from a specified account or bucket.
+
+After execution, any unused portion of the locked fees is refunded. If the main instructions fail, a partial fee is still charged for the work done by validators up to that point.
+
+---
+
+## The `TransactionBuilder`
+
+The `TransactionBuilder` provides a fluent API for constructing transactions.
+You start with `Transaction::builder(network)` (or the shorthand `Transaction::builder_localnet()` for local testing),
+chain instruction methods, and finally sign and seal the transaction with a private key.
+
+The builder is available in the `tari_ootle_transaction` crate.
+
+### Basic usage
+
+```rust
+use tari_ootle_transaction::{Transaction, args};
+
+let transaction = Transaction::builder(Network::Esmeralda)
+    // Specify how fees will be paid
+    .pay_fee_from_component(my_account_address, 1000u64)
+    // Add your instructions here
+    .call_function(my_template_address, "new", args![])
+    // Sign and seal the transaction with your private key
+    .finish()
+    .seal(&secret_key);
+```
+
+### Signing and building
+
+Once you have chained all your instructions, call one of the following to produce a final transaction:
+
+| Method                         | Description                                                                  |
+|--------------------------------|------------------------------------------------------------------------------|
+| `.build_and_seal(&secret_key)` | Signs and seals the transaction, returning a `Transaction` ready to submit   |
+| `.build_unsigned()`            | Returns an `UnsignedTransaction` (useful for multi-sig flows)                |
+| `.finish()`                    | Returns an `UnsealedTransaction` (has 0 or more signers, needs to be sealed) |
+
+<Aside type="note">
+  In most tests you'll use `.build_and_seal(&secret_key)`. In production, you'll likely want to pass the
+  unsigned/unsealed transaction to a wallet or HSM for signing.
+</Aside>
+
+---
+
+## Calling a Template Function
+
+To call a function (such as a constructor) on a deployed template, use `.call_function()`.
+
+```rust
+use tari_ootle_transaction::{Transaction, args};
+use tari_template_lib::types::TemplateAddress;
+
+// The address of the deployed template you want to call
+let template_address: TemplateAddress = /* ... */;
+
+let transaction = Transaction::builder(network)
+    .pay_fee_from_component(my_account, 1000u64)
+    // Call the "new" function on the template with two arguments.
+    // `fn new(name: String, initial_value: u64) -> Component<Self>`
+    .call_function(template_address, "new", args!["Ootle", 42u64])
+    .build_and_seal(&secret_key);
+```
+
+Any type that implements `serde::Serialize` can be passed as an argument, including addresses, amounts, strings, structs, and more.
+
+---
+
+## Calling a Component Method
+
+To call a method on an existing component, use `.call_method()`. You'll need the component's `ComponentAddress`.
+
+```rust
+use tari_ootle_transaction::{Transaction, args};
+use tari_template_lib::types::ComponentAddress;
+
+let component_address: ComponentAddress = /* ... */;
+
+let transaction = Transaction::builder(network)
+    .pay_fee_from_component(my_account, 1000u64)
+    // Call the "set_value" method with a u64 argument
+    .call_method(component_address, "set_value", args![99u64])
+    .build_and_seal(&secret_key);
+```
+
+---
+
+## Passing Values Between Instructions (The Workspace)
+
+A common pattern is to withdraw tokens from one place and deposit them in another, all in a single atomic transaction. Use `put_last_instruction_output_on_workspace` to capture the return value of an instruction, then reference it in the next with `Workspace("label")`.
+
+```rust
+use tari_ootle_transaction::{Transaction, args};
+
+let transaction = Transaction::builder(network)
+    .pay_fee_from_component(sender_account, Amount::from(1000))
+    // Withdraw 100 tokens of `my_resource` into a Bucket from the sender's account
+    .call_method(sender_account, "withdraw", args![my_resource, 100u64])
+    // Save the returned Bucket to the workspace as "payment"
+    .put_last_instruction_output_on_workspace("payment")
+    // Deposit the bucket into the receiver's account
+    .call_method(receiver_account, "deposit", args![Workspace("payment")])
+    .build_and_seal(&secret_key);
+```
+
+<Aside type="tip">
+  All buckets (tokens or NFTs) **must** be consumed by the end of a transaction. If a bucket is left in the workspace
+  without being deposited or burned, the transaction will fail. The engine enforces this to prevent tokens from
+  disappearing.
+</Aside>
+
+### Splitting a Bucket
+
+You can take a portion from a bucket using `.take_from_bucket()`. This creates a new bucket with the specified amount, leaving the remainder in the original.
+
+```rust
+.call_method(account, "withdraw", args![my_resource, 1000u64])
+.put_last_instruction_output_on_workspace("big_bucket")
+// Split off 250 into a new bucket called "payment"
+.take_from_bucket("big_bucket", 250u64, "payment")
+// Deposit "payment" into one component
+.call_method(component_a, "deposit", args![Workspace("payment")])
+// Deposit the rest ("big_bucket") into another
+.call_method(component_b, "deposit", args![Workspace("big_bucket")])
+```
+
+---
+
+## Calling a Component Created in the Same Transaction
+
+Sometimes you want to create a component and immediately call a method on it — before the transaction is committed. You can reference a workspace item as the target of a `call_method` call by passing a workspace label string directly as the component:
+
+```rust
+.call_function(template_address, "new", args![])
+.put_last_instruction_output_on_workspace("my_new_component")
+// Call a method on the component we just created (it's still in the workspace)
+.call_method("my_new_component", "initialize", args![42u64])
+```
+
+<Aside type="note">
+  When you pass a `&str` or `String` to `call_method`, the builder treats it as a workspace label. When you pass a
+  `ComponentAddress`, it uses the address directly.
+</Aside>
+
+---
+
+## Pre-allocating Addresses
+
+Sometimes you need to know an address before it is created — for example, to pass a component's own address to its constructor, or to set up cross-references between two components. Use `allocate_component_address` to pre-allocate an address and put it on the workspace, then pass it to `call_function`:
+
+```rust
+use tari_ootle_transaction::{Transaction, args, builder::named_component_call::CallFromWorkspace};
+
+let transaction = Transaction::builder(network)
+    .pay_fee_from_component(account, Amount::from(1000))
+    // Pre-allocate an address for our new component
+    .allocate_component_address("my_addr")
+    // Pass the pre-allocated address to the constructor
+    .call_function(template_address, "new_with_address", args![Workspace("my_addr")])
+    .build_and_seal(&secret_key);
+```
+
+Similarly, use `allocate_resource_address` to pre-allocate a resource address.
+
+---
+
+## Creating Accounts
+
+The `create_account` method adds a `CreateAccount` instruction, which creates a built-in account component for the given public key.
+This is idempotent — if the account already exists, it is a no-op.
+
+```rust
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+
+let owner_public_key: RistrettoPublicKeyBytes = /* ... */;
+
+let transaction = Transaction::builder(network)
+    .create_account(owner_public_key)
+    .build_and_seal(&secret_key);
+```
+
+You can also create an account and immediately deposit a bucket into it. If the component doesn't exist, it will be created. If it does exist, the bucket will simply be deposited.
+
+```rust
+.call_method(faucet, "take_free_coins", args![])
+.put_last_instruction_output_on_workspace("coins")
+// Create the account and deposit the bucket from the workspace
+.create_account_with_bucket(owner_public_key, "coins")
+```
+
+---
+
+## Assertions
+
+You can add assertions to a transaction to verify conditions about workspace items. If an assertion fails, the entire transaction is rejected.
+
+```rust
+use tari_template_lib::types::ResourceAddress;
+
+let resource: ResourceAddress = /* ... */;
+
+let transaction = Transaction::builder(network)
+    .call_method(account, "withdraw", args![resource, 100u64])
+    .put_last_instruction_output_on_workspace("bucket")
+    // Assert the bucket contains exactly 100 tokens of `resource`
+    .assert_bucket_contains_exactly("bucket", resource, 100u64)
+    .call_method(other_account, "deposit", args![Workspace("bucket")])
+    .build_and_seal(&secret_key);
+```
+
+Available assertion methods:
+
+| Method                                     | Description                               |
+|--------------------------------------------|-------------------------------------------|
+| `assert_bucket_contains_any`               | Bucket has more than zero tokens          |
+| `assert_bucket_contains_at_least`          | Bucket has at least N tokens              |
+| `assert_bucket_contains_exactly`           | Bucket has exactly N tokens               |
+| `assert_bucket_contains_at_most`           | Bucket has at most N tokens               |
+| `assert_bucket_contains_non_fungibles_all` | Bucket contains all of the specified NFTs |
+| `assert_bucket_contains_non_fungibles_any` | Bucket contains any of the specified NFTs |
+| `assert_workspace_item_is_not_null`        | Workspace item is non-null                |
+
+---
+
+## Fees
+
+To pay fees, use `.pay_fee_from_component()`. This calls the `pay_fee` method on a component (the built-in account supports this), locking up a maximum amount and refunding the remainder after execution.
+
+```rust
+let transaction = Transaction::builder(network)
+    // Lock up at most 1000 XTR for fees; refund the rest
+    .pay_fee_from_component(my_account, Amount::from(1000))
+    .call_function(template_address, "new", args![])
+    .build_and_seal(&secret_key);
+```
+
+For more advanced fee scenarios (e.g., funding fees from a faucet before paying), use `with_fee_instructions_builder`:
+
+```rust
+let transaction = Transaction::builder(network)
+    .with_fee_instructions_builder(|builder| {
+        builder
+            // Obtain coins from a faucet
+            .call_method(faucet, "take", args![100_000u64])
+            .put_last_instruction_output_on_workspace("faucet_coins")
+            // Deposit into account
+            .call_method(my_account, "deposit", args![Workspace("faucet_coins")])
+            // Then pay the fee from the account
+            .call_method(my_account, "pay_fee", args![Amount::from(1000)])
+    })
+    .call_function(template_address, "new", args![])
+    .build_and_seal(&secret_key);
+```
+
+<Aside type="caution">
+  Fees are **not** refunded if the main instructions fail. Validators executed the work and are entitled to their fees
+  regardless of the outcome.
+</Aside>
+
+---
+
+## Putting it All Together
+
+Here is a complete example that creates a component from a template and immediately calls a method on it, all in a single atomic transaction:
+
+```rust
+use tari_ootle_transaction::{Transaction, args};
+use tari_template_lib::types::{Amount, TemplateAddress};
+
+let template_address: TemplateAddress = /* the address of your deployed template */;
+let my_account: ComponentAddress = /* your account address */;
+
+let transaction = Transaction::builder(network)
+    // Pay fees (refunded if unused)
+    .pay_fee_from_component(my_account, Amount::from(2000))
+    // Call the template constructor to create a new component
+    .call_function(template_address, "new", args!["Hello, Ootle!"])
+    // Save the new component address to the workspace
+    .put_last_instruction_output_on_workspace("my_component")
+    // Immediately call a method on the freshly created component
+    .call_method("my_component", "greet", args![])
+    // Sign and seal the transaction
+    .build_and_seal(&secret_key);
+```
+
+---
+
+## Testing Transactions
+
+When writing tests for your template, the `tari_template_test_tooling` crate provides a `TemplateTest` harness that lets you execute transactions against a local in-process engine. This is the same approach used throughout the engine's own test suite.
+
+```rust
+use tari_template_test_tooling::TemplateTest;
+use tari_ootle_transaction::{Transaction, args};
+
+#[test]
+fn test_my_template() {
+  let mut test = TemplateTest::new(env!("CARGO_MANIFEST_DIR"), ["path/to/my_template"]);
+
+  // You can call functions directly via the helper methods...
+  let component_address: ComponentAddress =
+      test.call_function("MyTemplate", "new", call_args![], vec![]);
+
+  // ...or build and execute a full transaction
+  let result = test.build_and_execute(
+      test.transaction()
+          .call_method(component_address, "do_something", args![42u64])
+          .build_and_seal(&test.secret_key()),
+      vec![test.owner_proof()],
+  ).unwrap_success();
+}
+```
+
+See the <a href={basePath("/guides/guessing-game")}>Building a Guessing Game</a> guide for a worked example of testing a complete template.
+
+---
+
+### Next Steps
+
+- Implement an app that you can use to <a href={basePath("/guides/play-the-guessing-game")}>play the guessing game template</a>.
+- <a href={basePath("/guides/guessing-game")}>Build a Guessing Game
+  template</a> and write tests that use the transaction builder.
+- <a href={basePath("/guides/publishing-templates")}>Publish your template</a> to the Tari Ootle network.

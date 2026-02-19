@@ -1,6 +1,6 @@
 ---
 title: Types Reference
-description: Detailed documentation of core types in the Tari Ootle Template Library.
+description: Detailed documentation of types in the Tari Ootle Template Library.
 ---
 import { basePath } from '../../../helpers/path';
 
@@ -8,7 +8,7 @@ The `tari_template_lib_types` crate defines a rich set of types that are fundame
 
 Many of these types are re-exported through `tari_template_lib::prelude::*`, making them easily accessible in your template code.
 
-### Core Types
+### Types
 
 #### `Amount`
 
@@ -16,10 +16,10 @@ Represents a quantity of a fungible resource. It is a `u64` wrapper with special
 
 -   **Purpose:** Used for all fungible token balances, supplies, and transfer amounts.
 -   **Usage Example:**
-    ```rust
-    use tari_template_lib::prelude::*;
-    let amount = Amount(100_000);
-    let total_supply = Amount(1_000_000_000);
+```rust
+use tari_template_lib::prelude::*;
+let amount = Amount(100_000);
+let total_supply = Amount(1_000_000_000);
     ```
 
 #### `ResourceAddress`
@@ -28,9 +28,9 @@ A unique identifier for a specific resource type (e.g., a particular fungible to
 
 -   **Purpose:** To reference a resource globally on the blockchain.
 -   **Usage Example:**
-    ```rust
-    use tari_template_lib::prelude::*;
-    let token_address: ResourceAddress = ResourceBuilder::public_fungible().with_token_symbol("MTK").build();
+```rust
+use tari_template_lib::prelude::*;
+let token_address: ResourceAddress = ResourceBuilder::public_fungible().with_token_symbol("MTK").build();
     ```
 
 #### `ComponentAddress`
@@ -39,10 +39,10 @@ A unique identifier for a deployed component instance.
 
 -   **Purpose:** To reference a component globally on the blockchain.
 -   **Usage Example:**
-    ```rust
-    use tari_template_lib::prelude::*;
-    // Assuming 'my_component' is an instance of your component struct
-    // let component_address: ComponentAddress = ComponentBuilder::new().create_component("MyComponent", my_component);
+```rust
+use tari_template_lib::prelude::*;
+// Assuming 'my_component' is an instance of your component struct
+// let component_address: ComponentAddress = ComponentBuilder::new().create_component("MyComponent", my_component);
     ```
 
 #### `VaultId`
@@ -57,9 +57,9 @@ A unique identifier for a single non-fungible token within a collection.
 
 -   **Purpose:** To precisely identify an individual NFT.
 -   **Usage Example:**
-    ```rust
-    use tari_template_lib::prelude::*;
-    let nft_id = NonFungibleId::from_string("my_unique_nft_id");
+```rust
+use tari_template_lib::prelude::*;
+let nft_id = NonFungibleId::from_string("my_unique_nft_id");
     ```
 
 #### `Hash`

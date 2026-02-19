@@ -225,7 +225,7 @@ fn it_migrates_to_a_new_template_without_migration_call() {
 
     test.execute_expect_success(
         Transaction::builder_localnet()
-            .update_component_template_address(component, v2_template)
+            .update_component_template(component, v2_template)
             .call_method(component, "assert_correct", args![])
             .finish()
             .seal(test.secret_key()),

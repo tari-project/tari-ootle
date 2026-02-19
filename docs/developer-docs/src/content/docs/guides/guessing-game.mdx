@@ -1,0 +1,371 @@
+---
+title: Building a Guessing Game Template
+description: Build a simple guessing game template to demonstrate the core concepts of writing Tari Ootle Templates.
+---
+
+import Emgithub from '../../../components/Emgithub.astro';
+import { basePath } from '../../../helpers/path';
+import { Aside } from "@astrojs/starlight/components";
+
+<Aside type="tip">
+  If you'd like to skip the implementation details and just see the full code for the guessing game template, you can
+  copy and paste the working example from the <a href="#full-annotated-code">full annotated code</a>
+  section.
+</Aside>
+
+### Create an template crate
+
+First you'll need to create a new Rust crate for your template. You can do this manually with `cargo new`,
+but we recommend using the `cargo-generate` template, which sets up the necessary structure and dependencies for you.
+
+```bash
+# First, install cargo-generate if you haven't already:
+cargo install cargo-generate
+
+# Find somewhere to put your new template crate, and navigate there in your terminal. For example:
+cd ~/code
+
+# Then, generate a new template crate:
+cargo generate https://github.com/tari-project/wasm-template wasm_templates/empty -din_cargo_workspace=false --name guessing_game
+
+# Output:
+⚠️   Favorite `https://github.com/tari-project/wasm-template` not found in config, using it as a git repository: https://github.com/tari-project/wasm-template
+🔧   in_cargo_workspace: "false" (value from CLI)
+🤷   Project Name: guessing_game
+🔧   Destination: /home/me/code/guessing_game ...
+🔧   project-name: guessing_game ...
+🔧   Generating template ...
+🔧   Initializing a fresh Git repository
+✨   Done! New project created /home/me/code/guessing_game
+```
+
+This generates a new Rust library crate with the bare-bones structure and dependencies to start building your template.
+
+You should have a new directory called `guessing_game` with the following structure:
+```
+guessing_game
+├── Cargo.toml
+└── src
+    └── lib.rs  <-- source code for your template goes here
+└── tests
+    └── test.rs <-- unit tests for your template go here
+```
+To check that everything works, you can run the tests with `cargo test`:
+```
+(snip .. a lot of compilation output)
+
+running 1 test
+test it_works ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 31.76s
+```
+
+This template doesn't do much yet. So let's change that!
+
+## Implementing the Guessing Game Logic
+
+Let's define some rules for our guessing game:
+
+1. It should be a simple guessing game where players can guess a number between 1 and 10.
+1. Since there are only 10 possible numbers, we limit the number of players to &lt;10 per round (let's say 5).
+1. Each player can only make one guess per round.
+1. No one should know the correct number ahead of time.
+1. The game should give out a super-special limited-edition NFT prize to the winner.
+1. There is only one winner per game, any one of the players who guessed the correct number can be awarded the prize.
+1. Only the component creator can start a new round of the game.
+1. If there are no winners, the prize is destroyed.
+
+<Aside type="note">
+  These rules are chosen to balance simplicity for demo purposes, while still having a game that you _could_ play when
+  we're finished.
+</Aside>
+
+Let's think about what state we'll need in the component to accomplish this.
+First the prize; we'll need a resource to represent the prize, and a vault to hold it.
+Then we'll need to keep track of the guesses that players have made.
+Finally, we'll want to keep track of the round number so that we can "engrave" that round number into the prize for each round.
+
+```rust
+pub struct GuessingGame {
+  /// A vault containing the prize to be won for the round, or is empty if no round is active
+  prize_vault: Vault,
+  /// A map between a player's public key and their guess for the current round
+  guesses: HashMap<RistrettoPublicKeyBytes, Guess>,
+  /// The current round number, starting at 0 and incrementing by 1 for each new round
+  round_number: u32,
+}
+```
+
+We'll also need a struct to represent a player's guess, which includes the player's payout component (typically an account)
+and their guess for the current round.
+
+Add this struct inside the `template` module block:
+
+```rust
+pub struct Guess {
+    /// The component where the player wants to receive their payout if they win.
+    /// We use a ComponentManager for convenience: it simply wraps ComponentAddress and provides some helper methods,
+    pub payout_to: ComponentManager,
+    /// The player's guess for this round, which should be a number between 0 and 10.
+    pub guess: u8,
+}
+```
+
+<Aside type="tip">
+  Putting the struct inside the `template` module (annotated with the `#[template]` attribute) automatically implements
+  the required `serde` traits. You can also put it outside the module, and add `#[derive(serde::Serialize,
+  serde::Deserialize)]`
+  to it to achieve the same effect. You would need to add the `serde` crate as a dependency in your `Cargo.toml` to do
+  that.
+</Aside>
+
+## Implement a constructor
+
+Next, we need to create an instance of our game. Let's implement a constructor function called `new` inside the `impl` block for our `GuessingGame` struct.:
+
+```rust
+impl GuessingGame {
+  pub fn new() -> Component<Self> {
+      let prize_vault = Vault::new_empty(prize_resource); // <--- what is `prize_resource`?? we'll get to that in a moment
+
+      Component::new(Self {
+          prize_vault,
+          guesses: HashMap::new(),
+          round_number: 0,
+      })
+      .create()
+  }
+}
+```
+
+**What we did:**
+
+- We created a new empty vault that will hold the prize for our game.
+- We created a component that holds the state for our game
+
+<Aside type="tip">
+  A vault can only hold one and only one resource. If you try to deposit a different resource in the
+  vault, the call will panic.
+</Aside>
+
+## Create a Resource
+
+We'll need a non-fungible resource for our prize. Let's create that now.
+
+```rust
+  let prize_resource = ResourceBuilder::non_fungible()
+      // Optionally give it a name
+      .metadata("name", "Guessing Game Prize")
+      // Optionally, provide a token symbol that exchanges and explorers will display for the new resource
+      .with_token_symbol("🎲")
+      // Create the resource with no supply (use `.initial_supply(...)` to mint new NFTs in the builder)
+      .build();
+```
+
+<Aside type="tip">
+  The `build` method creates the resource and returns its `ResourceAddress`. This is a unique identifier for the
+  resource that we can use to refer to it later.
+
+  You can also use the `initial_supply` method to mint NFTs as part of the resource creation process.
+  `initial_supply` returns a `Bucket` containing the newly minted NFTs, which you can then deposit into the vault using
+  `Vault::from_bucket`.
+</Aside>
+
+**What we did:**
+- We created a new non-fungible resource that uniquely identifies the prize for our game.
+- We gave it some metadata, including a name and token symbol (optional but recommended).
+- We set `prize_resource` to the `ResourceAddress` (passed to `Vault::new_empty`).
+
+## Starting a new round
+
+Next, we need a function to start a new round of the game.
+
+```rust
+pub fn start_game(&mut self, prize: NonFungibleId) {
+  self.round_number += 1;
+  // To mint the prize, we need a ResourceManager. For convenience, a Vault provides the
+  // `get_resource_manager` method that returns a resource manager for the resource it holds.
+  let manager = self.prize_vault.get_resource_manager();
+  // Mine the prize. Each NFT has immutable (cannot be changed) data and mutable (holder can change) data.
+  // We pass in the round number as the immutable data to mint this round in NFT history
+  // and empty (unit) for the mutable data.
+  let prize = manager.mint_non_fungible(prize, &metadata!["round" => self.round_number.to_string()], &());
+  // Deposit the prize in the vault to hold it until it's awarded to a winner or destroyed if there are no winners.
+  self.prize_vault.deposit(prize);
+}
+```
+
+**What we did:**
+- We created a `start_game` method that takes a `NonFungibleId` as an argument. This allows the component creator to specify the prize NFT for this round
+- We increment the round number to keep track of which round we're on.
+- We used the `ResourceManager` to mint a new NFT for the prize, with the round number as immutable metadata.
+- We deposited the newly minted prize NFT into the vault to hold it until we determine the winner at the end of the round.
+
+## Submitting a guess
+Next, we need a function that allows players to submit their guesses.
+
+```rust
+pub fn guess(&mut self, guess: u8, payout_to: ComponentAddress) {
+    // We'll get the signer of the transaction to use as the player identifier for the guess.
+    let player = CallerContext::transaction_signer_public_key();
+    // Create a ComponentManager. This is a wrapper around a component address that allows us
+    // to call methods on the component. We'll use this in end_game_and_payout.
+    let payout_to = ComponentManager::get(payout_to);
+    // Insert the guess into the hashmap, assert that the player hasn't already made a guess this round.
+    let maybe_previous_guess = self.guesses.insert(player, Guess { payout_to, guess });
+    assert!(maybe_previous_guess.is_none(), "You already guessed in this round");
+}
+```
+
+**What we did:**
+- We created a `guess` method that takes a player's guess and the address of the component where they want to receive their payout if they win.
+- We used the `CallerContext::transaction_signer_public_key()` to identify the player making the guess.
+- We stored the player's guess in a hashmap, ensuring that they can only guess once per round.
+
+<Aside type="caution">
+  Do not take the player's signer public key as a method argument. This can be easily spoofed by any player.
+  `CallerContext::transaction_signer_public_key()` returns the authenticated public key of the signer of the
+  transaction.
+</Aside>
+
+<Aside type="note">
+  In the [annotated code below](#full-annotated-code), we add several additional checks but are removed in these
+  snippets for
+  simplicity.
+</Aside>
+
+Looks great! But wait there's a problem... We said that anyone can submit a guess.
+How do we do that since by default, only the component creator can call methods on the component?
+
+We'll need to make the `guess` method publicly callable by setting a access rule for the method in the component.
+Let's go back to the component constructor to do this.
+
+```rust
+ let access_rules = ComponentAccessRules::new()
+      // Here we allow anyone to call the "guess" method.
+      .method("guess", rule![allow_all]);
+
+ // Construct the component
+Component::new(Self {
+    // We create an empty vault that will hold our prize NFT
+    prize_vault: Vault::new_empty(prize_resource),
+    guesses: HashMap::new(),
+    round_number: 0,
+})
+// ADD THIS
+.with_access_rules(access_rules)
+.create()
+```
+
+**What we did:*
+- We created a `ComponentAccessRules` struct that defines who can call methods on our component.
+- We set the access rule for the `guess` method to `allow_all`, which means that anyone can call it without restriction.
+
+<Aside type="tip">
+  You don't need to specify access rules for every method. By default, all methods are only callable by the component
+  creator. You can override this default by using e.g. `.default(rule![allow_all])`
+
+  ```rust
+  let access_rules = ComponentAccessRules::new()
+  .method("im_public", rule![allow_all])
+  .default(rule![require(admin)]); // "admin" is required for all other methods
+  ```
+</Aside>
+
+## Ending the game and awarding the prize
+
+Finally, we need a function to end the game, determine if there are any winners, and either award the prize or destroy it.
+
+```rust
+pub fn end_game_and_payout(&mut self) {
+  // Since we know that we only ever have one prize in the vault, we can just withdraw it by amount.
+  // use `vault.withdraw_non_fungible(id)` if you want to withdraw a specific NFT by id instead.
+  let mut prize = self.prize_vault.withdraw(1u64);
+
+  // Generate a (pseudo) random number to determine the winner.
+  let number = generate_number(); // <-- we'll implement this function in a moment
+
+  // Take the guesses and clear the guesses for the next round.
+  let guesses = mem::take(&mut self.guesses);
+  let num_participants = guesses.len();
+
+  for (player, guess) in guesses {
+      if guess.guess == number {
+          // We have a winner! Payout the prize to the component specified in the guess.
+          // This is a cross component call that invokes the `deposit` method on the component specified in
+          // the guess. We pass in the bucket containing the prize as an argument.
+          guess.payout_to.invoke("deposit", args![prize]);
+          return;
+      }
+  }
+
+  // No winner, bye bye prize!
+  prize.burn();
+}
+```
+
+**What we did:**
+- We withdrew the prize from the vault into a bucket
+- We generated a pseudo-random number to compare against the players' guesses.
+- We iterated through the players' guesses to see if any of them matched the generated number.
+- If there was a winner, we used the `ComponentManager` to invoke the `deposit` method on the winner's account
+with the prize bucket as an argument.
+- If there wasn't a winner, we burned the prize to permanently remove it from circulation.
+
+What about generating our random number between 0 and 10?
+
+For that we'll create a normal rust helper function. Place this outside of the `impl` block for your component.
+
+```rust
+fn generate_number() -> u8 {
+    use tari_template_lib::rand::random_bytes;
+    let num = random_bytes(1)[0] as f32;
+    // Squish it to between 0 and 10
+    num % 11
+}
+```
+
+<Aside type="tip">
+  You could put this function inside the `impl` block for your component and make it a private method if you wanted to.
+  You would then call it using `Self::generate_number()` instead of just `generate_number()`.
+</Aside>
+
+<Aside type="caution">
+  The `rand::random_bytes` function returns random but deterministic bytes and should not be used for any use
+  cases that require cryptographic security.
+
+  The `wasm32-unknown-unknown` target does not have access to a source of entropy (`get_random`) used by crates like
+  `rand`. Any decentralized network with smart contracts must ensure that transactions run deterministically on all
+  nodes to
+  reach consensus, and so by design do not offer "real" randomness.
+
+  `random_bytes` uses the transaction itself and an internal counter as a source of entropy, which can
+  be hard to guess (or "mine"⛏️) but not impossible.
+</Aside>
+
+## Testing
+
+You'll want to write some unit tests to make sure your game logic works as expected.
+You can use the `tari_template_test_tooling` crate as a `dev-dependency`. This contains
+a harness that compiles your template to WASM and allows you to create transactions that call into
+your template/component using the same execution engine that runs on the Tari L2 network.
+
+Writing tests is out of scope for this guide, but the [full annotated code example](#full-annotated-code)
+includes a test that creates a new game, simulates some players making guesses, and then ends the game
+to check that the prize is awarded correctly.
+
+To run your tests, simply run `cargo test` in your template crate directory.
+The test harness will compile your template to WASM and run the tests against it.
+
+## Full annotated code
+
+Replace `Cargo.toml`, `src/lib.rs` and `tests/test.rs` files (respectively) in your new crate the following code
+and run `cargo test` to check that everything works:
+
+<Emgithub target="https://github.com/tari-project/wasm-template/blob/main/examples/guessing_game/Cargo.toml" />
+<Emgithub target="https://github.com/tari-project/wasm-template/blob/main/examples/guessing_game/src/lib.rs" />
+<Emgithub target="https://github.com/tari-project/wasm-template/blob/main/examples/guessing_game/tests/test.rs" />
+
+### Next Steps
+
+- Learn how to <a href={basePath("/guides/publishing-templates/")}>publish your template</a> to the Tari Ootle.

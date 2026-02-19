@@ -68,7 +68,7 @@ impl ResourceAddress {
         self.as_object_key().as_entity_id()
     }
 
-    pub fn is_tari(&self) -> bool {
+    pub fn is_xtr(&self) -> bool {
         *self == STEALTH_TARI_RESOURCE_ADDRESS
     }
 }

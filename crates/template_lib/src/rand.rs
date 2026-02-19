@@ -7,7 +7,11 @@ use tari_template_abi::{EngineOp, call_engine, rust::prelude::*};
 
 use crate::args::{GenerateRandomAction, GenerateRandomInvokeArg, InvokeResult};
 
-/// Returns a `Vec` of size `len` with random bytes as items
+/// Returns `len` pseudorandom bytes.
+/// WARNING: Entropy is provided by the transaction itself to ensure deterministic execution. This is not suitable for
+/// cryptographic purposes.
+/// NOTE: you cannot use the `rand` crate in templates, because `get_random` is not available for
+/// `wasm32-unknown-unknown` target.
 pub fn random_bytes(len: u32) -> Vec<u8> {
     let resp: InvokeResult = call_engine(EngineOp::GenerateRandomInvoke, &GenerateRandomInvokeArg {
         action: GenerateRandomAction::GetRandomBytes { len },

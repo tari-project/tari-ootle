@@ -83,7 +83,8 @@ use ootle_rs::{
 use tari_ootle_common_types::Network;
 
 const NETWORK: Network = Network::Esmeralda; // Testnet
-// Generate a new key pair using the in-memory provider. In a real app, you may use some other key providers that store secrets securely.
+// Generate a new key pair. In a real app, use a key provider
+// that stores secrets securely rather than in memory.
 let secret = PrivateKeyProvider::random(NETWORK);
 let wallet = OotleWallet::from(secret);
 
@@ -135,8 +136,8 @@ let tx = TransactionRequest::default()
 
 // Send the transaction
 let pending = provider.send_transaction(tx).await?;
-// Wait for it to be finalized
-let outcome = pending.watch().await?; // wait for the transaction to be finalized
+// Wait for the transaction to be finalized
+let outcome = pending.watch().await?;
 println!("Faucet transaction outcome: {outcome}");
 ```
 
@@ -156,7 +157,8 @@ use tari_template_lib_types::{TemplateAddress, constants::XTR};
 let unsigned_tx = TransactionBuilder::new(provider.network())
     .with_auto_fill_inputs()
     .pay_fee_from_component(account_addr, 2000u64)
-    // call_function invokes a constructor (a free function) on the template
+    // call_function invokes a function (no &self in the func signature)
+    // on the template
     .call_function(template_addr, "new", args![])
     .build_unsigned();
 ```
@@ -170,7 +172,8 @@ let component_addr = receipt.diff_summary.upped
     .find_map(|s| s.substate_id.as_component_address())
     .expect("component address in receipt");
 
-// The prize resource that the constructor created (everything except XTR is the game resource)
+// The prize resource the constructor created
+// (every resource except XTR is the game resource)
 let resource_addr = receipt.diff_summary.upped
     .iter()
     .find_map(|s| s.substate_id.as_resource_address().filter(|a| *a != XTR))
@@ -218,7 +221,9 @@ let mut player_provider = ProviderBuilder::new()
     .connect(&indexer_url)
     .await?;
 
-let player_account_addr = player_provider.default_signer_address().to_account_address();
+let player_account_addr = player_provider
+    .default_signer_address()
+    .to_account_address();
 
 let unsigned_tx = TransactionBuilder::new(player_provider.network())
     .with_auto_fill_inputs()
@@ -226,7 +231,7 @@ let unsigned_tx = TransactionBuilder::new(player_provider.network())
     .call_method(component_addr, "guess", args![number, payout_component_addr])
     .build_unsigned();
 
-// Sign with the player's wallet — this is what authenticates them in the template
+// Signing with the player's wallet authenticates them in the template
 let tx = TransactionRequest::default()
     .with_transaction(unsigned_tx)
     .build(player_provider.wallet())
@@ -294,7 +299,7 @@ support for multiple players — is available here:
   </a>
 </p>
 
-Use cargo-generate to download the full crate:
+Use cargo-generate to download the full crate locally:
 
 ```bash
 cargo generate https://github.com/tari-project/wasm-template examples/guessing_game/cli

@@ -172,7 +172,8 @@ use tari_ootle_transaction::{Transaction, args};
 
 let transaction = Transaction::builder(network)
     .pay_fee_from_component(sender_account, Amount::from(1000))
-    // Withdraw 100 tokens of `my_resource` into a Bucket from the sender's account
+    // Withdraw 100 tokens of `my_resource` into a Bucket
+    // from the sender's account
     .call_method(sender_account, "withdraw", args![my_resource, 100u64])
     // Save the returned Bucket to the workspace as "payment"
     .put_last_instruction_output_on_workspace("payment")
@@ -227,14 +228,21 @@ Sometimes you want to create a component and immediately call a method on it —
 Sometimes you need to know an address before it is created — for example, to pass a component's own address to its constructor, or to set up cross-references between two components. Use `allocate_component_address` to pre-allocate an address and put it on the workspace, then pass it to `call_function`:
 
 ```rust
-use tari_ootle_transaction::{Transaction, args, builder::named_component_call::CallFromWorkspace};
+use tari_ootle_transaction::{
+    Transaction, args,
+    builder::named_component_call::CallFromWorkspace,
+};
 
 let transaction = Transaction::builder(network)
     .pay_fee_from_component(account, Amount::from(1000))
     // Pre-allocate an address for our new component
     .allocate_component_address("my_addr")
     // Pass the pre-allocated address to the constructor
-    .call_function(template_address, "new_with_address", args![Workspace("my_addr")])
+    .call_function(
+        template_address,
+        "new_with_address",
+        args![Workspace("my_addr")],
+    )
     .build_and_seal(&secret_key);
 ```
 
@@ -322,7 +330,9 @@ let transaction = Transaction::builder(network)
             .call_method(faucet, "take", args![100_000u64])
             .put_last_instruction_output_on_workspace("faucet_coins")
             // Deposit into account
-            .call_method(my_account, "deposit", args![Workspace("faucet_coins")])
+            .call_method(
+                my_account, "deposit", args![Workspace("faucet_coins")],
+            )
             // Then pay the fee from the account
             .call_method(my_account, "pay_fee", args![Amount::from(1000)])
     })
@@ -345,7 +355,8 @@ Here is a complete example that creates a component from a template and immediat
 use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::types::{Amount, TemplateAddress};
 
-let template_address: TemplateAddress = /* the address of your deployed template */;
+// the address of your deployed template
+let template_address: TemplateAddress = /* ... */;
 let my_account: ComponentAddress = /* your account address */;
 
 let transaction = Transaction::builder(network)
@@ -373,7 +384,10 @@ use tari_ootle_transaction::{Transaction, args};
 
 #[test]
 fn test_my_template() {
-  let mut test = TemplateTest::new(env!("CARGO_MANIFEST_DIR"), ["path/to/my_template"]);
+  let mut test = TemplateTest::new(
+      env!("CARGO_MANIFEST_DIR"),
+      ["path/to/my_template"],
+  );
 
   // You can call functions directly via the helper methods...
   let component_address: ComponentAddress =

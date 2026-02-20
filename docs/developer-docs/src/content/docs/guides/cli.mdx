@@ -66,8 +66,13 @@ mod hello_world {
     }
 
     impl HelloWorld {
-        pub fn new(alloc: ComponentAddressAllocation, name: String) -> Component<Self> {
-            Component::new(Self { name }).with_address_allocation(alloc).create()
+        pub fn new(
+            alloc: ComponentAddressAllocation,
+            name: String,
+        ) -> Component<Self> {
+            Component::new(Self { name })
+                .with_address_allocation(alloc)
+                .create()
         }
 
         pub fn greet(&self) {
@@ -88,7 +93,10 @@ NOTES:
 Update the existing test in `tests/test.rs` to pass in a name when creating the `HelloWorld` component and call the `greet` method:
 
 ```rust
-use tari_template_test_tooling::{TemplateTest, transaction::{args, Transaction}};
+use tari_template_test_tooling::{
+    TemplateTest,
+    transaction::{args, Transaction},
+};
 
 #[test]
 fn it_works() {
@@ -100,8 +108,12 @@ fn it_works() {
     let _result = test.execute_expect_success(
         Transaction::builder_localnet()
             .allocate_component_address("hello_world_component")
-            // **UPDATE** 1. Call the constructor function `new` with a name argument
-            .call_function(template, "new", args![Workspace("hello_world_component"), "Alice"])
+            // **UPDATE** 1. Call the `new` constructor with a name
+            .call_function(
+                template,
+                "new",
+                args![Workspace("hello_world_component"), "Alice"],
+            )
             .call_method("hello_world_component", "greet", args![])
             .build_and_seal(test.secret_key()),
         vec![test.owner_proof()]

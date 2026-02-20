@@ -401,12 +401,17 @@ The test harness will compile your template to WASM and run the tests against it
 ## Full annotated code
 
 <p>
-  <a href="https://github.com/tari-project/wasm-template/tree/main/examples/guessing_game" target="_blank">Guessing Game
+  <a href="https://github.com/tari-project/wasm-template/tree/main/examples/guessing_game/template" target="_blank">Guessing
+    Game
     crate on Github</a>
 </p>
 
-Replace `Cargo.toml`, `src/lib.rs` and `tests/test.rs` files (respectively) in your new crate the following code
-and run `cargo test` to check that everything works:
+
+Use cargo-generate to download the full template crate:
+
+```bash
+cargo generate https://github.com/tari-project/wasm-template examples/guessing_game/template
+```
 
 <Emgithub src="https://github.com/tari-project/wasm-template/blob/main/examples/guessing_game/template/Cargo.toml" />
 <Emgithub src="https://github.com/tari-project/wasm-template/blob/main/examples/guessing_game/template/src/lib.rs" />

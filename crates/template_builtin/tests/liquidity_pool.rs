@@ -13,7 +13,7 @@ const TEMPLATE_NAME: &str = "TwoResourceLiquidityPool";
 fn initial_contribution_and_redeem() {
     // Setup
     // NOTE: builtin templates are automatically added to the test environment. No need to specify template paths.
-    let mut test = TemplateTest::new_no_templates();
+    let mut test = TemplateTest::new_builtin_only();
     let template_address = test.get_template_address(TEMPLATE_NAME);
 
     let (faucet_component, faucet_resource) = test.create_test_faucet_component(1_000_000_000_000u64);
@@ -102,7 +102,7 @@ fn initial_contribution_and_redeem() {
 #[test]
 fn basic_constant_product_swap() {
     // Setup
-    let mut test = TemplateTest::new_no_templates();
+    let mut test = TemplateTest::new_builtin_only();
     let template_address = test.get_template_address(TEMPLATE_NAME);
 
     let (faucet_component, faucet_resource) = test.create_test_faucet_component(1_000_000_000_000u64);

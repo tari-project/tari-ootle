@@ -34,8 +34,8 @@ use tari_state_tree::Version;
 use tari_template_lib::types::{
     EntityId,
     Metadata,
-    OwnerRule,
     ResourceType,
+    SubstateOwnerRule,
     access_rules::{ComponentAccessRules, ResourceAccessRules},
     constants::{
         NFT_FAUCET_COMPONENT_ADDRESS,
@@ -107,7 +107,7 @@ where
         template_address: tari_template_builtin::XTR_FAUCET_TEMPLATE_ADDRESS,
         module_name: "XtrFaucet".to_string(),
         owner_key: None,
-        owner_rule: OwnerRule::None,
+        owner_rule: SubstateOwnerRule::None,
         access_rules: ComponentAccessRules::allow_all(),
         entity_id: EntityId::default(),
         body: ComponentBody::from_cbor_value(
@@ -132,7 +132,7 @@ where
         template_address: tari_template_builtin::NFT_FAUCET_TEMPLATE_ADDRESS,
         module_name: "NftFaucet".to_string(),
         owner_key: None,
-        owner_rule: OwnerRule::None,
+        owner_rule: SubstateOwnerRule::None,
         access_rules: ComponentAccessRules::allow_all(),
         entity_id: EntityId::default(),
         body: ComponentBody {
@@ -147,7 +147,7 @@ where
     let value = Resource::new(
         ResourceType::NonFungible,
         None,
-        OwnerRule::None,
+        SubstateOwnerRule::None,
         access_rules,
         metadata,
         None,

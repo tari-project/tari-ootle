@@ -572,6 +572,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 self.get_vault_mut(&vault_lock)?.unlock(proof)?;
                 self.unlock_substate(vault_lock)?;
             },
+            ContainerRef::Runtime => {},
         }
 
         Ok(())
@@ -1328,22 +1329,22 @@ impl<TStore: StateReader> WorkingState<TStore> {
         }
         for bucket_id in value.bucket_ids() {
             if !self.buckets().contains_key(bucket_id) {
-                return Err(RuntimeError::ValidationFailedBucketNotInScope { bucket_id: *bucket_id });
+                return Err(RuntimeError::BucketNotInScope { bucket_id: *bucket_id });
             }
         }
         for proof_id in value.proof_ids() {
             if !self.proofs().contains_key(proof_id) {
-                return Err(RuntimeError::ValidationFailedProofNotInScope { proof_id: *proof_id });
+                return Err(RuntimeError::ProofNotInScope { proof_id: *proof_id });
             }
         }
         for allocation in value.component_address_allocations() {
             if !self.address_allocations.contains_key(&allocation.id()) {
-                return Err(RuntimeError::ValidationFailedAddressAllocationNotInScope { id: allocation.id() });
+                return Err(RuntimeError::AddressAllocationNotInScope { id: allocation.id() });
             }
         }
         for allocation in value.resource_address_allocations() {
             if !self.address_allocations.contains_key(&allocation.id()) {
-                return Err(RuntimeError::ValidationFailedAddressAllocationNotInScope { id: allocation.id() });
+                return Err(RuntimeError::AddressAllocationNotInScope { id: allocation.id() });
             }
         }
 
@@ -1376,12 +1377,12 @@ impl<TStore: StateReader> WorkingState<TStore> {
         }
         for bucket_id in value.bucket_ids() {
             if !scope.is_bucket_in_scope(*bucket_id) {
-                return Err(RuntimeError::ValidationFailedBucketNotInScope { bucket_id: *bucket_id });
+                return Err(RuntimeError::BucketNotInScope { bucket_id: *bucket_id });
             }
         }
         for proof_id in value.proof_ids() {
             if !scope.is_proof_in_scope(proof_id) {
-                return Err(RuntimeError::ValidationFailedProofNotInScope { proof_id: *proof_id });
+                return Err(RuntimeError::ProofNotInScope { proof_id: *proof_id });
             }
         }
         // TODO: should we scope address allocations?

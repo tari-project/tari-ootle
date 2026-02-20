@@ -31,15 +31,30 @@ mod caller_context_template {
     }
 
     impl CallerContextTest {
-        pub fn create() -> Component<Self> {
+        pub fn log_caller_pk() {
             let caller_pub_key = CallerContext::transaction_signer_public_key();
-            Component::new(Self { caller_pub_key })
-                .with_access_rules(AccessRules::allow_all())
-                .create()
+            info!("{}", caller_pub_key);
         }
 
-        pub fn caller_pub_key(&self) -> RistrettoPublicKeyBytes {
-            self.caller_pub_key.clone()
+        pub fn main_signer_proof() -> Proof {
+            CallerContext::get_main_signer_proof()
+        }
+
+        pub fn signer_proof_for_pk(public_key: RistrettoPublicKeyBytes) -> Proof {
+            CallerContext::get_signer_proof_for_public_key(public_key)
+        }
+
+        pub fn check_pk_proof(proof: Proof, expected_pk: RistrettoPublicKeyBytes) {
+            assert!(proof.resource_address().is_public_key_resource());
+            proof.authorize_with(|| {});
+            let badge = proof.get_non_fungibles().pop_first().unwrap();
+            assert_eq!(badge.as_u256().unwrap(), expected_pk.as_bytes());
+        }
+
+        /// Calls the `main_signer_proof` function of the template at the given address, using the `TemplateManager` to
+        /// call across template contexts. All signers are out of scope in cross-template calls
+        pub fn call_using_cross_template(addr: TemplateAddress) -> Proof {
+            TemplateManager::get(addr).call("main_signer_proof", args![])
         }
     }
 }

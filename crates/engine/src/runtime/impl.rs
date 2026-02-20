@@ -40,6 +40,7 @@ use tari_engine_types::{
     limits,
     lock::LockFlag,
     logs::LogEntry,
+    proof::{ContainerRef, LockedResource},
     published_template::{PublishedTemplate, PublishedTemplateAddress, TemplateBlob},
     resource::Resource,
     resource_container::{ResourceContainer, ResourceError},
@@ -113,6 +114,7 @@ use tari_template_lib::{
         OwnerRule,
         ResourceInfo,
         ResourceType,
+        SubstateOwnerRule,
         TemplateAddress,
         UtxoAddress,
         ValidatorFeePoolAddress,
@@ -593,11 +595,11 @@ where
                 let template_def = self.get_template_def(&template_addr)?;
                 validate_component_access_rule_methods(&access_rules, &template_def)?;
 
-                let owner_key = match owner_rule {
-                    OwnerRule::OwnedBySigner => Some(self.seal_signer_public_key),
-                    OwnerRule::None => None,
-                    OwnerRule::ByAccessRule(_) => None,
-                    OwnerRule::ByPublicKey(key) => Some(key),
+                let (owner_key, owner_rule) = match owner_rule {
+                    OwnerRule::OwnedBySigner => (Some(self.seal_signer_public_key), SubstateOwnerRule::ByPublicKey),
+                    OwnerRule::None => (None, SubstateOwnerRule::None),
+                    OwnerRule::ByAccessRule(rule) => (None, SubstateOwnerRule::ByAccessRule(rule)),
+                    OwnerRule::ByPublicKey(key) => (Some(key), SubstateOwnerRule::ByPublicKey),
                 };
 
                 let component_address = self.tracker.new_component(
@@ -758,11 +760,54 @@ where
                     let component = substate
                         .substate_value()
                         .component()
-                        .ok_or(RuntimeError::ComponentNotFound {
-                            address: component_address,
+                        .ok_or(RuntimeError::InvariantError {
+                            function: "GetTemplateAddress",
+                            details: format!("Substate at {} is not a component", component_address),
                         })?;
 
                     Ok(InvokeResult::encode(&component.template_address)?)
+                })
+            },
+            ComponentAction::GetOwnerProof => {
+                let component_address =
+                    component_ref
+                        .as_component_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "component_ref",
+                            reason: "GetOwnerRule component action requires a component address".to_string(),
+                        })?;
+
+                args.assert_no_args("Component::GetOwnerRule")?;
+
+                // The owner rule can never change so we'll just fetch the component
+                self.tracker.write_with(|state_mut| {
+                    let substate = state_mut.store().get_unmodified_substate(&component_address.into())?;
+                    let component = substate
+                        .substate_value()
+                        .component()
+                        .ok_or(RuntimeError::InvariantError {
+                            function: "GetOwnerProof",
+                            details: format!("Substate at {} is not a component", component_address),
+                        })?;
+
+                    let Some(owner) = component.owner_key.as_ref().copied() else {
+                        return Ok(InvokeResult::encode(&None::<tari_template_lib::models::Proof>)?);
+                    };
+
+                    let call_scope = state_mut.current_call_scope()?;
+                    let badge = NonFungibleAddress::from_public_key(owner);
+                    if !call_scope.auth_scope().contains_badge(&badge) {
+                        return Err(RuntimeError::SignerBadgeNotInScope { public_key: owner });
+                    }
+
+                    let proof_id = state_mut.id_provider()?.new_proof_id();
+                    let container = ResourceContainer::public_key(owner);
+                    let locked = LockedResource::new(ContainerRef::Runtime, container);
+                    state_mut.new_proof(proof_id, locked)?;
+
+                    Ok(InvokeResult::encode(&Some(tari_template_lib::models::Proof::from_id(
+                        proof_id,
+                    )))?)
                 })
             },
         }
@@ -821,10 +866,11 @@ where
                     });
                 }
 
-                let owner_key = match &arg.owner_rule {
-                    OwnerRule::OwnedBySigner => Some(self.seal_signer_public_key),
-                    OwnerRule::ByPublicKey(key) => Some(*key),
-                    OwnerRule::None | OwnerRule::ByAccessRule(_) => None,
+                let (owner_key, owner_rule) = match arg.owner_rule {
+                    OwnerRule::OwnedBySigner => (Some(self.seal_signer_public_key), SubstateOwnerRule::ByPublicKey),
+                    OwnerRule::ByPublicKey(key) => (Some(key), SubstateOwnerRule::ByPublicKey),
+                    OwnerRule::None => (None, SubstateOwnerRule::None),
+                    OwnerRule::ByAccessRule(rule) => (None, SubstateOwnerRule::ByAccessRule(rule)),
                 };
 
                 // Check that auth hook is valid
@@ -836,7 +882,7 @@ where
                     let resource = Resource::new(
                         arg.resource_type,
                         owner_key,
-                        arg.owner_rule,
+                        owner_rule,
                         arg.access_rules,
                         arg.metadata,
                         arg.view_key,
@@ -2595,12 +2641,32 @@ where
             },
             CallerContextAction::GetComponentAddress => self.tracker.read_with(|state| {
                 args.assert_no_args("CallerContextAction::GetComponentAddress")?;
-                let call_frame = state.current_call_scope()?;
-                let maybe_address = call_frame
+                let call_scope = state.current_call_scope()?;
+                let maybe_address = call_scope
                     .get_current_component_lock()
                     .map(|l| l.substate_id().as_component_address().unwrap());
                 Ok(InvokeResult::encode(&maybe_address)?)
             }),
+            CallerContextAction::GetSignerProof => {
+                let public_key = args
+                    .get_opt::<RistrettoPublicKeyBytes>(0)?
+                    .unwrap_or(self.seal_signer_public_key);
+
+                self.tracker.write_with(|state_mut| {
+                    let call_scope = state_mut.current_call_scope()?;
+                    let badge = NonFungibleAddress::from_public_key(public_key);
+                    if !call_scope.auth_scope().contains_badge(&badge) {
+                        return Err(RuntimeError::SignerBadgeNotInScope { public_key });
+                    }
+
+                    let proof_id = state_mut.id_provider()?.new_proof_id();
+                    let resx = ResourceContainer::public_key(public_key);
+                    let locked = LockedResource::new(ContainerRef::Runtime, resx);
+                    state_mut.new_proof(proof_id, locked)?;
+
+                    Ok(InvokeResult::encode(&proof_id)?)
+                })
+            },
         }
     }
 

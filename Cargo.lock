@@ -11855,6 +11855,8 @@ dependencies = [
 name = "tari_template_builtin"
 version = "0.23.2"
 dependencies = [
+ "ootle_byte_type",
+ "tari_crypto",
  "tari_engine",
  "tari_engine_types",
  "tari_ootle_transaction",
@@ -11865,7 +11867,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_lib"
-version = "0.19.3"
+version = "0.20.0"
 dependencies = [
  "borsh",
  "serde",
@@ -11879,7 +11881,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_lib_types"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "bincode 2.0.1",
  "bnum",

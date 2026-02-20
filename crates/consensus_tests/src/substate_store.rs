@@ -33,7 +33,7 @@ use tari_ootle_storage::{
     },
 };
 use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
-use tari_template_lib_types::{ComponentAddress, EntityId, ObjectKey};
+use tari_template_lib_types::{ComponentAddress, EntityId, ObjectKey, SubstateOwnerRule};
 use tempfile::TempDir;
 
 use crate::support::{TEST_NUM_PRESHARDS, logging::setup_logger};
@@ -266,7 +266,7 @@ fn new_substate_value(seed: u8) -> SubstateValue {
         template_address: Default::default(),
         module_name: "".to_string(),
         owner_key: None,
-        owner_rule: Default::default(),
+        owner_rule: SubstateOwnerRule::ByPublicKey,
         access_rules: Default::default(),
         entity_id: [seed; EntityId::LENGTH].into(),
         body: ComponentBody {

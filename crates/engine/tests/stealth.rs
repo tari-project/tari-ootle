@@ -211,7 +211,7 @@ fn transfer_with_revealed_outputs() {
 #[test]
 fn transfer_revealed_between_accounts() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let (alice, alice_proof, alice_sk) = test.create_empty_account();
+    let (alice, _alice_proof, alice_sk) = test.create_empty_account();
     let (bob, _proof, _sk) = test.create_empty_account();
 
     let outputs = [100, 1000, 10000];
@@ -247,10 +247,11 @@ fn transfer_revealed_between_accounts() {
             .put_last_instruction_output_on_workspace("transfer_to_bob")
             .call_method(bob, "deposit", args![Workspace("transfer_to_bob")])
             .finish()
+            // In tests, we set the spend condition to require the mask as a signer
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[1])
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[2])
             .seal(&alice_sk),
-        vec![alice_proof],
+        vec![],
     );
 
     let diff = result.finalize.any_accept().unwrap();

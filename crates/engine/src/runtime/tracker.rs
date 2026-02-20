@@ -43,7 +43,7 @@ use tari_template_lib::{
         ComponentAddress,
         Hash32,
         Metadata,
-        OwnerRule,
+        SubstateOwnerRule,
         TemplateAddress,
         access_rules::ComponentAccessRules,
         crypto::RistrettoPublicKeyBytes,
@@ -139,7 +139,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         &mut self,
         component_state: tari_bor::Value,
         owner_key: Option<RistrettoPublicKeyBytes>,
-        owner_rule: OwnerRule,
+        owner_rule: SubstateOwnerRule,
         access_rules: ComponentAccessRules,
         address_allocation: Option<ComponentAddressAllocation>,
     ) -> Result<ComponentAddress, RuntimeError> {

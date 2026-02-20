@@ -31,8 +31,8 @@ use tari_template_lib::{
         Amount,
         AuthHook,
         Metadata,
-        OwnerRule,
         ResourceType,
+        SubstateOwnerRule,
         access_rules::ResourceAccessRules,
         crypto::RistrettoPublicKeyBytes,
     },
@@ -44,7 +44,7 @@ use crate::ownership::Ownership;
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Resource {
     resource_type: ResourceType,
-    owner_rule: OwnerRule,
+    owner_rule: SubstateOwnerRule,
     owner_key: Option<RistrettoPublicKeyBytes>,
     access_rules: ResourceAccessRules,
     metadata: Metadata,
@@ -59,7 +59,7 @@ impl Resource {
     pub const fn new(
         resource_type: ResourceType,
         owner_key: Option<RistrettoPublicKeyBytes>,
-        owner_rule: OwnerRule,
+        owner_rule: SubstateOwnerRule,
         access_rules: ResourceAccessRules,
         metadata: Metadata,
         view_key: Option<RistrettoPublicKeyBytes>,
@@ -92,7 +92,7 @@ impl Resource {
     pub fn load(
         resource_type: ResourceType,
         owner_key: Option<RistrettoPublicKeyBytes>,
-        owner_rule: OwnerRule,
+        owner_rule: SubstateOwnerRule,
         access_rules: ResourceAccessRules,
         metadata: Metadata,
         view_key: Option<RistrettoPublicKeyBytes>,
@@ -117,7 +117,7 @@ impl Resource {
         self.resource_type
     }
 
-    pub fn owner_rule(&self) -> &OwnerRule {
+    pub fn owner_rule(&self) -> &SubstateOwnerRule {
         &self.owner_rule
     }
 

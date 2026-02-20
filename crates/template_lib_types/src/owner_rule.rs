@@ -27,3 +27,15 @@ impl OwnerRule {
         }
     }
 }
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum SubstateOwnerRule {
+    /// There is no owner, only access rules apply
+    None,
+    /// The owner is anyone who satisfies an access rule
+    ByAccessRule(AccessRule),
+    /// The owner is a specific public key
+    ByPublicKey,
+}

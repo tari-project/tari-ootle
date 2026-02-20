@@ -82,6 +82,7 @@ pub enum ComponentAction {
     SetState,
     SetAccessRules,
     GetTemplateAddress,
+    GetOwnerProof,
 }
 
 /// Encapsulates all the ways that a component can be referenced
@@ -517,6 +518,7 @@ pub enum GenerateRandomAction {
 pub enum CallerContextAction {
     GetCallerPublicKey,
     GetComponentAddress,
+    GetSignerProof,
 }
 
 /// A caller context operation argument

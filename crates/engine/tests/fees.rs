@@ -97,7 +97,7 @@ fn deposit_from_faucet_then_pay() {
 
 #[test]
 fn another_account_pays_partially_for_fees() {
-    let mut test = TemplateTest::new_no_templates();
+    let mut test = TemplateTest::new_builtin_only();
 
     let (account, _, _) = test.create_empty_account();
     let (account_fee, owner_token_fee, _) = test.create_funded_account();
@@ -306,7 +306,7 @@ fn fail_pay_less_fees_than_fee_transaction() {
 
 #[test]
 fn fail_pay_too_little_no_fee_instruction() {
-    let mut test = TemplateTest::new_no_templates();
+    let mut test = TemplateTest::new_builtin_only();
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let (account2, owner_token2, _) = test.create_funded_account();
@@ -345,7 +345,7 @@ fn fail_pay_too_little_no_fee_instruction() {
 
 #[test]
 fn failure_pay_fee_in_main_instructions() {
-    let mut test = TemplateTest::new_no_templates();
+    let mut test = TemplateTest::new_builtin_only();
 
     let (account, owner_token, private_key) = test.create_funded_account();
 

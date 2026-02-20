@@ -8,7 +8,8 @@ use tari_template_lib_types::ComponentAddress;
 
 use crate::{
     args::{AddressAllocationInvokeArg, CallerContextAction, CallerContextInvokeArg, InvokeResult},
-    models::{ComponentAddressAllocation, ResourceAddressAllocation},
+    error_variants::{ERR_ENGINE_DECODE_FAIL, ERR_NOT_IN_COMPONENT_CONTEXT},
+    models::{ComponentAddressAllocation, Proof, ResourceAddressAllocation},
     types::crypto::RistrettoPublicKeyBytes,
 };
 
@@ -23,7 +24,27 @@ impl CallerContext {
             args: invoke_args![],
         });
 
-        resp.decode().expect("Failed to decode PublicKey")
+        resp.decode().expect(ERR_ENGINE_DECODE_FAIL)
+    }
+
+    /// Returns a proof of the main/seal transaction signer
+    pub fn get_main_signer_proof() -> Proof {
+        Self::get_signer_proof_inner(None)
+    }
+
+    /// Returns a proof of the transaction signer with the given public key. If the public key does not match any
+    /// transaction signer, this will panic.
+    pub fn get_signer_proof_for_public_key(public_key: RistrettoPublicKeyBytes) -> Proof {
+        Self::get_signer_proof_inner(Some(public_key))
+    }
+
+    fn get_signer_proof_inner(pk: Option<RistrettoPublicKeyBytes>) -> Proof {
+        let resp: InvokeResult = call_engine(EngineOp::CallerContextInvoke, &CallerContextInvokeArg {
+            action: CallerContextAction::GetSignerProof,
+            args: pk.map(|pk| invoke_args![pk]).unwrap_or_default(),
+        });
+
+        resp.decode().expect(ERR_ENGINE_DECODE_FAIL)
     }
 
     /// Returns the address of the component that is being called in the current instruction.
@@ -35,8 +56,8 @@ impl CallerContext {
         });
 
         resp.decode::<Option<ComponentAddress>>()
-            .expect("Failed to decode Option<ComponentAddress>")
-            .expect("Not in a component instance context")
+            .expect(ERR_ENGINE_DECODE_FAIL)
+            .expect(ERR_NOT_IN_COMPONENT_CONTEXT)
     }
 
     /// Alias function to allocate component address
@@ -50,7 +71,7 @@ impl CallerContext {
             },
         );
 
-        resp.decode().expect("Failed to decode ComponentAddressAllocation ")
+        resp.decode().expect(ERR_ENGINE_DECODE_FAIL)
     }
 
     pub fn allocate_resource_address() -> ResourceAddressAllocation {
@@ -59,6 +80,6 @@ impl CallerContext {
             &AddressAllocationInvokeArg::CreateResourceAllocation,
         );
 
-        resp.decode().expect("Failed to decode ResourceAddressAllocation ")
+        resp.decode().expect(ERR_ENGINE_DECODE_FAIL)
     }
 }

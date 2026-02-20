@@ -261,7 +261,7 @@ impl Display for SubstatePledge {
 mod tests {
     use tari_engine_types::component::{ComponentBody, ComponentHeader};
     use tari_template_lib::types::{ComponentAddress, EntityId};
-    use tari_template_lib_types::access_rules::ComponentAccessRules;
+    use tari_template_lib_types::{SubstateOwnerRule, access_rules::ComponentAccessRules};
 
     use super::*;
 
@@ -274,7 +274,7 @@ mod tests {
             template_address: Default::default(),
             module_name: "".to_string(),
             owner_key: None,
-            owner_rule: Default::default(),
+            owner_rule: SubstateOwnerRule::ByPublicKey,
             access_rules: ComponentAccessRules::allow_all(),
             entity_id: EntityId::from_array([seed; EntityId::LENGTH]),
             body: ComponentBody::empty(),

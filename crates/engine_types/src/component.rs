@@ -27,7 +27,7 @@ use tari_template_lib::types::{
     ComponentAddress,
     EntityId,
     ObjectKey,
-    OwnerRule,
+    SubstateOwnerRule,
     TemplateAddress,
     access_rules::ComponentAccessRules,
     crypto::RistrettoPublicKeyBytes,
@@ -62,7 +62,7 @@ pub struct ComponentHeader {
     pub template_address: TemplateAddress,
     pub module_name: String,
     pub owner_key: Option<RistrettoPublicKeyBytes>,
-    pub owner_rule: OwnerRule,
+    pub owner_rule: SubstateOwnerRule,
     pub access_rules: ComponentAccessRules,
     pub entity_id: EntityId,
     // TODO: Split the state from the header

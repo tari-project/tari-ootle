@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use serde::{Deserialize, Serialize};
 use tari_template_lib::types::{
     Amount,
-    OwnerRule,
+    SubstateOwnerRule,
     ValidatorFeePoolAddress,
     constants::XTR,
     crypto::RistrettoPublicKeyBytes,
@@ -36,7 +36,7 @@ impl ValidatorFeePool {
     pub fn as_ownership(&self) -> Ownership<'_> {
         Ownership {
             owner_key: Some(&self.claim_public_key),
-            owner_rule: Cow::Owned(OwnerRule::OwnedBySigner),
+            owner_rule: Cow::Owned(SubstateOwnerRule::ByPublicKey),
         }
     }
 

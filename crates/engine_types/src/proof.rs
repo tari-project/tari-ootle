@@ -68,6 +68,7 @@ impl Proof {
 pub enum ContainerRef {
     Bucket(BucketId),
     Vault(VaultId),
+    Runtime,
 }
 
 #[derive(Debug, Clone)]

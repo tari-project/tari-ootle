@@ -15,8 +15,8 @@ use tari_template_lib::types::{
     Amount,
     ComponentAddress,
     ObjectKey,
-    OwnerRule,
     ResourceType,
+    SubstateOwnerRule,
     VaultId,
     access_rules::{ComponentAccessRules, ResourceAccessRules},
     constants::XTR,
@@ -32,7 +32,7 @@ pub fn setup_store() -> MemoryStateStore {
     let xtr = Resource::new(
         ResourceType::Stealth,
         None,
-        OwnerRule::None,
+        SubstateOwnerRule::None,
         ResourceAccessRules::new(),
         metadata!(),
         None,
@@ -57,7 +57,7 @@ pub fn setup_store() -> MemoryStateStore {
         template_address: XTR_FAUCET_TEMPLATE_ADDRESS,
         module_name: "XtrFaucet".to_string(),
         owner_key: None,
-        owner_rule: OwnerRule::None,
+        owner_rule: SubstateOwnerRule::None,
         access_rules: ComponentAccessRules::allow_all(),
         entity_id: Default::default(),
         body: ComponentBody::from_cbor_value(

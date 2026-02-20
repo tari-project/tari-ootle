@@ -102,11 +102,13 @@ Finally, we'll want to keep track of the round number so that we can "engrave" t
 
 ```rust
 pub struct GuessingGame {
-  /// A vault containing the prize to be won for the round, or is empty if no round is active
+  /// A vault containing the prize to be won for the round,
+  /// or is empty if no round is active
   prize_vault: Vault,
   /// A map between a player's public key and their guess for the current round
   guesses: HashMap<RistrettoPublicKeyBytes, Guess>,
-  /// The current round number, starting at 0 and incrementing by 1 for each new round
+  /// The current round number, starting at 0 and
+  /// incrementing by 1 for each new round
   round_number: u32,
 }
 ```
@@ -118,10 +120,12 @@ Add this struct inside the `template` module block:
 
 ```rust
 pub struct Guess {
-    /// The component where the player wants to receive their payout if they win.
-    /// We use a ComponentManager for convenience: it simply wraps ComponentAddress and provides some helper methods,
+    /// The component where the player wants to receive
+    /// their payout if they win.
+    /// We use a ComponentManager for convenience; it wraps
+    /// ComponentAddress and provides some helper methods.
     pub payout_to: ComponentManager,
-    /// The player's guess for this round, which should be a number between 0 and 10.
+    /// The player's guess for this round, a number between 0 and 10.
     pub guess: u8,
 }
 ```
@@ -141,9 +145,12 @@ Next, we need to create an instance of our game. Let's implement a constructor f
 ```rust
 impl GuessingGame {
   pub fn new() -> Component<Self> {
-      let prize_vault = Vault::new_empty(prize_resource); // <--- what is `prize_resource`?? we'll get to that in a moment
+      let prize_vault = Vault::new_empty(prize_resource);
+      // ↑ what is `prize_resource`?? we'll get to that in a moment
 
       Component::new(Self {
+          // Keep the vault in the component state so we can use it
+          // to hold the prize for each round.
           prize_vault,
           guesses: HashMap::new(),
           round_number: 0,
@@ -153,32 +160,54 @@ impl GuessingGame {
 }
 ```
 
+<Aside type="tip">
+  The `Vault` returned from `Vault::new_empty` is a reference to the on-chain vault substate.
+  You MUST store the vault in a component before the end of the function, or the transaction will fail.
+</Aside>
+
 **What we did:**
 
 - We created a new empty vault that will hold the prize for our game.
-- We created a component that holds the state for our game
+- We created a component that holds the vault and other state for our game
+
+But what is the prize exactly? Let's create that next.
 
 ## Create a Resource
 
-Now for the prize. We want to give out a unique NFT for each round.
-For this, we'll create a new non-fungible resource that uniquely represents a prize for our game.
-Later we'll use this resource to mint a prize for each round.
+We said we want to give out a unique NFT for each round. But how do we create an NFT?
+
+First, you'll need to create a "resource". A resource (sometimes called a "token" or an "asset")
+is native to Tari Ootle and behaves like an object or currency.
+That is, it can be minted, transferred, but not copied or unintentionally destroyed.
+
+There are 3 types of resource:
+- fungible stealth resources are private and enable "blinded" UTXO substates which hide the amount and the owner on-chain.
+- public fungible resources are like ERC-20 tokens, where each token is identical and divisible. Visible on-chain with transparent amounts and addresses.
+- non-fungible resources are like ERC-721 tokens, where each token is unique and indivisible. Visible on-chain with transparent metadata and ownership.
+
+For our game, we'll need a new non-fungible resource that uniquely represents prizes for our game.
+First we'll create a new resource and later, when the game starts, we'll use this resource to mint
+an NFT prize for each round.
 
 We can do this using the `ResourceBuilder` in the constructor:
 
 ```rust
-
 impl GuessingGame {
   pub fn new() -> Component<Self> {
       // ADD THIS
       let prize_resource = ResourceBuilder::non_fungible()
         // Optionally give it a name
         .metadata("name", "Guessing Game Prize")
-        // Optionally, provide a token symbol that exchanges and explorers will display for the new resource
+        // Optionally, provide a token symbol that exchanges and explorers will
+        // display for the new resource. This is usually 3-5 letters, but since
+        // this is a fun game let's make it 🎲
         .with_token_symbol("🎲")
-        // Create the resource with no supply (use `.initial_supply(...)` to mint new NFTs in the builder)
+        // Create the resource with no supply
+        // (use `.initial_supply(...)` to mint new NFTs in the builder)
         .build();
 
+      // Pass the resource address to the vault to specify that this vault will
+      // hold this, and only this, resource
       let prize_vault = Vault::new_empty(prize_resource);
 
       Component::new(Self {
@@ -193,20 +222,21 @@ impl GuessingGame {
 
 <Aside type="tip">
   The `build` method creates the resource and returns its `ResourceAddress`. This is a unique identifier for the
-  resource that we can use to refer to it later.
+  resource that we can use to mint new NFTs later. We pass the `ResourceAddress` to the vault to specify what type
+  of resource it holds.
 
-  You can also use the `initial_supply` method to mint NFTs as part of the resource creation process.
+  You can also use the `initial_supply(...)` method to mint NFTs as part of the resource creation process.
   `initial_supply` returns a `Bucket` containing the newly minted NFTs, which you can then deposit into the vault using
   `Vault::from_bucket`.
 </Aside>
 
-<Aside type="note">
-  By default, only the resource owner can mint new tokens for a resource. You can change this, but for this example,
-  this is exactly what we want.
+<Aside type="tip">
+  By default, only the resource owner can mint new tokens for a resource. You can change this,
+  by setting an access rule (`.mintable(rule![require(bob)])`) but for this example, we only want the owner to mint.
 </Aside>
 
-<Aside type="tip">
-  A vault can only hold one and only one resource. If you or anyone else later try to deposit a different resource in
+<Aside type="note">
+  A vault can only hold one and only one resource. If you or anyone else later tries to deposit a different resource in
   the vault, the transaction will fail.
 </Aside>
 
@@ -214,6 +244,7 @@ impl GuessingGame {
 **What we did:**
 - We created a new non-fungible resource that uniquely identifies the prize for our game.
 - We gave it some metadata, including a name and token symbol.
+- We passed the resource address to the vault to specify that it will hold this resource.
 
 ## Starting a new round
 
@@ -222,14 +253,20 @@ Next, we need a function to start a new round of the game.
 ```rust
 pub fn start_game(&mut self, prize: NonFungibleId) {
   self.round_number += 1;
-  // To mint the prize, we need a ResourceManager. For convenience, a Vault provides the
-  // `get_resource_manager` method that returns a resource manager for the resource it holds.
+  // To mint the prize, we need a ResourceManager. For convenience,
+  // a Vault provides `get_resource_manager` for the resource it holds.
   let manager = self.prize_vault.get_resource_manager();
-  // Mint the prize. Each NFT has immutable (cannot be changed) data and mutable (holder can change) data.
-  // We pass in the round number as the immutable data to mint this round in NFT history
-  // and empty (unit) for the mutable data.
-  let prize = manager.mint_non_fungible(prize, &metadata!["round" => self.round_number.to_string()], &());
-  // Deposit the prize in the vault to hold it until it's awarded to a winner or destroyed if there are no winners.
+  // Mint the prize. Each NFT has immutable (cannot be changed) data
+  // and mutable (holder can change) data.
+  // We pass in the round number as the immutable data to mint this
+  // round in NFT history, and empty (unit) for the mutable data.
+  let prize = manager.mint_non_fungible(
+      prize,
+      &metadata!["round" => self.round_number.to_string()],
+      &(),
+  );
+  // Deposit the prize in the vault to hold it until it's awarded
+  // to a winner or destroyed if there are no winners.
   self.prize_vault.deposit(prize);
 }
 ```
@@ -245,14 +282,21 @@ Next, we need a function that allows players to submit their guesses.
 
 ```rust
 pub fn guess(&mut self, guess: u8, payout_to: ComponentAddress) {
-    // We'll get the signer of the transaction to use as the player identifier for the guess.
+    // We'll get the signer of the transaction to use as the
+    // player identifier for the guess.
     let player = CallerContext::transaction_signer_public_key();
-    // Create a ComponentManager. This is a wrapper around a component address that allows us
-    // to call methods on the component. We'll use this in end_game_and_payout.
+    // Create a ComponentManager. This is a wrapper around a
+    // component address that allows us to call methods on it.
+    // We'll use this in end_game_and_payout.
     let payout_to = ComponentManager::get(payout_to);
-    // Insert the guess into the hashmap, assert that the player hasn't already made a guess this round.
-    let maybe_previous_guess = self.guesses.insert(player, Guess { payout_to, guess });
-    assert!(maybe_previous_guess.is_none(), "You already guessed in this round");
+    // Insert the guess into the hashmap, asserting that the
+    // player hasn't already made a guess this round.
+    let maybe_previous_guess = self.guesses
+        .insert(player, Guess { payout_to, guess });
+    assert!(
+        maybe_previous_guess.is_none(),
+        "You already guessed in this round",
+    );
 }
 ```
 
@@ -269,19 +313,22 @@ pub fn guess(&mut self, guess: u8, payout_to: ComponentAddress) {
 
 <Aside type="note">
   In the [annotated code below](#full-annotated-code), we add several additional checks but are removed in these
-  snippets for
-  simplicity.
+  snippets for brevity.
 </Aside>
 
-Looks great! But wait there's a problem... We said that anyone can submit a guess.
-How do we do that since by default, only the component creator can call methods on the component?
+Looks great! But there's a problem... We said that anyone can submit a guess.
+By default, only the component creator can call methods on the component. How do we change that to allow
+anyone to call the `guess` method?
 
-We'll need to make the `guess` method publicly callable by setting a access rule for the method in the component.
+The answer is access rules! Access rules is a larger subject that is covered in more detail <a href={basePath("/guides/authorization-and-access")}>here</a>,
+but for now, all you need to know is that access rules are a way to control who can call methods on your component.
+
+We'll need to make the `guess` method publicly callable by setting the `allow_all` access rule.
 Let's go back to the component constructor to do this.
 
 ```rust
  let access_rules = ComponentAccessRules::new()
-      // Here we allow anyone to call the "guess" method.
+      // ADDED: Allow anyone to call the "guess" method.
       .method("guess", rule![allow_all]);
 
  // Construct the component
@@ -296,13 +343,13 @@ Component::new(Self {
 .create()
 ```
 
-**What we did:*
+**What we did:**
 - We created a `ComponentAccessRules` struct that defines who can call methods on our component.
 - We set the access rule for the `guess` method to `allow_all`, which means that anyone can call it without restriction.
 
 <Aside type="tip">
   You don't need to specify access rules for every method. By default, all methods are only callable by the component
-  creator. You can override this default by using e.g. `.default(rule![allow_all])`
+  creator. You can override this default by using e.g. `.default(rule![require(any_of(admin, bob))])`
 
   ```rust
   let access_rules = ComponentAccessRules::new()
@@ -317,12 +364,14 @@ Finally, we need a function to end the game, determine if there are any winners,
 
 ```rust
 pub fn end_game_and_payout(&mut self) {
-  // Since we know that we only ever have one prize in the vault, we can just withdraw it by amount.
-  // use `vault.withdraw_non_fungible(id)` if you want to withdraw a specific NFT by id instead.
+  // Since we only ever have one prize in the vault, we can
+  // withdraw it by amount. Use `vault.withdraw_non_fungible(id)`
+  // if you want to withdraw a specific NFT by id instead.
   let mut prize = self.prize_vault.withdraw(1u64);
 
   // Generate a (pseudo) random number to determine the winner.
-  let number = generate_number(); // <-- we'll implement this function in a moment
+  // We'll implement generate_number() in a moment
+  let number = generate_number();
 
   // Take the guesses and clear the guesses for the next round.
   let guesses = mem::take(&mut self.guesses);
@@ -330,9 +379,9 @@ pub fn end_game_and_payout(&mut self) {
 
   for (player, guess) in guesses {
       if guess.guess == number {
-          // We have a winner! Payout the prize to the component specified in the guess.
-          // This is a cross component call that invokes the `deposit` method on the component specified in
-          // the guess. We pass in the bucket containing the prize as an argument.
+          // We have a winner! Payout the prize to the component
+          // specified in the guess. This is a cross-component call
+          // that invokes `deposit` with the prize bucket.
           guess.payout_to.invoke("deposit", args![prize]);
           return;
       }

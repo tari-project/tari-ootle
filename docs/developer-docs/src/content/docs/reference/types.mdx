@@ -30,7 +30,9 @@ A unique identifier for a specific resource type (e.g., a particular fungible to
 -   **Usage Example:**
 ```rust
 use tari_template_lib::prelude::*;
-let token_address: ResourceAddress = ResourceBuilder::public_fungible().with_token_symbol("MTK").build();
+let token_address: ResourceAddress = ResourceBuilder::public_fungible()
+    .with_token_symbol("MTK")
+    .build();
     ```
 
 #### `ComponentAddress`
@@ -42,7 +44,8 @@ A unique identifier for a deployed component instance.
 ```rust
 use tari_template_lib::prelude::*;
 // Assuming 'my_component' is an instance of your component struct
-// let component_address: ComponentAddress = ComponentBuilder::new().create_component("MyComponent", my_component);
+// let component_address: ComponentAddress =
+//     ComponentBuilder::new().create_component("MyComponent", my_component);
     ```
 
 #### `VaultId`

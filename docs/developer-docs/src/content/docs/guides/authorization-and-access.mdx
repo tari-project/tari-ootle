@@ -33,7 +33,9 @@ mod template {
         // Component state fields
     }
 
-    pub fn create_with_access_rules(admin_badge: ResourceAddress) -> ComponentAddress {
+    pub fn create_with_access_rules(
+        admin_badge: ResourceAddress,
+    ) -> ComponentAddress {
         let component = MyComponent { /* ... */ }; // Your component instance
 
         let component_address = Component::new(component)
@@ -42,9 +44,9 @@ mod template {
                 .method("public_method", rule!(allow_all))
                 // Only allow the 'admin_component' to call the 'admin_method'
                 .method("admin_method", rule!(require(admin_badge)])
-                // Default rule: anyone can call any method not explicitly defined
-                // If you dont specify a default rule, it will default to `DenyAll`,
-                // meaning no one can call methods other than the owner.
+                // Default rule: anyone can call methods not
+                // explicitly listed. Without a default rule it
+                // defaults to `DenyAll` — only the owner can call.
                 .default(rule!(allow_all))
             )
             .create_component("my_secured_component", component);
@@ -76,12 +78,16 @@ mod template {
     }
 
 impl MyComponent {
-    pub  fn create_with_restricted_resource(minter_badge: ResourceAddress) -> ResourceAddress {
+    pub fn create_with_restricted_resource(
+        minter_badge: ResourceAddress,
+    ) -> ResourceAddress {
         let resource_address = ResourceBuilder::public_fungible()
             .with_token_symbol("RTK")
-            .initial_supply(amount!["1000000000000000000000"]) // Mint an initial supply of 100 million tokens
-            .divisibility(10) // Set divisibility to 10 decimal places
-            .mintable(AccessRule::Restricted(vec![minter_address.into()])) // Only minter_address can mint more tokens
+            .divisibility(10) // Set to 10 decimal places
+            // Mint an initial supply of 100 million tokens
+            .initial_supply(amount!["1000000000000000000000"])
+            // Only minter_address can mint more tokens
+            .mintable(AccessRule::Restricted(vec![minter_address.into()]))
             .burnable(rule![deny_all]) // No one can burn these tokens
             .build();
 

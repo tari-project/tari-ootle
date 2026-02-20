@@ -36,12 +36,15 @@ use tari_template_lib::prelude::*;
 
 impl MyComponent {
   pub fn create_fungible_token() -> ResourceAddress {
-      // Create a new fungible resource with an initial supply of 1,000,000 units.
+      // Create a new fungible resource.
       let token_address = ResourceBuilder::public_fungible()
-          .with_token_symbol("MFT") // Set the token symbol, typically 3-4 letters.
+          // Set the token symbol, typically 3-4 letters.
+          .with_token_symbol("MFT")
           .metadata("url", "https://token.example")
-          .with_divisibility(10) // Set the number of decimal places (optional, default is 8)
-          .build(); // No initial supply, just creates the resource. By default, tokens can be minted later by the resource owner
+          // Set the number of decimal places (optional, default is 8)
+          .with_divisibility(10)
+          // No initial supply — tokens can be minted later by the owner.
+          .build();
       token_address
   }
 }
@@ -118,8 +121,9 @@ use tari_template_lib::prelude::*;
 impl MyComponent {
   // Inside a component method:
   pub fn deposit_funds(&mut self, bucket: Bucket) {
-      // Deposit resources from a Bucket (temporary container for resources in a transaction)
-      // into the component's vault. If the resource contained in the Bucket is not the same as the resource in the vault, this will panic and the transaction will fail.
+      // Deposit resources from a Bucket into the vault.
+      // If the Bucket contains a different resource than the vault,
+      // the transaction will panic and fail.
       self.fungible_vault.deposit(bucket);
   }
 
@@ -134,7 +138,8 @@ impl MyComponent {
   }
 
     pub fn deposit_nft(&mut self, bucket: Bucket) {
-      // Notice that this is no different from depositing fungible tokens. The vault will check that the bucket contains the correct resource and panic if it does not.
+      // No different from depositing fungible tokens — the vault
+      // checks the bucket contains the correct resource.
       self.nft_vault.deposit(bucket);
   }
 }
@@ -163,28 +168,35 @@ mod template {
 
     impl MyBurnToken {
         pub fn new(initial_supply: Option<Amount>) -> Component<Self> {
-            const INITIAL_SUPPLY: Amount = amount![10_000_000_000_000_000_000_000_000_000];
-            // Mint a new fungible stealth token with an initial supply of tokens
+            const INITIAL_SUPPLY: Amount =
+                amount![10_000_000_000_000_000_000_000_000_000];
+            // Mint a new fungible stealth token with an initial supply
             let bucket = ResourceBuilder::stealth()
-                .with_token_symbol("BRN") // Set the token symbol (optional)
-                .metadata("description", "A token that you (yes, you) can burn") // Add custom metadata (optional)
+                // Set the token symbol (optional)
+                .with_token_symbol("BRN")
+                // Add custom metadata (optional)
+                .metadata("description", "A token that you (yes, you) can burn")
                 .with_divisibility(6) // 6 decimal places
-                .burnable(rule![allow_all]) // Make the token burnable by anyone (for demonstration purposes)
+                // Burnable by anyone (for demonstration purposes)
+                .burnable(rule![allow_all])
                 .initial_supply(initial_supply.unwrap_or(INITIAL_SUPPLY));
 
             Component::new(Self {
                 tokens: Vault::from_bucket(bucket),
             })
             .with_access_rules(ComponentAccessRules::new()
-                .method("burn_one", rule![allow_all]) // Allow anyone to call the burn_one method
-                .default(rule![deny_all]) // Deny all other methods by default (only the owner can call them)
+                // Allow anyone to call the burn_one method
+                .method("burn_one", rule![allow_all])
+                // Deny all other methods by default
+                .default(rule![deny_all])
             )
             .create()
         }
 
         pub fn burn_one(&self) {
             // Withdraw 0.000001 token from the vault into a bucket
-            // If the vault is empty, this will panic and the transaction will fail
+            // If the vault is empty, this will panic and the
+            // transaction will fail
             let bucket = self.tokens.withdraw(1u64);
             // Burn the token in the bucket
             bucket.burn();

@@ -6,6 +6,7 @@ use ootle_rs::{
     TransactionRequest,
     builtin_templates::{UnsignedTransactionBuilder, faucet::IFaucet},
     const_nonzero_u64,
+    default_indexer_url,
     key_provider::PrivateKeyProvider,
     keys::HasViewOnlyKeySecret,
     provider::{PendingTransaction, Provider, ProviderBuilder, WalletProvider},
@@ -33,7 +34,11 @@ async fn main() {
 
     const NETWORK: Network = Network::LocalNet;
 
-    const INDEXER_API_URL: &str = "http://127.0.0.1:12500";
+    let indexer_api_url = default_indexer_url(NETWORK);
+    // This is the address that we will transfer to (Feel free to change this another address!)
+    let recipient = address!(
+        "otl_loc_10mc0v2lyy43kldl0ft4c2x5pe7j0ckduv8zej6jgr2z2g9m07fz7gl96ar5wwgu0qu0atmr5tl53ye7n38xr5u7ytlmudq0ruxcau0gge7rxk"
+    );
 
     let sender_secret = PrivateKeyProvider::random(NETWORK);
     let sender_address = sender_secret.address().clone();
@@ -51,7 +56,7 @@ async fn main() {
 
     let mut provider = ProviderBuilder::new()
         .wallet(wallet)
-        .connect(INDEXER_API_URL)
+        .connect(indexer_api_url)
         .await
         .unwrap();
 
@@ -105,11 +110,7 @@ async fn main() {
     let pending_tx = provider.send_transaction(transaction).await.unwrap();
     print_fancy_results("Faucet transfer", &pending_tx).await;
 
-    // Then we'll send it to some other address (Feel free to change this to any valid address).
-    let recipient = address!(
-        "otl_loc_10mc0v2lyy43kldl0ft4c2x5pe7j0ckduv8zej6jgr2z2g9m07fz7gl96ar5wwgu0qu0atmr5tl53ye7n38xr5u7ytlmudq0ruxcau0gge7rxk"
-    );
-
+    // Then we'll send it to the recipient
     // This builder creates a stealth transfer statement (spend proof). This is added to the transaction later.
     let (transfer, required_signers) = StealthTransfer::new(xtr_token, &provider)
         // Spend an existing stealth input that is controlled by the sender address.

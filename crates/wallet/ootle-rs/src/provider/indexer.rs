@@ -4,6 +4,7 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, OnceLock, Weak},
+    time::Duration,
 };
 
 use tari_indexer_client::{
@@ -44,6 +45,7 @@ pub struct IndexerProvider<Wallet> {
     client: Arc<IndexerRestApiClient>,
     wallet: Wallet,
     network: Network,
+    tx_timeout: Duration,
     tx_watcher: Arc<OnceLock<TransactionWatcherHandle>>,
 }
 
@@ -53,8 +55,16 @@ impl<Wallet> IndexerProvider<Wallet> {
             client: Arc::new(client),
             wallet,
             network,
+            tx_timeout: Duration::from_secs(32),
             tx_watcher: Arc::new(OnceLock::new()),
         }
+    }
+
+    /// The default timeout when waiting for a transaction to be finalized. This is used by the `PendingTransaction`
+    /// returned by `send_transaction`.
+    pub fn with_transaction_timeout(mut self, timeout: Duration) -> Self {
+        self.tx_timeout = timeout;
+        self
     }
 
     pub async fn get_network(&self) -> ProviderResult<Network> {
@@ -128,11 +138,7 @@ impl<Wallet: NetworkWallet + Send + Sync> IndexerProvider<Wallet> {
             .client
             .submit_transaction(SubmitTransactionRequest { transaction })
             .await?;
-        Ok(PendingTransaction::new(
-            watcher,
-            self.weak_client(),
-            resp.transaction_id,
-        ))
+        Ok(PendingTransaction::new(watcher, self.weak_client(), resp.transaction_id).with_timeout(self.tx_timeout))
     }
 
     pub(crate) fn get_tx_watcher(&self) -> &TransactionWatcherHandle {

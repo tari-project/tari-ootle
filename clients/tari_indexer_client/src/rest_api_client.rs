@@ -1,6 +1,8 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::time::Duration;
+
 use reqwest::{IntoUrl, Url, header, header::HeaderMap};
 use serde::{Serialize, de::DeserializeOwned};
 use tari_engine_types::substate::SubstateId;
@@ -57,13 +59,27 @@ pub struct IndexerRestApiClient {
 
 impl IndexerRestApiClient {
     pub fn connect<T: IntoUrl>(endpoint: T) -> Result<Self, IndexerRestClientError> {
-        let client = reqwest::Client::builder()
-            .default_headers({
-                let mut headers = HeaderMap::with_capacity(1);
-                headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
-                headers
-            })
-            .build()?;
+        Self::connect_internal(endpoint, None)
+    }
+
+    pub fn connect_with_timeout<T: IntoUrl>(endpoint: T, timeout: Duration) -> Result<Self, IndexerRestClientError> {
+        Self::connect_internal(endpoint, Some(timeout))
+    }
+
+    fn connect_internal(endpoint: impl IntoUrl, timeout: Option<Duration>) -> Result<Self, IndexerRestClientError> {
+        let client_builder = reqwest::Client::builder().default_headers({
+            let mut headers = HeaderMap::with_capacity(1);
+            headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
+            headers
+        });
+
+        let client_builder = if let Some(timeout) = timeout {
+            client_builder.timeout(timeout)
+        } else {
+            client_builder
+        };
+
+        let client = client_builder.build()?;
 
         Ok(Self {
             client,

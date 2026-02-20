@@ -23,7 +23,7 @@ export default defineConfig({
 						{ label: 'Getting Started', link: '/guides/getting-started/' },
 						{ label: 'Setup a Wallet', link: '/guides/setup-a-wallet/' },
 						{ label: 'Templates Overview', link: '/guides/template-overview/' },
-						{ label: 'Building a Guessing Game', link: '/guides/guessing-game/' },
+						{ label: 'Building a Guessing Game', link: '/guides/build-a-guessing-game/' },
 						{ label: 'Publish the Guessing Game', link: '/guides/publishing-templates/' },
 						{ label: 'Play the Guessing Game', link: '/guides/play-the-guessing-game/' },
 						{ label: 'Transaction Overview', link: '/guides/transaction-overview/' },

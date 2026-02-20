@@ -6,6 +6,7 @@ use ootle_rs::{
     TransactionRequest,
     address,
     builtin_templates::{UnsignedTransactionBuilder, account::IAccount, faucet::IFaucet},
+    default_indexer_url,
     key_provider::PrivateKeyProvider,
     keys::HasViewOnlyKeySecret,
     provider::{PendingTransaction, Provider, ProviderBuilder, WalletProvider},
@@ -23,7 +24,7 @@ async fn main() {
 
     const NETWORK: Network = Network::LocalNet;
 
-    const INDEXER_API_URL: &str = "http://127.0.0.1:12500";
+    let indexer_api_url = default_indexer_url(NETWORK);
 
     let sender_secret = PrivateKeyProvider::random(NETWORK);
     let sender_address = sender_secret.address().clone();
@@ -46,7 +47,7 @@ async fn main() {
 
     let mut provider = ProviderBuilder::new()
         .wallet(wallet)
-        .connect(INDEXER_API_URL)
+        .connect(indexer_api_url)
         .await
         .unwrap();
 

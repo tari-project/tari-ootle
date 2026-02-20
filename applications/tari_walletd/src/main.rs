@@ -54,12 +54,10 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let mut cli = Cli::init();
     let config_path = cli.common.config_path();
-    let cfg = load_configuration(config_path, true, &cli, cli.network_override())?;
+    let cfg = load_configuration(config_path, true, &cli, Some(cli.network()))?;
     let mut config = ApplicationConfig::load_from(&cfg)?;
 
-    if let Some(network) = cli.network_override() {
-        config.ootle_wallet_daemon.network = network;
-    }
+    config.ootle_wallet_daemon.network = cli.network();
     if let Some(password) = cli.override_keyring_password.take() {
         config.ootle_wallet_daemon.override_keyring_password = Some(password);
     }

@@ -242,7 +242,7 @@ pub struct PendingTransaction {
 
 impl PendingTransaction {
     pub fn new(watcher: TransactionWatcherHandle, client: Weak<IndexerRestApiClient>, tx_id: TransactionId) -> Self {
-        const DEFAULT_TX_TIMEOUT: Duration = Duration::from_secs(30);
+        const DEFAULT_TX_TIMEOUT: Duration = Duration::from_secs(32);
         Self {
             watcher,
             default_timeout: DEFAULT_TX_TIMEOUT,
@@ -251,7 +251,7 @@ impl PendingTransaction {
         }
     }
 
-    pub fn with_timeout(&mut self, timeout: Duration) -> &mut Self {
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.default_timeout = timeout;
         self
     }

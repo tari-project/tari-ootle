@@ -53,7 +53,7 @@ async fn main() {
 async fn main_inner() -> anyhow::Result<()> {
     let cli = Cli::init();
     let config_path = cli.common.config_path();
-    let cfg = load_configuration(config_path, true, &cli, cli.network_override())?;
+    let cfg = load_configuration(config_path, true, &cli, Some(cli.network()))?;
     let config = ApplicationConfig::load_from(&cfg)?;
     // Remove the file if it was left behind by a previous run
     let _file = fs::remove_file(config.common.base_path.join("pid"));

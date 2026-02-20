@@ -1,8 +1,295 @@
 ---
 title: Playing the Guessing Game
-description: Learn how to create transactions for the guessing game WASM template
+description: Use ootle-rs to write a Rust app that deploys and plays the guessing game template on Tari Ootle.
 ---
 
-import { Image } from "astro:assets";
 import { basePath } from '../../../helpers/path';
 import { Aside } from "@astrojs/starlight/components";
+
+### Where we are
+
+So far in this series we have:
+
+1. **Built** a guessing game template — a Rust crate that compiles to WebAssembly and defines the on-chain
+logic for the game. See <a href={basePath("/guides/build-a-guessing-game/")}>Building a Guessing Game Template</a>.
+2. **Published** that template to the Tari Ootle network, which gave us a `TemplateAddress` we can use to
+instantiate the game. See <a href={basePath("/guides/publishing-templates/")}>Publishing Templates</a>.
+
+If you haven't completed those steps yet, start there before continuing.
+
+<Aside type="tip">
+  The guessing game template is already published on the `esmeralda` testnet, so you can skip straight to this guide
+  if you want to interact with the existing game without building and publishing your own.
+
+  Head to the <a href="#full-working-example">Full Working Example</a> to find a complete Rust example that interacts
+  with the
+  published template.
+  When it asks for the template address, use
+  `template_ad47408f6285935af044d9db7e5d9a3c1fc341a33b2ea16027d8b9a9eceb9a6b`.
+</Aside>
+
+### What we'll cover
+
+In this guide we will write a Rust program that interacts with the published guessing game template using
+**`ootle-rs`** — the Rust client library for the Tari Ootle network. We will cover:
+
+- Initializing a wallet and connecting to the network via the indexer.
+- Building and submitting a transaction to deploy a new game component.
+- Submitting transactions to start a round, submit player guesses, and end the game.
+- Reading the transaction receipt and events to find out who won.
+
+We won't build a full CLI application here — instead we'll focus on the core `ootle-rs` concepts that apply
+to any template you write. A complete, runnable CLI example is linked at the bottom of this page.
+
+<Aside type="caution">
+  `ootle-rs` is still in active development and the API may change. The concepts covered in this guide will
+  remain relevant, but the exact code may need to be updated to match the latest version of the library.
+</Aside>
+
+---
+
+### Dependencies
+
+Add `ootle-rs` to your `Cargo.toml`:
+
+```toml
+[dependencies]
+# TODO: when ootle-rs is published to crates.io, change this to `ootle-rs = "x.y.z"`
+ootle-rs = { git = "https://github.com/tari-project/tari-ootle.git", branch = "development" }
+tari_ootle_transaction = { git = "https://github.com/tari-project/tari-ootle.git", branch = "development" }
+tari_ootle_common_types = { git = "https://github.com/tari-project/tari-ootle.git", branch = "development" }
+tari_template_lib_types = { git = "https://github.com/tari-project/tari-ootle.git", branch = "development" }
+```
+
+- **`ootle-rs`** — wallet, provider, and signing utilities.
+- **`tari_ootle_transaction`** — `TransactionBuilder` and the `args!` macro for calling template methods.
+- **`tari_template_lib_types`** — address and type definitions shared between templates and clients.
+
+---
+
+### Initializing a wallet and provider
+
+Every interaction with the network starts with a **wallet** (holds your secret keys and signs transactions)
+and a **provider** (connects to an indexer node and submits transactions).
+
+```rust
+use ootle_rs::{
+    key_provider::PrivateKeyProvider,
+    keys::OotleSecretKey,
+    provider::ProviderBuilder,
+    wallet::OotleWallet,
+    default_indexer_url,
+};
+use tari_ootle_common_types::Network;
+
+const NETWORK: Network = Network::Esmeralda; // Testnet
+// Generate a new key pair using the in-memory provider. In a real app, you may use some other key providers that store secrets securely.
+let secret = PrivateKeyProvider::random(NETWORK);
+let wallet = OotleWallet::from(secret);
+
+// Connect to an indexer node — this is your entry point to the network.
+let mut provider = ProviderBuilder::new()
+    .wallet(wallet)
+    // Use the default indexer URL for the network
+    .connect(default_indexer_url(NETWORK))
+    .await?;
+```
+
+`OotleSecretKey` holds two Ristretto key pairs: one for signing transactions and one for the view key.
+`OotleSecretKey::random` generates fresh keys. To restore an existing wallet, use
+`OotleSecretKey::new(network, account_sk, view_sk)` with keys loaded from secure storage.
+
+The `provider` is used for everything that follows: resolving inputs, sending transactions, and watching
+for results.
+
+<Aside type="tip">
+  Each player in the game needs their own wallet. Just create a separate `OotleSecretKey` and
+  `OotleWallet` for each one and build a provider from it.
+</Aside>
+
+---
+
+### Funding an account
+
+Before you can pay transaction fees, the account needs funds. On testnet the built-in faucet handles this:
+
+```rust
+use ootle_rs::{
+    TransactionRequest,
+    builtin_templates::{UnsignedTransactionBuilder, faucet::IFaucet},
+};
+use tari_template_lib_types::constants::ONE_XTR;
+
+// Build a transaction that calls the faucet to deposit 10 XTR into our account.
+let unsigned_tx = IFaucet::new(&provider)
+    .take_faucet_funds(10 * ONE_XTR)
+    .pay_fee(500u64)
+    .prepare()
+    .await?;
+
+// Sign and send the transaction
+let tx = TransactionRequest::default()
+    .with_transaction(unsigned_tx)
+    .build(provider.wallet())
+    .await?;
+
+// Send the transaction
+let pending = provider.send_transaction(tx).await?;
+// Wait for it to be finalized
+let outcome = pending.watch().await?; // wait for the transaction to be finalized
+println!("Faucet transaction outcome: {outcome}");
+```
+
+`IFaucet` is a built-in transaction builder that calls the network faucet component and deposits funds into
+your account, creating the account on-chain if it doesn't exist yet.
+
+---
+
+### Create the game component
+
+To create a new instance of the guessing game, call the template's `new` constructor using `call_function`:
+
+```rust
+use tari_template_lib_types::{TemplateAddress, constants::XTR};
+
+// template_addr comes from publishing your template (see Publishing Templates)
+let unsigned_tx = TransactionBuilder::new(provider.network())
+    .with_auto_fill_inputs()
+    .pay_fee_from_component(account_addr, 2000u64)
+    // call_function invokes a constructor (a free function) on the template
+    .call_function(template_addr, "new", args![])
+    .build_unsigned();
+```
+
+After the transaction is confirmed, find the deployed addresses in the receipt:
+
+```rust
+// The new component address
+let component_addr = receipt.diff_summary.upped
+    .iter()
+    .find_map(|s| s.substate_id.as_component_address())
+    .expect("component address in receipt");
+
+// The prize resource that the constructor created (everything except XTR is the game resource)
+let resource_addr = receipt.diff_summary.upped
+    .iter()
+    .find_map(|s| s.substate_id.as_resource_address().filter(|a| *a != XTR))
+    .expect("resource address in receipt");
+```
+
+`diff_summary.upped` lists every substate that was created or updated by the transaction.
+
+---
+
+### Starting a round
+
+Call a method on the component using `call_method`. The arguments are serialized by the `args!` macro and
+deserialized by the execution engine on the other side — the same types used in the template.
+
+```rust
+use tari_template_lib_types::NonFungibleId;
+
+let nft_id = NonFungibleId::from_string("round-1");
+
+let unsigned_tx = TransactionBuilder::new(provider.network())
+    .with_auto_fill_inputs()
+    .pay_fee_from_component(account_addr, 2000u64)
+    // call_method invokes a method on an existing component
+    .call_method(component_addr, "start_game", args![nft_id])
+    .build_unsigned();
+```
+
+`nft_id` is passed directly to `start_game` in the template, which uses it as the identifier for the prize
+NFT it mints this round.
+
+---
+
+### Submitting a player guess
+
+The guessing game template identifies each player by the *signer* of the transaction, not by an argument.
+This means each player must sign their own guess transaction with their own wallet — you cannot submit on
+their behalf.
+
+```rust
+// Build a provider for the player using their own wallet
+let player_wallet = OotleWallet::from(PrivateKeyProvider::new(player_secret));
+let mut player_provider = ProviderBuilder::new()
+    .wallet(player_wallet)
+    .connect(&indexer_url)
+    .await?;
+
+let player_account_addr = player_provider.default_signer_address().to_account_address();
+
+let unsigned_tx = TransactionBuilder::new(player_provider.network())
+    .with_auto_fill_inputs()
+    .pay_fee_from_component(player_account_addr, 2000u64)
+    .call_method(component_addr, "guess", args![number, payout_component_addr])
+    .build_unsigned();
+
+// Sign with the player's wallet — this is what authenticates them in the template
+let tx = TransactionRequest::default()
+    .with_transaction(unsigned_tx)
+    .build(player_provider.wallet())
+    .await?;
+
+player_provider.send_transaction(tx).await?.watch().await?;
+```
+
+<Aside type="note">
+  Inside the template, `CallerContext::transaction_signer_public_key()` returns the public key of whoever
+  signed the transaction. This is the authenticated player identity — it cannot be spoofed via arguments.
+</Aside>
+
+---
+
+### Ending the game and reading events
+
+Ending the game requires the vaults of every player who guessed as inputs, because the prize may be
+deposited into the winner's account. Add them manually with `.add_input` and `.with_inputs`:
+
+```rust
+let unsigned_tx = TransactionBuilder::new(provider.network())
+    .with_auto_fill_inputs()
+    // The prize NFT must be an input so it can be transferred or burned
+    .add_input(prize_nft_address)
+    // Each player's account that participated needs to be an input
+    .with_inputs(player_account_addrs.iter().copied().map(Into::into))
+    .pay_fee_from_component(account_addr, 2000u64)
+    .call_method(component_addr, "end_game_and_payout", args![])
+    .build_unsigned();
+```
+
+After the transaction is confirmed, the template will have emitted a `GuessingGame.GameEnded` event. Events
+are included in the receipt and can be read by topic name:
+
+```rust
+let event = receipt.events
+    .iter()
+    .find(|e| e.topic() == "GuessingGame.GameEnded")
+    .expect("GameEnded event in receipt");
+
+match event.get_payload("winner_account") {
+    Some(addr) => println!("Winner: {addr}"),
+    None => println!("No winner this round — the prize was burned."),
+}
+
+if let Some(number) = event.get_payload("number") {
+    println!("The number was: {number}");
+}
+```
+
+`get_payload` returns named fields from the event's payload, matching the field names used when the event
+was emitted in the template.
+
+---
+
+### Full working example
+
+A complete CLI application that implements all of the above — with persistent state, interactive prompts, and
+support for multiple players — is available here:
+
+<p>
+  <a href="https://github.com/tari-project/wasm-template/tree/main/examples/guessing_game/cli" target="_blank">
+    Guessing Game CLI on GitHub
+  </a>
+</p>

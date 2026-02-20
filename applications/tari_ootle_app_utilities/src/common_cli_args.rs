@@ -22,7 +22,8 @@
 use std::{error::Error, path::PathBuf};
 
 use clap::Args;
-use tari_common::configuration::{ConfigOverrideProvider, Network};
+use tari_common::configuration::{ConfigOverrideProvider, Network as L1Network};
+use tari_ootle_common_types::Network;
 
 #[derive(Args, Debug)]
 pub struct CommonCliArgs {
@@ -47,8 +48,8 @@ pub struct CommonCliArgs {
     pub log_path: Option<PathBuf>,
 
     /// Supply a network (overrides existing configuration)
-    #[clap(long, env = "TARI_NETWORK")]
-    pub network: Option<Network>,
+    #[clap(long, env = "TARI_NETWORK", default_value_t)]
+    pub network: Network,
 
     /// Overrides for properties in the config file (use the fully qualified key name!!), e.g.
     /// -p base_node.network=esmeralda
@@ -88,8 +89,7 @@ impl CommonCliArgs {
     }
 
     pub fn get_base_path(&self) -> PathBuf {
-        let network = self.network.unwrap_or_default();
-        PathBuf::from(&self.base_path).join(network.to_string())
+        PathBuf::from(&self.base_path).join(self.network.to_string())
     }
 
     pub fn log_config_path(&self, application_name: &str) -> PathBuf {
@@ -110,7 +110,7 @@ impl CommonCliArgs {
 }
 
 impl ConfigOverrideProvider for CommonCliArgs {
-    fn get_config_property_overrides(&self, _network: &Network) -> Vec<(String, String)> {
+    fn get_config_property_overrides(&self, _network: &L1Network) -> Vec<(String, String)> {
         let mut overrides = self.config_property_overrides.clone();
         overrides.push((
             "common.base_path".to_string(),

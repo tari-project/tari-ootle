@@ -64,6 +64,8 @@ pub async fn spawn_listener(
     let server = axum::serve(listener, router);
     let listen_addr = server.local_addr()?;
     info!(target: LOG_TARGET, "🌐 JSON-RPC listening on {listen_addr}");
+    #[cfg(feature = "web_ui")]
+    info!(target: LOG_TARGET, "🕸️ Web interface available at http://{listen_addr}");
     let server = server.with_graceful_shutdown(shutdown_signal);
     let task = tokio::spawn(async move {
         server.await?;

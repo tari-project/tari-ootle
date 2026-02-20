@@ -28,17 +28,6 @@ pub fn convert_network_to_l1_network(network: &Network) -> L1Network {
     }
 }
 
-pub fn convert_l1_network_to_network(network: &L1Network) -> Network {
-    match network {
-        L1Network::MainNet => Network::MainNet,
-        L1Network::StageNet => Network::StageNet,
-        L1Network::NextNet => Network::NextNet,
-        L1Network::LocalNet => Network::LocalNet,
-        L1Network::Igor => Network::Igor,
-        L1Network::Esmeralda => Network::Esmeralda,
-    }
-}
-
 /// Loads the configuration file from the specified path, or creates a new one with the embedded default presets if it
 /// does not. This also prompts the user.
 pub fn load_configuration<P: AsRef<Path>, TOverride: ConfigOverrideProvider>(

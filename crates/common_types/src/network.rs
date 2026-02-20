@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 
 /// Represents the available Tari networks. The variants and assigned byte needs to match the L1 network enum.
 #[repr(u8)]
-#[derive(Clone, Debug, PartialEq, Eq, Copy, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Copy, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "lowercase")]
 pub enum Network {
@@ -43,6 +43,7 @@ pub enum Network {
     NextNet = 0x02,
     LocalNet = 0x10,
     Igor = 0x24,
+    #[default]
     Esmeralda = 0x26,
 }
 

@@ -39,12 +39,21 @@ pub use prost;
 
 #[cfg(feature = "client")]
 mod client_helpers {
+    use std::time::Duration;
+
     use reqwest::IntoUrl;
 
     use crate::{error::IndexerRestClientError, rest_api_client::IndexerRestApiClient};
 
     pub fn connect_rest<T: IntoUrl>(url: T) -> Result<IndexerRestApiClient, IndexerRestClientError> {
         IndexerRestApiClient::connect(url)
+    }
+
+    pub fn connect_rest_with_timeout<T: IntoUrl>(
+        url: T,
+        timeout: Duration,
+    ) -> Result<IndexerRestApiClient, IndexerRestClientError> {
+        IndexerRestApiClient::connect_with_timeout(url, timeout)
     }
 }
 

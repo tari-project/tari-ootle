@@ -25,3 +25,4 @@ pub mod crypto {
 pub use tari_engine_types as engine_types;
 pub use tari_ootle_transaction as transaction;
 pub use tari_ootle_wallet_crypto as wallet_crypto;
+pub use tari_template_lib::types as template_lib_types;

@@ -11,10 +11,12 @@ pub mod wallet;
 #[macro_use]
 pub mod macros;
 
+mod helpers;
 pub mod keys;
 pub mod stealth;
 mod types;
 
 // Re-export the address macro from the ootle_address crate
+pub use helpers::*;
 pub use tari_ootle_address::address;
 pub use types::*;

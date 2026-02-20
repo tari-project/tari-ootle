@@ -26,7 +26,7 @@ use clap::{Args, Parser};
 use tari_common::configuration::{ConfigOverrideProvider, Network as L1Network};
 use tari_common_types::seeds::seed_words::SeedWords;
 use tari_crypto::tari_utilities::SafePassword;
-use tari_ootle_app_utilities::{common_cli_args::CommonCliArgs, configuration::convert_l1_network_to_network};
+use tari_ootle_app_utilities::common_cli_args::CommonCliArgs;
 use tari_ootle_common_types::Network;
 use url::Url;
 
@@ -88,8 +88,8 @@ impl Cli {
         Self::parse()
     }
 
-    pub fn network_override(&self) -> Option<Network> {
-        self.common.network.as_ref().map(convert_l1_network_to_network)
+    pub fn network(&self) -> Network {
+        self.common.network
     }
 }
 

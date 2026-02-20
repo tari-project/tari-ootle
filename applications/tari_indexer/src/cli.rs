@@ -30,7 +30,6 @@ use tari_common::{
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_app_utilities::{
     common_cli_args::CommonCliArgs,
-    configuration::convert_l1_network_to_network,
     p2p_config::{PeerSeedsConfig, ReachabilityMode},
 };
 use tari_ootle_common_types::Network;
@@ -80,8 +79,8 @@ impl Cli {
         Self::parse()
     }
 
-    pub fn network_override(&self) -> Option<Network> {
-        self.common.network.as_ref().map(convert_l1_network_to_network)
+    pub fn network(&self) -> Network {
+        self.common.network
     }
 }
 

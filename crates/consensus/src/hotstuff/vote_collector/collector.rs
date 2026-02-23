@@ -77,7 +77,7 @@ impl<V: Vote + Display> VoteCollector<V> {
             target: LOG_TARGET,
             "🔥 Received {} from {} ({} of {}). QUORUM!",
             vote_display,
-                sender_vn.address,
+            sender_vn.address,
             threshold_decision.total_power,
             quorum_threshold
         );

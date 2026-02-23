@@ -11,9 +11,9 @@ use std::{
 
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
-use tari_crypto::tari_utilities::hex::{Hex, from_hex};
+use tari_crypto::tari_utilities::hex::Hex;
 use tari_engine_types::substate::SubstateId;
-use tari_template_lib_types::{Hash32, ObjectKey, TransactionReceiptAddress};
+use tari_template_lib_types::{Hash32, ObjectKey, TransactionReceiptAddress, hex::fixed_bytes_from_hex};
 
 use crate::{NumPreshards, ShardGroup, shard::Shard, uint::U256};
 
@@ -56,12 +56,16 @@ impl SubstateAddress {
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, SubstateAddressSizeError> {
         if bytes.len() != SubstateAddress::LENGTH {
-            return Err(SubstateAddressSizeError);
+            return Err(SubstateAddressSizeError::SizeError {
+                expected: SubstateAddress::LENGTH,
+                actual: bytes.len(),
+            });
         }
-        let key = ObjectKey::try_from(bytes.get(..ObjectKey::LENGTH).expect("length checked"))
-            .map_err(|_| SubstateAddressSizeError)?;
+        let obj_key_bytes = bytes.get(..ObjectKey::LENGTH).expect("length checked");
+        let key = ObjectKey::try_from(obj_key_bytes).expect("ObjectKey length is correct");
         let mut v_buf = [0u8; size_of::<u32>()];
-        v_buf.copy_from_slice(bytes.get(ObjectKey::LENGTH..).expect("length checked"));
+        let version_bytes = bytes.get(ObjectKey::LENGTH..).expect("length checked");
+        v_buf.copy_from_slice(version_bytes);
         let version = u32::from_be_bytes(v_buf);
         Ok(Self::from_object_key(&key, version))
     }
@@ -238,9 +242,8 @@ impl FromStr for SubstateAddress {
     type Err = SubstateAddressSizeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // TODO: error isnt correct
-        let bytes = from_hex(s).map_err(|_| SubstateAddressSizeError)?;
-        Self::from_bytes(&bytes)
+        let bytes = fixed_bytes_from_hex(s).map_err(|_| SubstateAddressSizeError::FailedToParseHex)?;
+        Ok(Self(bytes))
     }
 }
 
@@ -269,8 +272,12 @@ impl AsRef<SubstateAddress> for SubstateAddress {
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("Invalid substate address size")]
-pub struct SubstateAddressSizeError;
+pub enum SubstateAddressSizeError {
+    #[error("Failed to parse SubstateAddress from hex string. Ensure the string is a valid hex and has the correct length of {} characters.", SubstateAddress::LENGTH * 2)]
+    FailedToParseHex,
+    #[error("Invalid size for SubstateAddress. Expected {expected} bytes, got {actual} bytes.")]
+    SizeError { expected: usize, actual: usize },
+}
 
 #[cfg(test)]
 mod tests {
@@ -631,6 +638,24 @@ mod tests {
 
             let range = ShardGroup::new(8, 16).to_substate_address_range(NumPreshards::P16);
             assert_range(range, address_at(8, 16)..=address_at(16, 16));
+        }
+    }
+
+    mod from_str {
+        use super::*;
+
+        #[test]
+        fn it_works() {
+            let s = address_at(1, 8).to_string();
+            let parsed = SubstateAddress::from_str(&s).unwrap();
+            assert_eq!(parsed, address_at(1, 8));
+        }
+
+        #[test]
+        fn it_errors_if_too_short() {
+            let s = "00";
+            let err = SubstateAddress::from_str(s).unwrap_err();
+            assert!(matches!(err, SubstateAddressSizeError::FailedToParseHex));
         }
     }
 }

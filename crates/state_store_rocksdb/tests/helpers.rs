@@ -49,7 +49,7 @@ use tari_template_lib::types::{
     ComponentKey,
     EntityId,
     ObjectKey,
-    OwnerRule,
+    SubstateOwnerRule,
     TemplateAddress,
     access_rules::ComponentAccessRules,
     crypto::SchnorrSignatureBytes,
@@ -134,8 +134,7 @@ pub fn build_substate_value(entity_id: Option<EntityId>) -> SubstateValue {
     SubstateValue::Component(ComponentHeader {
         template_address: TemplateAddress::default(),
         module_name: "foo".to_string(),
-        owner_key: None,
-        owner_rule: OwnerRule::None,
+        owner_rule: SubstateOwnerRule::None,
         access_rules: ComponentAccessRules::allow_all(),
         entity_id,
         body: ComponentBody {
@@ -221,8 +220,7 @@ pub fn substate_value_for_entity(entity_id: EntityId) -> SubstateValue {
     SubstateValue::Component(ComponentHeader {
         template_address: TemplateAddress::default(),
         module_name: "foo".to_string(),
-        owner_key: None,
-        owner_rule: OwnerRule::None,
+        owner_rule: SubstateOwnerRule::None,
         access_rules: ComponentAccessRules::allow_all(),
         entity_id,
         body: ComponentBody {

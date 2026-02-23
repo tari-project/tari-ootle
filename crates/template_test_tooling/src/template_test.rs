@@ -127,7 +127,7 @@ impl TemplateTest {
         )
     }
 
-    pub fn new_no_templates() -> Self {
+    pub fn new_builtin_only() -> Self {
         Self::new(".", iter::empty::<TemplateSpec>())
     }
 
@@ -222,7 +222,7 @@ impl TemplateTest {
 
     pub fn bootstrap_state(&mut self) {
         add_tari_resources(&mut self.state_store).unwrap();
-        initialize_builtin_faucet_state(&mut self.state_store, &self.public_key);
+        initialize_builtin_faucet_state(&mut self.state_store);
         initialize_builtin_nft_faucet_state(&mut self.state_store)
     }
 
@@ -446,6 +446,10 @@ impl TemplateTest {
         &self.public_key
     }
 
+    pub fn new_key_pair(&mut self, seed: u8) -> (RistrettoSecretKey, RistrettoPublicKey) {
+        create_key_pair_from_seed(seed)
+    }
+
     pub fn to_public_key_bytes(&self) -> RistrettoPublicKeyBytes {
         self.public_key.to_byte_type()
     }
@@ -594,7 +598,7 @@ impl TemplateTest {
             modules.push(Box::new(FeeModule::new(0, self.fee_table.clone())));
         }
 
-        if self.auto_add_proofs_from_signers {
+        if self.auto_add_proofs_from_signers && proofs.is_empty() {
             proofs.extend(
                 transaction
                     .signers_iter()

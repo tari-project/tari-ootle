@@ -4,7 +4,7 @@
 use tari_engine_types::ownership::Ownership;
 use tari_template_lib::types::{
     NonFungibleAddress,
-    OwnerRule,
+    SubstateOwnerRule,
     access_rules::{
         AccessRule,
         RequireRule,
@@ -115,24 +115,9 @@ fn check_ownership<TStore: StateReader>(
     ownership: Ownership<'_>,
 ) -> Result<bool, RuntimeError> {
     match ownership.owner_rule.as_ref() {
-        OwnerRule::OwnedBySigner => {
-            let Some(owner_key) = ownership.owner_key else {
-                return Ok(false);
-            };
-            let owner_proof = NonFungibleAddress::from_public_key(*owner_key);
-            Ok(scope.contains_badge(&owner_proof))
-        },
-        OwnerRule::None => Ok(false),
-        OwnerRule::ByAccessRule(rule) => check_access_rule(state, scope, rule),
-        OwnerRule::ByPublicKey(key) => {
-            let Some(owner_key) = ownership.owner_key else {
-                return Ok(false);
-            };
-
-            if key != owner_key {
-                return Ok(false);
-            }
-
+        SubstateOwnerRule::None => Ok(false),
+        SubstateOwnerRule::ByAccessRule(rule) => check_access_rule(state, scope, rule),
+        SubstateOwnerRule::ByPublicKey(key) => {
             let owner_proof = NonFungibleAddress::from_public_key(*key);
             Ok(scope.contains_badge(&owner_proof))
         },

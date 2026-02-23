@@ -14,7 +14,7 @@ use tari_engine_types::{
     substate::{SubstateId, SubstateValue},
 };
 use tari_ootle_common_types::{NumPreshards, ShardGroup, SubstateAddress};
-use tari_template_lib_types::{ComponentAddress, ComponentKey, EntityId, ObjectKey};
+use tari_template_lib_types::{ComponentAddress, ComponentKey, EntityId, ObjectKey, SubstateOwnerRule};
 
 use crate::support::TestAddress;
 
@@ -57,8 +57,7 @@ pub fn make_test_component(entity_id: EntityId) -> SubstateValue {
     SubstateValue::Component(ComponentHeader {
         template_address: Default::default(),
         module_name: "Test".to_string(),
-        owner_key: None,
-        owner_rule: Default::default(),
+        owner_rule: SubstateOwnerRule::None,
         access_rules: Default::default(),
         entity_id,
         body: ComponentBody {

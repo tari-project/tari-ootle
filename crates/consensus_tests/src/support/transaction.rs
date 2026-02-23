@@ -18,7 +18,7 @@ use tari_engine_types::{
 use tari_ootle_common_types::{LockIntent, SubstateRequirement};
 use tari_ootle_storage::consensus_models::{TransactionRecord, VersionedSubstateIdLockIntent};
 use tari_ootle_transaction::{Transaction, args};
-use tari_template_lib_types::TransactionReceiptAddress;
+use tari_template_lib_types::{SubstateOwnerRule, TransactionReceiptAddress};
 
 use crate::support::{TEST_NUM_PRESHARDS, committee_number_to_shard_group, helpers::random_substate_in_shard_group};
 
@@ -57,8 +57,7 @@ pub fn create_execution_result_for_transaction(
                         Substate::new(output.versioned_substate_id().version(), ComponentHeader {
                             template_address: Default::default(),
                             module_name: "Test".to_string(),
-                            owner_key: Default::default(),
-                            owner_rule: Default::default(),
+                            owner_rule: SubstateOwnerRule::None,
                             access_rules: Default::default(),
                             entity_id: output
                                 .versioned_substate_id()

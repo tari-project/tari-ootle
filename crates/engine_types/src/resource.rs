@@ -31,8 +31,8 @@ use tari_template_lib::{
         Amount,
         AuthHook,
         Metadata,
-        OwnerRule,
         ResourceType,
+        SubstateOwnerRule,
         access_rules::ResourceAccessRules,
         crypto::RistrettoPublicKeyBytes,
     },
@@ -44,8 +44,7 @@ use crate::ownership::Ownership;
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Resource {
     resource_type: ResourceType,
-    owner_rule: OwnerRule,
-    owner_key: Option<RistrettoPublicKeyBytes>,
+    owner_rule: SubstateOwnerRule,
     access_rules: ResourceAccessRules,
     metadata: Metadata,
     /// The total supply of the resource. None means total_supply tracking is disabled.
@@ -58,8 +57,7 @@ pub struct Resource {
 impl Resource {
     pub const fn new(
         resource_type: ResourceType,
-        owner_key: Option<RistrettoPublicKeyBytes>,
-        owner_rule: OwnerRule,
+        owner_rule: SubstateOwnerRule,
         access_rules: ResourceAccessRules,
         metadata: Metadata,
         view_key: Option<RistrettoPublicKeyBytes>,
@@ -75,7 +73,6 @@ impl Resource {
         Self {
             resource_type,
             owner_rule,
-            owner_key,
             access_rules,
             metadata,
             total_supply: if is_total_supply_tracking_enabled {
@@ -91,8 +88,7 @@ impl Resource {
 
     pub fn load(
         resource_type: ResourceType,
-        owner_key: Option<RistrettoPublicKeyBytes>,
-        owner_rule: OwnerRule,
+        owner_rule: SubstateOwnerRule,
         access_rules: ResourceAccessRules,
         metadata: Metadata,
         view_key: Option<RistrettoPublicKeyBytes>,
@@ -103,7 +99,6 @@ impl Resource {
         Self {
             resource_type,
             owner_rule,
-            owner_key,
             access_rules,
             metadata,
             total_supply,
@@ -117,17 +112,16 @@ impl Resource {
         self.resource_type
     }
 
-    pub fn owner_rule(&self) -> &OwnerRule {
+    pub fn owner_rule(&self) -> &SubstateOwnerRule {
         &self.owner_rule
     }
 
     pub fn owner_key(&self) -> Option<&RistrettoPublicKeyBytes> {
-        self.owner_key.as_ref()
+        self.owner_rule.owned_by_public_key()
     }
 
     pub fn as_ownership(&self) -> Ownership<'_> {
         Ownership {
-            owner_key: self.owner_key.as_ref(),
             owner_rule: Cow::Borrowed(&self.owner_rule),
         }
     }

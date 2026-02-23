@@ -8,7 +8,7 @@ edition = "2024"
 tari_template_lib = { path = "../../../template_lib" }
 
 [profile.release]
-opt-level = 's'     # Optimize for size.
+opt-level = 3       # Optimize for performance at the cost of compilation speed.
 lto = true          # Enable Link Time Optimization.
 codegen-units = 1   # Reduce number of codegen units to increase optimizations.
 panic = 'abort'     # Abort on panic.

@@ -36,15 +36,7 @@ use tari_ootle_transaction::{Transaction, args, call_args};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     models::NonFungible,
-    types::{
-        Amount,
-        ComponentAddress,
-        NonFungibleAddress,
-        ResourceAddress,
-        TemplateAddress,
-        constants::XTR,
-        crypto::RistrettoPublicKeyBytes,
-    },
+    types::{Amount, ComponentAddress, NonFungibleAddress, ResourceAddress, TemplateAddress, constants::XTR},
 };
 use tari_template_test_tooling::{
     TemplateTest,
@@ -52,7 +44,6 @@ use tari_template_test_tooling::{
     support::assert_error::assert_reject_reason,
 };
 use tari_transaction_manifest::ManifestValue;
-use tari_utilities::hex::to_hex;
 use wasmer::ExportError;
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
@@ -85,7 +76,7 @@ fn test_state() {
     assert_eq!(component.module_name, "State");
 
     let component = store.get_component(component_address2).unwrap();
-    assert_eq!(component.owner_key, Some(template_test.to_public_key_bytes()));
+    assert_eq!(component.owner_public_key(), Some(&template_test.to_public_key_bytes()));
     assert_eq!(component.module_name, "State");
 
     // call the "set" method to update the instance value
@@ -313,19 +304,6 @@ fn test_get_template_address() {
         vec![],
     );
     assert_eq!(addr, template_test.get_template_address("Account"));
-}
-
-#[test]
-fn test_caller_context() {
-    let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/caller_context"]);
-
-    // tuples returned in a regular function
-    let component: ComponentAddress = template_test.call_function("CallerContextTest", "create", call_args![], vec![]);
-    let value: RistrettoPublicKeyBytes = template_test.call_method(component, "caller_pub_key", call_args![], vec![]);
-    assert_eq!(
-        to_hex(value.as_bytes()),
-        "d884dd886cc7464402a04920485aebe6dd657b98072de655c46ec6179a52cd0d"
-    );
 }
 
 #[test]

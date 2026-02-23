@@ -2,15 +2,14 @@
 import type { Amount } from "./Amount";
 import type { AuthHook } from "./AuthHook";
 import type { Metadata } from "./Metadata";
-import type { OwnerRule } from "./OwnerRule";
 import type { ResourceAccessRules } from "./ResourceAccessRules";
 import type { ResourceType } from "./ResourceType";
 import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
+import type { SubstateOwnerRule } from "./SubstateOwnerRule";
 
 export type Resource = {
   resource_type: ResourceType;
-  owner_rule: OwnerRule;
-  owner_key: RistrettoPublicKeyBytes | null;
+  owner_rule: SubstateOwnerRule;
   access_rules: ResourceAccessRules;
   metadata: Metadata;
   /**

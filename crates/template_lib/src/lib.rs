@@ -180,3 +180,4 @@ pub use tari_bor::to_value;
 
 #[macro_use]
 pub mod macros;
+mod error_variants;

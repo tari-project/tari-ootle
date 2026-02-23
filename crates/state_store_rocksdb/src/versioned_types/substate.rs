@@ -44,7 +44,7 @@ mod tests {
     };
     use tari_ootle_common_types::{Epoch, shard::Shard};
     use tari_ootle_storage::consensus_models::{SubstateCreated, SubstateDestroyed};
-    use tari_template_lib_types::Hash32;
+    use tari_template_lib_types::{Hash32, SubstateOwnerRule};
 
     use super::*;
     use crate::codecs::{DbDecoder, DbEncoder, DefaultCodec};
@@ -62,8 +62,7 @@ mod tests {
                     .parse()
                     .unwrap(),
                 module_name: "blah".to_string(),
-                owner_key: None,
-                owner_rule: Default::default(),
+                owner_rule: SubstateOwnerRule::None,
                 access_rules: Default::default(),
                 entity_id: Default::default(),
                 body: ComponentBody { state: Value::Null },

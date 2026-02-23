@@ -27,7 +27,7 @@ use tari_template_lib::types::{
     ComponentAddress,
     EntityId,
     ObjectKey,
-    OwnerRule,
+    SubstateOwnerRule,
     TemplateAddress,
     access_rules::ComponentAccessRules,
     crypto::RistrettoPublicKeyBytes,
@@ -61,8 +61,7 @@ pub fn derive_component_address_from_public_key(
 pub struct ComponentHeader {
     pub template_address: TemplateAddress,
     pub module_name: String,
-    pub owner_key: Option<RistrettoPublicKeyBytes>,
-    pub owner_rule: OwnerRule,
+    pub owner_rule: SubstateOwnerRule,
     pub access_rules: ComponentAccessRules,
     pub entity_id: EntityId,
     // TODO: Split the state from the header
@@ -84,9 +83,12 @@ impl ComponentHeader {
 
     pub fn as_ownership(&self) -> Ownership<'_> {
         Ownership {
-            owner_key: self.owner_key.as_ref(),
             owner_rule: Cow::Borrowed(&self.owner_rule),
         }
+    }
+
+    pub fn owner_public_key(&self) -> Option<&RistrettoPublicKeyBytes> {
+        self.owner_rule.owned_by_public_key()
     }
 
     pub fn access_rules(&self) -> &ComponentAccessRules {

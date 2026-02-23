@@ -41,6 +41,7 @@ use tari_ootle_transaction::{
 use tari_template_lib::{
     args::{CallAction, VaultFreezeFlag},
     models::{AddressAllocationId, BucketId, ProofId},
+    prelude::RistrettoPublicKeyBytes,
     types::{
         Amount,
         ClaimedOutputTombstoneAddress,
@@ -98,11 +99,13 @@ pub enum RuntimeError {
         id: SubstateId,
     },
     #[error("Encountered unknown or out of scope bucket {bucket_id}")]
-    ValidationFailedBucketNotInScope { bucket_id: BucketId },
+    BucketNotInScope { bucket_id: BucketId },
     #[error("Encountered unknown or out of scope proof {proof_id}")]
-    ValidationFailedProofNotInScope { proof_id: ProofId },
+    ProofNotInScope { proof_id: ProofId },
     #[error("Encountered unknown or out of scope address allocation {id}")]
-    ValidationFailedAddressAllocationNotInScope { id: AddressAllocationId },
+    AddressAllocationNotInScope { id: AddressAllocationId },
+    #[error("Encountered unknown or out of scope signer badge with public key {public_key}")]
+    SignerBadgeNotInScope { public_key: RistrettoPublicKeyBytes },
     #[error("Component not found with address '{address}'")]
     ComponentNotFound { address: ComponentAddress },
     #[error("Layer one commitment not found with address '{address}'")]
@@ -194,8 +197,7 @@ pub enum RuntimeError {
     NoFeesPaid { details: String },
     #[error("No fee checkpoint")]
     NoFeeCheckpoint,
-    #[error("Component address must be sequential. Index before {index} was not found")]
-    ComponentAddressMustBeSequential { index: u32 },
+
     #[error("Failed to load template '{address}': {details}")]
     FailedToLoadTemplate { address: TemplateAddress, details: String },
     #[error("Transaction Receipt already exists {address}")]
@@ -359,7 +361,10 @@ pub enum AssertError {
 pub enum TransactionCommitError {
     #[error("{count} dangling buckets remain after transaction execution")]
     DanglingBuckets { count: usize },
-    #[error("{count} dangling proofs remain after transaction execution")]
+    #[error(
+        "{count} dangling proofs remain after transaction execution. You may need to add a `DropAllProofsOnWorkspace` \
+         instruction"
+    )]
     DanglingProofs { count: usize },
     #[error("Locked value (amount: {locked_amount}) remaining in vault {vault_id}")]
     DanglingLockedValueInVault { vault_id: VaultId, locked_amount: Amount },

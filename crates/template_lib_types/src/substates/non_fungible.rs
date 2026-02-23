@@ -54,6 +54,10 @@ impl NonFungibleId {
         Self::Uint64(id)
     }
 
+    pub const fn from_public_key(public_key: RistrettoPublicKeyBytes) -> Self {
+        Self::U256(public_key.into_array())
+    }
+
     /// Creates a NonFungibleId from a string, the string must be between 1 and 64 characters long. It can contain any
     /// UTF-8 character. Panics if the string is empty or longer than 64 characters.
     pub fn from_string<T: Into<String>>(id: T) -> Self {
@@ -248,7 +252,7 @@ impl NonFungibleAddress {
     pub fn from_public_key(public_key: RistrettoPublicKeyBytes) -> Self {
         Self::new(
             PUBLIC_IDENTITY_RESOURCE_ADDRESS,
-            NonFungibleId::U256(public_key.into_array()),
+            NonFungibleId::from_public_key(public_key),
         )
     }
 

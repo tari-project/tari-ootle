@@ -34,7 +34,7 @@ use crate::{
     KeyParseError,
     ObjectKey,
     address_prefixes,
-    constants::STEALTH_TARI_RESOURCE_ADDRESS,
+    constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS},
     newtype_struct_serde_impl,
 };
 
@@ -70,6 +70,10 @@ impl ResourceAddress {
 
     pub fn is_xtr(&self) -> bool {
         *self == STEALTH_TARI_RESOURCE_ADDRESS
+    }
+
+    pub fn is_public_key_resource(&self) -> bool {
+        *self == PUBLIC_IDENTITY_RESOURCE_ADDRESS
     }
 }
 

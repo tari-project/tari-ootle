@@ -28,8 +28,11 @@ mod account_template {
     use super::*;
 
     pub struct Account {
-        // TODO: Lazy key value map/store
         vaults: BTreeMap<ResourceAddress, Vault>,
+        #[serde(default)]
+        /// Approvals for other accounts to withdraw from this account. The key is a tuple of (approved resource,
+        /// required spender_badge), and the value is the approved amount.
+        approvals: BTreeMap<(ResourceAddress, NonFungibleAddress), Amount>,
     }
 
     impl Account {
@@ -55,6 +58,7 @@ mod account_template {
                     .add_method_rule("get_balances", rule!(allow_all))
                     .add_method_rule("deposit", rule!(allow_all))
                     .add_method_rule("deposit_all", rule!(allow_all))
+                    .add_method_rule("withdraw_approved", rule!(allow_all))
                     // By default, only the owner of the token will be able to withdraw funds from the account
                     .default(rule!(deny_all)),
             );
@@ -65,11 +69,14 @@ mod account_template {
                 vaults.insert(b.resource_address(), Vault::from_bucket(b));
             }
 
-            Component::new(Self { vaults })
-                .with_access_rules(access_rules)
-                .with_public_key_address(public_key)
-                .with_owner_rule(owner_rule)
-                .create()
+            Component::new(Self {
+                vaults,
+                approvals: BTreeMap::new(),
+            })
+            .with_access_rules(access_rules)
+            .with_public_key_address(public_key)
+            .with_owner_rule(owner_rule)
+            .create()
         }
 
         pub fn balance(&self, resource: ResourceAddress) -> Amount {
@@ -207,6 +214,71 @@ mod account_template {
             ]);
             let v = self.get_vault_mut(resource);
             v.create_proof_by_amount(amount)
+        }
+
+        pub fn create_ownership_proof(&mut self) -> Proof {
+            ComponentManager::current().get_owner_proof()
+        }
+
+        // Approval methods
+        /// Called by account owner — sets or updates approval
+        pub fn approve(&mut self, spender_badge: NonFungibleAddress, resource: ResourceAddress, amount: Amount) {
+            if amount.is_zero() {
+                let key = (resource, spender_badge);
+                if self.approvals.remove(&key).is_some() {
+                    emit_event("revoke_approval", [
+                        ("resource", key.0.to_string()),
+                        ("spender_badge", key.1.to_string()),
+                    ]);
+                }
+                // Else no-op
+            } else {
+                emit_event(
+                    "approve",
+                    metadata!(
+                        "spender_badge" => spender_badge.to_string(),
+                        "resource" => resource.to_string(),
+                        "amount" => amount.to_string(),
+                    ),
+                );
+
+                self.approvals.insert((resource, spender_badge), amount);
+            }
+        }
+
+        pub fn revoke_all_approvals(&mut self) {
+            self.approvals.clear();
+            emit_event("revoke_all_approvals", metadata!());
+        }
+
+        pub fn withdraw_approved(&mut self, spender_proof: Proof, resource: ResourceAddress, amount: Amount) -> Bucket {
+            let mut badges = spender_proof.get_non_fungibles();
+            let Some(badge) = badges.pop_first() else {
+                panic!("Proof does not contain any badges");
+            };
+            let badge_resource = spender_proof.resource_address();
+            let badge = NonFungibleAddress::new(badge_resource, badge);
+
+            let approval = self
+                .approvals
+                .get_mut(&(resource, badge.clone()))
+                .unwrap_or_else(|| panic!("No approval for badge {} on resource {}", badge, resource));
+
+            *approval = approval
+                .checked_sub(amount)
+                .unwrap_or_else(|| panic!("Amount exceeds approval (max: {}, attempted: {})", approval, amount));
+            // Clean up zero approvals
+            if approval.is_zero() {
+                self.approvals.remove(&(resource, badge));
+            }
+
+            emit_event("withdraw_approved", [
+                ("spender_badge", badge_resource.to_string()),
+                ("resource", resource.to_string()),
+                ("amount", amount.to_string()),
+            ]);
+
+            self.get_vault_mut(resource).withdraw(amount)
         }
     }
 }

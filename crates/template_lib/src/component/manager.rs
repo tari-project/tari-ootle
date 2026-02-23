@@ -20,13 +20,15 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 use serde::{Serialize, de::DeserializeOwned};
-use tari_bor::{from_value, to_value};
+use tari_bor::to_value;
 use tari_template_abi::{EngineOp, call_engine, rust::prelude::*};
 use tari_template_lib_types::{ComponentAddress, TemplateAddress, access_rules::ComponentAccessRules, bytes::Bytes};
 
 use crate::{
     args::{CallAction, CallInvokeArg, CallMethodArg, ComponentAction, ComponentInvokeArg, ComponentRef, InvokeResult},
     caller_context::CallerContext,
+    error_variants::ERR_ENGINE_DECODE_FAIL,
+    models::Proof,
 };
 
 /// Utility for managing components inside templates
@@ -69,9 +71,7 @@ impl ComponentManager {
             args: invoke_args![arg],
         });
 
-        result
-            .decode()
-            .expect("failed to decode component call result from engine")
+        result.decode().expect(ERR_ENGINE_DECODE_FAIL)
     }
 
     /// Calls a method of another component. The called method must return a unit type.
@@ -88,8 +88,7 @@ impl ComponentManager {
             args: invoke_args![],
         });
 
-        let component: tari_bor::Value = result.decode().expect("failed to decode component state from engine");
-        from_value(&component).expect("Failed to decode component state")
+        result.decode().expect(ERR_ENGINE_DECODE_FAIL)
     }
 
     /// Update the component state
@@ -120,9 +119,17 @@ impl ComponentManager {
             args: invoke_args![],
         });
 
-        result
-            .decode()
-            .expect("failed to decode component template address from engine")
+        result.decode().expect(ERR_ENGINE_DECODE_FAIL)
+    }
+
+    pub fn get_owner_proof(&self) -> Proof {
+        let result = call_engine::<_, InvokeResult>(EngineOp::ComponentInvoke, &ComponentInvokeArg {
+            component_ref: ComponentRef::Ref(self.address),
+            action: ComponentAction::GetOwnerProof,
+            args: invoke_args![],
+        });
+
+        result.decode().expect(ERR_ENGINE_DECODE_FAIL)
     }
 
     pub fn component_address(&self) -> ComponentAddress {

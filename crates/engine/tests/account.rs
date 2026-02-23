@@ -144,7 +144,7 @@ fn withdraw_from_account_prevented() {
 
 #[test]
 fn attempt_to_overwrite_account() {
-    let mut test = TemplateTest::new_no_templates();
+    let mut test = TemplateTest::new_builtin_only();
 
     // Create initial account with faucet funds
     let (source_account, source_account_proof, source_account_sk) = test.create_funded_account();
@@ -180,7 +180,7 @@ fn attempt_to_overwrite_account() {
 
 #[test]
 fn create_account_is_idempotent() {
-    let mut test = TemplateTest::new_no_templates();
+    let mut test = TemplateTest::new_builtin_only();
 
     // Create initial account with faucet funds
     let (source_account, source_account_proof, source_account_sk) = test.create_funded_account();
@@ -214,7 +214,7 @@ fn create_account_is_idempotent() {
 
 #[test]
 fn create_account_is_idempotent_with_deposit() {
-    let mut test = TemplateTest::new_no_templates();
+    let mut test = TemplateTest::new_builtin_only();
 
     // Create initial account with faucet funds
     let (source_account, source_account_proof, source_account_sk) = test.create_empty_account();
@@ -248,7 +248,7 @@ fn create_account_is_idempotent_with_deposit() {
 
 #[test]
 fn gasless() {
-    let mut test = TemplateTest::new_no_templates();
+    let mut test = TemplateTest::new_builtin_only();
     test.enable_fees();
 
     // Create initial account with faucet funds
@@ -279,7 +279,7 @@ fn gasless() {
 
 #[test]
 fn custom_access_rules() {
-    let mut test = TemplateTest::new_no_templates();
+    let mut test = TemplateTest::new_builtin_only();
 
     // First we create a account with a custom rule that anyone can withdraw
     let (owner_proof, public_key, secret_key) = test.create_owner_proof();

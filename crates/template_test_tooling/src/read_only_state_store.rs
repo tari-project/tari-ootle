@@ -105,7 +105,7 @@ impl<'a> ReadOnlyStateStore<'a> {
         self.with_substates(|id, substate| {
             if let SubstateId::Resource(resource_address) = id &&
                 let Some(resource) = substate.substate_value().as_resource() &&
-                resource.as_ownership().owner_key == Some(owner)
+                resource.owner_rule().owned_by_public_key() == Some(owner)
             {
                 resources.push((*resource_address, resource.clone()));
             }

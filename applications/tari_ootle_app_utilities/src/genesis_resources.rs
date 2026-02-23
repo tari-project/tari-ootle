@@ -5,9 +5,9 @@ use tari_engine_types::resource::Resource;
 use tari_ootle_common_types::Network;
 use tari_template_lib::types::{
     Metadata,
-    OwnerRule,
     ResourceAddress,
     ResourceType,
+    SubstateOwnerRule,
     access_rules::ResourceAccessRules,
     constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS, TOKEN_SYMBOL},
     rule,
@@ -16,8 +16,7 @@ use tari_template_lib::types::{
 pub fn get_public_identity_resource() -> (ResourceAddress, Resource) {
     let value = Resource::new(
         ResourceType::NonFungible,
-        None,
-        OwnerRule::None,
+        SubstateOwnerRule::None,
         ResourceAccessRules::new(),
         Metadata::from([(TOKEN_SYMBOL, "ID".to_string())]),
         None,
@@ -32,8 +31,7 @@ pub fn get_stealth_tari_resource(network: Network) -> (ResourceAddress, Resource
     let symbol = if network.is_testnet() { "tXTR" } else { "XTR" };
     let xtr_resource = Resource::new(
         ResourceType::Stealth,
-        None,
-        OwnerRule::None,
+        SubstateOwnerRule::None,
         ResourceAccessRules::new()
             // These are defaults, but just for explicitness
             .mintable(rule!(deny_all))

@@ -5,8 +5,11 @@ use std::collections::BTreeMap;
 
 use ootle_byte_type::ToByteType;
 use rand::rngs::OsRng;
-use tari_common_types::types::PrivateKey;
-use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey, ristretto::RistrettoPublicKey};
+use tari_crypto::{
+    commitment::HomomorphicCommitmentFactory,
+    keys::PublicKey,
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+};
 use tari_engine::runtime::{ActionIdent, NativeAction};
 use tari_engine_types::{
     UtxoOutput,
@@ -429,7 +432,7 @@ fn many_outputs_in_one_transfer() {
 
 pub fn try_brute_force_stealth_balance<I, TValueLookup>(
     utxos: &BTreeMap<PedersenCommitmentBytes, UtxoOutput>,
-    secret_view_key: &PrivateKey,
+    secret_view_key: &RistrettoSecretKey,
     value_range: I,
     value_lookup: &mut TValueLookup,
 ) -> Result<Option<u64>, TValueLookup::Error>

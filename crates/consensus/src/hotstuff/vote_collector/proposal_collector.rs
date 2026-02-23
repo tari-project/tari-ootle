@@ -3,7 +3,7 @@
 
 use log::*;
 use tari_consensus_types::{HighPc, ProposalCertificate, ProposalVote, ValidatorSignatureBytes};
-use tari_ootle_common_types::{Epoch, Network, NodeHeight, optional::Optional};
+use tari_ootle_common_types::{Epoch, NodeHeight, optional::Optional};
 use tari_ootle_storage::{StateStore, consensus_models::Block};
 use tari_sidechain::QuorumDecision;
 
@@ -18,7 +18,6 @@ const LOG_TARGET: &str = "tari::consensus::hotstuff::proposal_collector";
 
 #[derive(Clone)]
 pub struct ProposalVoteCollector<TConsensusSpec: ConsensusSpec> {
-    network: Network,
     vote_collector: VoteCollector<ProposalVote>,
     store: TConsensusSpec::StateStore,
     epoch_manager: TConsensusSpec::EpochManager,
@@ -29,13 +28,11 @@ impl<TConsensusSpec> ProposalVoteCollector<TConsensusSpec>
 where TConsensusSpec: ConsensusSpec
 {
     pub fn new(
-        network: Network,
         store: TConsensusSpec::StateStore,
         epoch_manager: TConsensusSpec::EpochManager,
         vote_signer_service: TConsensusSpec::SignerService,
     ) -> Self {
         Self {
-            network,
             store,
             vote_collector: VoteCollector::new(),
             epoch_manager,
@@ -74,13 +71,12 @@ where TConsensusSpec: ConsensusSpec
             sender_vn,
             block_id
         );
-        let sender_leaf_hash = sender_vn.get_node_hash(self.network);
         let result = self
             .vote_collector
             .collect_vote(
+                &sender_vn,
                 current_epoch,
                 current_height,
-                sender_leaf_hash,
                 vote,
                 epoch_state.local_committee(),
             )

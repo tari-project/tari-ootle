@@ -11,8 +11,10 @@ use tari_indexer_client::types::{
     GetTransactionReceiptResponse,
     ListTransactionReceiptsRequest,
     ListTransactionReceiptsResponse,
+    Ordering,
 };
 use tari_ootle_common_types::optional::Optional;
+use tari_ootle_storage::Ordering as StorageOrdering;
 use tari_template_lib_types::TransactionReceiptAddress;
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
@@ -34,9 +36,14 @@ pub async fn list_transaction_receipts(
         ));
     }
 
+    let ordering = match req.ordering {
+        Ordering::Ascending => StorageOrdering::Ascending,
+        Ordering::Descending => StorageOrdering::Descending,
+    };
+
     let receipts = context
         .read_only_store()
-        .list_transaction_receipts(req.last_id, u64::from(limit), req.ordering)
+        .list_transaction_receipts(req.last_id, u64::from(limit), ordering)
         .map_err(ErrorResponse::anyhow)?;
 
     Ok(context.apply_cache_control(Json(ListTransactionReceiptsResponse { receipts }), 10))

@@ -4,8 +4,10 @@
 use std::collections::BTreeMap;
 
 use rand::rngs::OsRng;
-use tari_common_types::types::PrivateKey;
-use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
+use tari_crypto::{
+    keys::PublicKey as _,
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+};
 use tari_engine_types::{
     crypto::{ElgamalVerifiableBalance, OutputBody, ValueLookupTable},
     resource_container::ResourceError,
@@ -472,7 +474,7 @@ fn mint_revealed_with_invalid_proof() {
 
 pub fn try_brute_force_confidential_balance<I, TValueLookup>(
     utxos: &BTreeMap<PedersenCommitmentBytes, OutputBody>,
-    secret_view_key: &PrivateKey,
+    secret_view_key: &RistrettoSecretKey,
     value_range: I,
     value_lookup: &mut TValueLookup,
 ) -> Result<Option<u64>, TValueLookup::Error>

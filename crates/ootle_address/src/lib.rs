@@ -9,3 +9,4 @@ mod pay_ref;
 
 pub use ootle_address::*;
 pub use pay_ref::*;
+pub use tari_ootle_common_types::Network;

@@ -32,7 +32,7 @@ use minotari_node_grpc_client::BaseNodeGrpcClient;
 use tari_common_types::types::FixedHash;
 use tari_node_components::blocks::BlockHeader;
 use tari_ootle_common_types::{Epoch, SubstateAddress};
-use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
 use tari_transaction_components::transaction_components::CodeTemplateRegistration;
 use tari_utilities::ByteArray;
 use tonic::codegen::tokio_stream::Stream;
@@ -168,7 +168,7 @@ impl BaseNodeClient for GrpcBaseNodeClient {
                         BaseNodeClientError::InvalidPeerMessage("public_key was not a valid public key".to_string())
                     })?,
                     shard_key: {
-                        let hash = FixedHash::try_from(resp.shard_key.as_slice()).map_err(|_| {
+                        let hash = Hash32::try_from(resp.shard_key.as_slice()).map_err(|_| {
                             BaseNodeClientError::InvalidPeerMessage("shard_key was not a valid fixed hash".to_string())
                         })?;
                         SubstateAddress::from_hash_and_version(hash, 0)

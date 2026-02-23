@@ -50,7 +50,6 @@ use tari_ootle_common_types::{
     SubstateAddress,
     VotePower,
     committee::{Committee, CommitteeMember},
-    hashing::ValidatorNodeBalancedMerkleTree,
 };
 use tari_ootle_storage::{
     AtomicDb,
@@ -850,49 +849,6 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             })?;
 
         query_res.map(EpochData::try_from).transpose()
-    }
-
-    fn insert_bmt(
-        &self,
-        tx: &mut Self::DbTransaction<'_>,
-        epoch: u64,
-        bmt: ValidatorNodeBalancedMerkleTree,
-    ) -> Result<(), Self::Error> {
-        use crate::global::schema::bmt_cache;
-
-        diesel::insert_into(bmt_cache::table)
-            .values((
-                bmt_cache::epoch.eq(epoch as i64),
-                bmt_cache::bmt.eq(serde_json::to_vec(&bmt)?),
-            ))
-            .execute(tx.connection())
-            .map_err(|source| SqliteStorageError::DieselError {
-                source,
-                operation: "insert::bmt",
-            })?;
-
-        Ok(())
-    }
-
-    fn get_bmt(
-        &self,
-        tx: &mut Self::DbTransaction<'_>,
-        epoch: Epoch,
-    ) -> Result<Option<ValidatorNodeBalancedMerkleTree>, Self::Error> {
-        use crate::global::schema::bmt_cache::dsl;
-
-        let query_res: Option<models::Bmt> = dsl::bmt_cache
-            .find(epoch.as_u64() as i64)
-            .first(tx.connection())
-            .optional()
-            .map_err(|source| SqliteStorageError::DieselError {
-                source,
-                operation: "get::bmt",
-            })?;
-        match query_res {
-            Some(bmt) => Ok(Some(serde_json::from_slice(&bmt.bmt)?)),
-            None => Ok(None),
-        }
     }
 
     fn insert_layer_one_transaction<T: Serialize>(

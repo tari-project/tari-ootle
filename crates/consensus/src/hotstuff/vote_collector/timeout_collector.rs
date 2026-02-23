@@ -3,7 +3,7 @@
 
 use log::*;
 use tari_consensus_types::{HighTc, SignedMessage, TimeoutCertificate, TimeoutVote, Vote};
-use tari_ootle_common_types::{Epoch, Network, NodeHeight};
+use tari_ootle_common_types::{Epoch, NodeHeight};
 use tari_ootle_storage::StateStore;
 
 use super::collector::VoteCollector;
@@ -17,7 +17,6 @@ const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::timeout_collector";
 
 #[derive(Clone)]
 pub struct TimeoutVoteCollector<TConsensusSpec: ConsensusSpec> {
-    network: Network,
     vote_collector: VoteCollector<TimeoutVote>,
     store: TConsensusSpec::StateStore,
     epoch_manager: TConsensusSpec::EpochManager,
@@ -28,13 +27,11 @@ impl<TConsensusSpec> TimeoutVoteCollector<TConsensusSpec>
 where TConsensusSpec: ConsensusSpec
 {
     pub fn new(
-        network: Network,
         store: TConsensusSpec::StateStore,
         epoch_manager: TConsensusSpec::EpochManager,
         vote_signer_service: TConsensusSpec::SignerService,
     ) -> Self {
         Self {
-            network,
             store,
             vote_collector: VoteCollector::new(),
             epoch_manager,
@@ -61,15 +58,14 @@ where TConsensusSpec: ConsensusSpec
         let sender_vn =
             check_eligibility::<TConsensusSpec, _>(&self.epoch_manager, from, &vote, local_committee_info).await?;
         self.validate_vote(current_epoch, &vote)?;
-        let sender_leaf_hash = sender_vn.get_node_hash(self.network);
         let height = vote.height;
 
         let result = self
             .vote_collector
             .collect_vote(
+                &sender_vn,
                 current_epoch,
                 current_height,
-                sender_leaf_hash,
                 vote,
                 epoch_state.local_committee(),
             )

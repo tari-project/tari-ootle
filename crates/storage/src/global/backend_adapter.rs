@@ -24,15 +24,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Serialize, de::DeserializeOwned};
 use tari_common_types::types::FixedHash;
-use tari_ootle_common_types::{
-    Epoch,
-    NodeAddressable,
-    ShardGroup,
-    SubstateAddress,
-    VotePower,
-    committee::Committee,
-    hashing::ValidatorNodeBalancedMerkleTree,
-};
+use tari_ootle_common_types::{Epoch, NodeAddressable, ShardGroup, SubstateAddress, VotePower, committee::Committee};
 use tari_template_lib_types::{Hash32, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 use super::{BlockHeaderModel, EpochData, TemplateStatus};
@@ -191,18 +183,6 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         epoch_hash: FixedHash,
     ) -> Result<(), Self::Error>;
     fn get_epoch(&self, tx: &mut Self::DbTransaction<'_>, epoch: Epoch) -> Result<Option<EpochData>, Self::Error>;
-
-    fn insert_bmt(
-        &self,
-        tx: &mut Self::DbTransaction<'_>,
-        epoch: u64,
-        bmt: ValidatorNodeBalancedMerkleTree,
-    ) -> Result<(), Self::Error>;
-    fn get_bmt(
-        &self,
-        tx: &mut Self::DbTransaction<'_>,
-        epoch: Epoch,
-    ) -> Result<Option<ValidatorNodeBalancedMerkleTree>, Self::Error>;
 
     fn insert_layer_one_transaction<T: Serialize>(
         &self,

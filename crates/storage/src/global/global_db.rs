@@ -22,7 +22,7 @@
 
 use std::sync::Arc;
 
-use super::{BaseLayerDb, BlockHeaderDb, BmtDb, EpochDb, validator_node_db::ValidatorNodeDb};
+use super::{BaseLayerDb, BlockHeaderDb, EpochDb, validator_node_db::ValidatorNodeDb};
 use crate::{
     StorageError,
     global::{backend_adapter::GlobalDbAdapter, metadata_db::MetadataDb, template_db::TemplateDb},
@@ -120,13 +120,6 @@ impl<TGlobalDbAdapter: GlobalDbAdapter> GlobalDb<TGlobalDbAdapter> {
         tx: &'tx mut TGlobalDbAdapter::DbTransaction<'a>,
     ) -> BaseLayerDb<'a, 'tx, TGlobalDbAdapter> {
         BaseLayerDb::new(&self.adapter, tx)
-    }
-
-    pub fn bmt<'a, 'tx>(
-        &'a self,
-        tx: &'tx mut TGlobalDbAdapter::DbTransaction<'a>,
-    ) -> BmtDb<'a, 'tx, TGlobalDbAdapter> {
-        BmtDb::new(&self.adapter, tx)
     }
 
     pub fn block_headers<'a, 'tx>(

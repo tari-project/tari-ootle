@@ -35,6 +35,7 @@ mod weight;
 pub use builder::TransactionBuilder;
 pub use envelope::*;
 pub use signable::*;
+pub use tari_ootle_common_types::Network;
 pub use transaction::*;
 pub use transaction_id::*;
 pub use unsealed::*;

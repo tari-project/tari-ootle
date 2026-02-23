@@ -4,7 +4,6 @@
 use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{
     Epoch,
     Network,
@@ -14,7 +13,7 @@ use tari_ootle_common_types::{
     displayable::Displayable,
     vn_node_hash,
 };
-use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+use tari_template_lib_types::{Hash32, crypto::RistrettoPublicKeyBytes};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidatorNode<TAddr> {
@@ -28,7 +27,7 @@ pub struct ValidatorNode<TAddr> {
 }
 
 impl<TAddr: NodeAddressable> ValidatorNode<TAddr> {
-    pub fn get_node_hash(&self, network: Network) -> FixedHash {
+    pub fn get_node_hash(&self, network: Network) -> Hash32 {
         vn_node_hash(network, &self.public_key, &self.shard_key)
     }
 }

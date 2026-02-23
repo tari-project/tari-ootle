@@ -28,13 +28,13 @@ fn it_allows_badge_to_withdraw_from_account() {
             .call_method(user1, "create_ownership_proof", args![])
             .put_last_instruction_output_on_workspace("user1_proof")
             // Withdraw the approved amount
-            .call_method(owner, "withdraw_from_approved", args![
+            .call_method(owner, "withdraw_approved", args![
                 Workspace("user1_proof"),
                 XTR,
                 900
             ])
             .put_last_instruction_output_on_workspace("bucket1")
-            .call_method(owner, "withdraw_from_approved", args![
+            .call_method(owner, "withdraw_approved", args![
                 Workspace("user1_proof"),
                 XTR,
                 100
@@ -73,7 +73,7 @@ fn it_rejects_withdrawals_greater_than_approval() {
             .call_method(user1, "create_ownership_proof", args![])
             .put_last_instruction_output_on_workspace("user1_proof")
             // Withdraw the approved amount
-            .call_method(owner, "withdraw_from_approved", args![
+            .call_method(owner, "withdraw_approved", args![
                 Workspace("user1_proof"),
                 XTR,
                 1001
@@ -97,7 +97,7 @@ fn it_rejects_withdrawals_greater_than_approval() {
             .call_method(user2, "create_ownership_proof", args![])
             .put_last_instruction_output_on_workspace("user2_proof")
             // Withdraw the approved amount
-            .call_method(owner, "withdraw_from_approved", args![
+            .call_method(owner, "withdraw_approved", args![
                 Workspace("user2_proof"),
                 XTR,
                 1
@@ -144,7 +144,7 @@ fn it_clears_the_approval() {
             .call_method(user1, "create_ownership_proof", args![])
             .put_last_instruction_output_on_workspace("user1_proof")
             // Withdraw the approved amount
-            .call_method(owner, "withdraw_from_approved", args![
+            .call_method(owner, "withdraw_approved", args![
                 Workspace("user1_proof"),
                 XTR,
                 1000

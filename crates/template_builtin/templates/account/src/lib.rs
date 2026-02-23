@@ -65,7 +65,7 @@ mod account_template {
                     .add_method_rule("get_balances", rule!(allow_all))
                     .add_method_rule("deposit", rule!(allow_all))
                     .add_method_rule("deposit_all", rule!(allow_all))
-                    .add_method_rule("withdraw_from_approved", rule!(allow_all))
+                    .add_method_rule("withdraw_approved", rule!(allow_all))
                     // By default, only the owner of the token will be able to withdraw funds from the account
                     .default(rule!(deny_all)),
             );
@@ -258,12 +258,7 @@ mod account_template {
             emit_event("revoke_all_approvals", metadata!());
         }
 
-        pub fn withdraw_from_approved(
-            &mut self,
-            spender_proof: Proof,
-            resource: ResourceAddress,
-            amount: Amount,
-        ) -> Bucket {
+        pub fn withdraw_approved(&mut self, spender_proof: Proof, resource: ResourceAddress, amount: Amount) -> Bucket {
             let mut badges = spender_proof.get_non_fungibles();
             let Some(badge) = badges.pop_first() else {
                 panic!("Proof does not contain any badges");
@@ -286,7 +281,7 @@ mod account_template {
                 self.approvals.remove(&(resource, badge));
             }
 
-            emit_event("withdraw_from_approved", [
+            emit_event("withdraw_approved", [
                 ("spender_badge", badge_resource.to_string()),
                 ("resource", resource.to_string()),
                 ("amount", amount.to_string()),

@@ -30,6 +30,8 @@ mod account_template {
     pub struct Account {
         vaults: BTreeMap<ResourceAddress, Vault>,
         #[serde(default)]
+        /// Approvals for other accounts to withdraw from this account. The key is a tuple of (approved resource,
+        /// required spender_badge), and the value is the approved amount.
         approvals: BTreeMap<(ResourceAddress, NonFungibleAddress), Amount>,
     }
 
@@ -281,7 +283,7 @@ mod account_template {
                 .unwrap_or_else(|| panic!("Allowance exceeded (max: {}, attempted: {})", approval, amount));
             // Clean up zero approvals
             if approval.is_zero() {
-                self.approvals.remove(&(badge_resource, badge));
+                self.approvals.remove(&(resource, badge));
             }
 
             emit_event("withdraw_from_approved", [

@@ -135,6 +135,7 @@ CREATE TABLE resources
     id            INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
     address       TEXT     NOT NULL,
     resource_type TEXT     NOT NULL,
+    owner_key     TEXT     NULL, -- removed
     owner_rule    TEXT     NOT NULL,
     access_rules  TEXT     NOT NULL,
     token_symbol  TEXT     NULL,

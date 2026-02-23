@@ -264,11 +264,9 @@ mod account_template {
                 .get_mut(&(resource, badge.clone()))
                 .unwrap_or_else(|| panic!("No approval for badge {} on resource {}", badge, resource));
 
-            assert!(*approval >= amount, "Amount exceeds approval");
-
             *approval = approval
                 .checked_sub(amount)
-                .unwrap_or_else(|| panic!("Allowance exceeded (max: {}, attempted: {})", approval, amount));
+                .unwrap_or_else(|| panic!("Amount exceeds approval (max: {}, attempted: {})", approval, amount));
             // Clean up zero approvals
             if approval.is_zero() {
                 self.approvals.remove(&(resource, badge));

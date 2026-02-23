@@ -10,7 +10,6 @@ import type { SubstateOwnerRule } from "./SubstateOwnerRule";
 export type Resource = {
   resource_type: ResourceType;
   owner_rule: SubstateOwnerRule;
-  owner_key: RistrettoPublicKeyBytes | null;
   access_rules: ResourceAccessRules;
   metadata: Metadata;
   /**

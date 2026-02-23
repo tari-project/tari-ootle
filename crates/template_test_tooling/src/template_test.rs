@@ -222,7 +222,7 @@ impl TemplateTest {
 
     pub fn bootstrap_state(&mut self) {
         add_tari_resources(&mut self.state_store).unwrap();
-        initialize_builtin_faucet_state(&mut self.state_store, &self.public_key);
+        initialize_builtin_faucet_state(&mut self.state_store);
         initialize_builtin_nft_faucet_state(&mut self.state_store)
     }
 

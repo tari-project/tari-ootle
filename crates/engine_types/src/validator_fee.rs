@@ -35,8 +35,7 @@ impl ValidatorFeePool {
 
     pub fn as_ownership(&self) -> Ownership<'_> {
         Ownership {
-            owner_key: Some(&self.claim_public_key),
-            owner_rule: Cow::Owned(SubstateOwnerRule::ByPublicKey),
+            owner_rule: Cow::Owned(SubstateOwnerRule::ByPublicKey(self.claim_public_key)),
         }
     }
 

@@ -57,8 +57,7 @@ pub fn make_test_component(entity_id: EntityId) -> SubstateValue {
     SubstateValue::Component(ComponentHeader {
         template_address: Default::default(),
         module_name: "Test".to_string(),
-        owner_key: None,
-        owner_rule: SubstateOwnerRule::ByPublicKey,
+        owner_rule: SubstateOwnerRule::None,
         access_rules: Default::default(),
         entity_id,
         body: ComponentBody {

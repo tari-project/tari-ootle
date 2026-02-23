@@ -22,7 +22,7 @@ pub enum OwnerRule {
 impl OwnerRule {
     pub fn owned_by_public_key(&self) -> Option<&RistrettoPublicKeyBytes> {
         match self {
-            OwnerRule::ByPublicKey(key) => Some(key),
+            Self::ByPublicKey(key) => Some(key),
             _ => None,
         }
     }
@@ -37,5 +37,14 @@ pub enum SubstateOwnerRule {
     /// The owner is anyone who satisfies an access rule
     ByAccessRule(AccessRule),
     /// The owner is a specific public key
-    ByPublicKey,
+    ByPublicKey(#[cfg_attr(feature = "ts", ts(type = "Array<number>"))] RistrettoPublicKeyBytes),
+}
+
+impl SubstateOwnerRule {
+    pub fn owned_by_public_key(&self) -> Option<&RistrettoPublicKeyBytes> {
+        match self {
+            Self::ByPublicKey(key) => Some(key),
+            _ => None,
+        }
+    }
 }

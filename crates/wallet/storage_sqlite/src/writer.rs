@@ -916,14 +916,12 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         let view_key = resource.view_key().map(serialize_hex);
         let divisibility = i32::from(resource.divisibility());
         let auth_hook = resource.auth_hook().map(serialize_json).transpose()?;
-        let owner_key = resource.owner_key().map(serialize_hex);
         let owner_rule = serialize_json(resource.owner_rule())?;
 
         diesel::insert_into(resources::table)
             .values((
                 resources::address.eq(resource_address.to_string()),
                 resources::resource_type.eq(&resource_type),
-                resources::owner_key.eq(owner_key.as_ref()),
                 resources::owner_rule.eq(&owner_rule),
                 resources::token_symbol.eq(resource.token_symbol()),
                 resources::divisibility.eq(divisibility),
@@ -937,7 +935,6 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .do_update()
             .set((
                 resources::resource_type.eq(&resource_type),
-                resources::owner_key.eq(owner_key.as_ref()),
                 resources::owner_rule.eq(&owner_rule),
                 resources::token_symbol.eq(resource.token_symbol()),
                 resources::divisibility.eq(divisibility),

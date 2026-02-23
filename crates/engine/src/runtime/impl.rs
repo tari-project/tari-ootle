@@ -595,20 +595,16 @@ where
                 let template_def = self.get_template_def(&template_addr)?;
                 validate_component_access_rule_methods(&access_rules, &template_def)?;
 
-                let (owner_key, owner_rule) = match owner_rule {
-                    OwnerRule::OwnedBySigner => (Some(self.seal_signer_public_key), SubstateOwnerRule::ByPublicKey),
-                    OwnerRule::None => (None, SubstateOwnerRule::None),
-                    OwnerRule::ByAccessRule(rule) => (None, SubstateOwnerRule::ByAccessRule(rule)),
-                    OwnerRule::ByPublicKey(key) => (Some(key), SubstateOwnerRule::ByPublicKey),
+                let owner_rule = match owner_rule {
+                    OwnerRule::OwnedBySigner => SubstateOwnerRule::ByPublicKey(self.seal_signer_public_key),
+                    OwnerRule::None => SubstateOwnerRule::None,
+                    OwnerRule::ByAccessRule(rule) => SubstateOwnerRule::ByAccessRule(rule),
+                    OwnerRule::ByPublicKey(key) => SubstateOwnerRule::ByPublicKey(key),
                 };
 
-                let component_address = self.tracker.new_component(
-                    encoded_state,
-                    owner_key,
-                    owner_rule,
-                    access_rules,
-                    address_allocation,
-                )?;
+                let component_address =
+                    self.tracker
+                        .new_component(encoded_state, owner_rule, access_rules, address_allocation)?;
                 Ok(InvokeResult::encode(&component_address)?)
             },
             ComponentAction::GetState => {
@@ -790,7 +786,7 @@ where
                             details: format!("Substate at {} is not a component", component_address),
                         })?;
 
-                    let Some(owner) = component.owner_key.as_ref().copied() else {
+                    let Some(owner) = component.owner_rule.owned_by_public_key().copied() else {
                         return Ok(InvokeResult::encode(&None::<tari_template_lib::models::Proof>)?);
                     };
 
@@ -866,11 +862,11 @@ where
                     });
                 }
 
-                let (owner_key, owner_rule) = match arg.owner_rule {
-                    OwnerRule::OwnedBySigner => (Some(self.seal_signer_public_key), SubstateOwnerRule::ByPublicKey),
-                    OwnerRule::ByPublicKey(key) => (Some(key), SubstateOwnerRule::ByPublicKey),
-                    OwnerRule::None => (None, SubstateOwnerRule::None),
-                    OwnerRule::ByAccessRule(rule) => (None, SubstateOwnerRule::ByAccessRule(rule)),
+                let owner_rule = match arg.owner_rule {
+                    OwnerRule::OwnedBySigner => SubstateOwnerRule::ByPublicKey(self.seal_signer_public_key),
+                    OwnerRule::ByPublicKey(key) => SubstateOwnerRule::ByPublicKey(key),
+                    OwnerRule::None => SubstateOwnerRule::None,
+                    OwnerRule::ByAccessRule(rule) => SubstateOwnerRule::ByAccessRule(rule),
                 };
 
                 // Check that auth hook is valid
@@ -881,7 +877,6 @@ where
                 self.tracker.write_with(|state_mut| {
                     let resource = Resource::new(
                         arg.resource_type,
-                        owner_key,
                         owner_rule,
                         arg.access_rules,
                         arg.metadata,

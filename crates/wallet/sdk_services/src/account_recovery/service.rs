@@ -201,16 +201,16 @@ where
                             ),
                         })?;
 
-                if component.owner_key.is_none() {
+                if component.owner_public_key().is_none() {
                     warn!(target: LOG_TARGET, "⚠️ Account {} has no owner key. This wallet may not be able to use this account", account_addr);
                 };
 
-                if component.owner_key.is_some_and(|pk| pk != public_key) {
+                if component.owner_public_key().is_some_and(|pk| *pk != public_key) {
                     warn!(
                         target: LOG_TARGET,
                         "⚠️ Account {} has a different owner key {} than the one derived from the seed key {}. This wallet may not be able to use this account",
                         account_addr,
-                        component.owner_key.unwrap_or_default(),
+                        component.owner_public_key().display(),
                         public_key
                     );
                 };
@@ -220,7 +220,7 @@ where
                     target: LOG_TARGET,
                     "🔑 Adding account {} with owner key {} and key index {}",
                     account_addr,
-                    component.owner_key.display(),
+                    component.owner_public_key().display(),
                     key.key_index()
                 );
                 self.wallet_sdk.accounts_api().add_account(

@@ -3,13 +3,11 @@ import type { ComponentAccessRules } from "./ComponentAccessRules";
 import type { ComponentBody } from "./ComponentBody";
 import type { EntityId } from "./EntityId";
 import type { Hash32 } from "./Hash32";
-import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
 import type { SubstateOwnerRule } from "./SubstateOwnerRule";
 
 export type ComponentHeader = {
   template_address: Hash32;
   module_name: string;
-  owner_key: RistrettoPublicKeyBytes | null;
   owner_rule: SubstateOwnerRule;
   access_rules: ComponentAccessRules;
   entity_id: EntityId;

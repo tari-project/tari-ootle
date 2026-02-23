@@ -46,7 +46,6 @@ use tari_template_lib::{
         SubstateOwnerRule,
         TemplateAddress,
         access_rules::ComponentAccessRules,
-        crypto::RistrettoPublicKeyBytes,
     },
 };
 
@@ -138,7 +137,6 @@ impl<TStore: StateReader> StateTracker<TStore> {
     pub fn new_component(
         &mut self,
         component_state: tari_bor::Value,
-        owner_key: Option<RistrettoPublicKeyBytes>,
         owner_rule: SubstateOwnerRule,
         access_rules: ComponentAccessRules,
         address_allocation: Option<ComponentAddressAllocation>,
@@ -164,7 +162,6 @@ impl<TStore: StateReader> StateTracker<TStore> {
             let component = ComponentHeader {
                 template_address,
                 module_name: module_name.clone(),
-                owner_key,
                 access_rules,
                 owner_rule,
                 entity_id: component_address.entity_id(),

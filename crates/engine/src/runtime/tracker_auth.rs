@@ -117,12 +117,8 @@ fn check_ownership<TStore: StateReader>(
     match ownership.owner_rule.as_ref() {
         SubstateOwnerRule::None => Ok(false),
         SubstateOwnerRule::ByAccessRule(rule) => check_access_rule(state, scope, rule),
-        SubstateOwnerRule::ByPublicKey => {
-            let Some(owner_key) = ownership.owner_key else {
-                return Ok(false);
-            };
-
-            let owner_proof = NonFungibleAddress::from_public_key(*owner_key);
+        SubstateOwnerRule::ByPublicKey(key) => {
+            let owner_proof = NonFungibleAddress::from_public_key(*key);
             Ok(scope.contains_badge(&owner_proof))
         },
     }

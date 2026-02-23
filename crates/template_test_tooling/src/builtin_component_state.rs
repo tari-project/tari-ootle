@@ -2,7 +2,6 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use tari_bor::cbor;
-use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_engine::state_store::{StateStoreError, StateWriter};
 use tari_engine_types::{
     component::{ComponentBody, ComponentHeader},
@@ -26,7 +25,6 @@ use tari_template_lib::types::{
         TOKEN_SYMBOL,
         XTR_FAUCET_VAULT_ADDRESS,
     },
-    crypto::RistrettoPublicKeyBytes,
     metadata,
     rule,
 };
@@ -44,7 +42,6 @@ pub fn add_tari_resources<T: StateWriter>(state_db: &mut T) -> Result<(), StateS
             0,
             Resource::new(
                 ResourceType::NonFungible,
-                None,
                 SubstateOwnerRule::None,
                 ResourceAccessRules::deny_all(),
                 metadata,
@@ -66,7 +63,6 @@ pub fn add_tari_resources<T: StateWriter>(state_db: &mut T) -> Result<(), StateS
             0,
             Resource::new(
                 ResourceType::Stealth,
-                None,
                 SubstateOwnerRule::None,
                 ResourceAccessRules::new(),
                 metadata,
@@ -81,10 +77,7 @@ pub fn add_tari_resources<T: StateWriter>(state_db: &mut T) -> Result<(), StateS
     Ok(())
 }
 
-pub fn initialize_builtin_faucet_state<TStore: StateWriter>(
-    store: &mut TStore,
-    signer_public_key: &RistrettoPublicKey,
-) {
+pub fn initialize_builtin_faucet_state<TStore: StateWriter>(store: &mut TStore) {
     let initial_supply = Amount::MAX;
     let entity_id = EntityId::default();
     let vault = Vault::new(ResourceContainer::stealth(
@@ -106,7 +99,6 @@ pub fn initialize_builtin_faucet_state<TStore: StateWriter>(
             Substate::new(0, ComponentHeader {
                 template_address: XTR_FAUCET_TEMPLATE_ADDRESS,
                 module_name: "XtrFaucet".to_string(),
-                owner_key: Some(RistrettoPublicKeyBytes::from_bytes(signer_public_key.as_bytes()).unwrap()),
                 owner_rule: SubstateOwnerRule::None,
                 access_rules: ComponentAccessRules::allow_all(),
                 entity_id,
@@ -119,7 +111,6 @@ pub fn initialize_builtin_faucet_state<TStore: StateWriter>(
 pub fn initialize_builtin_nft_faucet_state<TStore: StateWriter>(store: &mut TStore) {
     let resource = Resource::new(
         ResourceType::NonFungible,
-        None,
         SubstateOwnerRule::None,
         ResourceAccessRules::new().mintable(rule!(component(NFT_FAUCET_COMPONENT_ADDRESS))),
         metadata!(TOKEN_SYMBOL => "tNFT"),
@@ -146,7 +137,6 @@ pub fn initialize_builtin_nft_faucet_state<TStore: StateWriter>(store: &mut TSto
             Substate::new(0, ComponentHeader {
                 template_address: NFT_FAUCET_TEMPLATE_ADDRESS,
                 module_name: "TestFaucet".to_string(),
-                owner_key: None,
                 owner_rule: SubstateOwnerRule::None,
                 access_rules: ComponentAccessRules::allow_all(),
                 entity_id: EntityId::default(),

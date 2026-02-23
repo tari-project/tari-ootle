@@ -49,14 +49,7 @@ mod account_template {
                 .unwrap_or_else(|| panic!("public_key_token is not a valid public key: {}", public_key_token));
 
             // The owner of this account is either provided explicitly or defaults to the provided public key.
-            let owner_rule = owner_rule.unwrap_or_else(|| {
-                if CallerContext::transaction_signer_public_key() == public_key {
-                    // If the transaction signer is the same as the public key, we save 32 bytes on chain
-                    OwnerRule::OwnedBySigner
-                } else {
-                    OwnerRule::ByPublicKey(public_key)
-                }
-            });
+            let owner_rule = owner_rule.unwrap_or(OwnerRule::ByPublicKey(public_key));
 
             let access_rules = access_rules.unwrap_or(
                 // By default, allow deposits from anyone

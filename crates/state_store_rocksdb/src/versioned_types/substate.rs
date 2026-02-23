@@ -62,8 +62,7 @@ mod tests {
                     .parse()
                     .unwrap(),
                 module_name: "blah".to_string(),
-                owner_key: None,
-                owner_rule: SubstateOwnerRule::ByPublicKey,
+                owner_rule: SubstateOwnerRule::None,
                 access_rules: Default::default(),
                 entity_id: Default::default(),
                 body: ComponentBody { state: Value::Null },

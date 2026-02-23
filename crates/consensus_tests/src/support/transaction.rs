@@ -57,8 +57,7 @@ pub fn create_execution_result_for_transaction(
                         Substate::new(output.versioned_substate_id().version(), ComponentHeader {
                             template_address: Default::default(),
                             module_name: "Test".to_string(),
-                            owner_key: Default::default(),
-                            owner_rule: SubstateOwnerRule::ByPublicKey,
+                            owner_rule: SubstateOwnerRule::None,
                             access_rules: Default::default(),
                             entity_id: output
                                 .versioned_substate_id()

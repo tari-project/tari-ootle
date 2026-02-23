@@ -20,7 +20,6 @@ pub struct ResourceModel {
     pub id: i32,
     pub address: String,
     pub resource_type: String,
-    pub owner_key: Option<String>,
     pub owner_rule: String,
     pub access_rules: String,
     pub token_symbol: Option<String>,
@@ -47,16 +46,7 @@ impl ResourceModel {
                 item: "resource.resource_type",
                 details: e.to_string(),
             })?;
-        let owner_key = self
-            .owner_key
-            .as_ref()
-            .map(deserialize_hex_try_from)
-            .transpose()
-            .map_err(|e| WalletStorageError::DecodingError {
-                operation: "try_convert",
-                item: "resource.owner_key",
-                details: e.to_string(),
-            })?;
+
         let owner_rule = deserialize_json(&self.owner_rule).map_err(|e| WalletStorageError::DecodingError {
             operation: "try_convert",
             item: "resource.owner_rule",
@@ -98,7 +88,6 @@ impl ResourceModel {
 
         let resource = Resource::load(
             resource_type,
-            owner_key,
             owner_rule,
             access_rules,
             metadata,

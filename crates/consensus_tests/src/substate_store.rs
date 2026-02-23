@@ -265,8 +265,7 @@ fn new_substate_value(seed: u8) -> SubstateValue {
     ComponentHeader {
         template_address: Default::default(),
         module_name: "".to_string(),
-        owner_key: None,
-        owner_rule: SubstateOwnerRule::ByPublicKey,
+        owner_rule: SubstateOwnerRule::None,
         access_rules: Default::default(),
         entity_id: [seed; EntityId::LENGTH].into(),
         body: ComponentBody {

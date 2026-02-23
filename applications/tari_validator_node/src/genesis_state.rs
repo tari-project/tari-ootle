@@ -106,7 +106,6 @@ where
     let value = ComponentHeader {
         template_address: tari_template_builtin::XTR_FAUCET_TEMPLATE_ADDRESS,
         module_name: "XtrFaucet".to_string(),
-        owner_key: None,
         owner_rule: SubstateOwnerRule::None,
         access_rules: ComponentAccessRules::allow_all(),
         entity_id: EntityId::default(),
@@ -131,7 +130,6 @@ where
     let value = ComponentHeader {
         template_address: tari_template_builtin::NFT_FAUCET_TEMPLATE_ADDRESS,
         module_name: "NftFaucet".to_string(),
-        owner_key: None,
         owner_rule: SubstateOwnerRule::None,
         access_rules: ComponentAccessRules::allow_all(),
         entity_id: EntityId::default(),
@@ -146,7 +144,6 @@ where
     let access_rules = ResourceAccessRules::new().mintable(rule!(component(NFT_FAUCET_COMPONENT_ADDRESS)));
     let value = Resource::new(
         ResourceType::NonFungible,
-        None,
         SubstateOwnerRule::None,
         access_rules,
         metadata,

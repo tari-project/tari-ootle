@@ -31,7 +31,6 @@ pub fn setup_store() -> MemoryStateStore {
     let mut state_store = MemoryStateStore::new();
     let xtr = Resource::new(
         ResourceType::Stealth,
-        None,
         SubstateOwnerRule::None,
         ResourceAccessRules::new(),
         metadata!(),
@@ -56,7 +55,6 @@ pub fn setup_store() -> MemoryStateStore {
     let component = ComponentHeader {
         template_address: XTR_FAUCET_TEMPLATE_ADDRESS,
         module_name: "XtrFaucet".to_string(),
-        owner_key: None,
         owner_rule: SubstateOwnerRule::None,
         access_rules: ComponentAccessRules::allow_all(),
         entity_id: Default::default(),

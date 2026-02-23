@@ -111,7 +111,6 @@ diesel::table! {
         id -> Integer,
         address -> Text,
         resource_type -> Text,
-        owner_key -> Nullable<Text>,
         owner_rule -> Text,
         access_rules -> Text,
         token_symbol -> Nullable<Text>,

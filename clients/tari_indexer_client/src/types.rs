@@ -23,7 +23,6 @@ use tari_ootle_common_types::{
     shard::Shard,
     substate_type::SubstateType,
 };
-use tari_ootle_storage::{Ordering, time::PrimitiveDateTime};
 use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
 use tari_ootle_wallet_sdk::models::UtxoUpdateSet;
 use tari_template_abi::TemplateDef;
@@ -37,6 +36,7 @@ use tari_template_lib_types::{
     UtxoId,
     crypto::{RistrettoPublicKeyBytes, UtxoTag},
 };
+use time::PrimitiveDateTime;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
@@ -587,8 +587,17 @@ pub struct ListTransactionReceiptsRequest {
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     pub last_id: Option<TransactionReceiptAddress>,
     #[serde(default)]
-    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub ordering: Ordering,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub enum Ordering {
+    // Use default only where you "don't care" about the order. Ascending is more performant so it's the default.
+    #[default]
+    Ascending,
+    Descending,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

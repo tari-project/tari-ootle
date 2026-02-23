@@ -7364,7 +7364,7 @@ dependencies = [
 
 [[package]]
 name = "ootle_byte_type"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "tari_crypto",
  "tari_template_lib_types",
@@ -7372,7 +7372,7 @@ dependencies = [
 
 [[package]]
 name = "ootle_serde"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "bincode 2.0.1",
@@ -10876,7 +10876,6 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "tari_bor",
- "tari_common_types",
  "tari_crypto",
  "tari_engine_types",
  "tari_ootle_common_types",
@@ -11081,12 +11080,12 @@ dependencies = [
  "tari_consensus_types",
  "tari_engine_types",
  "tari_ootle_common_types",
- "tari_ootle_storage",
  "tari_ootle_transaction",
  "tari_ootle_wallet_sdk",
  "tari_template_abi",
  "tari_template_lib_types",
  "thiserror 2.0.18",
+ "time",
  "tokio",
  "ts-rs",
  "utoipa",
@@ -11206,7 +11205,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_address"
-version = "0.24.0"
+version = "0.1.0"
 dependencies = [
  "bech32",
  "bincode 2.0.1",
@@ -11277,12 +11276,9 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "tari_bor",
- "tari_common_types",
  "tari_crypto",
  "tari_engine_types",
  "tari_hashing 5.2.1",
- "tari_mmr",
- "tari_template_lib",
  "tari_template_lib_types",
  "thiserror 2.0.18",
  "ts-rs",
@@ -11415,7 +11411,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_crypto"
-version = "0.24.0"
+version = "0.1.1"
 dependencies = [
  "argon2 0.5.3",
  "blake2",
@@ -11444,7 +11440,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_sdk"
-version = "0.24.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "digest 0.10.7",
@@ -11481,7 +11477,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_sdk_services"
-version = "0.24.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "futures 0.3.31",
@@ -11897,7 +11893,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_macros"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "indoc",
  "proc-macro2",
@@ -11908,7 +11904,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_test_tooling"
-version = "0.9.1"
+version = "0.24.0"
 dependencies = [
  "anyhow",
  "cargo_toml 0.22.3",

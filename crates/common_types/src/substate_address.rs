@@ -11,13 +11,9 @@ use std::{
 
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::{FixedHash, FixedHashSizeError};
-use tari_crypto::tari_utilities::{
-    ByteArray,
-    hex::{Hex, from_hex},
-};
+use tari_crypto::tari_utilities::hex::{Hex, from_hex};
 use tari_engine_types::substate::SubstateId;
-use tari_template_lib_types::{ObjectKey, TransactionReceiptAddress};
+use tari_template_lib_types::{Hash32, ObjectKey, TransactionReceiptAddress};
 
 use crate::{NumPreshards, ShardGroup, shard::Shard, uint::U256};
 
@@ -58,12 +54,12 @@ impl SubstateAddress {
         &self.0
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, FixedHashSizeError> {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, SubstateAddressSizeError> {
         if bytes.len() != SubstateAddress::LENGTH {
-            return Err(FixedHashSizeError);
+            return Err(SubstateAddressSizeError);
         }
         let key = ObjectKey::try_from(bytes.get(..ObjectKey::LENGTH).expect("length checked"))
-            .map_err(|_| FixedHashSizeError)?;
+            .map_err(|_| SubstateAddressSizeError)?;
         let mut v_buf = [0u8; size_of::<u32>()];
         v_buf.copy_from_slice(bytes.get(ObjectKey::LENGTH..).expect("length checked"));
         let version = u32::from_be_bytes(v_buf);
@@ -94,13 +90,12 @@ impl SubstateAddress {
         Self([0xffu8; SubstateAddress::LENGTH])
     }
 
-    // TODO: remove this
-    pub fn from_hash_and_version<T: Into<FixedHash>>(hash: T, version: u32) -> Self {
-        // This will cause an error at compile-time if ObjectKey::LENGTH != FixedHash::byte_size()
+    pub fn from_hash_and_version<T: Into<Hash32>>(hash: T, version: u32) -> Self {
+        // This will cause an error at compile-time if ObjectKey::LENGTH != Hash32::LENGTH
         // If ObjectKey should differ in length, then this function should ideally be removed.
-        const _: () = [()][1 - (FixedHash::byte_size() == ObjectKey::LENGTH) as usize];
+        const _: () = [()][1 - (Hash32::LENGTH == ObjectKey::LENGTH) as usize];
         let mut buf = [0u8; SubstateAddress::LENGTH];
-        buf[..ObjectKey::LENGTH].copy_from_slice(hash.into().as_bytes());
+        buf[..ObjectKey::LENGTH].copy_from_slice(hash.into().as_slice());
         buf[ObjectKey::LENGTH..].copy_from_slice(&version.to_be_bytes());
         Self(buf)
     }
@@ -200,7 +195,7 @@ impl From<SubstateAddress> for Vec<u8> {
 }
 
 impl TryFrom<Vec<u8>> for SubstateAddress {
-    type Error = FixedHashSizeError;
+    type Error = SubstateAddressSizeError;
 
     fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
         Self::from_bytes(&value)
@@ -208,7 +203,7 @@ impl TryFrom<Vec<u8>> for SubstateAddress {
 }
 
 impl TryFrom<&[u8]> for SubstateAddress {
-    type Error = FixedHashSizeError;
+    type Error = SubstateAddressSizeError;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
         Self::from_bytes(value)
@@ -240,11 +235,11 @@ impl Display for SubstateAddress {
 }
 
 impl FromStr for SubstateAddress {
-    type Err = FixedHashSizeError;
+    type Err = SubstateAddressSizeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // TODO: error isnt correct
-        let bytes = from_hex(s).map_err(|_| FixedHashSizeError)?;
+        let bytes = from_hex(s).map_err(|_| SubstateAddressSizeError)?;
         Self::from_bytes(&bytes)
     }
 }
@@ -272,6 +267,10 @@ impl AsRef<SubstateAddress> for SubstateAddress {
         self
     }
 }
+
+#[derive(thiserror::Error, Debug)]
+#[error("Invalid substate address size")]
+pub struct SubstateAddressSizeError;
 
 #[cfg(test)]
 mod tests {

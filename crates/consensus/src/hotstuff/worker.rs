@@ -137,18 +137,10 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
     ) -> Self {
         let (tx_missing_transactions, rx_missing_transactions) = mpsc::unbounded_channel();
         let pacemaker = PaceMaker::new(config.consensus_constants.pacemaker_block_time);
-        let proposal_vote_collector = ProposalVoteCollector::new(
-            config.network,
-            state_store.clone(),
-            epoch_manager.clone(),
-            signing_service.clone(),
-        );
-        let timeout_vote_collector = TimeoutVoteCollector::new(
-            config.network,
-            state_store.clone(),
-            epoch_manager.clone(),
-            signing_service.clone(),
-        );
+        let proposal_vote_collector =
+            ProposalVoteCollector::new(state_store.clone(), epoch_manager.clone(), signing_service.clone());
+        let timeout_vote_collector =
+            TimeoutVoteCollector::new(state_store.clone(), epoch_manager.clone(), signing_service.clone());
         let transaction_manager = ConsensusTransactionManager::new(transaction_executor.clone());
 
         Self {

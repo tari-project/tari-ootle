@@ -11,7 +11,6 @@ license.workspace = true
 tari_ootle_common_types = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_ootle_transaction = { workspace = true }
-tari_ootle_storage = { workspace = true }
 tari_template_abi = { workspace = true }
 tari_template_lib_types = { workspace = true }
 tari_consensus_types = { workspace = true }
@@ -31,6 +30,7 @@ prost = { workspace = true }
 serde_urlencoded = { version = "0.7.1", optional = true }
 futures = { workspace = true }
 utoipa = { workspace = true, optional = true, features = ["time"] }
+time = { workspace = true, features = ["serde"] }
 memchr = "2.7.6"
 
 [dev-dependencies]
@@ -38,6 +38,6 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [features]
 default = ["client"]
-ts = ["ts-rs", "tari_template_lib_types/ts", "tari_engine_types/ts", "tari_ootle_common_types/ts", "tari_ootle_wallet_sdk/ts", "tari_ootle_storage/ts"]
+ts = ["ts-rs", "tari_template_lib_types/ts", "tari_engine_types/ts", "tari_ootle_common_types/ts", "tari_ootle_wallet_sdk/ts"]
 client = ["dep:reqwest", "dep:thiserror", "dep:serde_urlencoded", "dep:bytes"]
 utoipa = ["dep:utoipa"]

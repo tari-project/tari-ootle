@@ -8,6 +8,6 @@ pub mod cbor_value;
 pub mod duration;
 #[cfg(feature = "hex")]
 pub mod hex;
+pub mod map;
 pub mod string;
-pub mod vec;
 mod visitor;

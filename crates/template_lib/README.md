@@ -1,5 +1,8 @@
 # `tari_template_lib`
 
+[![Crates.io](https://img.shields.io/crates/v/tari_template_lib.svg)](https://crates.io/crates/tari_template_lib)
+[![Documentation](https://docs.rs/tari_template_lib/badge.svg)](https://docs.rs/tari_template_lib)
+
 ## Overview
 
 `tari_template_lib` provides ergonomic abstractions that allow WASM templates to interact with the Tari Ootle engine.

@@ -5,7 +5,7 @@ use std::fmt::Display;
 
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{Epoch, SubstateAddress, displayable::Displayable};
-use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+use tari_template_lib_types::{Hash32, crypto::RistrettoPublicKeyBytes};
 
 #[derive(Debug)]
 pub enum EpochEvent {
@@ -118,7 +118,7 @@ impl TryFrom<minotari_app_grpc::tari_rpc::ValidatorNodeChange> for ValidatorNode
                     activation_epoch: Epoch(add.activation_epoch),
                     minimum_value_promise: add.minimum_value_promise,
                     shard_key: {
-                        let hash = FixedHash::try_from(add.shard_key.as_slice()).context("Invalid shard key hash")?;
+                        let hash = Hash32::try_from(add.shard_key.as_slice()).context("Invalid shard key hash")?;
                         SubstateAddress::from_hash_and_version(hash, 0)
                     },
                 })

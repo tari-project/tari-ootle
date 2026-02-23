@@ -8,9 +8,9 @@ use std::{
 };
 
 use log::*;
-use tari_common_types::types::FixedHash;
 use tari_consensus_types::Vote;
 use tari_ootle_common_types::{Epoch, NodeAddressable, NodeHeight, VotePower, committee::Committee};
+use tari_ootle_storage::global::models::ValidatorNode;
 use tari_sidechain::QuorumDecision;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::RwLock;
@@ -31,9 +31,9 @@ impl<V: Vote + Display> VoteCollector<V> {
 
     pub async fn collect_vote<TAddr: NodeAddressable>(
         &self,
+        sender_vn: &ValidatorNode<TAddr>,
         current_epoch: Epoch,
         current_height: NodeHeight,
-        sender_hash: FixedHash,
         vote: V,
         committee: &Committee<TAddr>,
     ) -> Result<Option<(Vec<V>, QuorumDecision)>, VoteEquivocationDetected<V>> {
@@ -52,7 +52,7 @@ impl<V: Vote + Display> VoteCollector<V> {
                 target: LOG_TARGET,
                 "🔥 Received {} from {} ({} of {}).",
                 vote_display,
-                sender_hash,
+                sender_vn.address,
                 threshold_decision.total_power,
                 quorum_threshold
             );
@@ -66,7 +66,7 @@ impl<V: Vote + Display> VoteCollector<V> {
                 target: LOG_TARGET,
                 "🔥 Received {} from {} ({} of {}).",
                 vote_display,
-                sender_hash,
+                sender_vn.address,
                 threshold_decision.total_power,
                 quorum_threshold
             );
@@ -77,7 +77,7 @@ impl<V: Vote + Display> VoteCollector<V> {
             target: LOG_TARGET,
             "🔥 Received {} from {} ({} of {}). QUORUM!",
             vote_display,
-            sender_hash,
+                sender_vn.address,
             threshold_decision.total_power,
             quorum_threshold
         );
@@ -257,6 +257,7 @@ pub struct VoteEquivocationDetected<V: Vote> {
 
 #[cfg(test)]
 mod tests {
+    use tari_common_types::types::FixedHash;
     use tari_consensus_types::{SignedMessage, ToSignatureMessage};
     use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
 

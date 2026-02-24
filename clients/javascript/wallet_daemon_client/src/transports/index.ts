@@ -27,9 +27,11 @@ export interface RpcResponse<T> {
   id: number;
   jsonrpc: string;
   result?: T;
-  error?: {
-    code: number;
-    message: string;
-    data?: any;
-  };
+  error?: RpcErrorResponse;
+}
+
+export interface RpcErrorResponse {
+  code: number;
+  message: string;
+  data?: any;
 }

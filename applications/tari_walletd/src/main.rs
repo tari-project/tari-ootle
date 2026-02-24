@@ -208,12 +208,6 @@ async fn run(cli: Cli, config: ApplicationConfig) -> Result<(), anyhow::Error> {
 
     info!(
         target: LOG_TARGET,
-        "🟢 Starting wallet on {} connected to indexer {}",
-        config.ootle_wallet_daemon.network,
-        config.ootle_wallet_daemon.indexer_api_url
-    );
-    info!(
-        target: LOG_TARGET,
         "📂 Base directory: {}",
         config.common.base_path().display()
     );

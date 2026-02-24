@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
 import Accounts from "@routes/Accounts/Accounts";
 import AccountDetails from "@routes/AccountDetails/AccountDetails";
 import Keys from "@routes/Keys/Keys";
@@ -31,20 +31,18 @@ import AccessTokensLayout from "@routes/AccessTokens/AccessTokens";
 import Transactions from "@routes/Transactions/TransactionsLayout";
 import TransactionDetails from "@routes/Transactions/TransactionDetails";
 import SettingsPage from "@routes/Settings/Settings";
-import Webauthn from "@routes/Webauthn/Webauthn";
 import { useEffect, useState } from "react";
 import { useAuthMethod } from "@api/hooks/useAuth";
 import Templates from "@routes/Templates/Templates";
 import Manifest from "@routes/Manifest/Manifest";
-// import FlowEditor from "@routes/FlowEditor/FlowEditor";
 import StealthUtxoListPage from "@/routes/StealthUtxoList/StealthUtxoListPage";
 import { ErrorNotificationProvider } from "./contexts/ErrorNotificationContext";
 import Loading from "@components/Loading";
 import Onboarding from "@routes/Onboarding/Onboarding";
 import MyAssets from "@routes/AssetVault/Components/MyAssets";
 import { getClientInstance, isValidJwt } from "@utils/json_rpc";
-import { AuthNone } from "@routes/AuthNone";
 import useAuthStore from "@store/authStore";
+import { AuthDialog } from "@components/auth";
 
 export const breadcrumbRoutes = [
   {
@@ -138,18 +136,50 @@ interface GuardedRouteProps {
 
 // @ts-ignore
 const GuardedRoute = ({ component: Component, redirect = "/", ...rest }: GuardedRouteProps) => {
-  const { loggedIn, setLoggedIn } = useAuthStore();
+  const { loggedIn, setLoggedIn, needsReauth, setNeedsReauth } = useAuthStore();
   const { data: authMethod, isError: authMethodsIsError, error: authMethodsError, isLoading } = useAuthMethod();
   const [hasToken, setHasToken] = useState<boolean | null>(null);
 
   useEffect(() => {
-    getClientInstance().then((client) => {
-      let token = client.getToken();
-      const isAuthenticated = Boolean(token) && isValidJwt(token);
-      setHasToken(isAuthenticated);
-      setLoggedIn(isAuthenticated);
-    });
-  }, []);
+    async function initAuth() {
+      const client = await getClientInstance();
+      const token = client.getToken();
+
+      if (isValidJwt(token)) {
+        setHasToken(true);
+        setLoggedIn(true);
+        return;
+      }
+
+      // We only want to reauth after page refresh, or if a reauth is needed (we had a previous auth 401 error)
+      if (!needsReauth && hasToken !== null) {
+        return;
+      }
+      // No valid JWT in memory (e.g. page reload). Try a silent refresh using
+      // the server-side refresh token cookie before falling back to the dialog.
+      try {
+        console.log("AUTH: refresh");
+        const response = await client.authRefresh();
+        if (response.token) {
+          client.setToken(response.token);
+          setHasToken(true);
+          setLoggedIn(true);
+        } else {
+          setHasToken(false);
+        }
+      } catch {
+        setHasToken(false);
+      }
+    }
+
+    initAuth();
+  }, [hasToken, needsReauth]);
+
+  const handleOnAuthenticated = () => {
+    setHasToken(true);
+    setLoggedIn(true);
+    setNeedsReauth(false);
+  };
 
   if (isLoading || !authMethod || hasToken === null) {
     return <Loading />;
@@ -161,8 +191,8 @@ const GuardedRoute = ({ component: Component, redirect = "/", ...rest }: Guarded
   }
 
   if (!hasToken || !loggedIn) {
-    console.log(`User not authenticated, redirecting to auth method: ${authMethod.method}`);
-    return <Navigate replace to={`/auth/${authMethod.method}?redirect=${redirect}`} />;
+    console.log(`AUTH: User not authenticated, showing auth dialog for ${authMethod.method}`);
+    return <AuthDialog open={true} authMethod={authMethod.method} onAuthenticated={handleOnAuthenticated} />;
   }
 
   return <Component {...rest} />;
@@ -175,8 +205,6 @@ function App() {
         <Route path="/" element={<Layout />}>
           <Route index element={<GuardedRoute component={MyAssets} />} />
           <Route path="onboarding" element={<GuardedRoute component={Onboarding} />} />
-          <Route path="auth/webauthn" element={<Webauthn />} />
-          <Route path="auth/none" element={<AuthNone />} />
           <Route path="accounts" element={<GuardedRoute redirect="/accounts" component={Accounts} />} />
           <Route path="accounts/:id" element={<GuardedRoute redirect="/accounts" component={AccountDetails} />} />
           <Route path="keys" element={<GuardedRoute redirect="/keys" component={Keys} />} />

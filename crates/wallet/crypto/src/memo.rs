@@ -78,6 +78,11 @@ impl Memo {
         Self::new_pay_ref_and_bytes_truncate(pay_ref, msg.as_bytes())
     }
 
+    /// Create a new `Memo::PayRefAndBytes` from a payment reference and bytes. If the combined length exceeds
+    /// the maximum allowed length, the memo bytes are truncated to fit.
+    ///
+    /// Returns `None` if the payment reference alone exceeds the maximum allowed length (i.e. it cannot fit even with
+    /// an empty message).
     pub fn new_pay_ref_and_bytes_truncate<P: AsRef<[u8]>, B: AsRef<[u8]>>(pay_ref: P, msg_bytes: B) -> Option<Self> {
         let pr = pay_ref.as_ref();
         let available_len = (Self::MAX_BYTES_LENGTH - 1).checked_sub(pr.len())?; // -1 for length prefix byte

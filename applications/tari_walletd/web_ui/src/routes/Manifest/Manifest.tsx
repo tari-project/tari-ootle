@@ -160,8 +160,6 @@ function VariableEditor({
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
 
-  console.log("Variables:", variables);
-
   return (
     <Grid item xs={12} md={12} lg={12} mt={2}>
       <Stack direction="row" spacing={1} alignItems="center" marginBottom={2}>

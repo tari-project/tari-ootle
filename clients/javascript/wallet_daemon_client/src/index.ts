@@ -91,7 +91,6 @@ import type {
   WalletGetInfoResponse,
   WebauthnAlreadyRegisteredRequest,
   WebauthnAlreadyRegisteredResponse,
-  WebauthnFinishAuthRequest,
   WebauthnFinishRegisterRequest,
   WebauthnFinishRegisterResponse,
   WebauthnStartAuthRequest,
@@ -99,9 +98,9 @@ import type {
   WebauthnStartRegisterRequest,
   WebauthnStartRegisterResponse,
   WebRtcStartRequest,
-  WebRtcStartResponse,
+  WebRtcStartResponse, AuthRefreshResponse,
 } from "@tari-project/ootle-ts-bindings";
-import { FetchRpcTransport, RpcResponse, RpcTransport } from "./transports";
+import { FetchRpcTransport, RpcErrorResponse, RpcResponse, RpcTransport } from "./transports";
 
 export * as transports from "./transports";
 
@@ -165,6 +164,10 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
   public authRevoke(params: AuthRevokeTokenRequest): Promise<AuthRevokeTokenResponse> {
     return this.__invokeRpc("auth.revoke", params);
+  }
+
+  public authRefresh(): Promise<AuthRefreshResponse> {
+    return this.__invokeRpc("auth.refresh");
   }
 
   public walletGetInfo(): Promise<WalletGetInfoResponse> {
@@ -350,7 +353,6 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
   }
 
   async __invokeRpc<R>(method: string, params: object = null) : Promise<R> {
-    const AUTH_FAIL = "AUTH_FAIL";
     const id = this.id++;
     let response = await this.transport.sendRequest<any>(
       {
@@ -362,52 +364,24 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
       { token: this.token, timeout_millis: null },
     ) as RpcResponse<R>;
 
-    // If we get an unauthorized error, try refreshing the token and retrying the request once
-    if (response?.error && response.error.code === 401) {
-      // Refresh failed with 401. No point in trying it again
-      if (method.startsWith("auth.")) {
-        console.warn("Token refresh failed");
-        this.token = null;
-        throw new Error(`RPC Error ${response.error.code}: ${response.error.message}`, {cause: AUTH_FAIL});
-      }
-      const id = this.id++;
-      try {
-        const refreshResp = await this.transport.sendRequest<any>(
-          {
-            method: "auth.refresh",
-            jsonrpc: "2.0",
-            id: id,
-            params: {}
-          },
-        ) as RpcResponse<AuthLoginResponse>;
-        if (refreshResp.error) {
-          throw new Error(`Auth refresh failed: ${refreshResp.error.code} - ${refreshResp.error.message}`, {cause: refreshResp.error});
-        }
-
-        this.token = refreshResp.result.token;
-      } catch (err) {
-        console.warn("Token refresh failed, clearing token", err);
-        this.token = null;
-        throw err;
-      }
-
-      // Retry the original request with the new token
-      response = await this.transport.sendRequest<any>(
-        {
-          method,
-          jsonrpc: "2.0",
-          id: id,
-          params: params || {},
-        },
-        { token: this.token, timeout_millis: null },
-      ) as RpcResponse<R>;
-
-    }
-
     if (response.error) {
-      throw new Error(`RPC Error ${response.error.code}: ${response.error.message}`, {cause: response.error});
+      throw new Error(`RPC Error ${response.error.code}: ${response.error.message}`, {
+        cause: {
+          method,
+          ...response.error,
+        } as RpcError
+      });
     }
 
     return response.result;
   }
+}
+
+export type RpcError = RpcErrorResponse & {
+  method: string;
+}
+
+export function isAuthError(error: any): error is RpcError {
+  return error instanceof Error &&
+    (error as any).cause?.code === 401;
 }

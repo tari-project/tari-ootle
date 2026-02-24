@@ -75,8 +75,8 @@ impl IndexerRestApiNetworkInterface {
         Ok(client)
     }
 
-    pub fn set_endpoint(&self, endpoint: &str) -> Result<(), IndexerRestApiNetworkInterfaceError> {
-        *self.url.lock().unwrap() = Url::parse(endpoint)?;
+    pub fn set_endpoint(&self, endpoint: Url) -> Result<(), IndexerRestApiNetworkInterfaceError> {
+        *self.url.lock().unwrap() = endpoint;
         Ok(())
     }
 

@@ -36,7 +36,6 @@ import { Dialog, Stack, ThemeProvider } from "@mui/material";
 import { Link, Outlet } from "react-router-dom";
 import Logo from "@assets/Logo";
 import Container from "@mui/material/Container";
-import ConnectorLink from "@components/ConnectorLink";
 import Breadcrumbs from "@components/Breadcrumbs";
 import { breadcrumbRoutes } from "@/App";
 import Grid from "@mui/material/Grid";
@@ -181,7 +180,6 @@ export default function Layout() {
                 <Logo fill={theme.palette.text.primary} />
               </Link>
               <Stack direction="row" spacing={1}>
-                {loggedIn ? <ConnectorLink /> : null}
                 {loggedIn ? <WalletConnectLink /> : null}
               </Stack>
             </Box>

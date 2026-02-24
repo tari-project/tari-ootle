@@ -3,16 +3,16 @@
 
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
-import { Form, useNavigate } from "react-router-dom";
+import { Form } from "react-router-dom";
 import Button from "@mui/material/Button";
 import Grid from "@mui/material/Grid";
 import { useTheme } from "@mui/material/styles";
 import { FormEvent, useState } from "react";
-import { getClientInstance, webauthnFinishRegistration, webauthnStartRegistration } from "../../../utils/json_rpc";
+import { getClientInstance, webauthnFinishRegistration, webauthnStartRegistration } from "@utils/json_rpc";
 import { Buffer } from "buffer";
 import Loading from "@components/Loading";
-import useAuthStore from "@store/authStore";
-import { APP_NAME, DEFAULT_PERMISSIONS } from "@routes/Webauthn/Webauthn";
+import Alert from "@mui/material/Alert";
+import { APP_NAME, DEFAULT_PERMISSIONS, WebauthnProps } from "@components/auth/web_authn/Webauthn";
 
 const WEBAUTHN_RP_ID = import.meta.env.VITE_DAEMON_WEBAUTHN_RP_ID || window.location.hostname;
 
@@ -64,12 +64,11 @@ const createCredential = async (
   });
 };
 
-function WebauthnRegistration({ redirect }: { redirect: string }) {
-  const { setLoggedIn } = useAuthStore();
+function WebauthnRegistration(props: WebauthnProps) {
+  const { onAuthenticated } = props;
   const theme = useTheme();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const navigate = useNavigate();
 
   const handleRegister = async (e: FormEvent) => {
     e.preventDefault();
@@ -116,9 +115,7 @@ function WebauthnRegistration({ redirect }: { redirect: string }) {
       let client = await getClientInstance();
       client.setToken(token);
 
-      setLoggedIn(true);
-
-      navigate(redirect);
+      onAuthenticated();
     } catch (error) {
       console.error("Error registering WebAuthn key:", error);
       if (error instanceof Error) {
@@ -131,18 +128,6 @@ function WebauthnRegistration({ redirect }: { redirect: string }) {
     }
   };
 
-  const errorMessage = error ? (
-    <Typography
-      variant="h4"
-      style={{
-        textAlign: "center",
-        color: "red",
-      }}
-    >
-      {error.toString()}
-    </Typography>
-  ) : null;
-
   const loadingBar = loading ? <Loading /> : null;
 
   return (
@@ -154,22 +139,9 @@ function WebauthnRegistration({ redirect }: { redirect: string }) {
             justifyContent: "center",
             alignItems: "center",
             flexDirection: "column",
-            width: "100%",
-            height: "calc(100vh - 200px)",
-            minHeight: 400,
-            gap: theme.spacing(3),
           }}
         >
-          <Box
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-              flexDirection: "column",
-              gap: 0,
-              maxWidth: 600,
-            }}
-          >
+          <Box>
             <Typography
               variant="h3"
               style={{
@@ -190,7 +162,7 @@ function WebauthnRegistration({ redirect }: { redirect: string }) {
               </a>{" "}
               key to get started
             </Typography>
-            {errorMessage}
+
             <Form
               onSubmit={handleRegister}
               className="flex-container"
@@ -204,6 +176,22 @@ function WebauthnRegistration({ redirect }: { redirect: string }) {
               </Button>
               {loadingBar}
             </Form>
+            {error && (
+              <Box
+                style={{
+                  marginTop: theme.spacing(2),
+                  width: "100%",
+                  display: "flex",
+                  justifyContent: "center",
+                }}
+              >
+                <Alert severity={"error"}>
+                  <Typography variant="h6" style={{ color: "red" }}>
+                    {error.toString()}
+                  </Typography>
+                </Alert>
+              </Box>
+            )}
           </Box>
         </Box>
       </Grid>

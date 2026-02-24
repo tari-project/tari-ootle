@@ -22,7 +22,7 @@ pub async fn handle_get(
         .config_api()
         .get(ConfigKey::IndexerUrl)
         .optional()?
-        .unwrap_or_else(|| sdk.get_network_interface().get_endpoint().to_string());
+        .unwrap_or_else(|| sdk.get_network_interface().get_endpoint());
     let network = sdk.config_api().get_network()?;
 
     Ok(SettingsGetResponse {
@@ -41,7 +41,7 @@ pub async fn handle_set(
 ) -> Result<SettingsSetResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
-    sdk.get_network_interface().set_endpoint(&req.indexer_url)?;
     sdk.config_api().set(ConfigKey::IndexerUrl, &req.indexer_url)?;
+    sdk.get_network_interface().set_endpoint(req.indexer_url)?;
     Ok(SettingsSetResponse {})
 }

@@ -61,11 +61,6 @@ impl FeeState {
         Ok(())
     }
 
-    pub fn drain_refundable_fee_payments(&mut self) -> impl Iterator<Item = (ResourceContainer, VaultId)> + '_ {
-        self.running_payments_total = 0;
-        self.fee_payments.drain(..)
-    }
-
     pub fn refundable_fee_payments_iter_mut(
         &mut self,
     ) -> impl Iterator<Item = (&mut ResourceContainer, &mut VaultId)> + '_ {
@@ -136,6 +131,7 @@ mod tests {
         let err = fee_state.add_fee_payment_checked(resource, None).unwrap_err();
         assert!(matches!(err, RuntimeError::InvalidArgument { .. }));
     }
+
     #[test]
     fn it_tracks_refundable_payments() {
         let mut fee_state = FeeState::new();
@@ -144,12 +140,11 @@ mod tests {
         fee_state
             .add_fee_payment_checked(resource.clone(), Some(vault_id))
             .unwrap();
-        let mut drained: Vec<_> = fee_state.drain_refundable_fee_payments().collect();
+        let mut drained: Vec<_> = fee_state.refundable_fee_payments_iter_mut().collect();
         assert_eq!(drained.len(), 1);
         let (drained_resource, drained_vault_id) = drained.pop().unwrap();
         assert_eq!(drained_resource.unlocked_amount(), resource.unlocked_amount());
-        assert_eq!(drained_vault_id, vault_id);
-        assert!(fee_state.drain_refundable_fee_payments().next().is_none());
+        assert_eq!(*drained_vault_id, vault_id);
     }
 
     #[test]

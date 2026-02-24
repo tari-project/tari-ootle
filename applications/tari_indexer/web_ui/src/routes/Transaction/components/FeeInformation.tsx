@@ -77,7 +77,7 @@ function FeeInformation({
     setExpanded(isExpanded);
   };
 
-  const totalCost = Object.entries(cost_breakdown.breakdown).reduce((sum, [_, value]) => BigInt(sum) + value, BigInt(0));
+  const totalCost = Object.entries(cost_breakdown.breakdown).reduce((sum, [_, value]) => BigInt(sum) + BigInt(value), BigInt(0));
 
   return (
     <Accordion expanded={expanded} onChange={handleChange}>

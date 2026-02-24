@@ -25,6 +25,8 @@ import { DataTableCell } from "@components/StyledComponents";
 import { formatCurrency } from "@/utils/helpers";
 import { XTR_CURRENCY } from "@utils/constants";
 import { FeeReceipt as FeeReceiptProps } from "@tari-project/ootle-ts-bindings";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
 
 function unsignedSaturatingSub(a: bigint): bigint {
   return a < BigInt(0) ? BigInt(0) : a;
@@ -84,28 +86,32 @@ export default function FeeReceipt({ data }: { data: FeeReceiptProps }) {
 
   return (
     <TableContainer>
-      {feeItems.map((item, index) => (
-        <TableRow key={index}>
-          <DataTableCell>
-            <Typography variant="body2">{item.label}</Typography>
-          </DataTableCell>
-          <DataTableCell>{item.value}</DataTableCell>
-        </TableRow>
-      ))}
-      {costBreakdownItems.map((item, index) => (
-        <TableRow key={`breakdown-${index}`}>
-          <DataTableCell>
-            <Typography variant="body2">{item.label}</Typography>
-          </DataTableCell>
-          <DataTableCell>
-            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-              {Object.entries(item.breakdown).map(([key, value]) => (
-                <Chip key={key} label={`${key}: ${value}`} size="small" color="default" variant="outlined" />
-              ))}
-            </Box>
-          </DataTableCell>
-        </TableRow>
-      ))}
+      <Table>
+        <TableBody>
+          {feeItems.map((item, index) => (
+            <TableRow key={index}>
+              <DataTableCell>
+                <Typography variant="body2">{item.label}</Typography>
+              </DataTableCell>
+              <DataTableCell>{item.value}</DataTableCell>
+            </TableRow>
+          ))}
+          {costBreakdownItems.map((item, index) => (
+            <TableRow key={`breakdown-${index}`}>
+              <DataTableCell>
+                <Typography variant="body2">{item.label}</Typography>
+              </DataTableCell>
+              <DataTableCell>
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+                  {Object.entries(item.breakdown).map(([key, value]) => (
+                    <Chip key={key} label={`${key}: ${value}`} size="small" color="default" variant="outlined" />
+                  ))}
+                </Box>
+              </DataTableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </TableContainer>
   );
 }

@@ -20,12 +20,16 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Box, Typography, Chip } from "@mui/material";
+import { TableContainer, TableRow, Box, Typography, Chip } from "@mui/material";
 import { DataTableCell } from "@components/StyledComponents";
 import { formatCurrency } from "@/utils/helpers";
 import { XTR_CURRENCY } from "@utils/constants";
+import { FeeReceipt as FeeReceiptProps } from "@tari-project/ootle-ts-bindings";
 
-export default function FeeReceipt({ data }: { data: any }) {
+function unsignedSaturatingSub(a: bigint): bigint {
+  return a < BigInt(0) ? BigInt(0) : a;
+}
+export default function FeeReceipt({ data }: { data: FeeReceiptProps }) {
   if (!data) {
     return (
       <Box sx={{ p: 3, textAlign: "center" }}>
@@ -36,15 +40,35 @@ export default function FeeReceipt({ data }: { data: any }) {
     );
   }
 
+  const totalCost = Object.entries(data.cost_breakdown?.breakdown || {}).reduce(
+    (sum, [_, value]) => BigInt(sum) + BigInt(value),
+    BigInt(0),
+  );
+
   const feeItems = [
     {
-      label: "Total Fee Payment",
+      label: "Total Fees Paid",
       value: formatCurrency(data.total_fee_payment, XTR_CURRENCY.SYMBOL),
       color: "primary" as const,
     },
     {
-      label: "Total Fees Paid",
+      label: "Total Fees Charged",
       value: formatCurrency(data.total_fees_paid, XTR_CURRENCY.SYMBOL),
+      color: "success" as const,
+    },
+    {
+      label: "Total Fees Required",
+      value: formatCurrency(totalCost, XTR_CURRENCY.SYMBOL),
+      color: "success" as const,
+    },
+    {
+      label: "Fees Refunded",
+      value: formatCurrency(unsignedSaturatingSub(BigInt(data.total_fee_payment) - totalCost), XTR_CURRENCY.SYMBOL),
+      color: "success" as const,
+    },
+    {
+      label: "Fees Overcharge",
+      value: formatCurrency(data.total_fee_overcharge, XTR_CURRENCY.SYMBOL),
       color: "success" as const,
     },
   ];
@@ -60,38 +84,28 @@ export default function FeeReceipt({ data }: { data: any }) {
 
   return (
     <TableContainer>
-      <Table>
-        <TableHead>
-          <TableRow>
-            <TableCell>Fee Type</TableCell>
-            <TableCell>Amount</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {feeItems.map((item, index) => (
-            <TableRow key={index}>
-              <DataTableCell>
-                <Typography variant="body2">{item.label}</Typography>
-              </DataTableCell>
-              <DataTableCell>{item.value}</DataTableCell>
-            </TableRow>
-          ))}
-          {costBreakdownItems.map((item, index) => (
-            <TableRow key={`breakdown-${index}`}>
-              <DataTableCell>
-                <Typography variant="body2">{item.label}</Typography>
-              </DataTableCell>
-              <DataTableCell>
-                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-                  {Object.entries(item.breakdown).map(([key, value]) => (
-                    <Chip key={key} label={`${key}: ${value}`} size="small" color="default" variant="outlined" />
-                  ))}
-                </Box>
-              </DataTableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+      {feeItems.map((item, index) => (
+        <TableRow key={index}>
+          <DataTableCell>
+            <Typography variant="body2">{item.label}</Typography>
+          </DataTableCell>
+          <DataTableCell>{item.value}</DataTableCell>
+        </TableRow>
+      ))}
+      {costBreakdownItems.map((item, index) => (
+        <TableRow key={`breakdown-${index}`}>
+          <DataTableCell>
+            <Typography variant="body2">{item.label}</Typography>
+          </DataTableCell>
+          <DataTableCell>
+            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+              {Object.entries(item.breakdown).map(([key, value]) => (
+                <Chip key={key} label={`${key}: ${value}`} size="small" color="default" variant="outlined" />
+              ))}
+            </Box>
+          </DataTableCell>
+        </TableRow>
+      ))}
     </TableContainer>
   );
 }

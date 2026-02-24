@@ -1,5 +1,5 @@
 [workspace.package]
-version = "0.24.0"
+version = "0.25.0"
 edition = "2024"
 authors = ["The Tari Development Community"]
 repository = "https://github.com/tari-project/tari-ootle"
@@ -79,10 +79,8 @@ tari_ootle_app_utilities = { path = "applications/tari_ootle_app_utilities" }
 # core crates
 tari_consensus = { path = "crates/consensus" }
 tari_consensus_types = { path = "crates/consensus_types" }
-tari_ootle_common_types = { path = "crates/common_types", version = "0.24.0" }
 tari_ootle_address = { path = "crates/ootle_address" }
 tari_engine = { path = "crates/engine" }
-tari_engine_types = { path = "crates/engine_types", version = "0.24.0" }
 tari_ootle_p2p = { path = "crates/p2p" }
 tari_ootle_storage = { path = "crates/storage" }
 tari_ootle_storage_sqlite = { path = "crates/storage_sqlite" }
@@ -96,9 +94,7 @@ tari_indexer_lib = { path = "crates/indexer_lib" }
 tari_rpc_state_sync = { path = "crates/rpc_state_sync" }
 tari_state_store_rocksdb = { path = "crates/state_store_rocksdb" }
 tari_state_tree = { path = "crates/state_tree" }
-tari_template_builtin = { path = "crates/template_builtin", version = "0.24.0" }
 tari_template_test_tooling = { path = "crates/template_test_tooling" }
-tari_ootle_transaction = { path = "crates/transaction", version = "0.24.0" }
 tari_transaction_manifest = { path = "crates/transaction_manifest" }
 tari_validator_node_rpc = { path = "crates/validator_node_rpc" }
 sqlite_message_logger = { path = "networking/sqlite_message_logger" }
@@ -111,6 +107,12 @@ tari_swarm = { path = "networking/swarm" }
 tari_validator_node_client = { path = "clients/validator_node_client" }
 tari_wallet_daemon_client = { path = "clients/wallet_daemon_client" }
 transaction_generator = { path = "utilities/transaction_generator" }
+
+# Dependency crates on crates.io (update versions here as well when updating the workspace version)
+tari_ootle_common_types = { path = "crates/common_types", version = "0.25" }
+tari_engine_types = { path = "crates/engine_types", version = "0.25" }
+tari_template_builtin = { path = "crates/template_builtin", version = "0.25" }
+tari_ootle_transaction = { path = "crates/transaction", version = "0.25" }
 
 # Template lib
 tari_template_lib = { version = "0.20", path = "crates/template_lib" }

@@ -163,11 +163,6 @@ impl Resource {
     /// ## Panics
     /// Panics if the amount is not positive
     pub fn increase_total_supply(&mut self, amount: Amount) -> bool {
-        assert!(
-            amount.is_non_negative(),
-            "Invariant violation in increase_total_supply: amount must be non-negative but was {}",
-            amount
-        );
         let Some(supply_mut) = self.total_supply.as_mut() else {
             // Total supply tracking is disabled, this call succeeded
             return true;
@@ -187,12 +182,8 @@ impl Resource {
     /// ## Panics
     /// Panics if the amount is not positive or if the amount is greater than the total supply.
     pub fn decrease_total_supply(&mut self, amount: Amount) {
-        assert!(
-            amount.is_non_negative(),
-            "Invariant violation in decrease_total_supply: amount must be positive"
-        );
         if let Some(supply_mut) = self.total_supply.as_mut() {
-            *supply_mut = supply_mut.checked_sub_positive(amount).expect(
+            *supply_mut = supply_mut.checked_sub(amount).expect(
                 "Invariant violation in decrease_total_supply: decrease total supply by more than total supply",
             );
         }

@@ -1500,7 +1500,6 @@ impl<TStore: StateReader> WorkingState<TStore> {
         // Refund the remaining refundable payments if any
         for (mut resx, refund_vault) in self.fee_state.drain_refundable_fee_payments() {
             if resx.unlocked_amount().is_zero() {
-                debug_assert!(!resx.unlocked_amount().is_negative());
                 continue;
             }
 

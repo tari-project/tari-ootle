@@ -317,15 +317,12 @@ where TSpec: WalletSdkSpec
             )?)
         };
 
-        let remaining_left_to_pay = params
-            .amount
-            .checked_sub_positive(inputs_to_spend.revealed)
-            .unwrap_or_else(|| {
-                panic!(
-                    "BUG: paid more revealed funds ({}) than the amount to pay ({})",
-                    inputs_to_spend.revealed, params.amount
-                )
-            });
+        let remaining_left_to_pay = params.amount.checked_sub(inputs_to_spend.revealed).unwrap_or_else(|| {
+            panic!(
+                "BUG: paid more revealed funds ({}) than the amount to pay ({})",
+                inputs_to_spend.revealed, params.amount
+            )
+        });
         let change_confidential_amount = inputs_to_spend.total_confidential_amount() - remaining_left_to_pay;
 
         let maybe_change_statement = if change_confidential_amount.is_positive() {

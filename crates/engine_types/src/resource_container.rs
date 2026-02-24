@@ -57,7 +57,6 @@ pub enum ResourceContainer {
 impl ResourceContainer {
     pub fn public_fungible<T: Into<Amount>>(address: ResourceAddress, amount: T) -> Self {
         let amount = amount.into();
-        assert!(amount.is_non_negative(), "amount must be non-negative");
         Self::Fungible {
             address,
             amount,
@@ -78,10 +77,6 @@ impl ResourceContainer {
         commitment: I,
         revealed_amount: Amount,
     ) -> Self {
-        assert!(
-            revealed_amount.is_non_negative(),
-            "revealed amount must be non-negative"
-        );
         Self::Confidential {
             address,
             commitments: commitment.into_iter().collect(),
@@ -92,10 +87,6 @@ impl ResourceContainer {
     }
 
     pub fn stealth(address: ResourceAddress, revealed_amount: Amount) -> Self {
-        assert!(
-            revealed_amount.is_non_negative(),
-            "revealed amount must be non-negative"
-        );
         Self::Stealth {
             address,
             revealed_amount,
@@ -301,11 +292,6 @@ impl ResourceContainer {
     }
 
     pub fn withdraw(&mut self, withdraw_amt: Amount) -> Result<Self, ResourceError> {
-        if !withdraw_amt.is_non_negative() {
-            return Err(ResourceError::InvariantError(format!(
-                "Amount must be non-negative (>= 0). Got :{withdraw_amt}"
-            )));
-        }
         match self {
             Self::Fungible { amount, .. } => {
                 if withdraw_amt > *amount {

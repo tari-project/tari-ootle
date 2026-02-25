@@ -36,6 +36,7 @@ mod web_ui;
 
 mod base_layer;
 mod event_manager;
+pub mod ipc;
 #[cfg(feature = "metrics")]
 mod metrics;
 mod network_client;
@@ -69,18 +70,27 @@ use tari_ootle_storage::global::{DbFactory, GlobalDb};
 use tari_ootle_storage_sqlite::{SqliteDbFactory, global::SqliteGlobalDbAdapter};
 use tari_shutdown::ShutdownSignal;
 use tokio::task;
+use tokio_stream::{Stream, StreamExt};
 
 use crate::{
     bootstrap::{Services, spawn_services},
     config::ApplicationConfig,
     event_manager::EventManager,
     graphql::server::run_graphql,
+    ipc::{IpcError, IpcMessage},
 };
 
 const LOG_TARGET: &str = "tari::indexer::app";
 
 #[allow(clippy::too_many_lines)]
-pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
+pub async fn run_indexer<S>(
+    config: ApplicationConfig,
+    mut ipc_channel: S,
+    mut shutdown_signal: ShutdownSignal,
+) -> anyhow::Result<()>
+where
+    S: Stream<Item = Result<IpcMessage, IpcError>> + Unpin,
+{
     info!(target: LOG_TARGET, "Starting indexer node on network {}", config.network);
     let keypair = setup_keypair_prompt(config.to_identity_file_path(), true)?;
 
@@ -181,6 +191,19 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
             Ok(event) = epoch_manager_events.recv() => {
                 if let Err(err) = handle_epoch_manager_event(&services, event).await {
                     error!(target: LOG_TARGET, "Error handling epoch manager event: {}", err);
+                }
+            },
+
+            Some(msg_result) = ipc_channel.next() => {
+                match msg_result {
+                    Ok(msg) => {
+                        if let Err(err) = ipc::handle_ipc_message(&services, msg).await {
+                            error!(target: LOG_TARGET, "Error handling IPC message: {}", err);
+                        }
+                    },
+                    Err(err) => {
+                        error!(target: LOG_TARGET, "Error receiving IPC message: {}", err);
+                    }
                 }
             },
 

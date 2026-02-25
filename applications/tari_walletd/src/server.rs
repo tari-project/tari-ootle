@@ -49,6 +49,7 @@ pub async fn spawn_listener(
     let shutdown_signal = context.shutdown_signal().clone();
     let router = Router::new()
         .route("/json_rpc", post(handler))
+        .route("/json-rpc", post(handler))
         // TODO: Get these traces to work
         .layer(TraceLayer::new_for_http())
         .layer(Extension(Arc::new(context)))

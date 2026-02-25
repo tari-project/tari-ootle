@@ -14,8 +14,6 @@ use crate::{
     protobuf_stream::ProtobufStream,
     sse::{SseEventStream, SseEventStreamBuilder},
     types::{
-        AddPeerRequest,
-        AddPeerResponse,
         GetConnectionsResponse,
         GetEpochManagerStatsResponse,
         GetNetworkInfoResponse,
@@ -89,10 +87,6 @@ impl IndexerRestApiClient {
 
     pub async fn get_connections(&self) -> Result<GetConnectionsResponse, IndexerRestClientError> {
         self.send_get("network/connections", ()).await
-    }
-
-    pub async fn add_peer(&self, request: AddPeerRequest) -> Result<AddPeerResponse, IndexerRestClientError> {
-        self.send_post("network/connections", request).await
     }
 
     pub async fn get_substate(

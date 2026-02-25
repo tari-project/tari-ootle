@@ -10,7 +10,7 @@
       "name": "BSD-3-Clause",
       "identifier": "BSD-3-Clause"
     },
-    "version": "0.21.0"
+    "version": "0.25.0"
   },
   "paths": {
     "/epoch-manager/stats": {
@@ -99,55 +99,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GetConnectionsResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "handlers::network"
-        ],
-        "description": "Add a new peer connection",
-        "operationId": "add_connection",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AddPeerRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AddPeerResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -994,31 +945,6 @@
   },
   "components": {
     "schemas": {
-      "AddPeerRequest": {
-        "type": "object",
-        "required": [
-          "public_key",
-          "addresses",
-          "wait_for_dial"
-        ],
-        "properties": {
-          "addresses": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "public_key": {
-            "type": "string"
-          },
-          "wait_for_dial": {
-            "type": "boolean"
-          }
-        }
-      },
-      "AddPeerResponse": {
-        "type": "object"
-      },
       "Connection": {
         "type": "object",
         "required": [

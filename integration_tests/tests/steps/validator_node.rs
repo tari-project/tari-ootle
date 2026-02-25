@@ -63,15 +63,7 @@ async fn spawn_seed_node(
             .unwrap();
     }
     for indexer in world.indexers.values() {
-        let client = indexer.get_indexer_client();
-        client
-            .add_peer(tari_indexer_client::types::AddPeerRequest {
-                public_key: ident.public_key,
-                addresses: ident.public_addresses.clone(),
-                wait_for_dial: false,
-            })
-            .await
-            .unwrap();
+        indexer.add_peer(ident.public_key, ident.public_addresses.clone()).await;
     }
 
     validator

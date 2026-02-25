@@ -70,7 +70,7 @@ mod sparkle_nft_template {
         }
 
         pub fn take_initial_nft(&mut self) -> Bucket {
-            self.vault.withdraw(1)
+            self.vault.withdraw(1u64)
         }
 
         pub fn mint(&mut self, name: String, url: String) -> Bucket {

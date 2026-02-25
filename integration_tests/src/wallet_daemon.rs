@@ -118,14 +118,15 @@ impl TariWalletDaemonProcess {
     }
 
     fn get_client(&self) -> WalletDaemonClient {
-        let endpoint = Url::parse(&format!("http://127.0.0.1:{}", self.json_rpc_port)).unwrap();
+        let endpoint = Url::parse(&format!("http://127.0.0.1:{}/json_rpc", self.json_rpc_port)).unwrap();
         WalletDaemonClient::connect(endpoint, None).unwrap()
     }
 
     pub async fn get_authed_client(&self) -> WalletDaemonClient {
         cucumber_log!("Authenticating wallet daemon {}", self.name);
         let mut client = self.get_client();
-        // authentication
+
+        // authenticate
         let AuthLoginResponse { token } = client
             .auth_request(AuthLoginRequest {
                 permissions: vec!["Admin".parse().unwrap()],
@@ -133,6 +134,7 @@ impl TariWalletDaemonProcess {
             })
             .await
             .unwrap();
+
         cucumber_log!("Authenticated wallet daemon {}", self.name);
         client.set_auth_token(token);
         client

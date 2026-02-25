@@ -258,7 +258,7 @@ different versions remain interoperable.
 ## Implementation
 
 1. Add Diesel migration to extend `substate_transitions` with `transaction_id` and
-   create the two new indexes.
+   create a new index.
 2. Update the state-sync worker to populate `transaction_id` on `substate_transitions`
    rows when processing a `TransactionReceipt`.
 3. Extend `TransactionFinalizedEvent` with the `substates` field and populate it in

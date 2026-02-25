@@ -148,6 +148,7 @@ const GuardedRoute = ({ component: Component, redirect = "/", ...rest }: Guarded
       if (isValidJwt(token)) {
         setHasToken(true);
         setLoggedIn(true);
+        setNeedsReauth(false);
         return;
       }
 
@@ -158,17 +159,20 @@ const GuardedRoute = ({ component: Component, redirect = "/", ...rest }: Guarded
       // No valid JWT in memory (e.g. page reload). Try a silent refresh using
       // the server-side refresh token cookie before falling back to the dialog.
       try {
-        console.log("AUTH: refresh");
         const response = await client.authRefresh();
         if (response.token) {
+          console.log("AUTH: refresh succeeded");
           client.setToken(response.token);
           setHasToken(true);
           setLoggedIn(true);
         } else {
           setHasToken(false);
         }
-      } catch {
+      } catch (e) {
+        console.log("AUTH: refresh failed", e);
         setHasToken(false);
+      } finally {
+        setNeedsReauth(false);
       }
     }
 

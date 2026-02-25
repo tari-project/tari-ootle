@@ -146,6 +146,12 @@ impl From<Vec<JrpcPermission>> for JrpcPermissions {
     }
 }
 
+impl FromIterator<JrpcPermission> for JrpcPermissions {
+    fn from_iter<T: IntoIterator<Item = JrpcPermission>>(iter: T) -> Self {
+        JrpcPermissions(iter.into_iter().collect())
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Claims {

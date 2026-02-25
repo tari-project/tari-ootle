@@ -10,9 +10,7 @@
     // Required for wallet web ui to build
     "composite": true
   },
-  "include": [
-    "src/**/*"
-  ],
+  "include": ["src/**/*"],
   "references": [
     {
       "path": "../../../bindings"

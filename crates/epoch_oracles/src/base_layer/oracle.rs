@@ -261,6 +261,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
         {
             self.header_buf.reserve(additional);
         }
+
         let mut scan_epoch = constants.height_to_epoch(start_scan_height);
         while let Some(header) = stream.try_next().await? {
             let current_epoch = constants.height_to_epoch(header.height);
@@ -286,11 +287,11 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
 
                     info!(
                         target: LOG_TARGET,
-                        "🟩 epoch change {}->{} {} {}", scan_epoch, current_epoch, header_height, header_hash
+                        "🟩 epoch change {}->{} (height({}) hash({}))", scan_epoch, current_epoch, header_height, header_hash
                     );
                     self.pending_events.push_back(EpochEvent::EpochChanged {
                         epoch: current_epoch,
-                        // Set in set_last_epoch_block above
+                        // Set above
                         epoch_hash: self.last_epoch_hash.unwrap_or_default(),
                     });
                 }

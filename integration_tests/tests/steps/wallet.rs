@@ -100,10 +100,7 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
     });
 
     let CucumberClaimProof::Pending {
-        commitment,
-        nonce_id,
-        kernel_excess_sig_nonce,
-        kernel_excess_sig_signature,
+        commitment, nonce_id, ..
     } = proof
     else {
         // Already confirmed
@@ -117,61 +114,39 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
 
     let mut client = wallet.create_client().await;
 
-    let resp = client
-        .get_burn_claim_proof(tari_rpc::GetBurnClaimProofRequest {
-            commitment: commitment.as_bytes().to_vec(),
-        })
-        .await
-        .unwrap()
-        .into_inner();
+    let mut attempts = 0;
+    let proof_resp = loop {
+        let resp = client
+            .get_burn_claim_proof(tari_rpc::GetBurnClaimProofRequest {
+                commitment: commitment.as_bytes().to_vec(),
+            })
+            .await
+            .unwrap()
+            .into_inner();
 
-    cucumber_log!("Received burn claim proof response: {:?}", resp);
+        cucumber_log!("Received burn claim proof response: {:?}", resp);
 
+        let is_merkle_proof_available = resp.merkle_proof.is_some();
+        if is_merkle_proof_available {
+            break resp;
+        }
+        if attempts >= 20 {
+            return Err(anyhow!(
+                "Kernel Proof not available after waiting for {} attempts",
+                attempts
+            ));
+        }
+        attempts += 1;
+
+        cucumber_log!("Kernel proof not available yet, waiting...");
+        sleep(Duration::from_secs(3)).await;
+    };
     // Now that the proof is confirmed, call the base node HTTP endpoint to get kernel merkle proof
-    integration_tests::cucumber_log!("Proof confirmed! Now calling base node HTTP endpoint to get kernel merkle proof");
+    cucumber_log!("Proof confirmed! Now calling base node HTTP endpoint to get kernel merkle proof");
 
-    let base_node = world.base_nodes.values().next().expect("No base node found");
-
-    let http_client = reqwest::Client::new();
-    let url = format!(
-        "http://127.0.0.1:{}/generate_kernel_merkle_proof?excess_sig_public_nonce={}&excess_sig_signature={}",
-        base_node.http_port,
-        hex::encode(kernel_excess_sig_nonce),
-        hex::encode(kernel_excess_sig_signature)
-    );
-
-    integration_tests::cucumber_log!("Calling base node HTTP endpoint: {}", url);
-
-    let mut merkle_proof: Option<EncodedMerkleProof> = None;
-    match http_client.get(&url).send().await {
-        Ok(response) => {
-            if response.status().is_success() {
-                let proof_response = response.text().await.unwrap();
-                integration_tests::cucumber_log!("SUCCESS! Kernel merkle proof response: {}", proof_response);
-                merkle_proof = Some(
-                    serde_json::from_str(&proof_response)
-                        .map_err(|e| anyhow!("Failed to deserialize merkle proof: {e}"))?,
-                );
-            } else {
-                let status = response.status();
-                let error_text = response.text().await.unwrap_or_default();
-                integration_tests::cucumber_log!(
-                    "WARNING: Failed to get kernel merkle proof (status: {}): {}",
-                    status,
-                    error_text
-                );
-            }
-        },
-        Err(e) => {
-            integration_tests::cucumber_log!("ERROR: Failed to call kernel merkle proof endpoint: {}", e);
-        },
-    }
-    if merkle_proof.is_none() {
-        panic!("Kernel merkle proof not found");
-    }
-    let merkle_proof = merkle_proof.unwrap();
-
-    let claim_proof = resp.claim_proof.ok_or_else(|| anyhow!("No claim proof in response"))?;
+    let claim_proof = proof_resp
+        .claim_proof
+        .ok_or_else(|| anyhow!("No claim proof in response"))?;
     let ownership_proof = claim_proof
         .ownership_proof
         .ok_or_else(|| anyhow!("No ownership proof in response"))?;
@@ -190,7 +165,7 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
     let sender_offset_public_key = RistrettoPublicKeyBytes::from_bytes(&claim_proof.sender_offset_public_key)
         .map_err(|e| anyhow!("sender_offset_public_key parse error {e}"))?;
 
-    let kernel = resp.kernel.ok_or_else(|| anyhow!("No kernel in response"))?;
+    let kernel = proof_resp.kernel.ok_or_else(|| anyhow!("No kernel in response"))?;
     let kernel = AbridgedTransactionKernel {
         version: kernel.version as u8,
         fee: kernel.fee,
@@ -221,24 +196,39 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
         },
     };
 
-    integration_tests::cucumber_log!(
+    cucumber_log!(
         "DEBUG: creating confirmed proof. commitment: {}, encrypted_data: {}, reciprocal_key: {}",
         commitment,
-        hex::encode(&resp.encrypted_data),
+        hex::encode(&proof_resp.encrypted_data),
         reciprocal_claim_public_key
     );
+    let merkle_proof = proof_resp
+        .merkle_proof
+        .ok_or_else(|| anyhow!("No merkle proof in claim proof"))?;
+
     let proof = ClaimBurnProof {
         claim_proof: MinotariBurnClaimProof {
             burn_public_key: reciprocal_claim_public_key,
             commitment,
             ownership_proof,
-            encoded_merkle_proof: merkle_proof,
+            encoded_merkle_proof: EncodedMerkleProof {
+                block_hash: merkle_proof
+                    .block_hash
+                    .as_slice()
+                    .try_into()
+                    .map_err(|e| anyhow!("block_hash parse error: {e}"))?,
+                encoded_merkle_proof: merkle_proof
+                    .encoded_proof
+                    .try_into()
+                    .map_err(|e| anyhow!("encoded_merkle_proof parse error: {e}"))?,
+                leaf_index: merkle_proof.leaf_index,
+            },
             kernel,
-            value: resp.value,
+            value: proof_resp.value,
             sender_offset_public_key,
         },
         owner_nonce_key_index: *nonce_id,
-        encrypted_data: EncryptedData::try_from(resp.encrypted_data)
+        encrypted_data: EncryptedData::try_from(proof_resp.encrypted_data)
             .map_err(|e| anyhow!("Encrypted data length is out of bounds: {e}",))?,
     };
 

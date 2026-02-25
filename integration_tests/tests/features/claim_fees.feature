@@ -4,7 +4,7 @@
 @claim_fees
 Feature: Claim Fees
 
-  @serial @fixed
+  @serial
   Scenario: Claim validator fees
     Given a network with spec
   """

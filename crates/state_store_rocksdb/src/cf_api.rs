@@ -488,17 +488,34 @@ impl<'db, TQuery: QueryCf, DB: RocksReader> CfContext<'db, DB, TQuery> {
         &self,
         ordering: Ordering,
         start_key: &TQuery::Key,
-    ) -> impl Iterator<Item = Result<<TQuery::Cf as Cf>::Key, RocksDbStorageError>> + 'db {
+    ) -> Box<dyn Iterator<Item = Result<<TQuery::Cf as Cf>::Key, RocksDbStorageError>> + 'db> {
         let key = self.encode_key(start_key);
-        let iter = self
-            .range_iterator_with_codecs::<PrefixedCodec<TQuery::Cf>, <TQuery::Cf as Cf>::Key, UnitCodec, ()>(
-                ordering,
-                key..,
-            );
-        iter.map(|res| {
-            let (k, _) = res?;
-            Ok::<_, RocksDbStorageError>(k)
-        })
+        // If this is 0xFF then we'll read to the end (no end bound)
+        match TQuery::Cf::key_prefix().and_then(|p| p.checked_add(1)) {
+            Some(next_prefix) => {
+                let end = EncodeVec::new_from_array([next_prefix]);
+                let iter = self
+                    .range_iterator_with_codecs::<PrefixedCodec<TQuery::Cf>, <TQuery::Cf as Cf>::Key, UnitCodec, ()>(
+                        ordering,
+                        key..end,
+                    );
+                Box::new(iter.map(|res| {
+                    let (k, _) = res?;
+                    Ok::<_, RocksDbStorageError>(k)
+                }))
+            },
+            None => {
+                let iter = self
+                    .range_iterator_with_codecs::<PrefixedCodec<TQuery::Cf>, <TQuery::Cf as Cf>::Key, UnitCodec, ()>(
+                        ordering,
+                        key..,
+                    );
+                Box::new(iter.map(|res| {
+                    let (k, _) = res?;
+                    Ok::<_, RocksDbStorageError>(k)
+                }))
+            },
+        }
     }
 
     pub fn query_start_range_iterator(

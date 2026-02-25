@@ -2,17 +2,21 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 import { useEffect, useState } from "react";
-import WebauthnLogin from "./Components/Login";
-import WebauthnRegistration from "./Components/Registration";
+import WebauthnLogin from "./components/Login";
+import WebauthnRegistration from "./components/Registration";
 import { useWebauthnAlreadyRegistered } from "@api/hooks/useWebauthn";
 import Loading from "@components/Loading";
-import useAuthStore from "@store/authStore";
-import { useSearchParams } from "react-router-dom";
 import { JrpcPermission } from "@tari-project/ootle-ts-bindings";
 
 export const APP_NAME: string = "tari-wallet-webui";
 export const DEFAULT_PERMISSIONS: JrpcPermission[] = ["Admin"];
-function Webauthn() {
+
+export interface WebauthnProps {
+  onAuthenticated: () => void;
+}
+
+export default function WebAuthn(props: WebauthnProps) {
+  const { onAuthenticated } = props;
   const [registered, setRegistered] = useState(false);
   const {
     data: alreadyRegisteredResponse,
@@ -20,9 +24,6 @@ function Webauthn() {
     isError: alreadyRegisteredIsError,
     error: alreadyRegisteredError,
   } = useWebauthnAlreadyRegistered(APP_NAME);
-  const [searchParams] = useSearchParams();
-  const redirectQuery = searchParams.get("redirect");
-  const redirect = redirectQuery ? redirectQuery : "/";
 
   useEffect(() => {
     if (!alreadyRegisteredIsError && alreadyRegisteredResponse) {
@@ -39,10 +40,8 @@ function Webauthn() {
   }
 
   if (!registered) {
-    return <WebauthnRegistration redirect={redirect} />;
+    return <WebauthnRegistration onAuthenticated={onAuthenticated} />;
   }
 
-  return <WebauthnLogin redirect={redirect} />;
+  return <WebauthnLogin onAuthenticated={onAuthenticated} />;
 }
-
-export default Webauthn;

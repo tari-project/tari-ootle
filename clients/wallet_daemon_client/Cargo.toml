@@ -26,6 +26,7 @@ thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 webauthn-rs-proto = { workspace = true }
 hex = { workspace = true }
+url = { workspace = true, features = ["serde"] }
 zeroize = { workspace = true, features = ["serde", "simd"] }
 
 [features]

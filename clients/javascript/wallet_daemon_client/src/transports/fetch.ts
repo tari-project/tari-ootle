@@ -29,8 +29,8 @@ export default class FetchRpcTransport implements RpcTransport {
 
     const timeoutId = options?.timeout_millis
       ? setTimeout(() => {
-        controller.abort("Timeout");
-      }, options.timeout_millis)
+          controller.abort("Timeout");
+        }, options.timeout_millis)
       : null;
 
     const response = await fetch(this.url, {

@@ -76,6 +76,7 @@ use tari_template_lib::types::{
     stealth::{SpendCondition, StealthTransferStatement},
 };
 use time::PrimitiveDateTime;
+use url::Url;
 use webauthn_rs_proto::{
     PublicKeyCredential,
     PublicKeyCredentialCreationOptions,
@@ -861,7 +862,8 @@ pub struct ClaimValidatorFeesResponse {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct SettingsSetRequest {
-    pub indexer_url: String,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub indexer_url: Url,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -871,7 +873,8 @@ pub struct SettingsSetResponse {}
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct SettingsGetResponse {
-    pub indexer_url: String,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub indexer_url: Url,
     pub network: NetworkInfo,
 }
 

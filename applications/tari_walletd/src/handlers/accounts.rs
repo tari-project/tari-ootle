@@ -974,7 +974,7 @@ pub async fn handle_stealth_transfer(
                     .or_else(|| memo.as_memo_bytes())
                     .ok_or_else(|| invalid_params("pay ref", Some("can only include pay ref in message memo")))?;
                 let memo = Memo::new_pay_ref_and_bytes_truncate(pay_ref, memo_bytes)
-                    .expect("payref + truncated message fits in memo");
+                    .expect("PayRef guaranteed to fit within the memo");
 
                 Ok(TransferOutput {
                     address: transfer.destination_address,

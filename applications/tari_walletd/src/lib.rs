@@ -52,6 +52,7 @@ use tari_ootle_wallet_sdk_services::{
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::{SafePassword, hex::Hex};
+use url::Url;
 
 use crate::{
     config::ApplicationConfig,
@@ -85,6 +86,17 @@ pub async fn run_tari_ootle_walletd(
 
     let wallet_store = init_wallet_store(&config)?;
     let mut wallet_sdk: WalletSdk = initialize_wallet_sdk(&config, wallet_store.clone())?;
+
+    info!(
+        target: LOG_TARGET,
+        "🟢 Starting wallet on {} connected to indexer {}",
+        wallet_sdk.network(),
+        wallet_sdk
+            .config_api()
+            .get::<Url>(ConfigKey::IndexerUrl)
+            .optional()?
+            .unwrap_or_else(|| config.ootle_wallet_daemon.indexer_api_url.clone())
+    );
 
     let needs_seed_recovery =
         wallet_sdk.initialize_cipher_seed(seed_words.map(CipherSeedRestore::FromSeedWords).unwrap_or_default())?;

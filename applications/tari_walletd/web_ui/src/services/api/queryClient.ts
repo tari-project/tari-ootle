@@ -20,15 +20,21 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryCache, MutationCache, DefaultError } from "@tanstack/react-query";
+import useAuthStore from "@store/authStore";
+import { isAuthError } from "@tari-project/wallet_jrpc_client";
+
+const handleError = (error: DefaultError) => {
+  if (isAuthError(error) && !(error.cause as any)?.method.startsWith("auth")) {
+    console.log("APP: Authentication error detected. Reauth flow.", error);
+    useAuthStore.getState().setNeedsReauth(true);
+  }
+};
 
 const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 3,
-      structuralSharing: true,
-    },
-  },
+  queryCache: new QueryCache({ onError: handleError }),
+  mutationCache: new MutationCache({ onError: handleError }),
+  defaultOptions: { queries: { retry: 3, structuralSharing: true } },
 });
 
 export default queryClient;

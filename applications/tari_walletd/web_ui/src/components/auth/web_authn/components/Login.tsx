@@ -3,7 +3,7 @@
 
 import { useTheme } from "@mui/material/styles";
 import { FormEvent, useState } from "react";
-import { Form, useNavigate } from "react-router-dom";
+import { Form } from "react-router-dom";
 import Loading from "@components/Loading";
 import Typography from "@mui/material/Typography";
 import Grid from "@mui/material/Grid";
@@ -12,8 +12,7 @@ import Button from "@mui/material/Button";
 import { getClientInstance, webauthnStartAuth } from "@utils/json_rpc";
 import { Buffer } from "buffer";
 import { WebauthnFinishAuthRequest } from "@tari-project/ootle-ts-bindings";
-import useAuthStore from "@store/authStore";
-import { APP_NAME, DEFAULT_PERMISSIONS } from "@routes/Webauthn/Webauthn";
+import { APP_NAME, DEFAULT_PERMISSIONS, WebauthnProps } from "@components/auth/web_authn/Webauthn";
 
 export const getCredential = async (challenge: any, allowCredentials: any) => {
   const publicKeyCredentialRequestOptions: PublicKeyCredentialRequestOptions = {
@@ -27,12 +26,11 @@ export const getCredential = async (challenge: any, allowCredentials: any) => {
   });
 };
 
-function WebauthnLogin({ redirect }: { redirect: string }) {
-  const { setLoggedIn } = useAuthStore();
+function WebauthnLogin(props: WebauthnProps) {
+  const { onAuthenticated } = props;
   const theme = useTheme();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const navigate = useNavigate();
 
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
@@ -77,8 +75,7 @@ function WebauthnLogin({ redirect }: { redirect: string }) {
       const token = await client.authRequest(DEFAULT_PERMISSIONS, { WebAuthN: webauthnFinishAuthRequest });
       client.setToken(token);
 
-      setLoggedIn(true);
-      navigate(redirect);
+      onAuthenticated();
     } catch (error) {
       console.error(error);
       if (error instanceof Error) {
@@ -93,18 +90,6 @@ function WebauthnLogin({ redirect }: { redirect: string }) {
     }
   };
 
-  const errorMessage = error ? (
-    <Typography
-      variant="h4"
-      style={{
-        textAlign: "center",
-        color: "red",
-      }}
-    >
-      {error.toString()}
-    </Typography>
-  ) : null;
-
   return (
     <>
       <Grid item xs={12} md={12} lg={12}>
@@ -113,23 +98,9 @@ function WebauthnLogin({ redirect }: { redirect: string }) {
             display: "flex",
             justifyContent: "center",
             alignItems: "center",
-            flexDirection: "column",
-            width: "100%",
-            height: "calc(100vh - 200px)",
-            minHeight: 400,
-            gap: theme.spacing(3),
           }}
         >
-          <Box
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-              flexDirection: "column",
-              gap: 0,
-              maxWidth: 600,
-            }}
-          >
+          <Box>
             <Typography
               variant="h3"
               style={{
@@ -146,7 +117,6 @@ function WebauthnLogin({ redirect }: { redirect: string }) {
             >
               Please login with your passkey
             </Typography>
-            {errorMessage}
             <Form
               onSubmit={handleLogin}
               className="flex-container"
@@ -160,6 +130,17 @@ function WebauthnLogin({ redirect }: { redirect: string }) {
               </Button>
               {loading ? <Loading /> : null}
             </Form>
+            {error && (
+              <Typography
+                variant="h4"
+                style={{
+                  textAlign: "center",
+                  color: "red",
+                }}
+              >
+                {error.toString()}
+              </Typography>
+            )}
           </Box>
         </Box>
       </Grid>

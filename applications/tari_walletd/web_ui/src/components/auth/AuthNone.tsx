@@ -18,25 +18,22 @@ export function AuthNone(props: AuthNoneProps) {
 
   useEffect(() => {
     async function authenticate() {
-      const client = await getClientInstance();
-      const token = await client.authRequest(DEFAULT_PERMISSIONS, "None");
-      client.setToken(token);
+      try {
+        const client = await getClientInstance();
+        const token = await client.authRequest(DEFAULT_PERMISSIONS, "None");
+        client.setToken(token);
+        onAuthenticated();
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err ?? "Unknown authentication error"));
+        setError(error.message);
+        if (onError) {
+          onError(error);
+        }
+      }
     }
 
-    if (!error) {
-      authenticate()
-        .then(() => {
-          onAuthenticated();
-        })
-        .catch((err) => {
-          const error = err instanceof Error ? err : new Error(String(err ?? "Unknown authentication error"));
-          setError(error.message);
-          if (onError) {
-            onError(error);
-          }
-        });
-    }
-  }, [error]);
+    authenticate();
+  }, [onAuthenticated, onError]);
 
   if (error) {
     return <Typography color="error">Authentication failed: {error}</Typography>;

@@ -22,23 +22,25 @@
 
 use std::{path::PathBuf, time::Duration};
 
-use multiaddr::multiaddr;
+use multiaddr::Multiaddr;
 use reqwest::Url;
 use tari_common::configuration::{CommonConfig, StringList};
 use tari_indexer::{
     config::{ApplicationConfig, IndexerConfig},
+    ipc::{IpcAddPeer, IpcError, IpcMessage},
     run_indexer,
 };
 use tari_indexer_client::{
     graphql_client::IndexerGraphQLClient,
     rest_api_client::IndexerRestApiClient,
-    types::{AddPeerRequest, GetNonFungiblesRequest, GetSubstateRequest, GetSubstateResponse, NonFungibleSubstate},
+    types::{GetNonFungiblesRequest, GetSubstateRequest, GetSubstateResponse, NonFungibleSubstate},
 };
 use tari_ootle_app_utilities::{epoch_oracle_config::EpochOracleConfig, p2p_config::PeerSeedsConfig};
 use tari_ootle_common_types::Network;
 use tari_shutdown::Shutdown;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::task;
+use tonic::codegen::tokio_stream;
 
 use crate::{
     TariWorld,
@@ -55,21 +57,16 @@ pub struct IndexerProcess {
     pub base_node_grpc_port: u16,
     pub web_ui_port: u16,
     pub handle: task::JoinHandle<anyhow::Result<()>>,
+    pub ipc_sender: tokio::sync::mpsc::UnboundedSender<Result<IpcMessage, IpcError>>,
     pub temp_dir_path: String,
     pub shutdown: Shutdown,
     pub db_path: PathBuf,
 }
 
 impl IndexerProcess {
-    pub async fn add_peer(&self, public_key: RistrettoPublicKeyBytes, port: u16) {
-        let client = self.get_indexer_client();
-        client
-            .add_peer(AddPeerRequest {
-                public_key,
-                addresses: vec![multiaddr!(Ip4([127, 0, 0, 1]), Tcp(port))],
-                wait_for_dial: true,
-            })
-            .await
+    pub async fn add_peer(&self, public_key: RistrettoPublicKeyBytes, addresses: Vec<Multiaddr>) {
+        self.ipc_sender
+            .send(Ok(IpcAddPeer { public_key, addresses }.into()))
             .unwrap();
     }
 
@@ -140,6 +137,8 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
     let shutdown_signal = shutdown.to_signal();
     let db_path = base_dir.to_path_buf().join("state.db");
 
+    let (ipc_sender, ipc_receiver) = tokio::sync::mpsc::unbounded_channel();
+
     let handle = task::spawn(async move {
         let mut config = ApplicationConfig {
             common: CommonConfig::default(),
@@ -170,8 +169,9 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
 
         // Add all other VNs as peer seeds
         config.peer_seeds.peer_seeds = StringList::from(peer_seeds);
+        let ipc_stream = tokio_stream::wrappers::UnboundedReceiverStream::new(ipc_receiver);
 
-        run_indexer(config, shutdown_signal).await
+        run_indexer(config, ipc_stream, shutdown_signal).await
     });
 
     // Wait for node to start up
@@ -188,6 +188,7 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
         handle,
         api_port,
         graphql_port,
+        ipc_sender,
         temp_dir_path: base_dir_path,
         shutdown,
         db_path,

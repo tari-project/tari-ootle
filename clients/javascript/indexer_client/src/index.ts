@@ -10,8 +10,6 @@ import type {
   ResourceAddress,
   GetSubstatesRequest,
   GetSubstatesResponse, GetTransactionReceiptResponse,
-  IndexerAddPeerRequest,
-  IndexerAddPeerResponse,
   IndexerGetConnectionsResponse,
   IndexerGetIdentityResponse,
   IndexerGetSubstateRequest,
@@ -70,10 +68,6 @@ export class IndexerClient {
 
   public networkStats(): Promise<GetNetworkSyncStateResponse> {
     return this.transport.sendGet(`network/stats`, {});
-  }
-
-  public addConnection(req: IndexerAddPeerRequest): Promise<IndexerAddPeerResponse> {
-    return this.transport.sendPost(`network/connections`, req);
   }
 
   public getConnections(): Promise<IndexerGetConnectionsResponse> {

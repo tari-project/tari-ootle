@@ -11,6 +11,7 @@ use integration_tests::{
     wallet_daemon::spawn_wallet_daemon,
     wallet_daemon_client,
 };
+use multiaddr::multiaddr;
 use tari_validator_node_client::types::AddPeerRequest;
 
 use crate::{
@@ -53,7 +54,7 @@ async fn create_network(world: &mut TariWorld, step: &Step, spec: NetworkSpec) {
 
         world
             .get_indexer(&spec.indexer.name)
-            .add_peer(vn.public_key, vn.p2p_port)
+            .add_peer(vn.public_key, vec![multiaddr!(Ip4([127, 0, 0, 1]), Tcp(vn.p2p_port))])
             .await;
         world.validator_nodes.insert(vn_spec.node.name.clone(), vn);
     }

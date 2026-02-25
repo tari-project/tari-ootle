@@ -21,8 +21,6 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import type {
-  IndexerAddPeerRequest,
-  IndexerAddPeerResponse,
   IndexerGetConnectionsResponse,
   IndexerGetIdentityResponse,
   GetNonFungiblesRequest,
@@ -87,9 +85,7 @@ export async function client() {
 
 export const getIdentity = (): Promise<IndexerGetIdentityResponse> =>
   client().then((c) => c.identityGet());
-export const addPeer = (
-  request: IndexerAddPeerRequest,
-): Promise<IndexerAddPeerResponse> => client().then((c) => c.addConnection(request));
+
 export const getConnections = (): Promise<IndexerGetConnectionsResponse> =>
   client().then((c) => c.getConnections());
 

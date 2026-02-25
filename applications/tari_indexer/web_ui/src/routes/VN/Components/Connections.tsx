@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { addPeer, getConnections } from "../../../utils/api";
+import {  getConnections } from "../../../utils/api";
 import { shortenString } from "./helpers";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
@@ -31,13 +31,7 @@ import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import {
   DataTableCell,
-  BoxHeading2,
 } from "../../../Components/StyledComponents";
-import AddIcon from "@mui/icons-material/Add";
-import Button from "@mui/material/Button";
-import { TextField } from "@mui/material";
-import { Form } from "react-router-dom";
-import Fade from "@mui/material/Fade";
 import CopyToClipboard from "../../../Components/CopyToClipboard";
 import type { IndexerConnection } from "@tari-project/ootle-ts-bindings";
 import { displayDuration } from "../../../utils/helpers";
@@ -63,25 +57,6 @@ const useInterval = (fn: () => Promise<unknown>, ms: number) => {
 
 function Connections() {
   const [connections, setConnections] = useState<Array<IndexerConnection>>([]);
-  const [showPeerDialog, setShowAddPeerDialog] = useState(false);
-  const [formState, setFormState] = useState({ publicKey: "", address: "" });
-
-  const showAddPeerDialog = (setElseToggle: boolean = !showPeerDialog) => {
-    setShowAddPeerDialog(setElseToggle);
-  };
-
-  const onSubmitAddPeer = async () => {
-    await addPeer({
-      public_key: formState.publicKey,
-      addresses: formState.address ? [formState.address] : [],
-      wait_for_dial: false,
-    });
-    setFormState({ publicKey: "", address: "" });
-    setShowAddPeerDialog(false);
-  };
-  const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormState({ ...formState, [e.target.name]: e.target.value });
-  };
 
   let fetchConnections = useCallback(async () => {
     const resp = await getConnections();
@@ -91,50 +66,6 @@ function Connections() {
 
   return (
     <TableContainer>
-      <BoxHeading2>
-        {showPeerDialog && (
-          <Fade in={showPeerDialog}>
-            <Form onSubmit={onSubmitAddPeer} className="flex-container">
-              <TextField
-                name="publicKey"
-                label="Public Key"
-                value={formState.publicKey}
-                onChange={onChange}
-                style={{ flexGrow: 1 }}
-              />
-              <TextField
-                name="address"
-                label="Multiaddr"
-                value={formState.address}
-                onChange={onChange}
-                style={{ flexGrow: 1 }}
-              />
-              <Button variant="contained" type="submit">
-                Add Peer
-              </Button>
-              <Button
-                variant="outlined"
-                onClick={() => showAddPeerDialog(false)}
-              >
-                Cancel
-              </Button>
-            </Form>
-          </Fade>
-        )}
-        {!showPeerDialog && (
-          <Fade in={!showPeerDialog}>
-            <div className="flex-container">
-              <Button
-                variant="outlined"
-                startIcon={<AddIcon />}
-                onClick={() => showAddPeerDialog()}
-              >
-                Add Peer
-              </Button>
-            </div>
-          </Fade>
-        )}
-      </BoxHeading2>
       <Table>
         <TableHead>
           <TableRow>

@@ -359,31 +359,6 @@ pub struct NonFungibleSubstate {
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
-    ts(export, export_to = "tari-indexer-client/", rename = "IndexerAddPeerRequest")
-)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct AddPeerRequest {
-    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub public_key: RistrettoPublicKeyBytes,
-    #[cfg_attr(feature = "ts", ts(type = "Array<string>"))]
-    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<String>))]
-    pub addresses: Vec<Multiaddr>,
-    pub wait_for_dial: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "tari-indexer-client/", rename = "IndexerAddPeerResponse")
-)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct AddPeerResponse {}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
     ts(export, export_to = "tari-indexer-client/", rename = "IndexerGetCommsStatsResponse")
 )]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]

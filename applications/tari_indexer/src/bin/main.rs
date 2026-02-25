@@ -23,6 +23,7 @@
 use std::{fs, panic, path::PathBuf, process};
 
 use anyhow::Context;
+use futures::stream;
 use log::*;
 use logroller::{Rotation, RotationSize};
 use tari_indexer::{cli::Cli, config::ApplicationConfig, run_indexer};
@@ -60,7 +61,7 @@ async fn main_inner() -> anyhow::Result<()> {
     let mut shutdown = Shutdown::new();
     let _guard = init_tracing_subscriber(&cli)?;
 
-    run_indexer(config, shutdown.to_signal()).await?;
+    run_indexer(config, stream::empty(), shutdown.to_signal()).await?;
     shutdown.trigger();
 
     Ok(())

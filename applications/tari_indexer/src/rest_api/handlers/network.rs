@@ -4,13 +4,9 @@
 use std::ops::Deref;
 
 use axum::{Extension, Json, response::Response};
-use libp2p::swarm::dial_opts::PeerCondition;
-use ootle_byte_type::FromByteType;
 use tari_indexer_client::{
     types,
     types::{
-        AddPeerRequest,
-        AddPeerResponse,
         ConnectionDirection,
         GetConnectionsResponse,
         GetNetworkInfoResponse,
@@ -19,9 +15,7 @@ use tari_indexer_client::{
         SyncProgress,
     },
 };
-use tari_networking::{DialOpts, NetworkingService, is_supported_multiaddr};
 use tari_ootle_common_types::optional::Optional;
-use tari_ootle_p2p::public_key_to_peer_id;
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
 
@@ -108,53 +102,4 @@ pub async fn get_connections(Extension(context): Extension<HandlerContext>) -> H
         .collect();
 
     Ok(context.apply_cache_control(Json(GetConnectionsResponse { connections }), 10))
-}
-
-#[utoipa::path(post, path = "/network/connections", description = "Add a new peer connection",
-    request_body = AddPeerRequest,
-    responses(
-        (status = 200, body = AddPeerResponse),
-        (status = BAD_REQUEST, body = ErrorResponse),
-        (status = INTERNAL_SERVER_ERROR, body = ErrorResponse),
-    ),
-)]
-pub async fn add_connection(
-    Extension(context): Extension<HandlerContext>,
-    Json(req): Json<AddPeerRequest>,
-) -> HandlerResult<Json<AddPeerResponse>> {
-    let AddPeerRequest {
-        public_key,
-        addresses,
-        wait_for_dial,
-    } = req;
-
-    if let Some(unsupported) = addresses.iter().find(|a| !is_supported_multiaddr(a)) {
-        return Err(ErrorResponse::bad_request(format!(
-            "Unsupported multiaddr {unsupported}"
-        )));
-    }
-
-    let mut networking = context.networking().clone();
-    let public_key = public_key
-        .try_from_byte_type()
-        .map_err(|_| ErrorResponse::bad_request("Public key is malformed"))?;
-    let peer_id = public_key_to_peer_id(public_key);
-
-    let dial_wait = networking
-        .dial_peer(
-            DialOpts::peer_id(peer_id)
-                .addresses(addresses)
-                .condition(PeerCondition::Always)
-                .build(),
-        )
-        .await
-        .map_err(|err| ErrorResponse::general_error(err.to_string()))?;
-
-    if wait_for_dial {
-        dial_wait
-            .await
-            .map_err(|err| ErrorResponse::general_error(format!("Failed to dial peer {}: {}", peer_id, err)))?;
-    }
-
-    Ok(Json(AddPeerResponse {}))
 }

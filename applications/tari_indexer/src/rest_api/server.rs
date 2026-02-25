@@ -36,7 +36,6 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
     handlers::network::get,
     handlers::network::get_network_sync_stats,
     handlers::network::get_connections,
-    handlers::network::add_connection,
     handlers::substates::get_substate,
     handlers::substates::list_substates,
     handlers::substates::fetch_substates,
@@ -88,10 +87,7 @@ impl Server {
             .route("/epoch-manager/stats", get(handlers::misc::get_epoch_manager_stats))
             .route("/network", get(handlers::network::get))
             .route("/network/stats", get(handlers::network::get_network_sync_stats))
-            .route(
-                "/network/connections",
-                get(handlers::network::get_connections).post(handlers::network::add_connection),
-            )
+            .route("/network/connections", get(handlers::network::get_connections))
             .nest("/substates", Router::new()
                 .route("/fetch", post(handlers::substates::fetch_substates))
                 .route("/{substate_id}", get(handlers::substates::get_substate))

@@ -124,7 +124,7 @@ pub async fn submit_transaction_dry_run(
             "Non-dry-run transactions must be submitted to the /transactions endpoint".to_string(),
         ));
     }
-    // NOTE that we do not validate the signatures for dry-run transactions. Invalid signatures are permissable for
+    // NOTE that we do not validate the signatures for dry-run transactions. Invalid signatures are permissible for
     // dry-runs.
 
     let transaction_id = transaction.calculate_id();

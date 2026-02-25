@@ -66,12 +66,8 @@ impl Amount {
         self.0 > 0
     }
 
-    /// Returns true if the amount is non-negative (greater than or equal to zero).
-    pub const fn is_non_negative(&self) -> bool {
-        true
-    }
-
-    /// Returns true if the amount is negative (less than zero).
+    /// Always returns false since this type cannot represent negative values.
+    /// This method is provided for symmetry with other amount types that may be signed.
     pub const fn is_negative(&self) -> bool {
         false
     }
@@ -128,19 +124,6 @@ impl Amount {
     /// If negative results are not desired, use `saturating_sub_positive`.
     pub const fn saturating_sub(&self, other: Self) -> Self {
         Self(self.into_inner_value().saturating_sub(other.into_inner_value()))
-    }
-
-    /// Returns the difference of two amounts, returning `None` if the result is negative or if either amount is
-    /// negative.
-    pub fn checked_sub_positive(&self, other: Self) -> Option<Self> {
-        if self.is_negative() || other.is_negative() {
-            return None;
-        }
-        if *self < other {
-            return None;
-        }
-
-        self.checked_sub(other)
     }
 
     /// Returns the product of two amounts, returning `None` if the result overflows.

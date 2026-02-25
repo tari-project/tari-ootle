@@ -1498,9 +1498,8 @@ impl<TStore: StateReader> WorkingState<TStore> {
         }
 
         // Refund the remaining refundable payments if any
-        for (mut resx, refund_vault) in self.fee_state.drain_refundable_fee_payments() {
+        for (resx, refund_vault) in self.fee_state.refundable_fee_payments_iter_mut() {
             if resx.unlocked_amount().is_zero() {
-                debug_assert!(!resx.unlocked_amount().is_negative());
                 continue;
             }
 
@@ -1509,7 +1508,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 "Refunding {} of fees to vault {}", resx.unlocked_amount(), refund_vault
             );
             let vault_mut = substates_to_persist
-                .get_mut(&SubstateId::Vault(refund_vault))
+                .get_mut(&SubstateId::Vault(*refund_vault))
                 .expect("invariant: vault that made fee payment not in changeset")
                 .as_vault_mut()
                 .expect("invariant: substate substate_id for fee refund is not a vault");

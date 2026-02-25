@@ -115,14 +115,12 @@ pub async fn handle_create_transfer_proof(
         )
     })?;
 
-    let change_amount = total_input_value
-        .checked_sub_positive(req.confidential_amount)
-        .ok_or_else(|| {
-            invalid_request(format!(
-                "Insufficient funds to send {}. Total input value = {}",
-                req.confidential_amount, total_input_value
-            ))
-        })?;
+    let change_amount = total_input_value.checked_sub(req.confidential_amount).ok_or_else(|| {
+        invalid_request(format!(
+            "Insufficient funds to send {}. Total input value = {}",
+            req.confidential_amount, total_input_value
+        ))
+    })?;
     let change_amount_u64 = change_amount.to_u64_checked().ok_or_else(|| {
         invalid_request(format!(
             "Change value exceeds the maximum value supported in a single UTXO. Change: {}. Total input value = {}",

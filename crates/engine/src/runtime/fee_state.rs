@@ -14,7 +14,7 @@ pub struct FeeState {
     fee_payments_without_refund: Vec<ResourceContainer>,
     /// The fee payments made by the user, used to pay for the transaction fees with the return vault.
     fee_payments: Vec<(ResourceContainer, VaultId)>,
-    running_total: u64,
+    running_payments_total: u64,
     fee_charges: FeeBreakdown,
 }
 
@@ -44,8 +44,8 @@ impl FeeState {
                 reason: "Payed an invalid amount. Amount must be positive and not overflow".to_string(),
             });
         };
-        match self.running_total.checked_add(amount) {
-            Some(new_total) => self.running_total = new_total,
+        match self.running_payments_total.checked_add(amount) {
+            Some(new_total) => self.running_payments_total = new_total,
             None => {
                 return Err(RuntimeError::InvalidAmount {
                     amount: resource_container.unlocked_amount(),
@@ -59,10 +59,6 @@ impl FeeState {
             self.fee_payments_without_refund.push(resource_container);
         }
         Ok(())
-    }
-
-    pub fn drain_refundable_fee_payments(&mut self) -> impl Iterator<Item = (ResourceContainer, VaultId)> + '_ {
-        self.fee_payments.drain(..)
     }
 
     pub fn refundable_fee_payments_iter_mut(
@@ -92,13 +88,7 @@ impl FeeState {
     }
 
     pub fn total_payments(&self) -> u64 {
-        self.running_total
-    }
-
-    pub fn merge_charges(&mut self, other: &Self) {
-        for (source, amount) in other.fee_charges.iter() {
-            self.add_charge(*source, *amount);
-        }
+        self.running_payments_total
     }
 }
 
@@ -141,6 +131,7 @@ mod tests {
         let err = fee_state.add_fee_payment_checked(resource, None).unwrap_err();
         assert!(matches!(err, RuntimeError::InvalidArgument { .. }));
     }
+
     #[test]
     fn it_tracks_refundable_payments() {
         let mut fee_state = FeeState::new();
@@ -149,12 +140,11 @@ mod tests {
         fee_state
             .add_fee_payment_checked(resource.clone(), Some(vault_id))
             .unwrap();
-        let mut drained: Vec<_> = fee_state.drain_refundable_fee_payments().collect();
+        let mut drained: Vec<_> = fee_state.refundable_fee_payments_iter_mut().collect();
         assert_eq!(drained.len(), 1);
         let (drained_resource, drained_vault_id) = drained.pop().unwrap();
         assert_eq!(drained_resource.unlocked_amount(), resource.unlocked_amount());
-        assert_eq!(drained_vault_id, vault_id);
-        assert!(fee_state.drain_refundable_fee_payments().next().is_none());
+        assert_eq!(*drained_vault_id, vault_id);
     }
 
     #[test]
@@ -187,18 +177,5 @@ mod tests {
         assert_eq!(*vault, vault_id);
 
         assert!(iter.next().is_none());
-    }
-
-    #[test]
-    fn it_merges_charges() {
-        let mut fee_state1 = FeeState::new();
-        fee_state1.add_charge(FeeSource::Initial, 100);
-
-        let mut fee_state2 = FeeState::new();
-        fee_state2.add_charge(FeeSource::Storage, 50);
-        fee_state2.add_charge(FeeSource::RuntimeCall, 25);
-
-        fee_state1.merge_charges(&fee_state2);
-        assert_eq!(fee_state1.total_charges(), 175);
     }
 }

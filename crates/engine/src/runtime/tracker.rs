@@ -269,6 +269,12 @@ impl<TStore: StateReader> StateTracker<TStore> {
 
         if let Some(reason) = failure {
             let mut checkpoint_state = self.take_fee_checkpoint().ok_or(RuntimeError::NoFeeCheckpoint)?;
+            // Preserve fee state across resets so that we can charge for fees incurred during execution before the
+            // failure
+            self.read_with(|state| {
+                // Fee state in `state` includes the payments and charges from the fee transaction
+                *checkpoint_state.fee_state_mut() = state.fee_state().clone();
+            });
             let mut substates_to_persist = checkpoint_state.take_mutated_substates();
             // Process fees and refunds based on the fee checkpoint state
             let fee_receipt = checkpoint_state.finalize_fees_and_refunds(&mut substates_to_persist)?;
@@ -324,13 +330,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
     }
 
     fn take_fee_checkpoint(&mut self) -> Option<WorkingState<TStore>> {
-        let mut fee_cp = self.fee_checkpoint.take()?;
-        // Preserve fee state across resets so that we can charge for fees incurred during execution before the
-        // failure
-        self.read_with(|state| {
-            fee_cp.fee_state_mut().merge_charges(state.fee_state());
-        });
-        Some(fee_cp)
+        self.fee_checkpoint.take()
     }
 
     fn take_working_state(&mut self) -> WorkingState<TStore> {

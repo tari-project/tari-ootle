@@ -253,6 +253,10 @@ export function bigintToDecimalString(int: bigint | Amount, decimalPlaces: numbe
 
 export const formatCurrency = (amount: bigint | Amount, tokenSymbol: string | null): string => {
   const currencySymbol = tokenSymbol || "";
+  if (amount === BigInt(0) || (typeof amount === "number" && isNaN(amount))) {
+    return `0 ${currencySymbol}`;
+  }
+
   if (typeof amount === "bigint") {
     const divisor = BigInt(XTR_CURRENCY.DIVISOR);
     const integerPart = amount / divisor;

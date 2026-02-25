@@ -491,7 +491,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             // Any change outputs?
             let change_amount = inputs_to_spend
                 .total_amount()
-                .checked_sub_positive(params.total_output_amount())
+                .checked_sub(params.total_output_amount())
                 .ok_or_else(|| StealthTransferApiError::InvariantViolation {
                     details: format!(
                         "Total input amount {} is less than total output amount {}",

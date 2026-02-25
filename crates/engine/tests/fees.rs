@@ -7,10 +7,11 @@ use tari_template_lib::types::{Amount, ComponentAddress, constants::STEALTH_TARI
 use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason, xtr_faucet_component};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+const TEMPLATE_PATHS: [&str; 1] = ["tests/templates/state"];
 
 #[test]
 fn deducts_fees_from_payments_and_refunds_the_rest() {
-    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/state"]);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let orig_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
@@ -29,7 +30,13 @@ fn deducts_fees_from_payments_and_refunds_the_rest() {
 
     // Check difference was refunded
     let payment = result.finalize.fee_receipt;
-    let new_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
+    let new_balance = test
+        .read_only_state_store()
+        .get_vaults_for_account(account)
+        .unwrap()
+        .get(&STEALTH_TARI_RESOURCE_ADDRESS)
+        .unwrap()
+        .balance();
     assert_eq!(new_balance, orig_balance - payment.total_fees_charged());
     assert_eq!(payment.total_refunded(), 1000 - payment.total_fees_charged());
     assert!(payment.is_paid_in_full());
@@ -37,7 +44,7 @@ fn deducts_fees_from_payments_and_refunds_the_rest() {
 
 #[test]
 fn deducts_fees_when_transaction_fails() {
-    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/state"]);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let vaults = test.read_only_state_store().get_vaults_for_account(account).unwrap();
@@ -67,7 +74,7 @@ fn deducts_fees_when_transaction_fails() {
 
 #[test]
 fn deposit_from_faucet_then_pay() {
-    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/state"]);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
 
     let (account, owner_token, private_key) = test.create_empty_account();
 
@@ -88,10 +95,14 @@ fn deposit_from_faucet_then_pay() {
         vec![owner_token],
     );
 
-    test.disable_fees();
-
     let payment = result.finalize.fee_receipt;
-    let new_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
+    let new_balance = test
+        .read_only_state_store()
+        .get_vaults_for_account(account)
+        .unwrap()
+        .get(&STEALTH_TARI_RESOURCE_ADDRESS)
+        .unwrap()
+        .balance();
     assert_eq!(new_balance, 100000 - payment.total_fees_paid());
 }
 
@@ -143,13 +154,19 @@ fn another_account_pays_partially_for_fees() {
     assert!(Amount::from(200u64) < payment.total_fees_charged());
 
     // Check the rest of the transaction was committed
-    let balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
+    let balance = test
+        .read_only_state_store()
+        .get_vaults_for_account(account)
+        .unwrap()
+        .get(&STEALTH_TARI_RESOURCE_ADDRESS)
+        .unwrap()
+        .balance();
     assert_eq!(balance, Amount::from(1000u64));
 }
 
 #[test]
 fn failed_fee_transaction() {
-    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/state"]);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let initial_balance: Amount =
@@ -174,15 +191,20 @@ fn failed_fee_transaction() {
     assert!(matches!(reason, RejectReason::ExecutionFailure(_)));
     let reason = result.expect_failure();
     assert!(matches!(reason, RejectReason::ExecutionFailure(_)));
-    test.disable_fees();
 
-    let new_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
+    let new_balance = test
+        .read_only_state_store()
+        .get_vaults_for_account(account)
+        .unwrap()
+        .get(&STEALTH_TARI_RESOURCE_ADDRESS)
+        .unwrap()
+        .balance();
     assert_eq!(new_balance, initial_balance);
 }
 
 #[test]
 fn fail_partial_paid_fees() {
-    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/state"]);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let (account2, owner_token2, _) = test.create_funded_account();
@@ -206,8 +228,10 @@ fn fail_partial_paid_fees() {
         vec![owner_token, owner_token2],
     );
 
-    test.disable_fees();
-
+    let total_fees = result.finalize.fee_receipt.fee_breakdown().get_total();
+    // Check that the fee charged is more than the fee paid, but not too much more, since execution should stop once it
+    // determines the fees are insufficient
+    assert!(total_fees > 100 && total_fees < 150, "total fees: {total_fees}");
     let reason = result.expect_failure();
     assert!(
         matches!(reason, RejectReason::InsufficientFeesPaid(_)),
@@ -217,13 +241,19 @@ fn fail_partial_paid_fees() {
     // Check that the fee paid was deducted
     let payment = result.finalize.fee_receipt;
     assert!(!payment.is_paid_in_full());
-    let new_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
+    let new_balance = test
+        .read_only_state_store()
+        .get_vaults_for_account(account)
+        .unwrap()
+        .get(&STEALTH_TARI_RESOURCE_ADDRESS)
+        .unwrap()
+        .balance();
     assert_eq!(new_balance, orig_balance - Amount::ONE_HUNDRED);
 }
 
 #[test]
 fn fail_pay_negative_fee() {
-    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/state"]);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
 
     let (account, owner_token, private_key) = test.create_funded_account();
     test.enable_fees();
@@ -235,8 +265,6 @@ fn fail_pay_negative_fee() {
         vec![owner_token],
     );
 
-    test.disable_fees();
-
     assert!(
         matches!(reason, RejectReason::ExecutionFailure(_)),
         "actual reason: {reason}"
@@ -245,7 +273,7 @@ fn fail_pay_negative_fee() {
 
 #[test]
 fn fail_pay_less_fees_than_fee_transaction() {
-    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/state"]);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let (account2, owner_token2, _) = test.create_funded_account();
@@ -296,12 +324,25 @@ fn fail_pay_less_fees_than_fee_transaction() {
     );
 
     // Fee was not deducted
-    let new_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
+    let new_balance = test
+        .read_only_state_store()
+        .get_vaults_for_account(account)
+        .unwrap()
+        .get(&STEALTH_TARI_RESOURCE_ADDRESS)
+        .unwrap()
+        .balance();
     assert_eq!(new_balance, orig_balance);
 
     // State was not updated
-    let val: u32 = test.call_method(state, "get", args![], vec![]);
-    assert_eq!(val, 0);
+    let text = test
+        .read_only_state_store()
+        .get_component(state)
+        .unwrap()
+        .body
+        .state
+        .into_text()
+        .unwrap();
+    assert_eq!(text, "Zero");
 }
 
 #[test]
@@ -331,15 +372,19 @@ fn fail_pay_too_little_no_fee_instruction() {
         vec![owner_token, owner_token2],
     );
 
-    test.disable_fees();
-
     assert!(
         matches!(reason, RejectReason::InsufficientFeesPaid(_)),
         "actual reason: {reason}"
     );
 
     // Fee was not deducted
-    let new_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
+    let new_balance = test
+        .read_only_state_store()
+        .get_vaults_for_account(account)
+        .unwrap()
+        .get(&STEALTH_TARI_RESOURCE_ADDRESS)
+        .unwrap()
+        .balance();
     assert_eq!(new_balance, orig_balance);
 }
 
@@ -368,7 +413,7 @@ fn failure_pay_fee_in_main_instructions() {
 
 #[test]
 fn dangling_bucket_pay_fees() {
-    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/state"]);
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let orig_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
@@ -392,11 +437,15 @@ fn dangling_bucket_pay_fees() {
     // The transaction still finishes successfully
     result.expect_finalization_success();
 
-    test.disable_fees();
-
     // Check the fee was still paid
     let payment = result.finalize.fee_receipt;
-    let new_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
+    let new_balance = test
+        .read_only_state_store()
+        .get_vaults_for_account(account)
+        .unwrap()
+        .get(&STEALTH_TARI_RESOURCE_ADDRESS)
+        .unwrap()
+        .balance();
     assert_ne!(payment.total_fees_paid(), 0);
     assert_eq!(orig_balance - new_balance, payment.total_fees_paid());
 }

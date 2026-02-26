@@ -21,7 +21,6 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { breadcrumbRoutes } from "@/App";
-import { DRAWER_WIDTH } from "@/configs/consts";
 import Logo from "@assets/Logo";
 import Breadcrumbs from "@components/Breadcrumbs";
 import MenuItems from "@components/MenuItems";
@@ -50,6 +49,8 @@ import { componentSettings, dark, light } from "@theme/tokens";
 import { useState } from "react";
 import { Link, Outlet } from "react-router-dom";
 import "./theme.css";
+
+const DRAWER_WIDTH = 300;
 
 interface AppBarProps extends MuiAppBarProps {
   open?: boolean;

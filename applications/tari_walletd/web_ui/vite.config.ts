@@ -33,7 +33,6 @@ export default defineConfig({
       "@api": path.resolve(__dirname, "./src/services/api"),
       "@assets": path.resolve(__dirname, "./src/assets"),
       "@components": path.resolve(__dirname, "./src/components"),
-      "@configs": path.resolve(__dirname, "./src/configs"),
       "@hooks": path.resolve(__dirname, "./src/hooks"),
       "@routes": path.resolve(__dirname, "./src/routes"),
       "@store": path.resolve(__dirname, "./src/services/store"),

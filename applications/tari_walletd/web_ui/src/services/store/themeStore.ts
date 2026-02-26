@@ -28,10 +28,13 @@ interface Store {
   setThemeMode: (mode: "light" | "dark") => void;
 }
 
+const matchDark = window.matchMedia("(prefers-color-scheme: dark)")?.matches;
+const initialTheme = matchDark ? "dark" : "light";
+
 const useThemeStore = create<Store>()(
   persist<Store>(
     (set) => ({
-      themeMode: "light",
+      themeMode: initialTheme,
       setThemeMode: (mode) => set({ themeMode: mode }),
     }),
     {

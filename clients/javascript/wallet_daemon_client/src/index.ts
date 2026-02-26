@@ -412,26 +412,26 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
       console.debug("Token refreshed successfully. Retrying original request.");
       this.token = refreshResp.result.token;
-    }
 
-    // Retry the original request with the new token
-    response = (await this.transport.sendRequest<any>(
-      {
-        method,
-        jsonrpc: "2.0",
-        id,
-        params: params || {},
-      },
-      { token: this.token, timeout_millis: null },
-    )) as RpcResponse<R>;
-
-    if (response.error) {
-      throw new Error(`RPC Error ${response.error.code}: ${response.error.message}`, {
-        cause: {
+      // Retry the original request with the new token
+      response = (await this.transport.sendRequest<any>(
+        {
           method,
-          ...response.error,
-        } as RpcError,
-      });
+          jsonrpc: "2.0",
+          id,
+          params: params || {},
+        },
+        { token: this.token, timeout_millis: null },
+      )) as RpcResponse<R>;
+
+      if (response.error) {
+        throw new Error(`RPC Error ${response.error.code}: ${response.error.message}`, {
+          cause: {
+            method,
+            ...response.error,
+          } as RpcError,
+        });
+      }
     }
 
     return response.result;

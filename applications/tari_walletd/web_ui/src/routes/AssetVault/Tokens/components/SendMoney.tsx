@@ -41,6 +41,7 @@ import FormStep, { FormError, SendMoneyFormState } from "../steps/FormStep";
 import ConfirmationStep from "../steps/ConfirmationStep";
 import ResultStep, { TransferResult } from "../steps/ResultStep";
 import PopupTitle from "@/components/PopupTitle";
+import { parseAmountToBaseUnits } from "@utils/helpers";
 
 export interface SendMoneyDialogProps {
   open: boolean;
@@ -51,19 +52,6 @@ export interface SendMoneyDialogProps {
   token_symbol: string;
 }
 const U64_MAX = 2n ** 64n - 1n;
-/**
- * Converts a decimal string amount to base units using BigInt arithmetic.
- * e.g. "1000.5" with divisibility=6 → 1_000_500_000n
- */
-function parseAmountToBaseUnits(amount: string, divisibility: number): bigint {
-  const [intPart, fracPart = ""] = amount.split(".");
-
-  // Truncate (not round) fractional digits beyond divisibility
-  const scaledFrac = fracPart.slice(0, divisibility).padEnd(divisibility, "0");
-
-  return BigInt(intPart) * 10n ** BigInt(divisibility) + BigInt(scaledFrac);
-}
-
 export function SendMoneyDialog(props: SendMoneyDialogProps) {
   const INITIAL_VALUES: SendMoneyFormState = {
     address: "",

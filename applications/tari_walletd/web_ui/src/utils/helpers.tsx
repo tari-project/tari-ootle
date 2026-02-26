@@ -337,3 +337,16 @@ export function displayNftId(nftId: NonFungibleId): string {
 
   return `NFT #${JSON.stringify(nftId)}`;
 }
+
+/**
+ * Converts a decimal string amount to base units using BigInt arithmetic.
+ * e.g. "1000.5" with divisibility=6 → 1_000_500_000n
+ */
+export function parseAmountToBaseUnits(amount: string, divisibility: number): bigint {
+  const [intPart, fracPart = ""] = amount.split(".");
+
+  // Truncate (not round) fractional digits beyond divisibility
+  const scaledFrac = fracPart.slice(0, divisibility).padEnd(divisibility, "0");
+
+  return BigInt(intPart) * 10n ** BigInt(divisibility) + BigInt(scaledFrac);
+}

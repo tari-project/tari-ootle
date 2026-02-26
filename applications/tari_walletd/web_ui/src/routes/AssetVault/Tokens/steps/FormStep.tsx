@@ -20,19 +20,19 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, SUCH DAMAGE.
 
-import { FormEvent, useState } from "react";
-import { Form } from "react-router-dom";
+import { Divider, InputAdornment, InputLabel, Stack, Typography } from "@mui/material";
 import Button from "@mui/material/Button";
-import TextField from "@mui/material/TextField";
-import Select from "@mui/material/Select";
-import MenuItem from "@mui/material/MenuItem";
 import CheckBox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
-import { Divider, InputLabel, Stack, InputAdornment, Typography } from "@mui/material";
+import MenuItem from "@mui/material/MenuItem";
+import Select from "@mui/material/Select";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
-import { ResourceType, ResourceAddress, validateOotleAddress, Amount } from "@tari-project/ootle-ts-bindings";
-import { formatCurrency } from "@utils/helpers";
+import TextField from "@mui/material/TextField";
+import { Amount, ResourceAddress, ResourceType, validateOotleAddress } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
+import { formatCurrency, parseAmountToBaseUnits } from "@utils/helpers";
+import { FormEvent, useState } from "react";
+import { Form } from "react-router-dom";
 
 export interface SendMoneyFormState {
   address: string;
@@ -96,9 +96,8 @@ export default function FormStep({
 
   const enteredAmount = parseFloat(transferFormState.amount);
   const isNaNAmount = isNaN(enteredAmount);
-  const hasInsufficientFunds = isNaNAmount
-    ? false
-    : availableBalance !== undefined && BigInt(enteredAmount) > BigInt(availableBalance);
+  const enteredAmountInBaseUnits = isNaNAmount ? 0n : parseAmountToBaseUnits(transferFormState.amount, divisibility);
+  const hasInsufficientFunds = availableBalance !== undefined && enteredAmountInBaseUnits > BigInt(availableBalance);
 
   const isFormValid =
     !isNaNAmount &&

@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { ThemeOptions } from "@mui/material/styles";
-import { blue, gothic, green, grey, orange, red, tariPurple, teal } from "@theme/colors";
+import { blue, gothic, green, grey, orange, red, tariBg, tariPurple, teal } from "@theme/colors";
 import "./augmentation";
 import PoppinsBoldTTF from "./fonts/poppins/Poppins-Bold.ttf";
 import PoppinsMediumTTF from "./fonts/poppins/Poppins-Medium.ttf";
@@ -34,7 +34,7 @@ export const componentSettings: ThemeOptions = {
   },
   spacing: 8,
   typography: {
-    fontFamily: '"PoppinsRegular", sans-serif',
+    fontFamily: '"PoppinsMedium", sans-serif',
     fontSize: 12,
     body1: {
       lineHeight: 1.1,
@@ -145,9 +145,9 @@ export const componentSettings: ThemeOptions = {
         {
           props: { variant: "outlined" },
           style: ({ theme }) => ({
-            borderColor: theme.palette.primary.main,
+            borderColor: theme.palette.secondary.main,
             borderWidth: 1.25,
-            color: theme.palette.primary.main,
+            color: theme.palette.secondary.main,
           }),
         },
       ],
@@ -233,7 +233,7 @@ export const light: ThemeOptions = {
       light: tariPurple[400],
     },
     secondary: {
-      main: gothic[400],
+      main: tariPurple[600],
       dark: gothic[500],
       light: teal[400],
     },
@@ -244,8 +244,8 @@ export const light: ThemeOptions = {
       disabled: grey[400],
     },
     background: {
-      default: grey[50],
-      paper: "#fff",
+      default: tariBg[100],
+      paper: tariBg[50],
     },
     success: {
       main: green[500],
@@ -282,12 +282,12 @@ export const dark: ThemeOptions = {
   palette: {
     mode: "dark",
     primary: {
-      main: tariPurple[500],
-      dark: tariPurple[300],
+      main: tariPurple[400],
+      dark: tariPurple[200],
       light: tariPurple[50],
     },
     secondary: {
-      main: teal[400],
+      main: tariPurple[300],
       dark: teal[300],
       light: gothic[400],
     },
@@ -298,8 +298,8 @@ export const dark: ThemeOptions = {
       disabled: "rgba(255,255,255,0.4)",
     },
     background: {
-      default: grey[950],
-      paper: grey[900],
+      default: tariBg[950],
+      paper: tariBg[900],
     },
     success: {
       main: green[500],

@@ -30,7 +30,7 @@ interface Store {
 
 const matchDark = window.matchMedia("(prefers-color-scheme: dark)")?.matches;
 const initialTheme = matchDark ? "dark" : "light";
-console.debug(initialTheme);
+
 const useThemeStore = create<Store>()(
   persist<Store>(
     (set) => ({

@@ -27,7 +27,7 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import IconButton from "@mui/material/IconButton";
-import { Typography, Box, Stack, Icon, Tooltip } from "@mui/material";
+import { Typography, Box, Stack, Tooltip } from "@mui/material";
 import { useState } from "react";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import { DataTableCell } from "@components/StyledComponents";

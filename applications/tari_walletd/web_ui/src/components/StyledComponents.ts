@@ -119,3 +119,9 @@ export const NftCard: React.FC<CardProps> = styled(Card)(() => ({
     transform: "scale(1.02)",
   },
 }));
+
+export const SpacedBox: React.FC<BoxProps> = styled(Box)`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+`;

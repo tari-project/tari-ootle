@@ -23,8 +23,8 @@
 import Grid from "@mui/material/Grid";
 import IconButton from "@mui/material/IconButton";
 import { useTheme } from "@mui/material/styles";
-import { InnerHeading, StyledPaper } from "@components/StyledComponents";
-import { refreshAccountsBalances, useAccountsGetDefault } from "@api/hooks/useAccounts";
+import { InnerHeading, SpacedBox, StyledPaper } from "@components/StyledComponents";
+import { refreshAccountsBalances, useAccountsGetBalances, useAccountsGetDefault } from "@api/hooks/useAccounts";
 import useAccountStore from "@store/accountStore";
 import Transactions from "@routes/Transactions/Transactions";
 import AccountDetails from "./AccountDetails";
@@ -36,14 +36,16 @@ import queryClient from "@api/queryClient";
 import PageHeader from "@components/PageHeader";
 import { useEffect } from "react";
 import Loading from "@components/Loading";
-import { Navigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
+import Button from "@mui/material/Button";
 
 function MyAssets() {
   const theme = useTheme();
+  const navigate = useNavigate();
   const { account, setAccount, setOotleAddress } = useAccountStore();
   const { data: defaultAccount, error, refetch } = useAccountsGetDefault(false);
   const refreshBalances = refreshAccountsBalances();
-
+  const { data: balancesData } = useAccountsGetBalances(substateIdToString(account?.component_address));
   useEffect(() => {
     refetch();
 
@@ -63,7 +65,6 @@ function MyAssets() {
   if (!account) {
     return <Loading />;
   }
-
   const handleRefreshClicked = () => {
     refreshBalances.mutate(substateIdToString(account.component_address));
     queryClient.invalidateQueries({
@@ -73,6 +74,10 @@ function MyAssets() {
       },
     });
   };
+  const resource_address = balancesData?.balances.find((b) => !!b.balance)?.resource_address;
+  const stealUXTOLink = resource_address ? (
+    <Button onClick={() => navigate(`/stealth-utxos/${resource_address}`)}>Looking for your Stealth UXTOs?</Button>
+  ) : null;
 
   return (
     <>
@@ -106,7 +111,12 @@ function MyAssets() {
       </Grid>
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
-          <InnerHeading>Transactions</InnerHeading>
+          <InnerHeading>
+            <SpacedBox>
+              Transactions
+              {stealUXTOLink}
+            </SpacedBox>
+          </InnerHeading>
           <Transactions account={account} />
         </StyledPaper>
       </Grid>

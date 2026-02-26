@@ -423,15 +423,15 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
         },
         { token: this.token, timeout_millis: null },
       )) as RpcResponse<R>;
+    }
 
-      if (response.error) {
-        throw new Error(`RPC Error ${response.error.code}: ${response.error.message}`, {
-          cause: {
-            method,
-            ...response.error,
-          } as RpcError,
-        });
-      }
+    if (response.error) {
+      throw new Error(`RPC Error ${response.error.code}: ${response.error.message}`, {
+        cause: {
+          method,
+          ...response.error,
+        } as RpcError,
+      });
     }
 
     return response.result;

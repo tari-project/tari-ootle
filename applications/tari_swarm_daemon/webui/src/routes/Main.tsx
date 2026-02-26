@@ -543,6 +543,7 @@ export default function Main() {
 
   return (
     <div className="main">
+      <div className="buttons">
       <button onClick={() => stopAll()}>Stop all VNs</button>
       <button onClick={() => startAll()}>Start all VNs</button>
       <button onClick={() => setShowLogs(!showLogs)}>{showLogs && "Hide" || "Show"} logs</button>
@@ -550,6 +551,7 @@ export default function Main() {
       </button>
       <button onClick={() => setHorizontal(!horizontal)}>Swap rows/columns</button>
       <button onClick={() => addValidatorNode()}>Add VN</button>
+      </div>
       <div className="label">Base layer</div>
       <div className="infos">
         <MinotariNodes showLogs={showLogs} autoRefresh={autoRefresh} />

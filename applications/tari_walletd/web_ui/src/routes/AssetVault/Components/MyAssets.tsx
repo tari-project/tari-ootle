@@ -20,24 +20,24 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { refreshAccountsBalances, useAccountsGetBalances, useAccountsGetDefault } from "@api/hooks/useAccounts";
 import queryClient from "@api/queryClient";
+import Loading from "@components/Loading";
 import PageHeader from "@components/PageHeader";
+import { InnerHeading, SpacedBox, StyledPaper } from "@components/StyledComponents";
 import { Refresh } from "@mui/icons-material";
+import Button from "@mui/material/Button";
 import Grid from "@mui/material/Grid";
 import IconButton from "@mui/material/IconButton";
 import { useTheme } from "@mui/material/styles";
-import { InnerHeading, SpacedBox, StyledPaper } from "@components/StyledComponents";
-import { refreshAccountsBalances, useAccountsGetBalances, useAccountsGetDefault } from "@api/hooks/useAccounts";
 import Transactions from "@routes/Transactions/Transactions";
 import useAccountStore from "@store/accountStore";
 import { substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { useEffect } from "react";
+import { Navigate, useNavigate } from "react-router-dom";
 import AccountDetails from "./AccountDetails";
 import ActionMenu from "./ActionMenu";
 import Assets from "./Assets";
-import Loading from "@components/Loading";
-import { Navigate, useNavigate } from "react-router-dom";
-import Button from "@mui/material/Button";
 
 function MyAssets() {
   const theme = useTheme();
@@ -74,8 +74,11 @@ function MyAssets() {
       },
     });
   };
-  const resource_address = balancesData?.balances.find((b) => !!b.balance)?.resource_address;
-  const stealUXTOLink = resource_address ? (
+  const resource_address = balancesData?.balances
+    .filter((b) => BigInt(b.balance) > 0n || BigInt(b.confidential_balance) > 0n)
+    .find((b) => b.resource_type === "Stealth")?.resource_address;
+
+  const stealthUXTOLink = resource_address ? (
     <Button onClick={() => navigate(`/stealth-utxos/${resource_address}`)}>Looking for your Stealth UXTOs?</Button>
   ) : null;
 
@@ -114,7 +117,7 @@ function MyAssets() {
           <InnerHeading>
             <SpacedBox>
               Transactions
-              {stealUXTOLink}
+              {stealthUXTOLink}
             </SpacedBox>
           </InnerHeading>
           <Transactions account={account} />

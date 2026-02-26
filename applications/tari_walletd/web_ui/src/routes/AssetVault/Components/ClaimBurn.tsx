@@ -29,7 +29,7 @@ import DialogContent from "@mui/material/DialogContent";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import MenuItem from "@mui/material/MenuItem";
-import Select, { SelectChangeEvent } from "@mui/material/Select/Select";
+import Select, { SelectChangeEvent } from "@mui/material/Select";
 import { useTheme } from "@mui/material/styles";
 import TextField from "@mui/material/TextField";
 import useAccountStore from "@store/accountStore";

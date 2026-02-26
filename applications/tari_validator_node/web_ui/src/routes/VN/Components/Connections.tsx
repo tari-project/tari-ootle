@@ -40,7 +40,7 @@ import type { VNConnection } from "@tari-project/ootle-ts-bindings";
 import { displayDuration } from "../../../utils/helpers";
 
 const useInterval = (fn: () => Promise<unknown>, ms: number) => {
-  const timeout = useRef<number>();
+  const timeout = useRef<number>(0);
   const mountedRef = useRef(false);
   const run = useCallback(async () => {
     await fn();

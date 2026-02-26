@@ -28,10 +28,10 @@ import RecentTransactions from "./components/RecentTransactions";
 function RecentTransactionsLayout() {
   return (
     <>
-      <Grid item sm={12} md={12} xs={12}>
+      <Grid size={12}>
         <PageHeading>Recent Transactions</PageHeading>
       </Grid>
-      <Grid item sm={12} md={12} xs={12}>
+      <Grid size={12}>
         <StyledPaper>
           <RecentTransactions />
         </StyledPaper>

@@ -40,7 +40,7 @@ function PageHeader({ title, rightComponent, showAccountInfo = true, balanceComp
 
   return (
     <>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <Box
           className="flex-container"
           style={{
@@ -65,10 +65,7 @@ function PageHeader({ title, rightComponent, showAccountInfo = true, balanceComp
 
       {showAccountInfo && (
         <Grid
-          item
-          xs={12}
-          md={12}
-          lg={12}
+          size={12}
           style={{
             position: "sticky",
             top: 50,

@@ -26,13 +26,14 @@ import "./augmentation";
 
 export const componentSettings: ThemeOptions = {
   shape: {
-    borderRadius: 8,
+    borderRadius: 20,
   },
   spacing: 8,
   typography: {
     fontFamily: '"Poppins", sans-serif',
     fontSize: 12,
     body1: {
+      lineHeight: 1.1,
       letterSpacing: "0.5px",
       fontFamily: '"Poppins", sans-serif',
       fontWeight: 500,
@@ -170,9 +171,9 @@ export const light: ThemeOptions = {
   palette: {
     mode: "light",
     primary: {
-      main: tariPurple[600],
-      dark: tariPurple[700],
-      light: tariPurple[500],
+      main: tariPurple[500],
+      dark: tariPurple[800],
+      light: tariPurple[400],
     },
     secondary: {
       main: gothic[400],
@@ -218,14 +219,30 @@ export const light: ThemeOptions = {
       border: "rgba(0, 0, 0, 0.03)",
     },
   },
+  components: {
+    MuiButton: {
+      styleOverrides: {
+        root: {
+          variants: [
+            {
+              props: { variant: "outlined" },
+              style: {
+                borderWidth: "8px",
+              },
+            },
+          ],
+        },
+      },
+    },
+  },
 };
 
 export const dark: ThemeOptions = {
   palette: {
     mode: "dark",
     primary: {
-      main: tariPurple[500],
-      dark: tariPurple[400],
+      main: tariPurple[400],
+      dark: tariPurple[300],
       light: tariPurple[50],
     },
     secondary: {

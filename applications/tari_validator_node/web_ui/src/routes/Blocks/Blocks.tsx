@@ -28,10 +28,10 @@ import Blocks from "../VN/Components/Blocks";
 function BlocksLayout() {
   return (
     <>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <PageHeading>Blocks</PageHeading>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <Blocks />
         </StyledPaper>

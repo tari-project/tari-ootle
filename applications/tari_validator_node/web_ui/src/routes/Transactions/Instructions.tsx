@@ -29,7 +29,12 @@ import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import CodeBlockDialog from "../../Components/CodeBlock";
 import type { Instruction } from "@tari-project/ootle-ts-bindings";
 
-function RowData({ title, data }: { title: string; data: Instruction }, index: number) {
+interface InstructionsProps {
+    data: Instruction[];
+    index?: number
+}
+interface RowDataProps  { title: string; data: Instruction, index:number };
+function RowData({ title, data, index }:RowDataProps) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -59,14 +64,14 @@ function RowData({ title, data }: { title: string; data: Instruction }, index: n
   );
 }
 
-export default function Instructions({ data }: { data: Instruction[] }, index: number) {
+export default function Instructions({ data, }:InstructionsProps) {
   return (
     <TableContainer>
       <Table>
         <TableBody>
           {data &&
-            data.map((item: Instruction) => {
-              return <RowData title={Object.keys(item)[0]} data={item} />;
+            data.map((item: Instruction, index) => {
+              return <RowData index={index} key={index} title={Object.keys(item)[0]} data={item} />;
             })}
         </TableBody>
       </Table>

@@ -24,7 +24,7 @@ import PopupTitle from "@/components/PopupTitle";
 import { useAccountsGetBalances, useAccountsTransfer } from "@api/hooks/useAccounts";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
-import { SelectChangeEvent } from "@mui/material/Select/Select";
+import { SelectChangeEvent } from "@mui/material/Select";
 import useAccountStore from "@store/accountStore";
 import {
   BadgeUsage,

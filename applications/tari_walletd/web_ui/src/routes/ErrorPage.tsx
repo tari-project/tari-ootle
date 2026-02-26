@@ -30,7 +30,7 @@ export default function ErrorPage() {
   console.error("Error", error);
 
   return (
-    <Grid item xs={12} md={12} lg={12}>
+    <Grid size={12}>
       <StyledPaper sx={{ textAlign: "center" }}>
         <Typography variant="h3">Oops!</Typography>
         {/* <Typography>Sorry, an unexpected error has occurred.</Typography> */}

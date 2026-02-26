@@ -147,10 +147,10 @@ function EventsLayout() {
 
   return (
     <>
-      <Grid item sm={12} md={12} xs={12}>
+      <Grid size={12}>
         <PageHeading>Events</PageHeading>
       </Grid>
-      <Grid item>
+      <Grid>
         <Box className="flex-container" sx={{ marginBottom: 4 }}>
           <TextField
             name="topic"
@@ -172,7 +172,7 @@ function EventsLayout() {
           />
         </Box>
       </Grid>
-      <Grid item sm={12} md={12} xs={12}>
+      <Grid size={12}>
         <StyledPaper>
           <Table sx={{ minWidth: 650 }} aria-label="simple table">
             <TableHead>

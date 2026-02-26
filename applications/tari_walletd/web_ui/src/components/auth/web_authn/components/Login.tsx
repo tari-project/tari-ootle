@@ -92,7 +92,7 @@ function WebauthnLogin(props: WebauthnProps) {
 
   return (
     <>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <Box
           style={{
             display: "flex",

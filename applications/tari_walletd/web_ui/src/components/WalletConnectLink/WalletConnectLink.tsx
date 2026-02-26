@@ -286,8 +286,10 @@ const ConnectorDialog = () => {
   };
 
   useEffect(() => {
-    getClipboardContent();
-  }, []);
+    if (isOpen) {
+      getClipboardContent();
+    }
+  }, [isOpen, getClipboardContent]);
 
   let permissions: any[] = [];
   let optionalPermissions: any[] = [];

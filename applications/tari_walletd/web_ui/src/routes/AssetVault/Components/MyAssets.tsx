@@ -86,13 +86,13 @@ function MyAssets() {
     <>
       <PageHeader title="My Assets" rightComponent={<ActionMenu />} />
 
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <InnerHeading>Account Details</InnerHeading>
           <AccountDetails />
         </StyledPaper>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <InnerHeading>
             Assets
@@ -112,7 +112,7 @@ function MyAssets() {
           <Assets account={account} />
         </StyledPaper>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <InnerHeading>
             <SpacedBox>

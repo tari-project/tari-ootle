@@ -276,7 +276,7 @@ function FlowEditor() {
 
   return (
     <Grid container spacing={2}>
-      <Grid item xs={panelOpen ? 9 : 12}>
+      <Grid size={panelOpen ? 9 : 12}>
         <Grid
           container
           spacing={3}
@@ -285,10 +285,10 @@ function FlowEditor() {
             width: "100%",
           }}
         >
-          <Grid item xs={12} md={12} lg={12}>
+          <Grid size={12}>
             <PageHeading>Flow Editor</PageHeading>
           </Grid>
-          <Grid item xs={12} md={12} lg={12}>
+          <Grid size={12}>
             <StyledPaper>
               <div style={{ height: "600px", width: "100%" }}>
                 <QueryBuilder

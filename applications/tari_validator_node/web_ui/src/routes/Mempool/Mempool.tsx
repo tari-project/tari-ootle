@@ -28,10 +28,10 @@ import Mempool from "../VN/Components/Mempool";
 function MempoolLayout() {
   return (
     <>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <PageHeading>Mempool</PageHeading>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <Mempool />
         </StyledPaper>

@@ -111,10 +111,10 @@ function Templates() {
 
   return (
     <>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <PageHeading>Templates</PageHeading>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <FetchStatusCheck
             isLoading={isLoading || isAccountsLoading}

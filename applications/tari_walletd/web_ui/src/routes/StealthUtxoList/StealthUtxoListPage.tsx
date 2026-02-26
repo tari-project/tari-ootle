@@ -50,14 +50,14 @@ function StealthUtxoListPage() {
         <>
           <PageHeader title="Stealth UTXOs" balanceComponent={<ConfidentialBalanceDisplay />} />
 
-          <Grid item xs={12} md={12} lg={12}>
+          <Grid size={12}>
             <StyledPaper>
               <StealthUtxoList account={account} />
             </StyledPaper>
           </Grid>
         </>
       ) : (
-        <Grid item xs={12} md={12} lg={12}>
+        <Grid size={12}>
           <PageHeading>No Account Available</PageHeading>
         </Grid>
       )}

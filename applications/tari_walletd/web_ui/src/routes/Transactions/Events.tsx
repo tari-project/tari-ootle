@@ -41,6 +41,10 @@ import { useTheme } from "@mui/material/styles";
 import { Event, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 
+interface RowDataProps extends Event {
+  index: number;
+}
+
 function renderPayloadField(key: string, value: any) {
   if (key === "amount" && typeof value === "string") {
     return (
@@ -110,7 +114,7 @@ function renderPayload(payload: any) {
   );
 }
 
-function RowData({ substate_id, template_address, topic, payload }: Event, index: number) {
+function RowData({ index, substate_id, template_address, topic, payload }: RowDataProps) {
   const [open, setOpen] = useState(false);
   const theme = useTheme();
   return (
@@ -183,6 +187,7 @@ export default function Events({ data }: { data: Event[] }) {
                 topic={topic}
                 payload={payload}
                 key={index}
+                index={index}
               />
             );
           })}

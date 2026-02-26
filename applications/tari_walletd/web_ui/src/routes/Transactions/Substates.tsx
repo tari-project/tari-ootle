@@ -31,6 +31,13 @@ import { Substate, SubstateId, substateIdToString, TransactionResult } from "@ta
 import { useState } from "react";
 import { IoArrowDownCircle, IoArrowUpCircle } from "react-icons/io5";
 
+interface SubstateRowDataProps {
+  id: SubstateId;
+  substate?: Substate | number;
+  state: string;
+  index: number;
+}
+
 function renderSubstateDetails(substate: any, id: SubstateId) {
   if (!substate || typeof substate === "number") {
     return null;
@@ -195,18 +202,7 @@ function renderSubstateDetails(substate: any, id: SubstateId) {
   return null;
 }
 
-function SubstateRowData(
-  {
-    id,
-    substate,
-    state,
-  }: {
-    id: SubstateId;
-    substate?: Substate | number;
-    state: string;
-  },
-  index: number,
-) {
+function SubstateRowData({ id, substate, state, index }: SubstateRowDataProps) {
   const [open, setOpen] = useState(false);
   const theme = useTheme();
 
@@ -288,10 +284,10 @@ export default function Substates({ data }: { data: TransactionResult }) {
       <Table>
         <TableBody>
           {up.map(([id, substate]: [SubstateId, Substate | number], index: number) => {
-            return <SubstateRowData id={id} substate={substate} state="Up" key={index} />;
+            return <SubstateRowData index={index} id={id} substate={substate} state="Up" key={index} />;
           })}
           {down.map(([id, substate]: [SubstateId, Substate | number], index: number) => {
-            return <SubstateRowData id={id} substate={substate} state="Down" key={index} />;
+            return <SubstateRowData index={index} id={id} substate={substate} state="Down" key={index} />;
           })}
         </TableBody>
       </Table>

@@ -26,7 +26,7 @@ import { useNFTsList, useNftsTransfer } from "@api/hooks/useNfts";
 import Button from "@mui/material/Button";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
-import { SelectChangeEvent } from "@mui/material/Select/Select";
+import { SelectChangeEvent } from "@mui/material/Select";
 import useAccountStore from "@store/accountStore";
 import { useNftTransferStore } from "@store/nftTransferStore";
 import {

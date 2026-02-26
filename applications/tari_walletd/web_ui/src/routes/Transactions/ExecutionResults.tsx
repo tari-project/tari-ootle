@@ -33,6 +33,7 @@ import {
   TableRow,
   Typography,
 } from "@mui/material";
+import { ReactNode } from "react";
 
 function ResultRowData({ result, index }: { result: any; index: number }) {
   const returnTypeLabel =
@@ -56,7 +57,7 @@ function ResultRowData({ result, index }: { result: any; index: number }) {
     if (!result.indexed?.indexed) return null;
 
     const indexed = result.indexed.indexed;
-    const sections: JSX.Element[] = [];
+    const sections: ReactNode[] = [];
 
     const fieldConfig = [
       { key: "bucket_ids", label: "Bucket IDs", color: "primary" },

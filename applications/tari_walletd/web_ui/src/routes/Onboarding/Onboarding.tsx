@@ -25,7 +25,7 @@ import Loading from "@components/Loading";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Grid from "@mui/material/Grid";
-import TextField from "@mui/material/TextField/TextField";
+import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { useTheme } from "@mui/material/styles";
 import useAccountStore from "@store/accountStore";
@@ -94,7 +94,7 @@ function Onboarding() {
 
   return (
     <>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <Box
           style={{
             display: "flex",

@@ -43,7 +43,7 @@ export const StyledPaper: React.FC<PaperProps> = styled(Paper)(({ theme }) => ({
   border: "1px solid rgba(255,255,255,0.04)",
 }));
 
-export const InnerHeading: React.FC<TypographyProps> = styled(Typography)(({ theme }) => ({
+export const InnerHeading: React.FC<BoxProps> = styled(Box)(({ theme }) => ({
   fontSize: theme.typography.h6.fontSize,
   textTransform: "uppercase",
   borderBottom: `1px solid ${theme.palette.divider}`,

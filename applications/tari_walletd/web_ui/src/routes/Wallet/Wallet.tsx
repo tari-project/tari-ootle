@@ -20,15 +20,15 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import SecondaryHeading from "@components/SecondaryHeading";
+import { StyledPaper } from "@components/StyledComponents";
+import Grid from "@mui/material/Grid";
+import Transactions from "@routes/Transactions/Transactions";
+import useAccountStore from "@store/accountStore";
+import AccessTokens from "./Components/AccessTokens";
 import Accounts from "./Components/Accounts";
 import Keys from "./Components/Keys";
 import "./Wallet.css";
-import { StyledPaper } from "@components/StyledComponents";
-import Grid from "@mui/material/Grid";
-import SecondaryHeading from "@components/SecondaryHeading";
-import Transactions from "@routes/Transactions/Transactions";
-import AccessTokens from "./Components/AccessTokens";
-import useAccountStore from "@store/accountStore";
 
 function Wallet() {
   const { account } = useAccountStore();
@@ -48,7 +48,7 @@ function Wallet() {
       </Grid>
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
-          <Transactions account={account!}  />
+          <Transactions account={account!} />
         </StyledPaper>
       </Grid>
       <Grid item xs={12} md={12} lg={12}>

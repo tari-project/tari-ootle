@@ -30,19 +30,19 @@ import type {
   AccountsCreateFreeTestCoinsResponse,
   AccountsCreateRequest,
   AccountsCreateResponse,
-  AccountsRenameRequest,
-  AccountsRenameResponse,
   AccountSetDefaultRequest,
   AccountSetDefaultResponse,
   AccountsGetBalancesRequest,
   AccountsGetBalancesResponse,
   AccountsListRequest,
   AccountsListResponse,
+  AccountsRenameRequest,
+  AccountsRenameResponse,
   AccountsTransferRequest,
   AccountsTransferResponse,
+  AuthGetMethodResponse,
   AuthListSessionsRequest,
   AuthListSessionsResponse,
-  AuthGetMethodResponse,
   AuthRevokeTokenRequest,
   AuthRevokeTokenResponse,
   ClaimBurnRequest,
@@ -72,6 +72,8 @@ import type {
   SettingsSetResponse,
   StealthTransferRequest,
   StealthTransferResponse,
+  StealthUtxosDecryptValueRequest,
+  StealthUtxosDecryptValueResponse,
   StealthUtxosListRequest,
   StealthUtxosListResponse,
   SubstatesGetRequest,
@@ -88,6 +90,7 @@ import type {
   TransactionGetResponse,
   TransactionGetResultRequest,
   TransactionGetResultResponse,
+  TransactionSubmitDryRunResponse,
   TransactionSubmitManifestRequest,
   TransactionSubmitManifestResponse,
   TransactionSubmitRequest,
@@ -106,13 +109,8 @@ import type {
   WebauthnStartRegisterResponse,
   WebRtcStartRequest,
   WebRtcStartResponse,
-  StealthUtxosDecryptValueRequest,
-  StealthUtxosDecryptValueResponse,
-  TransactionSubmitDryRunResponse,
-  AuthCredentials,
 } from "@tari-project/ootle-ts-bindings";
 import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
-import useAuthStore from "@store/authStore";
 import { jwtDecode } from "jwt-decode";
 
 let clientInstance: WalletDaemonClient | null = null;

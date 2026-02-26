@@ -20,29 +20,29 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Route, Routes } from "react-router-dom";
-import Accounts from "@routes/Accounts/Accounts";
-import AccountDetails from "@routes/AccountDetails/AccountDetails";
-import Keys from "@routes/Keys/Keys";
-import ErrorPage from "@routes/ErrorPage";
-import Wallet from "@routes/Wallet/Wallet";
-import Layout from "@theme/LayoutMain";
-import AccessTokensLayout from "@routes/AccessTokens/AccessTokens";
-import Transactions from "@routes/Transactions/TransactionsLayout";
-import TransactionDetails from "@routes/Transactions/TransactionDetails";
-import SettingsPage from "@routes/Settings/Settings";
-import { useEffect, useState } from "react";
-import { useAuthMethod } from "@api/hooks/useAuth";
-import Templates from "@routes/Templates/Templates";
-import Manifest from "@routes/Manifest/Manifest";
 import StealthUtxoListPage from "@/routes/StealthUtxoList/StealthUtxoListPage";
-import { ErrorNotificationProvider } from "./contexts/ErrorNotificationContext";
-import Loading from "@components/Loading";
-import Onboarding from "@routes/Onboarding/Onboarding";
-import MyAssets from "@routes/AssetVault/Components/MyAssets";
-import { getClientInstance, isValidJwt } from "@utils/json_rpc";
-import useAuthStore from "@store/authStore";
+import { useAuthMethod } from "@api/hooks/useAuth";
 import { AuthDialog } from "@components/auth";
+import Loading from "@components/Loading";
+import AccessTokensLayout from "@routes/AccessTokens/AccessTokens";
+import AccountDetails from "@routes/AccountDetails/AccountDetails";
+import Accounts from "@routes/Accounts/Accounts";
+import MyAssets from "@routes/AssetVault/Components/MyAssets";
+import ErrorPage from "@routes/ErrorPage";
+import Keys from "@routes/Keys/Keys";
+import Manifest from "@routes/Manifest/Manifest";
+import Onboarding from "@routes/Onboarding/Onboarding";
+import SettingsPage from "@routes/Settings/Settings";
+import Templates from "@routes/Templates/Templates";
+import TransactionDetails from "@routes/Transactions/TransactionDetails";
+import Transactions from "@routes/Transactions/TransactionsLayout";
+import Wallet from "@routes/Wallet/Wallet";
+import useAuthStore from "@store/authStore";
+import Layout from "@theme/LayoutMain";
+import { getClientInstance, isValidJwt } from "@utils/json_rpc";
+import { useEffect, useState } from "react";
+import { Route, Routes } from "react-router-dom";
+import { ErrorNotificationProvider } from "./contexts/ErrorNotificationContext";
 
 export const breadcrumbRoutes = [
   {

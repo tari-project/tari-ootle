@@ -390,6 +390,12 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         Ok(account)
     }
 
+    pub fn get_vault_ids_by_account(&self, account: &ComponentAddress) -> Result<Vec<VaultId>, AccountsApiError> {
+        let mut tx = self.store.create_read_tx()?;
+        let vaults = tx.vaults_get_ids_by_account(account)?;
+        Ok(vaults)
+    }
+
     pub fn get_vaults_by_account(&self, account: &ComponentAddress) -> Result<Vec<VaultModel>, AccountsApiError> {
         let mut tx = self.store.create_read_tx()?;
         let vaults = tx.vaults_get_by_account(account)?;
@@ -406,12 +412,12 @@ where TSpec: WalletSdkSpec
     ) -> Result<ResolvedAccountDetails, ConfidentialTransferApiError> {
         let account_component = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, destination_pk);
         // Is it an account we own?
-        if let Some(vaults) = self.get_vaults_by_account(&account_component).optional()? {
+        if let Some(vault_ids) = self.get_vault_ids_by_account(&account_component).optional()? {
             let account = self.get_account_by_address(&account_component)?;
 
             return Ok(ResolvedAccountDetails {
                 address: account_component,
-                vaults: vaults.into_iter().map(|v| v.id).collect(),
+                vaults: vault_ids,
                 exists_on_chain: account.is_confirmed_on_chain(),
             });
         }

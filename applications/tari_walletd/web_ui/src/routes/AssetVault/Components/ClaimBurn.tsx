@@ -20,23 +20,23 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { FormEvent, useState } from "react";
-import { Form } from "react-router-dom";
+import PopupTitle from "@/components/PopupTitle";
+import { useAccountsList } from "@api/hooks/useAccounts";
+import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import TextField from "@mui/material/TextField";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
-import Select, { SelectChangeEvent } from "@mui/material/Select/Select";
 import MenuItem from "@mui/material/MenuItem";
-import Box from "@mui/material/Box";
-import { useAccountsList } from "@api/hooks/useAccounts";
+import Select, { SelectChangeEvent } from "@mui/material/Select/Select";
 import { useTheme } from "@mui/material/styles";
-import { accountsClaimBurn, transactionsWaitResult } from "@utils/json_rpc";
+import TextField from "@mui/material/TextField";
 import useAccountStore from "@store/accountStore";
-import type { ComponentAddress, AccountInfo } from "@tari-project/ootle-ts-bindings";
-import PopupTitle from "@/components/PopupTitle";
+import type { AccountInfo, ComponentAddress } from "@tari-project/ootle-ts-bindings";
+import { accountsClaimBurn, transactionsWaitResult } from "@utils/json_rpc";
+import { FormEvent, useState } from "react";
+import { Form } from "react-router-dom";
 
 type FormState = {
   account: ComponentAddress;

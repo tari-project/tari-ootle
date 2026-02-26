@@ -20,13 +20,13 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Typography from "@mui/material/Typography";
+import { Divider } from "@mui/material";
 import Box from "@mui/material/Box";
 import { useTheme } from "@mui/material/styles";
-import IndexerSettings from "./IndexerSettings";
-import { Divider } from "@mui/material";
-import React, { useEffect, useState } from "react";
+import Typography from "@mui/material/Typography";
 import { settingsGet } from "@utils/json_rpc";
+import React, { useEffect, useState } from "react";
+import IndexerSettings from "./IndexerSettings";
 
 function GeneralSettings() {
   const theme = useTheme();

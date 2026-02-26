@@ -117,25 +117,14 @@ CREATE TABLE vaults
 
 CREATE UNIQUE INDEX vaults_uniq_address ON vaults (address);
 
--- Vault locks
-CREATE TABLE vault_locks
-(
-    id         INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    vault_id   INTEGER  NOT NULL REFERENCES vaults (id) ON DELETE CASCADE,
-    lock_id    INTEGER  NOT NULL REFERENCES locks (id) ON DELETE CASCADE,
-    amount     BIGINT   NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE UNIQUE INDEX vault_locks_uniq_vault_lock ON vault_locks (vault_id, lock_id);
-
 -- Resources
 CREATE TABLE resources
 (
     id            INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
     address       TEXT     NOT NULL,
     resource_type TEXT     NOT NULL,
-    owner_key     TEXT     NULL, -- removed
+    -- MIGRATION: removed
+    owner_key     TEXT     NULL,
     owner_rule    TEXT     NOT NULL,
     access_rules  TEXT     NOT NULL,
     token_symbol  TEXT     NULL,
@@ -186,6 +175,19 @@ CREATE TABLE locks
 );
 
 CREATE UNIQUE INDEX locks_uniq_transaction_id ON locks (transaction_id) WHERE transaction_id IS NOT NULL;
+
+-- Vault locks
+CREATE TABLE vault_locks
+(
+    id         INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    vault_id   INTEGER  NOT NULL REFERENCES vaults (id) ON DELETE CASCADE,
+    lock_id    INTEGER  NOT NULL REFERENCES locks (id) ON DELETE CASCADE,
+    -- MIGRATION: changed to a string
+    amount     BIGINT   NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX vault_locks_uniq_vault_lock ON vault_locks (vault_id, lock_id);
 
 -- NFTs
 CREATE TABLE non_fungible_tokens

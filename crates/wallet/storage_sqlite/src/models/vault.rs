@@ -3,7 +3,6 @@
 
 use std::str::FromStr;
 
-use bigdecimal::{BigDecimal, ToPrimitive};
 use diesel::{Identifiable, Queryable};
 use tari_ootle_wallet_sdk::storage::WalletStorageError;
 use tari_template_lib_types::{Amount, ComponentAddress, ResourceAddress, ResourceType, VaultId};
@@ -31,7 +30,7 @@ impl Vault {
     pub(crate) fn try_into_vault(
         self,
         account_address: ComponentAddress,
-        locked_revealed_balance: BigDecimal,
+        locked_revealed_balance: Amount,
     ) -> Result<tari_ootle_wallet_sdk::models::VaultModel, WalletStorageError> {
         Ok(tari_ootle_wallet_sdk::models::VaultModel {
             account_address,
@@ -63,12 +62,7 @@ impl Vault {
                     item: "vault.revealed_balance",
                     details: format!("Invalid revealed balance: {}", e),
                 })?,
-            locked_revealed_balance: Amount::from(
-                locked_revealed_balance
-                    .to_u128()
-                    // Should be impossible because sqlite is limited to i64
-                    .expect("locked more than u128::MAX funds"),
-            ),
+            locked_revealed_balance,
             confidential_balance: self
                 .confidential_balance
                 .parse()

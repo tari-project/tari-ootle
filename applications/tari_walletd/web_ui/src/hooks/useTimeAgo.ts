@@ -20,8 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useEffect, useState } from "react";
 import { parseTimestamp } from "@utils/helpers";
+import { useEffect, useState } from "react";
 
 export function useTimeAgo(rawTimestamp: string | null | undefined): string {
   const getTimeAgo = (timestamp: string | null | undefined): string => {
@@ -35,12 +35,9 @@ export function useTimeAgo(rawTimestamp: string | null | undefined): string {
     const diffHours = Math.floor(diffMinutes / 60);
     const diffDays = Math.floor(diffHours / 24);
 
-    if (diffSeconds < 60)
-      return `${diffSeconds} sec${diffSeconds !== 1 ? "s" : ""} ago`;
-    if (diffMinutes < 60)
-      return `${diffMinutes} min${diffMinutes !== 1 ? "s" : ""} ago`;
-    if (diffHours < 24)
-      return `${diffHours} hour${diffHours !== 1 ? "s" : ""} ago`;
+    if (diffSeconds < 60) return `${diffSeconds} sec${diffSeconds !== 1 ? "s" : ""} ago`;
+    if (diffMinutes < 60) return `${diffMinutes} min${diffMinutes !== 1 ? "s" : ""} ago`;
+    if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? "s" : ""} ago`;
     if (diffDays === 1) return "yesterday";
     if (diffDays < 7) return `${diffDays} day${diffDays !== 1 ? "s" : ""} ago`;
 

@@ -20,9 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import type { Amount, NonFungibleId, SubstateId } from "@tari-project/ootle-ts-bindings";
+import { Currency } from "@utils/currency";
 import { ChangeEvent } from "react";
-import type { Amount, SubstateId, NonFungibleId } from "@tari-project/ootle-ts-bindings";
-import { XTR_CURRENCY } from "@utils/constants";
 
 export const renderJson = (json: any) => {
   if (Array.isArray(json)) {
@@ -251,44 +251,13 @@ export function bigintToDecimalString(int: bigint | Amount, decimalPlaces: numbe
   return `${wholeValues}.${padding}${fractionalValues}`;
 }
 
-export const formatCurrency = (amount: bigint | Amount, tokenSymbol: string | null): string => {
-  const currencySymbol = tokenSymbol || "";
-  if (amount === BigInt(0) || (typeof amount === "number" && isNaN(amount))) {
-    return `0 ${currencySymbol}`;
-  }
-
-  if (typeof amount === "bigint") {
-    const divisor = BigInt(XTR_CURRENCY.DIVISOR);
-    const integerPart = amount / divisor;
-    const remainder = amount % divisor;
-
-    const fractionalPart = remainder.toString().padStart(XTR_CURRENCY.DECIMALS, "0");
-
-    return `${Number(integerPart).toLocaleString("en-US")}.${fractionalPart} ${currencySymbol}`;
-  } else if (typeof amount === "number") {
-    if (isNaN(amount)) {
-      return `0 ${currencySymbol}`;
-    }
-    const convertedAmount = amount / XTR_CURRENCY.DIVISOR;
-    return `${convertedAmount.toLocaleString("en-US", {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: XTR_CURRENCY.DECIMALS,
-    })} ${currencySymbol}`;
-  } else {
-    // Handle Amount type
-    try {
-      const numericAmount = BigInt(amount);
-      const divisor = BigInt(XTR_CURRENCY.DIVISOR);
-      const integerPart = numericAmount / divisor;
-      const remainder = numericAmount % divisor;
-
-      const fractionalPart = remainder.toString().padStart(XTR_CURRENCY.DECIMALS, "0");
-
-      return `${Number(integerPart).toLocaleString("en-US")}.${fractionalPart} ${currencySymbol}`;
-    } catch (error) {
-      console.error("Failed to parse Amount:", amount, error);
-      return `0 ${currencySymbol}`;
-    }
+export const formatCurrency = (amount: bigint | Amount, currency: Currency): string => {
+  const currencySymbol = currency.symbol ?? "";
+  try {
+    return `${bigintToDecimalString(amount, currency.decimals)} ${currencySymbol}`;
+  } catch (error) {
+    console.error("Failed to parse Amount:", amount, error);
+    return `-- ${currencySymbol}`;
   }
 };
 
@@ -296,15 +265,15 @@ export const formatCurrency = (amount: bigint | Amount, tokenSymbol: string | nu
 export const formatDisplayCurrency = (
   amount: number,
   divisibility: number,
-  currencySymbol: string | undefined,
+  tokenSymbol: string | undefined,
 ): string => {
-  if (isNaN(amount)) {
-    return `0 ${currencySymbol}`;
+  const currencySymbol = tokenSymbol ?? "";
+  try {
+    return `${bigintToDecimalString(amount, divisibility)} ${currencySymbol}`;
+  } catch (error) {
+    console.error("Failed to parse Amount:", amount, error);
+    return `-- ${currencySymbol}`;
   }
-  return `${amount.toLocaleString("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: divisibility,
-  })} ${currencySymbol}`;
 };
 
 export function validateHash(hash: string): boolean {
@@ -367,4 +336,17 @@ export function displayNftId(nftId: NonFungibleId): string {
   }
 
   return `NFT #${JSON.stringify(nftId)}`;
+}
+
+/**
+ * Converts a decimal string amount to base units using BigInt arithmetic.
+ * e.g. "1000.5" with divisibility=6 → 1_000_500_000n
+ */
+export function parseAmountToBaseUnits(amount: string, divisibility: number): bigint {
+  const [intPart, fracPart = ""] = amount.split(".");
+
+  // Truncate (not round) fractional digits beyond divisibility
+  const scaledFrac = fracPart.slice(0, divisibility).padEnd(divisibility, "0");
+
+  return BigInt(intPart) * 10n ** BigInt(divisibility) + BigInt(scaledFrac);
 }

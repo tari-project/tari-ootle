@@ -20,22 +20,21 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
+import { useKeysCreate, useKeysList, useKeysSetActive } from "@api/hooks/useKeys";
+import FetchStatusCheck from "@components/FetchStatusCheck";
+import { BoxHeading2, DataTableCell } from "@components/StyledComponents";
+import AddIcon from "@mui/icons-material/Add";
+import Button from "@mui/material/Button/Button";
+import Fade from "@mui/material/Fade";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
-import { useKeysCreate, useKeysList, useKeysSetActive } from "@api/hooks/useKeys";
-import { BoxHeading2 } from "@components/StyledComponents";
-import AddIcon from "@mui/icons-material/Add";
-import Fade from "@mui/material/Fade";
-import { Form } from "react-router-dom";
-import Button from "@mui/material/Button/Button";
-import { DataTableCell } from "@components/StyledComponents";
-import FetchStatusCheck from "@components/FetchStatusCheck";
 import { KeyId } from "@tari-project/ootle-ts-bindings";
+import { useState } from "react";
+import { Form } from "react-router-dom";
 
 function Key([keyId, pk, active]: [KeyId, string, boolean], setActive: (key_id: KeyId) => void) {
   const rowKey =

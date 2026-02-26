@@ -52,6 +52,7 @@ use tari_ootle_wallet_sdk::{
     storage::{TagAndPublicNoncePair, WalletStorageError, WalletStoreReader},
 };
 use tari_template_lib_types::{
+    Amount,
     ComponentAddress,
     NonFungibleId,
     ResourceAddress,
@@ -505,15 +506,16 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
     // -------------------------------- Vaults -------------------------------- //
     fn vaults_get(&mut self, vault_id: &VaultId) -> Result<VaultModel, WalletStorageError> {
+        const OPERATION: &str = "vaults_get";
         use crate::schema::{accounts, vault_locks, vaults};
 
         let row = vaults::table
             .filter(vaults::address.eq(vault_id.to_string()))
             .first::<models::Vault>(self.connection())
             .optional()
-            .map_err(|e| WalletStorageError::general("vaults_get", e))?
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
             .ok_or_else(|| WalletStorageError::NotFound {
-                operation: "vaults_get",
+                operation: OPERATION,
                 entity: "vault".to_string(),
                 key: vault_id.to_string(),
             })?;
@@ -522,18 +524,29 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .select(accounts::address)
             .filter(accounts::id.eq(row.account_id))
             .first::<String>(self.connection())
-            .map_err(|e| WalletStorageError::general("vaults_get", e))?;
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
-        let locked_revealed_balance = vault_locks::table
-            .select(dsl::sum(vault_locks::amount))
+        let locked_revealed_balances = vault_locks::table
+            .select(vault_locks::amount)
             .filter(vault_locks::vault_id.eq(row.id))
-            .first::<Option<BigDecimal>>(self.connection())
-            .map_err(|e| WalletStorageError::general("vaults_get", e))?
-            .unwrap_or_default();
+            .get_results::<String>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        let locked_revealed_balance =
+            locked_revealed_balances
+                .into_iter()
+                .try_fold(Amount::default(), |acc, amount_str| {
+                    let amount = Amount::from_str(&amount_str).map_err(|e| WalletStorageError::DecodingError {
+                        operation: OPERATION,
+                        item: "vault lock amount",
+                        details: format!("Failed to parse vault lock amount '{}': {}", amount_str, e),
+                    })?;
+                    Ok(acc + amount)
+                })?;
 
         let component_addr =
             ComponentAddress::from_str(&account_address).map_err(|e| WalletStorageError::DecodingError {
-                operation: "vaults_get",
+                operation: OPERATION,
                 item: "vault",
                 details: e.to_string(),
             })?;
@@ -558,6 +571,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
         account_addr: &ComponentAddress,
         resource_address: &ResourceAddress,
     ) -> Result<VaultModel, WalletStorageError> {
+        const OPERATION: &str = "vaults_get_by_resource";
         use crate::schema::{accounts, vault_locks, vaults};
 
         let row = vaults::table
@@ -571,24 +585,34 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .filter(vaults::resource_address.eq(resource_address.to_string()))
             .first::<models::Vault>(self.connection())
             .optional()
-            .map_err(|e| WalletStorageError::general("vaults_get_by_resource", e))?
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
             .ok_or_else(|| WalletStorageError::NotFound {
-                operation: "vaults_get_by_resource",
+                operation: OPERATION,
                 entity: "vault".to_string(),
                 key: resource_address.to_string(),
             })?;
 
-        let locked_revealed_balance = vault_locks::table
-            .select(dsl::sum(vault_locks::amount))
+        let locked_revealed_balances = vault_locks::table
+            .select(vault_locks::amount)
             .filter(vault_locks::vault_id.eq(row.id))
-            .first::<Option<BigDecimal>>(self.connection())
-            .map_err(|e| WalletStorageError::general("vaults_get", e))?
-            .unwrap_or_default();
+            .get_results::<String>(self.connection())
+            .map_err(|e| WalletStorageError::general("vaults_get", e))?;
+        let locked_revealed_balance =
+            locked_revealed_balances
+                .into_iter()
+                .try_fold(Amount::default(), |acc, amount_str| {
+                    let amount = Amount::from_str(&amount_str).map_err(|e| WalletStorageError::DecodingError {
+                        operation: OPERATION,
+                        item: "vault lock amount",
+                        details: format!("Failed to parse vault lock amount '{}': {}", amount_str, e),
+                    })?;
+                    Ok(acc + amount)
+                })?;
 
         let vault = row
             .try_into_vault(*account_addr, locked_revealed_balance)
             .map_err(|e| WalletStorageError::DecodingError {
-                operation: "vaults_get_by_resource",
+                operation: OPERATION,
                 item: "vault",
                 details: format!("Failed to convert record to Vault: {}", e),
             })?;
@@ -619,17 +643,22 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .load::<models::Vault>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
-        let locked_revealed_balances = vault_locks::table
-            .group_by(vault_locks::vault_id)
-            .select((vault_locks::vault_id, dsl::sum(vault_locks::amount)))
-            .filter(vault_locks::vault_id.eq_any(rows.iter().map(|r| r.id)))
-            .load_iter::<(i32, Option<BigDecimal>), _>(self.connection())
+        let vault_ids = rows.iter().map(|r| r.id);
+        let lock_rows = vault_locks::table
+            .select((vault_locks::vault_id, vault_locks::amount))
+            .filter(vault_locks::vault_id.eq_any(vault_ids))
+            .load_iter::<(i32, String), _>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
         let mut locked_balance_map = HashMap::new();
-        for res in locked_revealed_balances {
-            let (id, balance) = res.map_err(|e| WalletStorageError::general(OPERATION, e))?;
-            locked_balance_map.insert(id, balance.unwrap_or_default());
+        for result in lock_rows {
+            let (vault_id, amount_str) = result.map_err(|e| WalletStorageError::general(OPERATION, e))?;
+            let amount = Amount::from_str(&amount_str).map_err(|e| WalletStorageError::DecodingError {
+                operation: OPERATION,
+                item: "vault lock amount",
+                details: format!("Failed to parse vault lock amount '{}': {}", amount_str, e),
+            })?;
+            *locked_balance_map.entry(vault_id).or_default() += amount;
         }
 
         let vaults = rows
@@ -641,6 +670,43 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .collect::<Result<_, _>>()?;
 
         Ok(vaults)
+    }
+
+    fn vaults_get_ids_by_account(
+        &mut self,
+        account_addr: &ComponentAddress,
+    ) -> Result<Vec<VaultId>, WalletStorageError> {
+        const OPERATION: &str = "vaults_get_ids_by_account";
+        use crate::schema::{accounts, vaults};
+
+        let account_id = accounts::table
+            .filter(accounts::address.eq(account_addr.to_string()))
+            .select(accounts::id)
+            .first::<i32>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "account".to_string(),
+                key: account_addr.to_string(),
+            })?;
+
+        let vault_addresses = vaults::table
+            .filter(vaults::account_id.eq(account_id))
+            .select(vaults::address)
+            .get_results::<String>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        vault_addresses
+            .into_iter()
+            .map(|addr| {
+                VaultId::from_str(&addr).map_err(|e| WalletStorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "vault address",
+                    details: e.to_string(),
+                })
+            })
+            .collect()
     }
 
     // -------------------------------- Resources -------------------------------- //

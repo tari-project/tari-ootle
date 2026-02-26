@@ -20,14 +20,14 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Box, Tab, Tabs, Typography } from "@mui/material";
-import React, { useState, useEffect } from "react";
 import { ApiError } from "@api/helpers/types";
 import { useNFTsList } from "@api/hooks/useNfts";
-import { substateIdToString, handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
+import { Box, Tab, Tabs, Typography } from "@mui/material";
 import NFTList from "@routes/AssetVault/NFTs/NFTList";
-import { Account } from "@tari-project/ootle-ts-bindings";
 import Tokens from "@routes/AssetVault/Tokens/Tokens";
+import { Account } from "@tari-project/ootle-ts-bindings";
+import { handleChangePage, handleChangeRowsPerPage, substateIdToString } from "@utils/helpers";
+import React, { useEffect, useState } from "react";
 
 interface TabPanelProps {
   children?: React.ReactNode;

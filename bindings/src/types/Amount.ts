@@ -9,4 +9,4 @@
  * This allows Tari to support a massive number tokens within resources.
  * e.g. 2 ETH = 2 x 10^18 Gwei.
  */
-export type Amount = string | number;
+export type Amount = string | number | bigint;

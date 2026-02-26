@@ -20,24 +20,24 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import React, { useEffect, useState, useRef } from "react";
+import CheckMark from "@components/WalletConnectLink/CheckMark";
+import ConfirmTransaction from "@components/WalletConnectLink/ConfirmTransaction";
+import ConnectorLogo from "@components/WalletConnectLink/ConnectorLogo";
+import Permissions from "@components/WalletConnectLink/Permissions";
+import { Error as ErrorIcon } from "@mui/icons-material";
+import CloseIcon from "@mui/icons-material/Close";
 import Button from "@mui/material/Button";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
+import CircularProgress from "@mui/material/CircularProgress";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogContentText from "@mui/material/DialogContentText";
-import CloseIcon from "@mui/icons-material/Close";
 import IconButton from "@mui/material/IconButton";
-import "./ConnectorLink.css";
-import Permissions from "@components/WalletConnectLink/Permissions";
-import CheckMark from "@components/WalletConnectLink/CheckMark";
-import ConnectorLogo from "@components/WalletConnectLink/ConnectorLogo";
-import ConfirmTransaction from "@components/WalletConnectLink/ConfirmTransaction";
 import { useTheme } from "@mui/material/styles";
-import { Core } from "@walletconnect/core";
+import TextField from "@mui/material/TextField";
+import Typography from "@mui/material/Typography";
 import { WalletKit } from "@reown/walletkit";
+import useAccountStore from "@store/accountStore";
 import {
   accountsCreateFreeTestCoins,
   accountsGet,
@@ -54,10 +54,10 @@ import {
   transactionsSubmit,
   walletGetInfo,
 } from "@utils/json_rpc";
-import useAccountStore from "@store/accountStore";
+import { Core } from "@walletconnect/core";
 import { buildApprovedNamespaces, getSdkError } from "@walletconnect/utils";
-import { Error as ErrorIcon } from "@mui/icons-material";
-import CircularProgress from "@mui/material/CircularProgress";
+import { useEffect, useRef, useState } from "react";
+import "./ConnectorLink.css";
 
 const projectId: string = import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID || "78f3485d08b9640a087cbcea000e1f8b";
 

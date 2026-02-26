@@ -1,7 +1,7 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-import { Stack, Typography, Button } from "@mui/material";
+import { Button, Stack, Typography } from "@mui/material";
 import { OutputStatus } from "@tari-project/ootle-ts-bindings";
 
 interface PlaceHolderProps {

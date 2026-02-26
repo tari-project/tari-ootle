@@ -1,9 +1,9 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-import { Stack, Select, MenuItem, FormControl } from "@mui/material";
-import { OutputStatus } from "@tari-project/ootle-ts-bindings";
 import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
+import { FormControl, MenuItem, Select, Stack } from "@mui/material";
+import { OutputStatus } from "@tari-project/ootle-ts-bindings";
 
 interface SortableHeaderProps {
   title: string;

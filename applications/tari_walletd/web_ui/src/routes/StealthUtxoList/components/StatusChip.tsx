@@ -1,16 +1,16 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-import { Chip, Avatar } from "@mui/material";
-import {
-  IoWalletOutline,
-  IoTimeOutline,
-  IoLockClosedOutline,
-  IoArrowForwardOutline,
-  IoWarningOutline,
-} from "react-icons/io5";
+import { Avatar, Chip } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import type { OutputStatus } from "@tari-project/ootle-ts-bindings";
+import {
+  IoArrowForwardOutline,
+  IoLockClosedOutline,
+  IoTimeOutline,
+  IoWalletOutline,
+  IoWarningOutline,
+} from "react-icons/io5";
 
 interface StatusChipProps {
   status: OutputStatus;

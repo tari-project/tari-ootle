@@ -20,16 +20,16 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Grid from "@mui/material/Grid";
-import { StyledPaper } from "@components/StyledComponents";
-import useAccountStore from "@store/accountStore";
-import StealthUtxoList from "@routes/StealthUtxoList/StealthUtxoList";
 import PageHeading from "@/components/PageHeading";
 import { useAccountsGetDefault } from "@api/hooks/useAccounts";
-import { useEffect } from "react";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import PageHeader from "@components/PageHeader";
+import { StyledPaper } from "@components/StyledComponents";
+import Grid from "@mui/material/Grid";
 import ConfidentialBalanceDisplay from "@routes/AssetVault/Components/ConfidentialBalanceDisplay";
+import StealthUtxoList from "@routes/StealthUtxoList/StealthUtxoList";
+import useAccountStore from "@store/accountStore";
+import { useEffect } from "react";
 
 function StealthUtxoListPage() {
   const account = useAccountStore((state) => state.account);

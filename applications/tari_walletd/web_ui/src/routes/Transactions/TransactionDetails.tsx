@@ -20,44 +20,48 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { formatCurrency } from "@/utils/helpers";
 import { useTransactionDetails } from "@api/hooks/useTransactions";
 import { Accordion, AccordionDetails, AccordionSummary } from "@components/Accordion";
-import {
-  Grid,
-  Table,
-  TableContainer,
-  TableBody,
-  TableRow,
-  TableCell,
-  Button,
-  Fade,
-  Stack,
-  Tooltip,
-} from "@mui/material";
-import Typography from "@mui/material/Typography";
-import { saveAs } from "file-saver";
-import { DataTableCell, StyledPaper } from "@components/StyledComponents";
+import Error from "@components/Error";
+import Loading from "@components/Loading";
 import PageHeading from "@components/PageHeading";
-import Events from "./Events";
-import Logs from "./Logs";
-import Instructions from "./Instructions";
-import Substates from "./Substates";
-import Inputs from "./Inputs";
-import Signers from "./Signers";
-import ExecutionResults from "./ExecutionResults";
-import FeeReceipt from "./FeeReceipt";
+import { DataTableCell, StyledPaper } from "@components/StyledComponents";
 import TransactionsStatusChip from "@components/TransactionsStatusChip";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import Loading from "@components/Loading";
-import Error from "@components/Error";
-import { FinalizeResult, TransactionResult } from "@tari-project/ootle-ts-bindings";
-import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tari-project/ootle-ts-bindings";
+import {
+  Button,
+  Fade,
+  Grid,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableRow,
+  Tooltip,
+} from "@mui/material";
+import Typography from "@mui/material/Typography";
+import {
+  FinalizeResult,
+  getRejectReasonFromTransactionResult,
+  rejectReasonToString,
+  TransactionResult,
+} from "@tari-project/ootle-ts-bindings";
+import { XTR_CURRENCY } from "@utils/currency";
+import { saveAs } from "file-saver";
+import { useState } from "react";
 import { BsQuestionCircle } from "react-icons/bs";
-import { formatCurrency } from "@/utils/helpers";
-import { XTR_CURRENCY } from "@utils/constants";
+import { useParams } from "react-router-dom";
+import Events from "./Events";
+import ExecutionResults from "./ExecutionResults";
+import FeeReceipt from "./FeeReceipt";
+import Inputs from "./Inputs";
+import Instructions from "./Instructions";
+import Logs from "./Logs";
+import Signers from "./Signers";
+import Substates from "./Substates";
 
 export default function TransactionDetails() {
   const [expandedPanels, setExpandedPanels] = useState<string[]>([]);
@@ -159,11 +163,11 @@ export default function TransactionDetails() {
                   <TableRow>
                     <TableCell>Total Fees</TableCell>
                     <DataTableCell>
-                      {feeReceipt ? formatCurrency(feeReceipt.total_fees_paid, XTR_CURRENCY.SYMBOL) : "0"}
+                      {feeReceipt ? formatCurrency(feeReceipt.total_fees_paid, XTR_CURRENCY) : "0"}
                       {feeReceipt?.total_fee_overcharge ? (
                         <>
                           {" "}
-                          ({formatCurrency(feeReceipt.total_fee_overcharge, XTR_CURRENCY.SYMBOL)} overcharge{" "}
+                          ({formatCurrency(feeReceipt.total_fee_overcharge, XTR_CURRENCY)} overcharge{" "}
                           <Tooltip title="An overcharge occurs when paying more fees than required using stealth transfers. To preserve privacy, there is no vault to refund excess fees, therefore the fees are given to validators in their entirety.">
                             <BsQuestionCircle style={{ display: "inline" }} />
                           </Tooltip>

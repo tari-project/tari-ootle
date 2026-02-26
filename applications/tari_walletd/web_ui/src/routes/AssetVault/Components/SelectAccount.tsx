@@ -20,19 +20,19 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
-import { IoAdd } from "react-icons/io5";
-import Divider from "@mui/material/Divider";
+import { useAccountsList } from "@api/hooks/useAccounts";
 import Box from "@mui/material/Box";
-import { useTheme } from "@mui/material/styles";
+import Divider from "@mui/material/Divider";
+import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import MenuItem from "@mui/material/MenuItem";
-import FormControl from "@mui/material/FormControl";
 import Select, { SelectChangeEvent } from "@mui/material/Select";
-import Dialog from "./AddAccount";
+import { useTheme } from "@mui/material/styles";
 import useAccountStore from "@store/accountStore";
-import { useAccountsList } from "@api/hooks/useAccounts";
 import { AccountInfo, substateIdToString } from "@tari-project/ootle-ts-bindings";
+import { useState } from "react";
+import { IoAdd } from "react-icons/io5";
+import Dialog from "./AddAccount";
 
 function SelectAccount() {
   const account = useAccountStore((state) => state.account);

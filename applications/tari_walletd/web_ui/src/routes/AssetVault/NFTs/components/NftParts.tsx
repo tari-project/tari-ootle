@@ -20,16 +20,16 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import CopyAddress from "@components/CopyAddress";
+import { NftCard as Card, DataTableCell } from "@components/StyledComponents";
 import CancelRoundedIcon from "@mui/icons-material/CancelRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import { Avatar, Box, CardContent, CardMedia, Chip, Divider, Grid, TableRow, Typography } from "@mui/material";
 import type { NonFungibleToken } from "@tari-project/ootle-ts-bindings";
-import CopyAddress from "@components/CopyAddress";
-import { NftCard as Card, DataTableCell } from "@components/StyledComponents";
 import { convertCborValue } from "@utils/cbor";
-import { shortenSubstateId, displayNftId } from "@utils/helpers";
-import SendNft from "./SendNft";
+import { displayNftId, shortenSubstateId } from "@utils/helpers";
 import { Fragment } from "react/jsx-runtime";
+import SendNft from "./SendNft";
 
 function NftCard({ nft }: { nft: NonFungibleToken }) {
   const mutableData = convertCborValue(nft.mutable_data);

@@ -20,8 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { DialogTitle, IconButton, Stack, Typography, Divider } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
+import { DialogTitle, Divider, IconButton, Stack, Typography } from "@mui/material";
 
 interface PopupTitleProps {
   title: string;

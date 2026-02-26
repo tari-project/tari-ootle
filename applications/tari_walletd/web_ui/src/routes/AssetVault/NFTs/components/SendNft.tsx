@@ -20,27 +20,27 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { FormEvent, useEffect, useState, useMemo } from "react";
+import PopupTitle from "@/components/PopupTitle";
+import { useAccountsList } from "@api/hooks/useAccounts";
+import { useNFTsList, useNftsTransfer } from "@api/hooks/useNfts";
 import Button from "@mui/material/Button";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
 import useAccountStore from "@store/accountStore";
+import { useNftTransferStore } from "@store/nftTransferStore";
 import {
   Account,
   ComponentAddressOrName,
-  ResourceAddress,
   NonFungibleId,
   NonFungibleToken,
+  ResourceAddress,
 } from "@tari-project/ootle-ts-bindings";
-import { useNftsTransfer, useNFTsList } from "@api/hooks/useNfts";
 import { substateIdToString } from "@utils/helpers";
-import { useAccountsList } from "@api/hooks/useAccounts";
-import { useNftTransferStore } from "@store/nftTransferStore";
-import FormStep from "../steps/FormStep";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import ConfirmationStep from "../steps/ConfirmationStep";
+import FormStep from "../steps/FormStep";
 import ResultStep from "../steps/ResultStep";
-import PopupTitle from "@/components/PopupTitle";
 
 interface TransferNftProps {
   account?: Account;

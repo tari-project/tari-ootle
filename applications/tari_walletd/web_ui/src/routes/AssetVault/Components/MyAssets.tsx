@@ -20,23 +20,23 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { refreshAccountsBalances, useAccountsGetDefault } from "@api/hooks/useAccounts";
+import queryClient from "@api/queryClient";
+import Loading from "@components/Loading";
+import PageHeader from "@components/PageHeader";
+import { InnerHeading, StyledPaper } from "@components/StyledComponents";
+import { Refresh } from "@mui/icons-material";
 import Grid from "@mui/material/Grid";
 import IconButton from "@mui/material/IconButton";
 import { useTheme } from "@mui/material/styles";
-import { InnerHeading, StyledPaper } from "@components/StyledComponents";
-import { refreshAccountsBalances, useAccountsGetDefault } from "@api/hooks/useAccounts";
-import useAccountStore from "@store/accountStore";
 import Transactions from "@routes/Transactions/Transactions";
+import useAccountStore from "@store/accountStore";
+import { substateIdToString } from "@tari-project/ootle-ts-bindings";
+import { useEffect } from "react";
+import { Navigate } from "react-router-dom";
 import AccountDetails from "./AccountDetails";
 import ActionMenu from "./ActionMenu";
 import Assets from "./Assets";
-import { substateIdToString } from "@tari-project/ootle-ts-bindings";
-import { Refresh } from "@mui/icons-material";
-import queryClient from "@api/queryClient";
-import PageHeader from "@components/PageHeader";
-import { useEffect } from "react";
-import Loading from "@components/Loading";
-import { Navigate } from "react-router-dom";
 
 function MyAssets() {
   const theme = useTheme();

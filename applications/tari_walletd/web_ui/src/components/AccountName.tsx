@@ -20,13 +20,13 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import React, { useState } from "react";
-import { Box, TextField, IconButton } from "@mui/material";
-import { IoCheckmark, IoClose } from "react-icons/io5";
-import { ComponentAddress } from "@tari-project/ootle-ts-bindings";
-import { useAccountsRename } from "../services/api/hooks/useAccounts";
-import { LuPencilLine } from "react-icons/lu";
+import { Box, IconButton, TextField } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
+import { ComponentAddress } from "@tari-project/ootle-ts-bindings";
+import React, { useState } from "react";
+import { IoCheckmark, IoClose } from "react-icons/io5";
+import { LuPencilLine } from "react-icons/lu";
+import { useAccountsRename } from "../services/api/hooks/useAccounts";
 
 export interface AccountNameProps {
   accountAddress: ComponentAddress;

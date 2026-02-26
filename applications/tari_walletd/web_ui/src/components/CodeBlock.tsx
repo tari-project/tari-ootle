@@ -28,15 +28,15 @@ import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { styled, useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
+import { renderJson } from "@utils/helpers";
 import { useState } from "react";
 import {
+  IoCheckmarkOutline,
+  IoContractOutline,
   IoCopyOutline,
   IoDownloadOutline,
   IoExpandOutline,
-  IoContractOutline,
-  IoCheckmarkOutline,
 } from "react-icons/io5";
-import { renderJson } from "@utils/helpers";
 
 interface ICodeBlockExpand {
   title: string;

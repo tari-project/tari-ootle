@@ -20,7 +20,24 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { ApiError } from "@api/helpers/types";
+import queryClient from "@api/queryClient";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import {
+  AccountOrKeyId,
+  BadgeUsage,
+  ClaimBurnRequest,
+  ComponentAddress,
+  ComponentAddressOrName,
+  decodeOotleAddress,
+  Memo,
+  OutputStatus,
+  PayTo,
+  ResourceAddress,
+  ResourceType,
+  UtxoInputSelection,
+  XTR,
+} from "@tari-project/ootle-ts-bindings";
 import {
   accountsClaimBurn,
   accountsConfidentialTransfer,
@@ -34,26 +51,9 @@ import {
   accountsStealthTransfer,
   accountsTransfer,
   mintFaucetNfts,
-  validatorsGetFees,
   stealthUtxosList,
+  validatorsGetFees,
 } from "@utils/json_rpc";
-import { ApiError } from "@api/helpers/types";
-import queryClient from "@api/queryClient";
-import {
-  AccountOrKeyId,
-  BadgeUsage,
-  ClaimBurnRequest,
-  ComponentAddress,
-  ComponentAddressOrName,
-  UtxoInputSelection,
-  decodeOotleAddress,
-  Memo,
-  OutputStatus,
-  ResourceAddress,
-  ResourceType,
-  XTR,
-  PayTo,
-} from "@tari-project/ootle-ts-bindings";
 
 const DEFAULT_MAX_FEE = 2000;
 
@@ -120,7 +120,7 @@ export const useAccountsRename = () => {
 
 export interface TransferParams {
   account: ComponentAddress;
-  amount: number;
+  amount: bigint | string;
   resource_address: string;
   destination_address: string;
   max_fee: number | null;
@@ -171,7 +171,7 @@ export const useAccountsTransfer = () => {
           transfers: [
             {
               destination_address: params.destination_address,
-              blinded_output_amount: params.output_to_revealed ? 0n : BigInt(params.amount),
+              blinded_output_amount: params.output_to_revealed ? 0n : params.amount,
               revealed_output_amount: params.output_to_revealed ? params.amount : 0,
               output_memo: params.output_memo || null,
               pay_to: "StealthPublicKey" as PayTo,

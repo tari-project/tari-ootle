@@ -20,16 +20,16 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useEffect, useState, useRef } from "react";
+import CloseIcon from "@mui/icons-material/Close";
 import Button from "@mui/material/Button";
-import Typography from "@mui/material/Typography";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
-import CloseIcon from "@mui/icons-material/Close";
 import IconButton from "@mui/material/IconButton";
-import "./ConnectorLink.css";
+import Typography from "@mui/material/Typography";
+import { useEffect, useRef, useState } from "react";
 import CheckMark from "./CheckMark";
+import "./ConnectorLink.css";
 import ConnectorLogo from "./ConnectorLogo";
 
 const ConnectorDialog = () => {

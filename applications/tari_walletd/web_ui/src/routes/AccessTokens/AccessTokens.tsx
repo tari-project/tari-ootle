@@ -21,8 +21,8 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import PageHeading from "@components/PageHeading";
-import Grid from "@mui/material/Grid";
 import { StyledPaper } from "@components/StyledComponents";
+import Grid from "@mui/material/Grid";
 import AccessTokens from "@routes/Wallet/Components/AccessTokens";
 
 function AccessTokensLayout() {

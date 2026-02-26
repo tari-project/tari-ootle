@@ -20,25 +20,17 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { NavLink } from "react-router-dom";
+import ThemeSwitcher from "@components/ThemeSwitcher";
+import Box from "@mui/material/Box";
+import Fade from "@mui/material/Fade";
 import ListItemButton from "@mui/material/ListItemButton";
 import ListItemIcon from "@mui/material/ListItemIcon";
 import ListItemText from "@mui/material/ListItemText";
-import {
-  IoHome,
-  IoHomeOutline,
-  IoSettings,
-  IoSettingsOutline,
-  IoTerminal,
-  IoTerminalOutline,
-  IoGitMerge,
-} from "react-icons/io5";
-import Tooltip from "@mui/material/Tooltip";
-import Fade from "@mui/material/Fade";
-import ThemeSwitcher from "@components/ThemeSwitcher";
-import Box from "@mui/material/Box";
 import { useTheme } from "@mui/material/styles";
+import Tooltip from "@mui/material/Tooltip";
+import { IoHome, IoHomeOutline, IoSettings, IoSettingsOutline, IoTerminal, IoTerminalOutline } from "react-icons/io5";
 import { LuLayoutTemplate } from "react-icons/lu";
+import { NavLink } from "react-router-dom";
 
 function MainListItems() {
   const theme = useTheme();

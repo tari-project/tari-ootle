@@ -20,17 +20,16 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
-import { TableContainer, Table, TableRow, TableBody, Collapse, Box, Typography, Chip } from "@mui/material";
-import { DataTableCell } from "@components/StyledComponents";
-import { AccordionIconButton } from "@components/StyledComponents";
+import CodeBlockExpand from "@components/CodeBlock";
+import CopyAddress from "@components/CopyAddress";
+import { AccordionIconButton, DataTableCell } from "@components/StyledComponents";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import { IoArrowDownCircle, IoArrowUpCircle } from "react-icons/io5";
-import CodeBlockExpand from "@components/CodeBlock";
+import { Box, Chip, Collapse, Table, TableBody, TableContainer, TableRow, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import { Substate, SubstateId, substateIdToString, TransactionResult } from "@tari-project/ootle-ts-bindings";
-import CopyAddress from "@components/CopyAddress";
+import { useState } from "react";
+import { IoArrowDownCircle, IoArrowUpCircle } from "react-icons/io5";
 
 function renderSubstateDetails(substate: any, id: SubstateId) {
   if (!substate || typeof substate === "number") {

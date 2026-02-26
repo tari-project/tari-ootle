@@ -126,7 +126,6 @@ export default function FormStep({
   const currency = {
     symbol: token_symbol,
     decimals: divisibility,
-    divisor: 10 ** divisibility,
   };
 
   return (
@@ -244,7 +243,7 @@ export default function FormStep({
             hasInsufficientFunds
               ? `Insufficient funds. Available balance: ${formatCurrency(availableBalance || 0, currency)}`
               : availableBalance !== undefined
-                ? `Available balance: ${formatCurrency(availableBalance, { decimals: divisibility, symbol: token_symbol })}`
+                ? `Available balance: ${formatCurrency(availableBalance, currency)}`
                 : undefined
           }
           InputProps={{

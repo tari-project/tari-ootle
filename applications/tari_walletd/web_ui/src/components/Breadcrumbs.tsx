@@ -20,9 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { Breadcrumbs, Link } from "@mui/material";
 import React from "react";
 import { Link as RouterLink } from "react-router-dom";
-import { Breadcrumbs, Link } from "@mui/material";
 import useBreadcrumbs from "use-react-router-breadcrumbs";
 
 interface BreadcrumbsItem {

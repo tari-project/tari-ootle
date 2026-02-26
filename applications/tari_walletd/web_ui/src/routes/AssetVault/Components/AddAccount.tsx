@@ -20,21 +20,20 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { FormEvent, useState } from "react";
-import { Form } from "react-router-dom";
+import PopupTitle from "@/components/PopupTitle";
+import { useAccountsCreate } from "@api/hooks/useAccounts";
+import queryClient from "@api/queryClient";
+import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
+import { CircularProgress, Fade, Stack, Typography } from "@mui/material";
 import Button from "@mui/material/Button";
-import TextField from "@mui/material/TextField";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
-import { CircularProgress } from "@mui/material";
-import { useAccountsCreate } from "@api/hooks/useAccounts";
+import { useTheme } from "@mui/material/styles";
+import TextField from "@mui/material/TextField";
 import useAccountStore from "@store/accountStore";
 import type { AccountsCreateResponse } from "@tari-project/ootle-ts-bindings";
-import { useTheme } from "@mui/material/styles";
-import queryClient from "@api/queryClient";
-import { Stack, Fade, Typography } from "@mui/material";
-import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
-import PopupTitle from "@/components/PopupTitle";
+import { FormEvent, useState } from "react";
+import { Form } from "react-router-dom";
 
 function AddAccount({ open, setOpen }: { open: boolean; setOpen: React.Dispatch<React.SetStateAction<boolean>> }) {
   const [accountFormState, setAccountFormState] = useState({

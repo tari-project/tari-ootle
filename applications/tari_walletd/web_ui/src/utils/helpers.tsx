@@ -20,9 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { ChangeEvent } from "react";
-import type { Amount, SubstateId, NonFungibleId } from "@tari-project/ootle-ts-bindings";
+import type { Amount, NonFungibleId, SubstateId } from "@tari-project/ootle-ts-bindings";
 import { Currency } from "@utils/currency";
+import { ChangeEvent } from "react";
 
 export const renderJson = (json: any) => {
   if (Array.isArray(json)) {

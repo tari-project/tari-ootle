@@ -20,12 +20,12 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Box, Button, Stack, Typography, Divider } from "@mui/material";
-import type { ResourceAddress, ResourceType } from "@tari-project/ootle-ts-bindings";
 import CopyAddress from "@components/CopyAddress";
+import { Box, Button, Divider, Stack, Typography } from "@mui/material";
+import type { ResourceAddress, ResourceType } from "@tari-project/ootle-ts-bindings";
+import { XTR_CURRENCY } from "@utils/currency";
 import { formatCurrency } from "@utils/helpers";
 import { SendMoneyFormState } from "./FormStep";
-import { XTR_CURRENCY } from "@utils/currency";
 
 interface ConfirmationStepProps {
   resource_address?: ResourceAddress;

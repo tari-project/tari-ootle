@@ -20,18 +20,18 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { useAccountsGetBalances } from "@api/hooks/useAccounts";
+import FetchStatusCheck from "@components/FetchStatusCheck";
 import Box from "@mui/material/Box";
 import Fade from "@mui/material/Fade";
 import IconButton from "@mui/material/IconButton";
 import Typography from "@mui/material/Typography";
 import { useTheme } from "@mui/material/styles";
-import { IoEyeOffOutline, IoEyeOutline } from "react-icons/io5";
-import FetchStatusCheck from "@components/FetchStatusCheck";
-import { useAccountsGetBalances } from "@api/hooks/useAccounts";
 import useAccountStore from "@store/accountStore";
-import { useEffect } from "react";
-import { substateIdToString, bigintToDecimalString } from "@utils/helpers";
 import { Account } from "@tari-project/ootle-ts-bindings";
+import { bigintToDecimalString, substateIdToString } from "@utils/helpers";
+import { useEffect } from "react";
+import { IoEyeOffOutline, IoEyeOutline } from "react-icons/io5";
 
 const XTR_RESOURCE = "resource_0101010101010101010101010101010101010101010101010101010101010101";
 

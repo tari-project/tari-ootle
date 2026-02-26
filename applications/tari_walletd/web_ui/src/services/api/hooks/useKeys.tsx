@@ -20,11 +20,11 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useQuery, useMutation } from "@tanstack/react-query";
 import { ApiError } from "@api/helpers/types";
 import queryClient from "@api/queryClient";
-import { keysCreate, keysList, keysSetActive } from "@utils/json_rpc";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { KeyBranch } from "@tari-project/ootle-ts-bindings";
+import { keysCreate, keysList, keysSetActive } from "@utils/json_rpc";
 
 export const useKeysList = (branch: KeyBranch) => {
   return useQuery({

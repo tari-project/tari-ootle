@@ -20,10 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Box, Chip, Typography } from "@mui/material";
-import { DataTableCell } from "@components/StyledComponents";
-import { SubstateRequirement, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import CopyAddress from "@components/CopyAddress";
+import { DataTableCell } from "@components/StyledComponents";
+import { Box, Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from "@mui/material";
+import { SubstateRequirement, substateIdToString } from "@tari-project/ootle-ts-bindings";
 
 function getSubstateType(substateId: string): string {
   if (substateId.startsWith("component_")) return "Component";

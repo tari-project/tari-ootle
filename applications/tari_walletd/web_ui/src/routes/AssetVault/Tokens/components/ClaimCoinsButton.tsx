@@ -20,12 +20,12 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Button from "@mui/material/Button";
-import { useAccountsCreateFreeTestCoins } from "@api/hooks/useAccounts";
-import useAccountStore from "@store/accountStore";
-import { substateIdToString, AccountsCreateFreeTestCoinsResponse } from "@tari-project/ootle-ts-bindings";
-import queryClient from "@api/queryClient";
 import { useErrorNotification } from "@/contexts/ErrorNotificationContext";
+import { useAccountsCreateFreeTestCoins } from "@api/hooks/useAccounts";
+import queryClient from "@api/queryClient";
+import Button from "@mui/material/Button";
+import useAccountStore from "@store/accountStore";
+import { AccountsCreateFreeTestCoinsResponse, substateIdToString } from "@tari-project/ootle-ts-bindings";
 
 function ClaimCoinsButton() {
   const { mutate: claimTestnetFaucetFunds, isPending } = useAccountsCreateFreeTestCoins();

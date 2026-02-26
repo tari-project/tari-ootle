@@ -20,15 +20,15 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Typography from "@mui/material/Typography";
-import TextField from "@mui/material/TextField";
-import { useState } from "react";
-import Button from "@mui/material/Button";
-import Box from "@mui/material/Box";
-import { useTheme } from "@mui/material/styles";
 import { Divider } from "@mui/material";
-import { confidentialViewVaultBalance } from "../../../utils/json_rpc";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import { useTheme } from "@mui/material/styles";
+import TextField from "@mui/material/TextField";
+import Typography from "@mui/material/Typography";
 import { ConfidentialViewVaultBalanceRequest } from "@tari-project/ootle-ts-bindings";
+import { useState } from "react";
+import { confidentialViewVaultBalance } from "../../../utils/json_rpc";
 
 function ViewVaultBalanceForm() {
   const [formState, setFormState] = useState({

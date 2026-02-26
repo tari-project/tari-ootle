@@ -20,12 +20,12 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { FormEvent, useState } from "react";
+import PopupTitle from "@/components/PopupTitle";
+import { useAccountsGetBalances, useAccountsTransfer } from "@api/hooks/useAccounts";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
-import { useAccountsGetBalances, useAccountsTransfer } from "@api/hooks/useAccounts";
-import useAccountStore from "@store/accountStore";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
+import useAccountStore from "@store/accountStore";
 import {
   BadgeUsage,
   BalanceEntry,
@@ -36,12 +36,12 @@ import {
   UtxoInputSelection,
   XTR,
 } from "@tari-project/ootle-ts-bindings";
-import { transactionsWaitResult } from "@utils/json_rpc";
-import FormStep, { FormError, SendMoneyFormState } from "../steps/FormStep";
-import ConfirmationStep from "../steps/ConfirmationStep";
-import ResultStep, { TransferResult } from "../steps/ResultStep";
-import PopupTitle from "@/components/PopupTitle";
 import { parseAmountToBaseUnits } from "@utils/helpers";
+import { transactionsWaitResult } from "@utils/json_rpc";
+import { FormEvent, useState } from "react";
+import ConfirmationStep from "../steps/ConfirmationStep";
+import FormStep, { FormError, SendMoneyFormState } from "../steps/FormStep";
+import ResultStep, { TransferResult } from "../steps/ResultStep";
 
 export interface SendMoneyDialogProps {
   open: boolean;

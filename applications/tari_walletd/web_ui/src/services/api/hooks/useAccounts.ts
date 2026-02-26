@@ -20,7 +20,24 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { ApiError } from "@api/helpers/types";
+import queryClient from "@api/queryClient";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import {
+  AccountOrKeyId,
+  BadgeUsage,
+  ClaimBurnRequest,
+  ComponentAddress,
+  ComponentAddressOrName,
+  decodeOotleAddress,
+  Memo,
+  OutputStatus,
+  PayTo,
+  ResourceAddress,
+  ResourceType,
+  UtxoInputSelection,
+  XTR,
+} from "@tari-project/ootle-ts-bindings";
 import {
   accountsClaimBurn,
   accountsConfidentialTransfer,
@@ -34,26 +51,9 @@ import {
   accountsStealthTransfer,
   accountsTransfer,
   mintFaucetNfts,
-  validatorsGetFees,
   stealthUtxosList,
+  validatorsGetFees,
 } from "@utils/json_rpc";
-import { ApiError } from "@api/helpers/types";
-import queryClient from "@api/queryClient";
-import {
-  AccountOrKeyId,
-  BadgeUsage,
-  ClaimBurnRequest,
-  ComponentAddress,
-  ComponentAddressOrName,
-  UtxoInputSelection,
-  decodeOotleAddress,
-  Memo,
-  OutputStatus,
-  ResourceAddress,
-  ResourceType,
-  XTR,
-  PayTo,
-} from "@tari-project/ootle-ts-bindings";
 
 const DEFAULT_MAX_FEE = 2000;
 

@@ -21,10 +21,10 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import PageHeading from "@components/PageHeading";
-import Grid from "@mui/material/Grid";
 import { StyledPaper } from "@components/StyledComponents";
-import Transactions from "./Transactions";
+import Grid from "@mui/material/Grid";
 import useAccountStore from "@store/accountStore";
+import Transactions from "./Transactions";
 
 function TransactionsLayout() {
   const { account } = useAccountStore();

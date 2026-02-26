@@ -20,33 +20,31 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
+import { ApiError } from "@api/helpers/types";
+import { useNFTsList } from "@api/hooks/useNfts";
+import AccountName from "@components/AccountName";
+import CopyAddress from "@components/CopyAddress";
+import FetchStatusCheck from "@components/FetchStatusCheck";
+import Loading from "@components/Loading";
 import PageHeading from "@components/PageHeading";
+import { DataTableCell, InnerHeading, StyledPaper } from "@components/StyledComponents";
+import { Box, Button, Fade, TextField } from "@mui/material";
 import Grid from "@mui/material/Grid";
-import { StyledPaper, InnerHeading } from "@components/StyledComponents";
-import TableContainer from "@mui/material/TableContainer";
 import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
-import TableCell from "@mui/material/TableCell";
-import TableBody from "@mui/material/TableBody";
-import { useAccountsGetBalances, useAccountsGet } from "../../services/api/hooks/useAccounts";
-import AccountName from "@components/AccountName";
-import { useNFTsList } from "@api/hooks/useNfts";
-import { ApiError } from "@api/helpers/types";
-import { DataTableCell } from "@components/StyledComponents";
-import FetchStatusCheck from "@components/FetchStatusCheck";
-import { BalanceEntry, decodeOotleAddressOrNull, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import NftList from "@routes/AssetVault/NFTs/NFTList";
-import CopyAddress from "@components/CopyAddress";
-import { Form, useParams } from "react-router-dom";
-import { accountsAssociateStealthResource } from "@utils/json_rpc";
-import Loading from "@components/Loading";
-import { IoAdd } from "react-icons/io5";
-import { Box, Fade, TextField, Button } from "@mui/material";
-import { handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
-import { formatCurrency } from "@utils/helpers";
+import { BalanceEntry, decodeOotleAddressOrNull, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { Currency } from "@utils/currency";
+import { formatCurrency, handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
+import { accountsAssociateStealthResource } from "@utils/json_rpc";
+import { useState } from "react";
+import { IoAdd } from "react-icons/io5";
+import { Form, useParams } from "react-router-dom";
+import { useAccountsGet, useAccountsGetBalances } from "../../services/api/hooks/useAccounts";
 
 function BalanceRow(props: BalanceEntry) {
   const currency = {

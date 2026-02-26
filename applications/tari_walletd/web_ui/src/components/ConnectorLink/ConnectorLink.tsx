@@ -20,25 +20,24 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import React, { useEffect, useState, useRef } from "react";
+import CheckMark from "@components/ConnectorLink/CheckMark";
+import ConfirmTransaction from "@components/ConnectorLink/ConfirmTransaction";
+import ConnectorLogo from "@components/ConnectorLink/ConnectorLogo";
+import Permissions from "@components/ConnectorLink/Permissions";
+import CloseIcon from "@mui/icons-material/Close";
 import Button from "@mui/material/Button";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogContentText from "@mui/material/DialogContentText";
-import CloseIcon from "@mui/icons-material/Close";
 import IconButton from "@mui/material/IconButton";
-import "./ConnectorLink.css";
-import Permissions from "@components/ConnectorLink/Permissions";
-import CheckMark from "@components/ConnectorLink/CheckMark";
-import ConnectorLogo from "@components/ConnectorLink/ConnectorLogo";
-import { parse } from "@utils/tari_permissions";
-import ConfirmTransaction from "@components/ConnectorLink/ConfirmTransaction";
-import Stepper from "@components/Stepper";
 import { useTheme } from "@mui/material/styles";
+import TextField from "@mui/material/TextField";
+import Typography from "@mui/material/Typography";
 import { webrtcStart } from "@utils/json_rpc";
+import { parse } from "@utils/tari_permissions";
+import React, { useEffect, useRef, useState } from "react";
+import "./ConnectorLink.css";
 
 const ConnectorDialog = () => {
   const [page, setPage] = useState(1);

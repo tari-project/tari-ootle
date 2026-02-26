@@ -20,10 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Typography, Stack, Button, CircularProgress, Fade, Divider } from "@mui/material";
-import { useEffect } from "react";
 import CancelRoundedIcon from "@mui/icons-material/CancelRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
+import { Button, CircularProgress, Divider, Fade, Stack, Typography } from "@mui/material";
+import { useEffect } from "react";
 
 export interface TransferResult {
   success: boolean;

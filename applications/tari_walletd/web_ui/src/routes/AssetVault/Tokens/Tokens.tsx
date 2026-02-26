@@ -20,27 +20,26 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { useAccountsGetBalances } from "@api/hooks/useAccounts";
+import CopyAddress from "@components/CopyAddress";
+import FetchStatusCheck from "@components/FetchStatusCheck";
+import { DataTableCell } from "@components/StyledComponents";
+import { Box, Button, Stack, Tooltip, Typography } from "@mui/material";
+import IconButton from "@mui/material/IconButton";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
-import IconButton from "@mui/material/IconButton";
-import { Typography, Box, Stack, Icon, Tooltip } from "@mui/material";
-import { useState } from "react";
-import FetchStatusCheck from "@components/FetchStatusCheck";
-import { DataTableCell } from "@components/StyledComponents";
-import { useAccountsGetBalances } from "@api/hooks/useAccounts";
 import useAccountStore from "@store/accountStore";
+import { Account, Amount, BalanceEntry, ResourceAddress, ResourceType, VaultId } from "@tari-project/ootle-ts-bindings";
 import { bigintToDecimalString, shortenSubstateId, substateIdToString } from "@utils/helpers";
-import { Button } from "@mui/material";
-import { SendMoneyDialog } from "./components/SendMoney";
-import ClaimCoinsButton from "./components/ClaimCoinsButton";
-import { ResourceAddress, ResourceType, VaultId, BalanceEntry, Account, Amount } from "@tari-project/ootle-ts-bindings";
-import CopyAddress from "@components/CopyAddress";
+import { useState } from "react";
 import { IoWalletOutline } from "react-icons/io5";
 import { useNavigate } from "react-router-dom";
+import ClaimCoinsButton from "./components/ClaimCoinsButton";
+import { SendMoneyDialog } from "./components/SendMoney";
 
 interface BalanceRowProps {
   token_symbol: string;

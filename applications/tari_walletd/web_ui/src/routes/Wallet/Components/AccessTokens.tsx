@@ -20,6 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { useAuthRevokeToken, useGetAllTokens } from "@api/hooks/useTokens";
+import FetchStatusCheck from "@components/FetchStatusCheck";
+import { AccordionIconButton, CodeBlock, DataTableCell } from "@components/StyledComponents";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import {
@@ -42,11 +45,6 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogContentText from "@mui/material/DialogContentText";
 import DialogTitle from "@mui/material/DialogTitle";
 import IconButton from "@mui/material/IconButton";
-import { useState } from "react";
-import { IoCloseCircleOutline } from "react-icons/io5";
-import FetchStatusCheck from "@components/FetchStatusCheck";
-import { AccordionIconButton, CodeBlock, DataTableCell } from "@components/StyledComponents";
-import { useAuthRevokeToken, useGetAllTokens } from "@api/hooks/useTokens";
 import type {
   AuthSessionInfo,
   JrpcPermission,
@@ -54,6 +52,8 @@ import type {
   RefreshTokenHash,
 } from "@tari-project/ootle-ts-bindings";
 import { jrpcPermissionToString } from "@tari-project/ootle-ts-bindings";
+import { useState } from "react";
+import { IoCloseCircleOutline } from "react-icons/io5";
 
 function AlertDialog({ fn }: any) {
   const [open, setOpen] = useState(false);

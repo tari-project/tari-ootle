@@ -1,12 +1,12 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-import { useEffect, useState } from "react";
-import WebauthnLogin from "./components/Login";
-import WebauthnRegistration from "./components/Registration";
 import { useWebauthnAlreadyRegistered } from "@api/hooks/useWebauthn";
 import Loading from "@components/Loading";
 import { JrpcPermission } from "@tari-project/ootle-ts-bindings";
+import { useEffect, useState } from "react";
+import WebauthnLogin from "./components/Login";
+import WebauthnRegistration from "./components/Registration";
 
 export const APP_NAME: string = "tari-wallet-webui";
 export const DEFAULT_PERMISSIONS: JrpcPermission[] = ["Admin"];

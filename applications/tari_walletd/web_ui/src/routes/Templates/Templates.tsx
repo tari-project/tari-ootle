@@ -1,45 +1,45 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
-import { Fragment, useEffect, useState } from "react";
 import { useAccountsList } from "@api/hooks/useAccounts";
+import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
+import CopyAddress from "@components/CopyAddress";
+import FetchStatusCheck from "@components/FetchStatusCheck";
 import PageHeading from "@components/PageHeading";
+import { AccordionIconButton, DataTableCell, StyledPaper } from "@components/StyledComponents";
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import {
+  Collapse,
+  FormControl,
   InputLabel,
+  MenuItem,
   Select,
   SelectChangeEvent,
-  MenuItem,
-  FormControl,
-  Table,
-  TableHead,
-  TableRow,
-  TableCell,
-  TableBody,
-  TableContainer,
-  Collapse,
-  TablePagination,
   Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TablePagination,
+  TableRow,
 } from "@mui/material";
+import Grid from "@mui/material/Grid";
+import { useTheme } from "@mui/material/styles";
+import useAccountStore from "@store/accountStore";
 import {
   AccountInfo,
   ArgDef,
   AuthoredTemplate,
+  Type as FuncType,
   type FunctionDef,
   decodeOotleAddress,
   substateIdToString,
-  Type as FuncType,
 } from "@tari-project/ootle-ts-bindings";
-import CopyAddress from "@components/CopyAddress";
-import { AccordionIconButton, DataTableCell, StyledPaper } from "@components/StyledComponents";
-import Grid from "@mui/material/Grid";
-import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
-import { useTheme } from "@mui/material/styles";
-import { SlCheck, SlClose } from "react-icons/sl";
 import { handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
-import useAccountStore from "@store/accountStore";
-import FetchStatusCheck from "@components/FetchStatusCheck";
+import { Fragment, useEffect, useState } from "react";
+import { SlCheck, SlClose } from "react-icons/sl";
 
 function getTypeAsString(funcType: FuncType): string {
   if (typeof funcType === "string") {

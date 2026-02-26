@@ -20,6 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { useGetAllTransactions } from "@api/hooks/useTransactions";
+import FetchStatusCheck from "@components/FetchStatusCheck";
+import { DataTableCell } from "@components/StyledComponents";
+import TransactionsStatusChip from "@components/TransactionsStatusChip";
 import { ChevronRight } from "@mui/icons-material";
 import {
   Fade,
@@ -34,16 +38,12 @@ import {
   TableRow,
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
+import { Account, WalletTransaction } from "@tari-project/ootle-ts-bindings";
+import { XTR_CURRENCY } from "@utils/currency";
+import { emptyRows, formatCurrency, handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import FetchStatusCheck from "@components/FetchStatusCheck";
-import TransactionsStatusChip from "@components/TransactionsStatusChip";
-import { DataTableCell } from "@components/StyledComponents";
-import { useGetAllTransactions } from "@api/hooks/useTransactions";
-import { emptyRows, handleChangePage, handleChangeRowsPerPage, formatCurrency } from "@utils/helpers";
-import { Account, WalletTransaction } from "@tari-project/ootle-ts-bindings";
 import TimeChip from "./TimeChip";
-import { XTR_CURRENCY } from "@utils/currency";
 
 export default function Transactions(_props: { account: Account }) {
   const [page, setPage] = useState(0);

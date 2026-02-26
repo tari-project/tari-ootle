@@ -20,8 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Chip } from "@mui/material";
 import { DataTableCell } from "@components/StyledComponents";
+import { Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
 import type { LogEntry } from "@tari-project/ootle-ts-bindings";
 
 function getLogLevelColor(

@@ -20,13 +20,13 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { TableContainer, TableRow, Box, Typography, Chip } from "@mui/material";
-import { DataTableCell } from "@components/StyledComponents";
 import { formatCurrency } from "@/utils/helpers";
-import { XTR_CURRENCY } from "@utils/currency";
-import { FeeReceipt as FeeReceiptProps } from "@tari-project/ootle-ts-bindings";
+import { DataTableCell } from "@components/StyledComponents";
+import { Box, Chip, TableContainer, TableRow, Typography } from "@mui/material";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
+import { FeeReceipt as FeeReceiptProps } from "@tari-project/ootle-ts-bindings";
+import { XTR_CURRENCY } from "@utils/currency";
 
 function unsignedSaturatingSub(a: bigint): bigint {
   return a < BigInt(0) ? BigInt(0) : a;

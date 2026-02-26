@@ -20,16 +20,16 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import React, { useEffect, useState } from "react";
+import Divider from "@mui/material/Divider";
 import FormControl from "@mui/material/FormControl";
-import FormGroup from "@mui/material/FormGroup";
 import FormControlLabel from "@mui/material/FormControlLabel";
+import FormGroup from "@mui/material/FormGroup";
 import FormHelperText from "@mui/material/FormHelperText";
 import Switch from "@mui/material/Switch";
-import Divider from "@mui/material/Divider";
 import Typography from "@mui/material/Typography";
-import "./Permissions.css";
 import { TariPermission } from "@tari-project/tari-permissions";
+import React, { useEffect, useState } from "react";
+import "./Permissions.css";
 
 export default function Permissions(props: {
   requiredPermissions: TariPermission[];

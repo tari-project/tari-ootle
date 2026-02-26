@@ -21,15 +21,15 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import PageHeading from "@components/PageHeading";
-import Grid from "@mui/material/Grid";
 import { StyledPaper } from "@components/StyledComponents";
+import Grid from "@mui/material/Grid";
+import DecryptUtxoBalance from "@routes/Settings/Components/DecryptUtxoBalance";
+import GeneralSettings from "@routes/Settings/Components/GeneralSettings";
+import SettingsTabs from "@routes/Settings/Components/SettingsTabs";
+import ViewVaultBalance from "@routes/Settings/Components/ViewVaultBalance";
+import AccessTokens from "@routes/Wallet/Components/AccessTokens";
 import Accounts from "@routes/Wallet/Components/Accounts";
 import Keys from "@routes/Wallet/Components/Keys";
-import AccessTokens from "@routes/Wallet/Components/AccessTokens";
-import SettingsTabs from "@routes/Settings/Components/SettingsTabs";
-import GeneralSettings from "@routes/Settings/Components/GeneralSettings";
-import ViewVaultBalance from "@routes/Settings/Components/ViewVaultBalance";
-import DecryptUtxoBalance from "@routes/Settings/Components/DecryptUtxoBalance";
 
 export interface ISettingsMenu {
   label: string;

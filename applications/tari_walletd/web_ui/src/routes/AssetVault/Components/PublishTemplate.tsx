@@ -20,33 +20,33 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { FormEvent, useEffect, useState } from "react";
-import { Form } from "react-router-dom";
+import PopupTitle from "@/components/PopupTitle";
+import { useAccountsList } from "@api/hooks/useAccounts";
+import { usePublishTemplate } from "@api/hooks/useTransactions";
+import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import TextField from "@mui/material/TextField";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
-import Box from "@mui/material/Box";
-import { useAccountsList } from "@api/hooks/useAccounts";
-import { useTheme } from "@mui/material/styles";
-import useAccountStore from "@store/accountStore";
+import InputLabel from "@mui/material/InputLabel";
+import MenuItem from "@mui/material/MenuItem";
 import Select from "@mui/material/Select";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
-import MenuItem from "@mui/material/MenuItem";
-import { useFilePicker } from "use-file-picker";
+import { useTheme } from "@mui/material/styles";
+import TextField from "@mui/material/TextField";
+import useAccountStore from "@store/accountStore";
 import {
+  AccountInfo,
+  PublishTemplateResponse,
   ResourceAddress,
   ResourceType,
   substateIdToString,
-  PublishTemplateResponse,
-  AccountInfo,
 } from "@tari-project/ootle-ts-bindings";
-import InputLabel from "@mui/material/InputLabel";
-import { usePublishTemplate } from "@api/hooks/useTransactions";
-import { FileAmountLimitValidator, FileSizeValidator, FileTypeValidator } from "use-file-picker/validators";
-import { FileContent } from "use-file-picker/types";
 import { base64FromArrayBuffer } from "@utils/helpers";
-import PopupTitle from "@/components/PopupTitle";
+import { FormEvent, useEffect, useState } from "react";
+import { Form } from "react-router-dom";
+import { useFilePicker } from "use-file-picker";
+import { FileContent } from "use-file-picker/types";
+import { FileAmountLimitValidator, FileSizeValidator, FileTypeValidator } from "use-file-picker/validators";
 
 export default function PublishTemplate() {
   const [open, setOpen] = useState(false);

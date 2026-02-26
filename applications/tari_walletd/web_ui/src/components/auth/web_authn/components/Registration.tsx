@@ -1,18 +1,18 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+import { APP_NAME, DEFAULT_PERMISSIONS, WebauthnProps } from "@components/auth/web_authn/Webauthn";
+import Loading from "@components/Loading";
+import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
-import Typography from "@mui/material/Typography";
-import { Form } from "react-router-dom";
 import Button from "@mui/material/Button";
 import Grid from "@mui/material/Grid";
 import { useTheme } from "@mui/material/styles";
-import { FormEvent, useState } from "react";
+import Typography from "@mui/material/Typography";
 import { getClientInstance, webauthnFinishRegistration, webauthnStartRegistration } from "@utils/json_rpc";
 import { Buffer } from "buffer";
-import Loading from "@components/Loading";
-import Alert from "@mui/material/Alert";
-import { APP_NAME, DEFAULT_PERMISSIONS, WebauthnProps } from "@components/auth/web_authn/Webauthn";
+import { FormEvent, useState } from "react";
+import { Form } from "react-router-dom";
 
 const WEBAUTHN_RP_ID = import.meta.env.VITE_DAEMON_WEBAUTHN_RP_ID || window.location.hostname;
 

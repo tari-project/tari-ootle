@@ -20,13 +20,13 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Box, Button, Stack, Typography, Avatar, Divider } from "@mui/material";
-import type { Account, NonFungibleId, NonFungibleToken } from "@tari-project/ootle-ts-bindings";
 import CopyAddress from "@components/CopyAddress";
+import { Avatar, Box, Button, Divider, Stack, Typography } from "@mui/material";
 import { useNftTransferStore } from "@store/nftTransferStore";
-import { formatCurrency, substateIdToString, displayNftId } from "@utils/helpers";
+import type { Account, NonFungibleId, NonFungibleToken } from "@tari-project/ootle-ts-bindings";
 import { convertCborValue } from "@utils/cbor";
 import { XTR_CURRENCY } from "@utils/currency";
+import { displayNftId, formatCurrency, substateIdToString } from "@utils/helpers";
 
 interface ConfirmationStepProps {
   accounts: Array<{ account: Account }> | undefined;

@@ -20,26 +20,26 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
-import {
-  TableContainer,
-  Table,
-  TableHead,
-  TableRow,
-  TableCell,
-  TableBody,
-  Collapse,
-  Box,
-  Chip,
-  Typography,
-} from "@mui/material";
-import { DataTableCell, AccordionIconButton } from "@components/StyledComponents";
+import CodeBlockExpand from "@components/CodeBlock";
+import CopyAddress from "@components/CopyAddress";
+import { AccordionIconButton, DataTableCell } from "@components/StyledComponents";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import CodeBlockExpand from "@components/CodeBlock";
+import {
+  Box,
+  Chip,
+  Collapse,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Typography,
+} from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import { Event, substateIdToString } from "@tari-project/ootle-ts-bindings";
-import CopyAddress from "@components/CopyAddress";
+import { useState } from "react";
 
 function renderPayloadField(key: string, value: any) {
   if (key === "amount" && typeof value === "string") {

@@ -25,9 +25,9 @@ import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
-import { useEffect, useState } from "react";
+import { settingsGet, settingsSet } from "@utils/json_rpc";
+import React, { useEffect, useState } from "react";
 import { Form } from "react-router-dom";
-import { settingsGet, settingsSet } from "../../../utils/json_rpc";
 
 function IndexerSettings() {
   // Keep the form and settings in the same format as the real settings in the wallet.
@@ -62,12 +62,19 @@ function IndexerSettings() {
     <>
       <Box className="flex-container">
         {showForm ? (
-          <Form onSubmit={onSubmitIndexer} className="flex-container">
+          <Form
+            onSubmit={onSubmitIndexer}
+            className="flex-container"
+            style={{
+              alignItems: "center",
+            }}
+          >
             <TextField
               name="indexer_url"
               label="Indexer url"
               value={accountFormState.indexer_url}
               onChange={onAccountChange}
+              size="small"
               style={{ flexGrow: 1 }}
             />
             <Button variant="contained" type="submit">
@@ -98,7 +105,6 @@ function IndexerSettings() {
                 setAccountFormState(settings);
                 setShowForm(true);
               }}
-              style={{ minWidth: "130px", height: "56px" }}
             >
               Set new url
             </Button>

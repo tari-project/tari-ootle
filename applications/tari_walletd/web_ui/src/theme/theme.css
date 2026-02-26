@@ -105,7 +105,7 @@ code {
 }
 
 .dialog-content {
-  width: 600px;
+  width: clamp(450px, 40vw, 600px);
 }
 
 @media screen and (max-width: 767px) {

@@ -68,11 +68,11 @@ function PageHeader({ title, rightComponent, showAccountInfo = true, balanceComp
           size={12}
           style={{
             position: "sticky",
-            top: 50,
-            background: theme.palette.background.default,
-            opacity: 0.9,
+            top: 64,
+            padding: `${theme.spacing(1)} ${theme.spacing(2)}`,
+            background: theme.palette.accent.background,
+            backdropFilter: `blur(18px)`,
             zIndex: 1,
-            paddingBottom: theme.spacing(1),
           }}
         >
           <Box

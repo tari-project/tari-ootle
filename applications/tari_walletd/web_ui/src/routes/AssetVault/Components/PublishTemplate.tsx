@@ -29,8 +29,7 @@ import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import InputLabel from "@mui/material/InputLabel";
 import MenuItem from "@mui/material/MenuItem";
-import Select from "@mui/material/Select";
-import { SelectChangeEvent } from "@mui/material/Select";
+import Select, { SelectChangeEvent } from "@mui/material/Select";
 import { useTheme } from "@mui/material/styles";
 import TextField from "@mui/material/TextField";
 import useAccountStore from "@store/accountStore";
@@ -226,6 +225,7 @@ function PublishTemplateDialog(props: DialogProps) {
                 value={formState.account || accounts.find((a: AccountInfo) => a.account.is_default) || ""}
                 onChange={setSelectFormValue}
                 variant="outlined"
+                size="small"
                 style={{ marginBottom: theme.spacing(1) }}
               >
                 {accounts.map((account: AccountInfo, i: number) => (
@@ -240,7 +240,7 @@ function PublishTemplateDialog(props: DialogProps) {
             className="flex-container"
             style={{
               justifyContent: "flex-start",
-              alignItems: "end",
+              alignItems: "baseline",
             }}
           >
             <Button
@@ -255,9 +255,9 @@ function PublishTemplateDialog(props: DialogProps) {
               Select WASM
             </Button>
             {formState.file && (
-              <p style={{ color: "#785be0", margin: 0 }}>
-                {formState.file.name}
-                <span style={{ color: "grey" }}> {formState.binary?.byteLength} bytes</span>
+              <p style={{ color: theme.palette.secondary.main, margin: 0 }}>
+                <em>{formState.file.name}</em>
+                <span style={{ color: theme.palette.text.secondary }}> {formState.binary?.byteLength} bytes</span>
               </p>
             )}
             {fpErrors[0] && <p style={{ color: "red" }}>{fpErrors[0].name}</p>}
@@ -270,7 +270,9 @@ function PublishTemplateDialog(props: DialogProps) {
             placeholder="Enter max fee"
             onChange={setFormValue}
             disabled={disabled}
-            style={{ flexGrow: 1, marginTop: theme.spacing(1) }}
+            fullWidth
+            size="small"
+            style={{ marginTop: theme.spacing(1) }}
           />
           <Box
             className="flex-container"

@@ -211,6 +211,7 @@ export const componentSettings: ThemeOptions = {
         },
       },
     },
+    MuiDialog: {},
     MuiMenuItem: {
       defaultProps: {
         sx: {
@@ -272,7 +273,7 @@ export const light: ThemeOptions = {
       contrastText: "#ffffff",
     },
     accent: {
-      background: "rgba(0, 0, 0, 0.03)",
+      background: "rgba(243,243,252,0.2)",
       border: "rgba(0, 0, 0, 0.03)",
     },
   },
@@ -326,7 +327,7 @@ export const dark: ThemeOptions = {
       contrastText: "#ffffff",
     },
     accent: {
-      background: "rgba(255, 255, 255, 0.03) ",
+      background: "rgba(10,8,26,0.4)",
       border: "rgba(255, 255, 255, 0.03) ",
     },
   },

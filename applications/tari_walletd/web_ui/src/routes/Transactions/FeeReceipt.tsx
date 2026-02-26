@@ -23,7 +23,7 @@
 import { TableContainer, TableRow, Box, Typography, Chip } from "@mui/material";
 import { DataTableCell } from "@components/StyledComponents";
 import { formatCurrency } from "@/utils/helpers";
-import { XTR_CURRENCY } from "@utils/constants";
+import { XTR_CURRENCY } from "@utils/currency";
 import { FeeReceipt as FeeReceiptProps } from "@tari-project/ootle-ts-bindings";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
@@ -50,27 +50,27 @@ export default function FeeReceipt({ data }: { data: FeeReceiptProps }) {
   const feeItems = [
     {
       label: "Total Fees Paid",
-      value: formatCurrency(data.total_fee_payment, XTR_CURRENCY.SYMBOL),
+      value: formatCurrency(data.total_fee_payment, XTR_CURRENCY),
       color: "primary" as const,
     },
     {
       label: "Total Fees Charged",
-      value: formatCurrency(data.total_fees_paid, XTR_CURRENCY.SYMBOL),
+      value: formatCurrency(data.total_fees_paid, XTR_CURRENCY),
       color: "success" as const,
     },
     {
       label: "Total Fees Required",
-      value: formatCurrency(totalCost, XTR_CURRENCY.SYMBOL),
+      value: formatCurrency(totalCost, XTR_CURRENCY),
       color: "success" as const,
     },
     {
       label: "Fees Refunded",
-      value: formatCurrency(unsignedSaturatingSub(BigInt(data.total_fee_payment) - totalCost), XTR_CURRENCY.SYMBOL),
+      value: formatCurrency(unsignedSaturatingSub(BigInt(data.total_fee_payment) - totalCost), XTR_CURRENCY),
       color: "success" as const,
     },
     {
       label: "Fees Overcharge",
-      value: formatCurrency(data.total_fee_overcharge, XTR_CURRENCY.SYMBOL),
+      value: formatCurrency(data.total_fee_overcharge, XTR_CURRENCY),
       color: "success" as const,
     },
   ];

@@ -40,6 +40,7 @@ import { useGetSubstate, useGetNonFungibles } from "../../../api/hooks/useSubsta
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import CopyToClipboard from "../../../Components/CopyToClipboard";
 import NftRow, { type NftData } from "./NftRow";
+import { formatCurrency } from "../../../utils/helpers";
 
 function Resources() {
   const { resourceAddress } = useParams();
@@ -197,7 +198,7 @@ function Resources() {
               <Stack direction="row" alignItems="baseline" spacing={1}>
                 <Typography variant="subtitle2">Total Supply:</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {resource?.total_supply}
+                  {resource?.total_supply ? formatCurrency(resource.total_supply, resource.divisibility, resource.metadata["SYMBOL"]): "--"}
                 </Typography>
               </Stack>
             </Grid>

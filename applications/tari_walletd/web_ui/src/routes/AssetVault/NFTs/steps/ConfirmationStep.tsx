@@ -26,6 +26,7 @@ import CopyAddress from "@components/CopyAddress";
 import { useNftTransferStore } from "@store/nftTransferStore";
 import { formatCurrency, substateIdToString, displayNftId } from "@utils/helpers";
 import { convertCborValue } from "@utils/cbor";
+import { XTR_CURRENCY } from "@utils/currency";
 
 interface ConfirmationStepProps {
   accounts: Array<{ account: Account }> | undefined;
@@ -126,7 +127,7 @@ export default function ConfirmationStep({
               <Typography variant="subtitle2" color="text.secondary">
                 Transaction Fee:
               </Typography>
-              <Typography>{formatCurrency(parseInt(transferFormState.maxFee), null)}</Typography>
+              <Typography>{formatCurrency(parseInt(transferFormState.maxFee), XTR_CURRENCY)}</Typography>
             </Box>
 
             <Box>

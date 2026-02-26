@@ -532,6 +532,8 @@ pub struct ProofsCancelRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct ConfidentialCreateOutputProofRequest {
+    #[cfg_attr(feature = "ts", ts(type = "number | bigint | string"))]
+    #[serde(deserialize_with = "ootle_serde::str_number::deserialize")]
     pub amount: u64,
 }
 
@@ -1187,6 +1189,8 @@ pub struct StealthTransferRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct StealthTransfer {
     pub destination_address: OotleAddress,
+    #[cfg_attr(feature = "ts", ts(type = "number | bigint | string"))]
+    #[serde(deserialize_with = "ootle_serde::str_number::deserialize")]
     pub blinded_output_amount: u64,
     pub revealed_output_amount: Amount,
     #[serde(default, skip_serializing_if = "Option::is_none")]

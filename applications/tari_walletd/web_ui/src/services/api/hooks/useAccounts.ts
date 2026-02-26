@@ -120,7 +120,7 @@ export const useAccountsRename = () => {
 
 export interface TransferParams {
   account: ComponentAddress;
-  amount: number;
+  amount: bigint | string;
   resource_address: string;
   destination_address: string;
   max_fee: number | null;
@@ -171,7 +171,7 @@ export const useAccountsTransfer = () => {
           transfers: [
             {
               destination_address: params.destination_address,
-              blinded_output_amount: params.output_to_revealed ? 0n : BigInt(params.amount),
+              blinded_output_amount: params.output_to_revealed ? 0n : params.amount,
               revealed_output_amount: params.output_to_revealed ? params.amount : 0,
               output_memo: params.output_memo || null,
               pay_to: "StealthPublicKey" as PayTo,

@@ -46,16 +46,22 @@ import { IoAdd } from "react-icons/io5";
 import { Box, Fade, TextField, Button } from "@mui/material";
 import { handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
 import { formatCurrency } from "@utils/helpers";
+import { Currency } from "@utils/currency";
 
 function BalanceRow(props: BalanceEntry) {
+  const currency = {
+    symbol: props.token_symbol || "",
+    decimals: props.divisibility,
+  } as Currency;
+
   return (
     <TableRow key={props.resource_address}>
       <DataTableCell>
         <CopyAddress address={props.resource_address} display={props.token_symbol || props.resource_address} />
       </DataTableCell>
       <DataTableCell>{props.resource_type}</DataTableCell>
-      <DataTableCell>{formatCurrency(props.balance, props.token_symbol)}</DataTableCell>
-      <DataTableCell>{formatCurrency(props.confidential_balance, props.token_symbol)}</DataTableCell>
+      <DataTableCell>{formatCurrency(props.balance, currency)}</DataTableCell>
+      <DataTableCell>{formatCurrency(props.confidential_balance, currency)}</DataTableCell>
     </TableRow>
   );
 }

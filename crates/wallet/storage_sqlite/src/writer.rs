@@ -4,7 +4,7 @@
 use std::{
     collections::HashSet,
     iter,
-    ops::{Add, Deref, DerefMut},
+    ops::{Deref, DerefMut},
     str::FromStr,
     sync::MutexGuard,
     time::Duration,
@@ -791,28 +791,34 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             })?;
 
         let existing_lock = vault_locks::table
-            .select(vault_locks::lock_id)
+            .select((vault_locks::id, vault_locks::amount))
             .filter(vault_locks::vault_id.eq(vault_db_id))
             .filter(vault_locks::lock_id.eq(lock_id))
-            .count()
-            .get_result::<i64>(self.connection())
+            .first::<(i32, String)>(self.connection())
+            .optional()
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
-        // TODO: we're limited to i64::MAX. Could be an issue with resources that have a high
-        // divisibility. e.g. i64::MAX < 10 ETH. Values could be represented as a string
         let amount_to_lock = amount_to_lock
             .to_u64_checked()
             .ok_or_else(|| WalletStorageError::bad_query(OPERATION, "amount to lock is too large"))?;
-        let amount_to_lock = i64::try_from(amount_to_lock).map_err(|_| {
-            WalletStorageError::bad_query(OPERATION, "amount to lock is too large, must be less than i64::MAX")
-        })?;
 
-        if existing_lock > 0 {
+        if let Some((existing_lock_id, lock_amount)) = existing_lock {
+            let amount = lock_amount
+                .parse::<Amount>()
+                .map_err(|e| WalletStorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "lock amount",
+                    details: format!(
+                        "Corrupt db: invalid lock amount '{lock_amount}' for lock_id {existing_lock_id}: {e}"
+                    ),
+                })?;
+            let amount = amount
+                .checked_add(amount_to_lock.into())
+                .ok_or_else(|| WalletStorageError::bad_query(OPERATION, "resulting lock amount is too large"))?;
             // Add to the existing lock
             diesel::update(vault_locks::table)
-                .set(vault_locks::amount.eq(vault_locks::amount.add(amount_to_lock)))
-                .filter(vault_locks::lock_id.eq(lock_id))
-                .filter(vault_locks::vault_id.eq(vault_db_id))
+                .set(vault_locks::amount.eq(amount.to_string()))
+                .filter(vault_locks::id.eq(existing_lock_id))
                 .execute(self.connection())
                 .map_err(|e| WalletStorageError::general(OPERATION, e))?;
         } else {
@@ -820,7 +826,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 .values((
                     vault_locks::vault_id.eq(vault_db_id),
                     vault_locks::lock_id.eq(lock_id),
-                    vault_locks::amount.eq(amount_to_lock),
+                    vault_locks::amount.eq(amount_to_lock.to_string()),
                 ))
                 .execute(self.connection())
                 .map_err(|e| WalletStorageError::general(OPERATION, e))?;
@@ -838,7 +844,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .inner_join(vaults::table.on(vaults::id.eq(vault_locks::vault_id)))
             .select((vault_locks::vault_id, vault_locks::amount, vaults::revealed_balance))
             .filter(vault_locks::lock_id.eq(lock_id))
-            .first::<(i32, i64, String)>(self.connection())
+            .first::<(i32, String, String)>(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general(OPERATION, e))?
             .ok_or_else(|| WalletStorageError::NotFound {
@@ -846,6 +852,12 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 entity: "vault lock".to_string(),
                 key: lock_id.to_string(),
             })?;
+        let amount = Amount::from_str(&amount).map_err(|e| WalletStorageError::DataInconsistent {
+            operation: OPERATION,
+            details: format!(
+                "Corrupt db: unable to convert lock amount '{amount}' to Amount for lock_id {lock_id}: {e}"
+            ),
+        })?;
 
         // Delete the lock record
         diesel::delete(vault_locks::table)
@@ -862,7 +874,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 ),
             })?;
         let new_balance = revealed_amount
-            .checked_sub(Amount::from_u64(amount as u64))
+            .checked_sub(amount)
             .ok_or_else(|| WalletStorageError::OperationError {
                 operation: OPERATION,
                 details: format!(

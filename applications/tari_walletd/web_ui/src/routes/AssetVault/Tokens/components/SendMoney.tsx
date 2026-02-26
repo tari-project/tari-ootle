@@ -20,28 +20,28 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { FormEvent, useState } from "react";
+import PopupTitle from "@/components/PopupTitle";
+import { useAccountsGetBalances, useAccountsTransfer } from "@api/hooks/useAccounts";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
-import { useAccountsGetBalances, useAccountsTransfer } from "@api/hooks/useAccounts";
-import useAccountStore from "@store/accountStore";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
+import useAccountStore from "@store/accountStore";
 import {
   BadgeUsage,
   BalanceEntry,
-  UtxoInputSelection,
   rejectReasonToString,
   ResourceAddress,
   ResourceType,
   substateIdToString,
+  UtxoInputSelection,
   XTR,
 } from "@tari-project/ootle-ts-bindings";
+import { parseAmountToBaseUnits } from "@utils/helpers";
 import { transactionsWaitResult } from "@utils/json_rpc";
-import FormStep, { FormError, SendMoneyFormState } from "../steps/FormStep";
+import { FormEvent, useState } from "react";
 import ConfirmationStep from "../steps/ConfirmationStep";
+import FormStep, { FormError, SendMoneyFormState } from "../steps/FormStep";
 import ResultStep, { TransferResult } from "../steps/ResultStep";
-import PopupTitle from "@/components/PopupTitle";
-import { XTR_CURRENCY } from "@utils/constants";
 
 export interface SendMoneyDialogProps {
   open: boolean;
@@ -51,7 +51,7 @@ export interface SendMoneyDialogProps {
   handleClose: () => void;
   token_symbol: string;
 }
-
+const U64_MAX = 2n ** 64n - 1n;
 export function SendMoneyDialog(props: SendMoneyDialogProps) {
   const INITIAL_VALUES: SendMoneyFormState = {
     address: "",
@@ -98,23 +98,22 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
     const revealedBalance = BigInt(balanceEntry.balance);
     const confidentialBalance = BigInt(balanceEntry.confidential_balance);
-    const divisor = Math.pow(10, balanceEntry.divisibility);
 
     let result;
     switch (transferFormState.inputSelection) {
       case "RevealedOnly":
-        result = Number(revealedBalance) / divisor;
+        result = revealedBalance;
         break;
       case "ConfidentialOnly":
-        result = Number(confidentialBalance) / divisor;
+        result = confidentialBalance;
         break;
       case "PreferRevealed":
       case "PreferConfidential":
         // For prefer options, show total available (revealed + confidential)
-        result = Number(revealedBalance + confidentialBalance) / divisor;
+        result = revealedBalance + confidentialBalance;
         break;
       default:
-        result = Number(revealedBalance + confidentialBalance) / divisor;
+        result = revealedBalance + confidentialBalance;
         break;
     }
 
@@ -193,7 +192,14 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     setIsEstimatingFee(true);
 
     try {
-      let amount = Math.floor((parseFloat(transferFormState.amount) || 0) * Math.pow(10, balanceEntry.divisibility));
+      const amount = parseAmountToBaseUnits(transferFormState.amount, balanceEntry.divisibility);
+      if (!transferFormState.outputToRevealed && amount > U64_MAX) {
+        // The maximum "whole" amount depends on the divisibility of the token
+        throw new RangeError(
+          `Amount exceeds maximum value for a UTXO (${U64_MAX / 10n ** BigInt(balanceEntry.divisibility)} ${props.token_symbol})`,
+        );
+      }
+
       // Create transfer object with current form state
       const currentTransfer = {
         account: substateIdToString(account.component_address),
@@ -269,7 +275,10 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     setActiveStep(2);
 
     try {
-      let amount = Math.floor((parseFloat(transferFormState.amount) || 0) * Math.pow(10, balanceEntry.divisibility));
+      const amount = parseAmountToBaseUnits(transferFormState.amount, balanceEntry.divisibility);
+      if (!transferFormState.outputToRevealed && amount > U64_MAX) {
+        throw new RangeError("Amount exceeds maximum value for a UTXO");
+      }
       const transfer = {
         account: substateIdToString(account.component_address),
         amount,

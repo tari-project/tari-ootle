@@ -21,8 +21,8 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import Stack from "@mui/material/Stack";
-import ClaimBurn from "./ClaimBurn";
 import useAccountStore from "@store/accountStore";
+import ClaimBurn from "./ClaimBurn";
 import ClaimFees from "./ClaimFees";
 import PublishTemplate from "./PublishTemplate";
 

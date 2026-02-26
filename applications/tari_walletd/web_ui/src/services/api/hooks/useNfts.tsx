@@ -1,12 +1,11 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { nftList, nftTransfer } from "@utils/json_rpc";
 import { ApiError } from "@api/helpers/types";
-import { TransferNftRequest } from "@tari-project/ootle-ts-bindings";
 import queryClient from "@api/queryClient";
-import { ComponentAddress, ComponentAddressOrName } from "@tari-project/ootle-ts-bindings";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { ComponentAddress, ComponentAddressOrName, TransferNftRequest } from "@tari-project/ootle-ts-bindings";
+import { nftList, nftTransfer } from "@utils/json_rpc";
 
 export interface ListAccountNftsReq {
   account: ComponentAddressOrName | null;

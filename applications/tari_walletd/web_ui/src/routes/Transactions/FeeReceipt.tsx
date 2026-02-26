@@ -20,13 +20,13 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { TableContainer, TableRow, Box, Typography, Chip } from "@mui/material";
-import { DataTableCell } from "@components/StyledComponents";
 import { formatCurrency } from "@/utils/helpers";
-import { XTR_CURRENCY } from "@utils/constants";
-import { FeeReceipt as FeeReceiptProps } from "@tari-project/ootle-ts-bindings";
+import { DataTableCell } from "@components/StyledComponents";
+import { Box, Chip, TableContainer, TableRow, Typography } from "@mui/material";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
+import { FeeReceipt as FeeReceiptProps } from "@tari-project/ootle-ts-bindings";
+import { XTR_CURRENCY } from "@utils/currency";
 
 function unsignedSaturatingSub(a: bigint): bigint {
   return a < BigInt(0) ? BigInt(0) : a;
@@ -50,27 +50,27 @@ export default function FeeReceipt({ data }: { data: FeeReceiptProps }) {
   const feeItems = [
     {
       label: "Total Fees Paid",
-      value: formatCurrency(data.total_fee_payment, XTR_CURRENCY.SYMBOL),
+      value: formatCurrency(data.total_fee_payment, XTR_CURRENCY),
       color: "primary" as const,
     },
     {
       label: "Total Fees Charged",
-      value: formatCurrency(data.total_fees_paid, XTR_CURRENCY.SYMBOL),
+      value: formatCurrency(data.total_fees_paid, XTR_CURRENCY),
       color: "success" as const,
     },
     {
       label: "Total Fees Required",
-      value: formatCurrency(totalCost, XTR_CURRENCY.SYMBOL),
+      value: formatCurrency(totalCost, XTR_CURRENCY),
       color: "success" as const,
     },
     {
       label: "Fees Refunded",
-      value: formatCurrency(unsignedSaturatingSub(BigInt(data.total_fee_payment) - totalCost), XTR_CURRENCY.SYMBOL),
+      value: formatCurrency(unsignedSaturatingSub(BigInt(data.total_fee_payment) - totalCost), XTR_CURRENCY),
       color: "success" as const,
     },
     {
       label: "Fees Overcharge",
-      value: formatCurrency(data.total_fee_overcharge, XTR_CURRENCY.SYMBOL),
+      value: formatCurrency(data.total_fee_overcharge, XTR_CURRENCY),
       color: "success" as const,
     },
   ];

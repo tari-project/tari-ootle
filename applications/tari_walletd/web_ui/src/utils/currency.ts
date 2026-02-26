@@ -20,9 +20,13 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+export type Currency = {
+  symbol: string | null;
+  decimals: number;
+};
+
 export const XTR_CURRENCY = {
   // TODO: only tXTR for testnet
-  SYMBOL: "tXTR",
-  DECIMALS: 6,
-  DIVISOR: 1_000_000,
-} as const;
+  symbol: "tXTR",
+  decimals: 6,
+} as Currency;

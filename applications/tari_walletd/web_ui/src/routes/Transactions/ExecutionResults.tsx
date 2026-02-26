@@ -20,19 +20,19 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { DataTableCell } from "@components/StyledComponents";
 import {
-  TableContainer,
+  Box,
+  Chip,
+  Stack,
   Table,
+  TableBody,
+  TableCell,
+  TableContainer,
   TableHead,
   TableRow,
-  TableCell,
-  TableBody,
-  Stack,
-  Box,
   Typography,
-  Chip,
 } from "@mui/material";
-import { DataTableCell } from "@components/StyledComponents";
 
 function ResultRowData({ result, index }: { result: any; index: number }) {
   const returnTypeLabel =

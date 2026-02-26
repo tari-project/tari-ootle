@@ -20,8 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Loading from "@components/Loading";
 import Error from "@components/Error";
+import Loading from "@components/Loading";
 
 interface FetchStatusCheckProps {
   errorMessage: string;

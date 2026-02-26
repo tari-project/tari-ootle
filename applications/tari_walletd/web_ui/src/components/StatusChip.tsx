@@ -20,9 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Chip, Avatar } from "@mui/material";
-import { IoCheckmarkOutline, IoDiamondOutline, IoReload, IoHourglassOutline, IoCloseOutline } from "react-icons/io5";
+import { Avatar, Chip } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
+import { IoCheckmarkOutline, IoCloseOutline, IoDiamondOutline, IoHourglassOutline, IoReload } from "react-icons/io5";
 
 export const StatusChipIcons = {
   Checkmark: "Checkmark",

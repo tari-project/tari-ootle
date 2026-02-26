@@ -20,19 +20,17 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import React, { useEffect, useState } from "react";
-import { Form } from "react-router-dom";
+import PopupTitle from "@/components/PopupTitle";
+import { useAccountsList } from "@api/hooks/useAccounts";
+import { useKeysList } from "@api/hooks/useKeys";
+import { FormControl, InputLabel, MenuItem, Select, SelectChangeEvent } from "@mui/material";
+import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import TextField from "@mui/material/TextField";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
-import Box from "@mui/material/Box";
-import { useAccountsList } from "@api/hooks/useAccounts";
 import { useTheme } from "@mui/material/styles";
+import TextField from "@mui/material/TextField";
 import useAccountStore from "@store/accountStore";
-import { FormControl, InputLabel, MenuItem, Select, SelectChangeEvent } from "@mui/material";
-import { useKeysList } from "@api/hooks/useKeys";
-import { validatorsClaimFees, validatorsGetFees } from "@utils/json_rpc";
 import {
   AccountInfo,
   getRejectReasonFromTransactionResult,
@@ -43,7 +41,9 @@ import {
   substateIdToString,
   TransactionResult,
 } from "@tari-project/ootle-ts-bindings";
-import PopupTitle from "@/components/PopupTitle";
+import { validatorsClaimFees, validatorsGetFees } from "@utils/json_rpc";
+import React, { useEffect, useState } from "react";
+import { Form } from "react-router-dom";
 
 interface FormState {
   account: string | null;

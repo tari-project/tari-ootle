@@ -20,8 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Chip, Tooltip } from "@mui/material";
 import { useTimeAgo } from "@hooks/useTimeAgo";
+import { Chip, Tooltip } from "@mui/material";
 import { formatTimestamp } from "@utils/helpers";
 
 function TimeChip({ timestamp }: { timestamp: string | null | undefined }) {

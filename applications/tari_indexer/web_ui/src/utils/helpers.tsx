@@ -22,6 +22,7 @@
 
 import { toHexString } from "../routes/VN/Components/helpers";
 import { CURRENCY } from "./constants";
+import type { Amount } from "@tari-project/ootle-ts-bindings";
 
 const renderJson = (json: any) => {
   if (Array.isArray(json)) {
@@ -196,4 +197,41 @@ export {
   validateHash,
   renderJson,
   formatXTM,
+};
+
+export function bigintToDecimalString(int: Amount, decimalPlaces: number, locale: string = "en-US"): string {
+  const number = typeof int === "bigint" ? int : BigInt(int);
+
+  if (decimalPlaces == 0) {
+    return number.toLocaleString(locale, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    });
+  }
+  const wholeValues = (number / BigInt(10 ** decimalPlaces)).toLocaleString(locale, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
+  const fractionalValues = number.toString().slice(-decimalPlaces);
+  if (wholeValues === "0" && fractionalValues === "0") {
+    return "0";
+  }
+
+  const padding = "0".repeat(decimalPlaces - fractionalValues.length);
+  return `${wholeValues}.${padding}${fractionalValues}`;
+}
+
+
+// Helper function for formatting currency amounts
+export const formatCurrency = (amount: Amount | null | undefined, divisibility: number, tokenSymbol: string | null | undefined): string => {
+  const currencySymbol = tokenSymbol ?? "";
+  if (!amount) {
+    return `0 ${currencySymbol}`;
+  }
+  try {
+    return `${bigintToDecimalString(amount, divisibility)} ${currencySymbol}`;
+  } catch (error) {
+    console.error("Failed to parse Amount:", amount, error);
+    return `-- ${currencySymbol}`;
+  }
 };

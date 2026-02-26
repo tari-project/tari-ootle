@@ -213,7 +213,7 @@ diesel::table! {
         id -> Integer,
         vault_id -> Integer,
         lock_id -> Integer,
-        amount -> BigInt,
+        amount -> Text,
         created_at -> Timestamp,
     }
 }

@@ -20,20 +20,20 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { FormEvent } from "react";
-import { Form } from "react-router-dom";
+import { Alert, Divider, InputLabel, Stack } from "@mui/material";
 import Button from "@mui/material/Button";
-import TextField from "@mui/material/TextField";
-import Select from "@mui/material/Select";
-import MenuItem from "@mui/material/MenuItem";
 import Checkbox from "@mui/material/Checkbox";
 import ListItemText from "@mui/material/ListItemText";
-import { Divider, InputLabel, Stack, Alert } from "@mui/material";
+import MenuItem from "@mui/material/MenuItem";
+import Select from "@mui/material/Select";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
-import type { NonFungibleId, NonFungibleToken, Account } from "@tari-project/ootle-ts-bindings";
-import { substateIdToString, displayNftId } from "@utils/helpers";
+import TextField from "@mui/material/TextField";
 import { useNftTransferStore } from "@store/nftTransferStore";
+import type { Account, NonFungibleId, NonFungibleToken } from "@tari-project/ootle-ts-bindings";
 import { validateOotleAddress } from "@tari-project/ootle-ts-bindings/dist/helpers/ootleAddress";
+import { displayNftId, substateIdToString } from "@utils/helpers";
+import { FormEvent } from "react";
+import { Form } from "react-router-dom";
 
 interface FormStepProps {
   account: Account;

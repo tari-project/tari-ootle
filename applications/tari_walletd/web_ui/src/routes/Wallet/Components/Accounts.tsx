@@ -20,11 +20,16 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
-import { Form, Link } from "react-router-dom";
+import { useAccountsCreate, useAccountsList } from "@api/hooks/useAccounts";
+import queryClient from "@api/queryClient";
+import CopyAddress from "@components/CopyAddress";
+import FetchStatusCheck from "@components/FetchStatusCheck";
+import { BoxHeading2, DataTableCell } from "@components/StyledComponents";
+import { ChevronRight } from "@mui/icons-material";
 import AddIcon from "@mui/icons-material/Add";
 import Button from "@mui/material/Button/Button";
 import Fade from "@mui/material/Fade";
+import IconButton from "@mui/material/IconButton";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
@@ -32,14 +37,9 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField/TextField";
-import { ChevronRight } from "@mui/icons-material";
-import IconButton from "@mui/material/IconButton";
-import { BoxHeading2, DataTableCell } from "@components/StyledComponents";
-import { useAccountsCreate, useAccountsList } from "@api/hooks/useAccounts";
-import FetchStatusCheck from "@components/FetchStatusCheck";
-import queryClient from "@api/queryClient";
-import { AccountInfo, substateIdToString, shortenSubstateId } from "@tari-project/ootle-ts-bindings";
-import CopyAddress from "@components/CopyAddress";
+import { AccountInfo, shortenSubstateId, substateIdToString } from "@tari-project/ootle-ts-bindings";
+import { useState } from "react";
+import { Form, Link } from "react-router-dom";
 
 function Account({ account }: { account: AccountInfo }) {
   const {

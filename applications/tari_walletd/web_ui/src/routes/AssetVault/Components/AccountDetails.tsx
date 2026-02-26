@@ -20,22 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { DataTableCell } from "@components/StyledComponents";
-import useAccountStore from "@store/accountStore";
-import CopyAddress from "@components/CopyAddress";
-import {
-  decodeOotleAddress,
-  encodeOotleAddress,
-  OotleAddress,
-  substateIdToString,
-} from "@tari-project/ootle-ts-bindings";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
 import AccountName from "@/components/AccountName";
+import CopyAddress from "@components/CopyAddress";
+import { DataTableCell } from "@components/StyledComponents";
 import {
   Button,
   Dialog,
@@ -47,10 +34,23 @@ import {
   Tooltip,
 } from "@mui/material";
 import IconButton from "@mui/material/IconButton";
-import { IoPaperPlaneOutline } from "react-icons/io5";
-import { useState } from "react";
-import QRCode from "react-qr-code";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableHead from "@mui/material/TableHead";
+import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
+import useAccountStore from "@store/accountStore";
+import {
+  decodeOotleAddress,
+  encodeOotleAddress,
+  OotleAddress,
+  substateIdToString,
+} from "@tari-project/ootle-ts-bindings";
+import { useState } from "react";
+import { IoPaperPlaneOutline } from "react-icons/io5";
+import QRCode from "react-qr-code";
 
 function AccountDetails() {
   const [payRefDialogOpen, setPayRefDialogOpen] = useState(false);

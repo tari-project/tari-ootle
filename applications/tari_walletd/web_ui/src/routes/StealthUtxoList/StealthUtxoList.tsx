@@ -1,7 +1,13 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+import FetchStatusCheck from "@/components/FetchStatusCheck";
+import { useAccountsGetBalances, useStealthUtxosList } from "@/services/api/hooks/useAccounts";
+import CopyToClipboard from "@components/CopyToClipboard";
+import { Memo } from "@components/Memo";
+import { DataTableCell } from "@components/StyledComponents";
 import {
+  Stack,
   Table,
   TableBody,
   TableCell,
@@ -9,28 +15,21 @@ import {
   TableHead,
   TablePagination,
   TableRow,
-  Stack,
 } from "@mui/material";
-import { useState } from "react";
-import { useStealthUtxosList } from "@/services/api/hooks/useAccounts";
 import { Account, OutputStatus, XTR } from "@tari-project/ootle-ts-bindings";
-import FetchStatusCheck from "@/components/FetchStatusCheck";
-import { DataTableCell } from "@components/StyledComponents";
-import StatusChip from "./components/StatusChip";
-import { useAccountsGetBalances } from "@/services/api/hooks/useAccounts";
-import { substateIdToString } from "@utils/helpers";
 import {
+  bigintToDecimalString,
   emptyRows,
   handleChangePage,
   handleChangeRowsPerPage,
-  bigintToDecimalString,
   shortenString,
+  substateIdToString,
 } from "@utils/helpers";
-import CopyToClipboard from "@components/CopyToClipboard";
+import { useState } from "react";
+import { useParams } from "react-router-dom";
 import PlaceHolder from "./components/PlaceHolder";
 import SortableHeader from "./components/SortableHeader";
-import { useParams } from "react-router-dom";
-import { Memo } from "@components/Memo";
+import StatusChip from "./components/StatusChip";
 
 function StealthUtxoList({ account }: { account: Account }) {
   const [page, setPage] = useState(0);

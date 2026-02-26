@@ -20,8 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { create } from "zustand";
 import { Account, OotleAddress } from "@tari-project/ootle-ts-bindings";
+import { create } from "zustand";
 
 interface Store {
   showBalance: boolean;

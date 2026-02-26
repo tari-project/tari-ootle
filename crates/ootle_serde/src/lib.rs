@@ -9,5 +9,6 @@ pub mod duration;
 #[cfg(feature = "hex")]
 pub mod hex;
 pub mod map;
+pub mod str_number;
 pub mod string;
-mod visitor;
+pub mod visitor;

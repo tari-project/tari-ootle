@@ -20,14 +20,13 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import TextField from "@mui/material/TextField";
-import { useState } from "react";
-import { Form } from "react-router-dom";
 import Alert from "@mui/material/Alert";
-import Button from "@mui/material/Button";
 import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { Form } from "react-router-dom";
 import { settingsGet, settingsSet } from "../../../utils/json_rpc";
 
 function IndexerSettings() {

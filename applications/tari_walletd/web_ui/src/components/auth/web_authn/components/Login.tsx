@@ -1,18 +1,18 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-import { useTheme } from "@mui/material/styles";
-import { FormEvent, useState } from "react";
-import { Form } from "react-router-dom";
+import { APP_NAME, DEFAULT_PERMISSIONS, WebauthnProps } from "@components/auth/web_authn/Webauthn";
 import Loading from "@components/Loading";
-import Typography from "@mui/material/Typography";
-import Grid from "@mui/material/Grid";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Grid from "@mui/material/Grid";
+import { useTheme } from "@mui/material/styles";
+import Typography from "@mui/material/Typography";
+import { WebauthnFinishAuthRequest } from "@tari-project/ootle-ts-bindings";
 import { getClientInstance, webauthnStartAuth } from "@utils/json_rpc";
 import { Buffer } from "buffer";
-import { WebauthnFinishAuthRequest } from "@tari-project/ootle-ts-bindings";
-import { APP_NAME, DEFAULT_PERMISSIONS, WebauthnProps } from "@components/auth/web_authn/Webauthn";
+import { FormEvent, useState } from "react";
+import { Form } from "react-router-dom";
 
 export const getCredential = async (challenge: any, allowCredentials: any) => {
   const publicKeyCredentialRequestOptions: PublicKeyCredentialRequestOptions = {

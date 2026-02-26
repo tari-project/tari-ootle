@@ -151,6 +151,12 @@ mod block_parent_operations {
         .unwrap();
         block2.insert(&mut tx).unwrap();
 
+        // Some functions expect a locked block to be present
+        block2.as_locked().set(&mut tx).unwrap();
+        // TODO: this method needs to either be cleaned up or removed
+        let blocks = tx.blocks_get_paginated(1000, 0, None, None, None, None).unwrap();
+        assert_eq!(blocks.len(), 3);
+
         // check that all blocks are inserted
         let res = tx.blocks_get(zero_block.id()).unwrap();
         assert_eq!(res.id(), zero_block.id());

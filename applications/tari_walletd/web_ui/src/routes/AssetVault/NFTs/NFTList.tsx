@@ -20,7 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import type { ApiError } from "@api/helpers/types";
+import FetchStatusCheck from "@components/FetchStatusCheck";
 import {
+  Button,
   Grid,
   IconButton,
   Stack,
@@ -32,14 +35,10 @@ import {
   TablePagination,
   TableRow,
   Typography,
-  Box,
-  Button,
 } from "@mui/material";
 import type { ListNftsResponse, NonFungibleToken } from "@tari-project/ootle-ts-bindings";
 import React, { useState } from "react";
 import { IoApps, IoList } from "react-icons/io5";
-import type { ApiError } from "@api/helpers/types";
-import FetchStatusCheck from "@components/FetchStatusCheck";
 import ClaimNftsButton from "./components/ClaimNftsButton";
 import { NftCard, NftRow } from "./components/NftParts";
 

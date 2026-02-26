@@ -20,11 +20,11 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { styled } from "@mui/material/styles";
 import { KeyboardArrowDownRounded } from "@mui/icons-material";
 import MuiAccordion, { AccordionProps } from "@mui/material/Accordion";
-import MuiAccordionSummary, { AccordionSummaryProps } from "@mui/material/AccordionSummary";
 import MuiAccordionDetails, { AccordionDetailsProps } from "@mui/material/AccordionDetails";
+import MuiAccordionSummary, { AccordionSummaryProps } from "@mui/material/AccordionSummary";
+import { styled } from "@mui/material/styles";
 
 export const Accordion: React.FC<AccordionProps> = styled((props: AccordionProps) => (
   <MuiAccordion disableGutters elevation={0} {...props} />

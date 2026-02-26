@@ -20,8 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { QueryClient, QueryCache, MutationCache, DefaultError } from "@tanstack/react-query";
 import useAuthStore from "@store/authStore";
+import { DefaultError, MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
 import { isAuthError } from "@tari-project/wallet_jrpc_client";
 
 const handleError = (error: DefaultError) => {

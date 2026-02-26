@@ -89,6 +89,10 @@ pub trait WalletStoreReader {
     ) -> Result<VaultModel, WalletStorageError>;
     fn vaults_get_by_account(&mut self, account_addr: &ComponentAddress)
     -> Result<Vec<VaultModel>, WalletStorageError>;
+    fn vaults_get_ids_by_account(
+        &mut self,
+        account_addr: &ComponentAddress,
+    ) -> Result<Vec<VaultId>, WalletStorageError>;
 
     // Resources
     fn resources_get(&mut self, resource_address: &ResourceAddress) -> Result<ResourceModel, WalletStorageError>;

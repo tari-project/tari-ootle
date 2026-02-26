@@ -20,17 +20,17 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
-import { TableContainer, Table, TableRow, TableBody, Collapse, Box, Typography } from "@mui/material";
-import { DataTableCell, AccordionIconButton } from "@components/StyledComponents";
+import CodeBlockExpand from "@components/CodeBlock";
+import { AccordionIconButton, DataTableCell } from "@components/StyledComponents";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import CodeBlockExpand from "@components/CodeBlock";
+import { Box, Collapse, Table, TableBody, TableContainer, TableRow, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import type { Instruction } from "@tari-project/ootle-ts-bindings";
-import { decode } from "cbor2";
-import { toHexString } from "@utils/helpers";
 import { BinaryTag } from "@utils/cbor";
+import { toHexString } from "@utils/helpers";
+import { decode } from "cbor2";
+import { useState } from "react";
 
 function RowData({ title, data }: { title: string; data: Instruction }, index: number) {
   const [open, setOpen] = useState(false);

@@ -20,6 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { useGetAllTransactions } from "@api/hooks/useTransactions";
+import FetchStatusCheck from "@components/FetchStatusCheck";
+import { DataTableCell } from "@components/StyledComponents";
+import TransactionsStatusChip from "@components/TransactionsStatusChip";
 import { ChevronRight } from "@mui/icons-material";
 import {
   Fade,
@@ -34,21 +38,17 @@ import {
   TableRow,
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
+import { Account, WalletTransaction } from "@tari-project/ootle-ts-bindings";
+import { XTR_CURRENCY } from "@utils/currency";
+import { emptyRows, formatCurrency, handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import FetchStatusCheck from "@components/FetchStatusCheck";
-import TransactionsStatusChip from "@components/TransactionsStatusChip";
-import { DataTableCell } from "@components/StyledComponents";
-import { useGetAllTransactions } from "@api/hooks/useTransactions";
-import { emptyRows, handleChangePage, handleChangeRowsPerPage, formatCurrency } from "@utils/helpers";
-import { Account, WalletTransaction } from "@tari-project/ootle-ts-bindings";
 import TimeChip from "./TimeChip";
-import { XTR_CURRENCY } from "@utils/constants";
 
-export default function Transactions({ account }: { account: Account }) {
+export default function Transactions(_props: { account: Account }) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-  const { data, isLoading, error, isError, refetch, isRefetching } = useGetAllTransactions({
+  const { data, isLoading, error, isError, isRefetching } = useGetAllTransactions({
     status: null,
     // Some stealth transactions cannot be identified by component/public key in the wallet - so we fetch all transactions.
     // If this feature is badly needed, we can "tag" transactions as involving a specific account when they are created.
@@ -103,7 +103,7 @@ export default function Transactions({ account }: { account: Account }) {
                       </DataTableCell>
                       <DataTableCell>
                         {fee_receipt?.total_fees_paid
-                          ? formatCurrency(fee_receipt.total_fees_paid, XTR_CURRENCY.SYMBOL)
+                          ? formatCurrency(fee_receipt.total_fees_paid, XTR_CURRENCY)
                           : "--"}
                       </DataTableCell>
                       <DataTableCell>

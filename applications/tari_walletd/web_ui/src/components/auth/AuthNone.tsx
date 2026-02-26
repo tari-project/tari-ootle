@@ -1,11 +1,11 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+import Loading from "@components/Loading";
+import { Typography } from "@mui/material";
 import { getClientInstance } from "@utils/json_rpc";
 import { useEffect, useState } from "react";
-import Loading from "@components/Loading";
 import { DEFAULT_PERMISSIONS } from "./web_authn/Webauthn";
-import { Typography } from "@mui/material";
 
 export interface AuthNoneProps {
   onAuthenticated: () => void;

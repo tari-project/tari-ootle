@@ -20,19 +20,19 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, SUCH DAMAGE.
 
-import { FormEvent, useState } from "react";
-import { Form } from "react-router-dom";
+import { Divider, InputAdornment, InputLabel, Stack, Typography } from "@mui/material";
 import Button from "@mui/material/Button";
-import TextField from "@mui/material/TextField";
-import Select from "@mui/material/Select";
-import MenuItem from "@mui/material/MenuItem";
 import CheckBox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
-import { Divider, InputLabel, Stack, InputAdornment, Typography } from "@mui/material";
+import MenuItem from "@mui/material/MenuItem";
+import Select from "@mui/material/Select";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
-import { ResourceType, ResourceAddress, validateOotleAddress } from "@tari-project/ootle-ts-bindings";
-import { formatDisplayCurrency } from "@utils/helpers";
-import { XTR_CURRENCY } from "@utils/constants";
+import TextField from "@mui/material/TextField";
+import { Amount, ResourceAddress, ResourceType, validateOotleAddress } from "@tari-project/ootle-ts-bindings";
+import { XTR_CURRENCY } from "@utils/currency";
+import { formatCurrency, parseAmountToBaseUnits } from "@utils/helpers";
+import { FormEvent, useState } from "react";
+import { Form } from "react-router-dom";
 
 export interface SendMoneyFormState {
   address: string;
@@ -52,7 +52,7 @@ interface FormStepProps {
   disabled: boolean;
   useBadge: boolean;
   isEstimatingFee: boolean;
-  availableBalance?: number;
+  availableBalance?: Amount;
   token_symbol: string;
   divisibility: number;
   formError?: FormError | null;
@@ -94,11 +94,16 @@ export default function FormStep({
   // Track if the user is currently typing in the amount field
   const [isFocusedAmount, setIsFocusedAmount] = useState(false);
 
-  const enteredAmount = parseFloat(transferFormState.amount) || 0;
-  const hasInsufficientFunds = availableBalance !== undefined && enteredAmount > availableBalance;
+  const enteredAmount = parseFloat(transferFormState.amount);
+  const isNaNAmount = isNaN(enteredAmount);
+  const enteredAmountInBaseUnits = isNaNAmount ? 0n : parseAmountToBaseUnits(transferFormState.amount, divisibility);
+  const hasInsufficientFunds = availableBalance !== undefined && enteredAmountInBaseUnits > BigInt(availableBalance);
 
   const isFormValid =
-    validateOotleAddress(transferFormState.address) && transferFormState.amount && !hasInsufficientFunds;
+    !isNaNAmount &&
+    validateOotleAddress(transferFormState.address) &&
+    transferFormState.amount &&
+    !hasInsufficientFunds;
 
   // Format amount for display
   const formatAmountValue = (amount: string) => {
@@ -116,6 +121,11 @@ export default function FormStep({
       minimumFractionDigits: 0,
       maximumFractionDigits: divisibility,
     });
+  };
+
+  const currency = {
+    symbol: token_symbol,
+    decimals: divisibility,
   };
 
   return (
@@ -231,9 +241,9 @@ export default function FormStep({
           error={hasInsufficientFunds}
           helperText={
             hasInsufficientFunds
-              ? `Insufficient funds. Available balance: ${formatDisplayCurrency(availableBalance || 0, divisibility, token_symbol)}`
+              ? `Insufficient funds. Available balance: ${formatCurrency(availableBalance || 0, currency)}`
               : availableBalance !== undefined
-                ? `Available balance: ${formatDisplayCurrency(availableBalance, divisibility, token_symbol)}`
+                ? `Available balance: ${formatCurrency(availableBalance, currency)}`
                 : undefined
           }
           InputProps={{
@@ -252,7 +262,7 @@ export default function FormStep({
           InputProps={{
             endAdornment:
               !isEstimatingFee && token_symbol ? (
-                <InputAdornment position="end">µ{XTR_CURRENCY.SYMBOL}</InputAdornment>
+                <InputAdornment position="end">µ{XTR_CURRENCY.symbol}</InputAdornment>
               ) : null,
           }}
         />

@@ -20,9 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Chip, Box, Typography } from "@mui/material";
-import { DataTableCell } from "@components/StyledComponents";
 import CopyAddress from "@components/CopyAddress";
+import { DataTableCell } from "@components/StyledComponents";
+import { Box, Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from "@mui/material";
 import { TransactionSignature } from "@tari-project/ootle-ts-bindings";
 
 interface SignersProps {

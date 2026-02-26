@@ -15,7 +15,7 @@ use crate::{impl_from, impl_try_from, partial_eq_impl, partial_ord_impl};
 /// e.g. 2 ETH = 2 x 10^18 Gwei.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct Amount(#[cfg_attr(feature = "ts", ts(type = "string | number"))] pub(super) u128);
+pub struct Amount(#[cfg_attr(feature = "ts", ts(type = "string | number | bigint"))] pub(super) u128);
 
 impl Amount {
     pub const BITS: usize = u128::BITS as usize;

@@ -210,12 +210,11 @@ function PublishTemplateDialog(props: DialogProps) {
       setValidity({ ...validity, account: true });
     }
   }, [accounts]);
-
   return (
     <Dialog open={props.open} onClose={handleClose}>
       <PopupTitle onClose={handleClose} title="Publish Template" />
       <DialogContent className="dialog-content">
-        <Form onSubmit={onSubmit} className="flex-container-vertical" style={{ paddingTop: theme.spacing(1) }}>
+        <Form onSubmit={onSubmit} className="flex-container-vertical" style={{ paddingTop: theme.spacing(1), gap: 12 }}>
           {accounts && (
             <>
               <InputLabel id="select-account">Account</InputLabel>
@@ -227,6 +226,7 @@ function PublishTemplateDialog(props: DialogProps) {
                 value={formState.account || accounts.find((a: AccountInfo) => a.account.is_default) || ""}
                 onChange={setSelectFormValue}
                 variant="outlined"
+                style={{ marginBottom: theme.spacing(1) }}
               >
                 {accounts.map((account: AccountInfo, i: number) => (
                   <MenuItem key={i} value={substateIdToString(account.account.component_address)}>
@@ -240,9 +240,11 @@ function PublishTemplateDialog(props: DialogProps) {
             className="flex-container"
             style={{
               justifyContent: "flex-start",
+              alignItems: "end",
             }}
           >
             <Button
+              size="small"
               variant="outlined"
               onClick={(e) => {
                 e.preventDefault();
@@ -253,8 +255,9 @@ function PublishTemplateDialog(props: DialogProps) {
               Select WASM
             </Button>
             {formState.file && (
-              <p style={{ color: "blue" }}>
-                {formState.file.name} {formState.binary?.byteLength} bytes
+              <p style={{ color: "#785be0", margin: 0 }}>
+                {formState.file.name}
+                <span style={{ color: "grey" }}> {formState.binary?.byteLength} bytes</span>
               </p>
             )}
             {fpErrors[0] && <p style={{ color: "red" }}>{fpErrors[0].name}</p>}
@@ -263,11 +266,11 @@ function PublishTemplateDialog(props: DialogProps) {
             name="maxFee"
             label="Fee"
             type="number"
-            value={formState.maxFee}
+            value={formState.maxFee || ""}
             placeholder="Enter max fee"
             onChange={setFormValue}
             disabled={disabled}
-            style={{ flexGrow: 1 }}
+            style={{ flexGrow: 1, marginTop: theme.spacing(1) }}
           />
           <Box
             className="flex-container"

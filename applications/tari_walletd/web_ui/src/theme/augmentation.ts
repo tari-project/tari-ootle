@@ -38,11 +38,17 @@ declare module "@mui/material/styles" {
   }
 
   interface TypographyVariants {
-    poster: React.CSSProperties;
+    label: React.CSSProperties;
   }
 
   // allow configuration using `createTheme()`
   interface TypographyVariantsOptions {
-    poster?: React.CSSProperties;
+    label?: React.CSSProperties;
+  }
+}
+
+declare module "@mui/material/Typography" {
+  interface TypographyPropsVariantOverrides {
+    label: true;
   }
 }

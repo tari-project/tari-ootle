@@ -86,7 +86,11 @@ export const componentSettings: ThemeOptions = {
     },
     // custom
     label: {
-      fontSize: "0.8rem",
+      fontSize: 10,
+      fontWeight: 400,
+      lineHeight: "1",
+      letterSpacing: 0.1,
+      fontFamily: '"PoppinsRegular", sans-serif',
     },
   },
   transitions: {
@@ -224,6 +228,13 @@ export const componentSettings: ThemeOptions = {
           marginLeft: 1,
           borderRadius: 1,
           padding: "12px 8px",
+        },
+      },
+    },
+    MuiTypography: {
+      defaultProps: {
+        variantMapping: {
+          label: "span",
         },
       },
     },

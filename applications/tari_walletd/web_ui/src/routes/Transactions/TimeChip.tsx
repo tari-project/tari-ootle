@@ -31,10 +31,10 @@ function TimeChip({ timestamp }: { timestamp: string | null | undefined }) {
 
   if (!timeAgo) return null;
 
-  const label = <Typography variant="overline">{timeAgo}</Typography>;
+  const label = <Typography variant="label">{timeAgo}</Typography>;
   return (
     <Tooltip title={`Created at: ${formattedTime}`} placement="top" arrow>
-      <Chip label={label} color="default" size="small" variant="filled" />
+      <Chip label={label} color="default" size="small" variant="filled" style={{ paddingLeft: 2, paddingRight: 2 }} />
     </Tooltip>
   );
 }

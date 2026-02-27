@@ -33,6 +33,7 @@ import { useAccountsGetBalances } from "@api/hooks/useAccounts";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import { DataTableCell } from "@components/StyledComponents";
 import Button from "@mui/material/Button";
+import TypeChip from "@routes/AssetVault/Components/ResourceTypeChip";
 import useAccountStore from "@store/accountStore";
 import { Account, Amount, BalanceEntry, ResourceAddress, ResourceType, VaultId } from "@tari-project/ootle-ts-bindings";
 import { bigintToDecimalString, shortenSubstateId, substateIdToString } from "@utils/helpers";
@@ -87,10 +88,8 @@ function BalanceRow({
     <TableRow key={token_symbol || resource_address}>
       <DataTableCell>{vault_address ? <CopyAddress address={vault_address} /> : "--"}</DataTableCell>
       <DataTableCell>
-        <CopyAddress
-          address={resource_address}
-          display={`${token_symbol || shortenSubstateId(resource_address)} ${resource_type}`}
-        />
+        <TypeChip type={resource_type} />
+        <CopyAddress address={resource_address} display={`${token_symbol || shortenSubstateId(resource_address)}`} />
       </DataTableCell>
       <DataTableCell>
         {showBalance ? bigintToDecimalString(balance, divisibility) + " " + token_symbol : "*************"}

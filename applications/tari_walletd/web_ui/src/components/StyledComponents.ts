@@ -55,6 +55,7 @@ export const InnerHeading: React.FC<BoxProps> = styled(Box)(({ theme }) => ({
 export const DataTableCell: React.FC<TableCellProps> = styled(TableCell)(({ theme }) => ({
   fontFamily: "'Courier New', Courier, monospace",
   fontSize: "14px",
+  width: "fit-content",
 }));
 
 export const CodeBlock: React.FC<BoxProps> = styled(Box)(({ theme }) => ({
@@ -119,9 +120,3 @@ export const NftCard: React.FC<CardProps> = styled(Card)(() => ({
     transform: "scale(1.02)",
   },
 }));
-
-export const SpacedBox: React.FC<BoxProps> = styled(Box)`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-`;

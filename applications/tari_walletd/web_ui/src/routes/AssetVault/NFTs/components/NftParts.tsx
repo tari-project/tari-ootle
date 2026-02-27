@@ -71,9 +71,7 @@ function NftCard({ nft }: { nft: NonFungibleToken }) {
 
           <Divider />
           <Typography variant="subtitle2">Vault:</Typography>
-          <Typography variant="body2" color="text.secondary" gutterBottom>
-            <CopyAddress address={nft.vault_id} display={shortenSubstateId(nft.vault_id)} />
-          </Typography>
+          <CopyAddress address={nft.vault_id} display={shortenSubstateId(nft.vault_id)} />
 
           <Divider />
           {data ? <NftData data={data} /> : null}
@@ -93,9 +91,7 @@ function NftData({ data }: { data: Record<string, any> }) {
         return (
           <Fragment key={i}>
             <Typography variant="subtitle2">{key}</Typography>
-            <Typography variant="body2" color="text.secondary" gutterBottom>
-              <CopyAddress address={String(value)} />
-            </Typography>
+            <CopyAddress address={String(value)} />
           </Fragment>
         );
       })}
@@ -140,20 +136,16 @@ function NftRow({ nft }: { nft: NonFungibleToken }) {
             <Typography variant="subtitle2" fontWeight="bold">
               {displayNftId(nft.nft_id)}
             </Typography>
-            <Typography variant="body2" color="text.secondary">
-              <CopyAddress address={nft.vault_id} display={shortenSubstateId(nft.vault_id)} />
-            </Typography>
+            <CopyAddress address={nft.vault_id} display={shortenSubstateId(nft.vault_id)} />
           </Box>
         </Box>
       </DataTableCell>
       <DataTableCell>
-        <Typography variant="body2">
-          {metadata.map(([key, value], index) => (
-            <div key={index}>
-              <strong>{key}:</strong> {value}
-            </div>
-          ))}
-        </Typography>
+        {metadata.map(([key, value]) => (
+          <Typography variant="body2" key={`meta_item_${key.slice(0, 4)}:${value}`}>
+            <strong>{key}:</strong> {value}
+          </Typography>
+        ))}
       </DataTableCell>
       <DataTableCell>
         <Chip

@@ -25,19 +25,17 @@ import FetchStatusCheck from "@components/FetchStatusCheck";
 import { DataTableCell } from "@components/StyledComponents";
 import TransactionsStatusChip from "@components/TransactionsStatusChip";
 import { ChevronRight } from "@mui/icons-material";
-import {
-  Fade,
-  IconButton,
-  Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TablePagination,
-  TableRow,
-} from "@mui/material";
+import { Stack } from "@mui/material";
+import Fade from "@mui/material/Fade";
+import IconButton from "@mui/material/IconButton";
 import { useTheme } from "@mui/material/styles";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableHead from "@mui/material/TableHead";
+import TablePagination from "@mui/material/TablePagination";
+import TableRow from "@mui/material/TableRow";
 import { Account, WalletTransaction } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
 import { emptyRows, formatCurrency, handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
@@ -45,7 +43,10 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import TimeChip from "./TimeChip";
 
-export default function Transactions(_props: { account: Account }) {
+interface TransactionsProps {
+  account?: Account;
+}
+export default function Transactions({ account: _ }: TransactionsProps) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const { data, isLoading, error, isError, isRefetching } = useGetAllTransactions({
@@ -85,11 +86,20 @@ export default function Transactions(_props: { account: Account }) {
                   return (
                     <TableRow key={hash}>
                       <DataTableCell>
-                        <Stack direction="row" spacing={2} alignItems="center">
+                        <Stack
+                          direction={{
+                            sm: "column",
+                            md: "row",
+                          }}
+                          spacing={2}
+                          style={{ maxWidth: `max(400px, max(90%, 600px))` }}
+                        >
                           <Link
                             to={`/transactions/${hash}`}
                             style={{
                               textDecoration: "none",
+                              wordBreak: "break-word",
+                              minWidth: `300px`,
                               color: theme.palette.text.secondary,
                             }}
                           >

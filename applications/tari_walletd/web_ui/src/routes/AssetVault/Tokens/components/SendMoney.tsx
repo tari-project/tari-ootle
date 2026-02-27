@@ -377,7 +377,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
   return (
     <Dialog open={props.open} onClose={handleClose} maxWidth="md" fullWidth>
-      <PopupTitle onClose={handleClose} title="Send Tari" />
+      <PopupTitle onClose={handleClose} title="Send Funds" />
       <DialogContent>{renderStepContent()}</DialogContent>
     </Dialog>
   );

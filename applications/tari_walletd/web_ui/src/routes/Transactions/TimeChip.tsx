@@ -32,13 +32,7 @@ function TimeChip({ timestamp }: { timestamp: string | null | undefined }) {
 
   return (
     <Tooltip title={`Created at: ${formattedTime}`} placement="top" arrow>
-      <Chip
-        label={timeAgo}
-        color="default"
-        size="small"
-        variant="filled"
-        sx={{ padding: "2px 4px 0px 4px", marginTop: "4px" }}
-      />
+      <Chip label={timeAgo} color="default" size="small" variant="filled" style={{ maxWidth: 100 }} />
     </Tooltip>
   );
 }

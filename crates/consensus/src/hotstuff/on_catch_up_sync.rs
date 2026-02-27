@@ -43,8 +43,8 @@ impl<TConsensusSpec: ConsensusSpec> OnCatchUpSync<TConsensusSpec> {
         };
 
         // Reset leader timeout to previous height since we're behind and need to process catch up blocks. This is the
-        // only case where the view is non-monotonic. TODO: is this correct/necessary?
-        // self.pacemaker.reset_view(epoch, block_height, block_height).await?;
+        // only case where the view is non-monotonic.
+        self.pacemaker.reset_view(epoch, block_height, block_height).await?;
 
         info!(
             target: LOG_TARGET,

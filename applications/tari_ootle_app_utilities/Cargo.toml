@@ -29,7 +29,7 @@ ootle_byte_type = { workspace = true, features = ["crypto"] }
 anyhow = { workspace = true }
 blake2 = { workspace = true }
 bincode = { workspace = true, features = ["serde"] }
-clap = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
 libp2p-identity = { workspace = true }
 log = { workspace = true, features = ["std"] }
 multiaddr = { workspace = true }

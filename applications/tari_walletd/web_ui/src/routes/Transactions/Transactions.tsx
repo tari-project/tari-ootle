@@ -36,9 +36,10 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TablePagination from "@mui/material/TablePagination";
 import TableRow from "@mui/material/TableRow";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import { Account, WalletTransaction } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
-import { emptyRows, formatCurrency, handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
+import { emptyRows, formatCurrency, handleChangePage, handleChangeRowsPerPage, shortenString } from "@utils/helpers";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import TimeChip from "./TimeChip";
@@ -59,7 +60,9 @@ export default function Transactions({ account: _ }: TransactionsProps) {
   });
 
   const theme = useTheme();
+  const isSm = useMediaQuery(theme.breakpoints.down("sm"));
 
+  const shortLen = isSm ? 4 : 6;
   return (
     <FetchStatusCheck
       isLoading={isLoading && !isRefetching}
@@ -88,28 +91,25 @@ export default function Transactions({ account: _ }: TransactionsProps) {
                       <DataTableCell>
                         <Stack
                           direction={{
-                            sm: "column",
-                            md: "row",
+                            xs: "column",
+                            sm: "row",
                           }}
-                          spacing={2}
-                          style={{ maxWidth: `max(400px, max(90%, 600px))` }}
+                          spacing={isSm ? 0.1 : 1.5}
                         >
                           <Link
                             to={`/transactions/${hash}`}
                             style={{
                               textDecoration: "none",
-                              wordBreak: "break-word",
-                              minWidth: `300px`,
                               color: theme.palette.text.secondary,
                             }}
                           >
-                            {hash}
+                            {shortenString(hash, shortLen, shortLen)}
                           </Link>
                           <TimeChip timestamp={transaction.last_update_time} />
                         </Stack>
                       </DataTableCell>
                       <DataTableCell>
-                        <TransactionsStatusChip status={status} showTitle />
+                        <TransactionsStatusChip status={status} />
                       </DataTableCell>
                       <DataTableCell>
                         {fee_receipt?.total_fees_paid

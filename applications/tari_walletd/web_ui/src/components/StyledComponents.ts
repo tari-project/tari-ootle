@@ -55,7 +55,6 @@ export const InnerHeading: React.FC<BoxProps> = styled(Box)(({ theme }) => ({
 export const DataTableCell: React.FC<TableCellProps> = styled(TableCell)(({ theme }) => ({
   fontFamily: "'Courier New', Courier, monospace",
   fontSize: "14px",
-  width: "fit-content",
 }));
 
 export const CodeBlock: React.FC<BoxProps> = styled(Box)(({ theme }) => ({

@@ -30,6 +30,7 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
+  Stack,
   TextField,
   Tooltip,
 } from "@mui/material";
@@ -88,12 +89,14 @@ function AccountDetails() {
               <CopyAddress address={substateIdToString(account.component_address)} />
             </DataTableCell>
             <DataTableCell>
-              <CopyAddress address={address} />
-              <Tooltip title="PayRef address">
-                <IconButton size="small" onClick={(_e) => setPayRefDialogOpen(true)} color="primary">
-                  <IoPaperPlaneOutline />
-                </IconButton>
-              </Tooltip>
+              <Stack direction="row" gap={1}>
+                <CopyAddress address={address} />
+                <Tooltip title="PayRef address">
+                  <IconButton size="small" onClick={(_e) => setPayRefDialogOpen(true)} color="primary">
+                    <IoPaperPlaneOutline />
+                  </IconButton>
+                </Tooltip>
+              </Stack>
             </DataTableCell>
           </TableRow>
         </TableBody>

@@ -22,6 +22,7 @@
 
 import { Avatar, Chip } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import type { TransactionStatus } from "@tari-project/ootle-ts-bindings";
 import { ReactNode } from "react";
 import { IoCheckmarkOutline, IoCloseOutline, IoDiamondOutline, IoHourglassOutline, IoReload } from "react-icons/io5";
@@ -43,6 +44,7 @@ const colorList: Record<string, string> = {
 
 export default function TransactionsStatusChip({ status, showTitle = true }: StatusChipProps) {
   const theme = useTheme();
+  const isSm = useMediaQuery(theme.breakpoints.down("sm"));
 
   const iconList: Record<string, ReactNode> = {
     Accepted: <IoCheckmarkOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
@@ -64,22 +66,19 @@ export default function TransactionsStatusChip({ status, showTitle = true }: Sta
 
   if (status === "OnlyFeeAccepted") {
     const leftColor = colorList["Accepted"];
-    const rightColor = colorList["Rejected"];
     background = `linear-gradient(to right, ${leftColor} 50%, ${colorList["Rejected"]} 50%)`;
   }
 
   if (!showTitle) {
-    let leftColor = colorList["Accepted"];
-    let rightColor = colorList["Rejected"];
-
-    return <Avatar sx={{ bgcolor: bgColor, height: 22, width: 22 }}>{iconList[status]}</Avatar>;
+    return <Avatar style={{ background: bgColor, height: 22, width: 22 }}>{iconList[status]}</Avatar>;
   } else {
     return (
       <Chip
-        avatar={<Avatar sx={{ bgcolor: bgColor, background: background }}>{iconList[status]}</Avatar>}
+        avatar={<Avatar style={{ background: background || bgColor }}>{iconList[status]}</Avatar>}
         label={status}
         style={{ color: colorList[status], borderColor: colorList[status] }}
         variant="outlined"
+        size={isSm ? "small" : "medium"}
       />
     );
   }

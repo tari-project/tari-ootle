@@ -22,20 +22,18 @@
 
 import type { ApiError } from "@api/helpers/types";
 import FetchStatusCheck from "@components/FetchStatusCheck";
-import {
-  Button,
-  Grid,
-  IconButton,
-  Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TablePagination,
-  TableRow,
-  Typography,
-} from "@mui/material";
+import Button from "@mui/material/Button";
+import Grid from "@mui/material/Grid";
+import IconButton from "@mui/material/IconButton";
+import Stack from "@mui/material/Stack";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableHead from "@mui/material/TableHead";
+import TablePagination from "@mui/material/TablePagination";
+import TableRow from "@mui/material/TableRow";
+import Typography from "@mui/material/Typography";
 import type { ListNftsResponse, NonFungibleToken } from "@tari-project/ootle-ts-bindings";
 import React, { useState } from "react";
 import { IoApps, IoList } from "react-icons/io5";

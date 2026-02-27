@@ -24,12 +24,15 @@ import CopyAddress from "@components/CopyAddress";
 import { NftCard as Card, DataTableCell } from "@components/StyledComponents";
 import CancelRoundedIcon from "@mui/icons-material/CancelRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
-import { Avatar, Box, CardContent, CardMedia, Chip, Divider, Grid, TableRow, Typography } from "@mui/material";
+import { Avatar, Box, CardContent, CardMedia, Chip, Divider, Grid, Stack, TableRow, Typography } from "@mui/material";
 import type { NonFungibleToken } from "@tari-project/ootle-ts-bindings";
 import { convertCborValue } from "@utils/cbor";
 import { displayNftId, shortenSubstateId } from "@utils/helpers";
 import { Fragment } from "react/jsx-runtime";
 import SendNft from "./SendNft";
+
+const ERR_IMG =
+  "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgdmlld0JveD0iMCAwIDMwMCAyMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIzMDAiIGhlaWdodD0iMjAwIiBmaWxsPSIjRjVGNUY1Ii8+CjxwYXRoIGQ9Ik0xMjUgNzVIMTc1VjEyNUgxMjVWNzVaIiBmaWxsPSIjRERERUREIi8+CjxwYXRoIGQ9Ik0xNDAgOTBIMTYwVjExMEgxNDBWOTBaIiBmaWxsPSIjQkJCQkJCIi8+Cjx0ZXh0IHg9IjE1MCIgeT0iMTQwIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5OTk5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiPk5GVDwvdGV4dD4KPC9zdmc+";
 
 function NftCard({ nft }: { nft: NonFungibleToken }) {
   const mutableData = convertCborValue(nft.mutable_data);
@@ -44,17 +47,13 @@ function NftCard({ nft }: { nft: NonFungibleToken }) {
           height="200"
           image={imageUrl || "/api/placeholder/300/200"}
           alt={`NFT ${displayNftId(nft.nft_id)}`}
-          sx={{
-            objectFit: "cover",
-            backgroundColor: "grey.200",
-          }}
+          style={{ objectFit: "cover", backgroundColor: "grey.200" }}
           onError={(e: any) => {
-            e.target.src =
-              "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgdmlld0JveD0iMCAwIDMwMCAyMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIzMDAiIGhlaWdodD0iMjAwIiBmaWxsPSIjRjVGNUY1Ii8+CjxwYXRoIGQ9Ik0xMjUgNzVIMTc1VjEyNUgxMjVWNzVaIiBmaWxsPSIjRERERUREIi8+CjxwYXRoIGQ9Ik0xNDAgOTBIMTYwVjExMEgxNDBWOTBaIiBmaWxsPSIjQkJCQkJCIi8+Cjx0ZXh0IHg9IjE1MCIgeT0iMTQwIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5OTk5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiPk5GVDwvdGV4dD4KPC9zdmc+";
+            e.target.src = ERR_IMG;
           }}
         />
-        <CardContent sx={{ flexGrow: 1, display: "flex", flexDirection: "column", gap: 1 }}>
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
+        <CardContent style={{ flexGrow: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+          <Box>
             <Typography variant="h6" component="h2" fontWeight="bold" noWrap>
               {displayNftId(nft.nft_id)}
             </Typography>
@@ -68,10 +67,11 @@ function NftCard({ nft }: { nft: NonFungibleToken }) {
               />
             )}
           </Box>
-
           <Divider />
-          <Typography variant="subtitle2">Vault:</Typography>
-          <CopyAddress address={nft.vault_id} display={shortenSubstateId(nft.vault_id)} />
+          <Stack>
+            <Typography variant="subtitle2">Vault:</Typography>
+            <CopyAddress address={nft.vault_id} display={shortenSubstateId(nft.vault_id)} />
+          </Stack>
 
           <Divider />
           {data ? <NftData data={data} /> : null}
@@ -122,10 +122,10 @@ function NftRow({ nft }: { nft: NonFungibleToken }) {
         <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
           <Avatar
             src={imageUrl}
-            sx={{
+            style={{
               width: 60,
               height: 60,
-              borderRadius: 1,
+              borderRadius: "shape.borderRadius",
               backgroundColor: "grey.200",
             }}
             variant="rounded"

@@ -31,8 +31,10 @@ import TableRow from "@mui/material/TableRow";
 
 import { useAccountsGetBalances } from "@api/hooks/useAccounts";
 import FetchStatusCheck from "@components/FetchStatusCheck";
-import { DataTableCell } from "@components/StyledComponents";
+import { FluidTableCell } from "@components/StyledComponents";
 import Button from "@mui/material/Button";
+import { useTheme } from "@mui/material/styles";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import TypeChip from "@routes/AssetVault/Components/ResourceTypeChip";
 import useAccountStore from "@store/accountStore";
 import { Account, Amount, BalanceEntry, ResourceAddress, ResourceType, VaultId } from "@tari-project/ootle-ts-bindings";
@@ -66,7 +68,7 @@ function ConfidentialBalance({ show, resourceType, balance, divisibility, token_
   switch (resourceType) {
     case "Confidential":
     case "Stealth":
-      return <>{show ? bigintToDecimalString(balance, divisibility) + " " + token_symbol : "**************"}</>;
+      return <>{show ? bigintToDecimalString(balance, divisibility) + " " + token_symbol : "********"}</>;
     default:
       return <>--</>;
   }
@@ -82,8 +84,11 @@ function BalanceRow({
   divisibility,
   onSendClicked,
 }: BalanceRowProps) {
-  const showBalance = useAccountStore((state) => state.showBalance);
+  const theme = useTheme();
   const navigate = useNavigate();
+  const isLg = useMediaQuery(theme.breakpoints.up("md"));
+  const showBalance = useAccountStore((state) => state.showBalance);
+
   const stealthUXTOs = resource_type === "Stealth" && (
     <Tooltip title="View Stealth UTXOs">
       <Button
@@ -99,15 +104,26 @@ function BalanceRow({
 
   return (
     <TableRow key={token_symbol || resource_address}>
-      <DataTableCell>{vault_address ? <CopyAddress address={vault_address} /> : "--"}</DataTableCell>
-      <DataTableCell>
-        <TypeChip type={resource_type} symbol={token_symbol} />
-        <CopyAddress address={resource_address} display={shortenString(resource_address, 3, 6)} />
-      </DataTableCell>
-      <DataTableCell>
-        {showBalance ? bigintToDecimalString(balance, divisibility) + " " + token_symbol : "*************"}
-      </DataTableCell>
-      <DataTableCell>
+      <FluidTableCell>{vault_address ? <CopyAddress address={vault_address} /> : "--"}</FluidTableCell>
+      <FluidTableCell>
+        <Stack
+          direction={{
+            xs: "column-reverse",
+            md: "row",
+          }}
+          gap={isLg ? 1 : 0.3}
+        >
+          <CopyAddress
+            address={resource_address}
+            display={shortenString(resource_address, isLg ? 3 : 1, isLg ? 6 : 4)}
+          />
+          <TypeChip type={resource_type} symbol={token_symbol} />
+        </Stack>
+      </FluidTableCell>
+      <FluidTableCell align="right">
+        {showBalance ? `${bigintToDecimalString(balance, divisibility)} ${token_symbol}` : "********"}
+      </FluidTableCell>
+      <FluidTableCell align="right">
         <ConfidentialBalance
           show={showBalance}
           resourceType={resource_type}
@@ -115,20 +131,22 @@ function BalanceRow({
           divisibility={divisibility}
           token_symbol={token_symbol}
         />
-      </DataTableCell>
-      <DataTableCell>
-        <Stack direction="row" gap={1}>
+      </FluidTableCell>
+      <FluidTableCell align="right">
+        <Stack direction="row" gap={1} justifyContent="flex-end">
           <Button size="small" variant="outlined" onClick={() => onSendClicked?.(resource_address, resource_type)}>
             Send
           </Button>
           {stealthUXTOs}
         </Stack>
-      </DataTableCell>
+      </FluidTableCell>
     </TableRow>
   );
 }
 
 function Tokens({ account }: { account: Account }) {
+  const theme = useTheme();
+  const isLg = useMediaQuery(theme.breakpoints.up("md"));
   const [resourceToSend, setResourceToSend] = useState<{
     address: ResourceAddress;
     resource_type: ResourceType;
@@ -195,11 +213,15 @@ function Tokens({ account }: { account: Account }) {
               <Table>
                 <TableHead>
                   <TableRow>
-                    <TableCell>Vault</TableCell>
-                    <TableCell>Resource</TableCell>
-                    <TableCell>Revealed Balance</TableCell>
-                    <TableCell>Confidential Balance</TableCell>
-                    <TableCell></TableCell>
+                    <TableCell size="small">Vault</TableCell>
+                    <TableCell size="small">Resource</TableCell>
+                    <TableCell size="small" align="right">
+                      Revealed Balance
+                    </TableCell>
+                    <TableCell size="small" align="right">
+                      Confidential Balance
+                    </TableCell>
+                    <TableCell size="small" align="right"></TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>

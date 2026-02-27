@@ -23,6 +23,8 @@
 import { useMintTestnetFaucetNfts } from "@api/hooks/useAccounts";
 import queryClient from "@api/queryClient";
 import Button from "@mui/material/Button";
+import { useTheme } from "@mui/material/styles";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import useAccountStore from "@store/accountStore";
 import { substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { useErrorNotification } from "../../../../contexts/ErrorNotificationContext";
@@ -31,7 +33,8 @@ function ClaimNftsButton() {
   const { mutate: claimTestnetFaucetNfts, isPending } = useMintTestnetFaucetNfts();
   const account = useAccountStore((state) => state.account);
   const { showError, showSuccess } = useErrorNotification();
-
+  const theme = useTheme();
+  const isLg = useMediaQuery(theme.breakpoints.up("md"));
   if (!account) {
     return <></>;
   }
@@ -71,7 +74,12 @@ function ClaimNftsButton() {
   };
 
   return (
-    <Button variant="outlined" onClick={() => onClaimTestnetNfts()} disabled={isPending}>
+    <Button
+      variant="outlined"
+      onClick={() => onClaimTestnetNfts()}
+      disabled={isPending}
+      size={isLg ? "large" : "small"}
+    >
       {isPending ? "Claiming..." : "Claim Testnet NFTs"}
     </Button>
   );

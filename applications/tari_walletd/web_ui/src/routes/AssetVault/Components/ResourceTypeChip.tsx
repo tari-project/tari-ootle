@@ -51,7 +51,13 @@ export default function TypeChip({ type, symbol }: TypeChipProps) {
     <Chip
       label={label}
       size="small"
-      style={{ background: colourOptions[type], padding: "2px", height: 20, userSelect: "none" }}
+      style={{
+        background: colourOptions[type],
+        padding: "2px",
+        height: 20,
+        userSelect: "none",
+        maxWidth: "min-content",
+      }}
     />
   );
 }

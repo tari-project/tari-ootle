@@ -22,6 +22,7 @@
 
 import CopyToClipboard from "@components/CopyToClipboard";
 import { Stack } from "@mui/material";
+import Typography from "@mui/material/Typography";
 import { shortenString } from "@tari-project/ootle-ts-bindings";
 import { isSubstateIdString, shortenSubstateId, substateIdToString } from "@utils/helpers";
 
@@ -36,8 +37,10 @@ export default function CopyAddress({ address, display }: Props) {
   const displayStr = display && (typeof display === "object" ? shortenSubstateId(display) : display);
 
   return (
-    <Stack direction="row" gap={1} style={{ width: "max-content" }}>
-      <span title={addressString}>{displayStr || shortAddress}</span>
+    <Stack direction="row" gap={1} style={{ width: "max-content" }} alignItems="center">
+      <Typography variant="span" title={addressString}>
+        {displayStr || shortAddress}
+      </Typography>
       <CopyToClipboard copy={addressString} />
     </Stack>
   );

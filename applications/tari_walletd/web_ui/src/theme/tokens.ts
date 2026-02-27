@@ -88,9 +88,12 @@ export const componentSettings: ThemeOptions = {
     label: {
       fontSize: 10,
       fontWeight: 400,
-      lineHeight: "1",
+      lineHeight: "10px",
       letterSpacing: 0.1,
       fontFamily: '"PoppinsRegular", sans-serif',
+    },
+    span: {
+      lineHeight: 1,
     },
   },
   transitions: {

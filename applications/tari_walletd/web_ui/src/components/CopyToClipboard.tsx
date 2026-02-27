@@ -32,7 +32,7 @@ interface CopyProps {
   iconHeight?: string;
 }
 
-const CopyToClipboard = ({ copy, title, iconWidth = "16px", iconHeight = "16px" }: CopyProps) => {
+const CopyToClipboard = ({ copy, title, iconWidth = "14px", iconHeight = "14px" }: CopyProps) => {
   const [tooltip, setTooltip] = useState<string | null>(null);
   const handleClick = async (copyThis: string) => {
     try {

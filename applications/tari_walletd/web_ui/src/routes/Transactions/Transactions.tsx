@@ -74,10 +74,10 @@ export default function Transactions({ account: _ }: TransactionsProps) {
           <Table>
             <TableHead>
               <TableRow>
-                <TableCell size="small">Transaction Hash</TableCell>
-                <TableCell size="small">Status</TableCell>
-                <TableCell size="small">Total Fees</TableCell>
-                <TableCell size="small">Details</TableCell>
+                <TableCell size="medium">Transaction Hash</TableCell>
+                <TableCell size="medium">Status</TableCell>
+                <TableCell size="medium">Total Fees</TableCell>
+                <TableCell size="medium">Details</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>

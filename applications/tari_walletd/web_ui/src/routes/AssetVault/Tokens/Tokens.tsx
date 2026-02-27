@@ -36,7 +36,7 @@ import Button from "@mui/material/Button";
 import TypeChip from "@routes/AssetVault/Components/ResourceTypeChip";
 import useAccountStore from "@store/accountStore";
 import { Account, Amount, BalanceEntry, ResourceAddress, ResourceType, VaultId } from "@tari-project/ootle-ts-bindings";
-import { bigintToDecimalString, shortenSubstateId, substateIdToString } from "@utils/helpers";
+import { bigintToDecimalString, shortenString, substateIdToString } from "@utils/helpers";
 import { useState } from "react";
 import { IoWalletOutline } from "react-icons/io5";
 import { useNavigate } from "react-router-dom";
@@ -84,12 +84,25 @@ function BalanceRow({
 }: BalanceRowProps) {
   const showBalance = useAccountStore((state) => state.showBalance);
   const navigate = useNavigate();
+  const stealthUXTOs = resource_type === "Stealth" && (
+    <Tooltip title="View Stealth UTXOs">
+      <Button
+        variant="outlined"
+        size="small"
+        endIcon={<IoWalletOutline />}
+        onClick={() => navigate(`/stealth-utxos/${resource_address}`)}
+      >
+        View
+      </Button>
+    </Tooltip>
+  );
+
   return (
     <TableRow key={token_symbol || resource_address}>
       <DataTableCell>{vault_address ? <CopyAddress address={vault_address} /> : "--"}</DataTableCell>
       <DataTableCell>
-        <TypeChip type={resource_type} />
-        <CopyAddress address={resource_address} display={`${token_symbol || shortenSubstateId(resource_address)}`} />
+        <TypeChip type={resource_type} symbol={token_symbol} />
+        <CopyAddress address={resource_address} display={shortenString(resource_address, 3, 6)} />
       </DataTableCell>
       <DataTableCell>
         {showBalance ? bigintToDecimalString(balance, divisibility) + " " + token_symbol : "*************"}
@@ -108,18 +121,7 @@ function BalanceRow({
           <Button size="small" variant="outlined" onClick={() => onSendClicked?.(resource_address, resource_type)}>
             Send
           </Button>
-          {resource_type === "Stealth" && (
-            <Tooltip title="View Stealth UTXOs">
-              <Button
-                variant="outlined"
-                size="small"
-                endIcon={<IoWalletOutline />}
-                onClick={() => navigate(`/stealth-utxos/${resource_address}`)}
-              >
-                View
-              </Button>
-            </Tooltip>
-          )}
+          {stealthUXTOs}
         </Stack>
       </DataTableCell>
     </TableRow>

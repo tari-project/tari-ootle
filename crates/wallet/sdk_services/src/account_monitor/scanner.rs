@@ -480,6 +480,12 @@ where TSpec: WalletSdkSpec
         for (account_address, value, account_version) in accounts {
             // If we know about this account, mark it as on-chain (if it isn't already)
             if self.mark_account_as_on_chain(&account_address).optional()?.is_none() {
+                debug!(
+                    target: LOG_TARGET,
+                    "🏦 Account {} in transaction {} does not belong to us.",
+                    account_address,
+                    tx_id
+                );
                 continue;
             }
             let mut has_changed = false;

@@ -350,8 +350,8 @@ let manager: ResourceManager = vault.get_resource_manager(); // For minting etc.
 vault.pay_fee(amount);                               // Pay transaction fee from this vault
 
 // ─── Authorization ───
-vault.authorize();                                   // Create auth proof from vault contents
-vault.authorize_with(amount);                        // Create proof from specific amount
+vault.authorize();                                   // Create auth proof from vault contents (RAII)
+let proof = vault.create_proof_by_amount(amount);    // Create proof for a specific amount
 ```
 
 > **CRITICAL:** A `Vault` MUST be stored in a component struct field before the function returns. An orphaned vault (created but not stored) will cause the transaction to fail.
@@ -375,7 +375,7 @@ let combined = bucket.join(other_bucket);               // Merge two same-resour
 
 // ─── Destruction ───
 bucket.burn();                                          // Permanently destroy tokens
-bucket.drop_empty(bucket);                              // Assert empty and drop (panics if not)
+bucket.drop_empty();                                    // Assert empty and drop (panics if not)
 
 // ─── Proofs ───
 let proof = bucket.create_proof();                      // Create ownership proof

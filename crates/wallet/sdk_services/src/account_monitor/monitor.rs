@@ -305,6 +305,15 @@ pub enum AccountMonitorError {
 
 impl IsNotFoundError for AccountMonitorError {
     fn is_not_found_error(&self) -> bool {
-        matches!(self, Self::Substate(s) if s.is_not_found_error())
+        match self {
+            Self::Transaction(e) => e.is_not_found_error(),
+            Self::Accounts(e) => e.is_not_found_error(),
+            Self::Substate(e) => e.is_not_found_error(),
+            Self::ConfidentialOutputs(e) => e.is_not_found_error(),
+            Self::StealthOutputs(e) => e.is_not_found_error(),
+            Self::NonFungibleTokens(e) => e.is_not_found_error(),
+            Self::Resources(e) => e.is_not_found_error(),
+            Self::DecodeValueFailed(_) | Self::UnexpectedSubstate(_) | Self::ServiceShutdown => false,
+        }
     }
 }

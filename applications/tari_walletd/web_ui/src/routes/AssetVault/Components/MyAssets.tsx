@@ -20,13 +20,12 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { refreshAccountsBalances, useAccountsGetBalances, useAccountsGetDefault } from "@api/hooks/useAccounts";
+import { refreshAccountsBalances, useAccountsGetDefault } from "@api/hooks/useAccounts";
 import queryClient from "@api/queryClient";
 import Loading from "@components/Loading";
 import PageHeader from "@components/PageHeader";
-import { InnerHeading, SpacedBox, StyledPaper } from "@components/StyledComponents";
+import { InnerHeading, StyledPaper } from "@components/StyledComponents";
 import { Refresh } from "@mui/icons-material";
-import Button from "@mui/material/Button";
 import Grid from "@mui/material/Grid";
 import IconButton from "@mui/material/IconButton";
 import { useTheme } from "@mui/material/styles";
@@ -34,18 +33,18 @@ import Transactions from "@routes/Transactions/Transactions";
 import useAccountStore from "@store/accountStore";
 import { substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { useEffect } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 import AccountDetails from "./AccountDetails";
 import ActionMenu from "./ActionMenu";
 import Assets from "./Assets";
 
 function MyAssets() {
   const theme = useTheme();
-  const navigate = useNavigate();
+
   const { account, setAccount, setOotleAddress } = useAccountStore();
   const { data: defaultAccount, error, refetch } = useAccountsGetDefault(false);
   const refreshBalances = refreshAccountsBalances();
-  const { data: balancesData } = useAccountsGetBalances(substateIdToString(account?.component_address));
+
   useEffect(() => {
     refetch();
 
@@ -74,25 +73,18 @@ function MyAssets() {
       },
     });
   };
-  const resource_address = balancesData?.balances
-    .filter((b) => BigInt(b.balance) > 0n || BigInt(b.confidential_balance) > 0n)
-    .find((b) => b.resource_type === "Stealth")?.resource_address;
-
-  const stealthUXTOLink = resource_address ? (
-    <Button onClick={() => navigate(`/stealth-utxos/${resource_address}`)}>Looking for your Stealth UXTOs?</Button>
-  ) : null;
 
   return (
     <>
       <PageHeader title="My Assets" rightComponent={<ActionMenu />} />
 
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <InnerHeading>Account Details</InnerHeading>
           <AccountDetails />
         </StyledPaper>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <InnerHeading>
             Assets
@@ -112,14 +104,9 @@ function MyAssets() {
           <Assets account={account} />
         </StyledPaper>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
-          <InnerHeading>
-            <SpacedBox>
-              Transactions
-              {stealthUXTOLink}
-            </SpacedBox>
-          </InnerHeading>
+          <InnerHeading>Transactions</InnerHeading>
           <Transactions account={account} />
         </StyledPaper>
       </Grid>

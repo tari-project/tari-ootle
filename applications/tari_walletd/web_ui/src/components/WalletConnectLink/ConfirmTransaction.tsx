@@ -27,7 +27,7 @@ import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import IconButton from "@mui/material/IconButton";
 import Typography from "@mui/material/Typography";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import CheckMark from "./CheckMark";
 import "./ConnectorLink.css";
 import ConnectorLogo from "./ConnectorLogo";
@@ -35,35 +35,6 @@ import ConnectorLogo from "./ConnectorLogo";
 const ConnectorDialog = () => {
   const [page, setPage] = useState(1);
   const [isOpen, setIsOpen] = useState(false);
-  const [linkDetected, setLinkDetected] = useState(false);
-  const [link, _setLink] = useState("");
-  const linkRef = useRef<HTMLInputElement>(null);
-
-  async function getClipboardContent() {
-    if (navigator.clipboard && navigator.clipboard.readText) {
-      try {
-        const clipboardData = await navigator.clipboard.readText();
-        // currently checks for the value 'transaction://' - this needs to be replaced with the correct value
-        if (clipboardData.startsWith("transaction://")) {
-          setIsOpen(true);
-          setLinkDetected(true);
-          _setLink(clipboardData);
-        } else {
-          setLinkDetected(false);
-          _setLink("");
-        }
-      } catch (err) {
-        console.error(`Failed to read clipboard contents: ${err}`);
-      }
-    } else {
-      console.warn("Clipboard API not supported in this browser");
-    }
-  }
-
-  const handleOpen = () => {
-    getClipboardContent();
-    setIsOpen(true);
-  };
 
   const handleClose = () => {
     setIsOpen(false);
@@ -71,10 +42,6 @@ const ConnectorDialog = () => {
       setPage(1);
     }, 500);
   };
-
-  useEffect(() => {
-    getClipboardContent();
-  }, []);
 
   const renderConfirmTransaction = () => {
     switch (page) {
@@ -109,9 +76,6 @@ const ConnectorDialog = () => {
 
   return (
     <>
-      {/* <Button variant="contained" color="primary" onClick={handleOpen}>
-        Confirm Transaction
-      </Button> */}
       <Dialog open={isOpen} onClose={handleClose}>
         <div className="dialog-heading">
           <div style={{ height: "24px", width: "24px" }}></div>

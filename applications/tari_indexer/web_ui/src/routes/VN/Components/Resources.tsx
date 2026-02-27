@@ -169,7 +169,7 @@ function Resources() {
             Resource Information
           </Typography>
           <Grid container spacing={0}>
-            <Grid item xs={12}>
+            <Grid size={{ xs: 12 }}>
               <Stack direction="row" alignItems="baseline" spacing={1}>
                 <Typography variant="subtitle2">Address:</Typography>
                 <Typography variant="body2" color="text.secondary">
@@ -178,7 +178,7 @@ function Resources() {
                 </Typography>
               </Stack>
             </Grid>
-            <Grid item xs={12}>
+            <Grid size={{ xs: 12 }}>
               <Stack direction="row" alignItems="baseline" spacing={1}>
                 <Typography variant="subtitle2">Token Symbol:</Typography>
                 <Typography variant="body2" color="text.secondary">
@@ -186,7 +186,7 @@ function Resources() {
                 </Typography>
               </Stack>
             </Grid>
-            <Grid item xs={12}>
+            <Grid size={{ xs: 12 }}>
               <Stack direction="row" alignItems="baseline" spacing={1}>
                 <Typography variant="subtitle2">Resource Type:</Typography>
                 <Typography variant="body2" color="text.secondary">
@@ -194,7 +194,7 @@ function Resources() {
                 </Typography>
               </Stack>
             </Grid>
-            <Grid item xs={12}>
+            <Grid size={{ xs: 12 }}>
               <Stack direction="row" alignItems="baseline" spacing={1}>
                 <Typography variant="subtitle2">Total Supply:</Typography>
                 <Typography variant="body2" color="text.secondary">

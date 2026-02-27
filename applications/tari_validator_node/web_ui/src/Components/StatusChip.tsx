@@ -22,6 +22,7 @@
 
 import {Avatar, Chip} from "@mui/material";
 import {IoBandageOutline, IoCheckmarkOutline, IoCloseOutline, IoHourglassOutline} from "react-icons/io5";
+import {ReactNode} from "react";
 
 interface StatusChipProps {
     status: "Commit" | "Abort" | "Pending" | "Dummy";
@@ -35,7 +36,7 @@ const colorList: Record<string, string> = {
     Dummy: "#C0C0C0",
 };
 
-const iconList: Record<string, JSX.Element> = {
+const iconList: Record<string, ReactNode> = {
     Commit: <IoCheckmarkOutline style={{height: 14, width: 14}} color="#FFF"/>,
     Pending: <IoHourglassOutline style={{height: 14, width: 14}} color="#FFF"/>,
     Abort: <IoCloseOutline style={{height: 14, width: 14}} color="#FFF"/>,

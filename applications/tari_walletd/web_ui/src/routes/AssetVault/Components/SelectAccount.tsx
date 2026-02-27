@@ -67,6 +67,7 @@ function SelectAccount() {
         <Select
           labelId="account-select-label"
           id="account-select"
+          size="small"
           value={
             account &&
             dataAccountsList?.accounts.some(

@@ -30,14 +30,14 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      "@components": path.resolve(__dirname, "./src/components"),
-      "@routes": path.resolve(__dirname, "./src/routes"),
-      "@utils": path.resolve(__dirname, "./src/utils"),
-      "@assets": path.resolve(__dirname, "./src/assets"),
-      "@hooks": path.resolve(__dirname, "./src/hooks"),
       "@api": path.resolve(__dirname, "./src/services/api"),
+      "@assets": path.resolve(__dirname, "./src/assets"),
+      "@components": path.resolve(__dirname, "./src/components"),
+      "@hooks": path.resolve(__dirname, "./src/hooks"),
+      "@routes": path.resolve(__dirname, "./src/routes"),
       "@store": path.resolve(__dirname, "./src/services/store"),
       "@theme": path.resolve(__dirname, "./src/theme"),
+      "@utils": path.resolve(__dirname, "./src/utils"),
     },
   },
 });

@@ -286,8 +286,10 @@ const ConnectorDialog = () => {
   };
 
   useEffect(() => {
-    getClipboardContent();
-  }, []);
+    if (isOpen) {
+      getClipboardContent();
+    }
+  }, [isOpen, getClipboardContent]);
 
   let permissions: any[] = [];
   let optionalPermissions: any[] = [];
@@ -386,14 +388,7 @@ const ConnectorDialog = () => {
   } else {
     return (
       <>
-        <Button
-          variant="contained"
-          color="primary"
-          onClick={handleOpen}
-          style={{
-            height: "48px",
-          }}
-        >
+        <Button variant="contained" color="primary" onClick={handleOpen} size="large">
           Connect with WalletConnect
         </Button>
         <Dialog open={isOpen} onClose={handleClose}>

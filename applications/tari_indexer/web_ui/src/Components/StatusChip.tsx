@@ -24,6 +24,7 @@ import { Chip, Avatar } from "@mui/material";
 import { IoCheckmarkOutline, IoCloseOutline } from "react-icons/io5";
 import { useTheme } from "@mui/material/styles";
 import type { Decision } from "@tari-project/ootle-ts-bindings";
+import {ReactNode} from "react";
 
 interface StatusChipProps {
   status: Decision;
@@ -50,7 +51,7 @@ export default function StatusChip({
   const statusLabel =
     typeof status === "string" ? status : `Abort: ${status.Abort}`;
 
-  const iconList: Record<string, JSX.Element> = {
+  const iconList: Record<string, ReactNode> = {
     Commit: (
       <IoCheckmarkOutline
         style={{ height: 14, width: 14 }}
@@ -63,51 +64,13 @@ export default function StatusChip({
         color={theme.palette.background.paper}
       />
     ),
-    // Pending: (
-    //   <IoHourglassOutline
-    //     style={{ height: 14, width: 14 }}
-    //     color={theme.palette.background.paper}
-    //   />
-    // ),
-    // DryRun: (
-    //   <IoReload
-    //     style={{ height: 14, width: 14 }}
-    //     color={theme.palette.background.paper}
-    //   />
-    // ),
-    // New: (
-    //   <IoDiamondOutline
-    //     style={{ height: 14, width: 14 }}
-    //     color={theme.palette.background.paper}
-    //   />
-    // ),
-    // InvalidTransaction: (
-    //   <IoCloseOutline
-    //     style={{ height: 14, width: 14 }}
-    //     color={theme.palette.background.paper}
-    //   />
-    // ),
-    // OnlyFeeAccepted: (
-    //   <>
-    //     <IoCheckmarkOutline
-    //       style={{ height: 14, width: 14 }}
-    //       color={theme.palette.background.paper}
-    //     />
-    //     <IoCloseOutline
-    //       style={{ height: 14, width: 14 }}
-    //       color={theme.palette.background.paper}
-    //     />
-    //   </>
-    // ),
+
   };
 
   let bgColor = colorList[statusKey];
   let background = null;
 
   if (!showTitle) {
-    let leftColor = colorList["Commit"];
-    let rightColor = colorList["Abort"];
-
     return (
       <Avatar sx={{ bgcolor: bgColor, height: 22, width: 22 }}>
         {iconList[statusKey]}

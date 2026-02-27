@@ -161,12 +161,13 @@ const TransactionFilter: React.FC<ISearchProps> = ({
           <Select
             value={filterBy}
             label="Filter By"
-            placeholder="Filter By"
+            renderValue={(selected) => (selected.length === 0 ? <em>Filter By</em> : selected)}
             onChange={onSelectChange}
             size="medium"
             name="filterBy"
             style={{ flexGrow: "1", minWidth: "200px" }}
           >
+            <MenuItem disabled value=""><em>Filter by</em></MenuItem>
             {filterItems.map((item) => (
               <MenuItem key={item.value} value={item.value}>
                 {item.title}

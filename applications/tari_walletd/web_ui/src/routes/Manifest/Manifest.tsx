@@ -25,9 +25,9 @@ import PageHeading from "@components/PageHeading";
 import { DataTableCell, StyledPaper } from "@components/StyledComponents";
 import { Stack, Table, TableBody, TableCell, TableHead, TableRow, TextareaAutosize, useTheme } from "@mui/material";
 import Box from "@mui/material/Box";
-import Button from "@mui/material/Button/Button";
+import Button from "@mui/material/Button";
 import Grid from "@mui/material/Grid";
-import TextField from "@mui/material/TextField/TextField";
+import TextField from "@mui/material/TextField";
 import useManifestCodeStore from "@store/manifestStore";
 import { rejectReasonToString } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
@@ -35,10 +35,10 @@ import { useState } from "react";
 function Manifest() {
   return (
     <>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <PageHeading>Manifest</PageHeading>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <ManifestEditor />
         </StyledPaper>
@@ -94,7 +94,7 @@ function ManifestEditor() {
 
   return (
     <>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         {error && (
           <Box sx={{ color: "red" }}>
             <p>{error.message}</p>
@@ -159,7 +159,7 @@ function VariableEditor({
   const [value, setValue] = useState("");
 
   return (
-    <Grid item xs={12} md={12} lg={12} mt={2}>
+    <Grid size={12} mt={2}>
       <Stack direction="row" spacing={1} alignItems="center" marginBottom={2}>
         <TextField
           name="variable-key"

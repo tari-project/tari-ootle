@@ -55,10 +55,10 @@ function CommitteesLayout() {
 
   return (
     <>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <PageHeading>Committees</PageHeading>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           Current epoch: {epoch.current_epoch}
           <br />
@@ -78,17 +78,17 @@ function CommitteesLayout() {
             .reduce((acc, curr) => Math.max(acc, curr), 0)}
         </StyledPaper>
       </Grid>
-      <Grid item xs={12} md={12} lg={8}>
+      <Grid size={{ xs:12, md:12, lg:8}}>
         <StyledPaper>
           <CommitteesPieChart chartData={committees} />
         </StyledPaper>
       </Grid>
-      <Grid item xs={12} md={12} lg={4}>
+      <Grid size={{ xs:12, md:12, lg:4}}>
         <StyledPaper>
           <CommitteesRadial committees={committees} />
         </StyledPaper>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <Typography>
             <Committees committees={committees.committees} peerId={identity.peer_id} />

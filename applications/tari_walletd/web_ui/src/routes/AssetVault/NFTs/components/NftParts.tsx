@@ -37,7 +37,7 @@ function NftCard({ nft }: { nft: NonFungibleToken }) {
   const imageUrl = mutableData?.image_url;
 
   return (
-    <Grid item xs={12} sm={6} md={4} lg={3}>
+    <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
       <Card>
         <CardMedia
           component="img"

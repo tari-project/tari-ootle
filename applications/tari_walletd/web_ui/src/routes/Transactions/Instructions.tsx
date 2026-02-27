@@ -32,7 +32,12 @@ import { toHexString } from "@utils/helpers";
 import { decode } from "cbor2";
 import { useState } from "react";
 
-function RowData({ title, data }: { title: string; data: Instruction }, index: number) {
+interface RowDataProps {
+  title: string;
+  data: Instruction;
+  index: number;
+}
+function RowData({ title, data, index }: RowDataProps) {
   const [open, setOpen] = useState(false);
   const theme = useTheme();
   return (
@@ -121,7 +126,7 @@ export default function Instructions({ data }: { data: Array<Instruction> }) {
         <TableBody>
           {data?.length ? (
             data.map((item: Instruction, index) => {
-              return <RowData key={index} title={Object.keys(item)[0]} data={item} />;
+              return <RowData key={index} index={index} title={Object.keys(item)[0]} data={item} />;
             })
           ) : (
             <Box sx={{ p: 3, textAlign: "center" }}>

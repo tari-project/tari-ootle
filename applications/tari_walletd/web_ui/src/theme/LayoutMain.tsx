@@ -50,7 +50,7 @@ import { useState } from "react";
 import { Link, Outlet } from "react-router-dom";
 import "./theme.css";
 
-const drawerWidth = 300;
+const DRAWER_WIDTH = 300;
 
 interface AppBarProps extends MuiAppBarProps {
   open?: boolean;
@@ -65,8 +65,8 @@ const AppBar = styled(MuiAppBar, {
     duration: theme.transitions.duration.enteringScreen,
   }),
   ...(open && {
-    marginLeft: drawerWidth,
-    width: `calc(100% - ${drawerWidth}px)`,
+    marginLeft: DRAWER_WIDTH,
+    width: `calc(100% - ${DRAWER_WIDTH}px)`,
     transition: theme.transitions.create(["width", "margin"], {
       easing: theme.transitions.easing.easeOut,
       duration: theme.transitions.duration.enteringScreen,
@@ -82,7 +82,7 @@ const Drawer = styled(MuiDrawer, {
     whiteSpace: "nowrap",
     borderRight: `1px solid ${lightAlpha[5]}`,
     boxShadow: "10px 14px 28px rgb(35 11 73 / 5%)",
-    width: drawerWidth,
+    width: DRAWER_WIDTH,
     transition: theme.transitions.create("width", {
       easing: theme.transitions.easing.easeOut,
       duration: theme.transitions.duration.enteringScreen,
@@ -136,15 +136,7 @@ export default function Layout() {
       </Dialog>
       <Box sx={{ display: "flex" }}>
         <CssBaseline />
-        <AppBar
-          position="absolute"
-          open={open}
-          elevation={0}
-          sx={{
-            backgroundColor: theme.palette.background.paper,
-            boxShadow: "10px 14px 28px rgb(35 11 73 / 5%)",
-          }}
-        >
+        <AppBar position="absolute" open={open} elevation={0}>
           <Toolbar
             sx={{
               pr: "24px",
@@ -219,7 +211,7 @@ export default function Layout() {
             }}
           >
             <Grid container spacing={3}>
-              <Grid item sm={12} md={12} lg={12}>
+              <Grid size={12}>
                 <div
                   style={{
                     display: "flex",

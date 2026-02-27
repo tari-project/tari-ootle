@@ -23,6 +23,7 @@
 import { Avatar, Chip } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import type { TransactionStatus } from "@tari-project/ootle-ts-bindings";
+import { ReactNode } from "react";
 import { IoCheckmarkOutline, IoCloseOutline, IoDiamondOutline, IoHourglassOutline, IoReload } from "react-icons/io5";
 
 interface StatusChipProps {
@@ -43,7 +44,7 @@ const colorList: Record<string, string> = {
 export default function TransactionsStatusChip({ status, showTitle = true }: StatusChipProps) {
   const theme = useTheme();
 
-  const iconList: Record<string, JSX.Element> = {
+  const iconList: Record<string, ReactNode> = {
     Accepted: <IoCheckmarkOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
     Pending: <IoHourglassOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
     DryRun: <IoReload style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,

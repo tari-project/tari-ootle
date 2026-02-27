@@ -28,10 +28,10 @@ import Fees from "../VN/Components/Fees";
 function FeesLayout() {
   return (
     <>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <PageHeading>Fees</PageHeading>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <Fees />
         </StyledPaper>

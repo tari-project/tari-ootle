@@ -128,10 +128,10 @@ function AccountDetailsLayout() {
       {balancesIsError && <div>Error loading balances: {balancesError?.message}</div>}
       {nftsListIsError && <div>Error loading NFTs: {nftsListError?.message}</div>}
 
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <PageHeading>Account Details</PageHeading>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <Button
             variant="outlined"
@@ -196,7 +196,7 @@ function AccountDetailsLayout() {
           </TableContainer>
         </StyledPaper>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <InnerHeading>Balances</InnerHeading>
           <FetchStatusCheck
@@ -220,7 +220,7 @@ function AccountDetailsLayout() {
           </FetchStatusCheck>
         </StyledPaper>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <InnerHeading>Account NFTs</InnerHeading>
           <NftList

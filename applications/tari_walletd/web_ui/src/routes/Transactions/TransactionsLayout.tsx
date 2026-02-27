@@ -30,10 +30,10 @@ function TransactionsLayout() {
   const { account } = useAccountStore();
   return (
     <>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <PageHeading>Transactions</PageHeading>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <Transactions account={account!} />
         </StyledPaper>

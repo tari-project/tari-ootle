@@ -28,10 +28,10 @@ import AccessTokens from "@routes/Wallet/Components/AccessTokens";
 function AccessTokensLayout() {
   return (
     <>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <PageHeading>Access Tokens</PageHeading>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <AccessTokens />
         </StyledPaper>

@@ -51,26 +51,26 @@ function ValidatorNode() {
   if (identity === undefined) return <div>Loading</div>;
   return (
     <>
-      <Grid item sm={12} md={12} xs={12}>
+      <Grid size={12}>
         <SecondaryHeading>Info</SecondaryHeading>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <Info identity={identity} />
         </StyledPaper>
       </Grid>
-      <Grid item sm={12} md={12} xs={12}>
+      <Grid size={12}>
         <SecondaryHeading>Connections</SecondaryHeading>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <Connections />
         </StyledPaper>
       </Grid>
-      <Grid item sm={12} md={12} xs={12}>
+      <Grid size={12}>
         <SecondaryHeading>Recent Transactions</SecondaryHeading>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <RecentTransactions />
         </StyledPaper>

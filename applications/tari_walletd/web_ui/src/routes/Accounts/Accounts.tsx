@@ -28,10 +28,10 @@ import Accounts from "../Wallet/Components/Accounts";
 function AccountsLayout() {
   return (
     <>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <PageHeading>Accounts</PageHeading>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <Accounts />
         </StyledPaper>

@@ -24,7 +24,7 @@ import { useKeysCreate, useKeysList, useKeysSetActive } from "@api/hooks/useKeys
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import { BoxHeading2, DataTableCell } from "@components/StyledComponents";
 import AddIcon from "@mui/icons-material/Add";
-import Button from "@mui/material/Button/Button";
+import Button from "@mui/material/Button";
 import Fade from "@mui/material/Fade";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
@@ -42,7 +42,7 @@ function Key([keyId, pk, active]: [KeyId, string, boolean], setActive: (key_id: 
       ? `derived-${keyId.Derived.index.toString()}`
       : `imported-${keyId.Imported.local_key_id.toString()}`;
   return (
-    <TableRow>
+    <TableRow key={`row-${rowKey}`}>
       <DataTableCell>{rowKey}</DataTableCell>
       <DataTableCell>{pk}</DataTableCell>
       <DataTableCell>{active ? <b>Active</b> : <div onClick={() => setActive(keyId)}>Activate</div>}</DataTableCell>

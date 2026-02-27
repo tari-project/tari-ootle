@@ -27,8 +27,8 @@ import { useTheme } from "@mui/material/styles";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { ConfidentialViewVaultBalanceRequest } from "@tari-project/ootle-ts-bindings";
+import { confidentialViewVaultBalance } from "@utils/json_rpc";
 import { useState } from "react";
-import { confidentialViewVaultBalance } from "../../../utils/json_rpc";
 
 function ViewVaultBalanceForm() {
   const [formState, setFormState] = useState({
@@ -70,11 +70,17 @@ function ViewVaultBalanceForm() {
   return (
     <>
       <Box className="flex-container" sx={{ marginBottom: 4 }}>
-        <TextField name="keyId" label="Key ID" value={formState.keyId} onChange={onChange} style={{ flexGrow: 1 }} />
+        <TextField
+          name="keyId"
+          label="Key ID"
+          value={formState.keyId || ""}
+          onChange={onChange}
+          style={{ flexGrow: 1 }}
+        />
         <TextField
           name="vaultId"
           label="Vault Id"
-          value={formState.vaultId}
+          value={formState.vaultId || ""}
           onChange={onChange}
           style={{ flexGrow: 1 }}
         />

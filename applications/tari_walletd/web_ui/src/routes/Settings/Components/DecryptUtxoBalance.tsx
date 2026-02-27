@@ -74,26 +74,38 @@ function DecryptUtxoBalanceForm() {
   return (
     <>
       <Box className="flex-container" sx={{ marginBottom: 4 }}>
-        <TextField name="keyId" label="Key ID" value={formState.keyId} onChange={onChange} style={{ flexGrow: 1 }} />
         <TextField
-          name="resourceAddress"
-          label="Resource Address"
-          value={formState.resourceAddress}
+          name="keyId"
+          label="Key ID"
+          value={formState.keyId || ""}
           onChange={onChange}
           style={{ flexGrow: 1 }}
         />
-        <TextField name="utxoId" label="UTXO ID" value={formState.utxoId} onChange={onChange} style={{ flexGrow: 1 }} />
+        <TextField
+          name="resourceAddress"
+          label="Resource Address"
+          value={formState.resourceAddress || ""}
+          onChange={onChange}
+          style={{ flexGrow: 1 }}
+        />
+        <TextField
+          name="utxoId"
+          label="UTXO ID"
+          value={formState.utxoId || ""}
+          onChange={onChange}
+          style={{ flexGrow: 1 }}
+        />
         <TextField
           name="minimumExpectedValue"
           label="Minimum Expected Value"
-          value={formState.minimumExpectedValue}
+          value={formState.minimumExpectedValue || ""}
           onChange={onChange}
           style={{ flexGrow: 1 }}
         />
         <TextField
           name="maximumExpectedValue"
           label="Maximum Expected Value"
-          value={formState.maximumExpectedValue}
+          value={formState.maximumExpectedValue || ""}
           onChange={onChange}
           style={{ flexGrow: 1 }}
         />

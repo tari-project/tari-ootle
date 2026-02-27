@@ -28,10 +28,10 @@ import Keys from "../Wallet/Components/Keys";
 function KeysLayout() {
   return (
     <>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <PageHeading>Keys</PageHeading>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           <Keys />
         </StyledPaper>

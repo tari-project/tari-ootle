@@ -147,10 +147,10 @@ export default function TransactionDetails() {
   const abortReason = final_decision !== null && typeof final_decision === "object" ? final_decision.Abort : null;
   return (
     <>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <PageHeading>Transaction Details</PageHeading>
       </Grid>
-      <Grid item xs={12} md={12} lg={12}>
+      <Grid size={12}>
         <StyledPaper>
           {loading ? (
             <Loading />

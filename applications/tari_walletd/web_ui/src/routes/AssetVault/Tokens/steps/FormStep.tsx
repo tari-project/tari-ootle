@@ -26,7 +26,7 @@ import CheckBox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import MenuItem from "@mui/material/MenuItem";
 import Select from "@mui/material/Select";
-import { SelectChangeEvent } from "@mui/material/Select/Select";
+import { SelectChangeEvent } from "@mui/material/Select";
 import TextField from "@mui/material/TextField";
 import { Amount, ResourceAddress, ResourceType, validateOotleAddress } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";

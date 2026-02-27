@@ -21,62 +21,67 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { ThemeOptions } from "@mui/material/styles";
-import { blue, gothic, green, grey, orange, red, tariPurple, teal } from "@theme/colors";
+import { blue, gothic, green, grey, orange, red, tariBg, tariPurple, teal } from "@theme/colors";
 import "./augmentation";
+import PoppinsBoldTTF from "./fonts/poppins/Poppins-Bold.ttf";
+import PoppinsMediumTTF from "./fonts/poppins/Poppins-Medium.ttf";
+import PoppinsRegularTTF from "./fonts/poppins/Poppins-Regular.ttf";
+import PoppinsSemiBoldTTF from "./fonts/poppins/Poppins-SemiBold.ttf";
 
 export const componentSettings: ThemeOptions = {
   shape: {
-    borderRadius: 8,
+    borderRadius: 20,
   },
   spacing: 8,
   typography: {
-    fontFamily: '"Poppins", sans-serif',
+    fontFamily: '"PoppinsMedium", sans-serif',
     fontSize: 12,
     body1: {
+      lineHeight: 1.1,
       letterSpacing: "0.5px",
-      fontFamily: '"Poppins", sans-serif',
       fontWeight: 500,
+      fontFamily: '"PoppinsMedium", sans-serif',
     },
     body2: {
       lineHeight: "1.5rem",
-      fontFamily: '"Poppins", sans-serif',
       fontWeight: 500,
+      fontFamily: '"PoppinsMedium", sans-serif',
     },
     h1: {
       fontSize: "2.2rem",
       lineHeight: "3.2rem",
-      fontFamily: '"Poppins", sans-serif',
       fontWeight: 700,
+      fontFamily: '"PoppinsBold", sans-serif',
     },
     h2: {
       fontSize: "1.9rem",
       lineHeight: "2.9rem",
-      fontFamily: '"Poppins", sans-serif',
       fontWeight: 700,
+      fontFamily: '"PoppinsBold", sans-serif',
     },
     h3: {
       fontSize: "1.6rem",
       lineHeight: "2.6rem",
-      fontFamily: '"Poppins", sans-serif',
       fontWeight: 700,
+      fontFamily: '"PoppinsBold", sans-serif',
     },
     h4: {
       fontSize: "1.3rem",
       lineHeight: "2.3rem",
-      fontFamily: '"Poppins", sans-serif',
       fontWeight: 600,
+      fontFamily: '"PoppinsSemiBold", sans-serif',
     },
     h5: {
       fontSize: "14px",
-      fontFamily: '"Poppins", sans-serif',
       lineHeight: "1.4rem",
       fontWeight: 600,
+      fontFamily: '"PoppinsSemiBold", sans-serif',
     },
     h6: {
       fontSize: "0.75rem",
       lineHeight: "1.8rem",
-      fontFamily: '"Poppins", sans-serif',
       fontWeight: 600,
+      fontFamily: '"PoppinsSemiBold", sans-serif',
     },
   },
   transitions: {
@@ -86,13 +91,66 @@ export const componentSettings: ThemeOptions = {
     },
   },
   components: {
+    MuiCssBaseline: {
+      styleOverrides: `
+        @font-face {
+          font-family: "PoppinsRegular";
+          src: local('Poppins'), url(${PoppinsRegularTTF}) format('ttf');
+          font-display: swap;
+          font-weight: 400
+        }
+        @font-face {
+          font-family: "PoppinsMedium";
+          src: local('Poppins'), url(${PoppinsMediumTTF}) format('ttf');
+          font-display: swap;
+          font-weight: 500
+        }
+        @font-face {
+          font-family: "PoppinsSemiBold";
+          src: local('Poppins'), url(${PoppinsSemiBoldTTF}) format('ttf');
+          font-display: swap;
+          font-weight: 600
+        }
+        @font-face {
+          font-family: "PoppinsBold";
+          src: local('Poppins'), url(${PoppinsBoldTTF}) format('ttf');
+          font-display: swap;
+          font-weight: 700
+        }
+      `,
+    },
+    MuiAppBar: {
+      defaultProps: {
+        sx: {
+          boxShadow: "10px 14px 28px rgb(35 11 73 / 5%)",
+          backgroundColor: (theme) => theme.palette.background.paper,
+        },
+      },
+    },
     MuiButton: {
       defaultProps: {
         size: "large",
         sx: {
           textTransform: "none",
+          fontWeight: 500,
         },
       },
+      variants: [
+        {
+          props: { variant: "contained" },
+          style: ({ theme }) => ({
+            backgroundColor: theme.palette.primary.main,
+          }),
+        },
+        {
+          props: { variant: "outlined" },
+          style: ({ theme }) => ({
+            borderColor: theme.palette.secondary.main,
+            borderWidth: 1.25,
+            color: theme.palette.secondary.main,
+          }),
+        },
+      ],
     },
     MuiPaper: {
       defaultProps: {
@@ -153,6 +211,7 @@ export const componentSettings: ThemeOptions = {
         },
       },
     },
+    MuiDialog: {},
     MuiMenuItem: {
       defaultProps: {
         sx: {
@@ -170,12 +229,12 @@ export const light: ThemeOptions = {
   palette: {
     mode: "light",
     primary: {
-      main: tariPurple[600],
-      dark: tariPurple[700],
-      light: tariPurple[500],
+      main: tariPurple[500],
+      dark: tariPurple[800],
+      light: tariPurple[400],
     },
     secondary: {
-      main: gothic[400],
+      main: tariPurple[600],
       dark: gothic[500],
       light: teal[400],
     },
@@ -186,8 +245,8 @@ export const light: ThemeOptions = {
       disabled: grey[400],
     },
     background: {
-      default: grey[50],
-      paper: "#fff",
+      default: tariBg[100],
+      paper: tariBg[50],
     },
     success: {
       main: green[500],
@@ -214,7 +273,7 @@ export const light: ThemeOptions = {
       contrastText: "#ffffff",
     },
     accent: {
-      background: "rgba(0, 0, 0, 0.03)",
+      background: "rgba(243,243,252,0.2)",
       border: "rgba(0, 0, 0, 0.03)",
     },
   },
@@ -224,12 +283,12 @@ export const dark: ThemeOptions = {
   palette: {
     mode: "dark",
     primary: {
-      main: tariPurple[500],
-      dark: tariPurple[400],
+      main: tariPurple[400],
+      dark: tariPurple[200],
       light: tariPurple[50],
     },
     secondary: {
-      main: teal[400],
+      main: tariPurple[300],
       dark: teal[300],
       light: gothic[400],
     },
@@ -240,8 +299,8 @@ export const dark: ThemeOptions = {
       disabled: "rgba(255,255,255,0.4)",
     },
     background: {
-      default: grey[950],
-      paper: grey[900],
+      default: tariBg[950],
+      paper: tariBg[900],
     },
     success: {
       main: green[500],
@@ -268,7 +327,7 @@ export const dark: ThemeOptions = {
       contrastText: "#ffffff",
     },
     accent: {
-      background: "rgba(255, 255, 255, 0.03) ",
+      background: "rgba(10,8,26,0.4)",
       border: "rgba(255, 255, 255, 0.03) ",
     },
   },

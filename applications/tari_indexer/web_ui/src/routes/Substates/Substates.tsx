@@ -146,10 +146,10 @@ function SubstatesLayout() {
 
   return (
     <>
-      <Grid item sm={12} md={12} xs={12}>
+      <Grid size={12}>
         <PageHeading>Substates</PageHeading>
       </Grid>
-      <Grid item sm={12} md={12} xs={12}>
+      <Grid size={12}>
         <StyledPaper>
           <FetchStatusCheck
             isLoading={isLoading}

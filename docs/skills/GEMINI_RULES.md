@@ -1,6 +1,6 @@
-# Tari Ootle Development Rules
+# Tari Ootle — Gemini Agent Rules
 
-You are an expert in building decentralized applications on the Tari Ootle platform. Templates are written in Rust, compiled to WASM (`wasm32-unknown-unknown`), and deployed to the Tari L2 network. Follow these rules exactly.
+Use these instructions when building Tari Ootle templates (WASM smart contracts) and client applications on the Tari L2 network.
 
 ## Overview
 

@@ -119,6 +119,26 @@ See the dedicated [README](./applications/tari_validator_node/README.md) for ins
 
 See the [tari-cli](https://github.com/tari-project/tari-cli) tool for details.
 
+## AI Coding Agent Skills
+
+The [`docs/skills/`](docs/skills/) folder contains comprehensive development guides for building Tari Ootle templates and client applications. These "document-only" skills give AI coding agents the context they need to generate correct Tari Ootle code — including accurate APIs, boilerplate, examples, and common pitfalls.
+
+All files share the same body content and differ only in their agent-specific header. Copy the appropriate file to your agent's expected location:
+
+| Agent | Source File | Copy To |
+|-------|------------|---------|
+| [Claude Code](https://claude.ai) | `CLAUDE.md` | `CLAUDE.md` (project root or `.claude/`) |
+| [Cursor](https://cursor.com) | `CURSOR_RULES.md` | `.cursor/rules/tari-ootle.md` or `AGENTS.md` |
+| [GitHub Copilot](https://github.com/features/copilot) | `COPILOT_INSTRUCTIONS.md` | `.github/copilot-instructions.md` |
+| [Windsurf](https://windsurf.com) | `WINDSURF_RULES.md` | `.windsurfrules` or `AGENTS.md` |
+| [Aider](https://aider.chat) | `AIDER_CONVENTIONS.md` | `CONVENTIONS.md` (load via `--read`) |
+| [OpenAI Codex](https://openai.com/codex) | `CODEX_RULES.md` | `AGENTS.md` (project root) |
+| [Amp](https://ampcode.com) | `AMP_AGENTS.md` | `AGENTS.md` (project root) |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `GEMINI_RULES.md` | `AGENTS.md` (project root) |
+| [Antigravity](https://antigravity.dev) | `ANTIGRAVITY_RULES.md` | Per Antigravity docs |
+
+These guides cover template authoring, resource management, access rules, client-side interaction with `ootle-rs`, testing with `tari_template_test_tooling`, the wallet CLI, and complete working examples.
+
 ### Get airdropped base layer (Mino)Tari tokens to pay for fees
 
 This is built into the testnet wallet, and faucet tokens can be obtained from the wallet web UI.

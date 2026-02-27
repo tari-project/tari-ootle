@@ -974,15 +974,15 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let mut dummy_block = None;
         let mut propose_high_tc = None;
         if next_height > highest_block.height + NodeHeight(1) {
-            let (high_qc, high_tc, parent) = self.state_store.with_read_tx(|tx| {
+            let (high_qc, high_tc, justify_block) = self.state_store.with_read_tx(|tx| {
                 let high_qc = HighPc::get(tx, epoch_state.epoch())?;
                 let high_qc = ProposalCertificate::get(tx, high_qc.epoch(), high_qc.id())?;
                 let high_tc = HighTc::get(tx, epoch_state.epoch()).optional()?;
                 let high_tc = high_tc
                     .map(|tc| TimeoutCertificate::get(tx, tc.epoch(), tc.id()))
                     .transpose()?;
-                let block = Block::get(tx, highest_block.block_id())?;
-                Ok::<_, HotStuffError>((high_qc, high_tc, block))
+                let justify_block = Block::get(tx, &high_qc.calculate_block_id())?;
+                Ok::<_, HotStuffError>((high_qc, high_tc, justify_block))
             })?;
 
             propose_high_tc = high_tc;
@@ -993,19 +993,19 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             );
 
             if let Some(dummy) = calculate_last_dummy_block(
-                highest_block.height,
+                justify_block.height(),
                 next_height,
                 self.config.network,
                 epoch_state.epoch(),
-                parent.shard_group(),
-                *parent.id(),
+                justify_block.shard_group(),
+                *justify_block.id(),
                 &high_qc,
-                *parent.state_merkle_root(),
+                *justify_block.state_merkle_root(),
                 &self.leader_strategy,
                 epoch_state.local_committee(),
-                parent.timestamp(),
-                *parent.header().accumulated_data(),
-                *parent.epoch_hash(),
+                justify_block.timestamp(),
+                *justify_block.header().accumulated_data(),
+                *justify_block.epoch_hash(),
             ) {
                 dummy_block = Some(dummy);
             }

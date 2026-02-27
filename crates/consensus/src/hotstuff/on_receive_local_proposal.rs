@@ -8,7 +8,6 @@ use ootle_byte_type::ToByteType;
 use tari_consensus_types::{
     Decision,
     HighPc,
-    HighestSeenBlock,
     LastSentVote,
     PcId,
     ProposalCertificate,
@@ -870,17 +869,12 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         if candidate_block.timeout_certificate().is_some() {
             let num_dummies = candidate_block.height().as_u64() - justify_block.height().as_u64() - 1;
             info!(target: LOG_TARGET, "🔨 Creating {} dummy block(s) for block {}", num_dummies, candidate_block);
-            // On a leader failure we want to include the highest valid block we've seen. We have already asserted above
-            // that we know the block in the proposal certificate (or else we kick into catch-up sync). Assuming that PC
-            // was included in the highest-seen block (that, for whatever reason, did not get justified) we
-            // can assume that this highest-seen block used to create dummy blocks is the same as the
-            // proposer.
-            let highest_seen_block = HighestSeenBlock::get(tx, candidate_block.epoch())?;
-            let highest_seen_block = Block::get(tx, highest_seen_block.block_id())?;
-
+            // On a leader failure we use the justify block (QC-certified block) as the starting point for dummy
+            // blocks. This is deterministic across all honest nodes since the QC is included in the candidate
+            // block and all nodes have the justified block stored.
             let dummy_blocks = calculate_dummy_blocks_from_justify(
                 &candidate_block,
-                &highest_seen_block,
+                &justify_block,
                 &self.leader_strategy,
                 local_committee,
             );
@@ -890,7 +884,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 if candidate_block.parent() != last_dummy.id() {
                     warn!(target: LOG_TARGET, "❌ Bad proposal, unable to find dummy blocks (last dummy: {}) for candidate block {}", last_dummy, candidate_block);
                     return Err(ProposalValidationError::CandidateBlockDoesNotExtendJustify {
-                        justify_block_height: highest_seen_block.height(),
+                        justify_block_height: justify_block.height(),
                         candidate_block_height: candidate_block.height(),
                     }
                     .into());

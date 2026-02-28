@@ -1058,7 +1058,7 @@ mod guessing_game {
         pub fn new(address: ComponentAddressAllocation) -> Component<Self> {
             let prize_resource = ResourceBuilder::non_fungible()
                 .metadata("name", "Guessing Game Prize")
-                .with_token_symbol("🎲")
+                .with_token_symbol("DICE")
                 .build();
 
             let access_rules = ComponentAccessRules::new()

@@ -159,12 +159,12 @@ mod my_template {
 
 ```rust
 // Simple constructor — returning Self creates the component with default rules
-pub fn new() -> Self {
+pub fn new_simple() -> Self {
     Self { counter: 0 }
 }
 
 // Explicit constructor — returns Component<Self> for full control
-pub fn new() -> Component<Self> {
+pub fn new_explicit() -> Component<Self> {
     Component::new(Self { counter: 0 })
         .with_access_rules(ComponentAccessRules::new()
             .method("do_something", rule!(allow_all))
@@ -175,7 +175,7 @@ pub fn new() -> Component<Self> {
 }
 
 // Constructor with address allocation — allows creating and calling in one transaction
-pub fn new(addr: ComponentAddressAllocation) -> Component<Self> {
+pub fn new_with_allocation(addr: ComponentAddressAllocation) -> Component<Self> {
     Component::new(Self { counter: 0 })
         .with_address_allocation(addr)
         .with_access_rules(ComponentAccessRules::new()
@@ -186,7 +186,7 @@ pub fn new(addr: ComponentAddressAllocation) -> Component<Self> {
 }
 
 // Constructor with public key address — deterministic address from a public key
-pub fn new() -> Component<Self> {
+pub fn new_with_public_key() -> Component<Self> {
     let pk = CallerContext::transaction_signer_public_key();
     Component::new(Self { counter: 0 })
         .with_public_key_address(pk)
@@ -611,14 +611,14 @@ let outcome = pending.watch().await?;
 Every on-chain interaction follows this pattern:
 
 ```rust
-use tari_ootle_transaction::{TransactionBuilder, args};
+use tari_ootle_transaction::{TransactionBuilder, call_args};
 use ootle_rs::TransactionRequest;
 
 // 1. Build an unsigned transaction
 let unsigned_tx = TransactionBuilder::new(provider.network())
     .with_auto_fill_inputs()                              // Auto-detect input substates
     .pay_fee_from_component(account_addr, 2000u64)        // Pay fee from account
-    .call_function(template_addr, "new", args![])         // Or call_method(...)
+    .call_function(template_addr, "new", call_args![])         // Or call_method(...)
     .build_unsigned();
 
 // 2. Sign it
@@ -638,7 +638,7 @@ let receipt = pending.watch().await?;
 let unsigned_tx = TransactionBuilder::new(provider.network())
     .with_auto_fill_inputs()
     .pay_fee_from_component(account_addr, 2000u64)
-    .call_function(template_addr, "new", args![])
+    .call_function(template_addr, "new", call_args![])
     .build_unsigned();
 ```
 
@@ -648,7 +648,7 @@ let unsigned_tx = TransactionBuilder::new(provider.network())
 let unsigned_tx = TransactionBuilder::new(provider.network())
     .with_auto_fill_inputs()
     .pay_fee_from_component(account_addr, 2000u64)
-    .call_method(component_addr, "start_game", args![nft_id])
+    .call_method(component_addr, "start_game", call_args![nft_id])
     .build_unsigned();
 ```
 
@@ -667,8 +667,8 @@ TransactionBuilder::new(network)
     .pay_fee_from_bucket(bucket_label, amount)  // Pay fee from a workspace bucket
 
     // Instructions
-    .call_function(template, "fn_name", args![...])   // Call template function
-    .call_method(component, "method", args![...])     // Call component method
+    .call_function(template, "fn_name", call_args![...])   // Call template function
+    .call_method(component, "method", call_args![...])     // Call component method
     .create_account(public_key)                        // Create an account component
     .create_account_with_bucket(pk, bucket_label)      // Create account with initial funds
     .publish_template(wasm_binary)                     // Deploy a template
@@ -729,7 +729,7 @@ let unsigned_tx = TransactionBuilder::new(provider.network())
     .add_input(specific_substate_address)
     .with_inputs(addresses.iter().copied().map(Into::into))
     .pay_fee_from_component(account_addr, 2000u64)
-    .call_method(component_addr, "end_game", args![])
+    .call_method(component_addr, "end_game", call_args![])
     .build_unsigned();
 ```
 

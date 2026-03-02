@@ -17,7 +17,7 @@ use tari_engine_types::{
     resource_container::ResourceError,
 };
 use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType};
-use tari_ootle_transaction::{Transaction, args, call_args};
+use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::types::{
     AccessRule,
     ComponentAddress,
@@ -89,7 +89,7 @@ fn mint_more_later() {
     let mint = stealth::generate_mint_statement([1200], 0u64, None);
     let (faucet, faucet_resx) = setup(&mut test, &mint, None);
 
-    test.call_method::<()>(faucet, "mint", call_args![11100], vec![]);
+    test.call_method::<()>(faucet, "mint", args![11100], vec![]);
 
     let resource = test.read_only_state_store().get_resource(&faucet_resx).unwrap();
     let total_supply = resource.total_supply().unwrap();

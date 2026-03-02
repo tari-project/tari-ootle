@@ -5,7 +5,7 @@ use std::vec;
 
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine::runtime::{AssertError, RuntimeError};
-use tari_ootle_transaction::{Assertion, CheckOrd, Instruction, Transaction, args, args::WorkspaceOffsetId, call_args};
+use tari_ootle_transaction::{Assertion, CheckOrd, Instruction, Transaction, args, args::WorkspaceOffsetId};
 use tari_template_lib::types::{
     Amount,
     ComponentAddress,
@@ -37,16 +37,13 @@ fn setup() -> AssertTest {
     let faucet_template = template_test.get_template_address("TestFaucet");
 
     let initial_supply = Amount::from(1_000_000_000_000u64);
-    let result = template_test
-        .execute_and_commit(
-            vec![Instruction::CallFunction {
-                address: faucet_template,
-                function: "mint".try_into().unwrap(),
-                args: call_args![initial_supply],
-            }],
-            vec![template_test.owner_proof()],
-        )
-        .unwrap();
+    let result = template_test.execute_expect_success(
+        template_test
+            .transaction()
+            .call_function(faucet_template, "mint", args![initial_supply])
+            .build_and_seal(template_test.secret_key()),
+        vec![template_test.owner_proof()],
+    );
 
     let faucet_component: ComponentAddress = result.finalize.execution_results.first().unwrap().decode().unwrap();
 

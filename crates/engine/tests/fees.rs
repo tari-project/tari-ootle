@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::commit_result::RejectReason;
-use tari_ootle_transaction::{Transaction, args, call_args};
+use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::types::{Amount, ComponentAddress, constants::STEALTH_TARI_RESOURCE_ADDRESS};
 use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason, xtr_faucet_component};
 
@@ -14,7 +14,7 @@ fn deducts_fees_from_payments_and_refunds_the_rest() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
 
     let (account, owner_token, private_key) = test.create_funded_account();
-    let orig_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
+    let orig_balance: Amount = test.call_method(account, "balance", args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
 
     test.enable_fees();
 
@@ -113,12 +113,7 @@ fn another_account_pays_partially_for_fees() {
     let (account, _, _) = test.create_empty_account();
     let (account_fee, owner_token_fee, _) = test.create_funded_account();
     let (account_fee2, owner_token_fee2, _) = test.create_funded_account();
-    let orig_balance: Amount = test.call_method(
-        account_fee,
-        "balance",
-        call_args![STEALTH_TARI_RESOURCE_ADDRESS],
-        vec![],
-    );
+    let orig_balance: Amount = test.call_method(account_fee, "balance", args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
 
     test.enable_fees();
 
@@ -169,8 +164,7 @@ fn failed_fee_transaction() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
 
     let (account, owner_token, private_key) = test.create_funded_account();
-    let initial_balance: Amount =
-        test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
+    let initial_balance: Amount = test.call_method(account, "balance", args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
 
     test.enable_fees();
     let result = test
@@ -208,7 +202,7 @@ fn fail_partial_paid_fees() {
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let (account2, owner_token2, _) = test.create_funded_account();
-    let orig_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
+    let orig_balance: Amount = test.call_method(account, "balance", args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
     test.enable_fees();
 
     let result = test.execute_expect_commit(
@@ -277,7 +271,7 @@ fn fail_pay_less_fees_than_fee_transaction() {
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let (account2, owner_token2, _) = test.create_funded_account();
-    let orig_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
+    let orig_balance: Amount = test.call_method(account, "balance", args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
     let state: ComponentAddress = test.call_function("State", "new", args![], vec![]);
 
     test.enable_fees();
@@ -351,7 +345,7 @@ fn fail_pay_too_little_no_fee_instruction() {
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let (account2, owner_token2, _) = test.create_funded_account();
-    let orig_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
+    let orig_balance: Amount = test.call_method(account, "balance", args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
 
     test.enable_fees();
 
@@ -416,7 +410,7 @@ fn dangling_bucket_pay_fees() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
 
     let (account, owner_token, private_key) = test.create_funded_account();
-    let orig_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
+    let orig_balance: Amount = test.call_method(account, "balance", args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
 
     test.enable_fees();
 

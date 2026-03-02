@@ -9,7 +9,7 @@ export default defineConfig({
   integrations: [
     starlight({
       favicon: "/favicon.png",
-      title: "Tari Ootle Documentation",
+      title: "Tari Ootle Playground",
       customCss: ["./src/styles/global.scss", "./src/styles/custom.scss", "./src/fonts/font-face.css"],
       social: [{ icon: "github", label: "GitHub", href: "https://github.com/tari-project/tari-ootle" }],
       sidebar: [

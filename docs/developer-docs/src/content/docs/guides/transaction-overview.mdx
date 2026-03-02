@@ -75,7 +75,7 @@ The workspace is not persisted — it disappears when the transaction finishes.
 
 ## Fees
 
-Every transaction must pay fees to validators. Fee instructions are a separate sequence that runs **before** the main instructions. They lock up a maximum amount of XTR (the native token) from a specified account or bucket.
+Every transaction must pay fees to validators. Fee instructions are a separate sequence that runs **before** the main instructions. They lock up a maximum amount of tXTR (the native token) from a specified account or bucket.
 
 After execution, any unused portion of the locked fees is refunded. If the main instructions fail, a partial fee is still charged for the work done by validators up to that point.
 
@@ -314,7 +314,7 @@ To pay fees, use `.pay_fee_from_component()`. This calls the `pay_fee` method on
 
 ```rust
 let transaction = Transaction::builder(network)
-    // Lock up at most 1000 XTR for fees; refund the rest
+    // Lock up at most 1000 tXTR for fees; refund the rest
     .pay_fee_from_component(my_account, Amount::from(1000))
     .call_function(template_address, "new", args![])
     .build_and_seal(&secret_key);

@@ -51,7 +51,7 @@ export default function ConfirmationStep({
     <Stack spacing={3} sx={{ py: 2 }}>
       <Stack spacing={2}>
         <Box>
-          <Typography variant="h6" color="text.primary" gutterBottom>
+          <Typography variant="h5" color="text.primary" gutterBottom>
             You are about to send:
           </Typography>
         </Box>
@@ -77,9 +77,7 @@ export default function ConfirmationStep({
           <Typography variant="subtitle2" color="text.secondary">
             To Address:
           </Typography>
-          <Typography variant="body1">
-            <CopyAddress address={transferFormState.address} />
-          </Typography>
+          <CopyAddress address={transferFormState.address} />
         </Box>
 
         <Box>

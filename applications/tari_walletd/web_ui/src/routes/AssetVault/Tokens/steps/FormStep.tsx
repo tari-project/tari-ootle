@@ -32,7 +32,7 @@ import TypeChip from "@routes/AssetVault/Components/ResourceTypeChip";
 import { Amount, ResourceAddress, ResourceType, validateOotleAddress } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
 import { formatCurrency, parseAmountToBaseUnits } from "@utils/helpers";
-import { SubmitEvent, useState } from "react";
+import { FormEvent, useState } from "react";
 import { Form } from "react-router";
 
 export interface SendMoneyFormState {
@@ -57,7 +57,7 @@ interface FormStepProps {
   token_symbol: string;
   divisibility: number;
   formError?: FormError | null;
-  onSubmit: (e: SubmitEvent) => void;
+  onSubmit: (e: FormEvent) => void;
   onCancel: () => void;
   onFormValueChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onSelectFormValueChange: (e: SelectChangeEvent<unknown>) => void;
@@ -123,6 +123,7 @@ export default function FormStep({
       maximumFractionDigits: divisibility,
     });
   };
+
   const currency = {
     symbol: token_symbol,
     decimals: divisibility,

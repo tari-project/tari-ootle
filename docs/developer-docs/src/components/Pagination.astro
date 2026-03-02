@@ -1,0 +1,89 @@
+---
+const { dir, pagination } = Astro.locals.starlightRoute;
+const { prev, next } = pagination;
+---
+
+<div class="pagination-links print:hidden" dir={dir}>
+    {
+        prev && (
+                    <a href={prev.href} rel="prev">
+                        <span class="arrow">
+                            ←
+                        </span>
+                        <span>
+					{Astro.locals.t('page.previousLink')}
+                            <br />
+					<span class="link-title">{prev.label}</span>
+				</span>
+                    </a>
+        )
+    }
+    {
+        next && (
+                    <a href={next.href} rel="next">
+                        <span>
+					{Astro.locals.t('page.nextLink')}
+                            <br />
+					<span class="link-title">{next.label}</span>
+				</span>
+                        <span class="arrow">→</span>
+                    </a>
+        )
+    }
+</div>
+
+<style lang="scss">
+    @layer starlight.core {
+        .pagination-links {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr));
+            gap: 1rem;
+        }
+
+        a {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            flex-basis: calc(50% - 0.5rem);
+            flex-grow: 1;
+            border-radius: 0.5rem;
+            text-decoration: none;
+            color: var(--color-green);
+            background-color: #040723;
+            padding: 1.5rem min(2rem, 4vw);
+            overflow-wrap: anywhere;
+            font-size: 0.875rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+
+        }
+        [rel='prev'] {
+            text-align: end;
+        }
+        a:hover {
+            border-color: var(--sl-color-gray-2);
+        }
+        .arrow {
+            font-size: 2.5rem;
+            display: flex;
+            color: var(--color-green);
+            font-weight: 900;
+            font-family: 'Arial Black', sans-serif;
+        }
+        .link-title {
+            letter-spacing: 0.1rem;
+            font-family: 'Druk', sans-serif;
+            white-space: nowrap;
+            color: #FEFEFF;
+            text-transform: uppercase;
+            font-size: clamp(var(--sl-text-xl), 1rem + 1vw, var(--sl-text-4xl));
+            line-height:1;
+        }
+
+        svg {
+            flex-shrink: 0;
+        }
+    }
+</style>

@@ -125,7 +125,6 @@ function NftRow({ nft }: { nft: NonFungibleToken }) {
             style={{
               width: 60,
               height: 60,
-              borderRadius: "shape.borderRadius",
               backgroundColor: "grey.200",
             }}
             variant="rounded"

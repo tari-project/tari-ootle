@@ -1,4 +1,4 @@
-# Tari Dan Template Library Documentation Site
+# Tari Ootle Template Library Documentation Site
 
 This repository contains the source code for the Tari Ootle Template Library documentation
 site, built with Astro and Starlight.

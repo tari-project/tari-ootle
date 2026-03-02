@@ -45,6 +45,16 @@ where TStore: WalletStore
         Ok(exists)
     }
 
+    pub fn fetch_authored_template(
+        &self,
+        template_address: TemplateAddress,
+    ) -> Result<AuthoredTemplateModel, TransactionApiError> {
+        let template = self
+            .store
+            .with_read_tx(|tx| tx.authored_templates_get_by_address(&template_address))?;
+        Ok(template)
+    }
+
     /// Listing authored templates in a paginated way.
     pub fn list_authored_templates(
         &self,

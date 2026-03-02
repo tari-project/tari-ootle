@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Serialize};
-use tari_template_abi::{FunctionDef, TemplateDef, version::WasmAbiVersion};
+use tari_template_abi::{FunctionDef, TemplateDef, TemplateDefV1, version::WasmAbiVersion};
 use tari_template_lib::types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -27,5 +27,15 @@ impl AuthoredTemplateModel {
             abi_version: template_def.abi_version(),
             functions: template_def.functions().to_vec(),
         }
+    }
+}
+
+impl From<AuthoredTemplateModel> for TemplateDef {
+    fn from(model: AuthoredTemplateModel) -> Self {
+        TemplateDef::V1(TemplateDefV1 {
+            template_name: model.name,
+            abi_version: model.abi_version,
+            functions: model.functions,
+        })
     }
 }

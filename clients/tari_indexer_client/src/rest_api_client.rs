@@ -35,14 +35,14 @@ use crate::{
         IndexerReadyResponse,
         ListRecentTransactionsRequest,
         ListRecentTransactionsResponse,
-        ListSubstatesRequest,
-        ListSubstatesResponse,
         ListTemplatesRequest,
         ListTemplatesResponse,
         ListTransactionReceiptsRequest,
         ListTransactionReceiptsResponse,
         ListUtxosRequest,
         ListUtxosResponse,
+        QueryTransactionEventsRequest,
+        QueryTransactionEventsResponse,
         SubmitTransactionDryRunResponse,
         SubmitTransactionRequest,
         SubmitTransactionResponse,
@@ -111,13 +111,6 @@ impl IndexerRestApiClient {
         self.send_post("substates/fetch", req).await
     }
 
-    pub async fn list_substates(
-        &self,
-        req: ListSubstatesRequest,
-    ) -> Result<ListSubstatesResponse, IndexerRestClientError> {
-        self.send_get("list_substates", req).await
-    }
-
     pub async fn submit_transaction(
         &self,
         req: SubmitTransactionRequest,
@@ -159,6 +152,13 @@ impl IndexerRestApiClient {
         template_address: TemplateAddress,
     ) -> Result<GetTemplateDefinitionResponse, IndexerRestClientError> {
         self.send_get(format!("templates/{template_address}"), ()).await
+    }
+
+    pub async fn query_transaction_events(
+        &self,
+        req: QueryTransactionEventsRequest,
+    ) -> Result<QueryTransactionEventsResponse, IndexerRestClientError> {
+        self.send_get("transactions/events", req).await
     }
 
     pub async fn get_epoch_manager_stats(&self) -> Result<GetEpochManagerStatsResponse, IndexerRestClientError> {

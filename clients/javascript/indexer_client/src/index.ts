@@ -16,8 +16,8 @@ import type {
   IndexerGetSubstateResponse,
   IndexerGetTransactionResultResponse,
   IndexerReadyResponse, ListRecentTransactionsRequest, ListRecentTransactionsResponse,
-  ListSubstatesRequest,
-  ListSubstatesResponse, ListTemplatesResponse, ListTransactionReceiptsRequest, ListTransactionReceiptsResponse,
+
+   ListTemplatesResponse, ListTransactionReceiptsRequest, ListTransactionReceiptsResponse,
   rejectReasonToString,
   stringToSubstateId,
   SubstateId,
@@ -27,7 +27,7 @@ import type {
   TemplatesListAuthoredResponse,
   TransactionId, TransactionReceiptAddress,
   TransactionSubmitRequest,
-  TransactionSubmitResponse,
+  TransactionSubmitResponse, QueryTransactionEventsRequest, QueryTransactionEventsResponse,
 } from "@tari-project/ootle-ts-bindings";
 import { FetchTransport, HttpTransport } from "./transports";
 
@@ -82,9 +82,6 @@ export class IndexerClient {
     return this.transport.sendGet(`substates/${encodeURIComponent(id)}`, params);
   }
 
-  public listSubstates(params: ListSubstatesRequest): Promise<ListSubstatesResponse> {
-    return this.transport.sendGet(`substates`, params);
-  }
 
   public fetchSubstates(params: GetSubstatesRequest): Promise<GetSubstatesResponse> {
     return this.transport.sendPost(`substates/fetch`, params);
@@ -98,8 +95,12 @@ export class IndexerClient {
     return this.transport.sendGet(`transactions/${encodeURIComponent(transaction_id)}/result`, {});
   }
 
+
   public listRecentTransactions(params: ListRecentTransactionsRequest): Promise<ListRecentTransactionsResponse> {
     return this.transport.sendGet(`transactions/recent`, params);
+  }
+  public queryTransactionEvents(params: QueryTransactionEventsRequest): Promise<QueryTransactionEventsResponse> {
+    return this.transport.sendGet(`transactions/events`, params);
   }
 
   public listTransactionReceipts(params: ListTransactionReceiptsRequest): Promise<ListTransactionReceiptsResponse> {

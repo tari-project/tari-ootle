@@ -258,8 +258,7 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
 
     let SettingsGetResponse { network, .. } = client.get_settings().await?;
 
-    let mut builder = Transaction::builder_localnet()
-        .for_network(network.byte)
+    let mut builder = Transaction::builder(network.byte)
         .call_method(fee_account.component_address, "withdraw", args![
             common.max_fee.unwrap_or(1000)
         ])
@@ -334,8 +333,7 @@ async fn handle_submit_manifest(
 
     let SettingsGetResponse { network, .. } = client.get_settings().await?;
 
-    let builder = Transaction::builder_localnet()
-        .for_network(network.byte)
+    let builder = Transaction::builder(network.byte)
         .with_fee_instructions_builder(|builder| {
             builder.with_instructions(instructions.fee_instructions).call_method(
                 fee_account.component_address,

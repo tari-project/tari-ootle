@@ -10,19 +10,12 @@ use tari_consensus_types::Decision;
 use tari_engine_types::{
     Utxo,
     commit_result::ExecuteResult,
+    events::Event,
     resource::Resource,
     substate::{Substate, SubstateId, SubstateValue},
     transaction_receipt::TransactionReceipt,
 };
-use tari_ootle_common_types::{
-    Epoch,
-    Network,
-    NumPreshards,
-    ShardGroup,
-    StateVersion,
-    shard::Shard,
-    substate_type::SubstateType,
-};
+use tari_ootle_common_types::{Epoch, Network, NumPreshards, ShardGroup, StateVersion, shard::Shard};
 use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
 use tari_ootle_wallet_sdk::models::UtxoUpdateSet;
 use tari_template_abi::TemplateDef;
@@ -37,28 +30,6 @@ use tari_template_lib_types::{
     crypto::{RistrettoPublicKeyBytes, UtxoTag},
 };
 use time::PrimitiveDateTime;
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct ListSubstatesRequest {
-    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
-    #[serde(default)]
-    pub by_id: Option<SubstateId>,
-    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
-    pub filter_by_template: Option<TemplateAddress>,
-    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
-    pub filter_by_type: Option<SubstateType>,
-    pub limit: Option<u64>,
-    pub offset: Option<u64>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct ListSubstatesResponse {
-    pub substates: Vec<ListSubstateItem>,
-}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
@@ -260,6 +231,26 @@ pub struct GetTransactionResultResponse {
     /// The result of the transaction, which may be pending (not yet finalized) or finalized with details such as the
     /// final decision, execution result, and timestamps
     pub result: IndexerTransactionFinalizedResult,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct QueryTransactionEventsRequest {
+    /// Filter events by topic
+    pub topic: Option<String>,
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub substate_id: Option<SubstateId>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct QueryTransactionEventsResponse {
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<(String, Object)>))]
+    pub events: Vec<(TransactionId, Event)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

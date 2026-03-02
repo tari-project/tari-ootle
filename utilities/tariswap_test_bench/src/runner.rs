@@ -118,9 +118,7 @@ impl Runner {
     }
 
     pub fn new_transaction_builder(&self) -> TransactionBuilder {
-        // 0x10 is LocalNet - avoiding having to include tari_common
-        // Igor is 0x24
-        Transaction::builder_localnet().for_network(0x10)
+        Transaction::builder(Network::LocalNet)
     }
 }
 

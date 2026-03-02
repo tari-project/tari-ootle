@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 // pub mod eth_style;
-pub mod events;
+pub mod indexer_events;
 pub mod misc;
 pub mod network;
 pub mod nfts;

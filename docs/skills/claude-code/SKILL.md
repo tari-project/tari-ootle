@@ -1,6 +1,7 @@
-# Tari Ootle — Amp Agent Instructions
-
-Use these instructions when building Tari Ootle templates (WASM smart contracts) and client applications. This document covers accurate APIs and patterns from the codebase.
+---
+name: claude-code
+description: Tari Ootle development instructions for Claude Code
+---
 
 ## Overview
 

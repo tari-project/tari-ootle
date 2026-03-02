@@ -13,11 +13,13 @@ use tari_indexer_client::types::{
     IndexerTransactionFinalizedResult,
     ListRecentTransactionsRequest,
     ListRecentTransactionsResponse,
+    QueryTransactionEventsRequest,
+    QueryTransactionEventsResponse,
     SubmitTransactionDryRunResponse,
     SubmitTransactionRequest,
     SubmitTransactionResponse,
 };
-use tari_ootle_common_types::optional::Optional;
+use tari_ootle_common_types::{displayable::Displayable, optional::Optional};
 use tari_ootle_transaction::TransactionId;
 use tari_rpc_framework::RpcStatusCode;
 use tari_validator_node_rpc::client::TransactionResultStatus;
@@ -204,4 +206,51 @@ pub async fn get_transaction_result(
     };
 
     Ok(Json(GetTransactionResultResponse { result: resp.result }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/transactions/events",
+    description = "Query and filter transaction events by substate ID and/or topic.",
+    responses(
+        (status = 200, description = "List of transaction events matching the filters", body = QueryTransactionEventsResponse),
+        (status = BAD_REQUEST, description = "Invalid request parameters", body = ErrorResponse),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to query transaction events", body = ErrorResponse),
+    )
+)]
+pub async fn query_transaction_events(
+    Extension(context): Extension<HandlerContext>,
+    Query(req): Query<QueryTransactionEventsRequest>,
+) -> HandlerResult<Json<QueryTransactionEventsResponse>> {
+    let limit = req.limit.unwrap_or(100);
+    if limit == 0 {
+        return Ok(Json(QueryTransactionEventsResponse::default()));
+    }
+
+    if limit > 1000 {
+        return Err(ErrorResponse::bad_request("Limit cannot be greater than 1000"));
+    }
+
+    let offset = req.offset.unwrap_or(0);
+
+    debug!(target: LOG_TARGET,
+        "Querying transaction events with filters - substate_id: {}, topic: {}, offset: {}, limit: {}",
+        req.substate_id.display(), req.topic.display(), offset, limit
+    );
+
+    let events = context
+        .read_only_store()
+        .get_events(
+            req.substate_id.as_ref(),
+            req.topic.as_deref().map(|t| t.trim()).filter(|t| !t.is_empty()),
+            offset,
+            limit,
+        )
+        .map_err(|e| {
+            error!(target: LOG_TARGET, "DB error when fetching events: {}", e);
+            ErrorResponse::internal_error("DB error when fetching events")
+        })?;
+
+    debug!(target: LOG_TARGET, "Found {} events", events.len());
+    Ok(Json(QueryTransactionEventsResponse { events }))
 }

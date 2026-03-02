@@ -1,4 +1,4 @@
-//  Copyright 2022. The Tari Project
+//  Copyright 2025. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -21,62 +21,21 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useQuery } from "@tanstack/react-query";
-import { getSubstate, getNonFungibles } from "../../utils/api";
+import { getTemplateDefinition } from "../../utils/api";
 
-interface UseGetSubstateProps {
-  address: any;
-  version?: number | null;
-  local_search_only?: boolean;
+interface UseGetTemplateDefinitionProps {
+  address: string | null;
   enabled?: boolean;
 }
 
-export const useGetSubstate = (props: UseGetSubstateProps) => {
-  const {
-    address,
-    version = null,
-    local_search_only = false,
-    enabled = true,
-  } = props;
+export const useGetTemplateDefinition = ({ address, enabled = true }: UseGetTemplateDefinitionProps) => {
   return useQuery({
-    queryKey: ["substate", address, version, local_search_only],
+    queryKey: ["templateDefinition", address],
     queryFn: async () => {
-      // @ts-ignore
-      return await getSubstate(
-        address,
-        version,
-        local_search_only,
-      );
+      return await getTemplateDefinition(address!);
     },
     enabled: enabled && !!address,
     staleTime: 5 * 60 * 1000,
     retry: false,
-  });
-};
-
-interface UseGetNonFungiblesProps {
-  address: any;
-  start_index?: number;
-  end_index?: number;
-  enabled?: boolean;
-}
-
-export const useGetNonFungibles = ({
-                                     address,
-                                     start_index = 0,
-                                     end_index = 10,
-                                     enabled = true,
-                                   }: UseGetNonFungiblesProps) => {
-  return useQuery({
-    queryKey: ["nonFungibles", address, start_index, end_index],
-    queryFn: async () => {
-      // @ts-ignore
-      return await getNonFungibles({
-        address,
-        start_index,
-        end_index,
-      });
-    },
-    enabled: enabled && !!address,
-    staleTime: 5 * 60 * 1000,
   });
 };

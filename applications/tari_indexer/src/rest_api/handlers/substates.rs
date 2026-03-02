@@ -3,60 +3,16 @@
 
 use std::{array, iter};
 
-use anyhow::anyhow;
 use axum::{
     Extension,
     Json,
     extract::{Path, Query},
-    response::Response,
 };
 use tari_engine_types::substate::SubstateId;
-use tari_indexer_client::types::{
-    GetSubstateRequest,
-    GetSubstateResponse,
-    GetSubstatesRequest,
-    GetSubstatesResponse,
-    ListSubstatesRequest,
-    ListSubstatesResponse,
-};
+use tari_indexer_client::types::{GetSubstateRequest, GetSubstateResponse, GetSubstatesRequest, GetSubstatesResponse};
 use tari_ootle_common_types::SubstateRequirementRef;
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
-
-#[utoipa::path(
-    get,
-    path = "/substates",
-    description = "List substates, optionally filtered by type or template",
-    params(
-        ("filter_by_type" = Option<String>, Query, description = "Filter substates by type"),
-        ("filter_by_template" = Option<String>, Query, description = "Filter substates by template address"),
-        ("limit" = Option<u32>, Query, description = "Limit the number of results returned"),
-        ("offset" = Option<u32>, Query, description = "Offset the results by this amount"),
-    ),
-    responses(
-        (status = 200, description = "List of substates matching the filters", body = ListSubstatesResponse),
-        (status = INTERNAL_SERVER_ERROR, description = "Failed to list substates", body = ErrorResponse),
-    )
-)]
-pub async fn list_substates(
-    Extension(context): Extension<HandlerContext>,
-    Query(req): Query<ListSubstatesRequest>,
-) -> HandlerResult<Response> {
-    let ListSubstatesRequest {
-        by_id,
-        filter_by_template,
-        filter_by_type,
-        limit,
-        offset,
-    } = req;
-
-    let substates = context
-        .substate_manager()
-        .get_stored_substates_by_filters(by_id.as_ref(), filter_by_type, filter_by_template, limit, offset)
-        .map_err(|e| ErrorResponse::anyhow(anyhow!("Error getting substate: {}", e)))?;
-
-    Ok(context.apply_cache_control(Json(ListSubstatesResponse { substates }), 100))
-}
 
 #[utoipa::path(
     get,
@@ -90,9 +46,10 @@ pub async fn get_substate(
         ));
     }
     let requirement = SubstateRequirementRef::new(&substate_id, req.version);
+
+    let manager = context.substate_manager();
     let maybe_substate = if req.local_search_only {
-        context
-            .substate_manager()
+        manager
             .get_cached_substates(array::from_ref(requirement.substate_id()))
             .await
             .map(|a| {
@@ -101,8 +58,7 @@ pub async fn get_substate(
             })
             .map_err(|e| ErrorResponse::internal_error(format!("Error getting substate: {}", e)))?
     } else {
-        context
-            .substate_manager()
+        manager
             .get_substates(iter::once(requirement))
             .await
             .map(|a| a.into_iter().next())

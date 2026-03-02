@@ -31,11 +31,7 @@ export async function getGraphQLAddress(): Promise<URL> {
     const resp = await fetch("/graphql_address");
     if (resp.status === 200) {
       const url = await resp.text();
-      try {
-        return new URL(url);
-      } catch (e) {
-        throw new Error(`Invalid URL: ${url} : ${e}`);
-      }
+      return new URL(url);
     }
   } catch (e) {
     console.warn(e);

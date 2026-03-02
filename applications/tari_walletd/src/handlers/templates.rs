@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use axum_extra::headers::authorization::Bearer;
+use tari_ootle_common_types::optional::Optional;
 use tari_ootle_wallet_sdk::network::WalletNetworkInterface;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
@@ -14,7 +15,7 @@ use tari_wallet_daemon_client::{
     },
 };
 
-use crate::handlers::HandlerContext;
+use crate::handlers::{HandlerContext, helpers::not_found};
 
 pub async fn handle_get(
     context: &HandlerContext,
@@ -24,10 +25,22 @@ pub async fn handle_get(
     let sdk = context.wallet_sdk().clone();
     context.check_auth(token, &[JrpcPermission::TemplatesRead])?;
 
+    if let Some(template) = sdk
+        .template_api()
+        .fetch_authored_template(req.template_address)
+        .optional()?
+    {
+        return Ok(TemplatesGetResponse {
+            template_definition: template.into(),
+        });
+    }
+
     let template_definition = sdk
         .get_network_interface()
         .fetch_template_definition(req.template_address)
-        .await?;
+        .await
+        .optional()?
+        .ok_or_else(|| not_found(format!("Template not found at address {}", req.template_address)))?;
 
     Ok(TemplatesGetResponse { template_definition })
 }

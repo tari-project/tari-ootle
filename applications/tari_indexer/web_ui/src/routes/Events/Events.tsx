@@ -37,93 +37,62 @@ import {
   Typography,
 } from "@mui/material";
 import React, { useEffect, useState } from "react";
-import { toHexString } from "../VN/Components/helpers";
 import { truncateText } from "../../utils/helpers";
-import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import KeyboardArrowLeftIcon from "@mui/icons-material/KeyboardArrowLeft";
 import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
 import saveAs from "file-saver";
 import JsonDialog from "../../Components/JsonDialog";
-import { getGraphQLAddress } from "../../utils/graphql";
+import { queryTransactionEvents } from "../../utils/api";
+import CopyToClipboard from "../../Components/CopyToClipboard";
+import { Link } from "react-router-dom";
+import { Event, TransactionId } from "@tari-project/ootle-ts-bindings";
 
 const PAGE_SIZE = 10;
 
 function EventsLayout() {
-  const [events, setEvents] = useState([]);
+  const [events, setEvents] = useState<Array<[string, Event]>>([]);
   const [page, setPage] = useState(0);
   const [jsonDialogOpen, setJsonDialogOpen] = React.useState(false);
   const [selectedPayload, setSelectedPayload] = useState({});
   const [filter, setFilter] = useState({
-    topic: null,
-    substate_id: null,
+    topic: "",
+    substate_id: "",
   });
 
   useEffect(() => {
-    get_events(page, PAGE_SIZE, filter);
+    getEvents(page, PAGE_SIZE, filter)
+      .then(setEvents)
   }, []);
 
-  async function get_events(offset: number, limit: number, filter: any) {
-    let graphql_filters = "";
-    if (filter.topic) {
-      graphql_filters += `topic:"${filter.topic}", `;
-    }
-    if (filter.substate_id) {
-      graphql_filters += `substateId:"${filter.substate_id}", `;
-    }
-
-    let indexer_address = (await getGraphQLAddress()).toString();
-    console.log({ indexer_address });
-
-    let res = await fetch(indexer_address, {
-      method: "POST",
-
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-
-      body: JSON.stringify({
-        query: `{ getEvents(${graphql_filters} offset:${offset}, limit:${limit}) {substateId, templateAddress, txHash, topic, payload } }`,
-        variables: {},
-      }),
+  async function getEvents(offset: number, limit: number, filter: any) {
+    const resp = await queryTransactionEvents({
+      topic: filter.topic,
+      substate_id: filter.substate_id || null,
+      limit,
+      offset,
     });
 
-    let res_json = await res.json();
-    console.log({ res_json });
-    let events = res_json.data.getEvents;
 
-    let rows = events.map((event: any) => {
-      return {
-        ...event,
-        tx_hash: toHexString(event.txHash),
-        template_address: toHexString(event.templateAddress),
-      };
-    });
-    console.log({ rows });
-    setEvents(rows);
-  }
-
-  async function handleCopyClick(text: string) {
-    if (text) {
-      navigator.clipboard.writeText(text);
-    }
+    return resp.events;
   }
 
   async function handleChangePage(newPage: number) {
     const offset = newPage * PAGE_SIZE;
-    await get_events(offset, PAGE_SIZE, filter);
+    const events = await getEvents(offset, PAGE_SIZE, filter);
+    setEvents(events);
     setPage(newPage);
   }
 
-  const handlePayloadDownload = (event: any) => {
+
+  const handlePayloadDownload = (txId: TransactionId, event: Event) => {
     const data = event.payload;
     const json = JSON.stringify(data, null, 2);
     const blob = new Blob([json], { type: "application/json" });
-    const filename = `event-${event.tx_hash}-${event.topic}.json`;
+    const filename = `event-${txId}-${event.topic}.json`;
     saveAs(blob, filename);
   };
 
-  const handlePayloadView = (event: any) => {
+  const handlePayloadView = (event: Event) => {
     setSelectedPayload(event.payload);
     setJsonDialogOpen(true);
   };
@@ -141,7 +110,8 @@ function EventsLayout() {
     setFilter(newFilter);
 
     const offset = 0;
-    await get_events(offset, PAGE_SIZE, newFilter);
+    let events = await getEvents(offset, PAGE_SIZE, newFilter);
+    setEvents(events);
     setPage(0);
   };
 
@@ -185,49 +155,44 @@ function EventsLayout() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {events.map((row: any) => (
-                <TableRow
-                  sx={{ "&:last-child td, &:last-child th": { border: 0 } }}
-                >
-                  <TableCell>{row.topic}</TableCell>
+              {events.map(([txId, event], i) => (
+                <TableRow key={i} sx={{ "&:last-child td, &:last-child th": { border: 0 } }}>
+                  <TableCell>{event.topic}</TableCell>
                   <TableCell>
-                    {truncateText(row.tx_hash, 20)}
-                    <IconButton
-                      aria-label="copy"
-                      onClick={() => handleCopyClick(row.tx_hash)}
-                    >
-                      <ContentCopyIcon />
-                    </IconButton>
+                    {truncateText(txId, 20)}
+                    <CopyToClipboard copy={txId} />
                   </TableCell>
                   <TableCell>
-                    {truncateText(row.substateId, 20)}
-                    <IconButton
-                      aria-label="copy"
-                      onClick={() => handleCopyClick(row.substateId)}
-                    >
-                      <ContentCopyIcon />
-                    </IconButton>
+                    {event.substate_id ? (
+                      <Link to={`/substates?address=${encodeURIComponent(event.substate_id)}`}>
+                        {truncateText(event.substate_id, 20)}
+                      </Link>
+                    ) : (
+                      truncateText(event.substate_id, 20)
+                    )}
+                    <CopyToClipboard copy={event.substate_id || ""} />
                   </TableCell>
                   <TableCell>
-                    {truncateText(row.template_address, 20)}
-                    <IconButton
-                      aria-label="copy"
-                      onClick={() => handleCopyClick(row.template_address)}
-                    >
-                      <ContentCopyIcon />
-                    </IconButton>
+                    {event.template_address ? (
+                      <Link to={`/templates?address=${encodeURIComponent(event.template_address)}`}>
+                        {truncateText(event.template_address, 20)}
+                      </Link>
+                    ) : (
+                      truncateText(event.template_address, 20)
+                    )}
+                    <CopyToClipboard copy={event.template_address} />
                   </TableCell>
                   <TableCell>
                     <Stack direction="row" spacing={2} alignItems="left">
                       <Button
                         variant="outlined"
-                        onClick={() => handlePayloadView(row)}
+                        onClick={() => handlePayloadView(event)}
                       >
                         View
                       </Button>
                       <Button
                         variant="outlined"
-                        onClick={() => handlePayloadDownload(row)}
+                        onClick={() => handlePayloadDownload(txId, event)}
                       >
                         Download
                       </Button>

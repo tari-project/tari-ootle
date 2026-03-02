@@ -8,12 +8,9 @@ use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use futures::{future, future::Either};
 use log::*;
 use ootle_byte_type::ToByteType;
-use tari_ootle_common_types::{Epoch, Network, optional::Optional, response_status::ResponseErrorStatus};
-use tari_ootle_transaction::{Transaction, args};
-use tari_ootle_wallet_sdk::{
-    apis::{config::ConfigKey, transaction::TransactionApiError},
-    models::WalletEvent,
-};
+use tari_ootle_common_types::{Epoch, optional::Optional, response_status::ResponseErrorStatus};
+use tari_ootle_transaction::args;
+use tari_ootle_wallet_sdk::{apis::transaction::TransactionApiError, models::WalletEvent};
 use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceError;
 use tari_transaction_manifest::parse_manifest;
 use tari_wallet_daemon_client::{
@@ -312,12 +309,10 @@ pub async fn handle_submit_manifest(
 
     let signing_key_id = req.signing_key_id.unwrap_or(account_owner_key_id);
 
-    let network = context.wallet_sdk().config_api().get::<Network>(ConfigKey::Network)?;
-
     let fee_amount = req.max_fee;
 
-    let transaction = Transaction::builder_localnet()
-        .for_network(network.as_byte())
+    let transaction = context
+        .transaction_builder()
         .with_dry_run(req.dry_run)
         .with_fee_instructions_builder(|builder| {
             if instructions.fee_instructions.is_empty() {

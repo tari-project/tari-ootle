@@ -202,6 +202,10 @@ pub trait WalletStoreReader {
 
     // Authored templates
     fn authored_templates_exists_by_address(&mut self, address: &TemplateAddress) -> Result<bool, WalletStorageError>;
+    fn authored_templates_get_by_address(
+        &mut self,
+        address: &TemplateAddress,
+    ) -> Result<AuthoredTemplateModel, WalletStorageError>;
     fn authored_templates_fetch_by_public_key(
         &mut self,
         author_public_key: &RistrettoPublicKeyBytes,

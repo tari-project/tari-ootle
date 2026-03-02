@@ -54,48 +54,6 @@ export function stringToSubstateId(substateId: string): SubstateId {
     throw new Error(`Invalid substate id: ${substateId}`);
   }
   return substateId;
-  // const [prefix, rest] = parts;
-  //
-  // switch (prefix) {
-  //   case "component":
-  //     return { Component: rest };
-  //   case "resource":
-  //     return { Resource: rest };
-  //   case "vault":
-  //     return { Vault: rest };
-  //   case "tombstone":
-  //     return { ClaimedOutputTombstone: rest };
-  //   case "txreceipt":
-  //     return { TransactionReceipt: rest };
-  //   case "vnfp":
-  //     return { ValidatorFeePool: rest };
-  //   case "nft":
-  //     const nftParts = rest.split("_", 3);
-  //     if (nftParts.length != 3) {
-  //       throw new Error(`Invalid NFT substate id: ${substateId}`);
-  //     }
-  //
-  //     const [resourceAddress, type, id] = nftParts;
-  //
-  //     return {
-  //       NonFungible: {
-  //         resource_address: resourceAddress,
-  //         id: { [type]: id } as NonFungibleId,
-  //       },
-  //     };
-  //   case "template":
-  //     return { Template: rest };
-  //   case "utxo":
-  //     const utxoParts = rest.split("_", 2);
-  //     if (utxoParts.length != 2) {
-  //       throw new Error(`Invalid UTXO substate id: ${substateId}`);
-  //     }
-  //
-  //     return { Utxo: { resource_address: utxoParts[0], id: utxoParts[1] } };
-  //
-  //   default:
-  //     throw new Error(`Unknown substate id: ${substateId}`);
-  // }
 }
 
 export function shortenSubstateId(

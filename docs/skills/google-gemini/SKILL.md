@@ -1,6 +1,9 @@
-# Tari Ootle Development Instructions for GitHub Copilot
+---
+name: google-gemini
+description: Tari Ootle development instructions for Google Gemini
+---
 
-You are assisting with development on the **Tari Ootle** platform — a decentralized application layer built on Tari L2. Templates (smart contracts) are written in Rust, compiled to WASM (`wasm32-unknown-unknown`), and deployed to the network.
+Use these instructions when building Tari Ootle templates (WASM smart contracts) and client applications on the Tari L2 network.
 
 ## Overview
 

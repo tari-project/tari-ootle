@@ -1,6 +1,9 @@
-# Tari Ootle — Windsurf AI Rules
+---
+name: openai-codex
+description: Tari Ootle development instructions for OpenAI Codex
+---
 
-Tari Ootle is a decentralized smart contract platform. You write **templates** in Rust, compile to WASM, and deploy to the Tari L2 network. Deployed instances are called **components** and hold on-chain state. Follow these rules exactly.
+Use these instructions to generate accurate Tari Ootle templates and client code aligned with repository APIs.
 
 ## Overview
 

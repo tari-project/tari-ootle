@@ -30,14 +30,12 @@ import type {
   IndexerGetTransactionResultResponse,
   ListRecentTransactionsRequest,
   ListRecentTransactionsResponse,
-  ListSubstatesRequest,
-  ListSubstatesResponse, SubstateId,
+   SubstateId, QueryTransactionEventsRequest, QueryTransactionEventsResponse,
 } from "@tari-project/ootle-ts-bindings";
 import { IndexerClient } from "@tari-project/indexer-client";
 
 const DEFAULT_API_ADDRESS = new URL(
   import.meta.env.VITE_INDEXER_API_ADDRESS ||
-  import.meta.env.VITE_API_ADDRESS ||
   import.meta.env.VITE_API_ADDRESS ||
   "http://localhost:9000",
 );
@@ -47,11 +45,7 @@ export async function getClientAddress(): Promise<URL> {
     const resp = await fetch("/rest_api_address");
     if (resp.status === 200) {
       const url = await resp.text();
-      try {
-        return new URL(url);
-      } catch (e) {
-        throw new Error(`Invalid URL: ${url} : {e}`);
-      }
+      return new URL(url);
     }
   } catch (e) {
     console.warn(e);
@@ -97,9 +91,6 @@ export const getSubstate = (
   version: version ?? null,
   local_search_only: local_search_only ?? false,
 }));
-export const listSubstates = (
-  request: ListSubstatesRequest,
-): Promise<ListSubstatesResponse> => client().then((c) => c.listSubstates(request));
 export const getNonFungibles = (
   request: GetNonFungiblesRequest,
 ): Promise<GetNonFungiblesResponse> =>
@@ -114,3 +105,9 @@ export const listRecentTransactions = (
   request: ListRecentTransactionsRequest,
 ): Promise<ListRecentTransactionsResponse> =>
   client().then((c) => c.listRecentTransactions(request));
+
+export const queryTransactionEvents = (req: QueryTransactionEventsRequest): Promise<QueryTransactionEventsResponse> =>
+  client().then((c) => c.queryTransactionEvents(req));
+
+export const getTemplateDefinition = (templateAddress: string): Promise<any> =>
+  client().then((c) => c.templatesGet(templateAddress));

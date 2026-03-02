@@ -134,6 +134,7 @@ pub enum Type {
     Other {
         name: String,
     },
+    Option(Box<Type>),
 }
 
 impl Type {
@@ -163,6 +164,7 @@ impl std::fmt::Display for Type {
             Type::U128 => write!(f, "U128"),
             Type::String => write!(f, "String"),
             Type::Vec(t) => write!(f, "Vec<{}>", t),
+            Type::Option(t) => write!(f, "Option<{}>", t),
             Type::Tuple(types) => {
                 let type_list = types.iter().map(|t| format!("{:?}", t)).collect::<Vec<_>>().join(",");
                 write!(f, "Tuple<{}>", type_list)

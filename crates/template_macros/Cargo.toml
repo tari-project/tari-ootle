@@ -19,3 +19,4 @@ syn = { workspace = true, features = ["full", "extra-traits"] }
 
 [dev-dependencies]
 indoc = { workspace = true }
+tari_bor = { workspace = true }

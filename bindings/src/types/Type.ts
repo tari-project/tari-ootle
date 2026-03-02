@@ -16,4 +16,5 @@ export type Type =
   | "String"
   | { Vec: Type }
   | { Tuple: Array<Type> }
-  | { Other: { name: string } };
+  | { Other: { name: string } }
+  | { Option: Type };

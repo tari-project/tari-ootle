@@ -2,6 +2,8 @@ body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     line-height: 1.6;
     font-weight: 400;
+
+
 }
 
 h1 {
@@ -12,11 +14,9 @@ h1 {
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
-    margin-bottom: 2rem;
     line-height: 0.9;
     text-transform: uppercase;
     letter-spacing: 0.01em;
-    font-stretch: condensed;
 }
 
 .site-title {
@@ -25,6 +25,7 @@ h1 {
     font-size: var(--sl-text-2xl);
     font-weight: 700;
     text-transform: uppercase;
+    letter-spacing: 0.05rem;
     white-space: nowrap;
 }
 
@@ -32,15 +33,15 @@ h1 {
     font-family: 'Druk', sans-serif;
     font-size: var(--sl-text-h3);
     font-weight: 700;
-    margin-bottom: 1.5rem;
+    margin-bottom: 1rem;
     position: relative;
     text-transform: uppercase;
-    font-stretch: condensed;
+    letter-spacing: 0.05rem;
 
     &::before {
         content: "";
         position: absolute;
-        left: -1.5rem;
+        left: -1.2rem;
         top: 0;
         bottom: 0;
         width: 4px;
@@ -73,4 +74,9 @@ ul li {
     border-inline-start: none;
     margin-inline-start: 4px;
     padding-inline-start: 0;
+}
+
+.content-panel {
+    border:none;
+    padding: 1.2rem 1rem;
 }

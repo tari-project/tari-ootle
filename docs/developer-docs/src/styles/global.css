@@ -28,18 +28,7 @@
     /** Key layout values */
     --sl-nav-height: 5rem;
     --sl-nav-pad-x: 1.25rem;
-    --sl-nav-pad-y: 0.75rem;
     --sl-mobile-toc-height: 3rem;
-    --sl-sidebar-width: 20rem;
-    --sl-sidebar-pad-x: 1rem;
-    --sl-content-width: 45rem;
-    --sl-content-pad-x: 1.5rem;
-    --sl-content-gap-y: 1rem;
-    --sl-main-pad: 0 0 4vh 0;
-    --sl-menu-button-size: 2rem;
-    --sl-nav-gap: var(--sl-content-pad-x);
-    /* Offset required to show outline inside an element instead of round the outside */
-    --sl-outline-offset-inside: 0.1875rem;
 
 
     /* Text size and line height */
@@ -49,46 +38,22 @@
     --sl-text-base: 1rem;
     --sl-text-lg: 1.125rem;
     --sl-text-xl: 1.25rem;
-    --sl-text-2xl: 1.75rem;
-    --sl-text-3xl: 2.8rem;
+    --sl-text-2xl: 1.85rem;
+    --sl-text-3xl: 2.25rem;
     --sl-text-4xl: 4rem;
     --sl-text-5xl: 6.6rem;
     --sl-text-6xl: 7rem;
+    --sl-content-width: 55rem;
+    --sl-sidebar-width: 20rem;
 
 
     /* Primary Colors from Design Guide */
-    --color-cloud: #FEFEFF;      /* R:254 G:254 B:255 */
-    --color-ink: #040723;        /* R:4 G:7 B:35 */
-    --color-purple: #8158F5;     /* R:129 G:88 B:245 */
-    --color-green: #C8E800;      /* R:200 G:232 B:0 */
-
-    /* Secondary Colors from Design Guide */
-    --color-red: #F61449;        /* R:246 G:20 B:73 */
-    --color-azure: #1255B1;      /* R:18 G:85 B:177 */
-    --color-yellow: #F2C819;     /* R:242 G:200 B:25 */
-    --color-steel: #95218229;    /* R:149 G:33 B:130 with alpha */
-
-    /* Neutral Colors from Design Guide */
-    --color-light-frost: #F2E225; /* R:242 G:226 B:37 */
-    --color-beige: #F2E201;      /* R:242 G:226 B:1 */
-    --color-off-white: #F2E206;  /* R:242 G:226 B:6 */
-
-    /* Derived Text Colors */
-    --text-primary: var(--color-ink);
-    --text-secondary: var(--color-ink);   /* Main copy in dark ink color */
+    --color-cloud: #040723;
+    --color-ink: #dee0f8;
+    --color-purple: #8158F5;
+    --color-green: #C8E800;
     --text-muted: #64748b;
-    --link-color: var(--color-purple);    /* Links in purple/blue */
 
-    /* Background Colors */
-    --bg-primary: var(--color-cloud);
-    --bg-secondary: #f8fafc;
-    --bg-sidebar: #fafbfc;
-    --bg-accent: rgba(129, 88, 245, 0.05);
-
-    /* Border Colors */
-    --border-light: #e2e8f0;
-    --border-medium: #cbd5e1;
-    --border-accent: var(--color-purple);
 }
 
 /* Light mode colors. */
@@ -105,4 +70,9 @@
     --sl-color-gray-6: #e9eef8;
     --sl-color-gray-7: #f4f6fb;
     --sl-color-black: #ffffff;
-    }
+
+    /* Primary Colors from Design Guide */
+    --color-cloud: #FEFEFF;
+    --color-ink: #040723;
+
+}

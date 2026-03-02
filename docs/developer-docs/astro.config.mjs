@@ -38,6 +38,9 @@ export default defineConfig({
 					autogenerate: { directory: 'reference' },
 				},
 			],
+			components: {
+				Pagination: './src/components/Pagination.astro',
+			}
 		}),
 	],
 });

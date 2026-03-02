@@ -9,7 +9,7 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'Tari Ootle Documentation',
-			customCss: ['./src/styles/global.css','./src/fonts/font-face.css'],
+			customCss: ['./src/styles/global.css','./src/styles/custom.css','./src/fonts/font-face.css'],
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/tari-project/tari-ootle' }],
 			sidebar: [
 				{

@@ -1,6 +1,5 @@
 /* Dark mode colors. */
 :root {
-    font-size: 16px;
     --sl-color-accent-low: #231e40;
     --sl-color-accent: #6a4dce;
     --sl-color-accent-high: #c6c3f0;
@@ -26,6 +25,23 @@
     --__sl-font-mono: var(--sl-font-mono, var(--sl-font-system-mono)), var(--sl-font-system-mono);
 
 
+    /** Key layout values */
+    --sl-nav-height: 5rem;
+    --sl-nav-pad-x: 1.25rem;
+    --sl-nav-pad-y: 0.75rem;
+    --sl-mobile-toc-height: 3rem;
+    --sl-sidebar-width: 20rem;
+    --sl-sidebar-pad-x: 1rem;
+    --sl-content-width: 45rem;
+    --sl-content-pad-x: 1.5rem;
+    --sl-content-gap-y: 1rem;
+    --sl-main-pad: 0 0 4vh 0;
+    --sl-menu-button-size: 2rem;
+    --sl-nav-gap: var(--sl-content-pad-x);
+    /* Offset required to show outline inside an element instead of round the outside */
+    --sl-outline-offset-inside: 0.1875rem;
+
+
     /* Text size and line height */
     --sl-text-2xs: 0.75rem;
     --sl-text-xs: 0.8125rem;
@@ -34,7 +50,7 @@
     --sl-text-lg: 1.125rem;
     --sl-text-xl: 1.25rem;
     --sl-text-2xl: 1.75rem;
-    --sl-text-3xl: 3rem;
+    --sl-text-3xl: 2.8rem;
     --sl-text-4xl: 4rem;
     --sl-text-5xl: 6.6rem;
     --sl-text-6xl: 7rem;
@@ -82,7 +98,7 @@
     --sl-color-accent-high: #32275f;
     --sl-color-white: #141821;
     --sl-color-gray-1: #1f2639;
-    --sl-color-gray-2: #30384c;
+    --sl-color-gray-2: var(--text-muted);
     --sl-color-gray-3: #4f586d;
     --sl-color-gray-4: #828ba2;
     --sl-color-gray-5: #bdc2ce;
@@ -90,48 +106,3 @@
     --sl-color-gray-7: #f4f6fb;
     --sl-color-black: #ffffff;
     }
-
-
-body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    line-height: 1.6;
-    font-weight: 400;
-}
-
-h1 {
-    font-family: 'Druk', sans-serif;
-    font-size: 6rem;
-    font-weight: 700;
-    background: linear-gradient(135deg, var(--color-ink) 0%, var(--color-purple) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    margin-bottom: 2rem;
-    line-height: 0.9;
-    text-transform: uppercase;
-    letter-spacing: -0.01em;
-    font-stretch: condensed;
-}
-
-.sl-markdown-content .sl-heading-wrapper.level-h3 {
-    font-family: 'Druk', sans-serif;
-    font-size: var(--sl-text-h3);
-
-    font-weight: 700;
-    color: var(--color-ink);
-    margin-bottom: 1.5rem;
-    position: relative;
-    text-transform: uppercase;
-    font-stretch: condensed;
-
-    &::before {
-        content: "";
-        position: absolute;
-        left: -1.5rem;
-        top: 0;
-        bottom: 0;
-        width: 4px;
-        background: var(--color-purple);
-        border-radius: 2px;
-    }
-}

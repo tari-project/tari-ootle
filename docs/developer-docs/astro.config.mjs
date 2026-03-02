@@ -16,10 +16,6 @@ export default defineConfig({
       social: [{ icon: "github", label: "GitHub", href: "https://github.com/tari-project/tari-ootle" }],
       sidebar: [
         {
-          label: "Introduction",
-          items: [{ label: "Overview", link: "/introduction/" }],
-        },
-        {
           label: "Guides",
           items: [
             { label: "Getting Started", link: "/guides/getting-started/" },

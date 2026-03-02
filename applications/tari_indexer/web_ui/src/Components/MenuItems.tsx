@@ -36,7 +36,7 @@ import {
   IoHome,
   IoHomeOutline,
 } from "react-icons/io5";
-import { TbTimelineEventText } from "react-icons/tb";
+import { TbTimelineEventText, TbTemplate } from "react-icons/tb";
 
 import ThemeSwitcher from "./ThemeSwitcher";
 
@@ -75,6 +75,12 @@ const mainItems = [
     icon: <PiPuzzlePiece style={iconStyle} />,
     activeIcon: <PiPuzzlePiece style={activeIconStyle} />,
     link: "substates",
+  },
+  {
+    title: "Templates",
+    icon: <TbTemplate style={iconStyle} />,
+    activeIcon: <TbTemplate style={activeIconStyle} />,
+    link: "templates",
   },
   {
     title: "Connections",

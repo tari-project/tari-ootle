@@ -22,127 +22,298 @@
 
 import PageHeading from "../../Components/PageHeading";
 import Grid from "@mui/material/Grid";
-import { StyledPaper, DataTableCell } from "../../Components/StyledComponents";
+import { StyledPaper, CodeBlock } from "../../Components/StyledComponents";
 import {
+  Alert,
   Box,
   Button,
+  Chip,
+  CircularProgress,
+  Divider,
+  IconButton,
+  InputAdornment,
   Stack,
+  TextField,
+  Typography,
   Table,
   TableBody,
   TableCell,
-  TableHead,
-  TableRow,
-  TextField,
-  Select,
-  MenuItem,
   TableContainer,
-  TablePagination,
-  FormControl,
-  InputLabel,
+  TableRow,
 } from "@mui/material";
-import React, { useEffect, useState, useMemo } from "react";
-import { truncateText, formatTimestamp } from "../../utils/helpers";
+import React, { useState, useCallback, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
+import { renderJson } from "../../utils/helpers";
+import { convertCborValue } from "../../utils/cbor";
 import CopyToClipboard from "../../Components/CopyToClipboard";
-import saveAs from "file-saver";
-import JsonDialog from "../../Components/JsonDialog";
-import { ListSubstateItem, shortenSubstateId, substateIdToString } from "@tari-project/ootle-ts-bindings";
-import { Link } from "react-router-dom";
-import FetchStatusCheck from "../../Components/FetchStatusCheck";
-import { useListSubstates, useGetSubstate } from "../../api/hooks/useSubstates";
+import { useGetSubstate } from "../../api/hooks/useSubstates";
+import type { SubstateValue } from "@tari-project/ootle-ts-bindings";
+import SearchIcon from "@mui/icons-material/Search";
+import ClearIcon from "@mui/icons-material/Clear";
 
-const SUBSTATE_TYPES = [
-  "Component",
-  "Resource",
-  "Vault",
-  "ClaimedOutputTombstone",
-  "NonFungible",
-  "TransactionReceipt",
-  "ValidatorFeePool",
-  "Template",
-  "Utxo",
-] as const;
+const SUBSTATE_PREFIXES = ["component", "resource", "vault", "nft", "tombstone", "txreceipt", "template", "vnfp", "utxo"];
 
-type ExtendedSubstateItem = ListSubstateItem & { id: string; show?: boolean };
+function validateSubstateId(id: string): string | null {
+  if (!id) return null;
+  const underscoreIndex = id.indexOf("_");
+  if (underscoreIndex === -1) {
+    return `Invalid format. Expected a prefix followed by "_" (e.g. component_..., resource_...). Valid prefixes: ${SUBSTATE_PREFIXES.join(", ")}`;
+  }
+  const prefix = id.substring(0, underscoreIndex);
+  if (!SUBSTATE_PREFIXES.includes(prefix)) {
+    return `Unknown prefix "${prefix}". Valid prefixes: ${SUBSTATE_PREFIXES.join(", ")}`;
+  }
+  return null;
+}
+
+function getSubstateType(substate: SubstateValue): string {
+  return Object.keys(substate)[0];
+}
+
+function getSubstateData(substate: SubstateValue): unknown {
+  return Object.values(substate)[0];
+}
+
+function SubstateDetails({ substate, version }: { substate: SubstateValue; version: number }) {
+  const type = getSubstateType(substate);
+  const data = getSubstateData(substate);
+
+  return (
+    <Stack spacing={2}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+        <Chip label={type} color="primary" />
+        <Typography variant="body2" color="text.secondary">
+          Version {version}
+        </Typography>
+      </Box>
+      <Divider />
+      {renderSubstateByType(type, data)}
+    </Stack>
+  );
+}
+
+function renderSubstateByType(type: string, data: unknown): React.ReactNode {
+  switch (type) {
+    case "Component":
+      return <ComponentView data={data as any} />;
+    case "Resource":
+      return <ResourceView data={data as any} />;
+    case "Vault":
+      return <VaultView data={data as any} />;
+    case "Template":
+      return <TemplateView data={data as any} />;
+    case "TransactionReceipt":
+      return <TransactionReceiptView data={data as any} />;
+    case "ValidatorFeePool":
+      return <ValidatorFeePoolView data={data as any} />;
+    case "NonFungible":
+      return <NonFungibleView data={data as any} />;
+    case "Utxo":
+      return <UtxoView data={data as any} />;
+    case "ClaimedOutputTombstone":
+      return <ClaimedOutputTombstoneView data={data as any} />;
+    default:
+      return <FallbackView data={data} />;
+  }
+}
+
+function FieldTable({ fields }: { fields: Array<{ label: string; value: React.ReactNode }> }) {
+  return (
+    <TableContainer>
+      <Table size="small">
+        <TableBody>
+          {fields.map((field) => (
+            <TableRow key={field.label}>
+              <TableCell sx={{ fontWeight: "bold", width: "200px", whiteSpace: "nowrap" }}>{field.label}</TableCell>
+              <TableCell sx={{ fontFamily: "'Courier New', Courier, monospace", fontSize: "14px", wordBreak: "break-all" }}>
+                {field.value}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+}
+
+function ComponentView({ data }: { data: any }) {
+  const decodedState = data.body?.state ? convertCborValue(data.body.state) : data.body;
+
+  return (
+    <Stack spacing={2}>
+      <FieldTable
+        fields={[
+          { label: "Template Address", value: data.template_address },
+          { label: "Module", value: data.module_name },
+          { label: "Entity ID", value: String(data.entity_id) },
+          { label: "Owner Rule", value: <CodeBlock>{renderJson(data.owner_rule)}</CodeBlock> },
+          { label: "Access Rules", value: <CodeBlock>{renderJson(data.access_rules)}</CodeBlock> },
+        ]}
+      />
+      <Typography variant="subtitle2">State</Typography>
+      <CodeBlock>{renderJson(decodedState)}</CodeBlock>
+    </Stack>
+  );
+}
+
+function ResourceView({ data }: { data: any }) {
+  return (
+    <FieldTable
+      fields={[
+        { label: "Resource Type", value: typeof data.resource_type === "object" ? JSON.stringify(data.resource_type) : String(data.resource_type) },
+        { label: "Divisibility", value: String(data.divisibility) },
+        { label: "Total Supply", value: data.total_supply !== null ? String(data.total_supply) : "Tracking disabled" },
+        { label: "Owner Rule", value: <CodeBlock>{renderJson(data.owner_rule)}</CodeBlock> },
+        { label: "Access Rules", value: <CodeBlock>{renderJson(data.access_rules)}</CodeBlock> },
+        { label: "Metadata", value: <CodeBlock>{renderJson(data.metadata)}</CodeBlock> },
+        ...(data.view_key ? [{ label: "View Key", value: String(data.view_key) }] : []),
+        ...(data.auth_hook ? [{ label: "Auth Hook", value: <CodeBlock>{renderJson(data.auth_hook)}</CodeBlock> }] : []),
+      ]}
+    />
+  );
+}
+
+function VaultView({ data }: { data: any }) {
+  return (
+    <FieldTable
+      fields={[
+        { label: "Resource Container", value: <CodeBlock>{renderJson(data.resource_container)}</CodeBlock> },
+        { label: "Freeze Flags", value: <CodeBlock>{renderJson(data.freeze_flags)}</CodeBlock> },
+      ]}
+    />
+  );
+}
+
+function TemplateView({ data }: { data: any }) {
+  return (
+    <FieldTable
+      fields={[
+        { label: "Author", value: data.author },
+        { label: "Published Epoch", value: String(data.at_epoch) },
+        { label: "Binary Size", value: data.binary ? `${data.binary.length} bytes` : "N/A" },
+      ]}
+    />
+  );
+}
+
+function TransactionReceiptView({ data }: { data: any }) {
+  return (
+    <Stack spacing={2}>
+      <FieldTable
+        fields={[
+          { label: "Outcome", value: <CodeBlock>{renderJson(data.outcome)}</CodeBlock> },
+          { label: "Epoch", value: String(data.epoch) },
+          { label: "Fee Receipt", value: <CodeBlock>{renderJson(data.fee_receipt)}</CodeBlock> },
+        ]}
+      />
+      {data.events?.length > 0 && (
+        <>
+          <Typography variant="subtitle2">Events ({data.events.length})</Typography>
+          <CodeBlock>{renderJson(data.events)}</CodeBlock>
+        </>
+      )}
+      {data.logs?.length > 0 && (
+        <>
+          <Typography variant="subtitle2">Logs ({data.logs.length})</Typography>
+          <CodeBlock>{renderJson(data.logs)}</CodeBlock>
+        </>
+      )}
+      <Typography variant="subtitle2">Diff Summary</Typography>
+      <CodeBlock>{renderJson(data.diff_summary)}</CodeBlock>
+    </Stack>
+  );
+}
+
+function ValidatorFeePoolView({ data }: { data: any }) {
+  return (
+    <FieldTable
+      fields={[
+        { label: "Claim Public Key", value: String(data.claim_public_key) },
+        { label: "Amount", value: String(data.amount) },
+      ]}
+    />
+  );
+}
+
+function NonFungibleView({ data }: { data: any }) {
+  if (data === null) {
+    return <Typography color="text.secondary">Empty non-fungible container</Typography>;
+  }
+  return <CodeBlock>{renderJson(data)}</CodeBlock>;
+}
+
+function UtxoView({ data }: { data: any }) {
+  return (
+    <FieldTable
+      fields={[
+        { label: "Frozen", value: data.is_frozen ? "Yes" : "No" },
+        { label: "Output", value: data.output ? <CodeBlock>{renderJson(data.output)}</CodeBlock> : "None" },
+      ]}
+    />
+  );
+}
+
+function ClaimedOutputTombstoneView({ data }: { data: any }) {
+  return (
+    <FieldTable
+      fields={[{ label: "Value", value: String(data.value) }]}
+    />
+  );
+}
+
+function FallbackView({ data }: { data: unknown }) {
+  return <CodeBlock>{renderJson(data)}</CodeBlock>;
+}
 
 function SubstatesLayout() {
-  const [filteredSubstates, setFilteredSubstates] = useState<ExtendedSubstateItem[]>([]);
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
-  const [jsonDialogOpen, setJsonDialogOpen] = React.useState(false);
-  const [selectedSubstate, setSelectedSubstate] = useState<any>(null);
-  const [filter, setFilter] = useState({
-    filter_by_template: "",
-    filter_by_type: "",
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialAddress = searchParams.get("address") || "";
+  const [addressInput, setAddressInput] = useState(initialAddress);
+  const [fetchAddress, setFetchAddress] = useState<string | null>(initialAddress || null);
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  const { data, isLoading, isError, error } = useGetSubstate({
+    address: fetchAddress,
+    enabled: !!fetchAddress,
   });
-
-  const { data, isLoading, isError, error } = useListSubstates({
-    offset: 0,
-    limit: 50,
-    filter_by_template: filter.filter_by_template || null,
-    filter_by_type: filter.filter_by_type || null,
-  });
-
-  const substates = data?.substates || [];
-
-  const { data: substateData } = useGetSubstate({
-    address: selectedSubstate?.substate_id,
-    enabled: !!selectedSubstate,
-  });
-
-  const extendedSubstates = useMemo(
-    () => substates.map((substate) => ({ ...substate, id: substateIdToString(substate.substate_id) })),
-    [substates],
-  );
-
-  const visibleSubstates = filteredSubstates.filter((substate) => substate.show !== false);
-  const paginatedSubstates = visibleSubstates.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
 
   useEffect(() => {
-    setFilteredSubstates(extendedSubstates);
-  }, [extendedSubstates]);
-
-  const handleChangePage = (_event: React.MouseEvent<HTMLButtonElement> | null, newPage: number) => {
-    setPage(newPage);
-  };
-
-  const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(0);
-  };
-
-  const handleContentDownload = (substate: any) => {
-    setSelectedSubstate(substate);
-  };
-
-  const handleContentView = (substate: any) => {
-    setSelectedSubstate(substate);
-    setJsonDialogOpen(true);
-  };
-
-  useEffect(() => {
-    if (substateData && selectedSubstate && !jsonDialogOpen) {
-      const json = JSON.stringify(substateData, null, 2);
-      const blob = new Blob([json], { type: "application/json" });
-      const filename = `substates-${substateIdToString(selectedSubstate.substate_id)}-${selectedSubstate.version}.json`;
-      saveAs(blob, filename);
-      setSelectedSubstate(null);
+    const addr = searchParams.get("address") || "";
+    if (addr && addr !== fetchAddress) {
+      setAddressInput(addr);
+      setValidationError(null);
+      setFetchAddress(addr);
     }
-  }, [substateData, selectedSubstate, jsonDialogOpen]);
+  }, [searchParams]);
 
-  const handleJsonDialogClose = () => {
-    setJsonDialogOpen(false);
-    setSelectedSubstate(null);
-  };
+  const handleFetch = useCallback(() => {
+    const trimmed = addressInput.trim();
+    if (!trimmed) return;
+    const error = validateSubstateId(trimmed);
+    if (error) {
+      setValidationError(error);
+      return;
+    }
+    setValidationError(null);
+    setFetchAddress(trimmed);
+    setSearchParams({ address: trimmed });
+  }, [addressInput, setSearchParams]);
 
-  const onFilterChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newFilter = {
-      ...filter,
-      [e.target.name]: e.target.value,
-    };
+  const handleClear = useCallback(() => {
+    setAddressInput("");
+    setFetchAddress(null);
+    setValidationError(null);
+    setSearchParams({});
+  }, [setSearchParams]);
 
-    setFilter(newFilter);
-    setPage(0);
-  };
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter") {
+        handleFetch();
+      }
+    },
+    [handleFetch],
+  );
 
   return (
     <>
@@ -151,113 +322,72 @@ function SubstatesLayout() {
       </Grid>
       <Grid size={12}>
         <StyledPaper>
-          <FetchStatusCheck
-            isLoading={isLoading}
-            isError={isError}
-            errorMessage={error ? (error as Error).message : "Error fetching substates."}
-          >
-            <Stack spacing={1}>
-              <Box className="flex-container" sx={{ marginBottom: 2 }}>
-                <FormControl style={{ minWidth: "250px" }}>
-                  <InputLabel shrink>Type</InputLabel>
-                  <Select
-                    name="filter_by_type"
-                    label="Type"
-                    value={filter.filter_by_type}
-                    displayEmpty
-                    onChange={async (e: any) => onFilterChange(e)}
-                    size="medium"
-                    renderValue={(value) => {
-                      if (value === "") {
-                        return "All types";
-                      }
-                      return value;
-                    }}
-                  >
-                    <MenuItem key={"All Types"} value="">
-                      {"All types"}
-                    </MenuItem>
-                    {SUBSTATE_TYPES.map((type) => (
-                      <MenuItem key={type} value={type}>
-                        {type}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <TextField
-                  name="filter_by_template"
-                  label="Template"
-                  value={filter.filter_by_template}
-                  onChange={async (e: any) => onFilterChange(e)}
-                  style={{ flexGrow: 1 }}
-                />
-              </Box>
-              <TableContainer>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Address</TableCell>
-                      <TableCell>Version</TableCell>
-                      <TableCell>Template</TableCell>
-                      <TableCell>Timestamp</TableCell>
-                      <TableCell>Content</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {paginatedSubstates.map((row) => (
-                      <TableRow
-                        key={substateIdToString(row.substate_id)}
-                        sx={{ "&:last-child td, &:last-child th": { border: 0 } }}
-                      >
-                        <DataTableCell>
-                          {substateIdToString(row.substate_id).startsWith("resource_") ? (
-                            <Link to={`/${substateIdToString(row.substate_id)}`}>
-                              {shortenSubstateId(row.substate_id)}
-                            </Link>
-                          ) : (
-                            shortenSubstateId(row.substate_id)
-                          )}
-                          <CopyToClipboard copy={substateIdToString(row.substate_id)} />
-                        </DataTableCell>
-                        <DataTableCell>{row.version}</DataTableCell>
-                        <DataTableCell>
-                          {row.template_address !== null && (
-                            <>
-                              {truncateText(row.template_address, 20)}
-                              <CopyToClipboard copy={row.template_address} />
-                            </>
-                          )}
-                        </DataTableCell>
-                        <DataTableCell>{formatTimestamp(row.timestamp)}</DataTableCell>
-                        <DataTableCell>
-                          <Stack direction="row" spacing={2} alignItems="left">
-                            <Button variant="outlined" onClick={() => handleContentView(row)}>
-                              View
-                            </Button>
-                            <Button variant="outlined" onClick={() => handleContentDownload(row)}>
-                              Download
-                            </Button>
-                          </Stack>
-                        </DataTableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-              <TablePagination
-                component="div"
-                count={visibleSubstates.length}
-                page={page}
-                onPageChange={handleChangePage}
-                rowsPerPage={rowsPerPage}
-                onRowsPerPageChange={handleChangeRowsPerPage}
-                rowsPerPageOptions={[5, 10, 25, 50]}
+          <Stack spacing={3}>
+            <Typography variant="body2" color="text.secondary">
+              Look up any substate from the network by its address (e.g. component_xxx, resource_xxx, vault_xxx).
+            </Typography>
+            <Box sx={{ display: "flex", gap: 2 }}>
+              <TextField
+                fullWidth
+                label="Substate Address"
+                placeholder="component_0000000000000000000000000000000000000000000000000000..."
+                value={addressInput}
+                onChange={(e) => {
+                  setAddressInput(e.target.value);
+                  if (validationError) setValidationError(null);
+                }}
+                onKeyDown={handleKeyDown}
+                size="medium"
+                error={!!validationError}
+                helperText={validationError}
+                sx={{ fontFamily: "'Courier New', Courier, monospace" }}
+                slotProps={{
+                  input: {
+                    endAdornment: addressInput ? (
+                      <InputAdornment position="end">
+                        <IconButton onClick={handleClear} edge="end" size="small">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      </InputAdornment>
+                    ) : null,
+                  },
+                }}
               />
-            </Stack>
-          </FetchStatusCheck>
+              <Button
+                variant="contained"
+                onClick={handleFetch}
+                disabled={!addressInput.trim() || isLoading}
+                startIcon={isLoading ? <CircularProgress size={20} /> : <SearchIcon />}
+                sx={{ minWidth: "120px" }}
+              >
+                {isLoading ? "Fetching" : "Fetch"}
+              </Button>
+            </Box>
+
+            {fetchAddress && (
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "'Courier New', Courier, monospace", wordBreak: "break-all" }}>
+                  {fetchAddress}
+                </Typography>
+                <CopyToClipboard copy={fetchAddress} />
+              </Box>
+            )}
+
+            {isError && (
+              <Alert severity="error">
+                {(error as any)?.message || "Failed to fetch substate. Check the address and try again."}
+              </Alert>
+            )}
+
+            {data && (
+              <>
+                <Divider />
+                <SubstateDetails substate={data.substate} version={data.version} />
+              </>
+            )}
+          </Stack>
         </StyledPaper>
       </Grid>
-      <JsonDialog open={jsonDialogOpen} onClose={handleJsonDialogClose} data={substateData || {}} />
     </>
   );
 }

@@ -37,10 +37,10 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
     handlers::network::get_network_sync_stats,
     handlers::network::get_connections,
     handlers::substates::get_substate,
-    handlers::substates::list_substates,
     handlers::substates::fetch_substates,
     handlers::nfts::get_non_fungibles,
     handlers::resources::get_resource,
+    handlers::indexer_events::sse_events,
     handlers::transactions::submit_transaction,
     handlers::transactions::submit_transaction_dry_run,
     handlers::transactions::list_recent_transactions,
@@ -91,7 +91,6 @@ impl Server {
             .nest("/substates", Router::new()
                 .route("/fetch", post(handlers::substates::fetch_substates))
                 .route("/{substate_id}", get(handlers::substates::get_substate))
-                .route("/", get(handlers::substates::list_substates))
             )
             .nest("/transactions", Router::new()
                 .route("/", post(handlers::transactions::submit_transaction))
@@ -114,6 +113,7 @@ impl Server {
                     "/{transaction_id}/result",
                     get(handlers::transactions::get_transaction_result),
                 )
+                .route("/events", get(handlers::transactions::query_transaction_events))
             )
             .nest("/templates", Router::new()
                 .route("/cached", get(handlers::templates::list_cached_templates))
@@ -141,7 +141,7 @@ impl Server {
                 // Convenience Shortcut
                 .route("/xtr" , get(handlers::resources::get_xtr))
                 .route("/{resource_address}" , get(handlers::resources::get_resource)))
-            .route("/events", get(handlers::events::sse_events))
+            .route("/events", get(handlers::indexer_events::sse_events))
             .layer(CorsLayer::permissive())
             .layer(RequestBodyLimitLayer::new(REQUEST_BODY_LIMIT))
             .merge(SwaggerUi::new("/swagger-ui").url("/openapi.json", ApiDoc::openapi()))

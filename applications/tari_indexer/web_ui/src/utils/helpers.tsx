@@ -90,7 +90,7 @@ export function displayDuration(duration: Duration) {
   return `${duration.secs}s`;
 }
 
-export function truncateText(text: string, length: number) {
+export function truncateText(text: string | null, length: number) {
   if (!length || !text || text.length <= length) {
     return text;
   }

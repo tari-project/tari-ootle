@@ -17,8 +17,7 @@ pub fn builder(network: Network) -> impl Fn(u64) -> Transaction {
 
         let account_address = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &signer_public_key);
 
-        Transaction::builder_localnet()
-            .for_network(network.as_byte())
+        Transaction::builder(network.as_byte())
             .with_fee_instructions_builder(|builder| {
                 builder
                     .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![5000])

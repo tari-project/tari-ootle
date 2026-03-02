@@ -251,4 +251,15 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
             .with_read_tx(|tx| tx.key_value_get_value(Key::SyncProgress))?;
         Ok(progress)
     }
+
+    pub fn get_events(
+        &self,
+        substate_id_filter: Option<&SubstateId>,
+        topic_filter: Option<&str>,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<(TransactionId, Event)>, StorageError> {
+        self.inner
+            .with_read_tx(|tx| tx.get_events(substate_id_filter, topic_filter, offset, limit))
+    }
 }

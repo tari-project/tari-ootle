@@ -1385,6 +1385,31 @@ impl WalletStoreReader for ReadTransaction<'_> {
         Ok(address_count > 0)
     }
 
+    fn authored_templates_get_by_address(
+        &mut self,
+        address: &TemplateAddress,
+    ) -> Result<AuthoredTemplateModel, WalletStorageError> {
+        const OPERATION: &str = "authored_templates_get_by_address";
+        use crate::schema::authored_templates;
+        let address_hex = format!("{}", address);
+        let model = authored_templates::table
+            .filter(authored_templates::address.eq(address_hex))
+            .first::<AuthoredTemplate>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "authored_template".to_string(),
+                key: address.to_string(),
+            })?;
+
+        AuthoredTemplateModel::try_from(&model).map_err(|e| WalletStorageError::DecodingError {
+            operation: OPERATION,
+            item: "authored_template",
+            details: format!("Corrupt db: invalid authored template record found: {:?}", e),
+        })
+    }
+
     fn authored_templates_fetch_by_public_key(
         &mut self,
         author_public_key: &RistrettoPublicKeyBytes,

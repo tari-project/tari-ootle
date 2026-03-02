@@ -27,6 +27,7 @@ import RecentTransactions from "./routes/RecentTransactions/RecentTransactionsLa
 import Resources from "./routes/Resources/Resources";
 import Events from "./routes/Events/Events";
 import Substates from "./routes/Substates/Substates";
+import Templates from "./routes/Templates/Templates";
 import TransactionDetails from "./routes/Transaction/TransactionDetails";
 import ErrorPage from "./routes/ErrorPage";
 import Layout from "./theme/LayoutMain";
@@ -68,6 +69,11 @@ export const breadcrumbRoutes = [
     dynamic: false,
   },
   {
+    label: "Templates",
+    path: "/templates",
+    dynamic: false,
+  },
+  {
     label: "Error",
     path: "*",
     dynamic: false,
@@ -85,6 +91,7 @@ export default function App() {
           <Route path="transactions/:transaction_id" element={<TransactionDetails />} />
           <Route path="events" element={<Events />} />
           <Route path="substates" element={<Substates />} />
+          <Route path="templates" element={<Templates />} />
           <Route path="*" element={<ErrorPage />} />
         </Route>
       </Routes>

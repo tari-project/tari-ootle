@@ -10,7 +10,7 @@
       "name": "BSD-3-Clause",
       "identifier": "BSD-3-Clause"
     },
-    "version": "0.25.0"
+    "version": "0.25.3"
   },
   "paths": {
     "/epoch-manager/stats": {
@@ -42,6 +42,16 @@
             }
           }
         }
+      }
+    },
+    "/events": {
+      "get": {
+        "tags": [
+          "handlers::indexer_events"
+        ],
+        "description": "SSE events",
+        "operationId": "sse_events",
+        "responses": {}
       }
     },
     "/identity": {

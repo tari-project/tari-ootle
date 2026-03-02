@@ -1,7 +1,6 @@
 ---
 const { dir, pagination } = Astro.locals.starlightRoute;
 const { prev, next } = pagination;
-const isRtl = dir === 'rtl';
 ---
 
 <div class="pagination-links print:hidden" dir={dir}>
@@ -52,9 +51,8 @@ const isRtl = dir === 'rtl';
             text-decoration: none;
             color: var(--color-green);
             background-color: #040723;
-            padding: 0.8rem min(2rem, 4vw);
+            padding: 1.5rem min(2rem, 4vw);
             overflow-wrap: anywhere;
-
             font-size: 0.875rem;
             font-weight: 600;
             text-transform: uppercase;

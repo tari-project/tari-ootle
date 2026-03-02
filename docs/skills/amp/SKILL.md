@@ -1,6 +1,9 @@
-# Tari Ootle — Gemini Agent Rules
+---
+name: amp
+description: Tari Ootle development instructions for Amp
+---
 
-Use these instructions when building Tari Ootle templates (WASM smart contracts) and client applications on the Tari L2 network.
+Use these instructions when building Tari Ootle templates (WASM smart contracts) and client applications. This document covers accurate APIs and patterns from the codebase.
 
 ## Overview
 

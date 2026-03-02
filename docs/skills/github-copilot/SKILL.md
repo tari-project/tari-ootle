@@ -1,6 +1,9 @@
-# Tari Ootle — Antigravity Agent Rules
+---
+name: github-copilot
+description: Tari Ootle development instructions for GitHub Copilot
+---
 
-Antigravity should use these instructions to help developers create Tari Ootle templates (WASM smart contracts) and client transactions with accurate APIs and patterns from the codebase.
+You are assisting with development on the **Tari Ootle** platform — a decentralized application layer built on Tari L2. Templates (smart contracts) are written in Rust, compiled to WASM (`wasm32-unknown-unknown`), and deployed to the network.
 
 ## Overview
 

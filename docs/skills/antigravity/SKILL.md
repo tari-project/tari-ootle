@@ -1,6 +1,9 @@
-# Tari Ootle Conventions for Aider
+---
+name: antigravity
+description: Tari Ootle development instructions for Antigravity
+---
 
-These conventions guide development on the Tari Ootle platform — a decentralized application layer on Tari L2. Smart contracts ("templates") are written in Rust, compiled to WASM (`wasm32-unknown-unknown`), and deployed to the network as components with persistent on-chain state.
+Antigravity should use these instructions to help developers create Tari Ootle templates (WASM smart contracts) and client transactions with accurate APIs and patterns from the codebase.
 
 ## Overview
 
@@ -161,12 +164,12 @@ mod my_template {
 
 ```rust
 // Simple constructor — returning Self creates the component with default rules
-pub fn new() -> Self {
+pub fn new_simple() -> Self {
     Self { counter: 0 }
 }
 
 // Explicit constructor — returns Component<Self> for full control
-pub fn new() -> Component<Self> {
+pub fn new_explicit() -> Component<Self> {
     Component::new(Self { counter: 0 })
         .with_access_rules(ComponentAccessRules::new()
             .method("do_something", rule!(allow_all))
@@ -177,7 +180,7 @@ pub fn new() -> Component<Self> {
 }
 
 // Constructor with address allocation — allows creating and calling in one transaction
-pub fn new(addr: ComponentAddressAllocation) -> Component<Self> {
+pub fn new_with_allocation(addr: ComponentAddressAllocation) -> Component<Self> {
     Component::new(Self { counter: 0 })
         .with_address_allocation(addr)
         .with_access_rules(ComponentAccessRules::new()
@@ -188,7 +191,7 @@ pub fn new(addr: ComponentAddressAllocation) -> Component<Self> {
 }
 
 // Constructor with public key address — deterministic address from a public key
-pub fn new() -> Component<Self> {
+pub fn new_with_public_key() -> Component<Self> {
     let pk = CallerContext::transaction_signer_public_key();
     Component::new(Self { counter: 0 })
         .with_public_key_address(pk)

@@ -4,7 +4,7 @@
 use ootle_byte_type::ToByteType;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine::runtime::{ActionIdent, RuntimeError};
-use tari_ootle_transaction::{Instruction, Transaction, args, call_args};
+use tari_ootle_transaction::{Transaction, args};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::types::{Amount, ComponentAddress, access_rules::ComponentAccessRules, constants::XTR, rule};
 use tari_template_test_tooling::{
@@ -60,21 +60,17 @@ fn basic_faucet_transfer() {
 
 #[test]
 fn withdraw_from_account_prevented() {
-    let mut template_test = TemplateTest::new(CRATE_PATH, Vec::<&str>::new());
+    let mut test = TemplateTest::new(CRATE_PATH, Vec::<&str>::new());
 
-    let faucet_template = template_test.get_template_address("TestFaucet");
+    let faucet_template = test.get_template_address("TestFaucet");
 
     let initial_supply = Amount::from(1_000_000_000_000u64);
-    let result = template_test
-        .execute_and_commit(
-            vec![Instruction::CallFunction {
-                address: faucet_template,
-                function: "mint".try_into().unwrap(),
-                args: call_args![initial_supply],
-            }],
-            vec![template_test.owner_proof()],
-        )
-        .unwrap();
+    let result = test.execute_expect_success(
+        test.transaction()
+            .call_function(faucet_template, "mint", args![initial_supply])
+            .build_and_seal(test.secret_key()),
+        vec![test.owner_proof()],
+    );
     let faucet_component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
     let faucet_resource = result
         .finalize
@@ -85,9 +81,9 @@ fn withdraw_from_account_prevented() {
         .unwrap();
 
     // Create sender and receiver accounts
-    let (source_account, _, _) = template_test.create_funded_account();
+    let (source_account, _, _) = test.create_funded_account();
 
-    let _result = template_test
+    let _result = test
         .execute_and_commit_manifest(
             r#"
                 let source_account = var!["source_account"];
@@ -104,9 +100,9 @@ fn withdraw_from_account_prevented() {
         )
         .unwrap();
 
-    let (dest_address, non_owning_token, non_owning_key) = template_test.create_funded_account();
+    let (dest_address, non_owning_token, non_owning_key) = test.create_funded_account();
 
-    let reason = template_test.execute_expect_failure(
+    let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
             .call_method(source_account, "withdraw", args![faucet_resource, 100])
             .put_last_instruction_output_on_workspace("stolen_coins")
@@ -121,7 +117,7 @@ fn withdraw_from_account_prevented() {
         method: "withdraw".to_string(),
     });
 
-    let result = template_test
+    let result = test
         .execute_and_commit_manifest(
             r#"
                 let dest_account = var!["dest_account"];

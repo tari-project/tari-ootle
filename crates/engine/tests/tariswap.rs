@@ -2,8 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_common_types::substate_type::SubstateType;
-use tari_ootle_transaction::{Instruction, Transaction, args, call_args};
-use tari_template_lib::types::{Amount, ComponentAddress, FunctionName, NonFungibleAddress, ResourceAddress};
+use tari_ootle_transaction::{Transaction, args};
+use tari_template_lib::types::{Amount, ComponentAddress, NonFungibleAddress, ResourceAddress};
 use tari_template_test_tooling::TemplateTest;
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
@@ -44,12 +44,8 @@ fn setup(fee: u16) -> TariSwapTest {
 
 fn create_faucet_component(template_test: &mut TemplateTest, symbol: String) -> (ComponentAddress, ResourceAddress) {
     let initial_supply = Amount::from(1_000_000_000_000u64);
-    let component_address: ComponentAddress = template_test.call_function(
-        "TestFaucet",
-        "mint_with_symbol",
-        call_args![initial_supply, symbol],
-        vec![],
-    );
+    let component_address: ComponentAddress =
+        template_test.call_function("TestFaucet", "mint_with_symbol", args![initial_supply, symbol], vec![]);
 
     let resource_address = template_test
         .get_previous_output_address(SubstateType::Resource)
@@ -68,16 +64,13 @@ fn create_tariswap_component(
     let module_name = "TariSwapPool";
     let tariswap_template = template_test.get_template_address(module_name);
 
-    let res = template_test
-        .execute_and_commit(
-            vec![Instruction::CallFunction {
-                address: tariswap_template,
-                function: FunctionName::new_checked("new").unwrap(),
-                args: call_args![a_resource, b_resource, fee],
-            }],
-            vec![],
-        )
-        .unwrap();
+    let res = template_test.execute_expect_success(
+        template_test
+            .transaction()
+            .call_function(tariswap_template, "new", args![a_resource, b_resource, fee])
+            .build_and_seal(template_test.secret_key()),
+        vec![],
+    );
 
     // extract the component address
     let (substate_addr, _) = res
@@ -171,12 +164,12 @@ fn remove_liquidity(test: &mut TariSwapTest, lp_amount: Amount) {
 
 fn get_pool_balance(test: &mut TariSwapTest, resource_address: ResourceAddress) -> Amount {
     test.template_test
-        .call_method(test.tariswap, "get_pool_balance", call_args![resource_address], vec![])
+        .call_method(test.tariswap, "get_pool_balance", args![resource_address], vec![])
 }
 
 fn get_account_balance(test: &mut TariSwapTest, resource_address: ResourceAddress) -> Amount {
     test.template_test
-        .call_method(test.account_address, "balance", call_args![resource_address], vec![])
+        .call_method(test.account_address, "balance", args![resource_address], vec![])
 }
 
 fn assert_swap(

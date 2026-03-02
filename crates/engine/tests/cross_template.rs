@@ -7,7 +7,7 @@ use tari_engine_types::{
     commit_result::{ExecuteResult, RejectReason},
     limits,
 };
-use tari_ootle_transaction::{Instruction, Transaction, args, call_args};
+use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::types::{Amount, ComponentAddress, ResourceAddress, TemplateAddress};
 use tari_template_test_tooling::{
     TemplateTest,
@@ -52,17 +52,13 @@ fn setup() -> CrossTemplateTest {
 
 fn initialize_composability(test: &mut CrossTemplateTest) -> ComponentInfo {
     // the cross_template template "new" function should create a new "state" component as well
-    let res = test
-        .template_test
-        .execute_and_commit(
-            vec![Instruction::CallFunction {
-                address: test.cross_call_template,
-                function: "new".try_into().unwrap(),
-                args: call_args![test.state_template],
-            }],
-            vec![],
-        )
-        .unwrap();
+    let res = test.template_test.execute_expect_success(
+        test.template_test
+            .transaction()
+            .call_function(test.cross_call_template, "new", args![test.state_template])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
 
     // extract the newly created component addresses
     let composability_component = extract_component_address_from_result(&res, TEMPLATE_NAME);
@@ -200,7 +196,7 @@ fn it_allows_method_to_function_calls() {
     test.template_test.call_method::<()>(
         components.cross_template_component,
         "replace_state_component",
-        call_args![test.state_template],
+        args![test.state_template],
         vec![],
     );
 
@@ -299,7 +295,7 @@ fn it_allows_multiple_recursion_levels() {
     test.template_test.call_method::<()>(
         composability_1,
         "set_nested_composability",
-        call_args![composability_0],
+        args![composability_0],
         vec![],
     );
 
@@ -326,7 +322,7 @@ fn it_fails_when_surpassing_recursion_limit_with_many_nested_components() {
         test.template_test.call_method::<()>(
             components.cross_template_component,
             "set_nested_composability",
-            call_args![last_composability_component],
+            args![last_composability_component],
             vec![],
         );
         last_composability_component = components.cross_template_component;

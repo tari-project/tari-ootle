@@ -14,7 +14,7 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::substate_type::SubstateType;
-use tari_ootle_transaction::{Transaction, args, call_args};
+use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::{
     models::Account,
     types::{
@@ -58,13 +58,11 @@ fn setup(
             template_test.call_function(
                 "ConfidentialFaucet",
                 "mint_with_view_key",
-                call_args![initial_supply, vk],
+                args![initial_supply, vk],
                 vec![],
             )
         })
-        .unwrap_or_else(|| {
-            template_test.call_function("ConfidentialFaucet", "mint", call_args![initial_supply], vec![])
-        });
+        .unwrap_or_else(|| template_test.call_function("ConfidentialFaucet", "mint", args![initial_supply], vec![]));
 
     let resx = template_test.get_previous_output_address(SubstateType::Resource);
 
@@ -90,7 +88,7 @@ fn mint_more_later() {
     let (mut template_test, faucet, _faucet_resx) = setup(confidential_proof, None);
 
     let (confidential_proof, mask, _change) = generate_confidential_output_statement(100, None);
-    template_test.call_method::<()>(faucet, "mint_more", call_args![confidential_proof], vec![]);
+    template_test.call_method::<()>(faucet, "mint_more", args![confidential_proof], vec![]);
 
     let (user_account, user_proof, user_key) = template_test.create_empty_account();
 
@@ -433,8 +431,8 @@ fn mint_and_transfer_revealed() {
 
     let (user_account, _, _) = test.create_empty_account();
 
-    test.call_method::<()>(faucet, "mint_revealed", call_args![123], vec![]);
-    let balance: Amount = test.call_method(faucet, "vault_balance", call_args![], vec![]);
+    test.call_method::<()>(faucet, "mint_revealed", args![123], vec![]);
+    let balance: Amount = test.call_method(faucet, "vault_balance", args![], vec![]);
     assert_eq!(balance, Amount::from(123u64));
 
     // Convert 100 revealed funds to confidential and the remaining 23 to revealed
@@ -506,7 +504,7 @@ fn mint_with_view_key() {
     let faucet_entity_id = faucet.entity_id();
 
     let (confidential_proof, mask, _change) = generate_confidential_proof_with_view_key(100, None, view_key);
-    test.call_method::<()>(faucet, "mint_more", call_args![confidential_proof], vec![]);
+    test.call_method::<()>(faucet, "mint_more", args![confidential_proof], vec![]);
 
     let (user_account, user_proof, user_key) = test.create_empty_account();
     let user_account_entity_id = user_account.entity_id();

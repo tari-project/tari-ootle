@@ -217,7 +217,7 @@ jobs:
         run: cargo nextest run --all-features --release --profile ci
 
       - name: upload artifact
-        uses: actions/upload-artifact@v6 # upload test results as artifact
+        uses: actions/upload-artifact@v7 # upload test results as artifact
         if: success() || failure()
         with:
           name: test-results
@@ -227,14 +227,14 @@ jobs:
         run: cargo test --release --package integration_tests --test cucumber
 
       - name: upload test result artifact
-        uses: actions/upload-artifact@v6 # upload test results as artifact
+        uses: actions/upload-artifact@v7 # upload test results as artifact
         if: success() || failure()
         with:
           name: cucumber-test-results
           path: ${{ github.workspace }}/integration_tests/cucumber-output-junit.xml
 
       - name: Upload cucumber log artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: success() || failure()
         with:
           name: cucumber-log-artifacts
@@ -246,7 +246,7 @@ jobs:
 
     steps:
       - name: Upload
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: Event File
           path: ${{ github.event_path }}

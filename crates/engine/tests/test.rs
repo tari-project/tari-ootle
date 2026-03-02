@@ -32,7 +32,7 @@ use tari_engine_types::{
     virtual_substate::{VirtualSubstate, VirtualSubstateId},
 };
 use tari_ootle_common_types::substate_type::SubstateType;
-use tari_ootle_transaction::{Transaction, args, call_args};
+use tari_ootle_transaction::{Transaction, args};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     models::NonFungible,
@@ -50,7 +50,7 @@ const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 #[test]
 fn test_hello_world() {
     let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/hello_world"]);
-    let result: String = template_test.call_function("HelloWorld", "greet", call_args![], vec![]);
+    let result: String = template_test.call_function("HelloWorld", "greet", args![], vec![]);
 
     assert_eq!(result, "Hello World!");
 }
@@ -60,7 +60,7 @@ fn test_state() {
     let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/state"]);
 
     // constructor
-    let component_address1: ComponentAddress = template_test.call_function("State", "new", call_args![], vec![]);
+    let component_address1: ComponentAddress = template_test.call_function("State", "new", args![], vec![]);
     template_test.assert_calls(&[
         "workspace_invoke",
         "component_invoke",
@@ -68,7 +68,7 @@ fn test_state() {
         "finalize",
     ]);
 
-    let component_address2: ComponentAddress = template_test.call_function("State", "new", call_args![], vec![]);
+    let component_address2: ComponentAddress = template_test.call_function("State", "new", args![], vec![]);
     assert_ne!(component_address1, component_address2);
 
     let store = template_test.read_only_state_store();
@@ -81,10 +81,10 @@ fn test_state() {
 
     // call the "set" method to update the instance value
     let new_value = 20_u32;
-    template_test.call_method::<()>(component_address2, "set", call_args![new_value], vec![]);
+    template_test.call_method::<()>(component_address2, "set", args![new_value], vec![]);
 
     // call the "get" method to get the current value
-    let value: u32 = template_test.call_method(component_address2, "get", call_args![], vec![]);
+    let value: u32 = template_test.call_method(component_address2, "get", args![], vec![]);
 
     assert_eq!(value, new_value);
 }
@@ -94,7 +94,7 @@ fn state_create_multiple_in_one_call() {
     let mut template_test = TemplateTest::new(CRATE_PATH, ["tests/templates/state"]);
 
     // constructor
-    template_test.call_function::<()>("State", "create_multiple", call_args![10u32], vec![]);
+    template_test.call_function::<()>("State", "create_multiple", args![10u32], vec![]);
 
     let template_address = template_test.get_template_address("State");
     let mut count = 0usize;
@@ -135,18 +135,18 @@ fn test_composed() {
         .collect::<Vec<_>>();
     assert_eq!(functions, vec!["new", "create_multiple", "restricted", "set", "get"]);
 
-    let component_state: ComponentAddress = template_test.call_function("State", "new", call_args![], vec![]);
-    let component_hw: ComponentAddress = template_test.call_function("HelloWorld", "new", call_args!["أهلا"], vec![]);
+    let component_state: ComponentAddress = template_test.call_function("State", "new", args![], vec![]);
+    let component_hw: ComponentAddress = template_test.call_function("HelloWorld", "new", args!["أهلا"], vec![]);
 
-    let result: String = template_test.call_method(component_hw, "custom_greeting", call_args!["Wasm"], vec![]);
+    let result: String = template_test.call_method(component_hw, "custom_greeting", args!["Wasm"], vec![]);
     assert_eq!(result, "أهلا Wasm!");
 
     // call the "set" method to update the instance value
     let new_value = 20_u32;
-    template_test.call_method::<()>(component_state, "set", call_args![new_value], vec![]);
+    template_test.call_method::<()>(component_state, "set", args![new_value], vec![]);
 
     // call the "get" method to get the current value
-    let value: u32 = template_test.call_method(component_state, "get", call_args![], vec![]);
+    let value: u32 = template_test.call_method(component_state, "get", args![], vec![]);
 
     assert_eq!(value, new_value);
 }
@@ -228,9 +228,9 @@ fn test_private_function() {
     assert_eq!(functions, vec!["new", "get", "increase"]);
 
     // check that public methods can still internally call private ones
-    let component: ComponentAddress = template_test.call_function("PrivateCounter", "new", call_args![], vec![]);
-    template_test.call_method::<()>(component, "increase", call_args![], vec![]);
-    let value: u32 = template_test.call_method(component, "get", call_args![], vec![]);
+    let component: ComponentAddress = template_test.call_function("PrivateCounter", "new", args![], vec![]);
+    template_test.call_method::<()>(component, "increase", args![], vec![]);
+    let value: u32 = template_test.call_method(component, "get", args![], vec![]);
     assert_eq!(value, 1);
 }
 
@@ -276,19 +276,19 @@ fn test_tuples() {
 
     // tuples returned in a constructor
     let (component_id, message): (ComponentAddress, String) =
-        template_test.call_function("Tuple", "new", call_args![], vec![]);
+        template_test.call_function("Tuple", "new", args![], vec![]);
     assert_eq!(message, "Hello World!");
 
     // tuples returned in a method
-    let (message, number): (String, u32) = template_test.call_method(component_id, "get", call_args![], vec![]);
+    let (message, number): (String, u32) = template_test.call_method(component_id, "get", args![], vec![]);
     assert_eq!(message, "Hello World!");
     assert_eq!(number, 0);
 
     // tuples passed as arguments to methods
     let new_value = ("New String".to_string(), 1);
-    template_test.call_method::<()>(component_id, "set", call_args![new_value], vec![]);
+    template_test.call_method::<()>(component_id, "set", args![new_value], vec![]);
     // check that the component state was actually updated
-    let value: (String, u32) = template_test.call_method(component_id, "get", call_args![], vec![]);
+    let value: (String, u32) = template_test.call_method(component_id, "get", args![], vec![]);
     assert_eq!(value, new_value);
 }
 
@@ -300,7 +300,7 @@ fn test_get_template_address() {
     let addr: TemplateAddress = template_test.call_function(
         "ComponentManagerTest",
         "get_template_address_for_component",
-        call_args![account],
+        args![account],
         vec![],
     );
     assert_eq!(addr, template_test.get_template_address("Account"));
@@ -310,14 +310,14 @@ fn test_get_template_address() {
 fn test_random() {
     let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/random"]);
     let component_address: ComponentAddress = template_test.call_function("RandomTest", "create", args![], vec![]);
-    let value: u32 = template_test.call_method(component_address, "get_random", call_args![], vec![]);
+    let value: u32 = template_test.call_method(component_address, "get_random", args![], vec![]);
     assert_ne!(value, 0);
 
-    let value: Vec<u8> = template_test.call_method(component_address, "get_random_bytes", call_args![], vec![]);
+    let value: Vec<u8> = template_test.call_method(component_address, "get_random_bytes", args![], vec![]);
     assert_eq!(value.len(), 32);
     assert_ne!(value, vec![0; 32]);
 
-    let value: Vec<u8> = template_test.call_method(component_address, "get_random_long_bytes", call_args![], vec![]);
+    let value: Vec<u8> = template_test.call_method(component_address, "get_random_long_bytes", args![], vec![]);
     assert_eq!(value.len(), 300);
     assert_ne!(value, vec![0; 300]);
 }
@@ -365,34 +365,21 @@ mod errors {
 
     #[test]
     fn invalid_args() {
-        let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/errors"]);
+        let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/errors"]);
 
         let text = "this isn't an amount";
-        let result = template_test
-            .try_execute_instructions(
-                vec![],
-                vec![Instruction::CallFunction {
-                    address: template_test.get_template_address("Errors"),
-                    function: "please_pass_invalid_args".try_into().unwrap(),
-                    args: call_args![text],
-                }],
-                vec![],
-            )
-            .unwrap();
-        println!("{:?}", result.finalize.result);
-        match result.finalize.result.any_reject().unwrap() {
-            RejectReason::ExecutionFailure(message) => {
-                assert!(
-                    message.contains(
-                        "Panic! failed to decode argument at position 0 (Amount) for function \
-                         'please_pass_invalid_args':"
-                    ),
-                    "Got a different error: {}",
-                    message
-                );
-            },
-            reason => panic!("Unexpected failure reason: {}", reason),
-        }
+        let reason = test.execute_expect_failure(
+            test.transaction()
+                .call_function(test.get_template_address("Errors"), "please_pass_invalid_args", args![
+                    text
+                ])
+                .build_and_seal(test.secret_key()),
+            vec![],
+        );
+        assert_reject_reason(
+            reason,
+            "Panic! failed to decode argument at position 0 (Amount) for function 'please_pass_invalid_args'",
+        )
     }
 }
 
@@ -416,40 +403,34 @@ mod consensus {
 }
 
 mod fungible {
-    use tari_ootle_transaction::Instruction;
-    use tari_template_lib::types::Amount;
 
     use super::*;
 
     #[test]
     fn fungible_mint_and_burn() {
-        let mut template_test = TemplateTest::new(CRATE_PATH, Vec::<&str>::new());
+        let mut test = TemplateTest::new_builtin_only();
 
-        let faucet_template = template_test.get_template_address("TestFaucet");
+        let faucet_template = test.get_template_address("TestFaucet");
 
         let initial_supply = Amount::from(1_000_000_000_000u64);
-        template_test
-            .execute_and_commit(
-                vec![Instruction::CallFunction {
-                    address: faucet_template,
-                    function: "mint".try_into().unwrap(),
-                    args: call_args![initial_supply],
-                }],
-                vec![],
-            )
-            .unwrap();
+        test.execute_expect_success(
+            test.transaction()
+                .call_function(faucet_template, "mint", args![initial_supply])
+                .build_and_seal(test.secret_key()),
+            vec![],
+        );
 
-        let faucet_component = template_test
+        let faucet_component = test
             .get_previous_output_address(SubstateType::Component)
             .as_component_address()
             .unwrap();
 
-        let total_supply: Amount = template_test.call_method(faucet_component, "total_supply", args![], vec![]);
+        let total_supply: Amount = test.call_method(faucet_component, "total_supply", args![], vec![]);
 
         assert_eq!(total_supply, initial_supply);
 
-        let owner_proof = template_test.owner_proof();
-        let result = template_test.build_and_execute(
+        let owner_proof = test.owner_proof();
+        let result = test.build_and_execute(
             Transaction::builder_localnet()
                 .call_method(faucet_component, "burn_coins", args![500])
                 .call_method(faucet_component, "total_supply", args![]),
@@ -462,7 +443,7 @@ mod fungible {
             initial_supply - Amount::from(500u64)
         );
 
-        let result = template_test.build_and_execute(
+        let result = test.build_and_execute(
             Transaction::builder_localnet()
                 .call_method(faucet_component, "burn_coins", args![
                     initial_supply - Amount::from(500u64)
@@ -477,17 +458,15 @@ mod fungible {
             Amount::zero()
         );
 
-        template_test
-            .build_and_execute(
-                Transaction::builder_localnet().call_method(faucet_component, "burn_coins", args![1]),
-                vec![],
-            )
-            .expect_failure();
+        test.build_and_execute(
+            Transaction::builder_localnet().call_method(faucet_component, "burn_coins", args![1]),
+            vec![],
+        )
+        .expect_failure();
     }
 }
 
 mod basic_nft {
-    use tari_template_lib::types::Amount;
 
     use super::*;
 
@@ -963,10 +942,10 @@ mod emoji_id {
         .unwrap();
 
         // the supply of emoji ids should have increased
-        let total_supply: Amount = test.call_method(emoji_id_minter, "total_supply", call_args![], vec![]);
+        let total_supply: Amount = test.call_method(emoji_id_minter, "total_supply", args![], vec![]);
         assert_eq!(total_supply, 1);
         // check that the account holds the newly minted nft
-        let nft_balance: Amount = test.call_method(account_address, "balance", call_args![emoji_id_resource], vec![]);
+        let nft_balance: Amount = test.call_method(account_address, "balance", args![emoji_id_resource], vec![]);
         assert_eq!(nft_balance, 1);
 
         // emoji id are unique, so minting the same emojis again must fail

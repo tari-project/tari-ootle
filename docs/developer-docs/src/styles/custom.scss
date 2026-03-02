@@ -63,25 +63,30 @@ h1 {
     white-space: nowrap;
 }
 
-.sl-markdown-content .sl-heading-wrapper.level-h3 {
-    font-family: 'Druk', sans-serif;
-    font-size: var(--sl-text-h3);
-    font-weight: 700;
-    margin-bottom: 1rem;
-    position: relative;
-    text-transform: uppercase;
-    letter-spacing: 0.05rem;
+.sl-markdown-content {
+    .sl-heading-wrapper {
+        font-family: 'Druk', sans-serif;
+    .level-h3 {
+        font-size: var(--sl-text-h3);
+        font-weight: 700;
+        margin-bottom: 1rem;
+        position: relative;
+        text-transform: uppercase;
+        letter-spacing: 0.05rem;
 
-    &::before {
-        content: "";
-        position: absolute;
-        left: -1.2rem;
-        top: 0;
-        bottom: 0;
-        width: 4px;
-        background: var(--color-purple);
-        border-radius: 2px;
+        &::before {
+            content: "";
+            position: absolute;
+            left: -1.2rem;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: var(--color-purple);
+            border-radius: 2px;
+        }
     }
+    }
+
 }
 
 .sidebar-content {

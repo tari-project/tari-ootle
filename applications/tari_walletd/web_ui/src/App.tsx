@@ -41,7 +41,7 @@ import useAuthStore from "@store/authStore";
 import Layout from "@theme/LayoutMain";
 import { getClientInstance, isValidJwt } from "@utils/json_rpc";
 import { useEffect, useState } from "react";
-import { Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router";
 import { ErrorNotificationProvider } from "./contexts/ErrorNotificationContext";
 
 export const breadcrumbRoutes = [

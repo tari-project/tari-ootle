@@ -36,7 +36,7 @@ import useAccountStore from "@store/accountStore";
 import type { AccountInfo, ComponentAddress } from "@tari-project/ootle-ts-bindings";
 import { accountsClaimBurn, transactionsWaitResult } from "@utils/json_rpc";
 import { FormEvent, useState } from "react";
-import { Form } from "react-router-dom";
+import { Form } from "react-router";
 
 type FormState = {
   account: ComponentAddress;

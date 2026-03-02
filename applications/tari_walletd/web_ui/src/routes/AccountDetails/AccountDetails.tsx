@@ -43,7 +43,7 @@ import { formatCurrency, handleChangePage, handleChangeRowsPerPage } from "@util
 import { accountsAssociateStealthResource } from "@utils/json_rpc";
 import { useState } from "react";
 import { IoAdd } from "react-icons/io5";
-import { Form, useParams } from "react-router-dom";
+import { Form, useParams } from "react-router";
 import { useAccountsGet, useAccountsGetBalances } from "../../services/api/hooks/useAccounts";
 
 function BalanceRow(props: BalanceEntry) {

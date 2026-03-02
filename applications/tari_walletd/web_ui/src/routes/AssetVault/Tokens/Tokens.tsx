@@ -41,7 +41,7 @@ import { Account, Amount, BalanceEntry, ResourceAddress, ResourceType, VaultId }
 import { bigintToDecimalString, shortenString, substateIdToString } from "@utils/helpers";
 import { useState } from "react";
 import { IoWalletOutline } from "react-icons/io5";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import ClaimCoinsButton from "./components/ClaimCoinsButton";
 import { SendMoneyDialog } from "./components/SendMoney";
 

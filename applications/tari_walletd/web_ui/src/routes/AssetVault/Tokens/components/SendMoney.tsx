@@ -38,7 +38,7 @@ import {
 } from "@tari-project/ootle-ts-bindings";
 import { parseAmountToBaseUnits } from "@utils/helpers";
 import { transactionsWaitResult } from "@utils/json_rpc";
-import { FormEvent, useState } from "react";
+import { SubmitEvent, useState } from "react";
 import ConfirmationStep from "../steps/ConfirmationStep";
 import FormStep, { FormError, SendMoneyFormState } from "../steps/FormStep";
 import ResultStep, { TransferResult } from "../steps/ResultStep";
@@ -238,7 +238,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     }
   };
 
-  const handleFormSubmit = async (e: FormEvent) => {
+  const handleFormSubmit = async (e: SubmitEvent) => {
     e.preventDefault();
     if (!account) {
       return;

@@ -42,7 +42,7 @@ import {
 } from "@tari-project/ootle-ts-bindings";
 import { base64FromArrayBuffer } from "@utils/helpers";
 import { FormEvent, useEffect, useState } from "react";
-import { Form } from "react-router-dom";
+import { Form } from "react-router";
 import { useFilePicker } from "use-file-picker";
 import { FileContent } from "use-file-picker/types";
 import { FileAmountLimitValidator, FileSizeValidator, FileTypeValidator } from "use-file-picker/validators";

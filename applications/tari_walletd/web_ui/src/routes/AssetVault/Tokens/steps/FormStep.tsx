@@ -20,19 +20,20 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, SUCH DAMAGE.
 
+import CopyAddress from "@components/CopyAddress";
 import { Divider, InputAdornment, InputLabel, Stack, Typography } from "@mui/material";
 import Button from "@mui/material/Button";
 import CheckBox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import MenuItem from "@mui/material/MenuItem";
-import Select from "@mui/material/Select";
-import { SelectChangeEvent } from "@mui/material/Select";
+import Select, { SelectChangeEvent } from "@mui/material/Select";
 import TextField from "@mui/material/TextField";
+import TypeChip from "@routes/AssetVault/Components/ResourceTypeChip";
 import { Amount, ResourceAddress, ResourceType, validateOotleAddress } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
 import { formatCurrency, parseAmountToBaseUnits } from "@utils/helpers";
-import { FormEvent, useState } from "react";
-import { Form } from "react-router-dom";
+import { SubmitEvent, useState } from "react";
+import { Form } from "react-router";
 
 export interface SendMoneyFormState {
   address: string;
@@ -56,7 +57,7 @@ interface FormStepProps {
   token_symbol: string;
   divisibility: number;
   formError?: FormError | null;
-  onSubmit: (e: FormEvent) => void;
+  onSubmit: (e: SubmitEvent) => void;
   onCancel: () => void;
   onFormValueChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onSelectFormValueChange: (e: SelectChangeEvent<unknown>) => void;
@@ -122,7 +123,6 @@ export default function FormStep({
       maximumFractionDigits: divisibility,
     });
   };
-
   const currency = {
     symbol: token_symbol,
     decimals: divisibility,
@@ -130,13 +130,11 @@ export default function FormStep({
 
   return (
     <Form onSubmit={onSubmit}>
-      <Stack direction="column" spacing={2} sx={{ py: 2 }}>
+      <Stack direction="column" spacing={2}>
         {resource_address && (
-          <Stack direction="column" spacing={0.5}>
-            <Typography variant="subtitle2" color="text.secondary">
-              Resource Address:
-            </Typography>
-            <Typography variant="body1">{resource_address}</Typography>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <TypeChip type={resource_type} symbol={token_symbol} />
+            <CopyAddress address={resource_address} />
           </Stack>
         )}
 
@@ -203,7 +201,9 @@ export default function FormStep({
               <TextField
                 name="memo"
                 label="Memo message (optional, max 253 characters)"
-                inputProps={{ maxLength: 253 }}
+                slotProps={{
+                  htmlInput: { maxLength: 253 },
+                }}
                 value={transferFormState.memo}
                 onChange={onFormValueChange}
                 style={{ flexGrow: 1 }}
@@ -239,6 +239,7 @@ export default function FormStep({
           style={{ flexGrow: 1 }}
           disabled={disabled}
           error={hasInsufficientFunds}
+          placeholder={"0" + (divisibility > 0 ? "." + "0".repeat(divisibility) : "")}
           helperText={
             hasInsufficientFunds
               ? `Insufficient funds. Available balance: ${formatCurrency(availableBalance || 0, currency)}`
@@ -246,9 +247,10 @@ export default function FormStep({
                 ? `Available balance: ${formatCurrency(availableBalance, currency)}`
                 : undefined
           }
-          InputProps={{
-            placeholder: "0" + (divisibility > 0 ? "." + "0".repeat(divisibility) : ""),
-            endAdornment: token_symbol ? <InputAdornment position="end">{token_symbol}</InputAdornment> : undefined,
+          slotProps={{
+            input: {
+              endAdornment: token_symbol ? <InputAdornment position="end">{token_symbol}</InputAdornment> : undefined,
+            },
           }}
         />
 
@@ -259,11 +261,13 @@ export default function FormStep({
           placeholder={isEstimatingFee ? "Estimating..." : "Auto-calculated"}
           onChange={onFormValueChange}
           style={{ flexGrow: 1 }}
-          InputProps={{
-            endAdornment:
-              !isEstimatingFee && token_symbol ? (
-                <InputAdornment position="end">µ{XTR_CURRENCY.symbol}</InputAdornment>
-              ) : null,
+          slotProps={{
+            input: {
+              endAdornment:
+                !isEstimatingFee && token_symbol ? (
+                  <InputAdornment position="end">µ{XTR_CURRENCY.symbol}</InputAdornment>
+                ) : null,
+            },
           }}
         />
 

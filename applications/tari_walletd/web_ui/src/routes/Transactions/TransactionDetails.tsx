@@ -53,7 +53,7 @@ import { XTR_CURRENCY } from "@utils/currency";
 import { saveAs } from "file-saver";
 import { useState } from "react";
 import { BsQuestionCircle } from "react-icons/bs";
-import { useParams } from "react-router-dom";
+import { useParams } from "react-router";
 import Events from "./Events";
 import ExecutionResults from "./ExecutionResults";
 import FeeReceipt from "./FeeReceipt";

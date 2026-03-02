@@ -1,0 +1,137 @@
+/* Dark mode colors. */
+:root {
+    font-size: 16px;
+    --sl-color-accent-low: #231e40;
+    --sl-color-accent: #6a4dce;
+    --sl-color-accent-high: #c6c3f0;
+    --sl-color-white: #ffffff;
+    --sl-color-gray-1: #e9eef8;
+    --sl-color-gray-2: #c3c8d5;
+    --sl-color-gray-3: #9aa4bc;
+    --sl-color-gray-4: #4f586d;
+    --sl-color-gray-5: #30384c;
+    --sl-color-gray-6: #1f2639;
+    --sl-color-black: #141821;
+
+
+    --sl-font: 'Inter', sans-serif;
+    --sl-font-mono: 'SF Mono', monospace;
+
+    --sl-font-system: ui-sans-serif, system-ui, 'Druk', 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+    'Noto Color Emoji';
+    --sl-font-system-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+    --__sl-font: var(--sl-font, var(--sl-font-system)), var(--sl-font-system);
+    --__sl-font-mono: var(--sl-font-mono, var(--sl-font-system-mono)), var(--sl-font-system-mono);
+
+
+    /* Text size and line height */
+    --sl-text-2xs: 0.75rem;
+    --sl-text-xs: 0.8125rem;
+    --sl-text-sm: 0.875rem;
+    --sl-text-base: 1rem;
+    --sl-text-lg: 1.125rem;
+    --sl-text-xl: 1.25rem;
+    --sl-text-2xl: 1.75rem;
+    --sl-text-3xl: 3rem;
+    --sl-text-4xl: 4rem;
+    --sl-text-5xl: 6.6rem;
+    --sl-text-6xl: 7rem;
+
+
+    /* Primary Colors from Design Guide */
+    --color-cloud: #FEFEFF;      /* R:254 G:254 B:255 */
+    --color-ink: #040723;        /* R:4 G:7 B:35 */
+    --color-purple: #8158F5;     /* R:129 G:88 B:245 */
+    --color-green: #C8E800;      /* R:200 G:232 B:0 */
+
+    /* Secondary Colors from Design Guide */
+    --color-red: #F61449;        /* R:246 G:20 B:73 */
+    --color-azure: #1255B1;      /* R:18 G:85 B:177 */
+    --color-yellow: #F2C819;     /* R:242 G:200 B:25 */
+    --color-steel: #95218229;    /* R:149 G:33 B:130 with alpha */
+
+    /* Neutral Colors from Design Guide */
+    --color-light-frost: #F2E225; /* R:242 G:226 B:37 */
+    --color-beige: #F2E201;      /* R:242 G:226 B:1 */
+    --color-off-white: #F2E206;  /* R:242 G:226 B:6 */
+
+    /* Derived Text Colors */
+    --text-primary: var(--color-ink);
+    --text-secondary: var(--color-ink);   /* Main copy in dark ink color */
+    --text-muted: #64748b;
+    --link-color: var(--color-purple);    /* Links in purple/blue */
+
+    /* Background Colors */
+    --bg-primary: var(--color-cloud);
+    --bg-secondary: #f8fafc;
+    --bg-sidebar: #fafbfc;
+    --bg-accent: rgba(129, 88, 245, 0.05);
+
+    /* Border Colors */
+    --border-light: #e2e8f0;
+    --border-medium: #cbd5e1;
+    --border-accent: var(--color-purple);
+}
+
+/* Light mode colors. */
+:root[data-theme='light'] {
+    --sl-color-accent-low: #d5d2f5;
+    --sl-color-accent: #8158F5;
+    --sl-color-accent-high: #32275f;
+    --sl-color-white: #141821;
+    --sl-color-gray-1: #1f2639;
+    --sl-color-gray-2: #30384c;
+    --sl-color-gray-3: #4f586d;
+    --sl-color-gray-4: #828ba2;
+    --sl-color-gray-5: #bdc2ce;
+    --sl-color-gray-6: #e9eef8;
+    --sl-color-gray-7: #f4f6fb;
+    --sl-color-black: #ffffff;
+    }
+
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    line-height: 1.6;
+    font-weight: 400;
+}
+
+h1 {
+    font-family: 'Druk', sans-serif;
+    font-size: 6rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--color-ink) 0%, var(--color-purple) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 2rem;
+    line-height: 0.9;
+    text-transform: uppercase;
+    letter-spacing: -0.01em;
+    font-stretch: condensed;
+}
+
+.sl-markdown-content .sl-heading-wrapper.level-h3 {
+    font-family: 'Druk', sans-serif;
+    font-size: var(--sl-text-h3);
+
+    font-weight: 700;
+    color: var(--color-ink);
+    margin-bottom: 1.5rem;
+    position: relative;
+    text-transform: uppercase;
+    font-stretch: condensed;
+
+    &::before {
+        content: "";
+        position: absolute;
+        left: -1.5rem;
+        top: 0;
+        bottom: 0;
+        width: 4px;
+        background: var(--color-purple);
+        border-radius: 2px;
+    }
+}

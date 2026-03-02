@@ -6,7 +6,7 @@ You can read about the technical specifications of the Ootle in the [RFCs](https
 
 If you're looking for the core Tari base layer code, it's in [this repository](https://github.com/tari-project/tari)
 
-[Documentation](https://tari-project.github.io/tari-ootle/)
+[Documentation](https://ootle.tari.com)
 
 ## Prerequisites
 
@@ -121,14 +121,14 @@ See the [tari-cli](https://github.com/tari-project/tari-cli) tool for details.
 
 ## AI Coding Agent Skills
 
-The [`docs/skills/`](docs/skills/) folder contains comprehensive development guides for building Tari Ootle templates and client applications. These skills are now published on the [documentation site](https://tari-project.github.io/tari-ootle/skills/) and discoverable by AI agents via the standard Agent Skills endpoint.
+The [`docs/skills/`](docs/skills/) folder contains comprehensive development guides for building Tari Ootle templates and client applications. These skills are now published on the [documentation site](https://ootle.tari.com/skills/) and discoverable by AI agents via the standard Agent Skills endpoint.
 
 ### Automatic Discovery
 
 All skills are exposed via the standard Agent Skills Discovery endpoint:
 
 ```
-https://tari-project.github.io/tari-ootle/.well-known/skills/
+https://ootle.tari.com/.well-known/skills/
 ```
 
 AI agents that support Agent Skills can automatically discover and load your skills using this URL. No manual setup required!

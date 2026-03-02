@@ -2,14 +2,14 @@
 
 This folder contains comprehensive development guides ("skills") that give AI coding agents the context they need to generate correct Tari Ootle code — including accurate APIs, boilerplate, working examples, and common pitfalls.
 
-Each skill is available as a `SKILL.md` file in its own directory and is published on the [Tari Ootle documentation site](https://tari-project.github.io/tari-ootle/skills/).
+Each skill is available as a `SKILL.md` file in its own directory and is published on the [Tari Ootle documentation site](https://ootle.tari.com/skills/).
 
 ## Quick Start: Automatic Discovery
 
 All skills are now exposed via the Agent Skills Discovery endpoint:
 
 ```
-https://tari-project.github.io/tari-ootle/.well-known/skills/
+https://ootle.tari.com/.well-known/skills/
 ```
 
 AI agents can automatically discover and load skills from this endpoint. No manual setup needed!

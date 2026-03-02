@@ -12,6 +12,10 @@
     --sl-color-gray-6: #1f2639;
     --sl-color-black: #141821;
 
+    --sl-color-bg-nav: hsla(var(--sl-color-gray-6), 80%, 20%, 0.5);
+
+    --sl-hue-purple: 258;
+    --sl-hue-orange: 38;
 
     --sl-font: 'Inter', sans-serif;
     --sl-font-mono: 'SF Mono', monospace;
@@ -54,6 +58,8 @@
     --color-green: #C8E800;
     --text-muted: #64748b;
 
+    --grad-accent: linear-gradient(145deg, rgba(78, 33, 203, 0.12) -10%, transparent, rgba(205, 236, 15, 0.05) 125%)
+
 }
 
 /* Light mode colors. */
@@ -74,5 +80,7 @@
     /* Primary Colors from Design Guide */
     --color-cloud: #FEFEFF;
     --color-ink: #040723;
+
+    --grad-accent: linear-gradient(135deg, rgba(92, 49, 211, 0.04) 1%, rgba(188, 218, 26, 0.05) 110%)
 
 }

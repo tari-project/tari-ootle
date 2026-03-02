@@ -45,7 +45,6 @@ const isRtl = dir === 'rtl';
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 0.5rem;
             width: 100%;
             flex-basis: calc(50% - 0.5rem);
             flex-grow: 1;
@@ -53,7 +52,7 @@ const isRtl = dir === 'rtl';
             text-decoration: none;
             color: var(--color-green);
             background-color: #040723;
-            padding: 2rem;
+            padding: 0.8rem min(2rem, 4vw);
             overflow-wrap: anywhere;
 
             font-size: 0.875rem;
@@ -78,10 +77,11 @@ const isRtl = dir === 'rtl';
         .link-title {
             letter-spacing: 0.1rem;
             font-family: 'Druk', sans-serif;
+            white-space: nowrap;
             color: #FEFEFF;
             text-transform: uppercase;
-            font-size: var(--sl-text-4xl);
-            line-height: var(--sl-line-height-headings);
+            font-size: clamp(var(--sl-text-xl), 1rem + 1vw, var(--sl-text-4xl));
+            line-height:1;
         }
 
         svg {

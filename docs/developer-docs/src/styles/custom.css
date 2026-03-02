@@ -6,6 +6,40 @@ body {
 
 }
 
+header.header  {
+    backdrop-filter: blur(40px);
+}
+
+.expressive-code {
+    border-radius: 6px;
+    .frame .header::after {
+        border: none;
+    }
+}
+figure {
+    border: none;
+    figcaption, pre {
+        box-shadow: none;
+        border: 1px solid rgba(129, 88, 245, 0.05);
+        border-radius: 6px;
+        background: var(--grad-accent);
+        code {
+            border: none;
+        }
+    }
+}
+
+code {
+    background: var(--grad-accent);
+    color: var(--color-purple);
+    padding: 0.25rem 0.5rem;
+    border-radius: 6px;
+    border: 1px solid rgba(129, 88, 245, 0.15);
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+    font-size: 0.875em;
+    font-weight: 500;
+}
+
 h1 {
     font-family: 'Druk', sans-serif;
     font-size: 5rem;

@@ -38,16 +38,22 @@ import {
 } from "@mui/material";
 import React, { useState, useCallback, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import CopyToClipboard from "../../Components/CopyToClipboard";
 import { useGetTemplateDefinition } from "../../api/hooks/useTemplates";
 import type { FunctionDef, Type } from "@tari-project/ootle-ts-bindings";
 import SearchIcon from "@mui/icons-material/Search";
 import ClearIcon from "@mui/icons-material/Clear";
 
+function stripTemplatePrefix(id: string): string {
+  return id.startsWith("template_") ? id.slice("template_".length) : id;
+}
+
 function validateTemplateAddress(id: string): string | null {
   if (!id) return null;
-  if (!/^[a-fA-F0-9]{64}$/.test(id)) {
-    return "Template address must be a 64-character hex string.";
+  const hex = stripTemplatePrefix(id);
+  if (!/^[a-fA-F0-9]{64}$/.test(hex)) {
+    return "Template address must be a 64-character hex string, optionally prefixed with 'template_'.";
   }
   return null;
 }
@@ -176,6 +182,7 @@ function TemplateDetails({ data }: { data: any }) {
 
 function TemplatesLayout() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const queryClient = useQueryClient();
   const initialAddress = searchParams.get("address") || "";
   const [addressInput, setAddressInput] = useState(initialAddress);
   const [fetchAddress, setFetchAddress] = useState<string | null>(initialAddress || null);
@@ -183,7 +190,6 @@ function TemplatesLayout() {
 
   const { data, isLoading, isError, error } = useGetTemplateDefinition({
     address: fetchAddress,
-    enabled: !!fetchAddress,
   });
 
   useEffect(() => {
@@ -198,15 +204,18 @@ function TemplatesLayout() {
   const handleFetch = useCallback(() => {
     const trimmed = addressInput.trim();
     if (!trimmed) return;
-    const error = validateTemplateAddress(trimmed);
-    if (error) {
-      setValidationError(error);
+    const err = validateTemplateAddress(trimmed);
+    if (err) {
+      setValidationError(err);
       return;
     }
     setValidationError(null);
-    setFetchAddress(trimmed);
-    setSearchParams({ address: trimmed });
-  }, [addressInput, setSearchParams]);
+    const hex = stripTemplatePrefix(trimmed);
+    // Remove any cached (possibly errored) query so it always refetches
+    queryClient.removeQueries({ queryKey: ["templateDefinition", hex] });
+    setFetchAddress(hex);
+    setSearchParams({ address: hex });
+  }, [addressInput, setSearchParams, queryClient]);
 
   const handleClear = useCallback(() => {
     setAddressInput("");

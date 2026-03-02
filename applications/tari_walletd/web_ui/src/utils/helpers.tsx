@@ -232,23 +232,29 @@ export function base64FromArrayBuffer(arrayBuffer: ArrayBuffer) {
 export function bigintToDecimalString(int: bigint | Amount, decimalPlaces: number, locale: string = "en-US"): string {
   const number = typeof int === "bigint" ? int : BigInt(int);
 
-  if (decimalPlaces == 0) {
-    return number.toLocaleString(locale, {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    });
-  }
-  const wholeValues = (number / BigInt(10 ** decimalPlaces)).toLocaleString(locale, {
+  const noDigitFormatter = new Intl.NumberFormat(locale, {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   });
-  const fractionalValues = number.toString().slice(-decimalPlaces);
+
+  if (decimalPlaces == 0) {
+    return noDigitFormatter.format(number);
+  }
+
+  let fractionalValues = number.toString().slice(-decimalPlaces);
+  const fractionalIsZero = [...fractionalValues].every((c) => c === "0");
+
+  const wholeValues = noDigitFormatter.format(number / BigInt(10 ** decimalPlaces));
+
+  if (fractionalIsZero) {
+    fractionalValues = "0";
+  }
   if (wholeValues === "0" && fractionalValues === "0") {
     return "0";
   }
 
   const padding = "0".repeat(decimalPlaces - fractionalValues.length);
-  return `${wholeValues}.${padding}${fractionalValues}`;
+  return fractionalIsZero ? wholeValues : `${wholeValues}.${padding}${fractionalValues}`;
 }
 
 export const formatCurrency = (amount: bigint | Amount, currency: Currency): string => {

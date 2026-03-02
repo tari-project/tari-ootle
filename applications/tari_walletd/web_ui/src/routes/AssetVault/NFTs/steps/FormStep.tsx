@@ -33,7 +33,7 @@ import type { Account, NonFungibleId, NonFungibleToken } from "@tari-project/oot
 import { validateOotleAddress } from "@tari-project/ootle-ts-bindings/dist/helpers/ootleAddress";
 import { displayNftId, substateIdToString } from "@utils/helpers";
 import { FormEvent } from "react";
-import { Form } from "react-router-dom";
+import { Form } from "react-router";
 
 interface FormStepProps {
   account: Account;

@@ -52,10 +52,18 @@ export const InnerHeading: React.FC<BoxProps> = styled(Box)(({ theme }) => ({
   letterSpacing: "1.5px",
 }));
 
-export const DataTableCell: React.FC<TableCellProps> = styled(TableCell)(({ theme }) => ({
+export const DataTableCell: React.FC<TableCellProps> = styled(TableCell)(() => ({
   fontFamily: "'Courier New', Courier, monospace",
   fontSize: "14px",
 }));
+
+export const FluidTableCell: React.FC<TableCellProps> = styled(TableCell)`
+  font-size: 14px;
+  font-family: "Courier New", Courier, monospace;
+  vertical-align: bottom;
+  padding: min(10vw, 14px);
+  white-space: nowrap;
+`;
 
 export const CodeBlock: React.FC<BoxProps> = styled(Box)(({ theme }) => ({
   backgroundColor: theme.palette.accent.background,
@@ -119,9 +127,3 @@ export const NftCard: React.FC<CardProps> = styled(Card)(() => ({
     transform: "scale(1.02)",
   },
 }));
-
-export const SpacedBox: React.FC<BoxProps> = styled(Box)`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-`;

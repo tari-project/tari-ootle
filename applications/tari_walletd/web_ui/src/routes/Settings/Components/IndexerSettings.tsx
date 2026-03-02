@@ -27,7 +27,7 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { settingsGet, settingsSet } from "@utils/json_rpc";
 import React, { useEffect, useState } from "react";
-import { Form } from "react-router-dom";
+import { Form } from "react-router";
 
 function IndexerSettings() {
   // Keep the form and settings in the same format as the real settings in the wallet.

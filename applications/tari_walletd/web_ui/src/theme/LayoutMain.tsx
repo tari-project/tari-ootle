@@ -47,7 +47,7 @@ import useThemeStore from "@store/themeStore";
 import { lightAlpha } from "@theme/colors";
 import { componentSettings, dark, light } from "@theme/tokens";
 import { useState } from "react";
-import { Link, Outlet } from "react-router-dom";
+import { Link, Outlet } from "react-router";
 import "./theme.css";
 
 const DRAWER_WIDTH = 300;

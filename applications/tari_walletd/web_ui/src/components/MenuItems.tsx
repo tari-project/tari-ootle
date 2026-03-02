@@ -30,7 +30,7 @@ import { useTheme } from "@mui/material/styles";
 import Tooltip from "@mui/material/Tooltip";
 import { IoHome, IoHomeOutline, IoSettings, IoSettingsOutline, IoTerminal, IoTerminalOutline } from "react-icons/io5";
 import { LuLayoutTemplate } from "react-icons/lu";
-import { NavLink } from "react-router-dom";
+import { NavLink } from "react-router";
 
 function MainListItems() {
   const theme = useTheme();

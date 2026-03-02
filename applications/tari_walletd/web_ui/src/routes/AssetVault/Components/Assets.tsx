@@ -22,7 +22,10 @@
 
 import { ApiError } from "@api/helpers/types";
 import { useNFTsList } from "@api/hooks/useNfts";
-import { Box, Tab, Tabs, Typography } from "@mui/material";
+import Box from "@mui/material/Box";
+import Tab from "@mui/material/Tab";
+import Tabs from "@mui/material/Tabs";
+import Typography from "@mui/material/Typography";
 import NFTList from "@routes/AssetVault/NFTs/NFTList";
 import Tokens from "@routes/AssetVault/Tokens/Tokens";
 import { Account } from "@tari-project/ootle-ts-bindings";
@@ -47,7 +50,7 @@ function TabPanel(props: TabPanelProps) {
       {...other}
     >
       {value === index && (
-        <Box sx={{ p: 3 }}>
+        <Box style={{ paddingTop: 16 }}>
           <Typography component="div">{children}</Typography>
         </Box>
       )}

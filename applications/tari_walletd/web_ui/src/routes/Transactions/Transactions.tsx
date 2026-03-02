@@ -25,27 +25,29 @@ import FetchStatusCheck from "@components/FetchStatusCheck";
 import { DataTableCell } from "@components/StyledComponents";
 import TransactionsStatusChip from "@components/TransactionsStatusChip";
 import { ChevronRight } from "@mui/icons-material";
-import {
-  Fade,
-  IconButton,
-  Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TablePagination,
-  TableRow,
-} from "@mui/material";
+import { Stack } from "@mui/material";
+import Fade from "@mui/material/Fade";
+import IconButton from "@mui/material/IconButton";
 import { useTheme } from "@mui/material/styles";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableHead from "@mui/material/TableHead";
+import TablePagination from "@mui/material/TablePagination";
+import TableRow from "@mui/material/TableRow";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import { Account, WalletTransaction } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
-import { emptyRows, formatCurrency, handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
+import { emptyRows, formatCurrency, handleChangePage, handleChangeRowsPerPage, shortenString } from "@utils/helpers";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import TimeChip from "./TimeChip";
 
-export default function Transactions(_props: { account: Account }) {
+interface TransactionsProps {
+  account?: Account;
+}
+export default function Transactions({ account: _ }: TransactionsProps) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const { data, isLoading, error, isError, isRefetching } = useGetAllTransactions({
@@ -58,7 +60,9 @@ export default function Transactions(_props: { account: Account }) {
   });
 
   const theme = useTheme();
+  const isSm = useMediaQuery(theme.breakpoints.down("sm"));
 
+  const shortLen = isSm ? 4 : 6;
   return (
     <FetchStatusCheck
       isLoading={isLoading && !isRefetching}
@@ -70,10 +74,10 @@ export default function Transactions(_props: { account: Account }) {
           <Table>
             <TableHead>
               <TableRow>
-                <TableCell>Transaction Hash</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Total Fees</TableCell>
-                <TableCell>Details</TableCell>
+                <TableCell size="medium">Transaction Hash</TableCell>
+                <TableCell size="medium">Status</TableCell>
+                <TableCell size="medium">Total Fees</TableCell>
+                <TableCell size="medium">Details</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -85,7 +89,13 @@ export default function Transactions(_props: { account: Account }) {
                   return (
                     <TableRow key={hash}>
                       <DataTableCell>
-                        <Stack direction="row" spacing={2} alignItems="center">
+                        <Stack
+                          direction={{
+                            xs: "column",
+                            sm: "row",
+                          }}
+                          spacing={isSm ? 0.1 : 1.5}
+                        >
                           <Link
                             to={`/transactions/${hash}`}
                             style={{
@@ -93,13 +103,13 @@ export default function Transactions(_props: { account: Account }) {
                               color: theme.palette.text.secondary,
                             }}
                           >
-                            {hash}
+                            {shortenString(hash, shortLen, shortLen)}
                           </Link>
                           <TimeChip timestamp={transaction.last_update_time} />
                         </Stack>
                       </DataTableCell>
                       <DataTableCell>
-                        <TransactionsStatusChip status={status} showTitle />
+                        <TransactionsStatusChip status={status} />
                       </DataTableCell>
                       <DataTableCell>
                         {fee_receipt?.total_fees_paid

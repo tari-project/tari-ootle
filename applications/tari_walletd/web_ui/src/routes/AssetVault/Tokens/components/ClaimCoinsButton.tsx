@@ -24,6 +24,8 @@ import { useErrorNotification } from "@/contexts/ErrorNotificationContext";
 import { useAccountsCreateFreeTestCoins } from "@api/hooks/useAccounts";
 import queryClient from "@api/queryClient";
 import Button from "@mui/material/Button";
+import { useTheme } from "@mui/material/styles";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import useAccountStore from "@store/accountStore";
 import { AccountsCreateFreeTestCoinsResponse, substateIdToString } from "@tari-project/ootle-ts-bindings";
 
@@ -31,6 +33,9 @@ function ClaimCoinsButton() {
   const { mutate: claimTestnetFaucetFunds, isPending } = useAccountsCreateFreeTestCoins();
   const { account, setAccount, setOotleAddress } = useAccountStore();
   const { showError, showSuccess } = useErrorNotification();
+
+  const theme = useTheme();
+  const isLg = useMediaQuery(theme.breakpoints.up("md"));
 
   if (!account) {
     return <></>;
@@ -68,7 +73,7 @@ function ClaimCoinsButton() {
   };
 
   return (
-    <Button variant="outlined" onClick={() => onClaimFreeCoins()} disabled={isPending}>
+    <Button variant="outlined" onClick={() => onClaimFreeCoins()} disabled={isPending} size={isLg ? "large" : "small"}>
       {isPending ? "Claiming..." : "Claim Testnet Funds"}
     </Button>
   );

@@ -12,7 +12,7 @@ import { WebauthnFinishAuthRequest } from "@tari-project/ootle-ts-bindings";
 import { getClientInstance, webauthnStartAuth } from "@utils/json_rpc";
 import { Buffer } from "buffer";
 import { FormEvent, useState } from "react";
-import { Form } from "react-router-dom";
+import { Form } from "react-router";
 
 export const getCredential = async (challenge: any, allowCredentials: any) => {
   const publicKeyCredentialRequestOptions: PublicKeyCredentialRequestOptions = {

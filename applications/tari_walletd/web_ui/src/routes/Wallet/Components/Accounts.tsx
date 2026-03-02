@@ -39,7 +39,7 @@ import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
 import { AccountInfo, shortenSubstateId, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
-import { Form, Link } from "react-router-dom";
+import { Form, Link } from "react-router";
 
 function Account({ account }: { account: AccountInfo }) {
   const {

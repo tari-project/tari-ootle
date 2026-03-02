@@ -1,4 +1,4 @@
-//  Copyright 2025. The Tari Project
+//  Copyright 2026. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,23 +20,49 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useTimeAgo } from "@hooks/useTimeAgo";
-import { Chip, Tooltip } from "@mui/material";
+import Chip from "@mui/material/Chip";
 import Typography from "@mui/material/Typography";
-import { formatTimestamp } from "@utils/helpers";
+import { ResourceType } from "@tari-project/ootle-ts-bindings";
 
-function TimeChip({ timestamp }: { timestamp: string | null | undefined }) {
-  const timeAgo = useTimeAgo(timestamp);
-  const formattedTime = formatTimestamp(timestamp);
-
-  if (!timeAgo) return null;
-
-  const label = <Typography variant="label">{timeAgo}</Typography>;
-  return (
-    <Tooltip title={`Created at: ${formattedTime}`} placement="top" arrow>
-      <Chip label={label} color="default" size="small" variant="filled" style={{ paddingLeft: 2, paddingRight: 2 }} />
-    </Tooltip>
-  );
+interface TypeChipProps {
+  type: ResourceType;
+  symbol?: string;
+  compact?: boolean;
 }
 
-export default TimeChip;
+const colourOptions: Record<ResourceType, string> = {
+  Fungible: "rgba(129,59,245, 0.3)",
+  NonFungible: "rgba(58,157,160, 0.3)",
+  Confidential: "rgba(81,125,137, 0.3)",
+  Stealth: "rgba(100,95,236, 0.3)",
+};
+export default function TypeChip({ type, symbol, compact = false }: TypeChipProps) {
+  const label = (
+    <Typography
+      variant="label"
+      sx={{
+        fontSize: compact ? undefined : 12,
+      }}
+    >
+      {symbol && (
+        <>
+          <strong>{symbol}</strong>
+          &#x0020;&#x0020;&#x25CA;&#x0020;&#x0020;
+        </>
+      )}
+      {type}
+    </Typography>
+  );
+  return (
+    <Chip
+      label={label}
+      size={compact ? "small" : "medium"}
+      style={{
+        background: colourOptions[type],
+        height: compact ? 20 : undefined,
+        userSelect: "none",
+        maxWidth: "min-content",
+      }}
+    />
+  );
+}

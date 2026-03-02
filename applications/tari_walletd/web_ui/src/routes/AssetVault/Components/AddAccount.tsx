@@ -33,7 +33,7 @@ import TextField from "@mui/material/TextField";
 import useAccountStore from "@store/accountStore";
 import type { AccountsCreateResponse } from "@tari-project/ootle-ts-bindings";
 import { FormEvent, useState } from "react";
-import { Form } from "react-router-dom";
+import { Form } from "react-router";
 
 function AddAccount({ open, setOpen }: { open: boolean; setOpen: React.Dispatch<React.SetStateAction<boolean>> }) {
   const [accountFormState, setAccountFormState] = useState({

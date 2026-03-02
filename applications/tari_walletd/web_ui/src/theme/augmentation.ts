@@ -36,4 +36,22 @@ declare module "@mui/material/styles" {
       border?: string;
     };
   }
+
+  interface TypographyVariants {
+    label: React.CSSProperties;
+    span: React.CSSProperties;
+  }
+
+  // allow configuration using `createTheme()`
+  interface TypographyVariantsOptions {
+    label?: React.CSSProperties;
+    span?: React.CSSProperties;
+  }
+}
+
+declare module "@mui/material/Typography" {
+  interface TypographyPropsVariantOverrides {
+    label: true;
+    span: true;
+  }
 }

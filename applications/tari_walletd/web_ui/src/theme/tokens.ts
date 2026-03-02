@@ -20,9 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import "./augmentation";
+
 import { ThemeOptions } from "@mui/material/styles";
 import { blue, gothic, green, grey, orange, red, tariBg, tariPurple, teal } from "@theme/colors";
-import "./augmentation";
 import PoppinsBoldTTF from "./fonts/poppins/Poppins-Bold.ttf";
 import PoppinsMediumTTF from "./fonts/poppins/Poppins-Medium.ttf";
 import PoppinsRegularTTF from "./fonts/poppins/Poppins-Regular.ttf";
@@ -82,6 +83,17 @@ export const componentSettings: ThemeOptions = {
       lineHeight: "1.8rem",
       fontWeight: 600,
       fontFamily: '"PoppinsSemiBold", sans-serif',
+    },
+    // custom
+    label: {
+      fontSize: 10,
+      fontWeight: 400,
+      lineHeight: "10px",
+      letterSpacing: 0.1,
+      fontFamily: '"PoppinsRegular", sans-serif',
+    },
+    span: {
+      lineHeight: 1,
     },
   },
   transitions: {
@@ -219,6 +231,13 @@ export const componentSettings: ThemeOptions = {
           marginLeft: 1,
           borderRadius: 1,
           padding: "12px 8px",
+        },
+      },
+    },
+    MuiTypography: {
+      defaultProps: {
+        variantMapping: {
+          label: "span",
         },
       },
     },

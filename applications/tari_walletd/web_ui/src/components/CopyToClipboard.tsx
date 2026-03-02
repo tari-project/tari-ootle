@@ -27,13 +27,12 @@ import { useState } from "react";
 
 interface CopyProps {
   copy: string;
-  floatright?: boolean;
   title?: string;
   iconWidth?: string;
   iconHeight?: string;
 }
 
-const CopyToClipboard = ({ copy, floatright, title, iconWidth = "16px", iconHeight = "16px" }: CopyProps) => {
+const CopyToClipboard = ({ copy, title, iconWidth = "14px", iconHeight = "14px" }: CopyProps) => {
   const [tooltip, setTooltip] = useState<string | null>(null);
   const handleClick = async (copyThis: string) => {
     try {
@@ -49,28 +48,17 @@ const CopyToClipboard = ({ copy, floatright, title, iconWidth = "16px", iconHeig
   };
 
   return (
-    <>
-      <IconButton
-        onClick={() => handleClick(copy)}
-        size="small"
-        aria-label="copy to clipboard"
-        style={
-          floatright
-            ? { float: "right", marginLeft: "10px", marginRight: "10px" }
-            : { marginLeft: "10px", marginRight: "10px" }
-        }
-      >
-        <Tooltip title={tooltip ? tooltip : title || copy} arrow>
-          <ContentCopyIcon
-            color="primary"
-            style={{
-              width: iconWidth,
-              height: iconHeight,
-            }}
-          />
-        </Tooltip>
-      </IconButton>
-    </>
+    <IconButton onClick={() => handleClick(copy)} size="small" aria-label="copy to clipboard">
+      <Tooltip title={tooltip ? tooltip : title || copy} arrow>
+        <ContentCopyIcon
+          color="primary"
+          style={{
+            width: iconWidth,
+            height: iconHeight,
+          }}
+        />
+      </Tooltip>
+    </IconButton>
   );
 };
 

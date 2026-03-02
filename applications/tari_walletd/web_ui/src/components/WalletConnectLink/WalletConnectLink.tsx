@@ -36,6 +36,7 @@ import IconButton from "@mui/material/IconButton";
 import { useTheme } from "@mui/material/styles";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import { WalletKit } from "@reown/walletkit";
 import useAccountStore from "@store/accountStore";
 import {
@@ -72,6 +73,7 @@ const ConnectorDialog = () => {
   const linkRef = useRef<HTMLInputElement>(null);
   const accountStore = useAccountStore();
   const theme = useTheme();
+  const isMd = useMediaQuery(theme.breakpoints.up("sm"));
   const [_chosenOptionalPermissions, setChosenOptionalPermissions] = useState<boolean[]>([]);
 
   const [web3wallet, setWeb3wallet] = useState<any | undefined>();
@@ -388,7 +390,7 @@ const ConnectorDialog = () => {
   } else {
     return (
       <>
-        <Button variant="contained" color="primary" onClick={handleOpen} size="large">
+        <Button variant="contained" color="primary" onClick={handleOpen} size={isMd ? "large" : "small"}>
           Connect with WalletConnect
         </Button>
         <Dialog open={isOpen} onClose={handleClose}>

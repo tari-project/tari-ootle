@@ -2,30 +2,42 @@
 
 This folder contains comprehensive development guides ("skills") that give AI coding agents the context they need to generate correct Tari Ootle code — including accurate APIs, boilerplate, working examples, and common pitfalls.
 
-All files share the same body content and differ only in their agent-specific header. Pick the file for your agent and copy it to the location your tool expects.
+Each skill is available as a `SKILL.md` file in its own directory and is published on the [Tari Ootle documentation site](https://tari-project.github.io/tari-ootle/skills/).
+
+## Quick Start: Automatic Discovery
+
+All skills are now exposed via the Agent Skills Discovery endpoint:
+
+```
+https://tari-project.github.io/tari-ootle/.well-known/skills/
+```
+
+AI agents can automatically discover and load skills from this endpoint. No manual setup needed!
 
 ## Available Skills
 
-| File | Agent | Description |
-|------|-------|-------------|
-| [`CLAUDE.md`](CLAUDE.md) | [Claude Code](https://claude.ai) | Claude Code / Anthropic Claude |
-| [`CURSOR_RULES.md`](CURSOR_RULES.md) | [Cursor](https://cursor.com) | Cursor AI editor |
-| [`COPILOT_INSTRUCTIONS.md`](COPILOT_INSTRUCTIONS.md) | [GitHub Copilot](https://github.com/features/copilot) | GitHub Copilot coding agent |
-| [`WINDSURF_RULES.md`](WINDSURF_RULES.md) | [Windsurf](https://windsurf.com) | Windsurf (Cognition) |
-| [`AIDER_CONVENTIONS.md`](AIDER_CONVENTIONS.md) | [Aider](https://aider.chat) | Aider CLI assistant |
-| [`CODEX_RULES.md`](CODEX_RULES.md) | [OpenAI Codex](https://openai.com/codex) | OpenAI Codex CLI |
-| [`AMP_AGENTS.md`](AMP_AGENTS.md) | [Amp](https://ampcode.com) | Amp coding agent |
-| [`GEMINI_RULES.md`](GEMINI_RULES.md) | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Google Gemini CLI |
-| [`ANTIGRAVITY_RULES.md`](ANTIGRAVITY_RULES.md) | [Antigravity](https://antigravity.dev) | Antigravity agent |
+| Directory | Agent | Description |
+|-----------|-------|-------------|
+| [`claude-code/`](claude-code/) | [Claude Code](https://claude.ai) | Claude Code / Anthropic Claude |
+| [`cursor/`](cursor/) | [Cursor](https://cursor.com) | Cursor AI editor |
+| [`github-copilot/`](github-copilot/) | [GitHub Copilot](https://github.com/features/copilot) | GitHub Copilot coding agent |
+| [`windsurf/`](windsurf/) | [Windsurf](https://windsurf.com) | Windsurf (Cognition) |
+| [`aider/`](aider/) | [Aider](https://aider.chat) | Aider CLI assistant |
+| [`openai-codex/`](openai-codex/) | [OpenAI Codex](https://openai.com/codex) | OpenAI Codex CLI |
+| [`amp/`](amp/) | [Amp](https://ampcode.com) | Amp coding agent |
+| [`google-gemini/`](google-gemini/) | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Google Gemini CLI |
+| [`antigravity/`](antigravity/) | [Antigravity](https://antigravity.dev) | Antigravity agent |
 
-## Installation
+## Manual Installation (Optional)
+
+If your tool doesn't support automatic skill discovery, you can still copy the skills manually:
 
 ### Claude Code
 
-Copy the file to your project root (or `.claude/` subdirectory):
+Copy the skill file to your project root (or `.claude/` subdirectory):
 
 ```bash
-cp docs/skills/CLAUDE.md ./CLAUDE.md
+cp docs/skills/claude-code/SKILL.md ./CLAUDE.md
 ```
 
 Claude Code reads `CLAUDE.md` automatically at the start of every session.
@@ -36,7 +48,7 @@ Copy into Cursor's rules directory:
 
 ```bash
 mkdir -p .cursor/rules
-cp docs/skills/CURSOR_RULES.md .cursor/rules/tari-ootle.md
+cp docs/skills/cursor/SKILL.md .cursor/rules/tari-ootle.md
 ```
 
 Or place it as `AGENTS.md` in the project root — Cursor reads that too.
@@ -47,7 +59,7 @@ Copy into the `.github/` directory:
 
 ```bash
 mkdir -p .github
-cp docs/skills/COPILOT_INSTRUCTIONS.md .github/copilot-instructions.md
+cp docs/skills/github-copilot/SKILL.md .github/copilot-instructions.md
 ```
 
 Copilot's coding agent reads `.github/copilot-instructions.md` automatically.
@@ -57,7 +69,7 @@ Copilot's coding agent reads `.github/copilot-instructions.md` automatically.
 Copy to the project root:
 
 ```bash
-cp docs/skills/WINDSURF_RULES.md .windsurfrules
+cp docs/skills/windsurf/SKILL.md .windsurfrules
 ```
 
 Or use `AGENTS.md` in the project root — Windsurf supports both.
@@ -67,13 +79,13 @@ Or use `AGENTS.md` in the project root — Windsurf supports both.
 Load it as a read-only context file:
 
 ```bash
-aider --read docs/skills/AIDER_CONVENTIONS.md
+aider --read docs/skills/aider/SKILL.md
 ```
 
 To load automatically on every run, add to `.aider.conf.yml`:
 
 ```yaml
-read: docs/skills/AIDER_CONVENTIONS.md
+read: docs/skills/aider/SKILL.md
 ```
 
 ### OpenAI Codex
@@ -81,7 +93,7 @@ read: docs/skills/AIDER_CONVENTIONS.md
 Copy to the project root as `AGENTS.md`:
 
 ```bash
-cp docs/skills/CODEX_RULES.md ./AGENTS.md
+cp docs/skills/openai-codex/SKILL.md ./AGENTS.md
 ```
 
 Codex reads `AGENTS.md` automatically before starting work. You can also place it at `~/.codex/AGENTS.md` for global defaults.
@@ -91,7 +103,7 @@ Codex reads `AGENTS.md` automatically before starting work. You can also place i
 Copy to the project root as `AGENTS.md`:
 
 ```bash
-cp docs/skills/AMP_AGENTS.md ./AGENTS.md
+cp docs/skills/amp/SKILL.md ./AGENTS.md
 ```
 
 Amp reads `AGENTS.md` automatically from the project root and subdirectories.
@@ -101,18 +113,18 @@ Amp reads `AGENTS.md` automatically from the project root and subdirectories.
 Copy to the project root as `AGENTS.md`:
 
 ```bash
-cp docs/skills/GEMINI_RULES.md ./AGENTS.md
+cp docs/skills/google-gemini/SKILL.md ./AGENTS.md
 ```
 
 Or configure in `.gemini/settings.json`:
 
 ```json
-{ "contextFileName": "docs/skills/GEMINI_RULES.md" }
+{ "contextFileName": "docs/skills/google-gemini/SKILL.md" }
 ```
 
 ### Antigravity
 
-Follow Antigravity's documentation for loading custom rules, using `ANTIGRAVITY_RULES.md` as the source.
+Follow Antigravity's documentation for loading custom rules, using `docs/skills/antigravity/SKILL.md` as the source.
 
 ## What's Covered
 

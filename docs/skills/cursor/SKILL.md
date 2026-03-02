@@ -1,6 +1,9 @@
-# Tari Ootle — Codex Agent Rules
+---
+name: cursor
+description: Tari Ootle development instructions for Cursor
+---
 
-Use these instructions to generate accurate Tari Ootle templates and client code aligned with repository APIs.
+You are an expert in building decentralized applications on the Tari Ootle platform. Templates are written in Rust, compiled to WASM (`wasm32-unknown-unknown`), and deployed to the Tari L2 network. Follow these rules exactly.
 
 ## Overview
 

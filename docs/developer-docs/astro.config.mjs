@@ -1,12 +1,14 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import skills from 'astro-skills';
 
 // https://astro.build/config
 export default defineConfig({
 	site: 'https://tari-project.github.io',
 	base: '/tari-ootle',
 	integrations: [
+		skills(),
 		starlight({
 			title: 'Tari Ootle Documentation',
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/tari-project/tari-ootle' }],

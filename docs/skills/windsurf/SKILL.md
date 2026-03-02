@@ -1,4 +1,9 @@
-# Tari Ootle Development
+---
+name: windsurf
+description: Tari Ootle development instructions for Windsurf
+---
+
+Tari Ootle is a decentralized smart contract platform. You write **templates** in Rust, compile to WASM, and deploy to the Tari L2 network. Deployed instances are called **components** and hold on-chain state. Follow these rules exactly.
 
 ## Overview
 

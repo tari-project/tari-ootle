@@ -6,7 +6,7 @@ import skills from 'astro-skills';
 // https://astro.build/config
 export default defineConfig({
 	site: 'https://tari-project.github.io',
-	base: '/tari-ootle',
+	base: '/',
 	integrations: [
 		skills(),
 		starlight({

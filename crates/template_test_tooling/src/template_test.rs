@@ -48,8 +48,10 @@ use tari_ootle_transaction::{
     Transaction,
     TransactionBuilder,
     args,
-    args::InstructionArg,
-    builder::{MainIntent, named_args::BuilderWorkspaceKey},
+    builder::{
+        MainIntent,
+        named_args::{BuilderWorkspaceKey, NamedArg},
+    },
 };
 use tari_template_lib::types::{
     Amount,
@@ -374,22 +376,19 @@ impl TemplateTest {
         &mut self,
         template_name: &str,
         func_name: &str,
-        args: Vec<InstructionArg>,
+        args: Vec<NamedArg>,
         proofs: Vec<NonFungibleAddress>,
     ) -> T
     where
         T: DeserializeOwned,
     {
-        let result = self
-            .execute_and_commit(
-                vec![Instruction::CallFunction {
-                    address: self.get_template_address(template_name),
-                    function: func_name.to_string().try_into().unwrap(),
-                    args,
-                }],
-                proofs,
-            )
-            .unwrap();
+        let address = self.get_template_address(template_name);
+        let result = self.execute_expect_success(
+            self.transaction()
+                .call_function(address, func_name, args)
+                .build_and_seal(&self.secret_key),
+            proofs,
+        );
         result
             .finalize
             .execution_results
@@ -404,22 +403,18 @@ impl TemplateTest {
         &mut self,
         component_address: ComponentAddress,
         method_name: &str,
-        args: Vec<InstructionArg>,
+        args: Vec<NamedArg>,
         proofs: Vec<NonFungibleAddress>,
     ) -> T
     where
         T: DeserializeOwned,
     {
-        let result = self
-            .execute_and_commit(
-                vec![Instruction::CallMethod {
-                    call: component_address.into(),
-                    method: method_name.try_into().unwrap(),
-                    args,
-                }],
-                proofs,
-            )
-            .unwrap();
+        let result = self.execute_expect_success(
+            self.transaction()
+                .call_method(component_address, method_name, args)
+                .build_and_seal(&self.secret_key),
+            proofs,
+        );
 
         result
             .finalize

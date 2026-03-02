@@ -4,7 +4,7 @@
 use ootle_byte_type::ToByteType;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::substate_type::SubstateType;
-use tari_ootle_transaction::{Transaction, args, call_args};
+use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::types::{Amount, ComponentAddress};
 use tari_template_test_tooling::TemplateTest;
 
@@ -12,7 +12,7 @@ const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 
 fn setup() -> (TemplateTest, ComponentAddress, SubstateId) {
     let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/nft/airdrop"]);
-    let airdrop: ComponentAddress = template_test.call_function("Airdrop", "new", call_args![], vec![]);
+    let airdrop: ComponentAddress = template_test.call_function("Airdrop", "new", args![], vec![]);
     let airdrop_resx = template_test.get_previous_output_address(SubstateType::Resource);
     (template_test, airdrop, airdrop_resx)
 }
@@ -21,7 +21,7 @@ fn setup() -> (TemplateTest, ComponentAddress, SubstateId) {
 fn airdrop() {
     let (mut test, airdrop, airdrop_resx) = setup();
 
-    let total_supply: Amount = test.call_method(airdrop, "total_supply", call_args![], vec![test.owner_proof()]);
+    let total_supply: Amount = test.call_method(airdrop, "total_supply", args![], vec![test.owner_proof()]);
     assert_eq!(total_supply, Amount::from(100u64));
 
     let builder = Transaction::builder_localnet().then(|builder| {
@@ -42,7 +42,7 @@ fn airdrop() {
         .into_keys()
         .collect::<Vec<_>>();
 
-    test.call_method::<()>(airdrop, "open_airdrop", call_args![], vec![test.owner_proof()]);
+    test.call_method::<()>(airdrop, "open_airdrop", args![], vec![test.owner_proof()]);
 
     test.build_and_execute(
         Transaction::builder_localnet().then(|builder| {

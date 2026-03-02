@@ -98,6 +98,16 @@ cp docs/skills/openai-codex/SKILL.md ./AGENTS.md
 
 Codex reads `AGENTS.md` automatically before starting work. You can also place it at `~/.codex/AGENTS.md` for global defaults.
 
+### Amp
+
+Copy to the project root as `AGENTS.md`:
+
+```bash
+cp docs/skills/amp/SKILL.md ./AGENTS.md
+```
+
+Amp reads `AGENTS.md` automatically from the project root and subdirectories.
+
 ### Gemini CLI
 
 Copy to the project root as `AGENTS.md`:

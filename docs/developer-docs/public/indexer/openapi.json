@@ -259,79 +259,6 @@
         }
       }
     },
-    "/substates": {
-      "get": {
-        "tags": [
-          "handlers::substates"
-        ],
-        "description": "List substates, optionally filtered by type or template",
-        "operationId": "list_substates",
-        "parameters": [
-          {
-            "name": "filter_by_type",
-            "in": "query",
-            "description": "Filter substates by type",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "filter_by_template",
-            "in": "query",
-            "description": "Filter substates by template address",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "description": "Limit the number of results returned",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "format": "int32",
-              "minimum": 0
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "description": "Offset the results by this amount",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "format": "int32",
-              "minimum": 0
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "List of substates matching the filters",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListSubstatesResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Failed to list substates",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/substates/fetch": {
       "post": {
         "tags": [
@@ -1327,54 +1254,6 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/TransactionEntry"
-            }
-          }
-        }
-      },
-      "ListSubstateItem": {
-        "type": "object",
-        "required": [
-          "substate_id",
-          "version",
-          "timestamp"
-        ],
-        "properties": {
-          "module_name": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "substate_id": {
-            "type": "string"
-          },
-          "template_address": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "timestamp": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "version": {
-            "type": "integer",
-            "format": "int32",
-            "minimum": 0
-          }
-        }
-      },
-      "ListSubstatesResponse": {
-        "type": "object",
-        "required": [
-          "substates"
-        ],
-        "properties": {
-          "substates": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ListSubstateItem"
             }
           }
         }

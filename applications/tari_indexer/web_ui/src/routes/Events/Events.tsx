@@ -45,7 +45,7 @@ import JsonDialog from "../../Components/JsonDialog";
 import { queryTransactionEvents } from "../../utils/api";
 import CopyToClipboard from "../../Components/CopyToClipboard";
 import { Link } from "react-router-dom";
-import { Event } from "@tari-project/ootle-ts-bindings";
+import { Event, TransactionId } from "@tari-project/ootle-ts-bindings";
 
 const PAGE_SIZE = 10;
 
@@ -84,15 +84,15 @@ function EventsLayout() {
   }
 
 
-  const handlePayloadDownload = (event: any) => {
+  const handlePayloadDownload = (txId: TransactionId, event: Event) => {
     const data = event.payload;
     const json = JSON.stringify(data, null, 2);
     const blob = new Blob([json], { type: "application/json" });
-    const filename = `event-${event.tx_hash}-${event.topic}.json`;
+    const filename = `event-${txId}-${event.topic}.json`;
     saveAs(blob, filename);
   };
 
-  const handlePayloadView = (event: any) => {
+  const handlePayloadView = (event: Event) => {
     setSelectedPayload(event.payload);
     setJsonDialogOpen(true);
   };
@@ -192,7 +192,7 @@ function EventsLayout() {
                       </Button>
                       <Button
                         variant="outlined"
-                        onClick={() => handlePayloadDownload(event)}
+                        onClick={() => handlePayloadDownload(txId, event)}
                       >
                         Download
                       </Button>

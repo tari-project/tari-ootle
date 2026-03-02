@@ -117,7 +117,7 @@ function BalanceRow({
             address={resource_address}
             display={shortenString(resource_address, isLg ? 3 : 1, isLg ? 6 : 4)}
           />
-          <TypeChip type={resource_type} symbol={token_symbol} />
+          <TypeChip type={resource_type} symbol={token_symbol} compact />
         </Stack>
       </FluidTableCell>
       <FluidTableCell align="right">

@@ -27,6 +27,7 @@ import { ResourceType } from "@tari-project/ootle-ts-bindings";
 interface TypeChipProps {
   type: ResourceType;
   symbol?: string;
+  compact?: boolean;
 }
 
 const colourOptions: Record<ResourceType, string> = {
@@ -35,9 +36,14 @@ const colourOptions: Record<ResourceType, string> = {
   Confidential: "rgba(81,125,137, 0.3)",
   Stealth: "rgba(100,95,236, 0.3)",
 };
-export default function TypeChip({ type, symbol }: TypeChipProps) {
+export default function TypeChip({ type, symbol, compact = false }: TypeChipProps) {
   const label = (
-    <Typography variant="label">
+    <Typography
+      variant="label"
+      sx={{
+        fontSize: compact ? undefined : 12,
+      }}
+    >
       {symbol && (
         <>
           <strong>{symbol}</strong>
@@ -50,11 +56,10 @@ export default function TypeChip({ type, symbol }: TypeChipProps) {
   return (
     <Chip
       label={label}
-      size="small"
+      size={compact ? "small" : "medium"}
       style={{
         background: colourOptions[type],
-        padding: "2px",
-        height: 20,
+        height: compact ? 20 : undefined,
         userSelect: "none",
         maxWidth: "min-content",
       }}

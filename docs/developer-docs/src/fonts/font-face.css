@@ -3,7 +3,7 @@
     src: url("./DrukLCG-Medium.ttf") format("truetype");
     font-weight: 500;
     font-style: normal;
-    font-display: swap;
+    font-display: optional;
 }
 
 @font-face {
@@ -11,7 +11,7 @@
     src: url("./DrukLCG-MediumItalic.ttf") format("truetype");
     font-weight: 500;
     font-style: italic;
-    font-display: swap;
+    font-display: optional;
 }
 
 @font-face {
@@ -19,7 +19,7 @@
     src: url("./DrukLCG-Bold.ttf") format("truetype");
     font-weight: 700;
     font-style: normal;
-    font-display: swap;
+    font-display: optional;
 }
 
 @font-face {
@@ -27,7 +27,7 @@
     src: url("./DrukLCG-BoldItalic.ttf") format("truetype");
     font-weight: 700;
     font-style: italic;
-    font-display: swap;
+    font-display: optional;
 }
 
 @font-face {
@@ -35,7 +35,7 @@
     src: url("./DrukLCG-Heavy.ttf") format("truetype");
     font-weight: 800;
     font-style: normal;
-    font-display: swap;
+    font-display: optional;
 }
 
 @font-face {
@@ -43,7 +43,7 @@
     src: url("./DrukLCG-HeavyItalic.ttf") format("truetype");
     font-weight: 800;
     font-style: italic;
-    font-display: swap;
+    font-display: optional;
 }
 
 @font-face {
@@ -51,7 +51,7 @@
     src: url("./DrukWideLCG-Medium.ttf") format("truetype");
     font-weight: 500;
     font-style: normal;
-    font-display: swap;
+    font-display: optional;
 }
 
 @font-face {
@@ -59,7 +59,7 @@
     src: url("./DrukWideLCG-MediumItalic.ttf") format("truetype");
     font-weight: 500;
     font-style: italic;
-    font-display: swap;
+    font-display: optional;
 }
 
 @font-face {
@@ -67,7 +67,7 @@
     src: url("./DrukWideLCG-Bold.ttf") format("truetype");
     font-weight: 700;
     font-style: normal;
-    font-display: swap;
+    font-display: optional;
 }
 
 @font-face {
@@ -75,7 +75,7 @@
     src: url("./DrukWideLCG-BoldItalic.ttf") format("truetype");
     font-weight: 700;
     font-style: italic;
-    font-display: swap;
+    font-display: optional;
 }
 
 @font-face {
@@ -83,7 +83,7 @@
     src: url("./DrukWideLCG-Heavy.ttf") format("truetype");
     font-weight: 800;
     font-style: normal;
-    font-display: swap;
+    font-display: optional;
 }
 
 @font-face {
@@ -91,5 +91,5 @@
     src: url("./DrukWideLCG-HeavyItalic.ttf") format("truetype");
     font-weight: 800;
     font-style: italic;
-    font-display: swap;
+    font-display: optional;
 }

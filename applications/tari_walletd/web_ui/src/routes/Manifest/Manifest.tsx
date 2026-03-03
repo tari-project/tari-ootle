@@ -43,7 +43,6 @@ import {
   TableHead,
   TableRow,
   Tabs,
-  TextareaAutosize,
   useTheme,
 } from "@mui/material";
 import type { SelectChangeEvent } from "@mui/material";
@@ -53,8 +52,39 @@ import Grid from "@mui/material/Grid";
 import TextField from "@mui/material/TextField";
 import useManifestCodeStore from "@store/manifestStore";
 import type { ManifestTab } from "@store/manifestStore";
+import { FormatAlignLeft } from "@mui/icons-material";
 import { rejectReasonToString, substateIdToString } from "@tari-project/ootle-ts-bindings";
+import { Highlight, themes } from "prism-react-renderer";
 import { useRef, useState } from "react";
+import Editor from "react-simple-code-editor";
+
+function formatManifestCode(code: string): string {
+  const lines = code.split("\n");
+  const formatted: string[] = [];
+  let indent = 0;
+
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      formatted.push("");
+      continue;
+    }
+
+    // Decrease indent for closing braces
+    if (trimmed.startsWith("}")) {
+      indent = Math.max(0, indent - 1);
+    }
+
+    formatted.push("    ".repeat(indent) + trimmed);
+
+    // Increase indent after opening braces (that aren't closed on the same line)
+    const opens = (trimmed.match(/{/g) || []).length;
+    const closes = (trimmed.match(/}/g) || []).length;
+    indent = Math.max(0, indent + opens - closes);
+  }
+
+  return formatted.join("\n");
+}
 
 function Manifest() {
   return (
@@ -127,21 +157,40 @@ function ManifestEditor() {
             onAdd={manifest.addTab}
             onRemove={manifest.removeTab}
             onRename={manifest.renameTab}
+            onFormat={() => manifest.setCode(formatManifestCode(manifest.code))}
           />
-          <TextareaAutosize
-            minRows={25}
-            aria-label="Manifest code editor"
-            name="manifest-code"
+          <Editor
             value={manifest.code}
-            onChange={(e) => manifest.setCode(e.target.value)}
+            onValueChange={manifest.setCode}
+            highlight={(code) => (
+              <Highlight
+                theme={theme.palette.mode === "dark" ? themes.vsDark : themes.vsLight}
+                code={code}
+                language="rust"
+              >
+                {({ tokens, getTokenProps }) =>
+                  tokens.map((line, i) => (
+                    <span key={i}>
+                      {line.map((token, key) => (
+                        <span key={key} {...getTokenProps({ token })} />
+                      ))}
+                      {i < tokens.length - 1 ? "\n" : ""}
+                    </span>
+                  ))
+                }
+              </Highlight>
+            )}
+            padding={32}
             style={{
               width: "100%",
               borderRadius: "0 0 8px 8px",
-              padding: "8px 32px",
-              fontFamily: "monospace",
+              fontFamily: "'Fira Code', 'Fira Mono', Consolas, Menlo, monospace",
+              fontSize: 14,
               backgroundColor: theme.palette.accent.background,
               color: theme.palette.text.primary,
+              minHeight: 400,
             }}
+            textareaClassName="manifest-code-textarea"
           />
           <Box className="flex-container" style={{ justifyContent: "flex-start" }}>
             <VariableEditor
@@ -186,6 +235,7 @@ function ManifestTabBar({
   onAdd,
   onRemove,
   onRename,
+  onFormat,
 }: {
   tabs: ManifestTab[];
   activeTabId: string;
@@ -193,6 +243,7 @@ function ManifestTabBar({
   onAdd: () => void;
   onRemove: (id: string) => void;
   onRename: (id: string, name: string) => void;
+  onFormat: () => void;
 }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const tabToDelete = confirmDeleteId ? tabs.find((t) => t.id === confirmDeleteId) : null;
@@ -223,8 +274,11 @@ function ManifestTabBar({
           />
         ))}
       </Tabs>
-      <IconButton size="small" onClick={onAdd} title="New tab" sx={{ ml: 0.5, mr: 1 }}>
+      <IconButton size="small" onClick={onAdd} title="New tab" sx={{ ml: 0.5 }}>
         +
+      </IconButton>
+      <IconButton size="small" onClick={onFormat} title="Format code" sx={{ mr: 1 }}>
+        <FormatAlignLeft fontSize="small" />
       </IconButton>
 
       <Dialog open={!!confirmDeleteId} onClose={() => setConfirmDeleteId(null)}>

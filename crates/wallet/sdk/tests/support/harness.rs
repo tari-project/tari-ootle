@@ -31,7 +31,6 @@ use tari_ootle_wallet_sdk::{
         KeyBranch,
         KeyId,
         OutputStatus,
-        UtxoUpdateSet,
         WalletLockDropGuard,
         WalletLockId,
     },

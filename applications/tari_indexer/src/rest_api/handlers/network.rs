@@ -89,7 +89,8 @@ pub async fn get_connections(Extension(context): Extension<HandlerContext>) -> H
         .map(|conn| types::Connection {
             connection_id: conn.connection_id.to_string(),
             peer_id: conn.peer_id.to_string(),
-            address: conn.endpoint.get_remote_address().clone(),
+            // We use a string to avoid depending on multiaddr in the client
+            address: conn.endpoint.get_remote_address().to_string(),
             direction: if conn.endpoint.is_dialer() {
                 ConnectionDirection::Outbound
             } else {

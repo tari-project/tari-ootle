@@ -28,7 +28,7 @@ use tari_ootle_storage::{
     consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof},
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
-use tari_ootle_wallet_sdk::models::UtxoStateUpdateSet;
+use tari_indexer_client::types::UtxoStateUpdateSet;
 use tari_template_lib_types::{
     Amount,
     ResourceAddress,

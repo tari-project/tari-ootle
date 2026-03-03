@@ -34,7 +34,7 @@ use tari_ootle_common_types::{
 use tari_ootle_storage::{Ordering, StorageError, time::PrimitiveDateTime};
 use tari_ootle_storage_sqlite::SqliteTransaction;
 use tari_ootle_transaction::{Transaction, TransactionId};
-use tari_ootle_wallet_sdk::models::UtxoStateUpdateSet;
+use tari_indexer_client::types::UtxoStateUpdateSet;
 use tari_template_lib_types::{
     Hash32,
     ResourceAddress,

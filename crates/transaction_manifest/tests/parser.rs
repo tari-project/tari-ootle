@@ -187,3 +187,54 @@ fn allocate_address_macros() {
     assert_eq!(instructions, expected);
     assert_eq!(fee_instructions, vec![]);
 }
+
+#[test]
+fn local_function_inlining() {
+    let manifest = r#"
+        use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as MyTemplate;
+
+        fn setup() {
+            let comp = MyTemplate::new();
+            let result = comp.do_something();
+        }
+
+        fn main() {
+            setup();
+            MyTemplate::final_step();
+        }
+    "#;
+
+    let template_addr =
+        TemplateAddress::from_hex("c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7").unwrap();
+
+    let ManifestInstructions {
+        instructions,
+        fee_instructions,
+    } = parse_manifest(manifest, HashMap::new(), Default::default()).unwrap();
+
+    // setup() should be inlined: its instructions appear first, then final_step()
+    let expected = vec![
+        // From setup():
+        Instruction::CallFunction {
+            address: template_addr,
+            function: "new".try_into().unwrap(),
+            args: call_args![],
+        },
+        Instruction::PutLastInstructionOutputOnWorkspace { key: 0 },
+        Instruction::CallMethod {
+            call: ComponentReference::Workspace(0),
+            method: "do_something".try_into().unwrap(),
+            args: call_args![],
+        },
+        Instruction::PutLastInstructionOutputOnWorkspace { key: 1 },
+        // From main() after setup():
+        Instruction::CallFunction {
+            address: template_addr,
+            function: "final_step".try_into().unwrap(),
+            args: call_args![],
+        },
+    ];
+
+    assert_eq!(instructions, expected);
+    assert_eq!(fee_instructions, vec![]);
+}

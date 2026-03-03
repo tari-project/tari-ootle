@@ -29,6 +29,7 @@ pub struct ManifestInstructionGenerator {
     current_workspace_id: WorkspaceId,
     workspace_ids: HashMap<String, WorkspaceId>,
     templates: HashMap<String, TemplateAddress>,
+    functions: HashMap<String, Vec<ManifestIntent>>,
 }
 
 impl ManifestInstructionGenerator {
@@ -40,6 +41,7 @@ impl ManifestInstructionGenerator {
             current_workspace_id: WorkspaceId::default(),
             workspace_ids: HashMap::new(),
             templates,
+            functions: HashMap::new(),
         }
     }
 
@@ -60,6 +62,8 @@ impl ManifestInstructionGenerator {
                 },
             })
             .collect::<Result<_, _>>()?;
+
+        self.functions = ast.parsed.functions;
 
         let mut instructions = Vec::with_capacity(ast.parsed.instruction_intents.len());
         for intent in ast.parsed.instruction_intents {
@@ -162,6 +166,19 @@ impl ManifestInstructionGenerator {
                 })?,
             }]),
             ManifestIntent::DropAllProofs => Ok(vec![Instruction::DropAllProofsInWorkspace]),
+            ManifestIntent::CallLocalFunction(ident) => {
+                let name = ident.to_string();
+                let body = self
+                    .functions
+                    .get(&name)
+                    .ok_or_else(|| ManifestError::UndefinedVariable { name: name.clone() })?
+                    .clone();
+                let mut instructions = Vec::new();
+                for intent in body {
+                    instructions.extend(self.translate_intent(intent)?);
+                }
+                Ok(instructions)
+            },
         }
     }
 

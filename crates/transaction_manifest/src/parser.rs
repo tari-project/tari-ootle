@@ -1,6 +1,8 @@
 //   Copyright 2022 The Tari Project
 //   SPDX-License-Identifier: BSD-3-clause
 
+use std::collections::HashMap;
+
 use proc_macro2::{Ident, TokenStream};
 use syn::{
     Block,
@@ -29,6 +31,7 @@ use syn::{
     token::Comma,
 };
 use tari_engine_types::{json_cbor::convert_json_to_cbor, substate::SubstateId};
+use tari_ootle_transaction::AllocatableAddressType;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::types::{
     Amount,
@@ -40,8 +43,6 @@ use tari_template_lib::types::{
     hex::bytes_from_hex,
 };
 
-use tari_ootle_transaction::AllocatableAddressType;
-
 use crate::error::ManifestError;
 
 #[derive(Debug, Clone)]
@@ -52,6 +53,7 @@ pub enum ManifestIntent {
     AllocateAddress(AllocateAddressStmt),
     Log(LogIntent),
     DropAllProofs,
+    CallLocalFunction(Ident),
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +119,7 @@ pub struct ParsedManifest {
     pub defines: Vec<ManifestImport>,
     pub instruction_intents: Vec<ManifestIntent>,
     pub fee_instruction_intents: Vec<ManifestIntent>,
+    pub functions: HashMap<String, Vec<ManifestIntent>>,
 }
 
 impl ManifestParser {
@@ -127,6 +130,7 @@ impl ManifestParser {
     pub fn parse(&self, input: ParseStream) -> Result<ParsedManifest, syn::Error> {
         let mut instruction_intents = vec![];
         let mut fee_instruction_intents = vec![];
+        let mut functions = HashMap::new();
         let mut defines = vec![];
         defines.push(ManifestImport {
             template_address: Some(ACCOUNT_TEMPLATE_ADDRESS),
@@ -171,13 +175,9 @@ impl ManifestParser {
                     } else if ident == "main" {
                         instruction_intents.extend(self.parse_block(*block)?);
                     } else {
-                        return Err(syn::Error::new_spanned(
-                            block,
-                            format!(
-                                "Invalid function declaration {}. Only main or fee_main are allowed.",
-                                ident
-                            ),
-                        ));
+                        let name = ident.to_string();
+                        let body = self.parse_block(*block)?;
+                        functions.insert(name, body);
                     }
                 },
                 _ => {
@@ -193,6 +193,7 @@ impl ManifestParser {
             defines,
             instruction_intents,
             fee_instruction_intents,
+            functions,
         })
     }
 
@@ -247,27 +248,29 @@ impl ManifestParser {
 
         let result = match *expr.clone() {
             Expr::Call(call) => {
-                let (template_ident, function_ident) = match &*call.func {
+                match &*call.func {
                     Expr::Path(path) => {
                         let mut iter = path.path.segments.iter();
-                        let template_name = iter.next().ok_or_else(|| {
-                            syn::Error::new_spanned(path, "Invalid template function call, no template name")
-                        })?;
+                        let first = iter
+                            .next()
+                            .ok_or_else(|| syn::Error::new_spanned(path, "Invalid function call, empty path"))?;
 
-                        let function_name = iter.next().ok_or_else(|| {
-                            syn::Error::new_spanned(path, "Invalid template function call, no function name")
-                        })?;
-                        (&template_name.ident, &function_name.ident)
+                        if let Some(second) = iter.next() {
+                            // Two segments: Template::function()
+                            ManifestIntent::InvokeTemplate(InvokeIntent {
+                                output_variable: Some(var_ident.clone()),
+                                component_variable: None,
+                                template_variable: Some(first.ident.clone()),
+                                function_name: second.ident.clone(),
+                                arguments: build_arguments(call.args)?,
+                            })
+                        } else {
+                            // Single segment: local function call
+                            ManifestIntent::CallLocalFunction(first.ident.clone())
+                        }
                     },
                     _ => return Err(syn::Error::new_spanned(call.func, "Invalid function call")),
-                };
-                ManifestIntent::InvokeTemplate(InvokeIntent {
-                    output_variable: Some(var_ident.clone()),
-                    component_variable: None,
-                    template_variable: Some(template_ident.clone()),
-                    function_name: function_ident.clone(),
-                    arguments: build_arguments(call.args)?,
-                })
+                }
             },
             Expr::MethodCall(ExprMethodCall {
                 receiver, method, args, ..
@@ -314,27 +317,29 @@ impl ManifestParser {
     fn handle_semi_expr(&self, expr: Expr) -> Result<ManifestIntent, syn::Error> {
         match expr {
             Expr::Call(call) => {
-                let (template_ident, function_ident) = match &*call.func {
+                match &*call.func {
                     Expr::Path(path) => {
                         let mut iter = path.path.segments.iter();
-                        let template_name = iter.next().ok_or_else(|| {
-                            syn::Error::new_spanned(path, "Invalid template function call, no template name")
-                        })?;
+                        let first = iter
+                            .next()
+                            .ok_or_else(|| syn::Error::new_spanned(path, "Invalid function call, empty path"))?;
 
-                        let function_name = iter.next().ok_or_else(|| {
-                            syn::Error::new_spanned(path, "Invalid template function call, no function name")
-                        })?;
-                        (&template_name.ident, &function_name.ident)
+                        if let Some(second) = iter.next() {
+                            // Two segments: Template::function()
+                            Ok(ManifestIntent::InvokeTemplate(InvokeIntent {
+                                output_variable: None,
+                                component_variable: None,
+                                template_variable: Some(first.ident.clone()),
+                                function_name: second.ident.clone(),
+                                arguments: build_arguments(call.args)?,
+                            }))
+                        } else {
+                            // Single segment: local function call
+                            Ok(ManifestIntent::CallLocalFunction(first.ident.clone()))
+                        }
                     },
                     _ => return Err(syn::Error::new_spanned(call.func, "Invalid function call")),
-                };
-                Ok(ManifestIntent::InvokeTemplate(InvokeIntent {
-                    output_variable: None,
-                    component_variable: None,
-                    template_variable: Some(template_ident.clone()),
-                    function_name: function_ident.clone(),
-                    arguments: build_arguments(call.args)?,
-                }))
+                }
             },
             Expr::MethodCall(ExprMethodCall {
                 receiver, method, args, ..

@@ -1,3 +1,5 @@
+//   Copyright 2026 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
 import { FluidTableCell } from "@components/StyledComponents";
 import { Collapse, Table, TableBody, TableContainer, TableHead, TableRow } from "@mui/material";
 import FunctionItem from "@routes/Templates/components/FunctionItem";

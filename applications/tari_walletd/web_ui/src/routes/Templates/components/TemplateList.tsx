@@ -1,3 +1,5 @@
+//   Copyright 2026 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
 import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
 import CopyAddress from "@components/CopyAddress";
 import FetchStatusCheck from "@components/FetchStatusCheck";

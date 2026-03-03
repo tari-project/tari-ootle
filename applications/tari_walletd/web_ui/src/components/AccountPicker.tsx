@@ -1,3 +1,5 @@
+//   Copyright 2026 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
 import { useAccountsList } from "@api/hooks/useAccounts";
 import { type SelectChangeEvent } from "@mui/material";
 import FormControl from "@mui/material/FormControl";

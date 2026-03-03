@@ -1,3 +1,5 @@
+//   Copyright 2026 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
 import TableCell, { TableCellProps } from "@mui/material/TableCell";
 import { styled } from "@mui/material/styles";
 

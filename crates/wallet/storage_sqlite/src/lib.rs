@@ -50,6 +50,7 @@ impl SqliteWalletStore {
         const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
         conn.run_pending_migrations(MIGRATIONS)
             .map_err(|source| WalletStorageError::general("migrate", source))?;
+
         Ok(())
     }
 }

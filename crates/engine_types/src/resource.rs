@@ -198,6 +198,10 @@ impl Resource {
         &self.metadata
     }
 
+    pub fn metadata_mut(&mut self) -> &mut Metadata {
+        &mut self.metadata
+    }
+
     pub fn token_symbol(&self) -> Option<&str> {
         self.metadata.get(TOKEN_SYMBOL)
     }

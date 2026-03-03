@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use log::{log, warn};
+use log::*;
 use rocksdb::{
     ColumnFamilyDescriptor,
     DB,
@@ -26,9 +26,7 @@ use tari_ootle_common_types::NodeAddressable;
 use tari_ootle_storage::{StateStore, StorageError};
 
 use crate::{
-    cf_api::DbContext,
-    codecs::ByteColumn,
-    column_families::{bookkeeping::DatabaseMigrationVersion, cf_names},
+    column_families::cf_names,
     dbs::read_only::ReadOnlyDb,
     error::RocksDbStorageError,
     info::ColumnFamilyInfo,
@@ -111,25 +109,7 @@ impl<TAddr> RocksDbStateStore<TAddr, TransactionDB> {
             _addr: PhantomData,
         };
 
-        db.migrate()?;
-
         Ok(db)
-    }
-
-    fn migrate(&self) -> Result<(), StorageError> {
-        // Put v0 for now. In future versions of the code, we can detect v0 and migrate accordingly.
-        // A "fresh" db will not have a version, meaning that no migration is required.
-        const OPERATION: &str = "migrate";
-        const CURRENT_VERSION: u64 = 0;
-        let tx = self.db.transaction();
-        let db = DbContext::new(&self.db, &tx);
-        db.cf(DatabaseMigrationVersion)?
-            .put(&ByteColumn, &CURRENT_VERSION, OPERATION)?;
-        tx.commit().map_err(|e| RocksDbStorageError::RocksDbError {
-            source: e,
-            operation: OPERATION,
-        })?;
-        Ok(())
     }
 
     /// Force compact all column families in the database.

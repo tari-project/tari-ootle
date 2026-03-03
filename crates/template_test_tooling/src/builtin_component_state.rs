@@ -56,7 +56,7 @@ pub fn add_tari_resources<T: StateWriter>(state_db: &mut T) -> Result<(), StateS
     // Create the second layer tari resource
     let id = SubstateId::Resource(STEALTH_TARI_RESOURCE_ADDRESS);
     let mut metadata = Metadata::new();
-    metadata.insert(TOKEN_SYMBOL, "tXTR".to_string());
+    metadata.insert(TOKEN_SYMBOL, "tTARI".to_string());
     state_db.set_state(
         id,
         Substate::new(

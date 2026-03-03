@@ -164,7 +164,7 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::storage::state_store_rocksdb::writer";
 
-type DbWriteContext<'a> = DbContext<'a, Transaction<'a, TransactionDB>>;
+pub type DbWriteContext<'a> = DbContext<'a, Transaction<'a, TransactionDB>>;
 
 pub struct RocksDbStateStoreWriteTransaction<'a, TAddr> {
     /// None indicates if the transaction has been explicitly committed/rolled back

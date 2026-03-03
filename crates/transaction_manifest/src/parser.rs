@@ -398,7 +398,7 @@ fn build_arguments(args: Punctuated<Expr, Comma>) -> Result<Vec<ManifestLiteral>
 
             Expr::Path(ExprPath { path, .. }) => {
                 if let Some(seg) = path.segments.first() {
-                    if seg.ident == "XTR" {
+                    if seg.ident == "XTR" || seg.ident == "TARI" {
                         Ok(ManifestLiteral::Special(SpecialLiteral::Address(OrVar::Value(
                             XTR.into(),
                         ))))

@@ -86,7 +86,7 @@ use crate::{
     base_layer::verify_correct_network,
     consensus::{self, ConsensusHandle, TarBlockTransactionExecutor, ValidationContext},
     file_l1_submitter::FileLayerOneSubmitter,
-    genesis_state::create_genesis_state,
+    migrations,
     p2p::{
         NopLogger,
         create_tari_validator_node_rpc_service,
@@ -224,7 +224,7 @@ pub async fn spawn_services(
         DatabaseOptions::default().with_debugging_data(true),
     )?;
 
-    state_store.with_write_tx(|tx| create_genesis_state(tx, config.network, consensus_constants.num_preshards))?;
+    state_store.with_write_tx(|tx| migrations::migrate(tx, config.network, &consensus_constants))?;
 
     info!(target: LOG_TARGET, "Epoch manager initializing");
     let epoch_manager_config = EpochManagerConfig {

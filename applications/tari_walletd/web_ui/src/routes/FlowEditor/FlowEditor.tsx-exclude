@@ -86,7 +86,7 @@ const KNOWN_TEMPLATES = [
   },
   {
     address: TESTNET_XTR_FAUCET_ADDRESS,
-    name: "tXTR faucet",
+    name: "tTARI faucet",
   },
 ];
 

@@ -124,7 +124,7 @@ async fn main() {
                 // NOTE: this memo is stored on-chain, and longer memos increase fees. It is encrypted so that only the recipient can read it.
                 .with_memo_message("transfer from ootle-rs!")
         )
-        // Send some change (2 XTR) back to ourselves (NOTE once this example exits, we'll lose the keys for this output!)
+        // Send some change (2 TARI) back to ourselves (NOTE once this example exits, we'll lose the keys for this output!)
         .to_stealth_output(Output::new(sender_address, tari_token, const_nonzero_u64!(2*TARI)))
         // Load the inputs from the provider to build the transfer statement. NOTE: this will error if the total input amounts != total output amounts.
         .prepare()

@@ -26,12 +26,12 @@ import queryClient from "@api/queryClient";
 import Button from "@mui/material/Button";
 import { useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
-import useAccountStore from "@store/accountStore";
+import useAccountStore, { setAccount, setOotleAddress } from "@store/accountStore";
 import { AccountsCreateFreeTestCoinsResponse, substateIdToString } from "@tari-project/ootle-ts-bindings";
 
 function ClaimCoinsButton() {
   const { mutate: claimTestnetFaucetFunds, isPending } = useAccountsCreateFreeTestCoins();
-  const { account, setAccount, setOotleAddress } = useAccountStore();
+  const account = useAccountStore((s) => s.account);
   const { showError, showSuccess } = useErrorNotification();
 
   const theme = useTheme();

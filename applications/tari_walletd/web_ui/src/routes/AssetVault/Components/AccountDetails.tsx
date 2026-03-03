@@ -42,7 +42,7 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
-import useAccountStore from "@store/accountStore";
+import useAccountStore, { setAccount } from "@store/accountStore";
 import {
   decodeOotleAddress,
   encodeOotleAddress,
@@ -55,7 +55,7 @@ import QRCode from "react-qr-code";
 
 function AccountDetails() {
   const [payRefDialogOpen, setPayRefDialogOpen] = useState(false);
-  const { account, address, setAccount } = useAccountStore();
+  const { account, address } = useAccountStore();
 
   if (!account) {
     return <>Loading...</>;

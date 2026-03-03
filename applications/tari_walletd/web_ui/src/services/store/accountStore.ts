@@ -27,7 +27,6 @@ interface Store {
   showBalance: boolean;
   setShowBalance: (show: boolean) => void;
   account: Account | null;
-  setAccount: (account: Account) => void;
   address: string;
   setOotleAddress: (address: OotleAddress) => void;
   indexer: string;
@@ -40,7 +39,6 @@ const useAccountStore = create<Store>()((set) => ({
   showBalance: true,
   setShowBalance: (show) => set({ showBalance: show }),
   account: null,
-  setAccount: (account) => set({ account: account }),
   address: "",
   setOotleAddress: (address) => set({ address: address }),
   indexer: "",
@@ -48,5 +46,8 @@ const useAccountStore = create<Store>()((set) => ({
   popup: { visible: false },
   setPopup: (popup) => set({ popup: { visible: true, ...popup } }),
 }));
+
+export const setAccount = (account: Account) => useAccountStore.setState({ account });
+export const setOotleAddress = (address: OotleAddress) => useAccountStore.setState({ address });
 
 export default useAccountStore;

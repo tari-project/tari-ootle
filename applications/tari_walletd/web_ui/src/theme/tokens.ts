@@ -313,8 +313,8 @@ export const dark: ThemeOptions = {
     },
     divider: "rgba(255,255,255,0.04)",
     text: {
-      primary: "#FFFFFF",
-      secondary: grey[300],
+      primary: "#ffffff",
+      secondary: grey[100],
       disabled: "rgba(255,255,255,0.4)",
     },
     background: {
@@ -346,8 +346,8 @@ export const dark: ThemeOptions = {
       contrastText: "#ffffff",
     },
     accent: {
-      background: "rgba(10,8,26,0.4)",
-      border: "rgba(255, 255, 255, 0.03) ",
+      background: "rgba(5,4,14,0.3)",
+      border: "rgba(255, 255, 255, 0.03)",
     },
   },
 };

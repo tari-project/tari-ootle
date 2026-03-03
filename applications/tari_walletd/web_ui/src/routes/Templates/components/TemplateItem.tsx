@@ -1,4 +1,4 @@
-import { DataTableCell } from "@components/StyledComponents";
+import { FluidTableCell } from "@components/StyledComponents";
 import { Collapse, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
 import { ArgDef, AuthoredTemplate, type FunctionDef, Type as FuncType } from "@tari-project/ootle-ts-bindings";
 import { SlCheck, SlClose } from "react-icons/sl";
@@ -32,28 +32,20 @@ function getTypeAsString(funcType: FuncType): string {
   return "Unknown";
 }
 
+const COLUMNS = ["Name", "Mutable", "Arguments", "Output"];
+
 export default function TemplateItem({ template, isOpen = false }: TemplateItemProps) {
+  const headers = COLUMNS.map((c) => <TableCell key={c}>{c}</TableCell>);
   return (
     <TableRow>
-      <DataTableCell
-        style={{
-          paddingTop: 0,
-          borderBottom: "none",
-        }}
-        colSpan={2}
-      >
+      <FluidTableCell colSpan={4} style={{ borderBottom: "none" }}>
         <Collapse in={isOpen} timeout="auto" unmountOnExit>
           <h3>Functions</h3>
           {template.functions ? (
             <TableContainer>
               <Table>
                 <TableHead>
-                  <TableRow>
-                    <TableCell>Name</TableCell>
-                    <TableCell>Mutable</TableCell>
-                    <TableCell>Arguments</TableCell>
-                    <TableCell>Output</TableCell>
-                  </TableRow>
+                  <TableRow>{headers}</TableRow>
                 </TableHead>
                 <TableBody>
                   {template.functions.map((funcDef: FunctionDef, index: number) => {
@@ -96,7 +88,7 @@ export default function TemplateItem({ template, isOpen = false }: TemplateItemP
             </TableContainer>
           ) : null}
         </Collapse>
-      </DataTableCell>
+      </FluidTableCell>
     </TableRow>
   );
 }

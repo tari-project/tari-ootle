@@ -20,7 +20,7 @@ export default function TemplateList() {
   const address = ootleAddress ? decodeOotleAddress(ootleAddress) : null;
 
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
   const [openItem, setOpenItem] = useState<string | undefined>();
 
   const { data, isLoading, isError, error } = useListTemplatesAuthored({

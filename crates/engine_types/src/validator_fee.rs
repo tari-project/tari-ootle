@@ -8,7 +8,7 @@ use tari_template_lib::types::{
     Amount,
     SubstateOwnerRule,
     ValidatorFeePoolAddress,
-    constants::XTR,
+    constants::TARI_TOKEN,
     crypto::RistrettoPublicKeyBytes,
 };
 
@@ -89,7 +89,7 @@ impl ValidatorFeePool {
         let amount = self.amount;
         self.amount = 0;
         Ok(ResourceContainer::Stealth {
-            address: XTR,
+            address: TARI_TOKEN,
             revealed_amount: amount.into(),
             locked_amount: Amount::zero(),
         })

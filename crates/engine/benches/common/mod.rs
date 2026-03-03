@@ -19,7 +19,7 @@ use tari_template_lib::types::{
     SubstateOwnerRule,
     VaultId,
     access_rules::{ComponentAccessRules, ResourceAccessRules},
-    constants::XTR,
+    constants::TARI_TOKEN,
     metadata,
 };
 
@@ -39,10 +39,10 @@ pub fn setup_store() -> MemoryStateStore {
         6,
         true,
     );
-    state_store.set_state(XTR.into(), Substate::new(0, xtr)).unwrap();
+    state_store.set_state(TARI_TOKEN.into(), Substate::new(0, xtr)).unwrap();
 
     let resource_cont = ResourceContainer::Stealth {
-        address: XTR,
+        address: TARI_TOKEN,
         revealed_amount: Amount::MAX,
         locked_amount: Amount::zero(),
     };

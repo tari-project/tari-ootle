@@ -3,14 +3,14 @@
 
 use tari_ootle_common_types::{Network, ToSubstateAddress, VersionedSubstateId};
 use tari_state_store_rocksdb::{column_families::substate::SubstateCf, writer::DbWriteContext};
-use tari_template_lib::types::constants::{TOKEN_SYMBOL, XTR};
+use tari_template_lib::types::constants::{TARI_TOKEN, TOKEN_SYMBOL};
 
 /// This migration sets the token symbol to (t)TARI -
 /// TODO: squash this on testnet reset
 pub fn migrate(db: &DbWriteContext<'_>, network: Network) -> anyhow::Result<()> {
     const OPERATION: &str = "v1 migration";
     let cf = db.cf(SubstateCf)?;
-    let tari_resx = VersionedSubstateId::new(XTR, 0).to_substate_address();
+    let tari_resx = VersionedSubstateId::new(TARI_TOKEN, 0).to_substate_address();
 
     let mut resx = cf.get(&tari_resx, OPERATION)?;
     let tari_mut = resx

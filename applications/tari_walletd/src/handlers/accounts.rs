@@ -31,7 +31,7 @@ use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib_types::{
     Amount,
     ResourceType,
-    constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
+    constants::{STEALTH_TARI_RESOURCE_ADDRESS, TARI_TOKEN, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
     stealth::SpendCondition,
 };
 use tari_wallet_daemon_client::{
@@ -554,7 +554,7 @@ pub async fn handle_claim_burn(
                 // Mint the UTXO
                 .claim_burn(claim_proof, output_data)
                 // Transfer the UTXO to another UTXO with some revealed output for fees
-                .stealth_transfer(XTR, pay_fee_and_mint_output)
+                .stealth_transfer(TARI_TOKEN, pay_fee_and_mint_output)
                 // Pay fee
                 .put_last_instruction_output_on_workspace("fee")
                 .pay_fee_from_bucket("fee")

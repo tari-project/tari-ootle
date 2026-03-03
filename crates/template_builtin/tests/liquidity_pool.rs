@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use tari_ootle_transaction::{Transaction, args};
-use tari_template_lib::types::{AccessRule, OwnerRule, constants::XTR, metadata};
+use tari_template_lib::types::{AccessRule, OwnerRule, constants::TARI_TOKEN, metadata};
 use tari_template_test_tooling::TemplateTest;
 
 const TEMPLATE_NAME: &str = "TwoResourceLiquidityPool";
@@ -27,14 +27,14 @@ fn initial_contribution_and_redeem() {
             .call_function(template_address, "create", args![
                 OwnerRule::OwnedBySigner,
                 AccessRule::AllowAll,
-                XTR,
+                TARI_TOKEN,
                 faucet_resource,
                 metadata!["name" => "XTR-Stablecoin Liquidity Pool"],
                 Workspace("pool"),
             ])
             .call_method(faucet_component, "take_free_coins_custom", args![2000])
             .put_last_instruction_output_on_workspace("faucet_coins")
-            .call_method(user1, "withdraw", args![XTR, 1000])
+            .call_method(user1, "withdraw", args![TARI_TOKEN, 1000])
             .put_last_instruction_output_on_workspace("xtr_coins")
             .call_method("pool", "contribute", args![
                 Workspace("xtr_coins"),
@@ -64,7 +64,7 @@ fn initial_contribution_and_redeem() {
         .collect::<HashMap<_, _>>();
     let pool_unit_resx = indexed.resource_addresses().first().copied().unwrap();
 
-    assert_eq!(vaults.get(&XTR).unwrap().balance(), 1000);
+    assert_eq!(vaults.get(&TARI_TOKEN).unwrap().balance(), 1000);
     assert_eq!(vaults.get(&faucet_resource).unwrap().balance(), 2000);
 
     let user_account = store.get_account(user1).unwrap();
@@ -79,7 +79,7 @@ fn initial_contribution_and_redeem() {
             .put_last_instruction_output_on_workspace("redeem_pool_units")
             .call_method(pool_addr, "redeem", args![Workspace("redeem_pool_units")])
             .put_last_instruction_output_on_workspace("redeemed_coins")
-            .assert_bucket_contains_at_least("redeemed_coins.0", XTR, 1000u64)
+            .assert_bucket_contains_at_least("redeemed_coins.0", TARI_TOKEN, 1000u64)
             .assert_bucket_contains_at_least("redeemed_coins.1", faucet_resource, 2000u64)
             .call_method(user1, "deposit", args![Workspace("redeemed_coins.0")])
             .call_method(user1, "deposit", args![Workspace("redeemed_coins.1")])
@@ -91,7 +91,7 @@ fn initial_contribution_and_redeem() {
     // Assert ACT 2
     let store = test.read_only_state_store();
     let user_account = store.get_account(user1).unwrap();
-    let xtr_vault = user_account.get_vault_by_resource(&XTR).unwrap();
+    let xtr_vault = user_account.get_vault_by_resource(&TARI_TOKEN).unwrap();
     let xtr_coins = store.get_vault(&xtr_vault.vault_id()).unwrap();
     assert_eq!(xtr_coins.balance(), TemplateTest::FUNDED_ACCOUNT_INITIAL_BALANCE);
     let stablecoin_vault = user_account.get_vault_by_resource(&faucet_resource).unwrap();
@@ -120,7 +120,7 @@ fn basic_constant_product_swap() {
             .call_function(template_address, "create", args![
                 OwnerRule::OwnedBySigner,
                 AccessRule::AllowAll,
-                XTR,
+                TARI_TOKEN,
                 faucet_resource,
                 metadata!["name" => "XTR-Stablecoin Liquidity Pool"],
                 Workspace("pool"),
@@ -129,7 +129,7 @@ fn basic_constant_product_swap() {
                 INITIAL_STABLECOIN_AMOUNT
             ])
             .put_last_instruction_output_on_workspace("faucet_coins")
-            .call_method(user1, "withdraw", args![XTR, INITIAL_XTR_AMOUNT])
+            .call_method(user1, "withdraw", args![TARI_TOKEN, INITIAL_XTR_AMOUNT])
             .put_last_instruction_output_on_workspace("xtr_coins")
             .call_method("pool", "contribute", args![
                 Workspace("xtr_coins"),
@@ -182,7 +182,7 @@ fn basic_constant_product_swap() {
     // Assert ACT 2
     let store = test.read_only_state_store();
     let user_account = store.get_account(user2).unwrap();
-    let xtr_vault = user_account.get_vault_by_resource(&XTR).unwrap();
+    let xtr_vault = user_account.get_vault_by_resource(&TARI_TOKEN).unwrap();
     let xtr_coins = store.get_vault(&xtr_vault.vault_id()).unwrap();
     let fees = result.finalize.fee_receipt.total_fees_paid();
     assert!(fees > 0);

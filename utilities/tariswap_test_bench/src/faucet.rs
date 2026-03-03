@@ -5,7 +5,7 @@ use log::info;
 use tari_ootle_common_types::SubstateRequirement;
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::models::Account;
-use tari_template_lib_types::{ComponentAddress, ResourceAddress, VaultId, constants::XTR};
+use tari_template_lib_types::{ComponentAddress, ResourceAddress, VaultId, constants::TARI_TOKEN};
 
 use crate::runner::Runner;
 
@@ -22,7 +22,7 @@ impl Runner {
         let fee_vault = self
             .sdk
             .accounts_api()
-            .get_vault_by_resource(&in_account.component_address, &XTR)?;
+            .get_vault_by_resource(&in_account.component_address, &TARI_TOKEN)?;
 
         let transaction = self
             .new_transaction_builder()
@@ -47,7 +47,7 @@ impl Runner {
             .ok_or_else(|| anyhow::anyhow!("Faucet Component address not found"))?;
         let resource_address = diff
             .up_iter()
-            .filter(|(addr, _)| *addr != XTR)
+            .filter(|(addr, _)| *addr != TARI_TOKEN)
             .find_map(|(addr, _)| addr.as_resource_address())
             .ok_or_else(|| anyhow::anyhow!("Faucet Resource address not found"))?;
         let vault_address = diff

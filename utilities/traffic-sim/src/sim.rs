@@ -26,7 +26,15 @@ use tari_ootle_wallet_sdk::{
     crypto::{memo::Memo, pay_to::PayTo},
     models::{AccountWithAddress, KeyBranch},
 };
-use tari_template_lib_types::{Amount, ComponentAddress, ResourceAddress, UtxoId, amount, constants::XTR, metadata};
+use tari_template_lib_types::{
+    Amount,
+    ComponentAddress,
+    ResourceAddress,
+    UtxoId,
+    amount,
+    constants::TARI_TOKEN,
+    metadata,
+};
 use tari_wallet_daemon_client::{
     WalletDaemonClient,
     types::{
@@ -404,9 +412,9 @@ impl TrafficSim {
             if balances.as_ref().is_none_or(|b| {
                 b.balances
                     .iter()
-                    .all(|b| b.resource_address != XTR || b.balance.is_zero())
+                    .all(|b| b.resource_address != TARI_TOKEN || b.balance.is_zero())
             }) {
-                log::info!("[{}] Funding account with XTR: {}", wallet.name, account);
+                log::info!("[{}] Funding account with TARI: {}", wallet.name, account);
                 client
                     .create_free_test_coins(AccountsCreateFreeTestCoinsRequest {
                         account: (*account.component_address()).into(),

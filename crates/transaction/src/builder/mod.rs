@@ -26,7 +26,7 @@ use tari_template_lib_types::{
     TemplateAddress,
     ValidatorFeePoolAddress,
     access_rules::ComponentAccessRules,
-    constants::XTR,
+    constants::TARI_TOKEN,
     crypto::RistrettoPublicKeyBytes,
     stealth::StealthTransferStatement,
 };
@@ -393,7 +393,7 @@ impl<D> TransactionBuilder<D> {
 
     fn add_resource_input(&mut self, resource: ResourceAddress) -> &mut Self {
         // XTR is implicit
-        if resource != XTR {
+        if resource != TARI_TOKEN {
             self.unsigned_transaction.inputs_mut().insert(resource.into());
         }
         self
@@ -712,7 +712,7 @@ impl<D> TransactionBuilder<D> {
                     Assertion::BucketContainsNonFungibles { resource_address, .. },
                 ..
             } => {
-                if *resource_address != XTR {
+                if *resource_address != TARI_TOKEN {
                     self.unsigned_transaction
                         .inputs_mut()
                         .insert((*resource_address).into());

@@ -35,8 +35,8 @@ import {
   PayTo,
   ResourceAddress,
   ResourceType,
+  TARI_TOKEN,
   UtxoInputSelection,
-  XTR,
 } from "@tari-project/ootle-ts-bindings";
 import {
   accountsClaimBurn,
@@ -160,8 +160,8 @@ export const useAccountsTransfer = () => {
         let transferRequest = {
           owner_account: account,
           fee_params: {
-            // For simplicity, we'll use prefer revealed for fees whenever a non-XTR stealth transfer is made
-            input_selection: params.resource_address === XTR ? params.input_selection : "PreferRevealed",
+            // For simplicity, we'll use prefer revealed for fees whenever a non-TARI_TOKEN stealth transfer is made
+            input_selection: params.resource_address === TARI_TOKEN ? params.input_selection : "PreferRevealed",
             // TODO: UI support for pay fee with swap for stealth transfers
             pay_fee_with_swap: null,
           },

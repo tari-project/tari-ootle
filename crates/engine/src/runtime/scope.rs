@@ -10,7 +10,7 @@ use tari_template_lib::{
     types::{
         EntityId,
         TemplateAddress,
-        constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, XTR},
+        constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, TARI_TOKEN},
     },
 };
 
@@ -74,7 +74,7 @@ impl CallScope {
     pub fn is_substate_in_scope(&self, address: &SubstateId) -> bool {
         // TODO: Hacky
         // If the address is the XTR resource, it is always in scope
-        if *address == XTR {
+        if *address == TARI_TOKEN {
             return true;
         }
 

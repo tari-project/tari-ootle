@@ -19,7 +19,7 @@ use tari_template_lib::types::{
     ResourceAddress,
     ResourceType,
     VaultId,
-    constants::XTR,
+    constants::TARI_TOKEN,
     crypto::RistrettoPublicKeyBytes,
 };
 
@@ -145,7 +145,7 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
             }
 
             let mut associated_stealth_resources = HashSet::new();
-            associated_stealth_resources.insert(XTR);
+            associated_stealth_resources.insert(TARI_TOKEN);
 
             tx.accounts_insert(
                 account_name,

@@ -16,7 +16,7 @@ import {
   TablePagination,
   TableRow,
 } from "@mui/material";
-import { Account, OutputStatus, XTR } from "@tari-project/ootle-ts-bindings";
+import { Account, OutputStatus, TARI_TOKEN } from "@tari-project/ootle-ts-bindings";
 import {
   bigintToDecimalString,
   emptyRows,
@@ -37,7 +37,7 @@ function StealthUtxoList({ account }: { account: Account }) {
   const [statusFilter, setStatusFilter] = useState<OutputStatus | "all">("all");
   const { data: balancesData } = useAccountsGetBalances(substateIdToString(account.component_address));
   const params = useParams();
-  const resourceAddress = params.resource_address || XTR;
+  const resourceAddress = params.resource_address || TARI_TOKEN;
 
   const resourceBalance = balancesData?.balances?.find((balance) => balance.resource_address === resourceAddress);
   const currencySymbol = resourceBalance ? resourceBalance.token_symbol || "" : "";

@@ -18,7 +18,7 @@ use tari_template_lib::{
         ComponentAddress,
         ResourceAddress,
         UtxoAddress,
-        constants::XTR,
+        constants::TARI_TOKEN,
         stealth::{StealthTransferStatement, StealthUnspentOutput},
     },
 };
@@ -283,7 +283,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             .pay_fee_with_swap
             .as_ref()
             .map(|swap| swap.input_resource)
-            .unwrap_or(XTR);
+            .unwrap_or(TARI_TOKEN);
         self.lock_inputs_for_transfer(
             lock_id,
             owner_account_address,
@@ -409,7 +409,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 .pay_fee_with_swap
                 .as_ref()
                 .map(|swap| swap.input_resource)
-                .unwrap_or(XTR);
+                .unwrap_or(TARI_TOKEN);
             // Generate fee transfer statement
             let fee_transfer_statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
                 view_only_key_id: owner_account.view_only_key_id(),
@@ -471,13 +471,13 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 // Add the vaults for XTR (fees) and the spending resource if different
                 if let Some(vault) = self
                     .accounts_api
-                    .get_vault_by_resource(owner_account.component_address(), &XTR)
+                    .get_vault_by_resource(owner_account.component_address(), &TARI_TOKEN)
                     .optional()?
                 {
                     substate_inputs.push(SubstateRequirement::unversioned(vault.id));
                     substate_inputs.push(SubstateRequirement::unversioned(vault.resource_address));
                 }
-                if params.resource_address != XTR &&
+                if params.resource_address != TARI_TOKEN &&
                     let Some(vault) = self
                         .accounts_api
                         .get_vault_by_resource(owner_account.component_address(), &params.resource_address)
@@ -740,7 +740,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         let transaction = Transaction::builder(network.as_byte())
             .with_dry_run(params.is_dry_run)
             .with_fee_instructions_builder(|builder| {
-                let fee_resource = params.fee_params.pay_fee_with_swap.as_ref().map(|swap| swap.input_resource).unwrap_or(XTR);
+                let fee_resource = params.fee_params.pay_fee_with_swap.as_ref().map(|swap| swap.input_resource).unwrap_or(TARI_TOKEN);
                 builder
                     .then(|b| {
                         if fee_transfer_statement.inputs_statement.revealed_amount.is_positive() {
@@ -762,7 +762,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                              .call_method(swap.pool_address, "swap", args![Workspace("fee_swap_input_bucket")])
                              .put_last_instruction_output_on_workspace("fee_input_bucket")
                              // Slippage protection - ensure that the output from the swap is at least the minimum fee amount
-                             .assert_bucket_contains_at_least("fee_input_bucket", XTR, swap.min_xtr_output_amount)
+                             .assert_bucket_contains_at_least("fee_input_bucket", TARI_TOKEN, swap.min_xtr_output_amount)
                         } else {
                             b.put_last_instruction_output_on_workspace("fee_input_bucket")
                         }

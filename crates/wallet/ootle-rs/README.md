@@ -40,7 +40,7 @@ use ootle_rs::{
     TransactionRequest,
 };
 use tari_ootle_common_types::Network;
-use tari_template_lib_types::constants::XTR;
+use tari_template_lib_types::constants::TARI_TOKEN;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -63,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let unsigned_tx = IAccount::new(&provider)
         .pay_fee(1000u64)
-        .public_transfer(&recipient, XTR, 1_000_000u64)
+        .public_transfer(&recipient, TARI_TOKEN, 1_000_000u64)
         .prepare()
         .await?;
 

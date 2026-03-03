@@ -34,6 +34,7 @@ export default defineConfig({
           label: "Reference",
           autogenerate: { directory: "reference" },
         },
+        { label: "For Bots", link: "/llms.txt", attrs: { target: "_blank" } },
       ],
       components: {
         Pagination: "./src/components/Pagination.astro",

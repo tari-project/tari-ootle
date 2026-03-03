@@ -74,11 +74,11 @@ async fn main() {
     const INPUT_AMOUNT: u64 = 10 * TARI + 1000 - 500;
     // This builder creates a stealth transfer statement (spend proof). This is added to the transaction later.
     let (faucet_transfer, required_signers) = StealthTransfer::new(tari_token, &provider)
-        // Tell the transfer to expect 10XTR (+1000 to cover fees) as revealed funds from a bucket (the faucet looks at this value and automatically provides the bucket).
+        // Tell the transfer to expect 10 TARI (+1000 to cover fees) as revealed funds from a bucket (the faucet looks at this value and automatically provides the bucket).
         .spend_revealed_input(10 * TARI + 1000)
-        // The transfer will output 500 micro XTR as revealed funds to pay for the fee
+        // The transfer will output 500 micro TARI as revealed funds to pay for the fee
         .to_revealed_output(500u64)
-        // Spend the remaining value (10XTR - fee) into an output for the sender address. NOTE: the sender address is not actually included in the output (privacy!),
+        // Spend the remaining value (10 TARI - fee) into an output for the sender address. NOTE: the sender address is not actually included in the output (privacy!),
         // but a supporting wallet that holds the secret key would be able to spend the output.
         // You can specify any address here and split up into many outputs as needed, as long as ∑inputs == ∑outputs.
         .to_stealth_output(
@@ -91,7 +91,7 @@ async fn main() {
     // Keep track of the input commitments to spend later.
     let input_to_spend = faucet_transfer.stealth_outputs().to_vec();
 
-    // First let's transfer some faucet XTR to our account to have funds for fees and transfers.
+    // First let's transfer some faucet TARI to our account to have funds for fees and transfers.
     let unsigned_tx = IFaucet::new(&provider)
         .take_faucet_funds_stealth(faucet_transfer, true)
         .prepare()
@@ -114,7 +114,7 @@ async fn main() {
     // This builder creates a stealth transfer statement (spend proof). This is added to the transaction later.
     let (transfer, required_signers) = StealthTransfer::new(tari_token, &provider)
         // Spend an existing stealth input that is controlled by the sender address.
-        // This is worth 10.000500 XTR
+        // This is worth 10.000500 TARI
         .spend_stealth_input(sender_address.clone(), input_to_spend[0].commitment())
         // The transfer will output 0.000500 TARI as revealed funds to pay for the fee
         .to_revealed_output(500u64)

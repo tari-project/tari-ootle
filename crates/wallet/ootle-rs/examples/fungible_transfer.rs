@@ -59,7 +59,7 @@ async fn main() {
     let latest_epoch = provider.get_epoch().await.unwrap();
     println!("Latest epoch: {latest_epoch}");
 
-    // First let's transfer some faucet XTR to our account to have funds for fees and transfers.
+    // First let's transfer some faucet TARI to our account to have funds for fees and transfers.
     let unsigned_tx = IFaucet::new(&provider)
         .take_faucet_funds(10 * TARI)
         // NOTE that pay fee must be called after the faucet funds are taken because fees are paid from the faucet funds
@@ -84,14 +84,14 @@ async fn main() {
     let recipient2 = address!(
         "otl_loc_1y2s6442wau8v72pdrr5h4kntrqppqndqug33dmqv7eqkvx5c7ue2gzrw6v56kzkhnr7l025ye3jt3gmzmunmxy6vpm573fdduw37vcc848dcz"
     );
-    // Send some XTR to another address. You can replace XTR with any other fungible token resource address.
-    let xtr_token = TARI_TOKEN; // resource_address!("resource_deadbeaf");
+    // Send some TARI to another address. You can replace TARI_TOKEN with any other fungible token resource address.
+    let tari_token = TARI_TOKEN; // resource_address!("resource_deadbeaf");
 
     let unsigned_tx = IAccount::new(&provider)
         .pay_fee(1000u64)
         // Multiple transfers in a single transaction
-        .public_transfer(&recipient1, xtr_token, 2 * TARI)
-        .public_transfer(&recipient2, xtr_token, TARI)
+        .public_transfer(&recipient1, tari_token, 2 * TARI)
+        .public_transfer(&recipient2, tari_token, TARI)
         .prepare()
         .await
         .expect("Failed to prepare transaction");

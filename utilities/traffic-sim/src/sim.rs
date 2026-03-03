@@ -414,7 +414,7 @@ impl TrafficSim {
                     .iter()
                     .all(|b| b.resource_address != TARI_TOKEN || b.balance.is_zero())
             }) {
-                log::info!("[{}] Funding account with XTR: {}", wallet.name, account);
+                log::info!("[{}] Funding account with TARI: {}", wallet.name, account);
                 client
                     .create_free_test_coins(AccountsCreateFreeTestCoinsRequest {
                         account: (*account.component_address()).into(),

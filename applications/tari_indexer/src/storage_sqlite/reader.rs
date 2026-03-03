@@ -22,7 +22,7 @@ use tari_engine_types::{
     substate::{Substate, SubstateId, SubstateValue},
     transaction_receipt::TransactionReceipt,
 };
-use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate, TransactionEntry};
+use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate, TransactionEntry, UtxoStateUpdateSet};
 use tari_ootle_common_types::{
     Epoch,
     ShardGroup,
@@ -34,7 +34,6 @@ use tari_ootle_common_types::{
 use tari_ootle_storage::{Ordering, StorageError, time::PrimitiveDateTime};
 use tari_ootle_storage_sqlite::SqliteTransaction;
 use tari_ootle_transaction::{Transaction, TransactionId};
-use tari_indexer_client::types::UtxoStateUpdateSet;
 use tari_template_lib_types::{
     Hash32,
     ResourceAddress,

@@ -13,7 +13,7 @@ use tari_engine_types::{
     substate::{Substate, SubstateId},
     transaction_receipt::TransactionReceipt,
 };
-use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate, TransactionEntry};
+use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate, TransactionEntry, UtxoStateUpdateSet};
 use tari_ootle_common_types::{
     Epoch,
     ShardGroup,
@@ -28,7 +28,6 @@ use tari_ootle_storage::{
     consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof},
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
-use tari_indexer_client::types::UtxoStateUpdateSet;
 use tari_template_lib_types::{
     Amount,
     ResourceAddress,

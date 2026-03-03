@@ -1,8 +1,6 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_ootle_common_types::{StateVersion, shard::Shard};
-
 pub use tari_indexer_client::types::{
     UtxoBurnt,
     UtxoSpent,
@@ -11,6 +9,7 @@ pub use tari_indexer_client::types::{
     UtxoUpdateSet,
     WalletUtxoUpdate,
 };
+use tari_ootle_common_types::{StateVersion, shard::Shard};
 
 #[derive(Debug, Clone)]
 pub struct UtxoUpdatePayload {

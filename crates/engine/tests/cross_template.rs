@@ -38,6 +38,7 @@ fn setup() -> CrossTemplateTest {
     let template_test = TemplateTest::new(CRATE_PATH, vec![
         "tests/templates/cross_template",
         "tests/templates/state",
+        "tests/templates/faucet",
     ]);
 
     let cross_call_template = template_test.get_template_address(TEMPLATE_NAME);

@@ -3,20 +3,24 @@
 
 use std::collections::HashMap;
 
+use tari_engine_types::indexed_value::IndexedWellKnownTypes;
 use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::types::{AccessRule, OwnerRule, constants::TARI_TOKEN, metadata};
+use tari_template_lib_types::{Amount, ComponentAddress, ResourceAddress};
 use tari_template_test_tooling::TemplateTest;
 
 const TEMPLATE_NAME: &str = "TwoResourceLiquidityPool";
+const TEMPLATE_PATHS: &[&str] = &["templates/two_resource_liquidity_pool", "test/templates/faucet"];
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 
 #[test]
 fn initial_contribution_and_redeem() {
     // Setup
     // NOTE: builtin templates are automatically added to the test environment. No need to specify template paths.
-    let mut test = TemplateTest::new_builtin_only();
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let template_address = test.get_template_address(TEMPLATE_NAME);
 
-    let (faucet_component, faucet_resource) = test.create_test_faucet_component(1_000_000_000_000u64);
+    let (faucet_component, faucet_resource) = create_test_faucet_component(&mut test, 1_000_000_000_000u64);
 
     let (user1, _user1_proof, user1_secret) = test.create_funded_account();
 
@@ -105,7 +109,7 @@ fn basic_constant_product_swap() {
     let mut test = TemplateTest::new_builtin_only();
     let template_address = test.get_template_address(TEMPLATE_NAME);
 
-    let (faucet_component, faucet_resource) = test.create_test_faucet_component(1_000_000_000_000u64);
+    let (faucet_component, faucet_resource) = create_test_faucet_component(&mut test, 1_000_000_000_000u64);
 
     let (user1, _user1_proof, user1_secret) = test.create_funded_account();
     let (user2, _user2_proof, user2_secret) = test.create_empty_account();
@@ -201,4 +205,45 @@ fn basic_constant_product_swap() {
         xtr_coins.balance(),
         constant_product_calc(INITIAL_STABLECOIN_AMOUNT, INITIAL_XTR_AMOUNT, 5000) - fees
     );
+}
+
+#[track_caller]
+pub fn create_test_faucet_component<A: Into<Amount>>(
+    test: &mut TemplateTest,
+    initial_supply: A,
+) -> (ComponentAddress, ResourceAddress) {
+    let template_addr = test.get_template_address("TestFaucet");
+    let result = test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_function(template_addr, "mint", args![initial_supply.into()])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    let (addr, component) = result
+        .expect_success()
+        .up_iter()
+        .filter_map(|(id, substate)| {
+            id.as_component_address().and_then(|addr| {
+                let component = substate.substate_value().as_component()?;
+                if component.template_address == template_addr {
+                    Some((addr, component.clone()))
+                } else {
+                    None
+                }
+            })
+        })
+        .next()
+        .expect("No component address found in faucet creation result");
+
+    let indexed = IndexedWellKnownTypes::from_value(component.state()).unwrap();
+    let vault_id = indexed
+        .vault_ids()
+        .first()
+        .expect("No vault id found in faucet component state");
+    let vault = test
+        .read_only_state_store()
+        .get_vault(vault_id)
+        .expect("No vault id found in faucet component state");
+    (addr, *vault.resource_address())
 }

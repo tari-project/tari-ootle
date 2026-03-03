@@ -408,7 +408,7 @@ mod fungible {
 
     #[test]
     fn fungible_mint_and_burn() {
-        let mut test = TemplateTest::new_builtin_only();
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/faucet"]);
 
         let faucet_template = test.get_template_address("TestFaucet");
 

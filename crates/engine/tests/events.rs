@@ -4,8 +4,12 @@
 use tari_engine::runtime::RuntimeError;
 use tari_ootle_transaction::{Transaction, args};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::types::{Amount, ComponentAddress};
-use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
+use tari_template_lib::types::{Amount, constants::XTR_FAUCET_COMPONENT_ADDRESS};
+use tari_template_test_tooling::{
+    TemplateTest,
+    support::assert_error::assert_reject_reason,
+    template_lib_types::constants::TARI_TOKEN,
+};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -54,30 +58,12 @@ fn cannot_use_standard_topic() {
 fn builtin_vault_events() {
     let mut test = TemplateTest::new(CRATE_PATH, Vec::<&str>::new());
 
-    // create a fungible resource for transfer
-    let faucet_template = test.get_template_address("TestFaucet");
-    let initial_supply = Amount::from(1_000_000_000_000u64);
-    let result = test.execute_expect_success(
-        test.transaction()
-            .call_function(faucet_template, "mint", args![initial_supply])
-            .build_and_seal(test.secret_key()),
-        vec![test.owner_proof()],
-    );
-    let faucet_component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
-    let faucet_resource = result
-        .finalize
-        .result
-        .expect("Faucet mint failed")
-        .up_iter()
-        .find_map(|(address, _)| address.as_resource_address())
-        .unwrap();
-
     // Create sender and receiver accounts
-    let (sender_address, sender_proof, _) = test.create_funded_account();
-    let (receiver_address, _, _) = test.create_funded_account();
+    let (sender_address, sender_proof, _) = test.create_empty_account();
+    let (receiver_address, _, _) = test.create_empty_account();
     test.build_and_execute(
         Transaction::builder_localnet()
-            .call_method(faucet_component, "take_free_coins", args![])
+            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![1000])
             .put_last_instruction_output_on_workspace("free_coins")
             .call_method(sender_address, "deposit", args![Workspace("free_coins")]),
         vec![test.owner_proof()],
@@ -88,7 +74,7 @@ fn builtin_vault_events() {
     let amount = Amount::from(100u64);
     let result = test.build_and_execute(
         Transaction::builder_localnet()
-            .call_method(sender_address, "withdraw", args![faucet_resource, amount])
+            .call_method(sender_address, "withdraw", args![TARI_TOKEN, amount])
             .put_last_instruction_output_on_workspace("foo_bucket")
             .call_method(receiver_address, "deposit", args![Workspace("foo_bucket")]),
         // Sender proof needed to withdraw
@@ -107,9 +93,9 @@ fn builtin_vault_events() {
     // assert_eq!(event.component_address().unwrap(), sender_address);
     assert_eq!(
         *event.payload().get("resource_address").unwrap(),
-        faucet_resource.to_string()
+        TARI_TOKEN.to_string()
     );
-    assert_eq!(event.payload().get("resource_type").unwrap(), "Fungible");
+    assert_eq!(event.payload().get("resource_type").unwrap(), "Stealth");
     assert_eq!(event.payload().get("amount").unwrap(), amount.to_string());
 
     // a standard event for the deposit must have been emmitted
@@ -121,10 +107,7 @@ fn builtin_vault_events() {
         .unwrap();
     assert_eq!(event.template_address(), ACCOUNT_TEMPLATE_ADDRESS);
     // assert_eq!(event.component_address().unwrap(), receiver_address);
-    assert_eq!(
-        event.payload().get("resource_address").unwrap(),
-        faucet_resource.to_string()
-    );
-    assert_eq!(event.payload().get("resource_type").unwrap(), "Fungible");
+    assert_eq!(event.payload().get("resource_address").unwrap(), TARI_TOKEN.to_string());
+    assert_eq!(event.payload().get("resource_type").unwrap(), "Stealth");
     assert_eq!(event.payload().get("amount").unwrap(), amount.to_string());
 }

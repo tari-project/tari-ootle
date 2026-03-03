@@ -8,9 +8,8 @@ use tari_ootle_transaction::{Transaction, args};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::types::{
     Amount,
-    ComponentAddress,
     access_rules::ComponentAccessRules,
-    constants::TARI_TOKEN,
+    constants::{TARI_TOKEN, XTR_FAUCET_COMPONENT_ADDRESS},
     rule,
 };
 use tari_template_test_tooling::{
@@ -25,16 +24,14 @@ const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 fn basic_faucet_transfer() {
     let mut template_test = TemplateTest::new(CRATE_PATH, Vec::<&str>::new());
 
-    let (faucet_component, faucet_resource) = template_test.create_test_faucet_component(1_000_000_000_000u64);
-
     // Create sender and receiver accounts
-    let (sender_address, sender_proof, _) = template_test.create_funded_account();
-    let (receiver_address, _, _) = template_test.create_funded_account();
+    let (sender_address, sender_proof, _) = template_test.create_empty_account();
+    let (receiver_address, _, _) = template_test.create_empty_account();
 
     let _result = template_test
         .build_and_execute(
             Transaction::builder_localnet()
-                .call_method(faucet_component, "take_free_coins", args![])
+                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![1000])
                 .put_last_instruction_output_on_workspace("free_coins")
                 .call_method(sender_address, "deposit", args![Workspace("free_coins")]),
             vec![template_test.owner_proof()],
@@ -44,11 +41,11 @@ fn basic_faucet_transfer() {
     let result = template_test
         .build_and_execute(
             Transaction::builder_localnet()
-                .call_method(sender_address, "withdraw", args![faucet_resource, 100])
+                .call_method(sender_address, "withdraw", args![TARI_TOKEN, 100])
                 .put_last_instruction_output_on_workspace("foo_bucket")
                 .call_method(receiver_address, "deposit", args![Workspace("foo_bucket")])
-                .call_method(sender_address, "balance", args![faucet_resource])
-                .call_method(receiver_address, "balance", args![faucet_resource]),
+                .call_method(sender_address, "balance", args![TARI_TOKEN])
+                .call_method(receiver_address, "balance", args![TARI_TOKEN]),
             // Sender proof needed to withdraw
             vec![sender_proof],
         )
@@ -68,24 +65,6 @@ fn basic_faucet_transfer() {
 fn withdraw_from_account_prevented() {
     let mut test = TemplateTest::new(CRATE_PATH, Vec::<&str>::new());
 
-    let faucet_template = test.get_template_address("TestFaucet");
-
-    let initial_supply = Amount::from(1_000_000_000_000u64);
-    let result = test.execute_expect_success(
-        test.transaction()
-            .call_function(faucet_template, "mint", args![initial_supply])
-            .build_and_seal(test.secret_key()),
-        vec![test.owner_proof()],
-    );
-    let faucet_component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
-    let faucet_resource = result
-        .finalize
-        .result
-        .expect("Faucet mint failed")
-        .up_iter()
-        .find_map(|(addr, _)| addr.as_resource_address())
-        .unwrap();
-
     // Create sender and receiver accounts
     let (source_account, _, _) = test.create_funded_account();
 
@@ -95,24 +74,24 @@ fn withdraw_from_account_prevented() {
                 let source_account = var!["source_account"];
                 let faucet_component = var!["faucet_component"];
                 
-                let free_coins = faucet_component.take_free_coins();
+                let free_coins = faucet_component.take(1000);
                 source_account.deposit(free_coins);
             "#,
             [
                 ("source_account", source_account.into()),
-                ("faucet_component", faucet_component.into()),
+                ("faucet_component", XTR_FAUCET_COMPONENT_ADDRESS.into()),
             ],
             vec![],
         )
         .unwrap();
 
-    let (dest_address, non_owning_token, non_owning_key) = test.create_funded_account();
+    let (dest_address, non_owning_token, non_owning_key) = test.create_empty_account();
 
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
-            .call_method(source_account, "withdraw", args![faucet_resource, 100])
+            .call_method(source_account, "withdraw", args![TARI_TOKEN, 100])
             .put_last_instruction_output_on_workspace("stolen_coins")
-            .call_method(source_account, "deposit", args![Workspace("stolen_coins")])
+            .call_method(dest_address, "deposit", args![Workspace("stolen_coins")])
             .build_and_seal(&non_owning_key),
         // VNs provide the token that signed the transaction, which in this case is the non_owning_token
         vec![non_owning_token],
@@ -123,25 +102,11 @@ fn withdraw_from_account_prevented() {
         method: "withdraw".to_string(),
     });
 
-    let result = test
-        .execute_and_commit_manifest(
-            r#"
-                let dest_account = var!["dest_account"];
-                let resource = var!["resource"];
-                dest_account.balance(resource);
-            "#,
-            [
-                ("dest_account", dest_address.into()),
-                ("resource", faucet_resource.into()),
-            ],
-            // Nothing required for balance check at the moment
-            vec![],
-        )
+    let vaults = test
+        .read_only_state_store()
+        .get_vaults_for_account(dest_address)
         .unwrap();
-    assert_eq!(
-        result.finalize.execution_results[0].decode::<Amount>().unwrap(),
-        Amount::zero()
-    );
+    assert!(!vaults.contains_key(&TARI_TOKEN));
 }
 
 #[test]
@@ -333,20 +298,12 @@ fn custom_access_rules() {
 fn take_from_bucket() {
     let mut test = TemplateTest::new(CRATE_PATH, Vec::<&str>::new());
 
-    let faucet_template = test.get_template_address("TestFaucet");
     let (alice, _proof, _alice_sk) = test.create_empty_account();
     let (bob, _proof, _bob_sk) = test.create_empty_account();
 
-    let initial_supply = Amount::from(1_000_000_000_000u64);
     test.execute_expect_success(
         Transaction::builder_localnet()
-            .allocate_component_address("faucet")
-            .call_function(faucet_template, "mint_with_opts", args![
-                initial_supply,
-                "faucet".to_string(),
-                Workspace("faucet"),
-            ])
-            .call_method("faucet", "take_free_coins_custom", args![1000])
+            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![1000])
             .put_last_instruction_output_on_workspace("free_coins")
             .take_from_bucket("free_coins", 100u64, "foo_bucket")
             // Take all to test what happens when free_coins is empty (should not fail due to dangling buckets)
@@ -357,23 +314,16 @@ fn take_from_bucket() {
         vec![test.owner_proof()],
     );
 
-    let resources = test.read_only_state_store().get_all_resources().unwrap();
-    let faucet_resource = resources
-        .iter()
-        .find(|(_, r)| r.token_symbol() == Some("faucet"))
-        .map(|(addr, _)| *addr)
-        .unwrap();
-
     let alice_acc = test.read_only_state_store().get_account(alice).unwrap();
     let bob_acc = test.read_only_state_store().get_account(bob).unwrap();
     let alice_balance = test
         .read_only_state_store()
-        .get_vault(&alice_acc.get_vault_by_resource(&faucet_resource).unwrap().vault_id())
+        .get_vault(&alice_acc.get_vault_by_resource(&TARI_TOKEN).unwrap().vault_id())
         .unwrap()
         .balance();
     let bob_balance = test
         .read_only_state_store()
-        .get_vault(&bob_acc.get_vault_by_resource(&faucet_resource).unwrap().vault_id())
+        .get_vault(&bob_acc.get_vault_by_resource(&TARI_TOKEN).unwrap().vault_id())
         .unwrap()
         .balance();
 

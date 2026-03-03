@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import TemplateList from "./components/TemplateList";
 import Wrapper from "./components/Wrapper";
 
+// TODO - move to helpers
 function getTypeAsString(funcType: FuncType): string {
   if (typeof funcType === "string") {
     return funcType;

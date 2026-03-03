@@ -10,6 +10,7 @@ import Stack from "@mui/material/Stack";
 import useAccountStore, { setAccount, setOotleAddress } from "@store/accountStore";
 import { substateIdToString } from "@tari-project/ootle-ts-bindings";
 
+// TODO - replace other file-specific account selectors with this component
 export default function AccountPicker() {
   const { data } = useAccountsList(0, 10);
   const currentAccount = useAccountStore((s) => s.account);

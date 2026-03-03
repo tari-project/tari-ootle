@@ -4,11 +4,13 @@ import FetchStatusCheck from "@components/FetchStatusCheck";
 import { AccordionIconButton, FluidTableCell } from "@components/StyledComponents";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import { TableBody, TableCell, TableHead, TableRow } from "@mui/material";
+import { TableBody, TableCell, TableHead, TablePagination, TableRow } from "@mui/material";
 import Table from "@mui/material/Table";
 import TableContainer from "@mui/material/TableContainer";
+import TemplateItem from "@routes/Templates/components/TemplateItem";
 import useAccountStore from "@store/accountStore";
 import { decodeOotleAddress } from "@tari-project/ootle-ts-bindings";
+import { handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
 import { Fragment, useState } from "react";
 
 const COLUMNS = ["Address", "Name", "ABI Version", ""];
@@ -18,7 +20,7 @@ export default function TemplateList() {
   const address = ootleAddress ? decodeOotleAddress(ootleAddress) : null;
 
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [rowsPerPage, setRowsPerPage] = useState(1);
   const [openItem, setOpenItem] = useState<string | undefined>();
 
   const { data, isLoading, isError, error } = useListTemplatesAuthored({
@@ -26,13 +28,14 @@ export default function TemplateList() {
     page: page,
     page_size: rowsPerPage,
   });
-
+  console.debug(data);
   const headers = COLUMNS.map((c) => <TableCell key={c}>{c}</TableCell>);
 
   function handleExpandClick(address: string) {
     setOpenItem((c) => (c === address ? undefined : address));
   }
-  const templates = data?.templates.map(({ author_public_key, address, name, abi_version, functions }) => {
+  const templates = data?.templates.map((template) => {
+    const { address, name, abi_version } = template;
     const isOpen = address === openItem;
     return (
       <Fragment key={`${name}-${address}`}>
@@ -48,6 +51,7 @@ export default function TemplateList() {
             </AccordionIconButton>
           </FluidTableCell>
         </TableRow>
+        {isOpen && <TemplateItem template={template} isOpen={isOpen} />}
       </Fragment>
     );
   });
@@ -66,6 +70,15 @@ export default function TemplateList() {
           <TableBody>{templates}</TableBody>
         </Table>
       </TableContainer>
+      <TablePagination
+        rowsPerPageOptions={[1, 25, 50]}
+        component="div"
+        count={data?.total_templates || 0}
+        rowsPerPage={rowsPerPage}
+        page={page}
+        onPageChange={(event, newPage) => handleChangePage(event, newPage, setPage)}
+        onRowsPerPageChange={(event) => handleChangeRowsPerPage(event, setRowsPerPage, setPage)}
+      />
     </FetchStatusCheck>
   );
 }

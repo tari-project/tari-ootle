@@ -3,38 +3,13 @@
 
 import { useAccountsList } from "@api/hooks/useAccounts";
 import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
-import CopyAddress from "@components/CopyAddress";
 import PageHeading from "@components/PageHeading";
-import { AccordionIconButton, DataTableCell } from "@components/StyledComponents";
-import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
-import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import {
-  Collapse,
-  SelectChangeEvent,
-  Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TablePagination,
-  TableRow,
-} from "@mui/material";
+import { SelectChangeEvent, Stack } from "@mui/material";
 import Grid from "@mui/material/Grid";
 import { useTheme } from "@mui/material/styles";
 import useAccountStore from "@store/accountStore";
-import {
-  AccountInfo,
-  ArgDef,
-  AuthoredTemplate,
-  Type as FuncType,
-  type FunctionDef,
-  decodeOotleAddress,
-  substateIdToString,
-} from "@tari-project/ootle-ts-bindings";
-import { handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
-import { Fragment, useEffect, useState } from "react";
-import { SlCheck, SlClose } from "react-icons/sl";
+import { AccountInfo, Type as FuncType, decodeOotleAddress, substateIdToString } from "@tari-project/ootle-ts-bindings";
+import { useEffect, useState } from "react";
 import TemplateList from "./components/TemplateList";
 import Wrapper from "./components/Wrapper";
 
@@ -114,127 +89,6 @@ function Templates() {
       <Wrapper>
         <Stack spacing={1}>
           <TemplateList />
-          {account ? (
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Address</TableCell>
-                    <TableCell>Name</TableCell>
-                    <TableCell>ABI Version</TableCell>
-                    <TableCell></TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {templatesResponse?.templates.map((template: AuthoredTemplate, i: number) => {
-                    return (
-                      <Fragment key={i}>
-                        <TableRow>
-                          <DataTableCell>
-                            <CopyAddress address={`template_${template.address}`} />
-                          </DataTableCell>
-                          <DataTableCell>{template.name}</DataTableCell>
-                          <TableCell>{template.abi_version}</TableCell>
-                          <TableCell>
-                            <AccordionIconButton
-                              aria-label="expand row"
-                              size="small"
-                              onClick={() => {
-                                if (open) {
-                                  const newOpen = open.map((value, idx) => (idx === i ? !value : value));
-                                  setOpen(newOpen);
-                                }
-                              }}
-                            >
-                              {open[i] ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-                            </AccordionIconButton>
-                          </TableCell>
-                        </TableRow>
-                        {open[i] ? (
-                          <TableRow>
-                            <DataTableCell
-                              style={{
-                                paddingBottom: theme.spacing(1),
-                                paddingTop: 0,
-                                borderBottom: "none",
-                              }}
-                              colSpan={2}
-                            >
-                              <Collapse in={open[i]} timeout="auto" unmountOnExit>
-                                <h3>Functions</h3>
-                                {template.functions ? (
-                                  <TableContainer>
-                                    <Table>
-                                      <TableHead>
-                                        <TableRow>
-                                          <TableCell>Name</TableCell>
-                                          <TableCell>Mutable</TableCell>
-                                          <TableCell>Arguments</TableCell>
-                                          <TableCell>Output</TableCell>
-                                        </TableRow>
-                                      </TableHead>
-                                      <TableBody>
-                                        {template.functions.map((funcDef: FunctionDef, index: number) => {
-                                          return (
-                                            <TableRow key={index}>
-                                              <TableCell>{funcDef.name}</TableCell>
-                                              <TableCell>
-                                                {funcDef.is_mut ? <SlCheck size={25} /> : <SlClose size={25} />}
-                                              </TableCell>
-                                              <TableCell>
-                                                {funcDef.arguments.length > 0 ? (
-                                                  <TableContainer>
-                                                    <Table>
-                                                      <TableHead>
-                                                        <TableRow>
-                                                          <TableCell>Name</TableCell>
-                                                          <TableCell>Type</TableCell>
-                                                        </TableRow>
-                                                      </TableHead>
-                                                      <TableBody>
-                                                        {funcDef.arguments.map((arg: ArgDef, index: number) => {
-                                                          return (
-                                                            <TableRow key={index}>
-                                                              <TableCell>{arg.name}</TableCell>
-                                                              <TableCell>{getTypeAsString(arg.arg_type)}</TableCell>
-                                                            </TableRow>
-                                                          );
-                                                        })}
-                                                      </TableBody>
-                                                    </Table>
-                                                  </TableContainer>
-                                                ) : (
-                                                  <SlClose size={25} color={"red"} />
-                                                )}
-                                              </TableCell>
-                                              <TableCell>{getTypeAsString(funcDef.output)}</TableCell>
-                                            </TableRow>
-                                          );
-                                        })}
-                                      </TableBody>
-                                    </Table>
-                                  </TableContainer>
-                                ) : null}
-                              </Collapse>
-                            </DataTableCell>
-                          </TableRow>
-                        ) : null}
-                      </Fragment>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          ) : null}
-          <TablePagination
-            rowsPerPageOptions={[10, 25, 50]}
-            component="div"
-            count={templatesCount}
-            rowsPerPage={rowsPerPage}
-            page={page}
-            onPageChange={(event, newPage) => handleChangePage(event, newPage, setPage)}
-            onRowsPerPageChange={(event) => handleChangeRowsPerPage(event, setRowsPerPage, setPage)}
-          />
         </Stack>
       </Wrapper>
     </>

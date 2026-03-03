@@ -52,8 +52,10 @@ import Grid from "@mui/material/Grid";
 import TextField from "@mui/material/TextField";
 import useManifestCodeStore from "@store/manifestStore";
 import type { ManifestTab } from "@store/manifestStore";
-import { FormatAlignLeft } from "@mui/icons-material";
-import { rejectReasonToString, substateIdToString } from "@tari-project/ootle-ts-bindings";
+import { FormatAlignLeft, LibraryAdd } from "@mui/icons-material";
+import { rejectReasonToString, substateIdToString, decodeOotleAddress } from "@tari-project/ootle-ts-bindings";
+import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
+import useAccountStore from "@store/accountStore";
 import { Highlight, themes } from "prism-react-renderer";
 import { useRef, useState } from "react";
 import Editor from "react-simple-code-editor";
@@ -158,6 +160,18 @@ function ManifestEditor() {
             onRemove={manifest.removeTab}
             onRename={manifest.renameTab}
             onFormat={() => manifest.setCode(formatManifestCode(manifest.code))}
+            onImportTemplate={(address, name) => {
+              const importLine = `use template_${address} as ${name};`;
+              if (manifest.code.includes(importLine)) return;
+              // Insert after any existing use statements, or at the top
+              const lines = manifest.code.split("\n");
+              let lastUseIdx = -1;
+              for (let i = 0; i < lines.length; i++) {
+                if (lines[i].trimStart().startsWith("use ")) lastUseIdx = i;
+              }
+              lines.splice(lastUseIdx + 1, 0, importLine);
+              manifest.setCode(lines.join("\n"));
+            }}
           />
           <Editor
             value={manifest.code}
@@ -236,6 +250,7 @@ function ManifestTabBar({
   onRemove,
   onRename,
   onFormat,
+  onImportTemplate,
 }: {
   tabs: ManifestTab[];
   activeTabId: string;
@@ -244,8 +259,10 @@ function ManifestTabBar({
   onRemove: (id: string) => void;
   onRename: (id: string, name: string) => void;
   onFormat: () => void;
+  onImportTemplate: (address: string, name: string) => void;
 }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const tabToDelete = confirmDeleteId ? tabs.find((t) => t.id === confirmDeleteId) : null;
 
   return (
@@ -277,9 +294,21 @@ function ManifestTabBar({
       <IconButton size="small" onClick={onAdd} title="New tab" sx={{ ml: 0.5 }}>
         +
       </IconButton>
-      <IconButton size="small" onClick={onFormat} title="Format code" sx={{ mr: 1 }}>
+      <IconButton size="small" onClick={onFormat} title="Format code">
         <FormatAlignLeft fontSize="small" />
       </IconButton>
+      <IconButton size="small" onClick={() => setImportOpen(true)} title="Import template" sx={{ mr: 1 }}>
+        <LibraryAdd fontSize="small" />
+      </IconButton>
+
+      <ImportTemplateDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImport={(address, name) => {
+          onImportTemplate(address, name);
+          setImportOpen(false);
+        }}
+      />
 
       <Dialog open={!!confirmDeleteId} onClose={() => setConfirmDeleteId(null)}>
         <DialogTitle>Delete tab</DialogTitle>
@@ -303,6 +332,66 @@ function ManifestTabBar({
         </DialogActions>
       </Dialog>
     </Box>
+  );
+}
+
+function ImportTemplateDialog({
+  open,
+  onClose,
+  onImport,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onImport: (address: string, name: string) => void;
+}) {
+  const ootleAddress = useAccountStore((s) => s.address);
+  const decoded = ootleAddress ? decodeOotleAddress(ootleAddress) : null;
+
+  const { data, isLoading } = useListTemplatesAuthored({
+    author_public_key: decoded?.accountPublicKey || "",
+    page: 0,
+    page_size: 100,
+  });
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>Import Template</DialogTitle>
+      <DialogContent>
+        {isLoading && <DialogContentText>Loading templates...</DialogContentText>}
+        {!isLoading && (!data?.templates || data.templates.length === 0) && (
+          <DialogContentText>No templates found for the current account.</DialogContentText>
+        )}
+        {data?.templates && data.templates.length > 0 && (
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Name</TableCell>
+                <TableCell>Address</TableCell>
+                <TableCell />
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {data.templates.map((t) => (
+                <TableRow key={t.address} hover sx={{ cursor: "pointer" }} onClick={() => onImport(t.address, t.name)}>
+                  <TableCell>{t.name}</TableCell>
+                  <TableCell sx={{ fontFamily: "monospace", fontSize: "0.75rem" }}>
+                    {t.address.slice(0, 8)}...{t.address.slice(-8)}
+                  </TableCell>
+                  <TableCell>
+                    <Button size="small" variant="outlined">
+                      Import
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+      </DialogActions>
+    </Dialog>
   );
 }
 

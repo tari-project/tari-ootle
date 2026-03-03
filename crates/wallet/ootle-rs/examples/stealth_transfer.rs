@@ -140,7 +140,7 @@ async fn main() {
                 .put_last_instruction_output_on_workspace("fees")
                 .pay_fee_from_bucket("fees")
         })
-        // This isn't necessary because all transactions implicitly use XTR for fees, but you'd need to include this if other resources are being used
+        // This isn't necessary because all transactions implicitly use TARI for fees, but you'd need to include this if other resources are being used
         .add_input(tari_token)
         // Add the UTXO substate as an input. This will be DOWNed (destroyed) if the transaction is successful.
         .add_input(UtxoAddress::new(tari_token, input_to_spend[0].commitment().into()))

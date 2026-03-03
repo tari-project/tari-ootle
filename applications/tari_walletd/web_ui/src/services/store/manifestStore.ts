@@ -38,6 +38,7 @@ interface Store {
   variables: Record<string, string>;
   addVariable: (key: string, value: string) => void;
   removeVariable: (key: string) => void;
+  renameVariable: (oldKey: string, newKey: string) => void;
 }
 
 const useManifestCodeStore = create<Store>()(
@@ -57,6 +58,12 @@ const useManifestCodeStore = create<Store>()(
         set((state) => {
           const { [key]: _, ...rest } = state.variables;
           return { variables: rest };
+        }),
+      renameVariable: (oldKey: string, newKey: string) =>
+        set((state) => {
+          if (oldKey === newKey || !(oldKey in state.variables)) return state;
+          const entries = Object.entries(state.variables).map(([k, v]) => (k === oldKey ? [newKey, v] : [k, v]));
+          return { variables: Object.fromEntries(entries) };
         }),
     }),
     { name: "manifest-code" },

@@ -20,16 +20,31 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { useAccountsList } from "@api/hooks/useAccounts";
 import { useSubmitManifest } from "@api/hooks/useTransactions";
 import PageHeading from "@components/PageHeading";
 import { DataTableCell, StyledPaper } from "@components/StyledComponents";
-import { Stack, Table, TableBody, TableCell, TableHead, TableRow, TextareaAutosize, useTheme } from "@mui/material";
+import {
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  TextareaAutosize,
+  useTheme,
+} from "@mui/material";
+import type { SelectChangeEvent } from "@mui/material";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Grid from "@mui/material/Grid";
 import TextField from "@mui/material/TextField";
 import useManifestCodeStore from "@store/manifestStore";
-import { rejectReasonToString } from "@tari-project/ootle-ts-bindings";
+import { rejectReasonToString, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 
 function Manifest() {
@@ -126,6 +141,7 @@ function ManifestEditor() {
               variables={manifest.variables}
               onAdd={manifest.addVariable}
               onRemove={manifest.removeVariable}
+              onRename={manifest.renameVariable}
             />
           </Box>
           <Box className="flex-container" style={{ justifyContent: "flex-start" }}>
@@ -146,17 +162,77 @@ function ManifestEditor() {
   );
 }
 
+function nextAccountVarName(variables: Record<string, string>): string {
+  let i = 1;
+  while (`account_${i}` in variables) {
+    i++;
+  }
+  return `account_${i}`;
+}
+
+function EditableKeyCell({ varKey, onRename }: { varKey: string; onRename: (oldKey: string, newKey: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(varKey);
+
+  const commit = () => {
+    setEditing(false);
+    const trimmed = draft.trim();
+    if (trimmed && trimmed !== varKey) {
+      onRename(varKey, trimmed);
+    } else {
+      setDraft(varKey);
+    }
+  };
+
+  if (editing) {
+    return (
+      <TextField
+        size="small"
+        variant="standard"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") {
+            setDraft(varKey);
+            setEditing(false);
+          }
+        }}
+        autoFocus
+        sx={{ minWidth: 120 }}
+      />
+    );
+  }
+
+  return (
+    <Box onClick={() => setEditing(true)} sx={{ cursor: "pointer", "&:hover": { textDecoration: "underline" } }}>
+      {varKey}
+    </Box>
+  );
+}
+
 function VariableEditor({
   variables,
   onAdd,
   onRemove,
+  onRename,
 }: {
   variables: Record<string, string>;
   onAdd: (key: string, value: string) => void;
   onRemove: (key: string) => void;
+  onRename: (oldKey: string, newKey: string) => void;
 }) {
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
+  const { data: accountsData } = useAccountsList(0, 100);
+
+  const handleAddAccount = (e: SelectChangeEvent) => {
+    const address = e.target.value;
+    if (!address) return;
+    const varName = nextAccountVarName(variables);
+    onAdd(varName, address);
+  };
 
   return (
     <Grid size={12} mt={2}>
@@ -187,6 +263,21 @@ function VariableEditor({
         >
           Add Variable
         </Button>
+        {accountsData?.accounts && accountsData.accounts.length > 0 && (
+          <FormControl style={{ minWidth: "200px" }}>
+            <InputLabel id="add-account-label">Add Account</InputLabel>
+            <Select labelId="add-account-label" label="Add Account" value="" onChange={handleAddAccount}>
+              {accountsData.accounts.map(({ account }) => {
+                const address = substateIdToString(account.component_address);
+                return (
+                  <MenuItem key={address} value={address}>
+                    {account.name || address}
+                  </MenuItem>
+                );
+              })}
+            </Select>
+          </FormControl>
+        )}
       </Stack>
 
       {Object.keys(variables).length > 0 && (
@@ -205,7 +296,9 @@ function VariableEditor({
           <TableBody>
             {Object.entries(variables).map(([k, v]) => (
               <TableRow key={k}>
-                <DataTableCell>{k}</DataTableCell>
+                <DataTableCell>
+                  <EditableKeyCell varKey={k} onRename={onRename} />
+                </DataTableCell>
                 <DataTableCell>{v}</DataTableCell>
                 <DataTableCell>
                   <Button variant="outlined" color="error" onClick={() => onRemove(k)}>

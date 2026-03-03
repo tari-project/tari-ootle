@@ -17,4 +17,4 @@
 [esmeralda.ootle_wallet_daemon]
 #authentication = "webauthn"
 # Indexer API url for Esme.
-indexer_api_url = "http://217.182.93.35:50124/"
+indexer_api_url = "https://ootle-indexer-a.tari.com/"

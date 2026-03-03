@@ -23,21 +23,15 @@ pub fn try_get_template_builtin(address: &TemplateAddress) -> Option<&'static [u
 
 pub const fn all_builtin_templates() -> &'static [(TemplateAddress, &'static [u8])] {
     &[
-        (
-            ACCOUNT_TEMPLATE_ADDRESS,
-            include_bytes!("../templates/account/account.wasm"),
-        ),
+        (ACCOUNT_TEMPLATE_ADDRESS, include_bytes!("../compiled/account.wasm")),
         (
             NFT_FAUCET_TEMPLATE_ADDRESS,
-            include_bytes!("../templates/nft_faucet/nft_faucet.wasm"),
+            include_bytes!("../compiled/nft_faucet.wasm"),
         ),
-        (
-            XTR_FAUCET_TEMPLATE_ADDRESS,
-            include_bytes!("../templates/faucet/faucet.wasm"),
-        ),
+        (XTR_FAUCET_TEMPLATE_ADDRESS, include_bytes!("../compiled/faucet.wasm")),
         (
             LIQUIDITY_POOL_TEMPLATE_ADDRESS,
-            include_bytes!("../templates/liquidity_pool/liquidity_pool.wasm"),
+            include_bytes!("../compiled/liquidity_pool.wasm"),
         ),
     ]
 }

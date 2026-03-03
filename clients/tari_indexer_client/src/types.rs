@@ -4,7 +4,6 @@
 use std::{collections::HashMap, time::Duration};
 
 use bounded_vec::BoundedVec;
-use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::Decision;
 use tari_engine_types::{
@@ -17,7 +16,6 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{Epoch, Network, NumPreshards, ShardGroup, StateVersion, shard::Shard};
 use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
-use tari_ootle_wallet_sdk::models::UtxoUpdateSet;
 use tari_template_abi::TemplateDef;
 use tari_template_lib_types::{
     Amount,
@@ -311,9 +309,7 @@ pub struct GetIdentityResponse {
     pub peer_id: String,
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub public_key: RistrettoPublicKeyBytes,
-    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<String>))]
-    #[cfg_attr(feature = "ts", ts(type = "string[]"))]
-    pub public_addresses: Vec<Multiaddr>,
+    pub public_addresses: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -388,9 +384,7 @@ pub struct GetEpochManagerStatsResponse {
 pub struct Connection {
     pub connection_id: String,
     pub peer_id: String,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub address: Multiaddr,
+    pub address: String,
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub direction: ConnectionDirection,
     #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number}"))]
@@ -452,6 +446,50 @@ pub struct GetUtxoUpdatesRequest {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unspent_only: bool,
     pub per_shard_limit: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct UtxoUpdateSet {
+    pub shard_updates: HashMap<Shard, UtxoStateUpdateSet>,
+    pub per_shard_high_watermark: Vec<(Shard, StateVersion)>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct UtxoStateUpdateSet {
+    pub updates: Vec<WalletUtxoUpdate>,
+    pub max_state_version: StateVersion,
+    pub max_epoch: Epoch,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum WalletUtxoUpdate {
+    Unspent(UtxoUnspent),
+    Spent(UtxoSpent),
+    Burnt(UtxoBurnt),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct UtxoUnspent {
+    pub tag: UtxoTag,
+    pub public_nonce: RistrettoPublicKeyBytes,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct UtxoSpent {
+    pub id: UtxoId,
+    pub version: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct UtxoBurnt {
+    pub id: UtxoId,
+    pub version: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

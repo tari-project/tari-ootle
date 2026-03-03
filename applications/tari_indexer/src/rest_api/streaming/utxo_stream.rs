@@ -10,9 +10,11 @@ use axum::response::{IntoResponse, Response};
 use bytes::{Bytes, BytesMut};
 use futures::Stream;
 use log::*;
-use tari_indexer_client::{protobuf, types::GetUtxoUpdatesRequest};
+use tari_indexer_client::{
+    protobuf,
+    types::{GetUtxoUpdatesRequest, UtxoStateUpdateSet, WalletUtxoUpdate},
+};
 use tari_ootle_common_types::{StateVersion, shard::Shard};
-use tari_ootle_wallet_sdk::models::{UtxoStateUpdateSet, WalletUtxoUpdate};
 
 use crate::{
     rest_api::{encoder::Encoder, error::ErrorResponse, streaming::encoding::MimeTypeEncoder},
@@ -69,7 +71,7 @@ impl UtxoUpdateStream {
         }
 
         if let Some(update) = pending_updates.next() {
-            payload.update = Some(protobuf::WalletUtxoUpdate::from(update));
+            payload.update = Some(wallet_utxo_update_to_protobuf(update));
         }
 
         if pending_updates.is_empty() {
@@ -251,5 +253,22 @@ impl PendingUpdates {
 
     pub const fn is_empty(&self) -> bool {
         self.updates_len() == 0
+    }
+}
+
+fn wallet_utxo_update_to_protobuf(update: &WalletUtxoUpdate) -> protobuf::WalletUtxoUpdate {
+    match update {
+        WalletUtxoUpdate::Unspent(unspent) => protobuf::WalletUtxoUpdate::Unspent(protobuf::UtxoUnspent {
+            tag: unspent.tag.value(),
+            public_nonce: unspent.public_nonce.to_vec(),
+        }),
+        WalletUtxoUpdate::Spent(spent) => protobuf::WalletUtxoUpdate::Spent(protobuf::UtxoSpent {
+            id: spent.id.as_bytes().to_vec(),
+            version: spent.version,
+        }),
+        WalletUtxoUpdate::Burnt(burnt) => protobuf::WalletUtxoUpdate::Burnt(protobuf::UtxoBurnt {
+            id: burnt.id.as_bytes().to_vec(),
+            version: burnt.version,
+        }),
     }
 }

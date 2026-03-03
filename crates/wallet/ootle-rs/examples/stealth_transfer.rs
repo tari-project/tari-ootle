@@ -116,7 +116,7 @@ async fn main() {
         // Spend an existing stealth input that is controlled by the sender address.
         // This is worth 10.000500 XTR
         .spend_stealth_input(sender_address.clone(), input_to_spend[0].commitment())
-        // The transfer will output 0.000500 XTR as revealed funds to pay for the fee
+        // The transfer will output 0.000500 TARI as revealed funds to pay for the fee
         .to_revealed_output(500u64)
         // Spend to a new output (8 TARI) that we'll generate for the recipient address.
         .to_stealth_output(

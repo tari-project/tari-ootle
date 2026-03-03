@@ -1,0 +1,127 @@
+body {
+  font-family:
+    "Inter",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+  line-height: 1.6;
+  font-weight: 400;
+}
+
+header.header {
+  backdrop-filter: blur(40px);
+}
+
+.expressive-code {
+  border-radius: 6px;
+  .frame .header::after {
+    border: none;
+  }
+}
+figure {
+  border: none;
+  figcaption,
+  pre {
+    box-shadow: none;
+    border: 1px solid rgba(129, 88, 245, 0.05);
+    border-radius: 6px;
+    background: var(--grad-accent);
+    code {
+      border: none;
+    }
+  }
+}
+
+code {
+  background: var(--grad-accent);
+  color: var(--color-purple);
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid rgba(129, 88, 245, 0.15);
+  font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace;
+  font-size: 0.875em;
+  font-weight: 500;
+}
+
+h1 {
+  font-family: "Druk", sans-serif;
+  font-size: 5rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--color-ink) 0%, var(--color-purple) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1;
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+}
+
+.site-title {
+  font-family: "Druk", sans-serif;
+  color: var(--sl-color-gray-1);
+  font-size: var(--sl-text-2xl);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05rem;
+  white-space: nowrap;
+}
+
+.sl-markdown-content {
+  .sl-heading-wrapper {
+    font-family: "Druk", sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.05rem;
+    margin: 2rem 0 1.2rem 0;
+    &.level-h3 {
+      font-size: var(--sl-text-h3);
+      font-weight: 700;
+      margin: 2rem 0 1rem;
+      position: relative;
+      &::before {
+        content: "";
+        position: absolute;
+        left: -1.2rem;
+        top: 0;
+        bottom: 0;
+        width: 4px;
+        background: var(--color-purple);
+        border-radius: 2px;
+      }
+    }
+  }
+}
+
+.sidebar-content {
+  font-weight: 600;
+  ul.top-level {
+    li {
+      a {
+        padding: 8px 12px;
+      }
+      .group-label {
+        text-transform: uppercase;
+        letter-spacing: -0.01em;
+        .large {
+          font-weight: 800;
+          font-size: 0.85rem;
+        }
+      }
+    }
+  }
+}
+
+ul li {
+  border-inline-start: none;
+  margin-inline-start: 4px;
+  padding-inline-start: 0;
+}
+
+.content-panel {
+  border: none;
+  padding: 1rem;
+}

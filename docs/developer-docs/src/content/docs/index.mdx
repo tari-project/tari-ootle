@@ -1,26 +1,30 @@
 ---
-title: Tari Ootle Template Library Documentation
-description: Comprehensive documentation for building on-chain applications with the Tari Ootle Template Library.
+title: Tari Ootle Playground
+description: Build on-chain applications on the Tari L2 network. Agent-first documentation for tapplet development.
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
-import { basePath } from '../../helpers/path';
+import { Card, CardGrid } from "@astrojs/starlight/components";
+import { basePath } from "../../helpers/path";
 
-Welcome to the **Tari Ootle Template Library Documentation**!
+One of the key use cases for Tari (and the Ootle) that will emerge is agentic payments. To that end, while this documentation is here for humans, this page has been designed with an "agent first" mindset. If you use any coding agent, point them at this page and they will be able to begin developing Tari tapplets for you.
 
-This documentation provides a comprehensive guide for developers looking to build secure, efficient, and powerful on-chain applications using the Tari Ootle Template Library.
-Whether you're new to the Tari ecosystem or an experienced blockchain developer, you'll find resources here to help you get started and master template development.
+## What You'll Learn
 
-The Tari Ootle Template Library simplifies the creation of smart contracts, referred to as "templates", by providing ergonomic Rust abstractions over the core
-Ootle engine interactions. It is designed to be highly secure, performant, and flexible, allowing you to define complex behaviors and to manage digital assets effectively.
+- **Set up a wallet:** Connect a wallet to the `esmeralda` testnet.
+- **Template Development Basics:** Understand the abstractions and structure of the Ootle template library.
+- **Build Your First Template:** Follow a step-by-step code walkthrough to create a functional template (smart contract).
+- **Publish to the Network:** Learn the process of deploying your templates to the Ootle network.
+- **Execute Transactions:** Use your published templates by executing them within transactions.
+
+## What You'll Achieve
+
+By the end of this guide, you will have a solid foundation in Tari Ootle development. You'll be able to write,
+test, and deploy Rust-based smart contracts, interact with the Ootle network, and understand how to manage
+digital assets and state on-chain.
 
 ## Key Sections
 
 <CardGrid>
-  <Card title="Introduction" icon="pencil">
-    Start here to understand the concepts of the Tari Ootle Template Library.
-    <a href={basePath("/introduction/")}>Read the Introduction</a>
-  </Card>
   <Card title="Setup a Wallet" icon="setting">
     Download and install a wallet. You'll need this to publish templates.
     <a href={basePath("/guides/setup-a-wallet")}>Wallet Setup</a>
@@ -28,7 +32,7 @@ Ootle engine interactions. It is designed to be highly secure, performant, and f
   <Card title="Guides" icon="document">
     Step-by-step tutorials and practical examples to help you build, test, and deploy your Ootle Templates. Learn how to
     write templates, manage resources, handle events, and implement access control.
-    <a href={basePath("/guides/getting-started/")}> Explore the Guides</a>
+    <a href={basePath("/guides/getting-started/")}>Explore the Guides</a>
   </Card>
   <Card title="Reference" icon="setting">
     Detailed API documentation for all the types, macros, and modules provided by the `tari_template_lib` and
@@ -36,10 +40,14 @@ Ootle engine interactions. It is designed to be highly secure, performant, and f
     <a href={basePath("/reference/api-overview/")}>View the Reference</a>
   </Card>
   <Card title="Crate Docs" icon="setting">
-    <a href="https://docs.rs/tari_template_lib/latest/tari_template_lib/" target="_blank">View on crates.io</a>
+    <a href="https://docs.rs/tari_template_lib/latest/tari_template_lib/" target="_blank">
+      View on crates.io
+    </a>
   </Card>
   <Card title="Indexer API docs" icon="setting">
-    <a href={basePath("/indexer/indexer-api.html")} target="_blank">Open Indexer API docs</a>
+    <a href={basePath("/indexer/indexer-api.html")} target="_blank">
+      Open Indexer API docs
+    </a>
   </Card>
 </CardGrid>
 
@@ -50,9 +58,7 @@ WebAssembly (WASM) and defines the logic and state transitions for on-chain appl
 
 ## Key Features
 
-  -   **Rust-Native Development**: Leverage the power and safety of Rust to write your on-chain logic.
-  -   **Ergonomic**: Simplified interfaces for interacting with the Tari Ootle engine, including resource management, component creation, and event emission.
-  -   **Interoperability**: Designed to integrate seamlessly within the broader Tari ecosystem.
-  -   **Security-Focused**: Built with security best practices in mind, providing tools to help developers write secure code.
-
-We encourage you to explore the documentation, experiment with the examples, and join our community to contribute and get support.
+- **Rust-Native Development**: Leverage the power and safety of Rust to write your on-chain logic.
+- **Ergonomic**: Simplified interfaces for interacting with the Tari Ootle engine, including resource management, component creation, and event emission.
+- **Interoperability**: Designed to integrate seamlessly within the broader Tari ecosystem.
+- **Security-Focused**: Built with security best practices in mind, providing tools to help developers write secure code.

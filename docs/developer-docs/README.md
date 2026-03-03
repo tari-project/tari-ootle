@@ -1,6 +1,6 @@
-# Tari Ootle Template Library Documentation Site
+# Tari Ootle Playground Documentation Site
 
-This repository contains the source code for the Tari Ootle Template Library documentation
+This repository contains the source code for the Tari Ootle Playground documentation
 site, built with Astro and Starlight.
 
 ## 🚀 Project Structure
@@ -13,7 +13,7 @@ Images and other static assets are in `src/assets/` and `public/`.
 All commands are run from the root of the project, from a terminal:
 
 | Command        | Action                                                |
-|:---------------|:------------------------------------------------------|
+| :------------- | :---------------------------------------------------- |
 | `pnpm install` | Installs project dependencies                         |
 | `pnpm dev`     | Starts a local development server at `localhost:4321` |
 | `pnpm build`   | Builds the production documentation site to `./dist/` |

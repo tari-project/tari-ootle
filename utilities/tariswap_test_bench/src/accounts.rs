@@ -69,7 +69,7 @@ impl Runner {
         )?;
         self.sdk
             .accounts_api()
-            .add_vault(account, vault, XTR, ResourceType::Stealth, Some("TARI".to_string()), 6)?;
+            .add_vault(account, vault, XTR, ResourceType::Stealth, Some("tTARI".to_string()), 6)?;
         let account = self.sdk.accounts_api().get_account_by_address(&account)?;
 
         Ok(account.account)

@@ -71,7 +71,7 @@ export default function TemplateList() {
         </Table>
       </TableContainer>
       <TablePagination
-        rowsPerPageOptions={[1, 25, 50]}
+        rowsPerPageOptions={[10, 25, 50]}
         component="div"
         count={data?.total_templates || 0}
         rowsPerPage={rowsPerPage}

@@ -1,6 +1,7 @@
 import { FluidTableCell } from "@components/StyledComponents";
-import { Collapse, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
+import { Collapse, Table, TableBody, TableContainer, TableHead, TableRow } from "@mui/material";
 import FunctionItem from "@routes/Templates/components/FunctionItem";
+import { NestedCell } from "@routes/Templates/components/StyledTableComponents";
 import { AuthoredTemplate } from "@tari-project/ootle-ts-bindings";
 
 interface TemplateItemProps {
@@ -12,7 +13,7 @@ const COLUMNS = ["Name", "Mutable", "Arguments", "Output"];
 
 export default function TemplateItem({ template, isOpen = false }: TemplateItemProps) {
   const { functions } = template;
-  const headers = COLUMNS.map((c) => <TableCell key={c}>{c}</TableCell>);
+  const headers = COLUMNS.map((c) => <NestedCell key={c}>{c}</NestedCell>);
   const items = functions.map((functionDef) => (
     <FunctionItem key={`function_${functionDef.name}`} functionDef={functionDef} />
   ));
@@ -21,7 +22,12 @@ export default function TemplateItem({ template, isOpen = false }: TemplateItemP
     <TableContainer>
       <Table>
         <TableHead>
-          <TableRow>{headers}</TableRow>
+          <TableRow>
+            <NestedCell>Name</NestedCell>
+            <NestedCell align="center">Mutable</NestedCell>
+            <NestedCell>Arguments</NestedCell>
+            <NestedCell align="right">Output Type</NestedCell>
+          </TableRow>
         </TableHead>
         <TableBody>{items}</TableBody>
       </Table>

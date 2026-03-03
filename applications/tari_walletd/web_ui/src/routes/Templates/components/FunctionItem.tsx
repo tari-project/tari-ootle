@@ -1,4 +1,4 @@
-import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
+import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow, useTheme } from "@mui/material";
 import { FunctionDef, Type as FuncType } from "@tari-project/ootle-ts-bindings";
 import { SlCheck, SlClose } from "react-icons/sl";
 
@@ -31,8 +31,9 @@ function getTypeAsString(funcType: FuncType): string {
 }
 
 export default function FunctionItem({ functionDef }: FunctionItemProps) {
+  const theme = useTheme();
   const { name, arguments: args, is_mut, output } = functionDef;
-  const argumentItems = args.map(({ name, arg_type }) => {
+  const argumentItems = args.map(({ name, arg_type }, i) => {
     if (name == "self") return;
     return (
       <TableRow key={`arg_${name}:${arg_type}`}>
@@ -46,10 +47,17 @@ export default function FunctionItem({ functionDef }: FunctionItemProps) {
 
   const argsTable =
     args?.length > 0 && !isSelfArg ? (
-      <TableContainer>
-        <Table size="small" padding="checkbox" style={{ border: "1px solid pink" }}>
+      <TableContainer style={{ borderRadius: theme.spacing(1), border: `1px solid ${theme.palette.divider}` }}>
+        <Table
+          size="small"
+          padding="checkbox"
+          style={{
+            border: "none",
+            background: theme.palette.accent.background,
+          }}
+        >
           <TableHead>
-            <TableRow>
+            <TableRow style={{ background: theme.palette.background.default }}>
               <TableCell>Name</TableCell>
               <TableCell>Type</TableCell>
             </TableRow>
@@ -64,7 +72,7 @@ export default function FunctionItem({ functionDef }: FunctionItemProps) {
     <TableRow>
       <TableCell size="small">{name}</TableCell>
       <TableCell size="small">{is_mut ? <SlCheck size={25} /> : <SlClose size={25} />}</TableCell>
-      <TableCell size="small">{argsTable}</TableCell>
+      <TableCell>{argsTable}</TableCell>
       <TableCell size="small">{getTypeAsString(output)}</TableCell>
     </TableRow>
   );

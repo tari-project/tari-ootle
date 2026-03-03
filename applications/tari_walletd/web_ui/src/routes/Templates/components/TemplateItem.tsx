@@ -13,7 +13,9 @@ const COLUMNS = ["Name", "Mutable", "Arguments", "Output"];
 export default function TemplateItem({ template, isOpen = false }: TemplateItemProps) {
   const { functions } = template;
   const headers = COLUMNS.map((c) => <TableCell key={c}>{c}</TableCell>);
-  const items = functions.map((functionDef) => <FunctionItem functionDef={functionDef} />);
+  const items = functions.map((functionDef) => (
+    <FunctionItem key={`function_${functionDef.name}`} functionDef={functionDef} />
+  ));
 
   const functionTable = (
     <TableContainer>

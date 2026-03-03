@@ -14,14 +14,12 @@ tari_ootle_transaction = { workspace = true }
 tari_template_abi = { workspace = true }
 tari_template_lib_types = { workspace = true }
 tari_consensus_types = { workspace = true }
-tari_ootle_wallet_sdk = { workspace = true }
 
 anyhow = { workspace = true }
 bytes = { workspace = true, optional = true }
 bounded-vec = { workspace = true }
 log = { workspace = true }
 reqwest = { workspace = true, features = ["json", "stream"], optional = true }
-multiaddr = { workspace = true }
 serde = { workspace = true, default-features = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true, optional = true }
@@ -38,6 +36,6 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [features]
 default = ["client"]
-ts = ["ts-rs", "tari_template_lib_types/ts", "tari_engine_types/ts", "tari_ootle_common_types/ts", "tari_ootle_wallet_sdk/ts"]
+ts = ["ts-rs", "tari_template_lib_types/ts", "tari_engine_types/ts", "tari_ootle_common_types/ts"]
 client = ["dep:reqwest", "dep:thiserror", "dep:serde_urlencoded", "dep:bytes"]
 utoipa = ["dep:utoipa"]

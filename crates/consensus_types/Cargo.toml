@@ -1,5 +1,6 @@
 [package]
 name = "tari_consensus_types"
+description = "Consensus types for Tari Ootle"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

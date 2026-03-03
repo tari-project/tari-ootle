@@ -33,6 +33,37 @@ Tari Ootle is a decentralized application platform built on the Tari Layer 2 net
 
 ---
 
+## Getting Started Workflow
+
+The typical development workflow for building on Tari Ootle:
+
+1. **Generate a template project** from the official starter repo:
+   ```bash
+   cargo generate https://github.com/tari-project/wasm-template
+   ```
+   This repo contains:
+   - `wasm_templates/` — Blank template starters (e.g., `wasm_templates/empty`)
+   - `examples/` — Complete working examples with templates and client apps (e.g., `examples/guessing_game/template`, `examples/guessing_game/cli`)
+
+   When prompted, select the subfolder matching your needs.
+
+2. **Write your template** in `src/lib.rs` inside the `#[template]` module.
+
+3. **Build to WASM:**
+   ```bash
+   cargo build --target wasm32-unknown-unknown --release
+   ```
+
+4. **Test locally** using `tari_template_test_tooling` (see [Testing Templates](#testing-templates)).
+
+5. **Publish to the network** via the Wallet Web UI (see [Publishing Templates](#publishing-templates)).
+
+6. **Interact with your component** using a client app built with `ootle-rs`, the Wallet CLI, or a pre-built example CLI from `cargo generate`.
+
+> **Tip:** For the guessing game and other example templates, pre-published template addresses are available on the Esmeralda testnet. Check the [Tari Ootle guides](https://ootle.tari.com/guides/) for current addresses — you can skip publishing and go straight to interacting.
+
+---
+
 ## Writing a Template
 
 ### Project Setup
@@ -45,7 +76,14 @@ cargo install cargo-generate
 cargo generate https://github.com/tari-project/wasm-template
 ```
 
-This creates:
+The [wasm-template](https://github.com/tari-project/wasm-template) repository offers multiple starting points:
+- **`wasm_templates/empty`** — A minimal blank template to start from scratch
+- **`examples/guessing_game/template`** — A complete guessing game template with tests
+- **`examples/guessing_game/cli`** — A ready-to-use CLI client for the guessing game
+
+When you run `cargo generate`, select the subfolder that matches your goal. For a blank slate, choose a `wasm_templates/` entry. For a working example to learn from, choose from `examples/`.
+
+A generated template project looks like:
 ```
 your_template/
 ├── Cargo.toml
@@ -540,6 +578,8 @@ use ootle_rs::TransactionRequest;
 
 let wasm_binary: Vec<u8> = std::fs::read("target/wasm32-unknown-unknown/release/your_template.wasm")?;
 let unsigned = TransactionBuilder::new(provider.network())
+    .with_auto_fill_inputs()
+    .pay_fee_from_component(account_addr, 250_000u64) // See fee note below
     .publish_template(wasm_binary.try_into().unwrap())
     .build_unsigned();
 let tx = TransactionRequest::default()
@@ -551,9 +591,11 @@ let receipt = provider.send_transaction(tx).await?.watch().await?;
 // Get the new template address from the receipt
 let template_addr = receipt.diff_summary.upped
     .iter()
-    .find_map(|s| s.substate_id.as_template_address())
+    .find_map(|s| s.substate_id.as_template())
     .expect("template address in receipt");
 ```
+
+> **Fee guidance for publishing:** Template publishing fees are proportional to WASM binary size. A typical template (~100-300 KB) needs **150,000-250,000** fee units. If you get an "insufficient fees" error, increase the fee amount. You can use the Wallet Web UI's "Estimate Fee" button to get an accurate estimate before publishing.
 
 ---
 
@@ -706,12 +748,14 @@ let resource_addr = receipt.diff_summary.upped
     .find_map(|s| s.substate_id.as_resource_address().filter(|a| *a != XTR))
     .expect("resource address in receipt");
 
-// Find a template address
+// Find a template address (returns PublishedTemplateAddress)
 let template_addr = receipt.diff_summary.upped
     .iter()
-    .find_map(|s| s.substate_id.as_template_address())
+    .find_map(|s| s.substate_id.as_template())
     .expect("template address in receipt");
 ```
+
+> **Note:** `as_component_address()` and `as_resource_address()` return `ComponentAddress` and `ResourceAddress` directly. For templates, `as_template()` returns `PublishedTemplateAddress`. Call `.as_template_address()` on the result if you need the underlying `TemplateAddress` (a `Hash32`).
 
 ### Read Events from Receipts
 

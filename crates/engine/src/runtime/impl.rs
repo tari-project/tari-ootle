@@ -120,7 +120,7 @@ use tari_template_lib::{
         ValidatorFeePoolAddress,
         access_rules::{ComponentAccessRules, ResourceAccessRules, ResourceAuthAction},
         bytes::Bytes,
-        constants::{IMAGE_URL, TOKEN_SYMBOL, XTR},
+        constants::{IMAGE_URL, TARI_TOKEN, TOKEN_SYMBOL},
         crypto::{RistrettoPublicKeyBytes, UtxoTag},
         engine_args::{SignatureAction, SignatureVerifyArg},
         metadata,
@@ -1749,7 +1749,7 @@ where
                         });
                     }
                     let resource_address = vault.resource_address();
-                    if *resource_address != XTR {
+                    if *resource_address != TARI_TOKEN {
                         return Err(RuntimeError::InvalidArgument {
                             argument: "vault_ref",
                             reason: format!(
@@ -1758,7 +1758,7 @@ where
                             ),
                         });
                     }
-                    let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(XTR))?;
+                    let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(TARI_TOKEN))?;
                     let resource = state_mut.get_resource(&resource_lock)?;
 
                     state_mut.authorization().check_resource_access_rules(
@@ -1769,13 +1769,14 @@ where
 
                     let vault_mut = state_mut.get_vault_mut(&vault_lock)?;
 
-                    let mut container = ResourceContainer::stealth(XTR, Amount::zero());
+                    let mut container = ResourceContainer::stealth(TARI_TOKEN, Amount::zero());
                     if arg.amount.is_positive() {
                         let withdrawn = vault_mut.withdraw(arg.amount)?;
                         container.deposit(withdrawn)?;
                     }
                     if let Some(statement) = arg.statement &&
-                        let Some(revealed) = state_mut.execute_stealth_transfer(XTR.into(), statement, None)?
+                        let Some(revealed) =
+                            state_mut.execute_stealth_transfer(TARI_TOKEN.into(), statement, None)?
                     {
                         container.deposit(revealed)?;
                     }
@@ -2559,7 +2560,7 @@ where
             state_mut.new_substate(address, ClaimedOutputTombstone { value: claim.value })?;
 
             // 3. Create the stealth UTXO
-            let address = UtxoAddress::new(XTR, claim.commitment.into());
+            let address = UtxoAddress::new(TARI_TOKEN, claim.commitment.into());
             let utxo = Utxo::new(UtxoOutput {
                 output: OutputBody {
                     public_nonce: claim.burn_public_key,

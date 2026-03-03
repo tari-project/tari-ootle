@@ -275,7 +275,7 @@ impl Display for MigrateFunction {
 
 #[cfg(test)]
 mod tests {
-    use tari_template_lib_types::constants::XTR;
+    use tari_template_lib_types::constants::TARI_TOKEN;
 
     use super::*;
     use crate::call_args;
@@ -284,7 +284,7 @@ mod tests {
         Instruction::CallFunction {
             address: Default::default(),
             function: "test".try_into().unwrap(),
-            args: call_args![("A", "B"), 123u64, true, vec![1, 2, 3], XTR],
+            args: call_args![("A", "B"), 123u64, true, vec![1, 2, 3], TARI_TOKEN],
         }
     }
 

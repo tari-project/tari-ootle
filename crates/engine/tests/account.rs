@@ -6,7 +6,13 @@ use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine::runtime::{ActionIdent, RuntimeError};
 use tari_ootle_transaction::{Transaction, args};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::types::{Amount, ComponentAddress, access_rules::ComponentAccessRules, constants::XTR, rule};
+use tari_template_lib::types::{
+    Amount,
+    ComponentAddress,
+    access_rules::ComponentAccessRules,
+    constants::TARI_TOKEN,
+    rule,
+};
 use tari_template_test_tooling::{
     TemplateTest,
     support::assert_error::{assert_access_denied_for_action, assert_reject_reason},
@@ -167,7 +173,7 @@ fn attempt_to_overwrite_account() {
 
     let store = test.read_only_state_store();
     let account = store.get_account(source_account).unwrap();
-    let vault = account.get_vault_by_resource(&XTR).unwrap();
+    let vault = account.get_vault_by_resource(&TARI_TOKEN).unwrap();
     // Double check that the source account was not overwritten due to the address collision, if it was, then we'd have
     // no vaults
     let vault = store.get_vault(&vault.vault_id()).expect("no vaults");
@@ -201,7 +207,7 @@ fn create_account_is_idempotent() {
 
     let store = test.read_only_state_store();
     let account = store.get_account(source_account).unwrap();
-    let vault = account.get_vault_by_resource(&XTR).unwrap();
+    let vault = account.get_vault_by_resource(&TARI_TOKEN).unwrap();
     // Double check that the source account was not overwritten due to the address collision, if it was, then we'd have
     // no vaults
     let vault = store.get_vault(&vault.vault_id()).expect("no vaults");
@@ -237,7 +243,7 @@ fn create_account_is_idempotent_with_deposit() {
 
     let store = test.read_only_state_store();
     let account = store.get_account(source_account).unwrap();
-    let vault = account.get_vault_by_resource(&XTR).unwrap();
+    let vault = account.get_vault_by_resource(&TARI_TOKEN).unwrap();
     let vault = store.get_vault(&vault.vault_id()).unwrap();
     assert_eq!(vault.balance(), 1000u64);
 }
@@ -257,7 +263,7 @@ fn gasless() {
     test.execute_expect_success(
         Transaction::builder_localnet()
             .pay_fee_from_component(fee_account, 1000u64)
-            .call_method(user_account, "withdraw", args![XTR, 100])
+            .call_method(user_account, "withdraw", args![TARI_TOKEN, 100])
             .put_last_instruction_output_on_workspace("b")
             .call_method(user2_account, "deposit", args![Workspace("b")])
             .finish()
@@ -270,7 +276,7 @@ fn gasless() {
         .read_only_state_store()
         .get_vaults_for_account(user2_account)
         .unwrap();
-    assert_eq!(vaults.get(&XTR).unwrap().balance(), 100u64);
+    assert_eq!(vaults.get(&TARI_TOKEN).unwrap().balance(), 100u64);
 }
 
 #[test]
@@ -315,7 +321,7 @@ fn custom_access_rules() {
     let (user2_account, user2_account_proof, user2_secret_key) = test.create_funded_account();
     test.execute_expect_success(
         Transaction::builder_localnet()
-            .call_method(user_account, "withdraw", args![XTR, 100])
+            .call_method(user_account, "withdraw", args![TARI_TOKEN, 100])
             .put_last_instruction_output_on_workspace("b")
             .call_method(user2_account, "deposit", args![Workspace("b")])
             .build_and_seal(&user2_secret_key),

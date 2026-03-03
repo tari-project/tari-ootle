@@ -16,16 +16,21 @@ pub const PUBLIC_IDENTITY_RESOURCE_ADDRESS: ResourceAddress = ResourceAddress::n
     1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ]));
 
-/// The Tari network native resource address, used for paying network fees
+/// The Tari network native resource address. This token is used for paying network fees, among other things. It is a
+/// fungible resource with a divisibility of 6, meaning that the smallest unit is 0.000001 TARI.
 /// resource_0101010101010101010101010101010101010101010101010101010101010101
 pub const STEALTH_TARI_RESOURCE_ADDRESS: ResourceAddress =
     ResourceAddress::new(ObjectKey::from_array([1u8; ObjectKey::LENGTH]));
 
 /// Shorthand version of the `STEALTH_TARI_RESOURCE_ADDRESS` constant
+pub const TARI_TOKEN: ResourceAddress = STEALTH_TARI_RESOURCE_ADDRESS;
+#[deprecated(since = "0.24.5", note = "Use TARI_TOKEN instead")]
 pub const XTR: ResourceAddress = STEALTH_TARI_RESOURCE_ADDRESS;
-/// One XTR in the smallest divisible units i.e. 1 XTR = 1,000,000 micro XTR
-/// For example: 10 * MXTR = 10 XTR
-pub const ONE_XTR: u64 = 1_000_000;
+/// One XTR in the smallest divisible units i.e. 1 TARI = 1,000,000 micro TARI
+/// For example: 10 * TARI = 10 TARI = 10,000,000 micro TARI
+pub const TARI: u64 = 1_000_000;
+#[deprecated(since = "0.24.5", note = "Use TARI instead")]
+pub const ONE_XTR: u64 = TARI;
 
 /// Address of testnet faucet component
 pub const XTR_FAUCET_COMPONENT_ADDRESS: ComponentAddress = ComponentAddress::new(ObjectKey::from_array([

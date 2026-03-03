@@ -10,7 +10,7 @@ use tari_engine_types::{
 use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::{
     args::VaultAction,
-    types::{Amount, ComponentAddress, ResourceType, constants::XTR},
+    types::{Amount, ComponentAddress, ResourceType, constants::TARI_TOKEN},
 };
 use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
 
@@ -138,7 +138,7 @@ fn it_rejects_references_to_buckets_that_arent_in_scope() {
 
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
-            .call_method(account, "withdraw", args![XTR, 1000])
+            .call_method(account, "withdraw", args![TARI_TOKEN, 1000])
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(shenanigans, "take_bucket_zero", args![])
             .build_and_seal(&owner_key),

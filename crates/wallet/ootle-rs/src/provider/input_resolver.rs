@@ -16,7 +16,7 @@ use tari_ootle_common_types::{
     substate_type::SubstateType,
 };
 use tari_ootle_transaction::UnsignedTransaction;
-use tari_template_lib_types::{ComponentAddress, constants::XTR};
+use tari_template_lib_types::{ComponentAddress, constants::TARI_TOKEN};
 use tracing::debug;
 
 use crate::{macros::_macro_exports::ResourceAddress, provider::WantInput};
@@ -185,7 +185,7 @@ impl TransactionInputResolver {
                             if vault.resource_address() == resource_address {
                                 // Found the vault for the specified resource
                                 tx_mut.add_input(SubstateRequirement::unversioned(vault_id));
-                                if *resource_address != XTR {
+                                if *resource_address != TARI_TOKEN {
                                     tx_mut.add_input(SubstateRequirement::unversioned(*resource_address));
                                 }
                                 is_satisfied = true;

@@ -13,7 +13,7 @@ use tari_template_lib::types::{
     NonFungibleId,
     ResourceAddress,
     ResourceType,
-    constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS, XTR},
+    constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS, TARI_TOKEN},
 };
 use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
 
@@ -93,7 +93,7 @@ mod assert_bucket_contains {
         let mut test: AssertTest = setup();
 
         // we are going to assert a different resource than the faucet resource
-        let invalid_resource_address = XTR;
+        let invalid_resource_address = TARI_TOKEN;
 
         let reason = test.template_test.execute_expect_failure(
             Transaction::builder_localnet()

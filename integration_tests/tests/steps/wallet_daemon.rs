@@ -16,7 +16,7 @@ use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::models::KeyBranch;
-use tari_template_lib_types::{Amount, bytes::Bytes, constants::XTR, crypto::PedersenCommitmentBytes};
+use tari_template_lib_types::{Amount, bytes::Bytes, constants::TARI_TOKEN, crypto::PedersenCommitmentBytes};
 use tari_transaction_components::{
     tari_amount::T,
     transaction_components::{MemoField, memo_field::TxType},
@@ -295,7 +295,8 @@ async fn check_account_balance_via_daemon(
 ) {
     cucumber_log!("==== Step: {}", step.value);
     // This also refreshes the wallet vaults
-    let current_balance = wallet_daemon_client::get_balance(world, &account_name, &wallet_daemon_name, XTR).await;
+    let current_balance =
+        wallet_daemon_client::get_balance(world, &account_name, &wallet_daemon_name, TARI_TOKEN).await;
     match least_or_most.to_lowercase().as_str() {
         "least" => {
             if current_balance < amount {
@@ -393,7 +394,8 @@ async fn wait_account_balance_via_daemon(
     let mut i = 0;
     loop {
         // This also refreshes the wallet vaults
-        let current_balance = wallet_daemon_client::get_balance(world, &account_name, &wallet_daemon_name, XTR).await;
+        let current_balance =
+            wallet_daemon_client::get_balance(world, &account_name, &wallet_daemon_name, TARI_TOKEN).await;
         if op(current_balance, amount) {
             break;
         }
@@ -495,7 +497,7 @@ async fn when_i_create_transfer_proof_via_wallet_daemon(
         wallet_daemon_name,
         outputs_name,
         // TODO: support for custom stealth resources
-        XTR,
+        TARI_TOKEN,
     )
     .await;
 }
@@ -521,7 +523,7 @@ async fn when_stealth_transfer_via_wallet_daemon(
         amount,
         wallet_daemon_name,
         outputs_name,
-        XTR,
+        TARI_TOKEN,
     )
     .await;
 }

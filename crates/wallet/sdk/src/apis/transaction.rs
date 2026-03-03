@@ -14,7 +14,7 @@ use tari_ootle_common_types::{
     response_status::{ResponseErrorStatus, TransactionStatusResponseError},
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
-use tari_template_lib::types::{ComponentAddress, constants::XTR, crypto::RistrettoPublicKeyBytes};
+use tari_template_lib::types::{ComponentAddress, constants::TARI_TOKEN, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
     models::{NewAccountData, TransactionStatus, WalletLockId, WalletTransaction, WalletTransactionUpdate},
@@ -481,7 +481,7 @@ where
                 SubstateId::ClaimedOutputTombstone(_) => {
                     tx.substates_upsert_root(
                         VersionedSubstateIdRef::new(id, substate.version()),
-                        [XTR.into()].into_iter().collect(),
+                        [TARI_TOKEN.into()].into_iter().collect(),
                         None,
                         None,
                     )?;

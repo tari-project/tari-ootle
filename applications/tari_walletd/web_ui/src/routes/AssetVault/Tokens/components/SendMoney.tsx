@@ -33,8 +33,8 @@ import {
   ResourceAddress,
   ResourceType,
   substateIdToString,
+  TARI_TOKEN,
   UtxoInputSelection,
-  XTR,
 } from "@tari-project/ootle-ts-bindings";
 import { parseAmountToBaseUnits } from "@utils/helpers";
 import { transactionsWaitResult } from "@utils/json_rpc";
@@ -204,7 +204,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
       const currentTransfer = {
         account: substateIdToString(account.component_address),
         amount,
-        resource_address: props.resource_address || XTR,
+        resource_address: props.resource_address || TARI_TOKEN,
         destination_address: transferFormState.address,
         resourceType: props.resource_type,
         output_to_revealed: transferFormState.outputToRevealed,

@@ -24,6 +24,8 @@
 //! tari_template_lib::prelude::*;`
 
 pub use tari_bor;
+#[expect(deprecated)]
+pub use tari_template_lib_types::constants::XTR;
 pub use tari_template_lib_types::{
     AccessRule,
     AuthHookCaller,
@@ -43,7 +45,7 @@ pub use tari_template_lib_types::{
     access_rules::{ComponentAccessRules as AccessRules, RestrictedAccessRule::*, *},
     bytes::Bytes,
     confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
-    constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS, XTR},
+    constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS, TARI_TOKEN},
     crypto::{
         BalanceProofSignature,
         PedersenCommitmentBytes,

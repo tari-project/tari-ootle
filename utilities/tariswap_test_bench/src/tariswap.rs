@@ -9,7 +9,14 @@ use tari_engine_types::indexed_value::decode_value_at_path;
 use tari_ootle_common_types::{SubstateRequirement, optional::Optional};
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::models::Account;
-use tari_template_lib_types::{Amount, ComponentAddress, ResourceAddress, ResourceType, VaultId, constants::XTR};
+use tari_template_lib_types::{
+    Amount,
+    ComponentAddress,
+    ResourceAddress,
+    ResourceType,
+    VaultId,
+    constants::TARI_TOKEN,
+};
 
 use crate::{faucet::Faucet, runner::Runner, timer::TraceTimer};
 
@@ -31,7 +38,7 @@ impl Runner {
         let fee_vault = self
             .sdk
             .accounts_api()
-            .get_vault_by_resource(&in_account.component_address, &XTR)?;
+            .get_vault_by_resource(&in_account.component_address, &TARI_TOKEN)?;
 
         let transaction = self
             .new_transaction_builder()
@@ -42,7 +49,7 @@ impl Runner {
             .then(|mut builder| {
                 for _ in 0..num_tariswaps {
                     builder = builder.call_function(self.tariswap_template, "new", args![
-                        XTR,
+                        TARI_TOKEN,
                         faucet.resource_address,
                         1 // fee
                     ]);
@@ -52,7 +59,7 @@ impl Runner {
             .with_inputs([
                 SubstateRequirement::unversioned(in_account.component_address),
                 SubstateRequirement::unversioned(fee_vault.id),
-                SubstateRequirement::unversioned(XTR),
+                SubstateRequirement::unversioned(TARI_TOKEN),
                 SubstateRequirement::unversioned(faucet.resource_address),
             ])
             .build_and_seal(&key.key);
@@ -109,7 +116,7 @@ impl Runner {
                 let xtr_vault = self
                     .sdk
                     .accounts_api()
-                    .get_vault_by_resource(&account.component_address, &XTR)?;
+                    .get_vault_by_resource(&account.component_address, &TARI_TOKEN)?;
                 let faucet_vault = self
                     .sdk
                     .accounts_api()
@@ -133,7 +140,7 @@ impl Runner {
                     ])
                     .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
                     .pay_fee_from_component(account.component_address, 2000u64)
-                    .call_method(account.component_address, "withdraw", args![XTR, amount_a])
+                    .call_method(account.component_address, "withdraw", args![TARI_TOKEN, amount_a])
                     .put_last_instruction_output_on_workspace("a")
                     .call_method(account.component_address, "withdraw", args![
                         faucet.resource_address,
@@ -233,7 +240,7 @@ impl Runner {
                 let xtr_vault = self
                     .sdk
                     .accounts_api()
-                    .get_vault_by_resource(&account.component_address, &XTR)?;
+                    .get_vault_by_resource(&account.component_address, &TARI_TOKEN)?;
                 let faucet_vault = self
                     .sdk
                     .accounts_api()
@@ -252,21 +259,21 @@ impl Runner {
                         SubstateRequirement::unversioned(faucet_vault.id),
                         SubstateRequirement::unversioned(tariswap.component_address),
                         SubstateRequirement::unversioned(faucet.resource_address),
-                        SubstateRequirement::unversioned(XTR),
+                        SubstateRequirement::unversioned(TARI_TOKEN),
                         SubstateRequirement::unversioned(tariswap.lp_resource_address),
                     ])
                     .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
                     .pay_fee_from_component(account.component_address, SWAP_FEE)
-                    .call_method(tariswap.component_address, "get_pool_balance", args![XTR])
+                    .call_method(tariswap.component_address, "get_pool_balance", args![TARI_TOKEN])
                     .call_method(tariswap.component_address, "get_pool_balance", args![
                         faucet.resource_address,
                     ])
-                    .call_method(tariswap.component_address, "get_pool_ratio", args![XTR, 1000])
+                    .call_method(tariswap.component_address, "get_pool_ratio", args![TARI_TOKEN, 1000])
                     .call_method(tariswap.component_address, "get_pool_ratio", args![
                         faucet.resource_address,
                         1000
                     ])
-                    .call_method(account.component_address, "withdraw", args![XTR, amount_a_for_b])
+                    .call_method(account.component_address, "withdraw", args![TARI_TOKEN, amount_a_for_b])
                     .put_last_instruction_output_on_workspace("a")
                     .call_method(tariswap.component_address, "swap", args![
                         Workspace("a"),
@@ -309,7 +316,7 @@ impl Runner {
                 let xtr_vault = self
                     .sdk
                     .accounts_api()
-                    .get_vault_by_resource(&account.component_address, &XTR)?;
+                    .get_vault_by_resource(&account.component_address, &TARI_TOKEN)?;
                 let faucet_vault = self
                     .sdk
                     .accounts_api()
@@ -323,16 +330,16 @@ impl Runner {
                         SubstateRequirement::unversioned(faucet_vault.id),
                         SubstateRequirement::unversioned(tariswap.component_address),
                         SubstateRequirement::unversioned(faucet.resource_address),
-                        SubstateRequirement::unversioned(XTR),
+                        SubstateRequirement::unversioned(TARI_TOKEN),
                         SubstateRequirement::unversioned(tariswap.lp_resource_address),
                     ])
                     .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
                     .pay_fee_from_component(account.component_address, SWAP_FEE)
-                    .call_method(tariswap.component_address, "get_pool_balance", args![XTR])
+                    .call_method(tariswap.component_address, "get_pool_balance", args![TARI_TOKEN])
                     .call_method(tariswap.component_address, "get_pool_balance", args![
                         faucet.resource_address
                     ])
-                    .call_method(tariswap.component_address, "get_pool_ratio", args![XTR, 1000])
+                    .call_method(tariswap.component_address, "get_pool_ratio", args![TARI_TOKEN, 1000])
                     .call_method(tariswap.component_address, "get_pool_ratio", args![
                         faucet.resource_address,
                         1000
@@ -342,7 +349,7 @@ impl Runner {
                         amount_b_for_a
                     ])
                     .put_last_instruction_output_on_workspace("b")
-                    .call_method(tariswap.component_address, "swap", args![Workspace("b"), XTR,])
+                    .call_method(tariswap.component_address, "swap", args![Workspace("b"), TARI_TOKEN,])
                     .put_last_instruction_output_on_workspace("swapped")
                     .call_method(account.component_address, "deposit", args![Workspace("swapped")])
                     .finish();

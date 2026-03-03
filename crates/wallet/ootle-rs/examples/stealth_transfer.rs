@@ -118,7 +118,7 @@ async fn main() {
         .spend_stealth_input(sender_address.clone(), input_to_spend[0].commitment())
         // The transfer will output 0.000500 XTR as revealed funds to pay for the fee
         .to_revealed_output(500u64)
-        // Spend to a new output (8 XTR) that we'll generate for the recipient address.
+        // Spend to a new output (8 TARI) that we'll generate for the recipient address.
         .to_stealth_output(
             Output::new(recipient, tari_token, const_nonzero_u64!(8 * TARI))
                 // NOTE: this memo is stored on-chain, and longer memos increase fees. It is encrypted so that only the recipient can read it.

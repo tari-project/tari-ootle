@@ -25,16 +25,24 @@ import { useSubmitManifest } from "@api/hooks/useTransactions";
 import PageHeading from "@components/PageHeading";
 import { DataTableCell, StyledPaper } from "@components/StyledComponents";
 import {
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   FormControl,
+  IconButton,
   InputLabel,
   MenuItem,
   Select,
   Stack,
+  Tab,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableRow,
+  Tabs,
   TextareaAutosize,
   useTheme,
 } from "@mui/material";
@@ -44,8 +52,9 @@ import Button from "@mui/material/Button";
 import Grid from "@mui/material/Grid";
 import TextField from "@mui/material/TextField";
 import useManifestCodeStore from "@store/manifestStore";
+import type { ManifestTab } from "@store/manifestStore";
 import { rejectReasonToString, substateIdToString } from "@tari-project/ootle-ts-bindings";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 function Manifest() {
   return (
@@ -110,18 +119,15 @@ function ManifestEditor() {
   return (
     <>
       <Grid size={12}>
-        {error && (
-          <Box sx={{ color: "red" }}>
-            <p>{error.message}</p>
-          </Box>
-        )}
-        {finalizeError && (
-          <Box sx={{ color: "red" }}>
-            <p>{finalizeError}</p>
-          </Box>
-        )}
-
         <form onSubmit={handleSubmit}>
+          <ManifestTabBar
+            tabs={manifest.tabs}
+            activeTabId={manifest.activeTabId}
+            onSelect={manifest.setActiveTab}
+            onAdd={manifest.addTab}
+            onRemove={manifest.removeTab}
+            onRename={manifest.renameTab}
+          />
           <TextareaAutosize
             minRows={25}
             aria-label="Manifest code editor"
@@ -130,10 +136,11 @@ function ManifestEditor() {
             onChange={(e) => manifest.setCode(e.target.value)}
             style={{
               width: "100%",
-              borderRadius: 8,
+              borderRadius: "0 0 8px 8px",
               padding: "8px 32px",
               fontFamily: "monospace",
               backgroundColor: theme.palette.accent.background,
+              color: theme.palette.text.primary,
             }}
           />
           <Box className="flex-container" style={{ justifyContent: "flex-start" }}>
@@ -144,7 +151,7 @@ function ManifestEditor() {
               onRename={manifest.renameVariable}
             />
           </Box>
-          <Box className="flex-container" style={{ justifyContent: "flex-start" }}>
+          <Box className="flex-container" style={{ justifyContent: "flex-end" }}>
             <TextField
               name="max-fee"
               placeholder="Max fee"
@@ -156,9 +163,179 @@ function ManifestEditor() {
               {isSubmittingManifest ? "Submitting..." : fee ? "Submit" : "Estimate fee"}
             </Button>
           </Box>
+          {error && (
+            <Box sx={{ color: "red" }}>
+              <p>{error.message}</p>
+            </Box>
+          )}
+          {finalizeError && (
+            <Box sx={{ color: "red" }}>
+              <p>{finalizeError}</p>
+            </Box>
+          )}
         </form>
       </Grid>
     </>
+  );
+}
+
+function ManifestTabBar({
+  tabs,
+  activeTabId,
+  onSelect,
+  onAdd,
+  onRemove,
+  onRename,
+}: {
+  tabs: ManifestTab[];
+  activeTabId: string;
+  onSelect: (id: string) => void;
+  onAdd: () => void;
+  onRemove: (id: string) => void;
+  onRename: (id: string, name: string) => void;
+}) {
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const tabToDelete = confirmDeleteId ? tabs.find((t) => t.id === confirmDeleteId) : null;
+
+  return (
+    <Box sx={{ display: "flex", alignItems: "center", borderBottom: 1, borderColor: "divider" }}>
+      <Tabs
+        value={activeTabId}
+        onChange={(_, id) => onSelect(id)}
+        variant="scrollable"
+        scrollButtons="auto"
+        sx={{ flexGrow: 1 }}
+      >
+        {tabs.map((tab) => (
+          <Tab
+            key={tab.id}
+            value={tab.id}
+            label={
+              <TabLabel
+                tab={tab}
+                isActive={tab.id === activeTabId}
+                canClose={tabs.length > 1}
+                onClose={() => setConfirmDeleteId(tab.id)}
+                onRename={(name) => onRename(tab.id, name)}
+              />
+            }
+            sx={{ textTransform: "none", minHeight: 42, py: 0 }}
+          />
+        ))}
+      </Tabs>
+      <IconButton size="small" onClick={onAdd} title="New tab" sx={{ ml: 0.5, mr: 1 }}>
+        +
+      </IconButton>
+
+      <Dialog open={!!confirmDeleteId} onClose={() => setConfirmDeleteId(null)}>
+        <DialogTitle>Delete tab</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Delete &quot;{tabToDelete?.name}&quot;? Any unsaved manifest code in this tab will be lost.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDeleteId(null)}>Cancel</Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={() => {
+              onRemove(confirmDeleteId!);
+              setConfirmDeleteId(null);
+            }}
+          >
+            Delete Tab
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+}
+
+function TabLabel({
+  tab,
+  isActive,
+  canClose,
+  onClose,
+  onRename,
+}: {
+  tab: ManifestTab;
+  isActive: boolean;
+  canClose: boolean;
+  onClose: () => void;
+  onRename: (name: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(tab.name);
+
+  const commit = () => {
+    setEditing(false);
+    const trimmed = draft.trim();
+    if (trimmed && trimmed !== tab.name) {
+      onRename(trimmed);
+    } else {
+      setDraft(tab.name);
+    }
+  };
+
+  if (editing) {
+    return (
+      <TextField
+        size="small"
+        variant="standard"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") {
+            setDraft(tab.name);
+            setEditing(false);
+          }
+        }}
+        onClick={(e) => e.stopPropagation()}
+        autoFocus
+        sx={{ minWidth: 80, maxWidth: 160 }}
+        inputProps={{ style: { fontSize: "0.875rem", padding: "2px 0" } }}
+      />
+    );
+  }
+
+  return (
+    <Stack direction="row" alignItems="center" spacing={0.5}>
+      <Box
+        component="span"
+        onDoubleClick={(e) => {
+          if (isActive) {
+            e.stopPropagation();
+            setDraft(tab.name);
+            setEditing(true);
+          }
+        }}
+      >
+        {tab.name}
+      </Box>
+      {canClose && (
+        <Box
+          component="span"
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose();
+          }}
+          sx={{
+            ml: 0.5,
+            px: 0.5,
+            lineHeight: 1,
+            fontSize: "1rem",
+            cursor: "pointer",
+            borderRadius: "50%",
+            "&:hover": { backgroundColor: "action.hover" },
+          }}
+        >
+          &times;
+        </Box>
+      )}
+    </Stack>
   );
 }
 
@@ -223,8 +400,10 @@ function VariableEditor({
   onRemove: (key: string) => void;
   onRename: (oldKey: string, newKey: string) => void;
 }) {
+  const [showInputs, setShowInputs] = useState(false);
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
+  const keyRef = useRef<HTMLInputElement>(null);
   const { data: accountsData } = useAccountsList(0, 100);
 
   const handleAddAccount = (e: SelectChangeEvent) => {
@@ -234,52 +413,16 @@ function VariableEditor({
     onAdd(varName, address);
   };
 
+  const handleAdd = () => {
+    if (!key.trim()) return;
+    onAdd(key, value);
+    setKey("");
+    setValue("");
+    setShowInputs(false);
+  };
+
   return (
     <Grid size={12} mt={2}>
-      <Stack direction="row" spacing={1} alignItems="center" marginBottom={2}>
-        <TextField
-          name="variable-key"
-          placeholder="Variable key"
-          value={key}
-          onChange={(e) => setKey(e.target.value)}
-        />
-        <TextField
-          name="variable-value"
-          placeholder="Variable value"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-        />
-        <Button
-          variant="contained"
-          color="primary"
-          onClick={() => {
-            onAdd(key, value);
-            setKey("");
-            setValue("");
-          }}
-          style={{
-            minHeight: "52px",
-          }}
-        >
-          Add Variable
-        </Button>
-        {accountsData?.accounts && accountsData.accounts.length > 0 && (
-          <FormControl style={{ minWidth: "200px" }}>
-            <InputLabel id="add-account-label">Add Account</InputLabel>
-            <Select labelId="add-account-label" label="Add Account" value="" onChange={handleAddAccount}>
-              {accountsData.accounts.map(({ account }) => {
-                const address = substateIdToString(account.component_address);
-                return (
-                  <MenuItem key={address} value={address}>
-                    {account.name || address}
-                  </MenuItem>
-                );
-              })}
-            </Select>
-          </FormControl>
-        )}
-      </Stack>
-
       {Object.keys(variables).length > 0 && (
         <Table
           sx={{
@@ -290,7 +433,7 @@ function VariableEditor({
             <TableRow>
               <TableCell>Key</TableCell>
               <TableCell>Value</TableCell>
-              <TableCell>Actions</TableCell>
+              <TableCell />
             </TableRow>
           </TableHead>
           <TableBody>
@@ -301,14 +444,89 @@ function VariableEditor({
                 </DataTableCell>
                 <DataTableCell>{v}</DataTableCell>
                 <DataTableCell>
-                  <Button variant="outlined" color="error" onClick={() => onRemove(k)}>
-                    Remove
-                  </Button>
+                  <IconButton size="small" onClick={() => onRemove(k)} title="Remove variable">
+                    &times;
+                  </IconButton>
                 </DataTableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
+      )}
+
+      {showInputs ? (
+        <Stack direction="row" spacing={1} alignItems="center" marginBottom={2}>
+          <TextField
+            name="variable-key"
+            placeholder="Variable key"
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleAdd();
+              if (e.key === "Escape") {
+                setShowInputs(false);
+                setKey("");
+                setValue("");
+              }
+            }}
+            inputRef={keyRef}
+            autoFocus
+          />
+          <TextField
+            name="variable-value"
+            placeholder="Variable value"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleAdd();
+              if (e.key === "Escape") {
+                setShowInputs(false);
+                setKey("");
+                setValue("");
+              }
+            }}
+          />
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={handleAdd}
+            style={{ minHeight: "52px" }}
+          >
+            Add
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={() => {
+              setShowInputs(false);
+              setKey("");
+              setValue("");
+            }}
+            style={{ minHeight: "52px" }}
+          >
+            Cancel
+          </Button>
+        </Stack>
+      ) : (
+        <Stack direction="row" spacing={1} alignItems="center" marginBottom={2}>
+          <IconButton size="small" onClick={() => setShowInputs(true)} title="Add variable">
+            +
+          </IconButton>
+          {accountsData?.accounts && accountsData.accounts.length > 0 && (
+            <FormControl style={{ minWidth: "200px" }}>
+              <InputLabel id="add-account-label">Add Account</InputLabel>
+              <Select labelId="add-account-label" label="Add Account" value="" onChange={handleAddAccount}>
+                {accountsData.accounts.map(({ account }) => {
+                  const address = substateIdToString(account.component_address);
+                  return (
+                    <MenuItem key={address} value={address}>
+                      {account.name || address}
+                    </MenuItem>
+                  );
+                })}
+              </Select>
+            </FormControl>
+          )}
+        </Stack>
       )}
     </Grid>
   );

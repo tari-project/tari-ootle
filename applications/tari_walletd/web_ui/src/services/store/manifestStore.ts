@@ -32,41 +32,147 @@ fn main() {
    // let bucket = account.withdraw(1000);
 }`;
 
-interface Store {
+export interface ManifestTab {
+  id: string;
+  name: string;
   code: string;
-  setCode: (code: string) => void;
   variables: Record<string, string>;
+}
+
+interface Store {
+  tabs: ManifestTab[];
+  activeTabId: string;
+
+  // Active tab convenience accessors
+  code: string;
+  variables: Record<string, string>;
+
+  // Tab management
+  addTab: () => void;
+  removeTab: (id: string) => void;
+  setActiveTab: (id: string) => void;
+  renameTab: (id: string, name: string) => void;
+
+  // Active tab code/variable operations
+  setCode: (code: string) => void;
   addVariable: (key: string, value: string) => void;
   removeVariable: (key: string) => void;
   renameVariable: (oldKey: string, newKey: string) => void;
 }
 
+let nextId = 1;
+function generateId(): string {
+  return `tab_${Date.now()}_${nextId++}`;
+}
+
+function createTab(name: string): ManifestTab {
+  return { id: generateId(), name, code: DEFAULT_CODE, variables: {} };
+}
+
+function nextTabName(tabs: ManifestTab[]): string {
+  let i = 1;
+  const names = new Set(tabs.map((t) => t.name));
+  while (names.has(`Manifest ${i}`)) i++;
+  return `Manifest ${i}`;
+}
+
+function updateActiveTab(state: Store, patch: Partial<ManifestTab>): Partial<Store> {
+  const tabs = state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, ...patch } : t));
+  const active = tabs.find((t) => t.id === state.activeTabId)!;
+  return { tabs, code: active.code, variables: active.variables };
+}
+
+const defaultTab = createTab("Manifest 1");
+
 const useManifestCodeStore = create<Store>()(
   persist<Store>(
     (set) => ({
-      code: DEFAULT_CODE,
-      setCode: (code: string) => set(() => ({ code })),
-      variables: {},
-      addVariable: (key: string, value: string) =>
+      tabs: [defaultTab],
+      activeTabId: defaultTab.id,
+      code: defaultTab.code,
+      variables: defaultTab.variables,
+
+      addTab: () =>
+        set((state) => {
+          const tab = createTab(nextTabName(state.tabs));
+          return {
+            tabs: [...state.tabs, tab],
+            activeTabId: tab.id,
+            code: tab.code,
+            variables: tab.variables,
+          };
+        }),
+
+      removeTab: (id: string) =>
+        set((state) => {
+          if (state.tabs.length <= 1) return state;
+          const idx = state.tabs.findIndex((t) => t.id === id);
+          const tabs = state.tabs.filter((t) => t.id !== id);
+          let activeTabId = state.activeTabId;
+          if (activeTabId === id) {
+            const newIdx = Math.min(idx, tabs.length - 1);
+            activeTabId = tabs[newIdx].id;
+          }
+          const active = tabs.find((t) => t.id === activeTabId)!;
+          return { tabs, activeTabId, code: active.code, variables: active.variables };
+        }),
+
+      setActiveTab: (id: string) =>
+        set((state) => {
+          const tab = state.tabs.find((t) => t.id === id);
+          if (!tab) return state;
+          return { activeTabId: id, code: tab.code, variables: tab.variables };
+        }),
+
+      renameTab: (id: string, name: string) =>
         set((state) => ({
-          variables: {
-            ...state.variables,
-            [key]: value,
-          },
+          tabs: state.tabs.map((t) => (t.id === id ? { ...t, name } : t)),
         })),
+
+      setCode: (code: string) => set((state) => updateActiveTab(state, { code })),
+
+      addVariable: (key: string, value: string) =>
+        set((state) => {
+          const active = state.tabs.find((t) => t.id === state.activeTabId)!;
+          return updateActiveTab(state, { variables: { ...active.variables, [key]: value } });
+        }),
+
       removeVariable: (key: string) =>
         set((state) => {
-          const { [key]: _, ...rest } = state.variables;
-          return { variables: rest };
+          const active = state.tabs.find((t) => t.id === state.activeTabId)!;
+          const { [key]: _, ...rest } = active.variables;
+          return updateActiveTab(state, { variables: rest });
         }),
+
       renameVariable: (oldKey: string, newKey: string) =>
         set((state) => {
-          if (oldKey === newKey || !(oldKey in state.variables)) return state;
-          const entries = Object.entries(state.variables).map(([k, v]) => (k === oldKey ? [newKey, v] : [k, v]));
-          return { variables: Object.fromEntries(entries) };
+          const active = state.tabs.find((t) => t.id === state.activeTabId)!;
+          if (oldKey === newKey || !(oldKey in active.variables)) return state;
+          const entries = Object.entries(active.variables).map(([k, v]) => (k === oldKey ? [newKey, v] : [k, v]));
+          return updateActiveTab(state, { variables: Object.fromEntries(entries) });
         }),
     }),
-    { name: "manifest-code" },
+    {
+      name: "manifest-code",
+      migrate: (persisted: unknown, version: number) => {
+        const state = persisted as Record<string, unknown>;
+        // Migrate from single-tab format (no tabs array) to multi-tab format
+        if (version === 0 && state && !state.tabs) {
+          const code = (state.code as string) || DEFAULT_CODE;
+          const variables = (state.variables as Record<string, string>) || {};
+          const tab: ManifestTab = { id: generateId(), name: "Manifest 1", code, variables };
+          return {
+            ...state,
+            tabs: [tab],
+            activeTabId: tab.id,
+            code: tab.code,
+            variables: tab.variables,
+          } as Store;
+        }
+        return state as unknown as Store;
+      },
+      version: 1,
+    },
   ),
 );
 

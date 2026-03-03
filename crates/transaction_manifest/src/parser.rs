@@ -36,7 +36,7 @@ use tari_template_lib::types::{
     Metadata,
     NonFungibleId,
     TemplateAddress,
-    constants::XTR,
+    constants::TARI_TOKEN,
     hex::bytes_from_hex,
 };
 
@@ -400,7 +400,7 @@ fn build_arguments(args: Punctuated<Expr, Comma>) -> Result<Vec<ManifestLiteral>
                 if let Some(seg) = path.segments.first() {
                     if seg.ident == "XTR" || seg.ident == "TARI" {
                         Ok(ManifestLiteral::Special(SpecialLiteral::Address(OrVar::Value(
-                            XTR.into(),
+                            TARI_TOKEN.into(),
                         ))))
                     } else {
                         Ok(ManifestLiteral::Workspace(seg.ident.clone()))

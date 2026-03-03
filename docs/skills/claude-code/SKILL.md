@@ -261,7 +261,7 @@ There are 4 resource types:
 - **Public Fungible** — Interchangeable tokens (like ERC-20), amounts visible on-chain
 - **Public Non-Fungible** — Unique tokens (like ERC-721), metadata visible on-chain
 - **Confidential** — Fungible tokens with hidden amounts (Pedersen commitments)
-- **Stealth** — Confidential UTXOs with hidden owners (XTR/tXTR is a stealth resource)
+- **Stealth** — Confidential UTXOs with hidden owners (TARI/tTARI is a stealth resource)
 
 ### Creating Resources
 
@@ -301,7 +301,7 @@ let conf_addr: ResourceAddress = ResourceBuilder::confidential()
     .with_view_key(CallerContext::transaction_signer_public_key())
     .build();
 
-// ─── Stealth (like XTR) ───
+// ─── Stealth (like TARI) ───
 let stealth_addr: ResourceAddress = ResourceBuilder::stealth()
     .with_token_symbol("sTOK")
     .build();
@@ -563,7 +563,7 @@ fn generate_number() -> u8 {
 
 1. Open the Tari Ootle Wallet web UI (default: `http://127.0.0.1:5100`)
 2. Click "Publish Template" on the Home page
-3. Select fee account with tXTR (testnet Tari)
+3. Select fee account with tTARI (testnet Tari)
 4. Upload the `.wasm` file from `target/wasm32-unknown-unknown/release/`
 5. Click "Estimate Fee" then "Publish Template"
 6. Find the template address under "Templates" in the sidebar
@@ -634,10 +634,10 @@ use ootle_rs::{
     TransactionRequest,
     builtin_templates::{UnsignedTransactionBuilder, faucet::IFaucet},
 };
-use tari_template_lib_types::constants::ONE_XTR;
+use tari_template_lib_types::constants::TARI;
 
 let unsigned_tx = IFaucet::new(&provider)
-    .take_faucet_funds(10 * ONE_XTR)    // Request 10 XTR
+    .take_faucet_funds(10 * TARI)    // Request 10 TARI
     .pay_fee(500u64)                     // Fee for the transaction
     .prepare()
     .await?;
@@ -739,11 +739,11 @@ let component_addr = receipt.diff_summary.upped
     .find_map(|s| s.substate_id.as_component_address())
     .expect("component address in receipt");
 
-// Find a resource address (excluding native XTR)
-use tari_template_lib_types::constants::XTR;
+// Find a resource address (excluding native TARI)
+use tari_template_lib_types::constants::TARI;
 let resource_addr = receipt.diff_summary.upped
     .iter()
-    .find_map(|s| s.substate_id.as_resource_address().filter(|a| *a != XTR))
+    .find_map(|s| s.substate_id.as_resource_address().filter(|a| *a != TARI))
     .expect("resource address in receipt");
 
 // Find a template address (returns PublishedTemplateAddress)
@@ -849,7 +849,7 @@ let result: T = test.call_function("TemplateName", "function", call_args![...], 
 let result: T = test.call_method(component_addr, "method", call_args![...], proofs);
 
 // ─── Account Management ───
-let (account, proof, secret) = test.create_funded_account();  // 1B micro-XTR balance
+let (account, proof, secret) = test.create_funded_account();  // 1B micro-TARI balance
 let (account, proof, secret) = test.create_empty_account();
 
 // ─── Low-Level Execution ───
@@ -1211,7 +1211,7 @@ The `tari_template_lib::prelude::*` import gives you:
 | **Amounts** | `Amount` |
 | **Crypto** | `RistrettoPublicKeyBytes`, `PublicKey`, `Signature` |
 | **Metadata** | `Metadata` |
-| **Constants** | `XTR`, `PUBLIC_IDENTITY_RESOURCE_ADDRESS`, `STEALTH_TARI_RESOURCE_ADDRESS` |
+| **Constants** | `TARI`, `PUBLIC_IDENTITY_RESOURCE_ADDRESS`, `STEALTH_TARI_RESOURCE_ADDRESS` |
 | **Macros** | `template`, `args!`, `rule!`, `metadata!`, `debug!`, `info!`, `warn!`, `error!` |
 | **Functions** | `emit_event` |
 | **Modules** | `rand` (for `random_bytes`, `random_u32`) |

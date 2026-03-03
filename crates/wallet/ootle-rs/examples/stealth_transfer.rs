@@ -23,7 +23,7 @@ use tari_ootle_common_types::{
 use tari_ootle_transaction::Transaction;
 use tari_template_lib_types::{
     UtxoAddress,
-    constants::{ONE_XTR, XTR},
+    constants::{TARI, TARI_TOKEN},
 };
 
 #[tokio::main]
@@ -68,21 +68,21 @@ async fn main() {
     let latest_epoch = provider.get_epoch().await.unwrap();
     println!("Latest epoch: {latest_epoch}");
 
-    // Send some XTR to another address. You can replace XTR with any other fungible token resource address.
-    let xtr_token = XTR; // resource_address!("resource_0123456789abcdef...");
+    // Send some TARI to another address. You can replace TARI with any other fungible token resource address.
+    let tari_token = TARI_TOKEN; // resource_address!("resource_0123456789abcdef...");
 
-    const INPUT_AMOUNT: u64 = 10 * ONE_XTR + 1000 - 500;
+    const INPUT_AMOUNT: u64 = 10 * TARI + 1000 - 500;
     // This builder creates a stealth transfer statement (spend proof). This is added to the transaction later.
-    let (faucet_transfer, required_signers) = StealthTransfer::new(xtr_token, &provider)
+    let (faucet_transfer, required_signers) = StealthTransfer::new(tari_token, &provider)
         // Tell the transfer to expect 10XTR (+1000 to cover fees) as revealed funds from a bucket (the faucet looks at this value and automatically provides the bucket).
-        .spend_revealed_input(10 * ONE_XTR + 1000)
+        .spend_revealed_input(10 * TARI + 1000)
         // The transfer will output 500 micro XTR as revealed funds to pay for the fee
         .to_revealed_output(500u64)
         // Spend the remaining value (10XTR - fee) into an output for the sender address. NOTE: the sender address is not actually included in the output (privacy!),
         // but a supporting wallet that holds the secret key would be able to spend the output.
         // You can specify any address here and split up into many outputs as needed, as long as ∑inputs == ∑outputs.
         .to_stealth_output(
-            Output::new(sender_address.clone(), xtr_token, const_nonzero_u64!(INPUT_AMOUNT))
+            Output::new(sender_address.clone(), tari_token, const_nonzero_u64!(INPUT_AMOUNT))
         )
         .prepare()
         .await
@@ -112,7 +112,7 @@ async fn main() {
 
     // Then we'll send it to the recipient
     // This builder creates a stealth transfer statement (spend proof). This is added to the transaction later.
-    let (transfer, required_signers) = StealthTransfer::new(xtr_token, &provider)
+    let (transfer, required_signers) = StealthTransfer::new(tari_token, &provider)
         // Spend an existing stealth input that is controlled by the sender address.
         // This is worth 10.000500 XTR
         .spend_stealth_input(sender_address.clone(), input_to_spend[0].commitment())
@@ -120,12 +120,12 @@ async fn main() {
         .to_revealed_output(500u64)
         // Spend to a new output (8 XTR) that we'll generate for the recipient address.
         .to_stealth_output(
-            Output::new(recipient, xtr_token, const_nonzero_u64!(8 * ONE_XTR))
+            Output::new(recipient, tari_token, const_nonzero_u64!(8 * TARI))
                 // NOTE: this memo is stored on-chain, and longer memos increase fees. It is encrypted so that only the recipient can read it.
                 .with_memo_message("transfer from ootle-rs!")
         )
         // Send some change (2 XTR) back to ourselves (NOTE once this example exits, we'll lose the keys for this output!)
-        .to_stealth_output(Output::new(sender_address, xtr_token, const_nonzero_u64!(2*ONE_XTR)))
+        .to_stealth_output(Output::new(sender_address, tari_token, const_nonzero_u64!(2*TARI)))
         // Load the inputs from the provider to build the transfer statement. NOTE: this will error if the total input amounts != total output amounts.
         .prepare()
         .await
@@ -136,14 +136,14 @@ async fn main() {
     let unsigned_tx = Transaction::builder(provider.network())
         .with_fee_instructions_builder(|builder| {
             builder
-                .stealth_transfer(xtr_token, transfer)
+                .stealth_transfer(tari_token, transfer)
                 .put_last_instruction_output_on_workspace("fees")
                 .pay_fee_from_bucket("fees")
         })
         // This isn't necessary because all transactions implicitly use XTR for fees, but you'd need to include this if other resources are being used
-        .add_input(xtr_token)
+        .add_input(tari_token)
         // Add the UTXO substate as an input. This will be DOWNed (destroyed) if the transaction is successful.
-        .add_input(UtxoAddress::new(xtr_token, input_to_spend[0].commitment().into()))
+        .add_input(UtxoAddress::new(tari_token, input_to_spend[0].commitment().into()))
         .build_unsigned();
 
     // This authorizer adds the required (stealth) signatures to spend inputs

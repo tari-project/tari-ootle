@@ -13,7 +13,7 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement, SubstateRequirementRef};
-use tari_template_lib_types::{ComponentAddress, constants::XTR, stealth::StealthTransferStatement};
+use tari_template_lib_types::{ComponentAddress, constants::TARI_TOKEN, stealth::StealthTransferStatement};
 
 use crate::{
     Instruction,
@@ -26,7 +26,7 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::transaction::transaction";
 
-static XTR_REQUIREMENT: SubstateRequirement = SubstateRequirement::new(SubstateId::Resource(XTR), None);
+static XTR_REQUIREMENT: SubstateRequirement = SubstateRequirement::new(SubstateId::Resource(TARI_TOKEN), None);
 
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -117,7 +117,7 @@ impl TransactionV1 {
     pub fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateRequirementRef<'_>> + '_ {
         self.inputs()
             .iter()
-            .filter(|id| id.substate_id().as_resource_address() != Some(XTR))
+            .filter(|id| id.substate_id().as_resource_address() != Some(TARI_TOKEN))
             // Ensure XTR requirement is always included since every transaction needs to pay fees in XTR
             .chain(iter::once(&XTR_REQUIREMENT))
             .map(Into::into)

@@ -8,7 +8,7 @@ use tari_ootle_transaction::{TransactionBuilder, UnsignedTransaction, args};
 use tari_template_lib_types::{
     Amount,
     UtxoAddress,
-    constants::{ONE_XTR, XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
+    constants::{TARI, TARI_TOKEN, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
     stealth::StealthTransferStatement,
 };
 
@@ -69,7 +69,7 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
             let component_addr = self.default_signer_address().to_account_address();
             self.want_list.insert(WantInput::VaultForResource {
                 component_address: component_addr,
-                resource_address: XTR,
+                resource_address: TARI_TOKEN,
                 required: true,
             });
             self.builder = self.builder.pay_fee_from_component(component_addr, amount);
@@ -84,7 +84,7 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
     /// Takes the maximum permitted funds from the faucet and deposits them into the default signer's account.
     pub fn take_max_faucet_funds(self) -> Self {
         // NOTE: that the actual maximum is currently 10_000, but we set it to 1_000 here to be conservative.
-        const FAUCET_MAX_TAKE_AMOUNT: u64 = 1_000 * ONE_XTR;
+        const FAUCET_MAX_TAKE_AMOUNT: u64 = 1_000 * TARI;
         self.take_faucet_funds(FAUCET_MAX_TAKE_AMOUNT)
     }
 
@@ -110,7 +110,7 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
         // Request all UTXO inputs
         for input in &transfer.inputs_statement.inputs {
             self.want_list.insert(WantInput::SpecificSubstate {
-                substate_id: UtxoAddress::new(XTR, input.commitment.into()).into(),
+                substate_id: UtxoAddress::new(TARI_TOKEN, input.commitment.into()).into(),
                 required: true,
             });
         }
@@ -152,7 +152,7 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
         let recipient_account_addr = self.default_signer_address().to_account_address();
         self.want_list.insert(WantInput::VaultForResource {
             component_address: recipient_account_addr,
-            resource_address: XTR,
+            resource_address: TARI_TOKEN,
             //     If it doesn't exist, deposit will create it
             required: false,
         });

@@ -14,7 +14,7 @@ use ootle_rs::{
     wallet::OotleWallet,
 };
 use tari_ootle_common_types::{Network, displayable::Displayable};
-use tari_template_lib_types::constants::{ONE_XTR, XTR};
+use tari_template_lib_types::constants::{TARI, TARI_TOKEN};
 
 #[tokio::main]
 async fn main() {
@@ -61,7 +61,7 @@ async fn main() {
 
     // First let's transfer some faucet XTR to our account to have funds for fees and transfers.
     let unsigned_tx = IFaucet::new(&provider)
-        .take_faucet_funds(10 * ONE_XTR)
+        .take_faucet_funds(10 * TARI)
         // NOTE that pay fee must be called after the faucet funds are taken because fees are paid from the faucet funds
         .pay_fee(500u64)
         .prepare()
@@ -85,13 +85,13 @@ async fn main() {
         "otl_loc_1y2s6442wau8v72pdrr5h4kntrqppqndqug33dmqv7eqkvx5c7ue2gzrw6v56kzkhnr7l025ye3jt3gmzmunmxy6vpm573fdduw37vcc848dcz"
     );
     // Send some XTR to another address. You can replace XTR with any other fungible token resource address.
-    let xtr_token = XTR; // resource_address!("resource_deadbeaf");
+    let xtr_token = TARI_TOKEN; // resource_address!("resource_deadbeaf");
 
     let unsigned_tx = IAccount::new(&provider)
         .pay_fee(1000u64)
         // Multiple transfers in a single transaction
-        .public_transfer(&recipient1, xtr_token, 2 * ONE_XTR)
-        .public_transfer(&recipient2, xtr_token, ONE_XTR)
+        .public_transfer(&recipient1, xtr_token, 2 * TARI)
+        .public_transfer(&recipient2, xtr_token, TARI)
         .prepare()
         .await
         .expect("Failed to prepare transaction");

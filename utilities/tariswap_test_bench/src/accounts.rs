@@ -12,7 +12,7 @@ use tari_ootle_wallet_sdk::models::{Account, KeyBranch, KeyId};
 use tari_template_lib_types::{
     Amount,
     ResourceType,
-    constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
+    constants::{TARI_TOKEN, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
 };
 
 use crate::{faucet::Faucet, runner::Runner};
@@ -67,9 +67,14 @@ impl Runner {
             true,
             true,
         )?;
-        self.sdk
-            .accounts_api()
-            .add_vault(account, vault, XTR, ResourceType::Stealth, Some("tTARI".to_string()), 6)?;
+        self.sdk.accounts_api().add_vault(
+            account,
+            vault,
+            TARI_TOKEN,
+            ResourceType::Stealth,
+            Some("tTARI".to_string()),
+            6,
+        )?;
         let account = self.sdk.accounts_api().get_account_by_address(&account)?;
 
         Ok(account.account)
@@ -99,7 +104,7 @@ impl Runner {
         let pay_fee_vault = self
             .sdk
             .accounts_api()
-            .get_vault_by_resource(&pay_fee_account.component_address, &XTR)?;
+            .get_vault_by_resource(&pay_fee_account.component_address, &TARI_TOKEN)?;
 
         let transaction = self
             .new_transaction_builder()
@@ -165,7 +170,7 @@ impl Runner {
         let fee_vault = self
             .sdk
             .accounts_api()
-            .get_vault_by_resource(&fee_account.component_address, &XTR)?;
+            .get_vault_by_resource(&fee_account.component_address, &TARI_TOKEN)?;
 
         for accounts in all_accounts.chunks(25) {
             let transaction = self

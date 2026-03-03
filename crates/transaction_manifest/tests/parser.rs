@@ -29,7 +29,7 @@ use tari_template_lib::types::{
     ComponentAddress,
     ObjectKey,
     TemplateAddress,
-    constants::XTR,
+    constants::TARI_TOKEN,
     crypto::RistrettoPublicKeyBytes,
 };
 use tari_transaction_manifest::{ManifestInstructions, parse_manifest};
@@ -94,7 +94,7 @@ fn manifest_smoke_test() {
         Instruction::CallMethod {
             call: account_component.into(),
             method: "withdraw".try_into().unwrap(),
-            args: call_args![XTR, 1_000],
+            args: call_args![TARI_TOKEN, 1_000],
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: 2 },
         Instruction::CallMethod {

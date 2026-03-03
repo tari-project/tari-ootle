@@ -8,7 +8,7 @@ use tari_ootle_common_types::{
     engine_types::{limits, published_template::TemplateBlob},
 };
 use tari_ootle_transaction::{TransactionBuilder, UnsignedTransaction, args};
-use tari_template_lib_types::{Amount, ResourceAddress, constants::XTR};
+use tari_template_lib_types::{Amount, ResourceAddress, constants::TARI_TOKEN};
 
 use crate::{
     Address,
@@ -62,7 +62,7 @@ impl<'a, P: Provider> AccountInvokeBuilder<'a, P> {
         let component_addr = self.default_signer_address().to_account_address();
         self.want_list.insert(WantInput::VaultForResource {
             component_address: component_addr,
-            resource_address: XTR,
+            resource_address: TARI_TOKEN,
             required: true,
         });
         self.builder = self.builder.pay_fee_from_component(component_addr, amount);

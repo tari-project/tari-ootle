@@ -5,7 +5,7 @@ use tari_engine_types::{
     fees::{FeeBreakdown, FeeSource},
     resource_container::ResourceContainer,
 };
-use tari_template_lib::types::{VaultId, constants::XTR};
+use tari_template_lib::types::{VaultId, constants::TARI_TOKEN};
 
 use crate::runtime::RuntimeError;
 
@@ -28,7 +28,7 @@ impl FeeState {
         resource_container: ResourceContainer,
         vault_id: Option<VaultId>,
     ) -> Result<(), RuntimeError> {
-        if *resource_container.resource_address() != XTR {
+        if *resource_container.resource_address() != TARI_TOKEN {
             return Err(RuntimeError::InvalidArgument {
                 argument: "vault_ref",
                 reason: format!(
@@ -101,21 +101,21 @@ mod tests {
     #[test]
     fn it_prevents_fees_from_exceeding_u64_max() {
         let mut fee_state = FeeState::new();
-        let resource = ResourceContainer::stealth(XTR, 100u64.into());
+        let resource = ResourceContainer::stealth(TARI_TOKEN, 100u64.into());
         let vault_id = VaultId::new(Default::default());
         fee_state
-            .add_fee_payment_checked(ResourceContainer::stealth(XTR, u128::MAX.into()), Some(vault_id))
+            .add_fee_payment_checked(ResourceContainer::stealth(TARI_TOKEN, u128::MAX.into()), Some(vault_id))
             .unwrap_err();
 
         fee_state.add_fee_payment_checked(resource, Some(vault_id)).unwrap();
         fee_state
-            .add_fee_payment_checked(ResourceContainer::stealth(XTR, 123u64.into()), Some(vault_id))
+            .add_fee_payment_checked(ResourceContainer::stealth(TARI_TOKEN, 123u64.into()), Some(vault_id))
             .unwrap();
 
         // 1 more than u64::MAX when added to previous payments
         fee_state
             .add_fee_payment_checked(
-                ResourceContainer::stealth(XTR, (u64::MAX - 223 + 1).into()),
+                ResourceContainer::stealth(TARI_TOKEN, (u64::MAX - 223 + 1).into()),
                 Some(vault_id),
             )
             .unwrap_err();
@@ -126,7 +126,7 @@ mod tests {
     fn it_errors_if_incorrect_fee_resource_used() {
         let mut fee_state = FeeState::new();
         let resource = ResourceAddress::new(ObjectKey::default());
-        assert_ne!(resource, XTR);
+        assert_ne!(resource, TARI_TOKEN);
         let resource = ResourceContainer::stealth(resource, 100u64.into());
         let err = fee_state.add_fee_payment_checked(resource, None).unwrap_err();
         assert!(matches!(err, RuntimeError::InvalidArgument { .. }));
@@ -135,7 +135,7 @@ mod tests {
     #[test]
     fn it_tracks_refundable_payments() {
         let mut fee_state = FeeState::new();
-        let resource = ResourceContainer::stealth(XTR, 100u64.into());
+        let resource = ResourceContainer::stealth(TARI_TOKEN, 100u64.into());
         let vault_id = VaultId::new(Default::default());
         fee_state
             .add_fee_payment_checked(resource.clone(), Some(vault_id))
@@ -155,13 +155,13 @@ mod tests {
         assert!(!fee_state.is_paid_in_full());
 
         // First payment
-        let resource = ResourceContainer::stealth(XTR, 10u64.into());
+        let resource = ResourceContainer::stealth(TARI_TOKEN, 10u64.into());
         let vault_id = VaultId::new(Default::default());
         fee_state.add_fee_payment_checked(resource, Some(vault_id)).unwrap();
         assert!(!fee_state.is_paid_in_full());
 
         // Second payment
-        let resource = ResourceContainer::stealth(XTR, 1000u64.into());
+        let resource = ResourceContainer::stealth(TARI_TOKEN, 1000u64.into());
         let vault_id = VaultId::new(Default::default());
         fee_state.add_fee_payment_checked(resource, Some(vault_id)).unwrap();
         assert!(fee_state.is_paid_in_full());

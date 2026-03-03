@@ -36,7 +36,7 @@ use tari_ootle_transaction::{Transaction, args};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     models::NonFungible,
-    types::{Amount, ComponentAddress, NonFungibleAddress, ResourceAddress, TemplateAddress, constants::XTR},
+    types::{Amount, ComponentAddress, NonFungibleAddress, ResourceAddress, TemplateAddress, constants::TARI_TOKEN},
 };
 use tari_template_test_tooling::{
     TemplateTest,
@@ -853,7 +853,7 @@ mod basic_nft {
 }
 
 mod emoji_id {
-    use tari_template_lib::types::{Amount, constants::XTR};
+    use tari_template_lib::types::{Amount, constants::TARI_TOKEN};
 
     use super::*;
 
@@ -908,7 +908,7 @@ mod emoji_id {
         let result = test
             .build_and_execute(
                 Transaction::builder_localnet().call_function(emoji_id_template, "new", args![
-                    XTR,
+                    TARI_TOKEN,
                     max_emoji_id_len,
                     price
                 ]),
@@ -933,7 +933,7 @@ mod emoji_id {
         mint_emoji_id(
             &mut test,
             account_address,
-            XTR,
+            TARI_TOKEN,
             emoji_id_minter,
             &emoji_id,
             price,
@@ -952,7 +952,7 @@ mod emoji_id {
         mint_emoji_id(
             &mut test,
             account_address,
-            XTR,
+            TARI_TOKEN,
             emoji_id_minter,
             &emoji_id,
             price,
@@ -966,7 +966,7 @@ mod emoji_id {
         mint_emoji_id(
             &mut test,
             account_address,
-            XTR,
+            TARI_TOKEN,
             emoji_id_minter,
             &emoji_id,
             price,
@@ -979,7 +979,7 @@ mod emoji_id {
         mint_emoji_id(
             &mut test,
             account_address,
-            XTR,
+            TARI_TOKEN,
             emoji_id_minter,
             &emoji_id,
             price,
@@ -1027,7 +1027,7 @@ mod tickets {
         // buy a ticket
         test.execute_expect_success(
             Transaction::builder_localnet()
-                .call_method(account_address, "withdraw", args![XTR, 20])
+                .call_method(account_address, "withdraw", args![TARI_TOKEN, 20])
                 .put_last_instruction_output_on_workspace("payment")
                 .call_method(ticket_seller, "buy_ticket", args![Workspace("payment")])
                 .put_last_instruction_output_on_workspace("nft_bucket")

@@ -7,7 +7,7 @@ use axum::{Extension, Json, extract::Path};
 use tari_engine_types::substate::SubstateId;
 use tari_indexer_client::types::GetResourceResponse;
 use tari_ootle_common_types::SubstateRequirementRef;
-use tari_template_lib_types::{ResourceAddress, constants::XTR};
+use tari_template_lib_types::{ResourceAddress, constants::TARI_TOKEN};
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
 
@@ -37,7 +37,7 @@ pub async fn get_resource(
         ));
     }
 
-    let is_xtr = resource_address == XTR;
+    let is_xtr = resource_address == TARI_TOKEN;
     let resource_address = SubstateId::Resource(resource_address);
 
     let (_, substate) = context
@@ -76,5 +76,5 @@ pub async fn get_resource(
 }
 
 pub async fn get_xtr(context: Extension<HandlerContext>) -> HandlerResult<Json<GetResourceResponse>> {
-    get_resource(context, Path(XTR)).await
+    get_resource(context, Path(TARI_TOKEN)).await
 }

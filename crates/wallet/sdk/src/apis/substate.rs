@@ -17,7 +17,7 @@ use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     substate_type::SubstateType,
 };
-use tari_template_lib::types::{ResourceAddress, TemplateAddress, constants::XTR};
+use tari_template_lib::types::{ResourceAddress, TemplateAddress, constants::TARI_TOKEN};
 
 use crate::{
     models::SubstateModel,
@@ -200,7 +200,7 @@ where
                             }
                         },
                         SubstateValue::ValidatorFeePool(_) => {
-                            let resx_addr = SubstateId::Resource(XTR);
+                            let resx_addr = SubstateId::Resource(TARI_TOKEN);
                             if substate_ids.contains(&resx_addr) {
                                 continue;
                             }

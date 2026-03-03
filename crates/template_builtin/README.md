@@ -39,5 +39,5 @@ let wasm_bytes: & [u8] = get_template_builtin( & ACCOUNT_TEMPLATE_ADDRESS);
 ## Development
 
 Template source lives in `templates/`. When building locally with the `templates` feature, `build.rs` compiles each
-template to WASM and copies the output to `compiled/`. The compiled wasms are checked into git and included in the
+template to WASM and copies the output to `compiled/`. The compiled wasms are git-ignored but included in the
 published crate so downstream consumers don't need the WASM toolchain.

@@ -30,7 +30,7 @@ import Grid from "@mui/material/Grid";
 import IconButton from "@mui/material/IconButton";
 import { useTheme } from "@mui/material/styles";
 import Transactions from "@routes/Transactions/Transactions";
-import useAccountStore from "@store/accountStore";
+import useAccountStore, { setAccount, setOotleAddress } from "@store/accountStore";
 import { substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { useEffect } from "react";
 import { Navigate } from "react-router";
@@ -41,7 +41,7 @@ import Assets from "./Assets";
 function MyAssets() {
   const theme = useTheme();
 
-  const { account, setAccount, setOotleAddress } = useAccountStore();
+  const account = useAccountStore((s) => s.account);
   const { data: defaultAccount, error, refetch } = useAccountsGetDefault(false);
   const refreshBalances = refreshAccountsBalances();
 

@@ -28,13 +28,13 @@ import Grid from "@mui/material/Grid";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { useTheme } from "@mui/material/styles";
-import useAccountStore from "@store/accountStore";
+import useAccountStore, { setAccount, setOotleAddress } from "@store/accountStore";
 import { FormEvent, useEffect, useState } from "react";
 import { Form, Navigate } from "react-router";
 
 function Onboarding() {
   const { mutate, isPending } = useAccountsCreate();
-  const { account, setAccount, setOotleAddress, setPopup } = useAccountStore();
+  const { account, setPopup } = useAccountStore();
   const theme = useTheme();
   const [accountFormState, setAccountFormState] = useState({
     accountName: "",

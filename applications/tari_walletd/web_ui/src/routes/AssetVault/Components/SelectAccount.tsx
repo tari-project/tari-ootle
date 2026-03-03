@@ -28,7 +28,7 @@ import InputLabel from "@mui/material/InputLabel";
 import MenuItem from "@mui/material/MenuItem";
 import Select, { SelectChangeEvent } from "@mui/material/Select";
 import { useTheme } from "@mui/material/styles";
-import useAccountStore from "@store/accountStore";
+import useAccountStore, { setAccount, setOotleAddress } from "@store/accountStore";
 import { AccountInfo, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 import { IoAdd } from "react-icons/io5";
@@ -36,8 +36,6 @@ import Dialog from "./AddAccount";
 
 function SelectAccount() {
   const account = useAccountStore((state) => state.account);
-  const setAccount = useAccountStore((state) => state.setAccount);
-  const setOotleAddress = useAccountStore((state) => state.setOotleAddress);
   const { data: dataAccountsList } = useAccountsList(0, 10);
   const [dialogOpen, setDialogOpen] = useState(false);
   const theme = useTheme();

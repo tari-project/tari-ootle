@@ -4,17 +4,12 @@
 import { useAccountsList } from "@api/hooks/useAccounts";
 import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
 import CopyAddress from "@components/CopyAddress";
-import FetchStatusCheck from "@components/FetchStatusCheck";
 import PageHeading from "@components/PageHeading";
-import { AccordionIconButton, DataTableCell, StyledPaper } from "@components/StyledComponents";
+import { AccordionIconButton, DataTableCell } from "@components/StyledComponents";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import {
   Collapse,
-  FormControl,
-  InputLabel,
-  MenuItem,
-  Select,
   SelectChangeEvent,
   Stack,
   Table,
@@ -40,6 +35,8 @@ import {
 import { handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
 import { Fragment, useEffect, useState } from "react";
 import { SlCheck, SlClose } from "react-icons/sl";
+import TemplateList from "./components/TemplateList";
+import Wrapper from "./components/Wrapper";
 
 function getTypeAsString(funcType: FuncType): string {
   if (typeof funcType === "string") {
@@ -114,162 +111,132 @@ function Templates() {
       <Grid size={12}>
         <PageHeading>Templates</PageHeading>
       </Grid>
-      <Grid size={12}>
-        <StyledPaper>
-          <FetchStatusCheck
-            isLoading={isLoading || isAccountsLoading}
-            isError={isError}
-            errorMessage={error ? (error as Error).message : "Error fetching templates."}
-          >
-            <Stack spacing={1}>
-              <Stack alignItems="center" justifyContent="flex-end" direction="row" spacing={2}>
-                {account ? (
-                  <FormControl style={{ minWidth: "250px" }}>
-                    <InputLabel id="account">Account</InputLabel>
-                    <Select
-                      labelId="account"
-                      name="account"
-                      label="Account"
-                      value={substateIdToString(account.account.component_address)}
-                      onChange={onAccountChange}
-                      size="medium"
-                    >
-                      {dataAccountsList?.accounts.map((account: AccountInfo, i: number) => {
-                        return (
-                          <MenuItem key={i} value={substateIdToString(account.account.component_address)}>
-                            {account.account.name || substateIdToString(account.account.component_address)}
-                          </MenuItem>
-                        );
-                      })}
-                    </Select>
-                  </FormControl>
-                ) : null}
-              </Stack>
-              {account ? (
-                <TableContainer>
-                  <Table>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Address</TableCell>
-                        <TableCell>Name</TableCell>
-                        <TableCell>ABI Version</TableCell>
-                        <TableCell></TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {templatesResponse?.templates.map((template: AuthoredTemplate, i: number) => {
-                        return (
-                          <Fragment key={i}>
-                            <TableRow>
-                              <DataTableCell>
-                                <CopyAddress address={`template_${template.address}`} />
-                              </DataTableCell>
-                              <DataTableCell>{template.name}</DataTableCell>
-                              <TableCell>{template.abi_version}</TableCell>
-                              <TableCell>
-                                <AccordionIconButton
-                                  aria-label="expand row"
-                                  size="small"
-                                  onClick={() => {
-                                    if (open) {
-                                      const newOpen = open.map((value, idx) => (idx === i ? !value : value));
-                                      setOpen(newOpen);
-                                    }
-                                  }}
-                                >
-                                  {open[i] ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-                                </AccordionIconButton>
-                              </TableCell>
-                            </TableRow>
-                            {open[i] ? (
-                              <TableRow>
-                                <DataTableCell
-                                  style={{
-                                    paddingBottom: theme.spacing(1),
-                                    paddingTop: 0,
-                                    borderBottom: "none",
-                                  }}
-                                  colSpan={2}
-                                >
-                                  <Collapse in={open[i]} timeout="auto" unmountOnExit>
-                                    <h3>Functions</h3>
-                                    {template.functions ? (
-                                      <TableContainer>
-                                        <Table>
-                                          <TableHead>
-                                            <TableRow>
-                                              <TableCell>Name</TableCell>
-                                              <TableCell>Mutable</TableCell>
-                                              <TableCell>Arguments</TableCell>
-                                              <TableCell>Output</TableCell>
-                                            </TableRow>
-                                          </TableHead>
-                                          <TableBody>
-                                            {template.functions.map((funcDef: FunctionDef, index: number) => {
-                                              return (
-                                                <TableRow key={index}>
-                                                  <TableCell>{funcDef.name}</TableCell>
-                                                  <TableCell>
-                                                    {funcDef.is_mut ? <SlCheck size={25} /> : <SlClose size={25} />}
-                                                  </TableCell>
-                                                  <TableCell>
-                                                    {funcDef.arguments.length > 0 ? (
-                                                      <TableContainer>
-                                                        <Table>
-                                                          <TableHead>
-                                                            <TableRow>
-                                                              <TableCell>Name</TableCell>
-                                                              <TableCell>Type</TableCell>
+      <Wrapper>
+        <Stack spacing={1}>
+          <TemplateList />
+          {account ? (
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Address</TableCell>
+                    <TableCell>Name</TableCell>
+                    <TableCell>ABI Version</TableCell>
+                    <TableCell></TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {templatesResponse?.templates.map((template: AuthoredTemplate, i: number) => {
+                    return (
+                      <Fragment key={i}>
+                        <TableRow>
+                          <DataTableCell>
+                            <CopyAddress address={`template_${template.address}`} />
+                          </DataTableCell>
+                          <DataTableCell>{template.name}</DataTableCell>
+                          <TableCell>{template.abi_version}</TableCell>
+                          <TableCell>
+                            <AccordionIconButton
+                              aria-label="expand row"
+                              size="small"
+                              onClick={() => {
+                                if (open) {
+                                  const newOpen = open.map((value, idx) => (idx === i ? !value : value));
+                                  setOpen(newOpen);
+                                }
+                              }}
+                            >
+                              {open[i] ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+                            </AccordionIconButton>
+                          </TableCell>
+                        </TableRow>
+                        {open[i] ? (
+                          <TableRow>
+                            <DataTableCell
+                              style={{
+                                paddingBottom: theme.spacing(1),
+                                paddingTop: 0,
+                                borderBottom: "none",
+                              }}
+                              colSpan={2}
+                            >
+                              <Collapse in={open[i]} timeout="auto" unmountOnExit>
+                                <h3>Functions</h3>
+                                {template.functions ? (
+                                  <TableContainer>
+                                    <Table>
+                                      <TableHead>
+                                        <TableRow>
+                                          <TableCell>Name</TableCell>
+                                          <TableCell>Mutable</TableCell>
+                                          <TableCell>Arguments</TableCell>
+                                          <TableCell>Output</TableCell>
+                                        </TableRow>
+                                      </TableHead>
+                                      <TableBody>
+                                        {template.functions.map((funcDef: FunctionDef, index: number) => {
+                                          return (
+                                            <TableRow key={index}>
+                                              <TableCell>{funcDef.name}</TableCell>
+                                              <TableCell>
+                                                {funcDef.is_mut ? <SlCheck size={25} /> : <SlClose size={25} />}
+                                              </TableCell>
+                                              <TableCell>
+                                                {funcDef.arguments.length > 0 ? (
+                                                  <TableContainer>
+                                                    <Table>
+                                                      <TableHead>
+                                                        <TableRow>
+                                                          <TableCell>Name</TableCell>
+                                                          <TableCell>Type</TableCell>
+                                                        </TableRow>
+                                                      </TableHead>
+                                                      <TableBody>
+                                                        {funcDef.arguments.map((arg: ArgDef, index: number) => {
+                                                          return (
+                                                            <TableRow key={index}>
+                                                              <TableCell>{arg.name}</TableCell>
+                                                              <TableCell>{getTypeAsString(arg.arg_type)}</TableCell>
                                                             </TableRow>
-                                                          </TableHead>
-                                                          <TableBody>
-                                                            {funcDef.arguments.map((arg: ArgDef, index: number) => {
-                                                              return (
-                                                                <TableRow key={index}>
-                                                                  <TableCell>{arg.name}</TableCell>
-                                                                  <TableCell>{getTypeAsString(arg.arg_type)}</TableCell>
-                                                                </TableRow>
-                                                              );
-                                                            })}
-                                                          </TableBody>
-                                                        </Table>
-                                                      </TableContainer>
-                                                    ) : (
-                                                      <SlClose size={25} color={"red"} />
-                                                    )}
-                                                  </TableCell>
-                                                  <TableCell>{getTypeAsString(funcDef.output)}</TableCell>
-                                                </TableRow>
-                                              );
-                                            })}
-                                          </TableBody>
-                                        </Table>
-                                      </TableContainer>
-                                    ) : null}
-                                  </Collapse>
-                                </DataTableCell>
-                              </TableRow>
-                            ) : null}
-                          </Fragment>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              ) : null}
-              <TablePagination
-                rowsPerPageOptions={[10, 25, 50]}
-                component="div"
-                count={templatesCount}
-                rowsPerPage={rowsPerPage}
-                page={page}
-                onPageChange={(event, newPage) => handleChangePage(event, newPage, setPage)}
-                onRowsPerPageChange={(event) => handleChangeRowsPerPage(event, setRowsPerPage, setPage)}
-              />
-            </Stack>
-          </FetchStatusCheck>
-        </StyledPaper>
-      </Grid>
+                                                          );
+                                                        })}
+                                                      </TableBody>
+                                                    </Table>
+                                                  </TableContainer>
+                                                ) : (
+                                                  <SlClose size={25} color={"red"} />
+                                                )}
+                                              </TableCell>
+                                              <TableCell>{getTypeAsString(funcDef.output)}</TableCell>
+                                            </TableRow>
+                                          );
+                                        })}
+                                      </TableBody>
+                                    </Table>
+                                  </TableContainer>
+                                ) : null}
+                              </Collapse>
+                            </DataTableCell>
+                          </TableRow>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          ) : null}
+          <TablePagination
+            rowsPerPageOptions={[10, 25, 50]}
+            component="div"
+            count={templatesCount}
+            rowsPerPage={rowsPerPage}
+            page={page}
+            onPageChange={(event, newPage) => handleChangePage(event, newPage, setPage)}
+            onRowsPerPageChange={(event) => handleChangeRowsPerPage(event, setRowsPerPage, setPage)}
+          />
+        </Stack>
+      </Wrapper>
     </>
   );
 }

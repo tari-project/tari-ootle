@@ -28,13 +28,11 @@ import { StyledPaper } from "@components/StyledComponents";
 import Grid from "@mui/material/Grid";
 import ConfidentialBalanceDisplay from "@routes/AssetVault/Components/ConfidentialBalanceDisplay";
 import StealthUtxoList from "@routes/StealthUtxoList/StealthUtxoList";
-import useAccountStore from "@store/accountStore";
+import useAccountStore, { setAccount, setOotleAddress } from "@store/accountStore";
 import { useEffect } from "react";
 
 function StealthUtxoListPage() {
   const account = useAccountStore((state) => state.account);
-  const setAccount = useAccountStore((state) => state.setAccount);
-  const setOotleAddress = useAccountStore((state) => state.setOotleAddress);
   const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
 
   useEffect(() => {
@@ -42,7 +40,7 @@ function StealthUtxoListPage() {
       setAccount(defaultAccount.account);
       setOotleAddress(defaultAccount.address);
     }
-  }, [defaultAccount, isError, account, setAccount, setOotleAddress]);
+  }, [defaultAccount, isError, account]);
 
   return (
     <FetchStatusCheck isLoading={isLoading} isError={isError} errorMessage={error?.message || "Error loading account"}>

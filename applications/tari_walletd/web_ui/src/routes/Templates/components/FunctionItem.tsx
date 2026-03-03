@@ -9,6 +9,7 @@ interface FunctionItemProps {
   functionDef: FunctionDef;
 }
 
+// TODO - move to helpers
 function getTypeAsString(funcType: FuncType): string {
   if (typeof funcType === "string") {
     return funcType;

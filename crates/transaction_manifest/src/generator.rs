@@ -6,11 +6,12 @@ use std::collections::HashMap;
 use proc_macro2::Ident;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_transaction::{
+    ComponentReference,
     Instruction,
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
     call_arg,
 };
-use tari_template_lib::types::TemplateAddress;
+use tari_template_lib::types::{ComponentAddress, TemplateAddress};
 
 use crate::{
     ManifestInstructions,
@@ -115,18 +116,17 @@ impl ManifestInstructionGenerator {
                     .as_ref()
                     .expect("AST parse should have failed: no component ident for ComponentInvoke statement")
                     .to_string();
-                let component_address = self
-                    .get_variable(&component_ident)?
-                    .as_address()
-                    .and_then(|addr| addr.as_component_address())
-                    .ok_or_else(|| {
-                        ManifestError::InvalidVariableType(format!(
-                            "Expected component variable but got {:?}",
-                            self.get_variable(&component_ident)
-                        ))
-                    })?;
+                let call = if let Some(value) = self.global_aliases.get(&component_ident) {
+                    ComponentReference::Address(Self::extract_component_address(value)?)
+                } else if let Some(&workspace_id) = self.workspace_ids.get(&component_ident) {
+                    ComponentReference::Workspace(workspace_id)
+                } else if let Some(value) = self.globals.get(&component_ident) {
+                    ComponentReference::Address(Self::extract_component_address(value)?)
+                } else {
+                    return Err(ManifestError::UndefinedVariable { name: component_ident });
+                };
                 let mut instructions = vec![Instruction::CallMethod {
-                    call: component_address.into(),
+                    call,
                     method: function_name
                         .to_string()
                         .try_into()
@@ -205,16 +205,19 @@ impl ManifestInstructionGenerator {
             .ok_or_else(|| ManifestError::TemplateNotImported { name: name.to_string() })
     }
 
-    fn get_variable(&self, name: &str) -> Result<&ManifestValue, ManifestError> {
-        self.global_aliases
-            .get(name)
-            .ok_or_else(|| ManifestError::UndefinedVariable { name: name.to_string() })
-    }
-
     fn get_global(&self, name: &str) -> Result<&ManifestValue, ManifestError> {
         self.globals
             .get(name)
             .ok_or_else(|| ManifestError::UndefinedGlobal { name: name.to_string() })
+    }
+
+    fn extract_component_address(value: &ManifestValue) -> Result<ComponentAddress, ManifestError> {
+        value
+            .as_address()
+            .and_then(|addr| addr.as_component_address())
+            .ok_or_else(|| {
+                ManifestError::InvalidVariableType(format!("Expected component variable but got {:?}", value))
+            })
     }
 
     fn get_ident(&self, name: &str) -> Result<InstructionArg, ManifestError> {

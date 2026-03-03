@@ -7,11 +7,8 @@ use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as
 
 fn main() {
     // initialize the component
-    // TODO: This creates a new component but does not use it as a component input for call method
-    //       because this is not currently supported.
     let picture_seller = PictureSeller::new(1_000u64);
 
-    let picture_seller = var!["picture_seller_addr"];
     let faucet = var!["test_faucet"];
     // TODO: Implement sugar for the account component
     // e.g.  let account = default_account!();

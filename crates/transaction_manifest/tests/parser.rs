@@ -24,7 +24,7 @@ use std::{collections::HashMap, fs, str::FromStr};
 
 use tari_bor::cbor;
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_transaction::{Instruction, call_args};
+use tari_ootle_transaction::{ComponentReference, Instruction, call_args};
 use tari_template_lib::types::{
     ComponentAddress,
     ObjectKey,
@@ -39,17 +39,12 @@ use tari_transaction_manifest::{ManifestInstructions, parse_manifest};
 fn manifest_smoke_test() {
     let input = fs::read_to_string("tests/examples/picture_seller.rs").unwrap();
     let account_component = ComponentAddress::new([0u8; ObjectKey::LENGTH].into());
-    let picture_seller_component = ComponentAddress::new([1u8; ObjectKey::LENGTH].into());
     let test_faucet_component = ComponentAddress::new([2u8; ObjectKey::LENGTH].into());
     let picture_seller_template =
         TemplateAddress::from_hex("c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7").unwrap();
 
     let globals = HashMap::from([
         ("account".to_string(), SubstateId::Component(account_component).into()),
-        (
-            "picture_seller_addr".to_string(),
-            SubstateId::Component(picture_seller_component).into(),
-        ),
         (
             "test_faucet".to_string(),
             SubstateId::Component(test_faucet_component).into(),
@@ -98,7 +93,7 @@ fn manifest_smoke_test() {
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: 2 },
         Instruction::CallMethod {
-            call: picture_seller_component.into(),
+            call: ComponentReference::Workspace(0),
             method: "buy".try_into().unwrap(),
             args: call_args![Workspace(2)],
         },
@@ -108,6 +103,44 @@ fn manifest_smoke_test() {
             method: "deposit".try_into().unwrap(),
             args: call_args![Workspace(3)],
         },
+    ];
+
+    assert_eq!(instructions, expected);
+    assert_eq!(fee_instructions, vec![]);
+}
+
+#[test]
+fn workspace_component_reference() {
+    let manifest = r#"
+        use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as MyTemplate;
+
+        fn main() {
+            let comp = MyTemplate::new();
+            let result = comp.do_something();
+        }
+    "#;
+
+    let template_addr =
+        TemplateAddress::from_hex("c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7").unwrap();
+
+    let ManifestInstructions {
+        instructions,
+        fee_instructions,
+    } = parse_manifest(manifest, HashMap::new(), Default::default()).unwrap();
+
+    let expected = vec![
+        Instruction::CallFunction {
+            address: template_addr,
+            function: "new".try_into().unwrap(),
+            args: call_args![],
+        },
+        Instruction::PutLastInstructionOutputOnWorkspace { key: 0 },
+        Instruction::CallMethod {
+            call: ComponentReference::Workspace(0),
+            method: "do_something".try_into().unwrap(),
+            args: call_args![],
+        },
+        Instruction::PutLastInstructionOutputOnWorkspace { key: 1 },
     ];
 
     assert_eq!(instructions, expected);

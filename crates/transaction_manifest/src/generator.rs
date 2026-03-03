@@ -141,6 +141,13 @@ impl ManifestInstructionGenerator {
                 }
                 Ok(instructions)
             },
+            ManifestIntent::AllocateAddress(alloc) => {
+                let workspace_id = self.next_workspace_id(alloc.output_variable.to_string());
+                Ok(vec![Instruction::AllocateAddress {
+                    allocatable_type: alloc.allocatable_type,
+                    workspace_id,
+                }])
+            },
             ManifestIntent::AssignInput(assign) => {
                 self.global_aliases.insert(
                     assign.variable_name.to_string(),

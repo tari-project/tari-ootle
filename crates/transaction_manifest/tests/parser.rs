@@ -24,7 +24,7 @@ use std::{collections::HashMap, fs, str::FromStr};
 
 use tari_bor::cbor;
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_transaction::{ComponentReference, Instruction, call_args};
+use tari_ootle_transaction::{AllocatableAddressType, ComponentReference, Instruction, call_args};
 use tari_template_lib::types::{
     ComponentAddress,
     ObjectKey,
@@ -141,6 +141,47 @@ fn workspace_component_reference() {
             args: call_args![],
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: 1 },
+    ];
+
+    assert_eq!(instructions, expected);
+    assert_eq!(fee_instructions, vec![]);
+}
+
+#[test]
+fn allocate_address_macros() {
+    let manifest = r#"
+        use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as MyTemplate;
+
+        fn main() {
+            let component_addr = new_component_addr!();
+            let resx_addr = new_resource_addr!();
+            let comp = MyTemplate::with_address(component_addr, resx_addr);
+        }
+    "#;
+
+    let template_addr =
+        TemplateAddress::from_hex("c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7").unwrap();
+
+    let ManifestInstructions {
+        instructions,
+        fee_instructions,
+    } = parse_manifest(manifest, HashMap::new(), Default::default()).unwrap();
+
+    let expected = vec![
+        Instruction::AllocateAddress {
+            allocatable_type: AllocatableAddressType::Component,
+            workspace_id: 0,
+        },
+        Instruction::AllocateAddress {
+            allocatable_type: AllocatableAddressType::Resource,
+            workspace_id: 1,
+        },
+        Instruction::CallFunction {
+            address: template_addr,
+            function: "with_address".try_into().unwrap(),
+            args: call_args![Workspace(0), Workspace(1)],
+        },
+        Instruction::PutLastInstructionOutputOnWorkspace { key: 2 },
     ];
 
     assert_eq!(instructions, expected);

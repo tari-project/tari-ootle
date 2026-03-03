@@ -40,6 +40,8 @@ use tari_template_lib::types::{
     hex::bytes_from_hex,
 };
 
+use tari_ootle_transaction::AllocatableAddressType;
+
 use crate::error::ManifestError;
 
 #[derive(Debug, Clone)]
@@ -47,6 +49,7 @@ pub enum ManifestIntent {
     InvokeTemplate(InvokeIntent),
     InvokeComponent(InvokeIntent),
     AssignInput(AssignInputStmt),
+    AllocateAddress(AllocateAddressStmt),
     Log(LogIntent),
     DropAllProofs,
 }
@@ -70,6 +73,12 @@ pub struct InvokeIntent {
 pub struct AssignInputStmt {
     pub variable_name: Ident,
     pub global_variable_name: LitStr,
+}
+
+#[derive(Debug, Clone)]
+pub struct AllocateAddressStmt {
+    pub output_variable: Ident,
+    pub allocatable_type: AllocatableAddressType,
 }
 
 #[derive(Debug, Clone)]
@@ -362,6 +371,14 @@ fn assignment_from_macro(var_name: Ident, mac: &Ident, tokens: TokenStream) -> R
         "global" | "var" | "arg" => Ok(ManifestIntent::AssignInput(AssignInputStmt {
             variable_name: var_name,
             global_variable_name: parse2(tokens)?,
+        })),
+        "new_component_addr" => Ok(ManifestIntent::AllocateAddress(AllocateAddressStmt {
+            output_variable: var_name,
+            allocatable_type: AllocatableAddressType::Component,
+        })),
+        "new_resource_addr" => Ok(ManifestIntent::AllocateAddress(AllocateAddressStmt {
+            output_variable: var_name,
+            allocatable_type: AllocatableAddressType::Resource,
         })),
         _ => Err(syn::Error::new_spanned(mac, "Invalid macro name")),
     }

@@ -1,6 +1,6 @@
 [workspace]
 [package]
-name = "faucet2"
+name = "faucet"
 version = "0.1.0"
 edition = "2024"
 

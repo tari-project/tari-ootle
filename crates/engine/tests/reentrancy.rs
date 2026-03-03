@@ -4,7 +4,7 @@
 use tari_engine::runtime::{LockError, LockState};
 use tari_engine_types::lock::LockFlag;
 use tari_ootle_transaction::{Transaction, args};
-use tari_template_lib::types::ComponentAddress;
+use tari_template_lib::types::{ComponentAddress, constants::XTR_FAUCET_COMPONENT_ADDRESS};
 use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
@@ -13,23 +13,11 @@ const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 fn it_prevents_reentrant_withdraw() {
     let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/reentrancy"]);
     let template_addr = test.get_template_address("Reentrancy");
-    let faucet_addr = test.get_template_address("TestFaucet");
     let (account, _, _) = test.create_empty_account();
 
     let result = test.execute_expect_success(
         Transaction::builder_localnet()
-            .call_function(faucet_addr, "mint", args![1000])
-            .build_and_seal(test.secret_key()),
-        vec![],
-    );
-
-    let faucet = result.finalize.execution_results[0]
-        .decode::<ComponentAddress>()
-        .unwrap();
-
-    let result = test.execute_expect_success(
-        Transaction::builder_localnet()
-            .call_method(faucet, "take_free_coins", args![])
+            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![1000])
             .put_last_instruction_output_on_workspace("bucket")
             .call_function(template_addr, "with_bucket", args![Workspace("bucket")])
             .build_and_seal(test.secret_key()),

@@ -7,7 +7,6 @@ use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine::runtime::{AssertError, RuntimeError};
 use tari_ootle_transaction::{Assertion, CheckOrd, Instruction, Transaction, args, args::WorkspaceOffsetId};
 use tari_template_lib::types::{
-    Amount,
     ComponentAddress,
     NonFungibleAddress,
     NonFungibleId,
@@ -15,7 +14,11 @@ use tari_template_lib::types::{
     ResourceType,
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS, TARI_TOKEN},
 };
-use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
+use tari_template_test_tooling::{
+    TemplateTest,
+    support::assert_error::assert_reject_reason,
+    template_lib_types::constants::XTR_FAUCET_COMPONENT_ADDRESS,
+};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 const TEMPLATE_PATH: &str = "tests/templates/tariswap";
@@ -34,34 +37,13 @@ struct AssertTest {
 fn setup() -> AssertTest {
     let mut template_test = TemplateTest::new(CRATE_PATH, [TEMPLATE_PATH]);
 
-    let faucet_template = template_test.get_template_address("TestFaucet");
-
-    let initial_supply = Amount::from(1_000_000_000_000u64);
-    let result = template_test.execute_expect_success(
-        template_test
-            .transaction()
-            .call_function(faucet_template, "mint", args![initial_supply])
-            .build_and_seal(template_test.secret_key()),
-        vec![template_test.owner_proof()],
-    );
-
-    let faucet_component: ComponentAddress = result.finalize.execution_results.first().unwrap().decode().unwrap();
-
-    let faucet_resource = result
-        .finalize
-        .result
-        .expect("Faucet mint failed")
-        .up_iter()
-        .find_map(|(address, _)| address.as_resource_address())
-        .unwrap();
-
     // Create user account to receive faucet tokens
     let (account, account_proof, account_key) = template_test.create_funded_account();
 
     AssertTest {
         template_test,
-        faucet_component,
-        faucet_resource,
+        faucet_component: XTR_FAUCET_COMPONENT_ADDRESS,
+        faucet_resource: TARI_TOKEN,
         account,
         account_proof,
         account_key,
@@ -77,7 +59,7 @@ mod assert_bucket_contains {
 
         test.template_test.execute_expect_success(
             Transaction::builder_localnet()
-                .call_method(test.faucet_component, "take_free_coins", args![])
+                .call_method(test.faucet_component, "take", args![1000])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
                 .assert_bucket_contains_at_least("faucet_bucket", test.faucet_resource, FAUCET_WITHDRAWAL_AMOUNT)
                 .assert_bucket_contains_exactly("faucet_bucket", test.faucet_resource, FAUCET_WITHDRAWAL_AMOUNT)
@@ -93,11 +75,11 @@ mod assert_bucket_contains {
         let mut test: AssertTest = setup();
 
         // we are going to assert a different resource than the faucet resource
-        let invalid_resource_address = TARI_TOKEN;
+        let invalid_resource_address = NFT_FAUCET_RESOURCE_ADDRESS;
 
         let reason = test.template_test.execute_expect_failure(
             Transaction::builder_localnet()
-                .call_method(test.faucet_component, "take_free_coins", args![])
+                .call_method(test.faucet_component, "take", args![1000])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
                 .assert_bucket_contains_at_least("faucet_bucket", invalid_resource_address, FAUCET_WITHDRAWAL_AMOUNT)
                 .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
@@ -123,7 +105,7 @@ mod assert_bucket_contains {
 
         let reason = test.template_test.execute_expect_failure(
             Transaction::builder_localnet()
-                .call_method(test.faucet_component, "take_free_coins", args![])
+                .call_method(test.faucet_component, "take", args![1000])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
                 // Passes
                 .assert_bucket_contains_exactly("faucet_bucket", test.faucet_resource, FAUCET_WITHDRAWAL_AMOUNT)
@@ -152,7 +134,7 @@ mod assert_bucket_contains {
 
         let reason = test.template_test.execute_expect_failure(
             Transaction::builder_localnet()
-                .call_method(test.faucet_component, "take_free_coins", args![])
+                .call_method(test.faucet_component, "take", args![1000])
                 // we are going to assert a workspace value that is NOT a bucket
                 .call_method(test.account, "get_balances", args![])
                 .put_last_instruction_output_on_workspace("invalid_bucket")
@@ -176,7 +158,7 @@ mod assert_bucket_contains {
 
         let reason = test.template_test.execute_expect_failure(
             Transaction::builder_localnet()
-                .call_method(test.faucet_component, "take_free_coins", args![])
+                .call_method(test.faucet_component, "take", args![1000])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
                 // we are going to assert a key that does not exist in the workspace
                 // assert_bucket_contains would panic if called with a non-existing key
@@ -232,7 +214,7 @@ mod assert_is_not_null {
 
         let reason = test.template_test.execute_expect_failure(
             Transaction::builder_localnet()
-                .call_method(test.faucet_component, "take_free_coins", args![])
+                .call_method(test.faucet_component, "take", args![1000])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
                 .assert_workspace_item_is_not_null("faucet_bucket")
                 .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
@@ -295,7 +277,7 @@ mod assert_bucket_contains_non_fungibles {
         // Take some tokens from the faucet to get a bucket with non-fungibles
         let reason = test.template_test.execute_expect_failure(
             Transaction::builder_localnet()
-                .call_method(test.faucet_component, "take_free_coins", args![])
+                .call_method(test.faucet_component, "take", args![1000])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
                 .assert_bucket_contains_non_fungibles_all("faucet_bucket", test.faucet_resource, vec![])
                 .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
@@ -305,7 +287,7 @@ mod assert_bucket_contains_non_fungibles {
 
         assert_reject_reason(reason, AssertError::InvalidResourceType {
             expected: ResourceType::NonFungible,
-            got: ResourceType::Fungible,
+            got: ResourceType::Stealth,
         });
     }
 

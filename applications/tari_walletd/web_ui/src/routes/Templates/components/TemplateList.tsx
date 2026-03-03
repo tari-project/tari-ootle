@@ -28,13 +28,13 @@ export default function TemplateList() {
     page: page,
     page_size: rowsPerPage,
   });
-  console.debug(data);
+
   const headers = COLUMNS.map((c) => <TableCell key={c}>{c}</TableCell>);
 
   function handleExpandClick(address: string) {
     setOpenItem((c) => (c === address ? undefined : address));
   }
-  const templates = data?.templates.map((template) => {
+  const templates = data?.templates.slice(1, 2).map((template) => {
     const { address, name, abi_version } = template;
     const isOpen = address === openItem;
     return (

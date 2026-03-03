@@ -26,7 +26,7 @@ export type Currency = {
 };
 
 export const XTR_CURRENCY = {
-  // TODO: only tXTR for testnet
-  symbol: "tXTR",
+  // TODO: only tTARI for testnet
+  symbol: "tTARI",
   decimals: 6,
 } as Currency;

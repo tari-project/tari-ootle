@@ -33,6 +33,7 @@ mod http_ui;
 mod json_rpc;
 #[cfg(feature = "metrics")]
 mod metrics;
+mod migrations;
 pub mod node;
 mod p2p;
 mod state_store_template_provider;

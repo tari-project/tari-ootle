@@ -69,7 +69,7 @@ impl Runner {
         )?;
         self.sdk
             .accounts_api()
-            .add_vault(account, vault, XTR, ResourceType::Stealth, Some("XTR".to_string()), 6)?;
+            .add_vault(account, vault, XTR, ResourceType::Stealth, Some("TARI".to_string()), 6)?;
         let account = self.sdk.accounts_api().get_account_by_address(&account)?;
 
         Ok(account.account)
@@ -181,8 +181,8 @@ impl Runner {
                             .put_last_instruction_output_on_workspace("faucet")
                             .call_method(account.component_address, "deposit", args![Workspace("faucet")])
                             .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![1_000_000])
-                            .put_last_instruction_output_on_workspace("xtr")
-                            .call_method(account.component_address, "deposit", args![Workspace("xtr")])
+                            .put_last_instruction_output_on_workspace("funds")
+                            .call_method(account.component_address, "deposit", args![Workspace("funds")])
                             .add_input(SubstateRequirement::unversioned(account.component_address))
                     })
                 })

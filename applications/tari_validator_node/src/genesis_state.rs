@@ -69,6 +69,20 @@ where
     TTx::Target: StateStoreReadTransaction,
     TTx::Addr: NodeAddressable + Serialize,
 {
+    migrate_genesis_state_v1(tx, network, num_preshards)?;
+    Ok(())
+}
+
+pub fn migrate_genesis_state_v1<TTx>(
+    tx: &mut TTx,
+    network: Network,
+    num_preshards: NumPreshards,
+) -> Result<(), StorageError>
+where
+    TTx: StateStoreWriteTransaction + Deref,
+    TTx::Target: StateStoreReadTransaction,
+    TTx::Addr: NodeAddressable + Serialize,
+{
     if has_bootstrapped(&**tx)? {
         return Ok(());
     }

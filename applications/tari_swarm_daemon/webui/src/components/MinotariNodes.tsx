@@ -76,7 +76,7 @@ function Node(props: any) {
       if (!isLoading && props.autoRefresh) {
         load();
       }
-    }, 1000);
+    }, 5000);
     return () => clearInterval(timer);
   }, [props.id, props.autoRefresh]);
 

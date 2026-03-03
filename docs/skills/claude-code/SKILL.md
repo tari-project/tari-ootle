@@ -740,10 +740,10 @@ let component_addr = receipt.diff_summary.upped
     .expect("component address in receipt");
 
 // Find a resource address (excluding native TARI)
-use tari_template_lib_types::constants::TARI;
+use tari_template_lib_types::constants::TARI_TOKEN;
 let resource_addr = receipt.diff_summary.upped
     .iter()
-    .find_map(|s| s.substate_id.as_resource_address().filter(|a| *a != TARI))
+    .find_map(|s| s.substate_id.as_resource_address().filter(|a| *a != TARI_TOKEN))
     .expect("resource address in receipt");
 
 // Find a template address (returns PublishedTemplateAddress)

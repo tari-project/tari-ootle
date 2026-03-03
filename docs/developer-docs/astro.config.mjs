@@ -12,6 +12,13 @@ export default defineConfig({
     starlight({
       favicon: "/favicon.png",
       title: "Tari Ootle Playground",
+      description: "Build agentic decentralized applications on the Tari Layer 2 network using Rust-based smart contract templates.",
+      head: [
+        { tag: "meta", attrs: { property: "og:image", content: "https://ootle.tari.com/og-image.png" } },
+        { tag: "meta", attrs: { property: "og:site_name", content: "Tari Ootle Playground" } },
+        { tag: "meta", attrs: { name: "twitter:card", content: "summary_large_image" } },
+        { tag: "meta", attrs: { name: "twitter:image", content: "https://ootle.tari.com/og-image.png" } },
+      ],
       customCss: ["./src/styles/global.scss", "./src/styles/custom.scss", "./src/fonts/font-face.css"],
       social: [{ icon: "github", label: "GitHub", href: "https://github.com/tari-project/tari-ootle" }],
       sidebar: [

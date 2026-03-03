@@ -105,9 +105,18 @@ tari_template_lib = { git = "https://github.com/tari-project/tari-ootle.git", br
 
 [lib]
 crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 's'     # Optimize for size.
+lto = true          # Enable Link Time Optimization.
+codegen-units = 1   # Reduce number of codegen units to increase optimizations.
+panic = 'abort'     # Abort on panic.
+strip = true          # Strip symbols and debug info.
 ```
 
 > **CRITICAL:** The `crate-type = ["cdylib"]` is required for WASM compilation. Without it, the build will not produce a `.wasm` file.
+
+> **Tip:** The `[profile.release]` section in `Cargo.toml` significantly reduces the size of the compiled WASM file, which lowers the fees required for on-chain storage and publishing.
 
 ### Compilation
 

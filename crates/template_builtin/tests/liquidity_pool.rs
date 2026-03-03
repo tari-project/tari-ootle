@@ -10,7 +10,7 @@ use tari_template_lib_types::{Amount, ComponentAddress, ResourceAddress};
 use tari_template_test_tooling::TemplateTest;
 
 const TEMPLATE_NAME: &str = "TwoResourceLiquidityPool";
-const TEMPLATE_PATHS: &[&str] = &["templates/two_resource_liquidity_pool", "test/templates/faucet"];
+const TEMPLATE_PATHS: &[&str] = &["tests/faucet"];
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 
 #[test]
@@ -106,7 +106,7 @@ fn initial_contribution_and_redeem() {
 #[test]
 fn basic_constant_product_swap() {
     // Setup
-    let mut test = TemplateTest::new_builtin_only();
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let template_address = test.get_template_address(TEMPLATE_NAME);
 
     let (faucet_component, faucet_resource) = create_test_faucet_component(&mut test, 1_000_000_000_000u64);

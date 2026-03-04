@@ -11,7 +11,6 @@ export const useListTemplatesAuthored = (request: TemplatesListAuthoredRequest) 
     queryFn: () => {
       return templatesListAuthored(request);
     },
-    enabled: !!request.author_public_key,
     refetchInterval: false,
     notifyOnChangeProps: ["data", "error"],
     retryOnMount: false,

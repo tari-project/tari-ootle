@@ -23,6 +23,7 @@
 import PageHeading from "@components/PageHeading";
 import { StyledPaper } from "@components/StyledComponents";
 import Grid from "@mui/material/Grid";
+import AdvancedFeatures from "@routes/Settings/Components/AdvancedFeatures";
 import DecryptUtxoBalance from "@routes/Settings/Components/DecryptUtxoBalance";
 import GeneralSettings from "@routes/Settings/Components/GeneralSettings";
 import SettingsTabs from "@routes/Settings/Components/SettingsTabs";
@@ -68,6 +69,11 @@ function SettingsPage() {
       label: "Decrypt UTXO",
       title: "Decrypt UTXO Balance",
       content: <DecryptUtxoBalance />,
+    },
+    {
+      label: "Advanced",
+      title: "Advanced Features",
+      content: <AdvancedFeatures />,
     },
   ];
 

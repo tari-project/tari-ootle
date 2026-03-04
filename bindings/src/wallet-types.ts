@@ -47,6 +47,7 @@ export * from "./types/wallet-types/AccountOrKeyId";
 export * from "./types/wallet-types/DerivedKeyId";
 export * from "./types/wallet-types/SettingsSetResponse";
 export * from "./types/wallet-types/WebauthnFinishAuthRequest";
+export * from "./types/wallet-types/AdvancedUiFeatures";
 export * from "./types/wallet-types/KeysListRequest";
 export * from "./types/wallet-types/AccountsTransferResponse";
 export * from "./types/wallet-types/TransactionGetResultResponse";

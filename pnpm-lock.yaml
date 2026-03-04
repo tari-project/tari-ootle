@@ -205,6 +205,9 @@ importers:
       '@tanstack/react-query-devtools':
         specifier: ^5.91.3
         version: 5.91.3(@tanstack/react-query@5.90.21(react@19.2.4))(react@19.2.4)
+      '@tari-project/indexer-client':
+        specifier: workspace:*
+        version: link:../../../clients/javascript/indexer_client
       '@tari-project/ootle-ts-bindings':
         specifier: link:../../../bindings
         version: link:../../../bindings

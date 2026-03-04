@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { IndexerClient } from "@tari-project/indexer-client";
 import type {
   AccountGetDefaultRequest,
   AccountGetRequest,
@@ -170,6 +171,10 @@ export const authRevoke = (request: AuthRevokeTokenRequest): Promise<AuthRevokeT
   client().then((c) => c.authRevoke(request));
 export const authGetAllJwt = (request: AuthListSessionsRequest): Promise<AuthListSessionsResponse> =>
   client().then((c) => c.authListSessions(request));
+
+// indexer
+export const indexerGetNetworkInfo = (indexerUrl: string) =>
+  IndexerClient.usingFetchTransport(indexerUrl).networkInfo();
 
 // settings
 export const settingsGet = (): Promise<SettingsGetResponse> => client().then((c) => c.settingsGet());

@@ -28,14 +28,14 @@ import ListItemIcon from "@mui/material/ListItemIcon";
 import ListItemText from "@mui/material/ListItemText";
 import { useTheme } from "@mui/material/styles";
 import Tooltip from "@mui/material/Tooltip";
+import useSettingsStore from "@store/settingsStore";
 import { IoHome, IoHomeOutline, IoSettings, IoSettingsOutline, IoTerminal, IoTerminalOutline } from "react-icons/io5";
 import { LuLayoutTemplate } from "react-icons/lu";
 import { NavLink } from "react-router";
 
 function MainListItems() {
   const theme = useTheme();
-  // Compile time environment variable to show/hide dev tools
-  const features = (import.meta.env.VITE_ALPHA_FEATURES || "").split(",");
+  const advancedUiFeatures = useSettingsStore((s) => s.advancedUiFeatures);
 
   const iconStyle = {
     height: 22,
@@ -70,7 +70,7 @@ function MainListItems() {
     },
   ];
 
-  if (features.includes("manifest")) {
+  if (advancedUiFeatures.enable_manifest) {
     mainItems.push({
       title: "Manifest",
       icon: <IoTerminalOutline style={iconStyle} />,
@@ -78,7 +78,7 @@ function MainListItems() {
       link: "manifest",
     });
   }
-  // if (features.includes("flowEditor")) {
+  // if (advancedUiFeatures.enable_flow_editor) {
   //   mainItems.push({
   //     title: "Flow Editor",
   //     icon: <IoGitMerge style={iconStyle} />,

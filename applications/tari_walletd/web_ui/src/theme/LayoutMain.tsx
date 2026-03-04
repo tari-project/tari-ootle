@@ -43,10 +43,12 @@ import { createTheme, styled } from "@mui/material/styles";
 import Toolbar from "@mui/material/Toolbar";
 import useAccountStore from "@store/accountStore";
 import useAuthStore from "@store/authStore";
+import useSettingsStore from "@store/settingsStore";
 import useThemeStore from "@store/themeStore";
 import { lightAlpha } from "@theme/colors";
 import { componentSettings, dark, light } from "@theme/tokens";
-import { useState } from "react";
+import { settingsGet } from "@utils/json_rpc";
+import { useEffect, useState } from "react";
 import { Link, Outlet } from "react-router";
 import "./theme.css";
 
@@ -108,6 +110,13 @@ export default function Layout() {
   const popup = useAccountStore((state) => state.popup);
   const setPopup = useAccountStore((state) => state.setPopup);
   const { loggedIn } = useAuthStore();
+  const setAdvancedUiFeatures = useSettingsStore((s) => s.setAdvancedUiFeatures);
+
+  useEffect(() => {
+    settingsGet().then((res) => {
+      setAdvancedUiFeatures(res.advanced_ui_features);
+    });
+  }, [setAdvancedUiFeatures]);
 
   const handleClose = () => {
     setPopup({ visible: false });

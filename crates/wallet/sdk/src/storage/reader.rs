@@ -206,9 +206,9 @@ pub trait WalletStoreReader {
         &mut self,
         address: &TemplateAddress,
     ) -> Result<AuthoredTemplateModel, WalletStorageError>;
-    fn authored_templates_fetch_by_public_key(
+    fn authored_templates_get_many(
         &mut self,
-        author_public_key: &RistrettoPublicKeyBytes,
+        author_public_key: Option<&RistrettoPublicKeyBytes>,
         page: u64,
         page_size: u64,
     ) -> Result<(Vec<AuthoredTemplateModel>, u64), WalletStorageError>;

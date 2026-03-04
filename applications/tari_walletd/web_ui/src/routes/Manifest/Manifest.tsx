@@ -53,9 +53,8 @@ import TextField from "@mui/material/TextField";
 import useManifestCodeStore from "@store/manifestStore";
 import type { ManifestTab } from "@store/manifestStore";
 import { FormatAlignLeft, LibraryAdd } from "@mui/icons-material";
-import { rejectReasonToString, substateIdToString, decodeOotleAddress } from "@tari-project/ootle-ts-bindings";
+import { rejectReasonToString, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
-import useAccountStore from "@store/accountStore";
 import { Highlight, themes } from "prism-react-renderer";
 import { useRef, useState } from "react";
 import Editor from "react-simple-code-editor";
@@ -344,11 +343,8 @@ function ImportTemplateDialog({
   onClose: () => void;
   onImport: (address: string, name: string) => void;
 }) {
-  const ootleAddress = useAccountStore((s) => s.address);
-  const decoded = ootleAddress ? decodeOotleAddress(ootleAddress) : null;
-
   const { data, isLoading } = useListTemplatesAuthored({
-    author_public_key: decoded?.accountPublicKey || "",
+    author_public_key: null,
     page: 0,
     page_size: 100,
   });
@@ -359,7 +355,7 @@ function ImportTemplateDialog({
       <DialogContent>
         {isLoading && <DialogContentText>Loading templates...</DialogContentText>}
         {!isLoading && (!data?.templates || data.templates.length === 0) && (
-          <DialogContentText>No templates found for the current account.</DialogContentText>
+          <DialogContentText>No templates found.</DialogContentText>
         )}
         {data?.templates && data.templates.length > 0 && (
           <Table size="small">

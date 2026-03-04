@@ -56,14 +56,14 @@ where TStore: WalletStore
     }
 
     /// Listing authored templates in a paginated way.
-    pub fn list_authored_templates(
+    pub fn list_templates(
         &self,
-        author_public_key: &RistrettoPublicKeyBytes,
+        author_public_key: Option<&RistrettoPublicKeyBytes>,
         page: u64,
         page_size: u64,
     ) -> Result<(Vec<AuthoredTemplateModel>, u64), TransactionApiError> {
         Ok(self
             .store
-            .with_read_tx(|tx| tx.authored_templates_fetch_by_public_key(author_public_key, page, page_size))?)
+            .with_read_tx(|tx| tx.authored_templates_get_many(author_public_key, page, page_size))?)
     }
 }

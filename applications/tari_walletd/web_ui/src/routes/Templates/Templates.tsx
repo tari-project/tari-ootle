@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 import PageHeading from "@components/PageHeading";
-import { Stack } from "@mui/material";
+import { StyledPaper } from "@components/StyledComponents";
+import { Stack, Typography } from "@mui/material";
 import Grid from "@mui/material/Grid";
 import TemplateList from "./components/TemplateList";
+import TemplateLookup from "./components/TemplateLookup";
 import Wrapper from "./components/Wrapper";
 
 function Templates() {
@@ -18,6 +20,14 @@ function Templates() {
           <TemplateList />
         </Stack>
       </Wrapper>
+      <Grid size={12}>
+        <StyledPaper>
+          <Typography variant="h6" gutterBottom>
+            Lookup Template
+          </Typography>
+          <TemplateLookup />
+        </StyledPaper>
+      </Grid>
     </>
   );
 }

@@ -95,10 +95,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "cargo:warning='{NPM} run build' error (is {NPM} installed?): {:?}",
                     error
                 );
-                // If on CI, fail the build. Otherwise, just warn
-                if env::var("CI").is_ok() {
-                    return Err(Box::new(error));
-                }
                 println!("cargo:warning=The web ui will not be included in the build!");
                 continue;
             },

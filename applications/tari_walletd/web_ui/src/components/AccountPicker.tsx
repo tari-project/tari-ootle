@@ -9,13 +9,21 @@ import Select from "@mui/material/Select";
 import Stack from "@mui/material/Stack";
 import useAccountStore, { setAccount, setOotleAddress } from "@store/accountStore";
 import { substateIdToString } from "@tari-project/ootle-ts-bindings";
+import { useEffect } from "react";
 
 // TODO - replace other file-specific account selectors with this component
 export default function AccountPicker() {
   const { data } = useAccountsList(0, 10);
   const currentAccount = useAccountStore((s) => s.account);
-  const defaultAccount = data?.accounts.find((a) => a.account.is_default)?.account;
-  const account = currentAccount || defaultAccount;
+  const defaultAccount = data?.accounts.find((a) => a.account.is_default);
+  const account = currentAccount || defaultAccount?.account;
+
+  useEffect(() => {
+    if (!currentAccount && defaultAccount) {
+      setAccount(defaultAccount.account);
+      setOotleAddress(defaultAccount.address);
+    }
+  }, [currentAccount, defaultAccount]);
 
   function onAccountChange(e: SelectChangeEvent) {
     const selected = data?.accounts.find((a) => substateIdToString(a.account.component_address) === e.target.value);

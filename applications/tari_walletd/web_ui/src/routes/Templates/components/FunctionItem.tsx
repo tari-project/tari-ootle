@@ -1,9 +1,8 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
-import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow, useTheme } from "@mui/material";
+import { Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip, useTheme } from "@mui/material";
 import { NestedCell } from "@routes/Templates/components/StyledTableComponents";
 import { FunctionDef, Type as FuncType } from "@tari-project/ootle-ts-bindings";
-import { SlCheck, SlClose } from "react-icons/sl";
 
 interface FunctionItemProps {
   functionDef: FunctionDef;
@@ -37,6 +36,8 @@ function getTypeAsString(funcType: FuncType): string {
 export default function FunctionItem({ functionDef }: FunctionItemProps) {
   const theme = useTheme();
   const { name, arguments: args, is_mut, output } = functionDef;
+  const is_migration = (functionDef as FunctionDef & { is_migration?: boolean }).is_migration;
+
   const argumentItems = args.map(({ name, arg_type }) => {
     if (name == "self") return;
     return (
@@ -79,8 +80,17 @@ export default function FunctionItem({ functionDef }: FunctionItemProps) {
     <TableRow>
       <NestedCell>
         <code>{name}</code>
+        {is_mut && (
+          <Tooltip title="This method mutates the component state">
+            <Chip label="mut" size="small" color="warning" sx={{ ml: 1 }} />
+          </Tooltip>
+        )}
+        {is_migration && (
+          <Tooltip title="This is a migration function">
+            <Chip label="migration" size="small" color="info" sx={{ ml: 1 }} />
+          </Tooltip>
+        )}
       </NestedCell>
-      <NestedCell align="center">{is_mut ? <SlCheck size={18} /> : <SlClose size={18} />}</NestedCell>
       <NestedCell>{argsTable}</NestedCell>
       <NestedCell align="right">
         <code>{getTypeAsString(output)}</code>

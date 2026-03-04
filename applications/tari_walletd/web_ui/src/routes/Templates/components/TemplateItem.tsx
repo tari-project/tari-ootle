@@ -11,7 +11,7 @@ interface TemplateItemProps {
   isOpen?: boolean;
 }
 
-const COLUMNS = ["Name", "Mutable", "Arguments", "Output"];
+const COLUMNS = ["Name", "Arguments", "Output"];
 
 export default function TemplateItem({ template, isOpen = false }: TemplateItemProps) {
   const { functions } = template;
@@ -26,7 +26,6 @@ export default function TemplateItem({ template, isOpen = false }: TemplateItemP
         <TableHead>
           <TableRow>
             <NestedCell>Name</NestedCell>
-            <NestedCell align="center">Mutable</NestedCell>
             <NestedCell>Arguments</NestedCell>
             <NestedCell align="right">Output Type</NestedCell>
           </TableRow>

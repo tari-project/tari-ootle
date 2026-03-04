@@ -22,6 +22,8 @@ use crate::{
     value::lit_to_arg,
 };
 
+const MAX_CALL_DEPTH: usize = 16;
+
 pub struct ManifestInstructionGenerator {
     imported_templates: HashMap<Ident, TemplateAddress>,
     global_aliases: HashMap<String, ManifestValue>,
@@ -29,6 +31,8 @@ pub struct ManifestInstructionGenerator {
     current_workspace_id: WorkspaceId,
     workspace_ids: HashMap<String, WorkspaceId>,
     templates: HashMap<String, TemplateAddress>,
+    functions: HashMap<String, Vec<ManifestIntent>>,
+    call_depth: usize,
 }
 
 impl ManifestInstructionGenerator {
@@ -40,6 +44,8 @@ impl ManifestInstructionGenerator {
             current_workspace_id: WorkspaceId::default(),
             workspace_ids: HashMap::new(),
             templates,
+            functions: HashMap::new(),
+            call_depth: 0,
         }
     }
 
@@ -61,6 +67,8 @@ impl ManifestInstructionGenerator {
             })
             .collect::<Result<_, _>>()?;
 
+        self.functions = ast.parsed.functions;
+
         let mut instructions = Vec::with_capacity(ast.parsed.instruction_intents.len());
         for intent in ast.parsed.instruction_intents {
             instructions.extend(self.translate_intent(intent)?);
@@ -77,6 +85,7 @@ impl ManifestInstructionGenerator {
         })
     }
 
+    #[expect(clippy::too_many_lines)]
     fn translate_intent(&mut self, intent: ManifestIntent) -> Result<Vec<Instruction>, ManifestError> {
         match intent {
             ManifestIntent::InvokeTemplate(InvokeIntent {
@@ -141,6 +150,13 @@ impl ManifestInstructionGenerator {
                 }
                 Ok(instructions)
             },
+            ManifestIntent::AllocateAddress(alloc) => {
+                let workspace_id = self.next_workspace_id(alloc.output_variable.to_string());
+                Ok(vec![Instruction::AllocateAddress {
+                    allocatable_type: alloc.allocatable_type,
+                    workspace_id,
+                }])
+            },
             ManifestIntent::AssignInput(assign) => {
                 self.global_aliases.insert(
                     assign.variable_name.to_string(),
@@ -155,6 +171,24 @@ impl ManifestInstructionGenerator {
                 })?,
             }]),
             ManifestIntent::DropAllProofs => Ok(vec![Instruction::DropAllProofsInWorkspace]),
+            ManifestIntent::CallLocalFunction(ident) => {
+                if self.call_depth >= MAX_CALL_DEPTH {
+                    return Err(ManifestError::MaxCallDepthExceeded { max: MAX_CALL_DEPTH });
+                }
+                let name = ident.to_string();
+                let body = self
+                    .functions
+                    .get(&name)
+                    .ok_or_else(|| ManifestError::UndefinedFunction { name: name.clone() })?
+                    .clone();
+                self.call_depth += 1;
+                let mut instructions = Vec::with_capacity(body.len());
+                for intent in body {
+                    instructions.extend(self.translate_intent(intent)?);
+                }
+                self.call_depth -= 1;
+                Ok(instructions)
+            },
         }
     }
 

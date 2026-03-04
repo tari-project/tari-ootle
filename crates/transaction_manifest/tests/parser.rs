@@ -24,7 +24,7 @@ use std::{collections::HashMap, fs, str::FromStr};
 
 use tari_bor::cbor;
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_transaction::{ComponentReference, Instruction, call_args};
+use tari_ootle_transaction::{AllocatableAddressType, ComponentReference, Instruction, call_args};
 use tari_template_lib::types::{
     ComponentAddress,
     ObjectKey,
@@ -145,4 +145,121 @@ fn workspace_component_reference() {
 
     assert_eq!(instructions, expected);
     assert_eq!(fee_instructions, vec![]);
+}
+
+#[test]
+fn allocate_address_macros() {
+    let manifest = r#"
+        use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as MyTemplate;
+
+        fn main() {
+            let component_addr = new_component_addr!();
+            let resx_addr = new_resource_addr!();
+            let comp = MyTemplate::with_address(component_addr, resx_addr);
+        }
+    "#;
+
+    let template_addr =
+        TemplateAddress::from_hex("c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7").unwrap();
+
+    let ManifestInstructions {
+        instructions,
+        fee_instructions,
+    } = parse_manifest(manifest, HashMap::new(), Default::default()).unwrap();
+
+    let expected = vec![
+        Instruction::AllocateAddress {
+            allocatable_type: AllocatableAddressType::Component,
+            workspace_id: 0,
+        },
+        Instruction::AllocateAddress {
+            allocatable_type: AllocatableAddressType::Resource,
+            workspace_id: 1,
+        },
+        Instruction::CallFunction {
+            address: template_addr,
+            function: "with_address".try_into().unwrap(),
+            args: call_args![Workspace(0), Workspace(1)],
+        },
+        Instruction::PutLastInstructionOutputOnWorkspace { key: 2 },
+    ];
+
+    assert_eq!(instructions, expected);
+    assert_eq!(fee_instructions, vec![]);
+}
+
+#[test]
+fn local_function_inlining() {
+    let manifest = r#"
+        use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as MyTemplate;
+
+        fn setup() {
+            let comp = MyTemplate::new();
+            let result = comp.do_something();
+        }
+
+        fn main() {
+            setup();
+            MyTemplate::final_step();
+        }
+    "#;
+
+    let template_addr =
+        TemplateAddress::from_hex("c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7").unwrap();
+
+    let ManifestInstructions {
+        instructions,
+        fee_instructions,
+    } = parse_manifest(manifest, HashMap::new(), Default::default()).unwrap();
+
+    // setup() should be inlined: its instructions appear first, then final_step()
+    let expected = vec![
+        // From setup():
+        Instruction::CallFunction {
+            address: template_addr,
+            function: "new".try_into().unwrap(),
+            args: call_args![],
+        },
+        Instruction::PutLastInstructionOutputOnWorkspace { key: 0 },
+        Instruction::CallMethod {
+            call: ComponentReference::Workspace(0),
+            method: "do_something".try_into().unwrap(),
+            args: call_args![],
+        },
+        Instruction::PutLastInstructionOutputOnWorkspace { key: 1 },
+        // From main() after setup():
+        Instruction::CallFunction {
+            address: template_addr,
+            function: "final_step".try_into().unwrap(),
+            args: call_args![],
+        },
+    ];
+
+    assert_eq!(instructions, expected);
+    assert_eq!(fee_instructions, vec![]);
+}
+
+#[test]
+fn recursive_function_exceeds_call_depth() {
+    let manifest = r#"
+        use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as MyTemplate;
+
+        fn recurse() {
+            recurse();
+        }
+
+        fn main() {
+            recurse();
+        }
+    "#;
+
+    let result = parse_manifest(manifest, HashMap::new(), Default::default());
+    let err = match result {
+        Ok(_) => panic!("Expected MaxCallDepthExceeded error, but got Ok"),
+        Err(e) => e,
+    };
+    assert!(
+        err.to_string().contains("Maximum call depth"),
+        "Expected MaxCallDepthExceeded error, got: {err}"
+    );
 }

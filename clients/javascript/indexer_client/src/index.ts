@@ -27,7 +27,7 @@ import type {
   TemplatesListAuthoredResponse,
   TransactionId, TransactionReceiptAddress,
   TransactionSubmitRequest,
-  TransactionSubmitResponse, QueryTransactionEventsRequest, QueryTransactionEventsResponse,
+  TransactionSubmitResponse, QueryTransactionEventsRequest, QueryTransactionEventsResponse, GetNetworkInfoResponse,
 } from "@tari-project/ootle-ts-bindings";
 import { FetchTransport, HttpTransport } from "./transports";
 
@@ -65,7 +65,11 @@ export class IndexerClient {
   public epochManagerStats(): Promise<GetEpochManagerStatsResponse> {
     return this.transport.sendGet(`epoch-manager/stats`, {});
   }
+  public networkInfo(): Promise<GetNetworkInfoResponse> {
+    return this.transport.sendGet(`network`, {});
+  }
 
+  p
   public networkStats(): Promise<GetNetworkSyncStateResponse> {
     return this.transport.sendGet(`network/stats`, {});
   }

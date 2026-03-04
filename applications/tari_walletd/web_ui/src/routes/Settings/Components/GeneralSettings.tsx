@@ -20,24 +20,40 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Divider } from "@mui/material";
+import { Chip, Divider } from "@mui/material";
 import Box from "@mui/material/Box";
 import { useTheme } from "@mui/material/styles";
 import Typography from "@mui/material/Typography";
+import { SettingsGetResponse } from "@tari-project/ootle-ts-bindings";
 import { settingsGet } from "@utils/json_rpc";
 import React, { useEffect, useState } from "react";
 import IndexerSettings from "./IndexerSettings";
 
+const NETWORK_COLORS: Record<string, string> = {
+  mainnet: "#4caf50",
+  stagenet: "#9c27b0",
+  nextnet: "#2196f3",
+  localnet: "#ff9800",
+  igor: "#00bcd4",
+  esmeralda: "#009688",
+};
+
 function GeneralSettings() {
   const theme = useTheme();
+  const [settings, setSettings] = useState<SettingsGetResponse | null>(null);
+
+  useEffect(() => {
+    settingsGet().then(setSettings);
+  }, []);
+
   const items = [
     {
       label: "Network",
-      content: <NetworkSettings />,
+      content: <NetworkSettings network={settings?.network.name ?? ""} />,
     },
     {
       label: "Indexer Url",
-      content: <IndexerSettings />,
+      content: <IndexerSettings indexerUrl={settings?.indexer_url ?? ""} walletNetwork={settings?.network.name ?? ""} />,
     },
   ];
 
@@ -65,17 +81,16 @@ function GeneralSettings() {
   );
 }
 
-function NetworkSettings() {
-  const [network, setNetwork] = useState("");
+function NetworkSettings({ network }: { network: string }) {
+  const color = NETWORK_COLORS[network] ?? "#757575";
 
-  useEffect(() => {
-    if (network) return;
-    settingsGet().then((res) => {
-      setNetwork(res.network.name);
-    });
-  }, [network]);
-
-  return <Typography>{network}</Typography>;
+  return (
+    <Chip
+      label={network || "…"}
+      size="small"
+      style={{ backgroundColor: color, color: "#fff", fontWeight: 600, textTransform: "capitalize" }}
+    />
+  );
 }
 
 export default GeneralSettings;

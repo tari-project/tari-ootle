@@ -1,7 +1,7 @@
 // Copyright 2026 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 import { useTemplateGet } from "@api/hooks/useTemplate";
-import { Alert, Box, Button, Collapse, IconButton, InputAdornment, Table, TableBody, TableContainer, TableHead, TableRow, TextField } from "@mui/material";
+import { Alert, Box, Button, Collapse, IconButton, InputAdornment, Table, TableBody, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import ClearIcon from "@mui/icons-material/Clear";
 import FunctionItem from "@routes/Templates/components/FunctionItem";
 import { NestedCell } from "@routes/Templates/components/StyledTableComponents";
@@ -64,7 +64,7 @@ export default function TemplateLookup() {
       )}
 
       <Collapse in={functions.length > 0} timeout="auto">
-        <h3>Functions</h3>
+        <Typography variant="h6" component="h3" sx={{ mt: 2 }}>Functions</Typography>
         <TableContainer>
           <Table>
             <TableHead>

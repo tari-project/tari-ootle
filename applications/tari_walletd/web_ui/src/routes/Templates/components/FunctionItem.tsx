@@ -35,8 +35,7 @@ function getTypeAsString(funcType: FuncType): string {
 
 export default function FunctionItem({ functionDef }: FunctionItemProps) {
   const theme = useTheme();
-  const { name, arguments: args, is_mut, output } = functionDef;
-  const is_migration = (functionDef as FunctionDef & { is_migration?: boolean }).is_migration;
+  const { name, arguments: args, is_mut, is_migration, output } = functionDef;
 
   const argumentItems = args.map(({ name, arg_type }) => {
     if (name == "self") return;

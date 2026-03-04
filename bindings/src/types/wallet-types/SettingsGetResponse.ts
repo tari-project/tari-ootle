@@ -2,4 +2,8 @@
 import type { AdvancedUiFeatures } from "./AdvancedUiFeatures";
 import type { NetworkInfo } from "./NetworkInfo";
 
-export type SettingsGetResponse = { indexer_url: string; network: NetworkInfo; advanced_ui_features: AdvancedUiFeatures };
+export type SettingsGetResponse = {
+  indexer_url: string;
+  network: NetworkInfo;
+  advanced_ui_features: AdvancedUiFeatures;
+};

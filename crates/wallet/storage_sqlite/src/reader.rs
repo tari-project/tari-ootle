@@ -1410,24 +1410,32 @@ impl WalletStoreReader for ReadTransaction<'_> {
         })
     }
 
-    fn authored_templates_fetch_by_public_key(
+    fn authored_templates_get_many(
         &mut self,
-        author_public_key: &RistrettoPublicKeyBytes,
+        author_public_key: Option<&RistrettoPublicKeyBytes>,
         page: u64,
         page_size: u64,
     ) -> Result<(Vec<AuthoredTemplateModel>, u64), WalletStorageError> {
         use crate::schema::authored_templates;
 
-        let author_public_key_str = serialize_hex(author_public_key);
+        let author_public_key_str = author_public_key.map(serialize_hex);
 
-        let total_templates_for_key_index = authored_templates::table
-            .filter(authored_templates::author_public_key.eq(&author_public_key_str))
+        let mut query = authored_templates::table.into_boxed();
+        if let Some(author_public_key_str) = &author_public_key_str {
+            query = query.filter(authored_templates::author_public_key.eq(author_public_key_str))
+        }
+
+        let total_templates_for_key_index = query
             .count()
             .first::<i64>(self.connection())
             .map_err(|e| WalletStorageError::general("count_authored_templates_fetch_by_key_index", e))?;
 
-        let templates = authored_templates::table
-            .filter(authored_templates::author_public_key.eq(author_public_key_str))
+        let mut query = authored_templates::table.into_boxed();
+
+        if let Some(author_public_key_str) = &author_public_key_str {
+            query = query.filter(authored_templates::author_public_key.eq(author_public_key_str));
+        }
+        let templates = query
             .limit(page_size as i64)
             .offset((page * page_size) as i64)
             .select(AuthoredTemplate::as_select())

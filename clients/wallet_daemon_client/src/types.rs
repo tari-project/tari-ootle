@@ -955,8 +955,7 @@ pub struct TemplatesGetResponse {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct TemplatesListAuthoredRequest {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub author_public_key: RistrettoPublicKeyBytes,
+    pub author_public_key: Option<RistrettoPublicKeyBytes>,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub page: u64,
     #[cfg_attr(feature = "ts", ts(type = "number"))]

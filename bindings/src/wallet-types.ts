@@ -15,6 +15,7 @@ export * from "./types/wallet-types/AccountsAssociateStealthResourceResponse";
 export * from "./types/wallet-types/WalletSubstateInfo";
 export * from "./types/wallet-types/WebauthnAlreadyRegisteredResponse";
 export * from "./types/wallet-types/AccountGetResponse";
+export * from "./types/wallet-types/AdvancedUiFeatures";
 export * from "./types/wallet-types/SettingsSetRequest";
 export * from "./types/wallet-types/StealthTransferResponse";
 export * from "./types/wallet-types/StealthTransferRequest";

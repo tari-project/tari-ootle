@@ -24,6 +24,11 @@ pub async fn handle_get(
         .optional()?
         .unwrap_or_else(|| sdk.get_network_interface().get_endpoint());
     let network = sdk.config_api().get_network()?;
+    let advanced_ui_features = sdk
+        .config_api()
+        .get(ConfigKey::AdvancedUiFeatures)
+        .optional()?
+        .unwrap_or_default();
 
     Ok(SettingsGetResponse {
         indexer_url,
@@ -31,6 +36,7 @@ pub async fn handle_get(
             name: network.to_string(),
             byte: network.as_byte(),
         },
+        advanced_ui_features,
     })
 }
 
@@ -43,5 +49,9 @@ pub async fn handle_set(
     context.check_auth(token, &[JrpcPermission::Admin])?;
     sdk.config_api().set(ConfigKey::IndexerUrl, &req.indexer_url)?;
     sdk.get_network_interface().set_endpoint(req.indexer_url);
+    if let Some(advanced_ui_features) = &req.advanced_ui_features {
+        sdk.config_api()
+            .set(ConfigKey::AdvancedUiFeatures, advanced_ui_features)?;
+    }
     Ok(SettingsSetResponse {})
 }

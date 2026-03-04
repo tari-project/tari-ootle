@@ -102,6 +102,8 @@ pub enum ConfigKey {
     RecoveryNeeded,
     /// The keyring key that stored the decryption password
     KeyringPasswordEntryKey,
+    /// Advanced UI features. type: AdvancedUiFeatures
+    AdvancedUiFeatures,
 }
 
 impl ConfigKey {
@@ -112,6 +114,7 @@ impl ConfigKey {
             Self::IndexerUrl => "indexer_url",
             Self::RecoveryNeeded => "recovery_needed",
             Self::KeyringPasswordEntryKey => "keyring_password_entry_key",
+            Self::AdvancedUiFeatures => "advanced_ui_features",
         }
     }
 }

@@ -45,7 +45,7 @@ function IndexerSettings() {
 
   const onSubmitIndexer = () => {
     setSettings(accountFormState);
-    settingsSet(accountFormState);
+    settingsSet({ indexer_url: accountFormState.indexer_url, advanced_ui_features: null });
     setShowForm(false);
     setAccountFormState({ ...accountFormState, indexer_url: "" });
   };

@@ -22,6 +22,8 @@ use crate::{
     value::lit_to_arg,
 };
 
+const MAX_CALL_DEPTH: usize = 16;
+
 pub struct ManifestInstructionGenerator {
     imported_templates: HashMap<Ident, TemplateAddress>,
     global_aliases: HashMap<String, ManifestValue>,
@@ -30,6 +32,7 @@ pub struct ManifestInstructionGenerator {
     workspace_ids: HashMap<String, WorkspaceId>,
     templates: HashMap<String, TemplateAddress>,
     functions: HashMap<String, Vec<ManifestIntent>>,
+    call_depth: usize,
 }
 
 impl ManifestInstructionGenerator {
@@ -42,6 +45,7 @@ impl ManifestInstructionGenerator {
             workspace_ids: HashMap::new(),
             templates,
             functions: HashMap::new(),
+            call_depth: 0,
         }
     }
 
@@ -81,6 +85,7 @@ impl ManifestInstructionGenerator {
         })
     }
 
+    #[expect(clippy::too_many_lines)]
     fn translate_intent(&mut self, intent: ManifestIntent) -> Result<Vec<Instruction>, ManifestError> {
         match intent {
             ManifestIntent::InvokeTemplate(InvokeIntent {
@@ -167,16 +172,21 @@ impl ManifestInstructionGenerator {
             }]),
             ManifestIntent::DropAllProofs => Ok(vec![Instruction::DropAllProofsInWorkspace]),
             ManifestIntent::CallLocalFunction(ident) => {
+                if self.call_depth >= MAX_CALL_DEPTH {
+                    return Err(ManifestError::MaxCallDepthExceeded { max: MAX_CALL_DEPTH });
+                }
                 let name = ident.to_string();
                 let body = self
                     .functions
                     .get(&name)
-                    .ok_or_else(|| ManifestError::UndefinedVariable { name: name.clone() })?
+                    .ok_or_else(|| ManifestError::UndefinedFunction { name: name.clone() })?
                     .clone();
-                let mut instructions = Vec::new();
+                self.call_depth += 1;
+                let mut instructions = Vec::with_capacity(body.len());
                 for intent in body {
                     instructions.extend(self.translate_intent(intent)?);
                 }
+                self.call_depth -= 1;
                 Ok(instructions)
             },
         }

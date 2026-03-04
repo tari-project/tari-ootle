@@ -338,7 +338,7 @@ impl ManifestParser {
                             Ok(ManifestIntent::CallLocalFunction(first.ident.clone()))
                         }
                     },
-                    _ => return Err(syn::Error::new_spanned(call.func, "Invalid function call")),
+                    _ => Err(syn::Error::new_spanned(call.func, "Invalid function call")),
                 }
             },
             Expr::MethodCall(ExprMethodCall {

@@ -238,3 +238,28 @@ fn local_function_inlining() {
     assert_eq!(instructions, expected);
     assert_eq!(fee_instructions, vec![]);
 }
+
+#[test]
+fn recursive_function_exceeds_call_depth() {
+    let manifest = r#"
+        use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as MyTemplate;
+
+        fn recurse() {
+            recurse();
+        }
+
+        fn main() {
+            recurse();
+        }
+    "#;
+
+    let result = parse_manifest(manifest, HashMap::new(), Default::default());
+    let err = match result {
+        Ok(_) => panic!("Expected MaxCallDepthExceeded error, but got Ok"),
+        Err(e) => e,
+    };
+    assert!(
+        err.to_string().contains("Maximum call depth"),
+        "Expected MaxCallDepthExceeded error, got: {err}"
+    );
+}

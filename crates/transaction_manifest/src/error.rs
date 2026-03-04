@@ -36,10 +36,14 @@ pub enum ManifestError {
     UndefinedGlobal { name: String },
     #[error("Variable '{name}' is not defined")]
     UndefinedVariable { name: String },
+    #[error("Function '{name}' is not defined")]
+    UndefinedFunction { name: String },
     #[error("Invalid variable type: {0}")]
     InvalidVariableType(String),
     #[error("Template alias '{alias}' not defined")]
     TemplateAliasNotDefined { alias: String },
     #[error("Invalid instruction: {reason}")]
     InvalidInstruction { reason: String },
+    #[error("Maximum call depth of {max} exceeded")]
+    MaxCallDepthExceeded { max: usize },
 }

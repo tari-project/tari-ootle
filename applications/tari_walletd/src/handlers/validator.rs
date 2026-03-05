@@ -12,7 +12,7 @@ use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{SubstateAddress, SubstateRequirement, derive_fee_pool_address};
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId};
-use tari_wallet_daemon_client::{
+use tari_ootle_walletd_client::{
     permissions::JrpcPermission,
     types::{
         AccountOrKeyId,

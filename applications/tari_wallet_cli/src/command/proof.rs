@@ -25,7 +25,7 @@ use std::str::FromStr;
 use base64::{Engine, prelude::BASE64_STANDARD};
 use clap::{Args, Subcommand};
 use tari_bor::encode;
-use tari_wallet_daemon_client::{WalletDaemonClient, types::ConfidentialCreateOutputProofRequest};
+use tari_ootle_walletd_client::{WalletDaemonClient, types::ConfidentialCreateOutputProofRequest};
 
 #[derive(Debug, Subcommand, Clone)]
 pub enum ProofsSubcommand {

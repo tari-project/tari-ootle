@@ -27,14 +27,7 @@ use tari_ootle_wallet_sdk::{
     },
     models::{KeyBranch, KeyId, NewAccountData, StealthUtxoSpendKeyId, TransactionSubmittedEvent},
 };
-use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib_types::{
-    Amount,
-    ResourceType,
-    constants::{STEALTH_TARI_RESOURCE_ADDRESS, TARI_TOKEN, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
-    stealth::SpendCondition,
-};
-use tari_wallet_daemon_client::{
+use tari_ootle_walletd_client::{
     ComponentAddressOrName,
     permissions::JrpcPermission,
     types::{
@@ -72,6 +65,13 @@ use tari_wallet_daemon_client::{
         StealthTransferRequest,
         StealthTransferResponse,
     },
+};
+use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
+use tari_template_lib_types::{
+    Amount,
+    ResourceType,
+    constants::{STEALTH_TARI_RESOURCE_ADDRESS, TARI_TOKEN, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
+    stealth::SpendCondition,
 };
 use tokio::task;
 

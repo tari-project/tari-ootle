@@ -26,16 +26,7 @@ use tari_ootle_wallet_sdk::{
     crypto::{memo::Memo, pay_to::PayTo},
     models::{AccountWithAddress, KeyBranch},
 };
-use tari_template_lib_types::{
-    Amount,
-    ComponentAddress,
-    ResourceAddress,
-    UtxoId,
-    amount,
-    constants::TARI_TOKEN,
-    metadata,
-};
-use tari_wallet_daemon_client::{
+use tari_ootle_walletd_client::{
     WalletDaemonClient,
     types::{
         AccountsAssociateStealthResourceRequest,
@@ -53,6 +44,15 @@ use tari_wallet_daemon_client::{
         TransactionWaitResultRequest,
         TransferStatementRequest,
     },
+};
+use tari_template_lib_types::{
+    Amount,
+    ComponentAddress,
+    ResourceAddress,
+    UtxoId,
+    amount,
+    constants::TARI_TOKEN,
+    metadata,
 };
 use tokio::time::sleep;
 

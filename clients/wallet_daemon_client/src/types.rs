@@ -59,7 +59,7 @@ use tari_ootle_wallet_sdk::{
     },
 };
 use tari_template_abi::{FunctionDef, TemplateDef, version::WasmAbiVersion};
-use tari_template_lib::types::{
+use tari_template_lib_types::{
     Amount,
     ComponentAddress,
     EncryptedData,

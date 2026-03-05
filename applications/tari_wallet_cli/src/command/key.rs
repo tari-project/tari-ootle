@@ -22,8 +22,8 @@
 
 use clap::Subcommand;
 use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId};
+use tari_ootle_walletd_client::WalletDaemonClient;
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
-use tari_wallet_daemon_client::WalletDaemonClient;
 
 use crate::{table::Table, table_row};
 

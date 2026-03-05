@@ -4,7 +4,7 @@
 use axum_extra::headers::authorization::Bearer;
 use tari_ootle_common_types::optional::Optional;
 use tari_ootle_wallet_sdk::apis::config::ConfigKey;
-use tari_wallet_daemon_client::{
+use tari_ootle_walletd_client::{
     permissions::JrpcPermission,
     types::{NetworkInfo, SettingsGetResponse, SettingsSetRequest, SettingsSetResponse},
 };

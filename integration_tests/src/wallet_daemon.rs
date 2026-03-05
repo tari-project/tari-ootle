@@ -33,8 +33,7 @@ use tari_ootle_walletd::{
     config::{ApplicationConfig, WalletDaemonAuth, WalletDaemonConfig},
     run_tari_ootle_walletd,
 };
-use tari_shutdown::Shutdown;
-use tari_wallet_daemon_client::{
+use tari_ootle_walletd_client::{
     ComponentAddressOrName,
     WalletDaemonClient,
     error::WalletDaemonClientError,
@@ -49,6 +48,7 @@ use tari_wallet_daemon_client::{
         TransactionWaitResultResponse,
     },
 };
+use tari_shutdown::Shutdown;
 use tokio::task;
 
 use crate::{

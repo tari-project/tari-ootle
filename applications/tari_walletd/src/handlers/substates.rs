@@ -5,7 +5,7 @@ use axum_extra::headers::authorization::Bearer;
 use tari_engine_types::substate::Substate;
 use tari_ootle_common_types::optional::Optional;
 use tari_ootle_wallet_sdk::network::WalletNetworkInterface;
-use tari_wallet_daemon_client::{
+use tari_ootle_walletd_client::{
     permissions::JrpcPermission,
     types::{
         SubstatesGetRequest,

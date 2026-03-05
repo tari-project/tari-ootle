@@ -13,9 +13,9 @@ use tari_ootle_wallet_sdk::{
     apis::accounts::{AccountsApi, AccountsApiError},
     models::{AccountWithAddress, DerivedKeyIndex, TransactionFinalizedEvent, WalletEvent},
 };
+use tari_ootle_walletd_client::ComponentAddressOrName;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib_types::ComponentAddress;
-use tari_wallet_daemon_client::ComponentAddressOrName;
 use tokio::sync::broadcast;
 
 use crate::server::ApplicationErrorCode;

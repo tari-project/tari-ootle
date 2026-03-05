@@ -1,5 +1,5 @@
 [workspace.package]
-version = "0.25.7"
+version = "0.25.8"
 edition = "2024"
 authors = ["The Tari Development Community"]
 repository = "https://github.com/tari-project/tari-ootle"
@@ -84,7 +84,7 @@ tari_ootle_p2p = { path = "crates/p2p" }
 tari_ootle_storage = { path = "crates/storage" }
 tari_ootle_storage_sqlite = { path = "crates/storage_sqlite" }
 tari_ootle_wallet_crypto = { path = "crates/wallet/crypto", version = "0.1" }
-tari_ootle_wallet_sdk = { path = "crates/wallet/sdk" }
+tari_ootle_wallet_sdk = { path = "crates/wallet/sdk", version = "0.1.0" }
 tari_ootle_wallet_sdk_services = { path = "crates/wallet/sdk_services" }
 tari_ootle_wallet_storage_sqlite = { path = "crates/wallet/storage_sqlite" }
 tari_epoch_manager = { path = "crates/epoch_manager" }
@@ -104,7 +104,7 @@ tari_rpc_framework = { path = "networking/rpc_framework" }
 tari_rpc_macros = { path = "networking/rpc_macros" }
 tari_swarm = { path = "networking/swarm" }
 tari_validator_node_client = { path = "clients/validator_node_client" }
-tari_wallet_daemon_client = { path = "clients/wallet_daemon_client" }
+tari_ootle_walletd_client = { path = "clients/wallet_daemon_client" }
 transaction_generator = { path = "utilities/transaction_generator" }
 
 # Dependency crates on crates.io (update versions here as well when updating the workspace version)

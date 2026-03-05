@@ -8,8 +8,8 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json as json;
 use serde_json::json;
+use tari_ootle_walletd_client::types::EncodedJwtString;
 use tari_shutdown::ShutdownSignal;
-use tari_wallet_daemon_client::types::EncodedJwtString;
 use webrtc::{
     api::APIBuilder,
     data_channel::{RTCDataChannel, data_channel_message::DataChannelMessage},

@@ -36,9 +36,7 @@ use tari_ootle_wallet_sdk::{
     crypto::pay_to::PayTo,
     models::{Account, AccountWithAddress, NonFungibleToken},
 };
-use tari_template_lib_types::{Amount, ResourceAddress, constants::TOKEN_SYMBOL, crypto::RistrettoPublicKeyBytes};
-use tari_transaction_manifest::{ManifestValue, parse_manifest};
-use tari_wallet_daemon_client::{
+use tari_ootle_walletd_client::{
     ComponentAddressOrName,
     WalletDaemonClient,
     error::WalletDaemonClientError,
@@ -60,6 +58,8 @@ use tari_wallet_daemon_client::{
         TransactionWaitResultResponse,
     },
 };
+use tari_template_lib_types::{Amount, ResourceAddress, constants::TOKEN_SYMBOL, crypto::RistrettoPublicKeyBytes};
+use tari_transaction_manifest::{ManifestValue, parse_manifest};
 use tokio::{task::JoinSet, time::timeout};
 
 use crate::{

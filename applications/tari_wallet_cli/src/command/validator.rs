@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use clap::{Args, Subcommand};
 use tari_ootle_common_types::{ShardGroup, shard::Shard};
-use tari_wallet_daemon_client::{
+use tari_ootle_walletd_client::{
     ComponentAddressOrName,
     WalletDaemonClient,
     types::{AccountOrKeyId, ClaimValidatorFeesRequest, GetValidatorFeesRequest},

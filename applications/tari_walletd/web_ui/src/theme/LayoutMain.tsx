@@ -24,11 +24,10 @@ import { breadcrumbRoutes } from "@/App";
 import Logo from "@assets/Logo";
 import Breadcrumbs from "@components/Breadcrumbs";
 import MenuItems from "@components/MenuItems";
-import WalletConnectLink from "@components/WalletConnectLink";
 import { Check } from "@mui/icons-material";
 import MenuOpenOutlinedIcon from "@mui/icons-material/MenuOpenOutlined";
 import MenuOutlinedIcon from "@mui/icons-material/MenuOutlined";
-import { Dialog, Stack, ThemeProvider } from "@mui/material";
+import { Dialog, ThemeProvider } from "@mui/material";
 import MuiAppBar, { AppBarProps as MuiAppBarProps } from "@mui/material/AppBar";
 import Box from "@mui/material/Box";
 import Container from "@mui/material/Container";
@@ -180,9 +179,9 @@ export default function Layout() {
               >
                 <Logo fill={theme.palette.text.primary} />
               </Link>
-              <Stack direction="row" spacing={1}>
-                {loggedIn ? <WalletConnectLink /> : null}
-              </Stack>
+              {/*<Stack direction="row" spacing={1}>*/}
+              {/*  {loggedIn ? <WalletConnectLink /> : null}*/}
+              {/*</Stack>*/}
             </Box>
           </Toolbar>
         </AppBar>

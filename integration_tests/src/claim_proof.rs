@@ -1,8 +1,8 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_ootle_walletd_client::types::ClaimBurnProof;
 use tari_template_lib_types::crypto::PedersenCommitmentBytes;
-use tari_wallet_daemon_client::types::ClaimBurnProof;
 
 pub enum CucumberClaimProof {
     Confirmed {

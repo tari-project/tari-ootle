@@ -5,7 +5,7 @@ use std::{fmt::Debug, sync::Arc};
 
 use anyhow::anyhow;
 use tari_ootle_wallet_sdk::storage::WalletStore;
-use tari_wallet_daemon_client::types::AuthCredentials;
+use tari_ootle_walletd_client::types::AuthCredentials;
 use webauthn_rs::Webauthn;
 
 use crate::{handlers::auth::Authenticator, services::WebauthnService};

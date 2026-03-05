@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use axum_extra::headers::authorization::Bearer;
-use tari_wallet_daemon_client::types::{WalletGetInfoRequest, WalletGetInfoResponse};
+use tari_ootle_walletd_client::types::{WalletGetInfoRequest, WalletGetInfoResponse};
 
 use crate::handlers::HandlerContext;
 

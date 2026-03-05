@@ -4,7 +4,7 @@
 use axum_extra::headers::authorization::Bearer;
 use ootle_byte_type::ToByteType;
 use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId};
-use tari_wallet_daemon_client::{
+use tari_ootle_walletd_client::{
     permissions::JrpcPermission,
     types::{
         KeysCreateRequest,

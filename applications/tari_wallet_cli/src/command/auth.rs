@@ -22,7 +22,7 @@
 
 use clap::{Args, Subcommand};
 use tari_ootle_common_types::displayable::Displayable;
-use tari_wallet_daemon_client::{
+use tari_ootle_walletd_client::{
     WalletDaemonClient,
     permissions::JrpcPermission,
     types::{AuthCredentials, AuthListSessionsRequest, AuthLoginRequest, AuthRevokeTokenRequest},

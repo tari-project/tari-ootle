@@ -51,20 +51,7 @@ use tari_ootle_transaction::{
     call_arg,
 };
 use tari_ootle_wallet_sdk::{apis::confidential_transfer::UtxoInputSelection, crypto::memo::Memo};
-use tari_template_lib::{
-    models::BucketId,
-    types::{
-        Amount,
-        NonFungibleAddress,
-        NonFungibleId,
-        ResourceAddress,
-        TemplateAddress,
-        constants::STEALTH_TARI_RESOURCE_ADDRESS,
-        crypto::RistrettoPublicKeyBytes,
-    },
-};
-use tari_transaction_manifest::{ManifestValue, parse_manifest};
-use tari_wallet_daemon_client::{
+use tari_ootle_walletd_client::{
     ComponentAddressOrName,
     WalletDaemonClient,
     types::{
@@ -79,6 +66,19 @@ use tari_wallet_daemon_client::{
         TransactionWaitResultResponse,
     },
 };
+use tari_template_lib::{
+    models::BucketId,
+    types::{
+        Amount,
+        NonFungibleAddress,
+        NonFungibleId,
+        ResourceAddress,
+        TemplateAddress,
+        constants::STEALTH_TARI_RESOURCE_ADDRESS,
+        crypto::RistrettoPublicKeyBytes,
+    },
+};
+use tari_transaction_manifest::{ManifestValue, parse_manifest};
 
 use crate::from_hex::FromHex;
 

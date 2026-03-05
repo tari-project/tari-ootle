@@ -7,7 +7,7 @@ use axum_extra::headers::authorization::Bearer;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, TokenData, Validation};
 use tari_crypto::tari_utilities::SafePassword;
 use tari_ootle_wallet_sdk::storage::WalletStorageError;
-use tari_wallet_daemon_client::{
+use tari_ootle_walletd_client::{
     permissions::{Claims, JrpcPermission, JrpcPermissions},
     types::EncodedJwtString,
 };

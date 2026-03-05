@@ -12,9 +12,9 @@ use tari_ootle_wallet_sdk_services::{
     transaction_service::TransactionServiceHandle,
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
+use tari_ootle_walletd_client::permissions::JrpcPermission;
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::SafePassword;
-use tari_wallet_daemon_client::permissions::JrpcPermission;
 use webauthn_rs::Webauthn;
 
 use crate::{

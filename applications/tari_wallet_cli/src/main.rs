@@ -24,7 +24,7 @@ use anyhow::anyhow;
 use multiaddr::{Multiaddr, Protocol};
 use reqwest::Url;
 use tari_ootle_wallet_cli::{cli::Cli, command::Command};
-use tari_wallet_daemon_client::WalletDaemonClient;
+use tari_ootle_walletd_client::WalletDaemonClient;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), anyhow::Error> {

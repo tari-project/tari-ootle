@@ -9,7 +9,7 @@ use std::{
 };
 
 use axum_extra::extract::cookie::{Cookie, SameSite};
-use tari_wallet_daemon_client::{
+use tari_ootle_walletd_client::{
     permissions::{Claims, JrpcPermissions},
     types::RefreshTokenHash,
 };

@@ -12,6 +12,7 @@ use minotari_app_grpc::{
 };
 use tari_engine_types::confidential::{AbridgedTransactionKernel, EncodedMerkleProof, MinotariBurnClaimProof};
 use tari_ootle_wallet_sdk::models::KeyBranch;
+use tari_ootle_walletd_client::types::ClaimBurnProof;
 use tari_template_lib_types::{
     EncryptedData,
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
@@ -20,7 +21,6 @@ use tari_transaction_components::{
     tari_amount::T,
     transaction_components::{MemoField, memo_field::TxType},
 };
-use tari_wallet_daemon_client::types::ClaimBurnProof;
 use tokio::time::sleep;
 
 use crate::{TariWorld, spawn_minotari_wallet};

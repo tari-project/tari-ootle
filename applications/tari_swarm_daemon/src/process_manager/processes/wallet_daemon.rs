@@ -3,11 +3,11 @@
 
 use anyhow::anyhow;
 use tari_ootle_wallet_sdk::models::KeyBranch;
-use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
-use tari_wallet_daemon_client::{
+use tari_ootle_walletd_client::{
     WalletDaemonClient,
     types::{AuthCredentials, AuthLoginRequest, AuthLoginResponse, WebauthnFinishAuthRequest},
 };
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::process_manager::Instance;
 

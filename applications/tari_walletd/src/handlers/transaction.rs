@@ -12,8 +12,7 @@ use tari_ootle_common_types::{Epoch, optional::Optional, response_status::Respon
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::{apis::transaction::TransactionApiError, models::WalletEvent};
 use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceError;
-use tari_transaction_manifest::parse_manifest;
-use tari_wallet_daemon_client::{
+use tari_ootle_walletd_client::{
     permissions::JrpcPermission,
     types::{
         CallInstructionRequest,
@@ -35,6 +34,7 @@ use tari_wallet_daemon_client::{
         TransactionWaitResultResponse,
     },
 };
+use tari_transaction_manifest::parse_manifest;
 use tokio::time;
 
 use super::context::HandlerContext;

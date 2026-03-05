@@ -10,10 +10,6 @@ if [ -d "$SOURCE_PATH/$THEME_DIR" ]; then
   echo "Removing dir (src) $SOURCE_PATH/$THEME_DIR"
   npx shx rm -rf $SOURCE_PATH/$THEME_DIR || true
 fi
-for file in $(find "$SOURCE_PATH" -name "*.ts" -maxdepth 1); do
-  echo "Removing file (src) $file"
-  npx shx rm $file || true
-done
 if [ -f "$SOURCE_PATH/$DIST_DIR" ]; then
   echo "Removing dir (dist): $SOURCE_PATH/$DIST_DIR"
   npx shx rm -rf ./$DIST_DIR || true

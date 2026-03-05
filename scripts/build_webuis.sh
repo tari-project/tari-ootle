@@ -79,19 +79,11 @@ else
 fi
 popd > /dev/null
 
-
 pushd $base_path/applications/theming > /dev/null
-if [ ! -z "${build_theming}" ]; then
-  # Build bindings
   echo "Building theme..."
   pnpm install
-  pnpm run build-dev
+  pnpm run build-dist # build with the TS definitions included
   pnpm run build
-else
-  echo "Building theming (Dist only)..."
-  pnpm install
-  pnpm run build-dev # build with the TS definitions included
-fi
 popd > /dev/null
 
 function build() {

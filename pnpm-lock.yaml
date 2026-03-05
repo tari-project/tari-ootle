@@ -62,6 +62,9 @@ importers:
       '@tari-project/ootle-ts-bindings':
         specifier: link:../../../bindings
         version: link:../../../bindings
+      '@tari-project/ootle-web-ui-theming':
+        specifier: link:../../applications/theming
+        version: link:../../applications/theming
       file-saver:
         specifier: ^2.0.5
         version: 2.0.5

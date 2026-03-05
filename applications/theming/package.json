@@ -5,6 +5,14 @@
   "publishConfig": {
     "access": "public"
   },
+  "homepage": "https://github.com/tari-project/tari-ootle#readme",
+  "bugs": {
+    "url": "https://github.com/tari-project/tari-ootle/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tari-project/tari-ootle.git"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [

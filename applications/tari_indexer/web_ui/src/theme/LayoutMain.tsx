@@ -34,7 +34,6 @@ import MenuOpenOutlinedIcon from "@mui/icons-material/MenuOpenOutlined";
 import MenuOutlinedIcon from "@mui/icons-material/MenuOutlined";
 import { mainListItems } from "../Components/MenuItems";
 import { ThemeProvider } from "@mui/material";
-// import theme from "./theme";
 import { Outlet, Link } from "react-router-dom";
 import Logo from "../assets/Logo";
 import Container from "@mui/material/Container";
@@ -42,7 +41,7 @@ import Breadcrumbs from "../Components/Breadcrumbs";
 import { breadcrumbRoutes } from "../App";
 import Grid from "@mui/material/Grid";
 import { createTheme } from "@mui/material/styles";
-import { light, dark, componentSettings } from "./theme";
+import { light, dark, componentSettings } from "@tari-project/ootle-web-ui-theming";
 import useThemeStore from "../store/themeStore";
 
 const drawerWidth = 300;

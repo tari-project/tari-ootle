@@ -45,6 +45,8 @@ use types::{
     AccountsTransferResponse,
     AuthLoginRequest,
     AuthLoginResponse,
+    AuthRefreshRequest,
+    CallInstructionRequest,
     ClaimBurnRequest,
     ClaimBurnResponse,
     GetNftRequest,
@@ -59,6 +61,8 @@ use types::{
     ProofsFinalizeResponse,
     ProofsGenerateRequest,
     ProofsGenerateResponse,
+    TransferNftRequest,
+    TransferNftResponse,
     WebRtcStartRequest,
     WebRtcStartResponse,
 };
@@ -86,6 +90,7 @@ use crate::{
         AccountsListResponse,
         AccountsRenameRequest,
         AccountsRenameResponse,
+        AuthGetMethodResponse,
         AuthListSessionsRequest,
         AuthListSessionsResponse,
         AuthRevokeTokenRequest,
@@ -110,6 +115,12 @@ use crate::{
         PublishTemplateRequest,
         PublishTemplateResponse,
         SettingsGetResponse,
+        SettingsSetRequest,
+        SettingsSetResponse,
+        SubstatesGetRequest,
+        SubstatesGetResponse,
+        SubstatesListRequest,
+        SubstatesListResponse,
         StealthTransferRequest,
         StealthTransferResponse,
         StealthUtxosDecryptValueRequest,
@@ -122,14 +133,28 @@ use crate::{
         TransactionGetResponse,
         TransactionGetResultRequest,
         TransactionGetResultResponse,
+        TemplatesGetRequest,
+        TemplatesGetResponse,
+        TemplatesListAuthoredRequest,
+        TemplatesListAuthoredResponse,
         TransactionSubmitDryRunRequest,
         TransactionSubmitDryRunResponse,
+        TransactionSubmitManifestRequest,
+        TransactionSubmitManifestResponse,
         TransactionSubmitRequest,
         TransactionSubmitResponse,
         TransactionWaitResultRequest,
         TransactionWaitResultResponse,
         WalletGetInfoRequest,
         WalletGetInfoResponse,
+        WebauthnAlreadyRegisteredRequest,
+        WebauthnAlreadyRegisteredResponse,
+        WebauthnFinishRegisterRequest,
+        WebauthnFinishRegisterResponse,
+        WebauthnStartAuthRequest,
+        WebauthnStartAuthResponse,
+        WebauthnStartRegisterRequest,
+        WebauthnStartRegisterResponse,
     },
 };
 
@@ -149,6 +174,9 @@ impl WalletDaemonClient {
                 headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
                 headers
             })
+            // Enable cookie storage so that HttpOnly refresh token cookies set by the server
+            // are automatically stored and sent back on subsequent requests (e.g. auth.refresh).
+            .cookie_store(true)
             .build()?;
 
         Ok(Self {
@@ -252,6 +280,24 @@ impl WalletDaemonClient {
         request: T,
     ) -> Result<TransactionSubmitDryRunResponse, WalletDaemonClientError> {
         self.send_request("transactions.submit_dry_run", request.borrow()).await
+    }
+
+    /// Submits a single instruction for execution as a transaction.
+    pub async fn submit_instruction<T: Borrow<CallInstructionRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<TransactionSubmitResponse, WalletDaemonClientError> {
+        self.send_request("transactions.submit_instruction", request.borrow())
+            .await
+    }
+
+    /// Submits a transaction manifest for execution.
+    pub async fn submit_manifest<T: Borrow<TransactionSubmitManifestRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<TransactionSubmitManifestResponse, WalletDaemonClientError> {
+        self.send_request("transactions.submit_manifest", request.borrow())
+            .await
     }
 
     /// Creates a new account with an optional name and key index.
@@ -465,6 +511,14 @@ impl WalletDaemonClient {
         self.send_request("nfts.list", req.borrow()).await
     }
 
+    /// Transfers an NFT from one account to another.
+    pub async fn transfer_nft<T: Borrow<TransferNftRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<TransferNftResponse, WalletDaemonClientError> {
+        self.send_request("nfts.transfer", req.borrow()).await
+    }
+
     /// Decrypts and returns the confidential balance of a vault using the provided view key.
     /// The view key must correspond to the public view key of the Resource the vault holds.
     /// If the resource is not confidential, or has no view key configured, this will return an error.
@@ -475,12 +529,22 @@ impl WalletDaemonClient {
         self.send_request("confidential.view_vault_balance", req.borrow()).await
     }
 
+    /// Requests the current required authentication method to use when authenticating with the wallet daemon.
+    pub async fn get_auth_method(&mut self) -> Result<AuthGetMethodResponse, WalletDaemonClientError> {
+        self.send_request("auth.method", &()).await
+    }
+
     /// Requests a JWT authentication token with the specified permissions and duration.
     pub async fn auth_request<T: Borrow<AuthLoginRequest>>(
         &mut self,
         req: T,
     ) -> Result<AuthLoginResponse, WalletDaemonClientError> {
         self.send_request("auth.request", req.borrow()).await
+    }
+
+    /// Refreshes an authentication token using the refresh token cookie.
+    pub async fn auth_refresh(&mut self) -> Result<AuthLoginResponse, WalletDaemonClientError> {
+        self.send_request("auth.refresh", &AuthRefreshRequest {}).await
     }
 
     /// Revokes an active JWT token, invalidating further use.
@@ -539,6 +603,79 @@ impl WalletDaemonClient {
         self.send_request("settings.get", &json!({})).await
     }
 
+    /// Updates the wallet daemon's settings.
+    pub async fn set_settings<T: Borrow<SettingsSetRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<SettingsSetResponse, WalletDaemonClientError> {
+        self.send_request("settings.set", req.borrow()).await
+    }
+
+    /// Fetches a substate by its address from the network.
+    pub async fn get_substate<T: Borrow<SubstatesGetRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<SubstatesGetResponse, WalletDaemonClientError> {
+        self.send_request("substates.get", req.borrow()).await
+    }
+
+    /// Lists substates owned by an account or matching a filter.
+    pub async fn list_substates<T: Borrow<SubstatesListRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<SubstatesListResponse, WalletDaemonClientError> {
+        self.send_request("substates.list", req.borrow()).await
+    }
+
+    /// Fetches a template by its address, including its function definitions.
+    pub async fn get_template<T: Borrow<TemplatesGetRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<TemplatesGetResponse, WalletDaemonClientError> {
+        self.send_request("templates.get", req.borrow()).await
+    }
+
+    /// Lists templates authored by the wallet's public key.
+    pub async fn list_authored_templates<T: Borrow<TemplatesListAuthoredRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<TemplatesListAuthoredResponse, WalletDaemonClientError> {
+        self.send_request("templates.list_authored", req.borrow()).await
+    }
+
+    /// Checks whether a WebAuthn credential has already been registered.
+    pub async fn webauthn_already_registered<T: Borrow<WebauthnAlreadyRegisteredRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<WebauthnAlreadyRegisteredResponse, WalletDaemonClientError> {
+        self.send_request("webauthn.already_registered", req.borrow())
+            .await
+    }
+
+    /// Starts a WebAuthn credential registration flow, returning a challenge.
+    pub async fn webauthn_start_registration<T: Borrow<WebauthnStartRegisterRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<WebauthnStartRegisterResponse, WalletDaemonClientError> {
+        self.send_request("webauthn.reg_start", req.borrow()).await
+    }
+
+    /// Completes a WebAuthn credential registration flow.
+    pub async fn webauthn_finish_registration<T: Borrow<WebauthnFinishRegisterRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<WebauthnFinishRegisterResponse, WalletDaemonClientError> {
+        self.send_request("webauthn.reg_finish", req.borrow()).await
+    }
+
+    /// Starts a WebAuthn authentication flow, returning a challenge.
+    pub async fn webauthn_start_auth<T: Borrow<WebauthnStartAuthRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<WebauthnStartAuthResponse, WalletDaemonClientError> {
+        self.send_request("webauthn.auth_start", req.borrow()).await
+    }
+
     fn next_request_id(&mut self) -> i64 {
         self.request_id += 1;
         self.request_id
@@ -586,11 +723,12 @@ impl WalletDaemonClient {
 fn jsonrpc_result(val: json::Value) -> Result<json::Value, WalletDaemonClientError> {
     if let Some(err) = val.get("error") {
         let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or(-1);
-        let message = err.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error");
-        return Err(WalletDaemonClientError::RequestFailedWithStatus {
-            code,
-            message: message.to_string(),
-        });
+        let message = err
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("Unknown error")
+            .to_string();
+        return Err(WalletDaemonClientError::from_error_code(code, message));
     }
 
     let result = val

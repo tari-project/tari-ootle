@@ -60,6 +60,38 @@ The typical development workflow for building on Tari Ootle:
 
 > **Tip:** For the guessing game and other example templates, pre-published template addresses are available on the Esmeralda testnet. Check the [Tari Ootle guides](https://ootle.tari.com/guides/) for current addresses — you can skip publishing and go straight to interacting.
 
+### CLI App Workflow Order (IMPORTANT)
+
+When running a CLI client app (e.g., the guessing game CLI), operations MUST happen in this order:
+
+1. **Initialize wallet** — Create keypairs, select network, connect to indexer
+2. **Fund admin account** — Get tTARI from the faucet
+3. **Publish the template** — Deploy the WASM to the network. **Direct the user to the Wallet Web UI** at `http://127.0.0.1:5100` to publish. Do NOT write custom publish code — the Web UI handles fee estimation, upload, and provides the template address.
+4. **Create/deploy the game component** — Instantiate the template on-chain (requires the template address from step 3)
+5. **Register players** — Add player accounts AFTER the game component exists
+6. **Play** — Start rounds, make guesses, end games
+
+> **CRITICAL:** Never register players or add users before the template is published and the game component is deployed. Players need a component to interact with. Never try to publish a template programmatically unless the CLI already has a publish command — always direct users to the Wallet Web UI for publishing.
+
+### Tooling Requirements
+
+The only tools needed for Ootle development are:
+- `rustup` with the `wasm32-unknown-unknown` target
+- `cargo-generate` (for scaffolding)
+- Standard Rust toolchain (`cargo build`, `cargo test`)
+
+> **Do NOT install** rust-analyzer extensions, cargo-expand, wasm-pack, wasm-bindgen, or other WASM/Rust analysis tools. They are unnecessary for Ootle development and add bloat. The `wasm32-unknown-unknown` target and standard `cargo build` are sufficient.
+
+### Non-Interactive CLI Usage
+
+The generated CLI examples use `dialoguer` for interactive prompts (Select, Input), which requires a real TTY. **Claude Code runs commands in a non-interactive shell without a TTY.**
+
+When running CLI commands that have interactive prompts:
+- **Tell the user to run the command in their terminal** rather than trying to run it through Claude Code
+- Do NOT try to pipe input, use `expect`, or wrap with `script` — these are fragile workarounds
+- Do NOT modify the CLI to add non-interactive flags unless the user specifically asks for it
+- If the CLI already supports `--flag` style arguments that bypass prompts, use those
+
 ---
 
 ## Writing a Template
@@ -568,7 +600,9 @@ fn generate_number() -> u8 {
 
 ## Publishing Templates
 
-### Publish via Wallet Web UI
+> **STOP: Do NOT write a publish command.** When the user needs to publish a template, tell them to use the Wallet Web UI. Do NOT add a `publish` subcommand to CLI apps, do NOT write `publish_template()` code, do NOT try to create a programmatic publish workflow. The Web UI at `http://127.0.0.1:5100` is the correct and only supported way to publish templates.
+
+### Publish via Wallet Web UI (The Only Supported Method)
 
 1. Open the Tari Ootle Wallet web UI (default: `http://127.0.0.1:5100`)
 2. Click "Publish Template" on the Home page
@@ -576,8 +610,11 @@ fn generate_number() -> u8 {
 4. Upload the `.wasm` file from `target/wasm32-unknown-unknown/release/`
 5. Click "Estimate Fee" then "Publish Template"
 6. Find the template address under "Templates" in the sidebar
+7. Paste the template address into the CLI's state file or `--template-address` flag
 
-### Publish Programmatically (ootle-rs)
+### Publish Programmatically (ootle-rs) — Reference Only
+
+> This section is reference documentation for existing publish implementations. Do NOT use this to write new publish commands — direct users to the Web UI instead.
 
 ```rust
 use tari_ootle_transaction::TransactionBuilder;
@@ -629,7 +666,16 @@ let mut provider = ProviderBuilder::new()
     .wallet(wallet)
     .connect(default_indexer_url(NETWORK))
     .await?;
+
+// With custom transaction timeout (default is 32 seconds — too short for testnet):
+use std::time::Duration;
+let mut provider = ProviderBuilder::new()
+    .wallet(wallet)
+    .connect_with_transaction_timeout(default_indexer_url(NETWORK), Duration::from_secs(120))
+    .await?;
 ```
+
+> **Timeout guidance:** The default transaction timeout is 32 seconds, which is often too short for the Esmeralda testnet. Use `connect_with_transaction_timeout()` with 120 seconds for testnet usage. LocalNet is faster and the default is usually fine.
 
 **Available networks:**
 - `Network::Esmeralda` — Public testnet (indexer: `http://217.182.93.35:50124`)
@@ -756,13 +802,15 @@ let resource_addr = receipt.diff_summary.upped
     .expect("resource address in receipt");
 
 // Find a template address (returns PublishedTemplateAddress)
+// IMPORTANT: Use as_template() on SubstateId — NOT as_template_address()
+// as_template_address() does NOT exist on SubstateId
 let template_addr = receipt.diff_summary.upped
     .iter()
     .find_map(|s| s.substate_id.as_template())
     .expect("template address in receipt");
 ```
 
-> **Note:** `as_component_address()` and `as_resource_address()` return `ComponentAddress` and `ResourceAddress` directly. For templates, `as_template()` returns `PublishedTemplateAddress`. Call `.as_template_address()` on the result if you need the underlying `TemplateAddress` (a `Hash32`).
+> **IMPORTANT API note:** On `SubstateId`, the method is `as_template()` — it returns `Option<PublishedTemplateAddress>`. There is NO `as_template_address()` method on `SubstateId`. If you need the underlying `TemplateAddress` (a `Hash32`), call `.as_template_address()` on the `PublishedTemplateAddress` result, not on the `SubstateId`.
 
 ### Read Events from Receipts
 
@@ -1203,6 +1251,13 @@ mod guessing_game {
 8. **Using `args!` in tests** — Use `call_args!` (from `tari_ootle_transaction`) in test code, not `args!` (which is for inside templates).
 9. **Returning mutable bucket** — Forgetting to actually deposit/burn a bucket in all code paths → transaction fails if the bucket isn't consumed.
 10. **Large state** — Storing unbounded data structures → high transaction costs, potential DoS.
+11. **Hallucinated APIs** — These methods/types do NOT exist. Never use them:
+    - `SubstateId::as_template_address()` — use `as_template()` instead
+    - `IAccount::publish_template()` — no such method; publish via `TransactionBuilder::publish_template()` or the Web UI
+    - `provider.publish_template()` — no such method on the provider
+    - `ProviderBuilder::with_timeout()` — use `connect_with_transaction_timeout()` instead
+12. **Writing publish commands** — Do NOT write custom template publish code. Direct users to the Wallet Web UI. The generated CLI examples do not include a publish command by design.
+13. **Wrong operation order** — Always: init wallet → fund → publish template → create component → register players. Never register players before the game component exists.
 
 ---
 

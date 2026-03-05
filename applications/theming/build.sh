@@ -58,3 +58,8 @@ for file in $(find $FONT_DIR -mindepth 1 -maxdepth 1 | sort);  do
   echo "Copying font file: $file"
   cp -rv "$file" "../$DIST_DIR/$FONT_DIR"
 done
+
+for file in $(find $THEME_DIR -name "*.css" -maxdepth 1 | sort); do
+   echo "Copying css file: $file"
+    cp -rv "$file" "../$DIST_DIR/$THEME_DIR"
+done

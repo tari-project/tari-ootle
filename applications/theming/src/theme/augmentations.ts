@@ -1,3 +1,5 @@
+//   Copyright 2026 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
 import "@mui/material/styles";
 declare module "@mui/material/styles" {
     interface Palette {

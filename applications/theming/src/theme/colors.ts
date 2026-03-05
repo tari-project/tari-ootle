@@ -1,3 +1,5 @@
+//   Copyright 2026 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
 export const tariBg = {
     50: "#fafaff",
     100: "#f3f3fc",

@@ -20,16 +20,16 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
-import TextField from "@mui/material/TextField";
-import IconButton from "@mui/material/IconButton";
-import FormControl from "@mui/material/FormControl";
-import InputLabel from "@mui/material/InputLabel";
-import Select from "@mui/material/Select";
-import MenuItem from "@mui/material/MenuItem";
-import InputAdornment from "@mui/material/InputAdornment";
-import SearchIcon from "@mui/icons-material/Search";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
+import SearchIcon from "@mui/icons-material/Search";
+import FormControl from "@mui/material/FormControl";
+import IconButton from "@mui/material/IconButton";
+import InputAdornment from "@mui/material/InputAdornment";
+import InputLabel from "@mui/material/InputLabel";
+import MenuItem from "@mui/material/MenuItem";
+import Select from "@mui/material/Select";
+import TextField from "@mui/material/TextField";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 interface IFilterItems {
   title: string;
@@ -48,21 +48,21 @@ interface ISearchProps {
 
 // The stateObject being passed to the filter function needs to have an id property for the filter to work
 
-const TransactionFilter: React.FC<ISearchProps> = ({
+const TransactionFilter = ({
   setPage,
   stateObject,
   setStateObject,
   filterItems,
   placeholder,
   defaultSearch = "id",
-}) => {
+}: ISearchProps) => {
   const [formState, setFormState] = useState({ searchValue: "" });
   const [filterBy, setFilterBy] = useState(defaultSearch);
   const [showClearBtn, setShowClearBtn] = useState(false);
   const [initialUpdate, setInitialUpdate] = useState(true);
   const filterInputRef = useRef<any>(null);
   const stateObjectRef = useRef(stateObject);
-  
+
   // Update ref when stateObject changes
   useEffect(() => {
     stateObjectRef.current = stateObject;
@@ -80,40 +80,37 @@ const TransactionFilter: React.FC<ISearchProps> = ({
   };
 
   // search function
-  const requestSearch = useCallback(
-    (searchedVal: string, filter: string) => {
-      const currentStateObject = stateObjectRef.current;
-      const filteredRows = currentStateObject.filter((row: any) => {
-        const index = filterItems.findIndex((item) => item.value === filter);
-        const filterFunction = filterItems[index].filterFn;
-        return filterFunction(searchedVal, row);
-      });
+  const requestSearch = useCallback((searchedVal: string, filter: string) => {
+    const currentStateObject = stateObjectRef.current;
+    const filteredRows = currentStateObject.filter((row: any) => {
+      const index = filterItems.findIndex((item) => item.value === filter);
+      const filterFunction = filterItems[index].filterFn;
+      return filterFunction(searchedVal, row);
+    });
 
-      // Create a new array that is a copy of the original
-      const updatedObject = [...currentStateObject];
+    // Create a new array that is a copy of the original
+    const updatedObject = [...currentStateObject];
 
-      // Set the "show" property of all transactions in the copy to false
-      updatedObject.forEach((template) => {
-        template.show = false;
-      });
+    // Set the "show" property of all transactions in the copy to false
+    updatedObject.forEach((template) => {
+      template.show = false;
+    });
 
-      // Loop over the filtered array, find the matching object in the
-      // original array, and set its "show" property to true
-      filteredRows.forEach((filteredRow: any) => {
-        const index = updatedObject.findIndex((item) => item.id === filteredRow.id);
-        if (index !== -1) {
-          updatedObject[index].show = true;
-        }
-      });
+    // Loop over the filtered array, find the matching object in the
+    // original array, and set its "show" property to true
+    filteredRows.forEach((filteredRow: any) => {
+      const index = updatedObject.findIndex((item) => item.id === filteredRow.id);
+      if (index !== -1) {
+        updatedObject[index].show = true;
+      }
+    });
 
-      // Update the state with the modified copy of the original array
-      setStateObject(updatedObject);
+    // Update the state with the modified copy of the original array
+    setStateObject(updatedObject);
 
-      // Set paging to first page
-      setPage(0);
-    },
-    [filterItems, setPage, setStateObject],
-  );
+    // Set paging to first page
+    setPage(0);
+  }, []);
 
   // when search input changes and formState has been updated
   useEffect(() => {
@@ -125,7 +122,7 @@ const TransactionFilter: React.FC<ISearchProps> = ({
     }, 300); // Debounce search
 
     return () => clearTimeout(timeoutId);
-  }, [formState.searchValue, filterBy, requestSearch]);
+  }, [formState.searchValue]);
 
   // once selected filter, focus on input
 
@@ -135,8 +132,7 @@ const TransactionFilter: React.FC<ISearchProps> = ({
     } else {
       setInitialUpdate(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterBy]);
+  }, [filterBy, initialUpdate]);
 
   // search function when enter is pressed
   const confirmSearch = () => {
@@ -154,40 +150,42 @@ const TransactionFilter: React.FC<ISearchProps> = ({
   };
 
   return (
-    <>
-      <div className="flex-container">
-        <FormControl>
-          <InputLabel>Filter By</InputLabel>
-          <Select
-            value={filterBy}
-            label="Filter By"
-            renderValue={(selected) => (selected.length === 0 ? <em>Filter By</em> : selected)}
-            onChange={onSelectChange}
-            size="medium"
-            name="filterBy"
-            style={{ flexGrow: "1", minWidth: "200px" }}
-          >
-            <MenuItem disabled value=""><em>Filter by</em></MenuItem>
-            {filterItems.map((item) => (
-              <MenuItem key={item.value} value={item.value}>
-                {item.title}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <TextField
-          value={formState.searchValue}
-          name="searchValue"
-          onChange={onTextChange}
-          style={{ flexGrow: 1 }}
-          inputRef={filterInputRef}
-          placeholder={placeholder}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              confirmSearch();
-            }
-          }}
-          InputProps={{
+    <div className="flex-container">
+      <FormControl>
+        <InputLabel>Filter By</InputLabel>
+        <Select
+          value={filterBy}
+          label="Filter By"
+          renderValue={(selected) => (selected.length === 0 ? <em>Filter By</em> : selected)}
+          onChange={onSelectChange}
+          size="medium"
+          name="filterBy"
+          style={{ flexGrow: "1", minWidth: "200px" }}
+        >
+          <MenuItem disabled value="">
+            <em>Filter by</em>
+          </MenuItem>
+          {filterItems.map((item) => (
+            <MenuItem key={item.value} value={item.value}>
+              {item.title}
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+      <TextField
+        value={formState.searchValue}
+        name="searchValue"
+        onChange={onTextChange}
+        style={{ flexGrow: 1 }}
+        inputRef={filterInputRef}
+        placeholder={placeholder}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            confirmSearch();
+          }
+        }}
+        slotProps={{
+          input: {
             startAdornment: (
               <InputAdornment position="start">
                 <SearchIcon />
@@ -202,10 +200,10 @@ const TransactionFilter: React.FC<ISearchProps> = ({
                 )}
               </InputAdornment>
             ),
-          }}
-        />
-      </div>
-    </>
+          },
+        }}
+      />
+    </div>
   );
 };
 

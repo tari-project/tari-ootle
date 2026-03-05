@@ -20,21 +20,21 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import Box from "@mui/material/Box";
+import Card, { CardProps } from "@mui/material/Card";
+import IconButton from "@mui/material/IconButton";
 import Paper from "@mui/material/Paper";
 import TableCell from "@mui/material/TableCell";
-import { styled } from "@mui/material/styles";
-import Box from "@mui/material/Box";
-import IconButton from "@mui/material/IconButton";
 import Typography from "@mui/material/Typography";
-import Card, { CardProps } from "@mui/material/Card";
+import { styled } from "@mui/material/styles";
 
 interface IAccordionIconButton {
   open: boolean;
 }
 
 export const AccordionIconButton = styled(IconButton)<IAccordionIconButton>(({ theme, open }) => ({
-  backgroundColor: open ? theme.palette.primary.main : "#fff",
-  color: open ? "#fff" : theme.palette.primary.main,
+  "backgroundColor": open ? theme.palette.primary.main : "#fff",
+  "color": open ? "#fff" : theme.palette.primary.main,
   "&:hover": {
     backgroundColor: theme.palette.primary.main,
     color: "#fff",
@@ -51,13 +51,20 @@ export const DataTableCell = styled(TableCell)(({ theme }) => ({
   fontSize: "14px",
 }));
 
-export const CodeBlock = styled(Box)(({ theme }) => ({
-  backgroundColor: theme.palette.divider,
-  borderRadius: theme.shape.borderRadius,
-  padding: theme.spacing(3),
-  maxHeight: "400px",
-  overflowY: "scroll",
-}));
+export const CodeBlock = styled(Box)`
+  background: ${({ theme }) => theme.palette.divider};
+  border-radius: ${({ theme }) => theme.shape.borderRadius}px;
+  padding: ${({ theme }) => theme.spacing(3)};
+  max-height: 400px;
+  overflow-y: scroll;
+  max-width: 100%;
+
+  .string {
+    color: ${({ theme }) => theme.palette.success.dark};
+    word-wrap: anywhere;
+    font-weight: 600;
+  }
+`;
 
 export const BoxHeading = styled(Box)(({ theme }) => ({
   backgroundColor: "#fafafa",
@@ -80,10 +87,10 @@ export const SubHeading = styled(Typography)(() => ({
 }));
 
 export const NftCard: React.FC<CardProps> = styled(Card)(() => ({
-  height: "100%",
-  display: "flex",
-  flexDirection: "column",
-  transition: "transform 0.3s ease",
+  "height": "100%",
+  "display": "flex",
+  "flexDirection": "column",
+  "transition": "transform 0.3s ease",
   "&:hover": {
     transform: "scale(1.02)",
   },

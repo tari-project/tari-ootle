@@ -20,45 +20,50 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import type { Amount } from "@tari-project/ootle-ts-bindings";
+import { ReactNode } from "react";
 import { toHexString } from "../routes/VN/Components/helpers";
 import { CURRENCY } from "./constants";
-import type { Amount } from "@tari-project/ootle-ts-bindings";
 
-const renderJson = (json: any) => {
-  if (Array.isArray(json)) {
-    if (json.length === 32) {
-      return <span className="string">"{toHexString(json)}"</span>;
-    }
+type JSONObj = Record<string, unknown>;
+type JSONArr = Array<unknown>;
+type JSONRenderItem = JSONArr | JSONObj | string | unknown;
+
+const renderJson = (json: JSONRenderItem) => {
+  function handleObj(obj: JSONObj) {
+    const mapped = Object.entries(obj).map(([k, v]) => (
+      <li key={`${k}-${v}`}>
+        <b>"{k}"</b>:{renderJson(v)}
+      </li>
+    ));
     return (
       <>
-        [
-        <ol>
-          {json.map((val) => (
-            <li>{renderJson(val)},</li>
-          ))}
-        </ol>
-        ],
+        {`{`}
+        <ul>{mapped}</ul>
+        {`}`}
       </>
     );
-  } else if (typeof json === "object" && json !== null) {
-    return (
-      <>
-        {"{"}
-        <ul>
-          {Object.keys(json).map((key) => (
-            <li>
-              <b>"{key}"</b>:{renderJson(json[key])}
-            </li>
-          ))}
-        </ul>
-        {"}"}
-      </>
-    );
-  } else {
-    if (typeof json === "string")
-      return <span className="string">"{json}"</span>;
-    return <span className="other">{json}</span>;
   }
+  function handleArr(arr: JSONArr) {
+    if (arr.length === 32) {
+      return <span className="string">"{toHexString(arr as number[])}"</span>;
+    }
+    const mapped = arr.map((val, i) => <li key={`json-arr-item-${i}`}>{handleObj(val as JSONObj)},</li>);
+    return (
+      <>
+        [<ol>{mapped}</ol>],
+      </>
+    );
+  }
+
+  if (Array.isArray(json)) {
+    return handleArr(json as JSONArr);
+  }
+  if (typeof json === "object" && json !== null) {
+    return handleObj(json as JSONObj);
+  }
+  if (typeof json === "string") return <span className="string">"{json}"</span>;
+  return <span className="other">{json as ReactNode}</span>;
 };
 
 export interface Duration {
@@ -77,11 +82,8 @@ export function displayDuration(duration: Duration) {
     return `${duration.nanos}ns`;
   }
   if (duration.secs >= 60 * 60) {
-    const minutes_secs =
-      duration.secs - Math.floor(duration.secs / 60 / 60) * 60 * 60;
-    return `${(duration.secs / 60 / 60).toFixed(0)}h${Math.floor(
-      minutes_secs / 60
-    )}m`;
+    const minutes_secs = duration.secs - Math.floor(duration.secs / 60 / 60) * 60 * 60;
+    return `${(duration.secs / 60 / 60).toFixed(0)}h${Math.floor(minutes_secs / 60)}m`;
   }
   if (duration.secs >= 60) {
     const secs = duration.secs - Math.floor(duration.secs / 60) * 60;
@@ -99,11 +101,7 @@ export function truncateText(text: string | null, length: number) {
   }
   const leftChars = Math.ceil(length / 2);
   const rightChars = Math.floor(length / 2);
-  return (
-    text.substring(0, leftChars) +
-    "..." +
-    text.substring(text.length - rightChars)
-  );
+  return text.substring(0, leftChars) + "..." + text.substring(text.length - rightChars);
 }
 
 const validateHash = (hash: string): boolean => {
@@ -147,9 +145,7 @@ const formatTimestamp = (rawTimestamp: string | null | undefined): string => {
   });
 };
 
-const parseTimestamp = (
-  rawTimestamp: string | null | undefined
-): Date | null => {
+const parseTimestamp = (rawTimestamp: string | null | undefined): Date | null => {
   if (!rawTimestamp) return null;
 
   let formatted = rawTimestamp;
@@ -185,19 +181,10 @@ const formatXTM = (amount: number | bigint): string => {
   if (typeof amount !== "number" || isNaN(amount)) {
     return `0 ${CURRENCY.SYMBOL}`;
   }
-  return `${(amount / CURRENCY.DIVISOR).toFixed(CURRENCY.DECIMALS)} ${
-    CURRENCY.SYMBOL
-  }`;
+  return `${(amount / CURRENCY.DIVISOR).toFixed(CURRENCY.DECIMALS)} ${CURRENCY.SYMBOL}`;
 };
 
-export {
-  parseTimestamp,
-  isTimestampNew,
-  formatTimestamp,
-  validateHash,
-  renderJson,
-  formatXTM,
-};
+export { formatTimestamp, formatXTM, isTimestampNew, parseTimestamp, renderJson, validateHash };
 
 export function bigintToDecimalString(int: Amount, decimalPlaces: number, locale: string = "en-US"): string {
   const number = typeof int === "bigint" ? int : BigInt(int);
@@ -221,9 +208,12 @@ export function bigintToDecimalString(int: Amount, decimalPlaces: number, locale
   return `${wholeValues}.${padding}${fractionalValues}`;
 }
 
-
 // Helper function for formatting currency amounts
-export const formatCurrency = (amount: Amount | null | undefined, divisibility: number, tokenSymbol: string | null | undefined): string => {
+export const formatCurrency = (
+  amount: Amount | null | undefined,
+  divisibility: number,
+  tokenSymbol: string | null | undefined,
+): string => {
   const currencySymbol = tokenSymbol ?? "";
   if (!amount) {
     return `0 ${currencySymbol}`;

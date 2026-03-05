@@ -1,6 +1,7 @@
 packages:
   - bindings
   - clients/javascript/*
+  - applications/theming
   - applications/tari_walletd/web_ui
   - applications/tari_indexer/web_ui
   - applications/tari_validator_node/web_ui

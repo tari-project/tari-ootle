@@ -297,7 +297,6 @@ export const light: ThemeOptions = {
     },
   },
 };
-
 export const dark: ThemeOptions = {
   palette: {
     mode: "dark",

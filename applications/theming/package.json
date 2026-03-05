@@ -1,0 +1,24 @@
+{
+  "name": "@tari-project/ootle-web-ui-theming",
+  "version": "0.0.1",
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "/dist"
+  ],
+  "scripts": {
+    "build": "sh build.sh && tsc --project tsconfig.prod.json && echo '✅ Build complete!'",
+    "build-dev": "tsc",
+    "build-dist": "tsc --project tsconfig.prod.json"
+  },
+  "devDependencies": {
+    "@mui/material": "^7.3.8",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "catalog:"
+  }
+}

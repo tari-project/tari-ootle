@@ -342,11 +342,11 @@ impl TransactionStatusResponseError for IndexerRestApiNetworkInterfaceError {
                     IndexerRestClientError::ErrorResponse { source, details } => {
                         if source.status().map(|s| s.as_u16()) == Some(INVALID_REQUEST_CODE as u16) {
                             ResponseErrorStatus::TransactionRejected {
-                                message: format!("Indexer error response: {}. Details: {}", source, details.display()),
+                                message: format!("{}. Details: {}", source, details.display()),
                             }
                         } else {
                             ResponseErrorStatus::InternalError {
-                                message: format!("Indexer error response: {}", source),
+                                message: format!("Indexer error: {}", source),
                             }
                         }
                     },

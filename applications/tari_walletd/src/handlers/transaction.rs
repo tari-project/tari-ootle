@@ -178,32 +178,23 @@ pub async fn handle_submit(
         .transaction_service()
         .submit_transaction(transaction)
         .await
-        .map_err(|e| {
-            error!(target: LOG_TARGET, "Transaction submission failed: {}", e);
-            match &e {
-                TransactionServiceError::TransactionApiError(TransactionApiError::NetworkInterfaceError {
-                    status,
-                    message,
-                }) => match &status {
-                    ResponseErrorStatus::TransactionRejected { .. } => transaction_rejected(message),
-                    ResponseErrorStatus::NotFound { message } => not_found(message),
-                    _ => JsonRpcError::new(
-                        JsonRpcErrorReason::ApplicationError(1),
-                        format!("Failed to submit transaction: {}", e),
-                        serde_json::Value::Null,
-                    )
-                    .into(),
-                },
-                _ => JsonRpcError::new(
-                    JsonRpcErrorReason::ApplicationError(1),
-                    format!("Failed to submit transaction: {}", e),
-                    serde_json::Value::Null,
-                )
-                .into(),
-            }
-        })?;
+        .map_err(map_transaction_submission_error)?;
 
     Ok(TransactionSubmitResponse { transaction_id })
+}
+
+fn map_transaction_submission_error(e: TransactionServiceError) -> anyhow::Error {
+    error!(target: LOG_TARGET, "Transaction submission failed: {}", e);
+    match &e {
+        TransactionServiceError::TransactionApiError(TransactionApiError::NetworkInterfaceError { status, .. }) => {
+            match &status {
+                ResponseErrorStatus::TransactionRejected { message } => transaction_rejected(message),
+                ResponseErrorStatus::NotFound { message } => not_found(message),
+                ResponseErrorStatus::InternalError { message } => anyhow!("Failed to submit transaction: {}", message),
+            }
+        },
+        _ => anyhow!("Failed to submit transaction: {}", e),
+    }
 }
 
 pub async fn handle_submit_dry_run(
@@ -262,7 +253,8 @@ pub async fn handle_submit_dry_run(
     let exec_result = context
         .transaction_service()
         .submit_dry_run_transaction(transaction)
-        .await?;
+        .await
+        .map_err(map_transaction_submission_error)?;
 
     Ok(TransactionSubmitDryRunResponse {
         transaction_id: exec_result.finalize.transaction_hash.into_array().into(),

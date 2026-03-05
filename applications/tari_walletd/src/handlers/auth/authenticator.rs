@@ -3,7 +3,7 @@
 
 use log::info;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
-use tari_wallet_daemon_client::types::AuthCredentials;
+use tari_ootle_walletd_client::types::AuthCredentials;
 use url::Url;
 use webauthn_rs::{Webauthn, WebauthnBuilder};
 

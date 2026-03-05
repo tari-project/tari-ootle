@@ -15,13 +15,7 @@ use tari_engine_types::{
 use tari_ootle_common_types::{SubstateRequirement, optional::Optional};
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::apis::substate::ValidatorScanResult;
-use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib_types::{
-    ComponentAddress,
-    ResourceAddress,
-    constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS},
-};
-use tari_wallet_daemon_client::{
+use tari_ootle_walletd_client::{
     permissions::JrpcPermission,
     types::{
         GetNftRequest,
@@ -33,6 +27,12 @@ use tari_wallet_daemon_client::{
         TransferNftRequest,
         TransferNftResponse,
     },
+};
+use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
+use tari_template_lib_types::{
+    ComponentAddress,
+    ResourceAddress,
+    constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS},
 };
 
 use super::{context::HandlerContext, helpers::get_account_or_default};

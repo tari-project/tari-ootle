@@ -10,12 +10,12 @@ use minotari_wallet_grpc_client::WalletGrpcClient;
 use serde::Serialize;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::confidential::{AbridgedTransactionKernel, EncodedMerkleProof, MinotariBurnClaimProof};
+use tari_ootle_walletd_client::types::ClaimBurnProof;
 use tari_template_lib_types::{
     EncryptedData,
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
 };
 use tari_transaction_components::transaction_components::{MemoField, memo_field::TxType};
-use tari_wallet_daemon_client::types::ClaimBurnProof;
 
 use crate::process_manager::Instance;
 

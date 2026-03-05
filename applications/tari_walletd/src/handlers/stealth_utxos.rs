@@ -9,8 +9,7 @@ use indexmap::IndexMap;
 use log::{info, warn};
 use tari_engine_types::crypto::ValueLookupTable;
 use tari_ootle_wallet_crypto::{GenerateValueLookup, MMapValueLookup};
-use tari_template_lib_types::UtxoAddress;
-use tari_wallet_daemon_client::{
+use tari_ootle_walletd_client::{
     permissions::JrpcPermission,
     types::{
         StealthUtxosDecryptValueRequest,
@@ -20,6 +19,7 @@ use tari_wallet_daemon_client::{
         UtxoInfo,
     },
 };
+use tari_template_lib_types::UtxoAddress;
 use tokio::{
     task::{AbortHandle, spawn_blocking},
     time::Instant,

@@ -168,10 +168,12 @@ impl WalletDaemonClient {
         self
     }
 
+    /// Returns general information about the wallet, including the wallet's public key and network.
     pub async fn get_wallet_info(&mut self) -> Result<WalletGetInfoResponse, WalletDaemonClientError> {
         self.send_request("wallet.get_info", &WalletGetInfoRequest {}).await
     }
 
+    /// Derives the next key for the given [`KeyBranch`].
     pub async fn create_key(&mut self, branch: KeyBranch) -> Result<KeysCreateResponse, WalletDaemonClientError> {
         self.send_request("keys.create", &KeysCreateRequest {
             branch,
@@ -180,6 +182,7 @@ impl WalletDaemonClient {
         .await
     }
 
+    /// Derives a key at a specific index for the given [`KeyBranch`].
     pub async fn create_specific_key(
         &mut self,
         branch: KeyBranch,
@@ -192,15 +195,18 @@ impl WalletDaemonClient {
         .await
     }
 
+    /// Sets the active key index used for signing transactions.
     pub async fn set_active_key(&mut self, index: u64) -> Result<KeysSetActiveResponse, WalletDaemonClientError> {
         self.send_request("keys.set_active", &KeysSetActiveRequest { index })
             .await
     }
 
+    /// Lists all derived keys for the given [`KeyBranch`].
     pub async fn list_keys(&mut self, branch: KeyBranch) -> Result<KeysListResponse, WalletDaemonClientError> {
         self.send_request("keys.list", &KeysListRequest { branch }).await
     }
 
+    /// Fetches a transaction by ID.
     pub async fn get_transaction<T: Borrow<TransactionGetRequest>>(
         &mut self,
         request: T,
@@ -208,6 +214,7 @@ impl WalletDaemonClient {
         self.send_request("transactions.get", request.borrow()).await
     }
 
+    /// Lists transactions with pagination.
     pub async fn get_transactions_all<T: Borrow<TransactionGetAllRequest>>(
         &mut self,
         request: T,
@@ -215,6 +222,7 @@ impl WalletDaemonClient {
         self.send_request("transactions.list", request.borrow()).await
     }
 
+    /// Fetches the finalized result of a transaction without blocking.
     pub async fn get_transaction_result<T: Borrow<TransactionGetResultRequest>>(
         &mut self,
         request: T,
@@ -222,6 +230,7 @@ impl WalletDaemonClient {
         self.send_request("transactions.get_result", request.borrow()).await
     }
 
+    /// Blocks until the transaction is finalized or the timeout is reached.
     pub async fn wait_transaction_result<T: Borrow<TransactionWaitResultRequest>>(
         &mut self,
         request: T,
@@ -229,6 +238,7 @@ impl WalletDaemonClient {
         self.send_request("transactions.wait_result", request.borrow()).await
     }
 
+    /// Submits a transaction to the network for processing.
     pub async fn submit_transaction<T: Borrow<TransactionSubmitRequest>>(
         &mut self,
         request: T,
@@ -236,6 +246,7 @@ impl WalletDaemonClient {
         self.send_request("transactions.submit", request.borrow()).await
     }
 
+    /// Submits a transaction as a dry run without committing it to the network.
     pub async fn submit_transaction_dry_run<T: Borrow<TransactionSubmitDryRunRequest>>(
         &mut self,
         request: T,
@@ -243,6 +254,7 @@ impl WalletDaemonClient {
         self.send_request("transactions.submit_dry_run", request.borrow()).await
     }
 
+    /// Creates a new account with an optional name and key index.
     pub async fn create_account<T: Borrow<AccountsCreateRequest>>(
         &mut self,
         request: T,
@@ -250,6 +262,7 @@ impl WalletDaemonClient {
         self.send_request("accounts.create", request.borrow()).await
     }
 
+    /// Returns an existing account by name, or creates it if it does not exist.
     pub async fn create_or_get_account<T: Borrow<AccountsCreateOrGetRequest>>(
         &mut self,
         request: T,
@@ -257,6 +270,7 @@ impl WalletDaemonClient {
         self.send_request("accounts.create_or_get", request.borrow()).await
     }
 
+    /// Associates a stealth resource address with an account for tracking stealth outputs.
     pub async fn associate_stealth_resource<T: Borrow<AccountsAssociateStealthResourceRequest>>(
         &mut self,
         request: T,
@@ -265,6 +279,7 @@ impl WalletDaemonClient {
             .await
     }
 
+    /// Returns the balances for all vaults in an account, optionally refreshing from the network.
     pub async fn get_account_balances<T: Borrow<AccountsGetBalancesRequest>>(
         &mut self,
         request: T,
@@ -272,6 +287,7 @@ impl WalletDaemonClient {
         self.send_request("accounts.get_balances", request.borrow()).await
     }
 
+    /// Returns unclaimed validator fees for the given shard range.
     pub async fn get_validator_fees<T: Borrow<GetValidatorFeesRequest>>(
         &mut self,
         request: T,
@@ -279,6 +295,7 @@ impl WalletDaemonClient {
         self.send_request("validators.get_fees", request.borrow()).await
     }
 
+    /// Claims accumulated validator fees for the given shard range.
     pub async fn claim_validator_fees<T: Borrow<ClaimValidatorFeesRequest>>(
         &mut self,
         request: T,
@@ -286,6 +303,7 @@ impl WalletDaemonClient {
         self.send_request("validators.claim_fees", request.borrow()).await
     }
 
+    /// Lists accounts with pagination.
     pub async fn list_accounts(
         &mut self,
         offset: u64,
@@ -295,6 +313,7 @@ impl WalletDaemonClient {
             .await
     }
 
+    /// Fetches an account by name or component address.
     pub async fn accounts_get(
         &mut self,
         name_or_address: ComponentAddressOrName,
@@ -303,6 +322,7 @@ impl WalletDaemonClient {
             .await
     }
 
+    /// Fetches an account by its owner key index.
     pub async fn accounts_get_by_key_index(
         &mut self,
         key_index: u64,
@@ -311,11 +331,13 @@ impl WalletDaemonClient {
             .await
     }
 
+    /// Returns the default account.
     pub async fn accounts_get_default(&mut self) -> Result<AccountGetResponse, WalletDaemonClientError> {
         self.send_request("accounts.get_default", &AccountGetDefaultRequest {})
             .await
     }
 
+    /// Sets the default account used for operations when no account is specified.
     pub async fn accounts_set_default(
         &mut self,
         account: ComponentAddressOrName,
@@ -324,6 +346,7 @@ impl WalletDaemonClient {
             .await
     }
 
+    /// Renames an account.
     pub async fn accounts_rename(
         &mut self,
         account: ComponentAddressOrName,
@@ -333,6 +356,7 @@ impl WalletDaemonClient {
             .await
     }
 
+    /// Transfers resources from one account to a destination public key.
     pub async fn accounts_transfer<T: Borrow<AccountsTransferRequest>>(
         &mut self,
         req: T,
@@ -340,6 +364,7 @@ impl WalletDaemonClient {
         self.send_request("accounts.transfer", req.borrow()).await
     }
 
+    /// Performs a confidential (shielded) transfer between accounts.
     pub async fn accounts_confidential_transfer<T: Borrow<ConfidentialTransferRequest>>(
         &mut self,
         req: T,
@@ -347,6 +372,7 @@ impl WalletDaemonClient {
         self.send_request("accounts.confidential_transfer", req.borrow()).await
     }
 
+    /// Performs a stealth transfer, sending resources to a one-time stealth address.
     pub async fn accounts_stealth_transfer<T: Borrow<StealthTransferRequest>>(
         &mut self,
         req: T,
@@ -354,6 +380,7 @@ impl WalletDaemonClient {
         self.send_request("accounts.stealth_transfer", req.borrow()).await
     }
 
+    /// Creates a stealth transfer statement that can be shared with the recipient for claiming.
     pub async fn accounts_create_stealth_transfer_statement<
         T: Borrow<AccountsCreateStealthTransferStatementRequest>,
     >(
@@ -364,6 +391,7 @@ impl WalletDaemonClient {
             .await
     }
 
+    /// Claims a burn transaction, converting burned Minotari into Ootle funds.
     pub async fn claim_burn<T: Borrow<ClaimBurnRequest>>(
         &mut self,
         req: T,
@@ -371,6 +399,7 @@ impl WalletDaemonClient {
         self.send_request("accounts.claim_burn", req.borrow()).await
     }
 
+    /// Generates a confidential transfer proof for use in a confidential transaction.
     pub async fn confidential_create_transfer_proof<T: Borrow<ProofsGenerateRequest>>(
         &mut self,
         req: T,
@@ -379,6 +408,7 @@ impl WalletDaemonClient {
             .await
     }
 
+    /// Cancels a previously generated confidential transfer proof.
     pub async fn cancel_transfer_proof<T: Borrow<ProofsCancelRequest>>(
         &mut self,
         req: T,
@@ -386,6 +416,7 @@ impl WalletDaemonClient {
         self.send_request("confidential.cancel", req.borrow()).await
     }
 
+    /// Finalizes a confidential transfer proof, making it ready for submission.
     pub async fn finalize_transfer_proof<T: Borrow<ProofsFinalizeRequest>>(
         &mut self,
         req: T,
@@ -393,6 +424,7 @@ impl WalletDaemonClient {
         self.send_request("confidential.finalize", req.borrow()).await
     }
 
+    /// Creates a confidential output proof for a confidential deposit or withdrawal.
     pub async fn create_confidential_output_proof<T: Borrow<ConfidentialCreateOutputProofRequest>>(
         &mut self,
         req: T,
@@ -401,6 +433,7 @@ impl WalletDaemonClient {
             .await
     }
 
+    /// Creates free test coins for an account. Only available on test networks.
     pub async fn create_free_test_coins<T: Borrow<AccountsCreateFreeTestCoinsRequest>>(
         &mut self,
         req: T,
@@ -408,6 +441,7 @@ impl WalletDaemonClient {
         self.send_request("accounts.create_free_test_coins", req.borrow()).await
     }
 
+    /// Mints one or more NFTs from the faucet into an account.
     pub async fn mint_faucet_nft<T: Borrow<MintFaucetNftRequest>>(
         &mut self,
         req: T,
@@ -415,6 +449,7 @@ impl WalletDaemonClient {
         self.send_request("nfts.mint_faucet_nft", req.borrow()).await
     }
 
+    /// Fetches a specific NFT by its resource address and ID.
     pub async fn get_account_nft<T: Borrow<GetNftRequest>>(
         &mut self,
         req: T,
@@ -422,6 +457,7 @@ impl WalletDaemonClient {
         self.send_request("nfts.get", req.borrow()).await
     }
 
+    /// Lists NFTs held by an account with pagination.
     pub async fn list_account_nfts<T: Borrow<ListNftsRequest>>(
         &mut self,
         req: T,
@@ -429,6 +465,9 @@ impl WalletDaemonClient {
         self.send_request("nfts.list", req.borrow()).await
     }
 
+    /// Decrypts and returns the confidential balance of a vault using the provided view key.
+    /// The view key must correspond to the public view key of the Resource the vault holds.
+    /// If the resource is not confidential, or has no view key configured, this will return an error.
     pub async fn view_vault_balance<T: Borrow<ConfidentialViewVaultBalanceRequest>>(
         &mut self,
         req: T,
@@ -436,6 +475,7 @@ impl WalletDaemonClient {
         self.send_request("confidential.view_vault_balance", req.borrow()).await
     }
 
+    /// Requests a JWT authentication token with the specified permissions and duration.
     pub async fn auth_request<T: Borrow<AuthLoginRequest>>(
         &mut self,
         req: T,
@@ -443,6 +483,7 @@ impl WalletDaemonClient {
         self.send_request("auth.request", req.borrow()).await
     }
 
+    /// Revokes an active JWT token, invalidating further use.
     pub async fn auth_revoke<T: Borrow<AuthRevokeTokenRequest>>(
         &mut self,
         req: T,
@@ -450,13 +491,15 @@ impl WalletDaemonClient {
         self.send_request("auth.revoke", req.borrow()).await
     }
 
+    /// Lists all active auth sessions.
     pub async fn auth_list_sessions<T: Borrow<AuthListSessionsRequest>>(
         &mut self,
         req: T,
     ) -> Result<AuthListSessionsResponse, WalletDaemonClientError> {
-        self.send_request("auth.get_all_jwt", req.borrow()).await
+        self.send_request("auth.list_sessions", req.borrow()).await
     }
 
+    /// Initiates a WebRTC signalling session with the wallet daemon.
     pub async fn webrtc_start<T: Borrow<WebRtcStartRequest>>(
         &mut self,
         req: T,
@@ -464,6 +507,7 @@ impl WalletDaemonClient {
         self.send_request("webrtc.start", req.borrow()).await
     }
 
+    /// Publishes a WASM template to the network.
     pub async fn publish_template<T: Borrow<PublishTemplateRequest>>(
         &mut self,
         request: T,
@@ -472,6 +516,7 @@ impl WalletDaemonClient {
             .await
     }
 
+    /// Lists stealth UTXOs for an account, with optional resource filtering.
     pub async fn stealth_utxos_list<T: Borrow<StealthUtxosListRequest>>(
         &mut self,
         request: T,
@@ -479,6 +524,9 @@ impl WalletDaemonClient {
         self.send_request("stealth_utxos.list", request.borrow()).await
     }
 
+    /// Decrypts the value of a stealth UTXO using the provided view key.
+    /// The view key must correspond to the public view key of the Resource the UTXO represents.
+    /// If the resource is not stealth, or has no view key configured, this will return an error.
     pub async fn stealth_utxos_decrypt_value<T: Borrow<StealthUtxosDecryptValueRequest>>(
         &mut self,
         request: T,
@@ -486,6 +534,7 @@ impl WalletDaemonClient {
         self.send_request("stealth_utxos.decrypt_value", request.borrow()).await
     }
 
+    /// Returns the wallet daemon's current settings.
     pub async fn get_settings(&mut self) -> Result<SettingsGetResponse, WalletDaemonClientError> {
         self.send_request("settings.get", &json!({})).await
     }

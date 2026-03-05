@@ -5,7 +5,7 @@ use axum_extra::{extract::CookieJar, headers::authorization::Bearer};
 use axum_jrpc::JsonRpcResponse;
 use tari_ootle_wallet_sdk::models::AuthLoginRequestEvent;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
-use tari_wallet_daemon_client::types::{
+use tari_ootle_walletd_client::types::{
     WebauthnAlreadyRegisteredRequest,
     WebauthnAlreadyRegisteredResponse,
     WebauthnFinishRegisterRequest,

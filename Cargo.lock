@@ -4920,6 +4920,7 @@ dependencies = [
  "tari_ootle_transaction",
  "tari_ootle_wallet_sdk",
  "tari_ootle_walletd",
+ "tari_ootle_walletd_client",
  "tari_p2p",
  "tari_shutdown",
  "tari_sidechain",
@@ -4930,7 +4931,6 @@ dependencies = [
  "tari_transaction_manifest",
  "tari_validator_node",
  "tari_validator_node_client",
- "tari_wallet_daemon_client",
  "time",
  "tokio",
  "tonic 0.13.1",
@@ -11395,10 +11395,10 @@ dependencies = [
  "tari_ootle_common_types",
  "tari_ootle_transaction",
  "tari_ootle_wallet_sdk",
+ "tari_ootle_walletd_client",
  "tari_template_lib",
  "tari_transaction_manifest",
  "tari_utilities",
- "tari_wallet_daemon_client",
  "thiserror 2.0.18",
  "time",
  "tokio",
@@ -11564,12 +11564,12 @@ dependencies = [
  "tari_ootle_wallet_sdk",
  "tari_ootle_wallet_sdk_services",
  "tari_ootle_wallet_storage_sqlite",
+ "tari_ootle_walletd_client",
  "tari_shutdown",
  "tari_template_builtin",
  "tari_template_lib_types",
  "tari_transaction_manifest",
  "tari_utilities",
- "tari_wallet_daemon_client",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -11579,6 +11579,30 @@ dependencies = [
  "wasm-opt",
  "webauthn-rs",
  "webrtc",
+ "zeroize",
+]
+
+[[package]]
+name = "tari_ootle_walletd_client"
+version = "0.1.1"
+dependencies = [
+ "hex",
+ "ootle_serde",
+ "reqwest 0.13.2",
+ "serde",
+ "serde_json",
+ "tari_engine_types",
+ "tari_ootle_address",
+ "tari_ootle_common_types",
+ "tari_ootle_transaction",
+ "tari_ootle_wallet_sdk",
+ "tari_template_abi",
+ "tari_template_lib_types",
+ "thiserror 2.0.18",
+ "time",
+ "ts-rs",
+ "url",
+ "webauthn-rs-proto",
  "zeroize",
 ]
 
@@ -11820,12 +11844,12 @@ dependencies = [
  "tari_ootle_app_utilities",
  "tari_ootle_common_types",
  "tari_ootle_wallet_sdk",
+ "tari_ootle_walletd_client",
  "tari_shutdown",
  "tari_sidechain",
  "tari_template_lib_types",
  "tari_transaction_components",
  "tari_validator_node_client",
- "tari_wallet_daemon_client",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.9.11+spec-1.1.0",
@@ -12162,30 +12186,6 @@ dependencies = [
  "tari_rpc_macros",
  "thiserror 2.0.18",
  "tokio",
-]
-
-[[package]]
-name = "tari_wallet_daemon_client"
-version = "0.25.7"
-dependencies = [
- "hex",
- "ootle_serde",
- "reqwest 0.13.2",
- "serde",
- "serde_json",
- "tari_engine_types",
- "tari_ootle_address",
- "tari_ootle_common_types",
- "tari_ootle_transaction",
- "tari_ootle_wallet_sdk",
- "tari_template_abi",
- "tari_template_lib",
- "thiserror 2.0.18",
- "time",
- "ts-rs",
- "url",
- "webauthn-rs-proto",
- "zeroize",
 ]
 
 [[package]]
@@ -12913,8 +12913,8 @@ dependencies = [
  "tari_ootle_common_types",
  "tari_ootle_transaction",
  "tari_ootle_wallet_sdk",
+ "tari_ootle_walletd_client",
  "tari_template_lib_types",
- "tari_wallet_daemon_client",
  "tokio",
 ]
 

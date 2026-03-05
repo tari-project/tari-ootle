@@ -11,7 +11,7 @@ use axum_jrpc::{
     error::{JsonRpcError, JsonRpcErrorReason},
 };
 use log::*;
-use tari_wallet_daemon_client::{
+use tari_ootle_walletd_client::{
     permissions::{JrpcPermission, JrpcPermissions},
     types::{WebRtcStartRequest, WebRtcStartResponse},
 };

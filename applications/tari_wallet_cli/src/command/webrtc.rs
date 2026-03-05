@@ -22,7 +22,7 @@
 
 use anyhow::anyhow;
 use clap::{Args, Subcommand};
-use tari_wallet_daemon_client::{WalletDaemonClient, types::WebRtcStartRequest};
+use tari_ootle_walletd_client::{WalletDaemonClient, types::WebRtcStartRequest};
 use url::Url;
 
 #[derive(Debug, Subcommand, Clone)]

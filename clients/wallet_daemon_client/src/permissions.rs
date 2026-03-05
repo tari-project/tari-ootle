@@ -9,7 +9,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
-use tari_template_lib::types::{ComponentAddress, ResourceAddress};
+use tari_template_lib_types::{ComponentAddress, ResourceAddress};
 
 #[derive(Debug, Clone, Deserialize, Serialize, Hash, Eq, PartialEq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]

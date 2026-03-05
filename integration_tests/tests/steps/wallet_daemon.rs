@@ -16,14 +16,14 @@ use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::models::KeyBranch;
+use tari_ootle_walletd_client::{
+    ComponentAddressOrName,
+    types::{TransactionSubmitRequest, TransactionWaitResultRequest},
+};
 use tari_template_lib_types::{Amount, bytes::Bytes, constants::TARI_TOKEN, crypto::PedersenCommitmentBytes};
 use tari_transaction_components::{
     tari_amount::T,
     transaction_components::{MemoField, memo_field::TxType},
-};
-use tari_wallet_daemon_client::{
-    ComponentAddressOrName,
-    types::{TransactionSubmitRequest, TransactionWaitResultRequest},
 };
 
 async fn claim_burn(

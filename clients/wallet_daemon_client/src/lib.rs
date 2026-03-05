@@ -117,26 +117,26 @@ use crate::{
         SettingsGetResponse,
         SettingsSetRequest,
         SettingsSetResponse,
-        SubstatesGetRequest,
-        SubstatesGetResponse,
-        SubstatesListRequest,
-        SubstatesListResponse,
         StealthTransferRequest,
         StealthTransferResponse,
         StealthUtxosDecryptValueRequest,
         StealthUtxosDecryptValueResponse,
         StealthUtxosListRequest,
         StealthUtxosListResponse,
+        SubstatesGetRequest,
+        SubstatesGetResponse,
+        SubstatesListRequest,
+        SubstatesListResponse,
+        TemplatesGetRequest,
+        TemplatesGetResponse,
+        TemplatesListAuthoredRequest,
+        TemplatesListAuthoredResponse,
         TransactionGetAllRequest,
         TransactionGetAllResponse,
         TransactionGetRequest,
         TransactionGetResponse,
         TransactionGetResultRequest,
         TransactionGetResultResponse,
-        TemplatesGetRequest,
-        TemplatesGetResponse,
-        TemplatesListAuthoredRequest,
-        TemplatesListAuthoredResponse,
         TransactionSubmitDryRunRequest,
         TransactionSubmitDryRunResponse,
         TransactionSubmitManifestRequest,
@@ -534,7 +534,7 @@ impl WalletDaemonClient {
         self.send_request("auth.method", &()).await
     }
 
-    /// Requests a JWT authentication token with the specified permissions and duration.
+    /// Requests a JWT authentication token with the specified permissions.
     pub async fn auth_request<T: Borrow<AuthLoginRequest>>(
         &mut self,
         req: T,
@@ -600,7 +600,7 @@ impl WalletDaemonClient {
 
     /// Returns the wallet daemon's current settings.
     pub async fn get_settings(&mut self) -> Result<SettingsGetResponse, WalletDaemonClientError> {
-        self.send_request("settings.get", &json!({})).await
+        self.send_request("settings.get", &()).await
     }
 
     /// Updates the wallet daemon's settings.
@@ -648,8 +648,7 @@ impl WalletDaemonClient {
         &mut self,
         req: T,
     ) -> Result<WebauthnAlreadyRegisteredResponse, WalletDaemonClientError> {
-        self.send_request("webauthn.already_registered", req.borrow())
-            .await
+        self.send_request("webauthn.already_registered", req.borrow()).await
     }
 
     /// Starts a WebAuthn credential registration flow, returning a challenge.

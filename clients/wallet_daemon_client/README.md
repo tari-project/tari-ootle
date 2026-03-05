@@ -18,9 +18,10 @@ let mut client = WalletDaemonClient::connect("http://localhost:18000", None)?;
 // Authenticate and set the JWT token
 let auth_resp = client.auth_request(AuthLoginRequest {
     permissions: vec![JrpcPermission::Admin],
-    duration: None,
+    // For simplicity, we're assuming auth is disabled. Use appropriate credentials that match the configured authentication method of your wallet daemon.
+    credentials: AuthCredentials::None,
 }).await?;
-client.set_auth_token(auth_resp.auth_token);
+client.set_auth_token(auth_resp.token);
 
 // Create an account
 let resp = client.create_account(AccountsCreateRequest {

@@ -19,9 +19,9 @@ access:
 use tari_ootle_wallet_sdk::{WalletSdk, WalletSdkSpec};
 
 // WalletSdkSpec requires:
-//   Store: WalletStore          — persistent storage backend
-//   KeyStore: KeyStore           — cryptographic key management
-//   NetworkInterface             — network communication (indexer)
+//   Store: WalletStore              — persistent storage backend
+//   KeyStore: WalletKeyStore        — cryptographic key management
+//   NetworkInterface: WalletNetworkInterface — network communication (indexer)
 ```
 
 Once initialized, domain-specific APIs are accessed via accessor methods on `WalletSdk`:

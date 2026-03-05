@@ -876,7 +876,7 @@ fn test_my_template() {
     let transaction = test.transaction()
         .call_function(template_addr, "new", args![])
         .put_last_instruction_output_on_workspace("component")
-        .call_method_on_workspace("component", "some_method", args![42u64])
+        .call_method("component", "some_method", args![42u64])
         .build_and_seal(&secret_key);
 
     let result = test.execute_expect_success(transaction, vec![owner_proof]);
@@ -895,7 +895,7 @@ TemplateTest::new_builtin_only()            // Only built-in templates (Account,
 let tx = test.transaction()                 // Returns a transaction builder (recommended)
     .call_function(template_addr, "fn", args![...])
     .put_last_instruction_output_on_workspace("name")
-    .call_method_on_workspace("name", "method", args![...])
+    .call_method("name", "method", args![...])
     .build_and_seal(&secret_key);
 
 // ─── Single-Call Convenience Methods ───

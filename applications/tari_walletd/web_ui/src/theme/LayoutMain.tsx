@@ -45,8 +45,7 @@ import useAccountStore from "@store/accountStore";
 import useAuthStore from "@store/authStore";
 import useSettingsStore from "@store/settingsStore";
 import useThemeStore from "@store/themeStore";
-import { lightAlpha } from "@theme/colors";
-import { componentSettings, dark, light } from "@theme/tokens";
+import { componentSettings, dark, light } from "@tari-project/ootle-web-ui-theming";
 import { settingsGet } from "@utils/json_rpc";
 import { useEffect, useState } from "react";
 import { Link, Outlet } from "react-router";
@@ -82,7 +81,7 @@ const Drawer = styled(MuiDrawer, {
   "& .MuiDrawer-paper": {
     position: "relative",
     whiteSpace: "nowrap",
-    borderRight: `1px solid ${lightAlpha[5]}`,
+    borderRight: `1px solid ${light.palette?.accent?.border}`,
     boxShadow: "10px 14px 28px rgb(35 11 73 / 5%)",
     width: DRAWER_WIDTH,
     transition: theme.transitions.create("width", {

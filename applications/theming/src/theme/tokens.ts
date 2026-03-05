@@ -1,10 +1,11 @@
-import "./augmentations"
+import "../fonts/augmentations";
+import "./augmentations";
 import { ThemeOptions } from "@mui/material/styles";
 import { blue, gothic, green, grey, orange, red, tariBg, tariPurple, teal } from "./colors";
-import PoppinsBoldTTF from "./fonts/poppins/Poppins-Bold.ttf";
-import PoppinsMediumTTF from "./fonts/poppins/Poppins-Medium.ttf";
-import PoppinsRegularTTF from "./fonts/poppins/Poppins-Regular.ttf";
-import PoppinsSemiBoldTTF from "./fonts/poppins/Poppins-SemiBold.ttf";
+import PoppinsBoldTTF from "../fonts/Poppins-Bold.ttf";
+import PoppinsMediumTTF from "../fonts/Poppins-Medium.ttf";
+import PoppinsRegularTTF from "../fonts/Poppins-Regular.ttf";
+import PoppinsSemiBoldTTF from "../fonts/Poppins-SemiBold.ttf";
 
 const componentSettings: ThemeOptions = {
     shape: {

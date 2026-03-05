@@ -37,7 +37,6 @@
     "react-qr-code": "^2.0.18",
     "react-router": "^7.13.1",
     "react-simple-code-editor": "^0.14.1",
-    "use-file-picker": "^2.1.4",
     "use-react-router-breadcrumbs": "^4.0.1",
     "zustand": "catalog:",
     "zustand-persist": "^0.4.0"

@@ -21,13 +21,13 @@ Tari Ootle is a decentralized application platform built on the Tari Layer 2 net
 |-------|---------|---------|
 | `tari_template_lib` | Core template library: prelude, `ResourceBuilder`, `Vault`, `Bucket`, `ComponentManager`, `CallerContext`, `emit_event`, `rand`, macros (`args!`, `rule!`, `metadata!`) | Templates (WASM) |
 | `tari_template_lib_types` | Shared types: `Amount`, `ComponentAddress`, `ResourceAddress`, `NonFungibleId`, `AccessRule`, `OwnerRule`, `Metadata` | Templates & client |
-| `tari_ootle_transaction` | `TransactionBuilder` and `call_args!` macro for constructing transactions | Client & tests |
+| `tari_ootle_transaction` | `TransactionBuilder` and `args!` macro for constructing transactions | Client & tests |
 | `ootle-rs` | Client wallet and Indexer provider: sign, submit, watch transactions; builtin template helpers (faucet) | Client apps |
 | `tari_template_test_tooling` | Local test harness (dev-dependency): compile templates to WASM and run against the engine in-process | Tests only |
 
 **Important macro distinction:**
-- `args!` (from `tari_template_lib::prelude`) — used **inside templates** for cross-component calls
-- `call_args!` (from `tari_ootle_transaction`) — used **in test code and client code** for `TemplateTest::call_function`/`call_method`
+- `args!` (from `tari_template_lib::prelude`) — used **inside templates** for cross-template calls (alias for `invoke_args!`)
+- `args!` (from `tari_ootle_transaction`) — used **in test code and client code** for `TransactionBuilder`, `TemplateTest::call_function`, and `call_method`. Produces `Vec<NamedArg>`.
 
 ---
 
@@ -131,7 +131,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-tari_template_lib = { git = "https://github.com/tari-project/tari-ootle.git", branch = "development" }
+tari_template_lib = "0.20"
 
 [lib]
 crate-type = ["cdylib"]
@@ -147,6 +147,8 @@ strip = true          # Strip symbols and debug info.
 > **CRITICAL:** The `crate-type = ["cdylib"]` is required for WASM compilation. Without it, the build will not produce a `.wasm` file.
 
 > **Tip:** The `[profile.release]` section in `Cargo.toml` significantly reduces the size of the compiled WASM file, which lowers the fees required for on-chain storage and publishing.
+
+> **Versions:** These crate versions are updated as new releases are published to crates.io. Use the minor version (e.g. `"0.20"` not `"0.20.5"`) to automatically get the latest patch. Before starting a new template, check [crates.io](https://crates.io/crates/tari_template_lib) for a newer minor version (e.g. `"0.21"`, `"0.22"`).
 
 ### Compilation
 
@@ -711,14 +713,14 @@ let outcome = pending.watch().await?;
 Every on-chain interaction follows this pattern:
 
 ```rust
-use tari_ootle_transaction::{TransactionBuilder, call_args};
+use tari_ootle_transaction::{TransactionBuilder, args};
 use ootle_rs::TransactionRequest;
 
 // 1. Build an unsigned transaction
 let unsigned_tx = TransactionBuilder::new(provider.network())
     .with_auto_fill_inputs()                              // Auto-detect input substates
     .pay_fee_from_component(account_addr, 2000u64)        // Pay fee from account
-    .call_function(template_addr, "new", call_args![])         // Or call_method(...)
+    .call_function(template_addr, "new", args![])         // Or call_method(...)
     .build_unsigned();
 
 // 2. Sign it
@@ -738,7 +740,7 @@ let receipt = pending.watch().await?;
 let unsigned_tx = TransactionBuilder::new(provider.network())
     .with_auto_fill_inputs()
     .pay_fee_from_component(account_addr, 2000u64)
-    .call_function(template_addr, "new", call_args![])
+    .call_function(template_addr, "new", args![])
     .build_unsigned();
 ```
 
@@ -748,7 +750,7 @@ let unsigned_tx = TransactionBuilder::new(provider.network())
 let unsigned_tx = TransactionBuilder::new(provider.network())
     .with_auto_fill_inputs()
     .pay_fee_from_component(account_addr, 2000u64)
-    .call_method(component_addr, "start_game", call_args![nft_id])
+    .call_method(component_addr, "start_game", args![nft_id])
     .build_unsigned();
 ```
 
@@ -767,8 +769,8 @@ TransactionBuilder::new(network)
     .pay_fee_from_bucket(bucket_label, amount)  // Pay fee from a workspace bucket
 
     // Instructions
-    .call_function(template, "fn_name", call_args![...])   // Call template function
-    .call_method(component, "method", call_args![...])     // Call component method
+    .call_function(template, "fn_name", args![...])   // Call template function
+    .call_method(component, "method", args![...])     // Call component method
     .create_account(public_key)                        // Create an account component
     .create_account_with_bucket(pk, bucket_label)      // Create account with initial funds
     .publish_template(wasm_binary)                     // Deploy a template
@@ -833,7 +835,7 @@ let unsigned_tx = TransactionBuilder::new(provider.network())
     .add_input(specific_substate_address)
     .with_inputs(addresses.iter().copied().map(Into::into))
     .pay_fee_from_component(account_addr, 2000u64)
-    .call_method(component_addr, "end_game", call_args![])
+    .call_method(component_addr, "end_game", args![])
     .build_unsigned();
 ```
 
@@ -848,47 +850,34 @@ Use `tari_template_test_tooling` as a **dev-dependency**. It compiles your templ
 Add to your test crate's `Cargo.toml`:
 ```toml
 [dev-dependencies]
-tari_template_test_tooling = { git = "https://github.com/tari-project/tari-ootle.git", branch = "development" }
-tari_ootle_transaction = { git = "https://github.com/tari-project/tari-ootle.git", branch = "development" }
+tari_template_test_tooling = "0.25"
+tari_ootle_transaction = "0.20"
 ```
 
-### Basic Test Pattern
+> **Versions:** These versions may be updated as new crates are published. Use the minor version (e.g. `"0.25"` not `"0.25.7"`) to get the latest patch. Check [crates.io](https://crates.io/crates/tari_template_test_tooling) for newer versions before starting.
+
+### Standard Test Pattern
+
+Most template interactions require multiple instructions in a single transaction (e.g. creating a component then calling a method on it, or paying fees from an account). Use `test.transaction()` to build multi-instruction transactions — this is the standard way to write tests.
 
 ```rust
 use tari_template_test_tooling::TemplateTest;
-use tari_ootle_transaction::call_args;
-use tari_template_lib::types::ComponentAddress;
+use tari_ootle_transaction::args;
 
 #[test]
 fn test_my_template() {
-    // Compile the template(s) and create test environment
-    // First arg: base path, second arg: list of template paths relative to base
     let mut test = TemplateTest::new(".", ["."]);
+    let (account, owner_proof, secret_key) = test.create_funded_account();
+    let template_addr = test.get_template_address("MyTemplate");
 
-    // Call a constructor function — returns the decoded return value
-    let component: ComponentAddress = test.call_function(
-        "MyTemplate",           // Template name (from mod name)
-        "new",                  // Function name
-        call_args![],           // Arguments
-        vec![],                 // Authorization proofs (empty = use default signer)
-    );
+    // Build a transaction with multiple instructions
+    let transaction = test.transaction()
+        .call_function(template_addr, "new", args![])
+        .put_last_instruction_output_on_workspace("component")
+        .call_method("component", "some_method", args![42u64])
+        .build_and_seal(&secret_key);
 
-    // Call a method on the component
-    test.call_method::<()>(
-        component,
-        "public_method",
-        call_args![42u64],
-        vec![],
-    );
-
-    // Call a method that returns a value
-    let counter: u64 = test.call_method(
-        component,
-        "get_counter",
-        call_args![],
-        vec![],
-    );
-    assert_eq!(counter, 42);
+    let result = test.execute_expect_success(transaction, vec![owner_proof]);
 }
 ```
 
@@ -900,16 +889,25 @@ TemplateTest::my_crate()                    // Test the template in the current 
 TemplateTest::new(base_path, [paths])       // Compile templates from given paths
 TemplateTest::new_builtin_only()            // Only built-in templates (Account, etc.)
 
-// ─── Calling Templates ───
-// Returns decoded result; proofs vec can be empty (uses default signer)
-let result: T = test.call_function("TemplateName", "function", call_args![...], proofs);
-let result: T = test.call_method(component_addr, "method", call_args![...], proofs);
+// ─── Building Transactions ───
+let tx = test.transaction()                 // Returns a transaction builder (recommended)
+    .call_function(template_addr, "fn", args![...])
+    .put_last_instruction_output_on_workspace("name")
+    .call_method("name", "method", args![...])
+    .build_and_seal(&secret_key);
+
+// ─── Single-Call Convenience Methods ───
+// Each creates a transaction with a single call. Useful for simple cases but limited —
+// Most template interactions require multiple instructions to be useful (e.g. deposit a bucket
+// returned from a previous call). Use test.transaction() for this.
+let result: T = test.call_function("TemplateName", "function", args![...], proofs);
+let result: T = test.call_method(component_addr, "method", args![...], proofs);
 
 // ─── Account Management ───
 let (account, proof, secret) = test.create_funded_account();  // 1B micro-TARI balance
 let (account, proof, secret) = test.create_empty_account();
 
-// ─── Low-Level Execution ───
+// ─── Execution ───
 let result = test.execute_expect_success(transaction, proofs);  // Panics on failure
 let result = test.execute_expect_failure(transaction, proofs);  // Panics on success
 let result = test.execute_expect_commit(transaction, proofs);   // Panics if not finalized
@@ -923,32 +921,11 @@ test.enable_fees();                          // Enable fee tracking
 test.disable_fees();                         // Disable fee tracking (default)
 ```
 
-### Advanced Test: Building Transactions Manually
-
-```rust
-use tari_ootle_transaction::{Transaction, call_args, Instruction};
-
-#[test]
-fn test_with_manual_transaction() {
-    let mut test = TemplateTest::new(".", ["."]);
-    let (account, owner_proof, secret_key) = test.create_funded_account();
-    let template_addr = test.get_template_address("MyTemplate");
-
-    let transaction = Transaction::builder_localnet()
-        .call_function(template_addr, "new", call_args![])
-        .put_last_instruction_output_on_workspace("component")
-        .call_method_on_workspace("component", "some_method", call_args![42u64])
-        .build_and_seal(&secret_key);
-
-    let result = test.execute_expect_success(transaction, vec![owner_proof]);
-}
-```
-
 ---
 
 ## Tari Wallet CLI
 
-The `tari_ootle_wallet_cli` is the command-line interface for interacting with the Tari Ootle network. It connects to a running Wallet Daemon (`tari_ootle_walletd`) via JSON-RPC.
+The `tari_ootle_wallet_cli` is a simple CLI for interacting with the Wallet Daemon (`tari_ootle_walletd`) via its JSON-RPC interface. The wallet daemon is what connects to the network via the indexer.
 
 **Repository:** This CLI is part of the [tari-ootle](https://github.com/tari-project/tari-ootle) repository at `applications/tari_wallet_cli/`.
 
@@ -1248,7 +1225,7 @@ mod guessing_game {
 5. **No Access Rules** — Forgetting `.with_access_rules()` → default is `deny_all`, only the component creator/owner can call methods.
 6. **Wrong Resource in Vault** — Depositing a different resource type into a vault → transaction fails.
 7. **Missing `cdylib`** — Forgetting `crate-type = ["cdylib"]` in Cargo.toml → no WASM output produced.
-8. **Using `args!` in tests** — Use `call_args!` (from `tari_ootle_transaction`) in test code, not `args!` (which is for inside templates).
+8. **Using the wrong `args!` macro** — Ensure you use `args!` from `tari_ootle_transaction` for client/test code (produces `Vec<NamedArg>`) and `args!` from `tari_template_lib::prelude` for cross-template calls inside templates.
 9. **Returning mutable bucket** — Forgetting to actually deposit/burn a bucket in all code paths → transaction fails if the bucket isn't consumed.
 10. **Large state** — Storing unbounded data structures → high transaction costs, potential DoS.
 11. **Hallucinated APIs** — These methods/types do NOT exist. Never use them:

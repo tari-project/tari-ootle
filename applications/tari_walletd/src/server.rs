@@ -60,6 +60,8 @@ pub async fn spawn_listener(
 
     #[cfg(feature = "web_ui")]
     let router = router.fallback(crate::handlers::web_ui::handler);
+    #[cfg(not(feature = "web_ui"))]
+    let router = router.fallback(crate::handlers::web_ui::feature_disabled_handler);
 
     let listener = try_bind_with_fallback(preferred_address).await?;
     let server = axum::serve(listener, router);

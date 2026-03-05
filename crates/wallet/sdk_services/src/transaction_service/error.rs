@@ -9,8 +9,8 @@ pub enum TransactionServiceError {
     ServiceShutdown,
     #[error("Transaction API error: {0}")]
     TransactionApiError(#[from] TransactionApiError),
-    #[error("Dry run transaction failed: {details}")]
-    DryRunTransactionFailed { details: String },
+    #[error("BUG: {details}")]
+    InvariantError { details: String },
     #[error("Lock API error: {0}")]
     LockApiError(#[from] LocksApiError),
 }

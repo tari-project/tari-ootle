@@ -133,11 +133,14 @@ where
                 transaction_api.release_all_locks_for_transaction(transaction_id)?;
                 match transaction_api.submit_dry_run_transaction(transaction).await {
                     Ok(finalized_transaction) => {
-                        let finalize = finalized_transaction.finalize.ok_or_else(|| {
-                            TransactionServiceError::DryRunTransactionFailed {
-                                details: "Transaction was not finalized".to_string(),
-                            }
-                        });
+                        let finalize =
+                            finalized_transaction
+                                .finalize
+                                .ok_or_else(|| TransactionServiceError::InvariantError {
+                                    details: format!(
+                                        "Dry run transaction {transaction_id} succeeded but was not finalized"
+                                    ),
+                                });
                         reply
                             .send(finalize.map(|finalize| ExecuteResult {
                                 finalize,

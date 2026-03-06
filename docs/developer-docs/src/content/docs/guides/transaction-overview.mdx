@@ -314,7 +314,7 @@ To pay fees, use `.pay_fee_from_component()`. This calls the `pay_fee` method on
 
 ```rust
 let transaction = Transaction::builder(network)
-    // Lock up at most 1000 tXTR for fees; refund the rest
+    // Lock up at most 1000 TTARI for fees; refund the rest
     .pay_fee_from_component(my_account, Amount::from(1000))
     .call_function(template_address, "new", args![])
     .build_and_seal(&secret_key);

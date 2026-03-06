@@ -1,6 +1,6 @@
 ---
 title: Playing the Guessing Game
-description: Use ootle-rs to write a Rust app that deploys and plays the guessing game template on Tari Ootle.
+description: Use ootle-rs to write a Rust app that publishes and plays the guessing game template on Tari Ootle.
 ---
 
 import { basePath } from '../../../helpers/path';
@@ -32,7 +32,7 @@ In this guide we will write a Rust program that interacts with the published gue
 **`ootle-rs`** — the Rust client library for the Tari Ootle network. We will cover:
 
 - Initializing a wallet and connecting to the network via the indexer.
-- Building and submitting a transaction to deploy a new game component.
+- Building and submitting a transaction to create a new game component.
 - Submitting transactions to start a round, submit player guesses, and end the game.
 - Reading the transaction receipt and events to find out who won.
 
@@ -119,7 +119,7 @@ use ootle_rs::{
 };
 use tari_template_lib_types::constants::ONE_XTR;
 
-// Build a transaction that calls the faucet to deposit 10 tXTR into our account.
+// Build a transaction that calls the faucet to deposit 10 TTARI into our account.
 let unsigned_tx = IFaucet::new(&provider)
     .take_faucet_funds(10 * ONE_XTR)
     .pay_fee(500u64)

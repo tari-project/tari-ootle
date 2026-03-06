@@ -3,6 +3,19 @@ title: Getting Started
 description: Set up your development environment and create your first Tari Ootle Template.
 ---
 import { basePath } from '../../../helpers/path';
+import { Aside } from '@astrojs/starlight/components';
+
+<Aside type="tip" title="Using an AI coding agent?">
+Install the Ootle skill so Claude Code (or another agent) understands the SDK, CLI
+workflow, and common pitfalls:
+
+```bash
+mkdir -p .claude/skills/ootle && curl -fsSo .claude/skills/ootle/SKILL.md \
+  https://ootle.tari.com/.well-known/skills/claude-code/SKILL.md
+```
+
+Skills for Cursor, Windsurf, and Aider are listed at [ootle.tari.com/llms.txt](https://ootle.tari.com/llms.txt).
+</Aside>
 
 ### Prerequisites
 

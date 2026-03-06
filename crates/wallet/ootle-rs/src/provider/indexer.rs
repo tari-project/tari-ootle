@@ -55,7 +55,7 @@ impl<Wallet> IndexerProvider<Wallet> {
             client: Arc::new(client),
             wallet,
             network,
-            tx_timeout: Duration::from_secs(32),
+            tx_timeout: Duration::from_secs(60),
             tx_watcher: Arc::new(OnceLock::new()),
         }
     }

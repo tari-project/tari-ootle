@@ -249,7 +249,8 @@ impl TemplateTest {
 
     /// Compiles and adds a new template to the test environment after initial construction.
     /// Returns the [`TemplateAddress`] assigned to the newly compiled template.
-    /// The template is registered under the given `name` for later lookup via [`get_template_address`](Self::get_template_address).
+    /// The template is registered under the given `name` for later lookup via
+    /// [`get_template_address`](Self::get_template_address).
     pub fn compile_new_template<T, P, TEnvs, K, V>(
         &mut self,
         name: T,

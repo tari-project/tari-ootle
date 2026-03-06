@@ -48,7 +48,7 @@ const renderJson = (json: JSONRenderItem) => {
     if (arr.length === 32) {
       return <span className="string">"{toHexString(arr as number[])}"</span>;
     }
-    const mapped = arr.map((val, i) => <li key={`json-arr-item-${i}`}>{handleObj(val as JSONObj)},</li>);
+    const mapped = arr.map((val, i) => <li key={`json-arr-item-${i}`}>{renderJson(val)},</li>);
     return (
       <>
         [<ol>{mapped}</ol>],

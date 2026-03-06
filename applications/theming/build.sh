@@ -10,7 +10,7 @@ if [ -d "$SOURCE_PATH/$THEME_DIR" ]; then
   echo "Removing dir (src) $SOURCE_PATH/$THEME_DIR"
   npx shx rm -rf $SOURCE_PATH/$THEME_DIR || true
 fi
-if [ -f "$SOURCE_PATH/$DIST_DIR" ]; then
+if [ -d "$DIST_DIR" ]; then
   echo "Removing dir (dist): $SOURCE_PATH/$DIST_DIR"
   npx shx rm -rf ./$DIST_DIR || true
 fi
@@ -18,19 +18,7 @@ fi
 mkdir -p $SOURCE_PATH/$THEME_DIR
 mkdir -p $SOURCE_PATH/$FONT_DIR
 
-# Add the license header
-echo "//   Copyright $(date +%Y) The Tari Project" >> $SOURCE_PATH/$MAIN_INDEX_FILE
-echo "//   SPDX-License-Identifier: BSD-3-Clause" >> $SOURCE_PATH/$MAIN_INDEX_FILE
-echo "" >> $SOURCE_PATH/$MAIN_INDEX_FILE
-
 cd ./src
-
-
-# Generate the index file
-for file in $(find $THEME_DIR -name "*.ts" -maxdepth 1 | sort); do
-  MODULE_NAME="${file%.*}"
-  echo "export * from './$MODULE_NAME';" >> $MAIN_INDEX_FILE
-done
 
 for dir in $(find $THEME_DIR -mindepth 1 -maxdepth 1 -type d | sort); do
   module_dir_name="$(basename $dir)"
@@ -51,11 +39,9 @@ done
 
 
 for file in $(find $FONT_DIR -mindepth 1 -maxdepth 1 | sort);  do
-  echo "Copying font file: $file"
   cp -rv "$file" "../$DIST_DIR/$FONT_DIR"
 done
 
 for file in $(find $THEME_DIR -name "*.css" -maxdepth 1 | sort); do
-   echo "Copying css file: $file"
-    cp -rv "$file" "../$DIST_DIR/$THEME_DIR"
+  cp -rv "$file" "../$DIST_DIR/$THEME_DIR"
 done

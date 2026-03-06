@@ -122,7 +122,7 @@ const TransactionFilter = ({
     }, 300); // Debounce search
 
     return () => clearTimeout(timeoutId);
-  }, [formState.searchValue]);
+  }, [formState.searchValue, filterBy]);
 
   // once selected filter, focus on input
 

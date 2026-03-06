@@ -1,8 +1,9 @@
 ---
 title: Using the Tari Ootle CLI
-description: Create, build, and deploy your Tari Ootle Templates using the command-line interface.
+description: Create, build, and publish your Tari Ootle Templates using the command-line interface.
 ---
 import { basePath } from '../../../helpers/path';
+import { Aside } from '@astrojs/starlight/components';
 
 ### Covered in this guide
 
@@ -14,7 +15,7 @@ In this guide, you will:
 - Test templates using the `TemplateTest` tooling.
 - Build and publish templates to the Tari Ootle network.
 
-This guide will walk you through installing the Tari Ootle CLI and using it to create, build, and deploy your first Tari Ootle Template.
+This guide will walk you through installing the Tari Ootle CLI and using it to create, build, and publish your first Tari Ootle Template.
 The CLI is a convenient tool for managing your templates.
 
 ### Installation
@@ -22,7 +23,30 @@ The CLI is a convenient tool for managing your templates.
 To install the Tari Ootle CLI, you can use Cargo, the Rust package manager. Run the following command in your terminal:
 
 ```bash
-cargo install tari-cli
+cargo install tari-ootle-cli
+```
+
+<Aside type="tip">
+  This installs a binary called `tari`. All CLI commands below use the `tari` command.
+</Aside>
+
+### Usage
+
+```
+Usage: tari [OPTIONS] <COMMAND>
+
+Commands:
+  create   Creates a new workspace for your Tari template project
+  add      Generates and adds a new Tari wasm template crate
+  publish  Publishing a Tari template to a network
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -b, --base-dir <PATH>          Base directory for CLI data [default: ~/.local/share/tari_cli]
+  -c, --config-file-path <PATH>  Config file location [default: ~/.config/tari_cli/tari.config.toml]
+  -e, --config-overrides <KEY=VALUE>  Config file overrides
+  -h, --help                     Print help
+  -V, --version                  Print version
 ```
 
 ### Creating a New Template Project
@@ -123,38 +147,20 @@ fn it_works() {
 
 Run `cargo test` to execute the test and ensure that your template is working correctly.
 
-### Building and Deploying Your Template
+### Building and Publishing Your Template
 
-**PREREQUISITE**:
+<Aside type="caution" title="Prerequisite: Wallet Setup">
+  You need a Wallet daemon running with a default account funded with TTARI before you can publish.
 
-Ensure you have a local Wallet daemon running with a default account funded with some tTARI.
+  <a href={basePath("/guides/setup-a-wallet/")}
+     style="display:inline-block;margin-top:0.5rem;padding:0.4rem 1rem;background:var(--sl-color-accent);color:var(--sl-color-black);border-radius:0.375rem;text-decoration:none;font-weight:600;">Set
+    up your Wallet →</a>
+</Aside>
 
-Basic steps:
-1. Head over to https://github.com/tari-project/tari-ootle/releases and download the latest release of the Tari Ootle Wallet daemon for your operating system.
-2. Place the tari_ootle_walletd binary where you want and run it.
-3. Run the wallet daemon with the following command:
-
-```bash
-# Show usage
-./tari_ootle_walletd --help
-# Run the wallet daemon on the Esme testnet
-./tari_ootle_walletd --network esme
-```
-
-By default, the wallet daemon listens for JSON-RPC requests on port 9000.
-You'll have to configure `tari.config.toml` with the correct RPC endpoint if your wallet daemon is
-listening on a port other than 9000.
-
-```toml
-[network]
-# 9000 is the default port for the Wallet daemon's JSON-RPC interface
-wallet-daemon-jrpc-address = "http://127.0.0.1:9000/json_rpc"
-```
-
-NOTE: that the CLI only supports deploying to a Wallet daemon JSON-RPC for now. In future, we may
+NOTE: that the CLI only supports publishing to a Wallet daemon JSON-RPC for now. In future, we may
 implement template publishing using an HSM and/or Tari Universe.
 
-To build and deploy your template, run the following command in the root directory of your workspace:
+To build and publish your template, run the following command in the root directory of your workspace:
 
 ```bash
 tari publish hello_world
@@ -169,7 +175,7 @@ Output:
 🔗 Connected to wallet version 0.20.0 (network: localnet)
 ❓ No Account specified. Using default account: component_bb20db18ecb78711583aefe1523afac6b7e2df7afddd50bd452a3de8b0d770cd
 ✅ WASM size: 148 KiB
-⚠️ Deploying this template costs 67599 tXTR (estimated), are you sure to continue? yes
+⚠️ Publishing this template costs 67599 micro-TTARI, are you sure to continue? yes
 ✅ Publishing template. This may take while...
 ⭐ Your new template's address: 3bba17783b1c1a3c76d1a70cfac1bb159352b5b109f38a71c405c40e8cd5d2d3
 ```

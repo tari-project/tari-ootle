@@ -1,6 +1,6 @@
 # Tari Ootle Documentation
 
-> Tari Ootle is a decentralized application layer built on the Tari L2 network. Templates (smart contracts) are written in Rust, compiled to WASM, and deployed on-chain. This documentation covers template authoring, resources, vaults, access rules, transactions, and client-side integration.
+> Tari Ootle is a decentralized application layer built on the Tari L2 network. Templates (smart contracts) are written in Rust, compiled to WASM, and published on-chain. This documentation covers template authoring, resources, vaults, access rules, transactions, and client-side integration.
 
 ## Getting Started
 
@@ -13,7 +13,7 @@
 - [Templates Overview](https://ootle.tari.com/guides/template-overview/): The `#[template]` macro, constructors, state, and component lifecycle
 - [Building a Guessing Game](https://ootle.tari.com/guides/build-a-guessing-game/): End-to-end walkthrough of writing a template
 - [Publishing Templates](https://ootle.tari.com/guides/publishing-templates/): Compile to WASM and publish via wallet or CLI
-- [Play the Guessing Game](https://ootle.tari.com/guides/play-the-guessing-game/): Interact with a deployed component
+- [Play the Guessing Game](https://ootle.tari.com/guides/play-the-guessing-game/): Interact with a published component
 - [Transaction Overview](https://ootle.tari.com/guides/transaction-overview/): How transactions are constructed and executed
 - [Tari CLI](https://ootle.tari.com/guides/cli/): Command-line tools for development
 - [Resources](https://ootle.tari.com/guides/resources/): Fungible, non-fungible, confidential, and stealth resource types

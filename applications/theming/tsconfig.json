@@ -2,7 +2,6 @@
   "compilerOptions": {
     "target": "ESNext",
     "moduleResolution": "bundler",
-    "rootDir": "./lib",
     "outDir": "./dist",
     "noEmit": true,
     "types": ["vite/client", "@types/node", "./lib/augmentations.d.ts"]

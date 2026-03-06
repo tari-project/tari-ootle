@@ -117,11 +117,11 @@ use ootle_rs::{
     TransactionRequest,
     builtin_templates::{UnsignedTransactionBuilder, faucet::IFaucet},
 };
-use tari_template_lib_types::constants::ONE_XTR;
+use tari_template_lib_types::constants::TARI;
 
 // Build a transaction that calls the faucet to deposit 10 TTARI into our account.
 let unsigned_tx = IFaucet::new(&provider)
-    .take_faucet_funds(10 * ONE_XTR)
+    .take_faucet_funds(10 * TARI)
     .pay_fee(500u64)
     .prepare()
     .await?;

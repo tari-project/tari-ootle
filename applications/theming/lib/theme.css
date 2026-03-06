@@ -1,64 +1,64 @@
 @font-face {
   font-family: "AvenirRegular";
-  src: url("../fonts/AvenirLTStd-Book.otf");
+  src: url("../public/fonts/AvenirLTStd-Book.otf");
   font-display: swap;
 }
 
 @font-face {
   font-family: "AvenirMedium";
-  src: url("../fonts/AvenirLTStd-Medium.otf");
+  src: url("../public/fonts/AvenirLTStd-Medium.otf");
   font-display: swap;
 }
 
 @font-face {
   font-family: "AvenirHeavy";
-  src: url("../fonts/AvenirLTStd-Heavy.otf");
+  src: url("../public/fonts/AvenirLTStd-Heavy.otf");
   font-display: swap;
 }
 
 @font-face {
   font-family: "PoppinsRegular";
-  src: url("../fonts/poppins/Poppins-Regular.ttf");
+  src: url("../public/fonts/poppins/Poppins-Regular.ttf");
   font-display: swap;
   font-weight: 400;
 }
 
 @font-face {
   font-family: "PoppinsMedium";
-  src: url("../fonts/poppins/Poppins-Medium.ttf");
+  src: url("../public/fonts/poppins/Poppins-Medium.ttf");
   font-display: swap;
   font-weight: 500;
 }
 
 @font-face {
   font-family: "PoppinsSemiBold";
-  src: url("../fonts/poppins/Poppins-SemiBold.ttf");
+  src: url("../public/fonts/poppins/Poppins-SemiBold.ttf");
   font-display: swap;
   font-weight: 600;
 }
 
 @font-face {
   font-family: "PoppinsBold";
-  src: url("../fonts/poppins/Poppins-Bold.ttf");
+  src: url("../public/fonts/poppins/Poppins-Bold.ttf");
   font-display: swap;
   font-weight: 700;
 }
 
 @font-face {
   font-family: "DrukMedium";
-  src: url("../fonts/druk/DrukLCG-Medium.ttf");
+  src: url("../public/fonts/druk/DrukLCG-Medium.ttf");
   font-display: swap;
 }
 
 @font-face {
   font-family: "DrukBold";
-  src: url("../fonts/druk/DrukLCG-Bold.ttf");
+  src: url("../public/fonts/druk/DrukLCG-Bold.ttf");
   font-display: swap;
 }
 
 @font-face {
   font-family: "DrukHeavy";
-  src: url("../fonts/druk/DrukLCG-Heavy.ttf");
+  src: url("../public/fonts/druk/DrukLCG-Heavy.ttf");
   font-display: swap;
 }
 

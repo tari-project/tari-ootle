@@ -2,11 +2,13 @@
   "compilerOptions": {
     "module": "ES2020",
     "target": "ESNext",
+    "skipLibCheck": true,
     "moduleResolution": "node",
-    "rootDir": "./src",
     "outDir": "./dist",
     "declaration": true,
-    "composite": true
+    "noEmit": true,
+    "composite": true,
+    "types": ["vite/client"]
   },
-  "include": ["src/**/*"]
+  "include": ["lib/**/*"]
 }

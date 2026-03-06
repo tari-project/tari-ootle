@@ -19,7 +19,7 @@
     "@tanstack/react-query-devtools": "^5.91.3",
     "@tari-project/indexer-client": "link:../../../clients/javascript/indexer_client",
     "@tari-project/ootle-ts-bindings": "link:../../../bindings",
-    "@tari-project/ootle-web-ui-theming": "link:../../applications/theming",
+    "@tari-project/ootle-web-ui-theming": "link:../theming",
     "file-saver": "^2.0.5",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

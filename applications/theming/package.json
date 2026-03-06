@@ -1,11 +1,8 @@
 {
   "name": "@tari-project/ootle-web-ui-theming",
-  "version": "0.0.1",
-  "private": false,
   "type": "module",
-  "publishConfig": {
-    "access": "public"
-  },
+  "version": "0.1.0",
+  "private": false,
   "homepage": "https://github.com/tari-project/tari-ootle#readme",
   "bugs": {
     "url": "https://github.com/tari-project/tari-ootle/issues"
@@ -14,24 +11,26 @@
     "type": "git",
     "url": "git+https://github.com/tari-project/tari-ootle.git"
   },
-  "files": [
-    "dist"
-  ],
   "exports": {
     ".": {
-      "default": "./dist/tari-ootle-theming.js"
-    },
-    "./theme.css": "./dist/theme.css"
+      "fonts": "./dist/fonts/**/*",
+      "ootle-web-ui-theming.css": "./dist/ootle-web-ui-theming.css",
+      "default": "./dist/ootle-web-ui-theming.js"
+    }
   },
   "scripts": {
     "build": "tsc && vite build"
   },
   "devDependencies": {
     "@mui/material": "^7.3.8",
+    "@types/node": "catalog:",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.4",
     "typescript": "catalog:",
     "vite": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -1,20 +1,29 @@
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   plugins: [react()],
   build: {
     lib: {
-      name: "TariOotleTheming",
-      entry: ["lib/index.ts"],
+      entry: resolve(__dirname, "lib/index.ts"),
+      name: "@tari-project/ootle-web-ui-theming",
       formats: ["es"],
-      fileName: "tari-ootle-theming",
-      cssFileName: "theme",
     },
   },
   rollupOptions: {
     external: ["react", "react-dom", "@mui/material"],
     output: {
+      compact: true,
+      validate: true,
+      entryFileNames: "[name].js",
+      generatedCode: {
+        objectShorthand: true,
+        constBindings: true,
+      },
       globals: {
         "react": "React",
         "react-dom": "ReactDOM",

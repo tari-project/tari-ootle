@@ -1,14 +1,24 @@
 {
   "compilerOptions": {
-    "module": "ES2020",
+    "module": "ESNext",
     "target": "ESNext",
     "skipLibCheck": true,
-    "moduleResolution": "node",
-    "outDir": "./dist",
+    "moduleResolution": "bundler",
     "declaration": true,
     "noEmit": true,
     "composite": true,
-    "types": ["vite/client"]
+    "esModuleInterop": true,
+    "allowJs": true,
+    "allowImportingTsExtensions": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "strict": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitAny": false,
+    "baseUrl": ".",
+    "types": ["vite/client", "@types/node"]
   },
-  "include": ["lib/**/*"]
+  "include": ["./lib/**/*"],
+  "exclude": ["node_modules", "dist"]
 }

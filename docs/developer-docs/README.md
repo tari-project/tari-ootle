@@ -8,7 +8,21 @@ site, built with Astro and Starlight.
 The documentation content is located in `src/content/docs/`.
 Images and other static assets are in `src/assets/` and `public/`.
 
-## 🧞 Commands
+## � AI Coding Agent Skills
+
+If you are using **Claude Code** (or another AI coding agent) to build Ootle templates,
+install the Ootle skill so the agent understands the SDK, CLI workflow, and common pitfalls:
+
+```bash
+# Install the Ootle skill for Claude Code
+mkdir -p .claude/skills/ootle && curl -fsSo .claude/skills/ootle/SKILL.md \
+  https://ootle.tari.com/.well-known/skills/claude-code/SKILL.md
+```
+
+Skills for other agents (Cursor, Windsurf, Aider) are listed at
+[ootle.tari.com/llms.txt](https://ootle.tari.com/llms.txt).
+
+## �🧞 Commands
 
 All commands are run from the root of the project, from a terminal:
 

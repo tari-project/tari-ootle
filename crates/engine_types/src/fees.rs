@@ -105,9 +105,7 @@ impl FeeReceipt {
 
     /// The amount of unpaid fees
     pub fn unpaid_debt(&self) -> u64 {
-        self.total_fees_charged()
-            .checked_sub(self.total_fees_paid())
-            .unwrap_or_default()
+        self.total_fees_charged().saturating_sub(self.total_fees_paid())
     }
 
     /// Returns true if the total fees charged is less than or equal to the total fees paid, otherwise false

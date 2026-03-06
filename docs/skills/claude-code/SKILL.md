@@ -1235,6 +1235,10 @@ mod guessing_game {
     - `ProviderBuilder::with_timeout()` — use `connect_with_transaction_timeout()` instead
 12. **Writing publish commands** — Do NOT write custom template publish code. Direct users to the Wallet Web UI. The generated CLI examples do not include a publish command by design.
 13. **Wrong operation order** — Always: init wallet → fund → publish template → create component → register players. Never register players before the game component exists.
+14. **Struct placement in template module** — The `#[template]` macro requires the main component struct to appear first in the template module. Placing other structs above it causes the macro to treat the wrong struct as the component, leading to compilation errors like *"a template must have associated functions and/or methods"*. Fix: define ancillary structs in their own module and `use` them, or place them below the component `impl` block. Note: ancillary structs defined outside the template module must derive `#[derive(serde::Serialize, serde::Deserialize)]` and require `serde = "1"` as a dependency.
+15. **Git dependencies** — Never use git dependencies in `Cargo.toml`. All Tari crates are published on [crates.io](https://crates.io). Always use the latest minor version (e.g. `"0.20"` not a git URL). Check crates.io if unsure.
+16. **Duplicate test dependency** — `tari_template_test_tooling` re-exports the `tari_ootle_transaction` crate. Use the re-export (`tari_template_test_tooling::transaction`) in tests rather than adding `tari_ootle_transaction` as a separate `[dev-dependencies]` entry.
+17. **Missing standard imports** — Import standard library types (e.g. `HashMap`, `BTreeMap`) as normal in Rust. You can import them outside the template module and bring them in with `use super::*;` (which all template modules should include), or import directly inside the template module.
 
 ---
 

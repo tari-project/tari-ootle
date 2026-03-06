@@ -77,14 +77,30 @@ use crate::{
     wrapped_transaction::WrappedTransaction,
 };
 
+/// Returns the component address of the built-in XTR (Tari) faucet used in tests.
 pub const fn xtr_faucet_component() -> ComponentAddress {
     XTR_FAUCET_COMPONENT_ADDRESS
 }
 
+/// Returns the component address of the built-in NFT faucet used in tests.
 pub fn test_nft_faucet_component() -> ComponentAddress {
     NFT_FAUCET_COMPONENT_ADDRESS
 }
 
+/// Test harness for Tari Ootle templates.
+///
+/// Compiles WASM templates, manages an in-memory state store, and provides convenience methods
+/// for executing transactions, creating accounts, and inspecting results. Designed for use in
+/// `#[test]` functions within template crates.
+///
+/// # Quick start
+///
+/// ```rust,no_run
+/// use tari_template_test_tooling::TemplateTest;
+///
+/// let mut test = TemplateTest::my_crate();
+/// let (account, proof, secret_key) = test.create_funded_account();
+/// ```
 pub struct TemplateTest {
     package: Arc<Package>,
     track_calls: TrackCallsModule,
@@ -119,6 +135,8 @@ impl TemplateTest {
         Self::new_internal(base_path, template_paths, iter::empty::<(String, String)>())
     }
 
+    /// Creates a new `TemplateTest` using the current working directory as the base path.
+    /// Template paths are resolved relative to the CWD.
     pub fn new_cwd<I: IntoIterator<Item = T>, T: Into<TemplateSpec>>(template_paths: I) -> Self {
         Self::new_internal(
             env::current_dir().expect("cannot get CWD"),
@@ -127,10 +145,14 @@ impl TemplateTest {
         )
     }
 
+    /// Creates a new `TemplateTest` with only the built-in templates (e.g. `Account`, faucets).
+    /// No user templates are compiled or loaded.
     pub fn new_builtin_only() -> Self {
         Self::new(".", iter::empty::<TemplateSpec>())
     }
 
+    /// Creates a new `TemplateTest` with additional environment variables set during WASM compilation.
+    /// This is useful for templates that use `env!()` or conditional compilation based on environment variables.
     pub fn new_with_compile_envs<P, I, T, TEnvs, K, V>(base_path: P, template_paths: I, envs: TEnvs) -> Self
     where
         P: AsRef<Path>,
@@ -217,12 +239,18 @@ impl TemplateTest {
         }
     }
 
+    /// Initializes the in-memory state store with built-in resources and faucet state.
+    /// This is called automatically by the constructors and typically does not need to be called manually.
     pub fn bootstrap_state(&mut self) {
         add_tari_resources(&mut self.state_store).unwrap();
         initialize_builtin_faucet_state(&mut self.state_store);
         initialize_builtin_nft_faucet_state(&mut self.state_store)
     }
 
+    /// Compiles and adds a new template to the test environment after initial construction.
+    /// Returns the [`TemplateAddress`] assigned to the newly compiled template.
+    /// The template is registered under the given `name` for later lookup via
+    /// [`get_template_address`](Self::get_template_address).
     pub fn compile_new_template<T, P, TEnvs, K, V>(
         &mut self,
         name: T,
@@ -249,44 +277,63 @@ impl TemplateTest {
         template_addr
     }
 
+    /// Enables fee charging for subsequent transaction executions.
+    /// By default, fees are disabled in tests.
     pub fn enable_fees(&mut self) -> &mut Self {
         self.enable_fees = true;
         self
     }
 
+    /// Disables fee charging for subsequent transaction executions.
     pub fn disable_fees(&mut self) -> &mut Self {
         self.enable_fees = false;
         self
     }
 
+    /// Enables automatic proof generation from transaction signers.
+    /// When enabled (the default), if the `proofs` argument is empty, proofs are automatically
+    /// derived from the transaction's signing keys.
     pub fn enable_auto_add_proofs_from_signers(&mut self) -> &mut Self {
         self.auto_add_proofs_from_signers = true;
         self
     }
 
+    /// Disables automatic proof generation from transaction signers.
+    /// When disabled, you must explicitly pass the required proofs to each execution call.
     pub fn disable_auto_add_proofs_from_signers(&mut self) -> &mut Self {
         self.auto_add_proofs_from_signers = false;
         self
     }
 
+    /// Returns a reference to the current fee table used when fees are enabled.
     pub fn fee_table(&self) -> &FeeTable {
         &self.fee_table
     }
 
+    /// Replaces the fee table with the given one. Only has effect when fees are enabled.
     pub fn set_fee_table(&mut self, fee_table: FeeTable) -> &mut Self {
         self.fee_table = fee_table;
         self
     }
 
+    /// Sets a virtual substate (e.g. `CurrentEpoch`) that is available to transactions during execution.
     pub fn set_virtual_substate(&mut self, address: VirtualSubstateId, value: VirtualSubstate) -> &mut Self {
         self.virtual_substates.insert(address, value);
         self
     }
 
+    /// Returns a read-only view of the current state store, useful for inspecting component state
+    /// between transactions.
     pub fn read_only_state_store(&self) -> ReadOnlyStateStore<'_> {
         ReadOnlyStateStore::new(&self.state_store)
     }
 
+    /// Extracts and deserializes a value from a component's state at the given JSON pointer `path`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the component does not exist, the path is invalid, or the value cannot be deserialized
+    /// into `T`.
     pub fn extract_component_value<T: DeserializeOwned>(&self, component_address: ComponentAddress, path: &str) -> T {
         self.read_only_state_store()
             .inspect_component(component_address)
@@ -296,20 +343,33 @@ impl TemplateTest {
             .unwrap_or_else(|| panic!("Expected component to have value at '{path}' but no value was found"))
     }
 
+    /// Returns the default secret key used to sign transactions when no other key is specified.
     pub fn default_signing_key(&self) -> &RistrettoSecretKey {
         &self.secret_key
     }
 
+    /// Asserts that the tracked cross-template calls match the given expected list exactly.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the recorded calls do not match `expected`.
     #[track_caller]
     pub fn assert_calls(&self, expected: &[&'static str]) {
         let calls = self.track_calls.get();
         assert_eq!(calls, expected);
     }
 
+    /// Clears the tracked cross-template call log.
     pub fn clear_calls(&self) {
         self.track_calls.clear();
     }
 
+    /// Returns a [`SubstateId`] from the outputs of the most recently committed transaction
+    /// that matches the given [`SubstateType`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if no output of the given type was produced by the last transaction.
     pub fn get_previous_output_address(&self, ty: SubstateType) -> SubstateId {
         self.last_outputs
             .iter()
@@ -335,6 +395,11 @@ impl TemplateTest {
         eprintln!();
     }
 
+    /// Returns the compiled WASM module for the template registered under the given name.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no template with the given name exists.
     pub fn get_module(&self, module_name: &str) -> LoadedWasmTemplate {
         let addr = self.name_to_template.get(module_name).unwrap();
         match self.package.get_template_by_address(addr).unwrap() {
@@ -342,6 +407,11 @@ impl TemplateTest {
         }
     }
 
+    /// Returns the [`TemplateAddress`] for the template registered under the given name.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no template with the given name exists.
     pub fn get_template_address(&self, name: &str) -> TemplateAddress {
         *self
             .name_to_template
@@ -349,6 +419,11 @@ impl TemplateTest {
             .unwrap_or_else(|| panic!("No template with name {}", name))
     }
 
+    /// Creates a new account component owned by the given public key.
+    /// Returns the [`ComponentAddress`] of the newly created account.
+    ///
+    /// Optionally places the result on the workspace under `workspace_id`.
+    /// Additional `proofs` are passed as initial ownership proofs for the transaction.
     #[track_caller]
     pub fn create_account(
         &mut self,
@@ -366,6 +441,14 @@ impl TemplateTest {
         diff.up_iter().find_map(|(id, _)| id.as_component_address()).unwrap()
     }
 
+    /// Calls a template function by name and returns the deserialized result.
+    ///
+    /// This is a convenience method that builds a transaction with a single `CallFunction` instruction,
+    /// executes it, and decodes the return value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the transaction fails or if the return value cannot be deserialized into `T`.
     #[track_caller]
     pub fn call_function<T>(
         &mut self,
@@ -393,6 +476,14 @@ impl TemplateTest {
             .unwrap()
     }
 
+    /// Calls a method on an existing component and returns the deserialized result.
+    ///
+    /// This is a convenience method that builds a transaction with a single `CallMethod` instruction,
+    /// executes it, and decodes the return value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the transaction fails or if the return value cannot be deserialized into `T`.
     #[track_caller]
     pub fn call_method<T>(
         &mut self,
@@ -420,30 +511,43 @@ impl TemplateTest {
             .unwrap()
     }
 
+    /// Returns the default owner proof (non-fungible address) and secret key pair.
+    /// Useful for setting up ownership proofs in tests.
     pub fn get_test_proof_and_secret_key(&self) -> (NonFungibleAddress, RistrettoSecretKey) {
         (self.owner_proof(), self.secret_key.clone())
     }
 
+    /// Returns the default owner proof derived from the test's default public key.
     pub fn owner_proof(&self) -> NonFungibleAddress {
         NonFungibleAddress::from_public_key(self.public_key.to_byte_type())
     }
 
+    /// Returns a reference to the default secret key.
     pub fn secret_key(&self) -> &RistrettoSecretKey {
         &self.secret_key
     }
 
+    /// Returns a reference to the default public key.
     pub fn public_key(&self) -> &RistrettoPublicKey {
         &self.public_key
     }
 
+    /// Generates a deterministic key pair from the given seed byte.
+    /// Different seeds produce different key pairs, allowing tests to create multiple distinct identities.
     pub fn new_key_pair(&mut self, seed: u8) -> (RistrettoSecretKey, RistrettoPublicKey) {
         create_key_pair_from_seed(seed)
     }
 
+    /// Returns the default public key as [`RistrettoPublicKeyBytes`], the byte representation
+    /// commonly used in template function arguments.
     pub fn to_public_key_bytes(&self) -> RistrettoPublicKeyBytes {
         self.public_key.to_byte_type()
     }
 
+    /// Creates a new account with zero balance and a fresh key pair.
+    /// Returns `(account_address, owner_proof, secret_key)`.
+    ///
+    /// Fees are temporarily disabled for the account creation transaction.
     #[track_caller]
     pub fn create_empty_account(&mut self) -> (ComponentAddress, NonFungibleAddress, RistrettoSecretKey) {
         let (owner_proof, public_key, secret_key) = self.create_owner_proof();
@@ -454,6 +558,11 @@ impl TemplateTest {
         (component, owner_proof, secret_key)
     }
 
+    /// Creates a new account funded with [`FUNDED_ACCOUNT_INITIAL_BALANCE`](Self::FUNDED_ACCOUNT_INITIAL_BALANCE)
+    /// tokens from the XTR faucet, using a fresh key pair.
+    /// Returns `(account_address, owner_proof, secret_key)`.
+    ///
+    /// Fees are temporarily disabled for the account creation transaction.
     #[track_caller]
     pub fn create_funded_account(&mut self) -> (ComponentAddress, NonFungibleAddress, RistrettoSecretKey) {
         let (owner_proof, public_key, secret_key) = self.create_owner_proof();
@@ -476,6 +585,11 @@ impl TemplateTest {
         (account_address, owner_proof, secret_key)
     }
 
+    /// Creates a new account funded with a custom `amount` of tokens from the XTR faucet,
+    /// using a fresh key pair.
+    /// Returns `(account_address, owner_proof, secret_key, public_key)`.
+    ///
+    /// Fees are temporarily disabled for the account creation transaction.
     #[track_caller]
     pub fn create_custom_funded_account<A: Into<Amount>>(
         &mut self,
@@ -511,6 +625,10 @@ impl TemplateTest {
         seed
     }
 
+    /// Creates a fresh owner proof by generating a new key pair with an auto-incrementing seed.
+    /// Returns `(owner_proof, public_key, secret_key)`.
+    ///
+    /// Each call produces a different key pair, making this suitable for creating multiple distinct owners.
     #[track_caller]
     pub fn create_owner_proof(&mut self) -> (NonFungibleAddress, RistrettoPublicKey, RistrettoSecretKey) {
         let (secret_key, public_key) = create_key_pair_from_seed(self.next_key_seed());
@@ -518,6 +636,12 @@ impl TemplateTest {
         (owner_token, public_key, secret_key)
     }
 
+    /// Builds and executes a transaction from raw fee and main instruction vectors.
+    /// Returns `Ok(ExecuteResult)` on successful execution, or a [`TransactionError`] if the
+    /// transaction processor encounters a fatal error.
+    ///
+    /// Unlike [`execute_expect_success`](Self::execute_expect_success), this does not panic on
+    /// rejection and does not commit state changes.
     #[track_caller]
     pub fn try_execute_instructions(
         &mut self,
@@ -533,6 +657,13 @@ impl TemplateTest {
         self.try_execute(transaction, proofs)
     }
 
+    /// Executes a pre-built transaction without committing state changes.
+    /// Returns `Ok(ExecuteResult)` on successful execution, or a [`TransactionError`] if the
+    /// transaction processor encounters a fatal error.
+    ///
+    /// This is the lowest-level execution method. It does not panic on transaction rejection
+    /// and does not commit the resulting state diff. Use this when you need full control over
+    /// result handling.
     #[track_caller]
     pub fn try_execute(
         &mut self,
@@ -600,6 +731,8 @@ impl TemplateTest {
         Ok(result)
     }
 
+    /// Executes a transaction and commits state changes only if the transaction is accepted.
+    /// Does not panic on rejection — returns the result in all cases.
     #[track_caller]
     pub fn execute_and_commit_on_success(
         &mut self,
@@ -614,6 +747,8 @@ impl TemplateTest {
         result
     }
 
+    /// Returns a new [`TransactionBuilder`] configured for the local test network.
+    /// Use this to construct custom transactions with multiple instructions.
     pub fn transaction(&self) -> TransactionBuilder<MainIntent> {
         Transaction::builder(Network::LocalNet)
     }
@@ -666,6 +801,8 @@ impl TemplateTest {
         result.expect_failure().clone()
     }
 
+    /// Executes instructions (with no fee instructions) and commits the state diff on success.
+    /// Returns an error if the transaction is rejected.
     #[track_caller]
     pub fn execute_and_commit(
         &mut self,
@@ -675,6 +812,8 @@ impl TemplateTest {
         self.execute_and_commit_with_fees(vec![], instructions, proofs)
     }
 
+    /// Executes instructions with explicit fee instructions and commits the state diff on success.
+    /// Returns an error if the fee transaction is rejected or the main transaction fails.
     #[track_caller]
     pub fn execute_and_commit_with_fees(
         &mut self,
@@ -700,6 +839,14 @@ impl TemplateTest {
         Ok(result)
     }
 
+    /// Parses and executes a transaction manifest string, automatically importing all registered
+    /// templates. Template names are available as identifiers in the manifest without explicit
+    /// `use` statements.
+    ///
+    /// `variables` provides named values that can be referenced in the manifest (e.g. component
+    /// addresses, amounts).
+    ///
+    /// Returns an error if parsing fails, the transaction is rejected, or execution fails.
     #[track_caller]
     pub fn execute_and_commit_manifest<'a, I: IntoIterator<Item = (&'a str, ManifestValue)>>(
         &mut self,
@@ -724,6 +871,7 @@ impl TemplateTest {
         self.execute_and_commit(instructions.instructions, proofs)
     }
 
+    /// Prints all substates in the current state store to stderr for debugging.
     pub fn print_state(&self) {
         for (k, v) in self.state_store.iter() {
             eprintln!("[{}]: {:?}", k, v.substate_value());

@@ -20,7 +20,7 @@
     "@tanstack/react-query": "^5.90.21",
     "@tanstack/react-query-devtools": "^5.91.3",
     "@tari-project/indexer-client": "workspace:*",
-    "@tari-project/ootle-ts-bindings": "link:../../../bindings",
+    "@tari-project/ootle-ts-bindings": "workspace:*",
     "@tari-project/ootle-web-ui-theming": "workspace:*",
     "@tari-project/tari-permissions": "0.14.6",
     "@tari-project/wallet_jrpc_client": "workspace:*",

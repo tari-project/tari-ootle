@@ -15,6 +15,7 @@ export default defineConfig({
     },
   },
   rollupOptions: {
+    input: resolve(__dirname, "lib/index.ts"),
     external: ["react", "react-dom", "@mui/material"],
     output: {
       compact: true,

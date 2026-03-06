@@ -9,14 +9,17 @@ packages:
   - docs/developer-docs
 
 catalog:
-  "@types/node": ^25.3.1
+  '@types/node': ^25.3.1
   typescript: ^5.9.3
   vite: ^7.3.1
   zustand: ^5.0.11
 
 ignoredBuiltDependencies:
-  - "@swc/core"
+  - '@swc/core'
   - esbuild
   - msw
+
+overrides:
+  ootle-web-ui-theming: link:../../../Library/pnpm/global/5/node_modules/@tari-project/ootle-web-ui-theming
 
 publishBranch: development

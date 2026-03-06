@@ -19,6 +19,9 @@ catalogs:
       specifier: ^5.0.11
       version: 5.0.11
 
+overrides:
+  ootle-web-ui-theming: link:../../../Library/pnpm/global/5/node_modules/@tari-project/ootle-web-ui-theming
+
 importers:
 
   .:
@@ -63,8 +66,8 @@ importers:
         specifier: workspace:*
         version: link:../../../bindings
       '@tari-project/ootle-web-ui-theming':
-        specifier: workspace:*
-        version: link:../../theming
+        specifier: link:../theming
+        version: link:../theming
       file-saver:
         specifier: ^2.0.5
         version: 2.0.5
@@ -5533,7 +5536,7 @@ snapshots:
 
   '@types/sax@1.2.7':
     dependencies:
-      '@types/node': 17.0.45
+      '@types/node': 25.3.5
 
   '@types/unist@2.0.11': {}
 

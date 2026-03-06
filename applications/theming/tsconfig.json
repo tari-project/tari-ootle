@@ -1,24 +1,13 @@
 {
   "compilerOptions": {
-    "module": "ESNext",
     "target": "ESNext",
-    "skipLibCheck": true,
     "moduleResolution": "bundler",
-    "declaration": true,
+    "rootDir": "./lib",
+    "outDir": "./dist",
     "noEmit": true,
-    "composite": true,
-    "esModuleInterop": true,
-    "allowJs": true,
-    "allowImportingTsExtensions": true,
-    "allowSyntheticDefaultImports": true,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "strict": true,
-    "noFallthroughCasesInSwitch": true,
-    "noImplicitAny": false,
-    "baseUrl": ".",
-    "types": ["vite/client", "@types/node"]
+    "types": ["vite/client", "@types/node", "./lib/augmentations.d.ts"]
   },
   "include": ["./lib/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "exclude": ["node_modules", "dist"],
+  "references": [{ "path": "./tsconfig.node.json" }]
 }

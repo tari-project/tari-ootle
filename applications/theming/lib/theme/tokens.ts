@@ -1,6 +1,5 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
-import "./augmentations";
 import { ThemeOptions } from "@mui/material/styles";
 import { blue, gothic, green, grey, orange, red, tariBg, tariPurple, teal } from "./colors";
 import PoppinsBoldTTF from "/fonts/poppins/Poppins-Bold.ttf";

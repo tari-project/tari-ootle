@@ -11,15 +11,18 @@
     "type": "git",
     "url": "git+https://github.com/tari-project/tari-ootle.git"
   },
+  "main": "./dist/ootle-web-ui-theming.js",
   "exports": {
     ".": {
       "fonts": "./dist/fonts/**/*",
-      "ootle-web-ui-theming.css": "./dist/ootle-web-ui-theming.css",
+      "import": "./dist/ootle-web-ui-theming.js",
       "default": "./dist/ootle-web-ui-theming.js"
-    }
+    },
+    "./ootle-web-ui-theming.css": "./dist/ootle-web-ui-theming.css"
   },
   "scripts": {
-    "build": "tsc && vite build"
+    "typecheck": "tsc",
+    "build": "vite build"
   },
   "devDependencies": {
     "@mui/material": "^7.3.8",

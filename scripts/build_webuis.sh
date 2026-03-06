@@ -82,7 +82,7 @@ popd > /dev/null
 pushd $base_path/applications/theming > /dev/null
   echo "Building theme..."
   pnpm install
-  pnpm run build
+  pnpm build
 popd > /dev/null
 
 function build() {

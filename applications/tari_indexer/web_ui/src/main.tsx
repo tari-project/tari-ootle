@@ -22,7 +22,7 @@
 
 import React from "react";
 import ReactDOM from "react-dom/client";
-import "@tari-project/ootle-web-ui-theming/theme.css";
+import "@tari-project/ootle-web-ui-theming/ootle-web-ui-theming.css";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import App from "./App";
 import ErrorPage from "./routes/ErrorPage";

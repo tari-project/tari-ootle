@@ -26,7 +26,7 @@ import Accounts from "@routes/Accounts/Accounts";
 import TransactionDetails from "@routes/Transactions/TransactionDetails";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
-import "@tari-project/ootle-web-ui-theming/dist/theme/theme.css";
+import "@tari-project/ootle-web-ui-theming/ootle-web-ui-theming.css";
 import ReactDOM from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router";
 

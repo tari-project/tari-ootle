@@ -26,6 +26,8 @@ type EnvVars = &'static [(&'static str, &'static str)];
 const NPM_COMMANDS: &[(&str, &[&str], EnvVars)] = &[
     ("../../bindings", &["install"], &[]),
     ("../../bindings", &["run", "build-dev"], &[]),
+    ("../theming", &["install"], &[]),
+    ("../theming", &["run", "build"], &[]),
     ("../../clients/javascript/wallet_daemon_client", &["install"], &[]),
     ("../../clients/javascript/wallet_daemon_client", &["run", "build"], &[]),
     ("./web_ui", &["clean-dist"], &[]),

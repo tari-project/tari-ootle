@@ -328,4 +328,4 @@ const dark: ThemeOptions = {
   },
 };
 
-export { componentSettings, light, dark };
+export { componentSettings, dark, light };

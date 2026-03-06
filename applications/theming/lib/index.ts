@@ -1,8 +1,10 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 /// <reference types="vite/client" />
-import "./theme.css";
-import { tariBg, tariPurple, grey, teal, gothic, blue, orange, green, red } from "./theme/colors";
-import { componentSettings, light, dark } from "./theme/tokens";
 
-export { componentSettings, light, dark, tariBg, tariPurple, grey, teal, gothic, blue, orange, green, red };
+import "./augmentations.d.ts";
+import "./theme.css";
+import { blue, gothic, green, grey, orange, red, tariBg, tariPurple, teal } from "./theme/colors";
+import { componentSettings, dark, light } from "./theme/tokens";
+
+export { blue, componentSettings, dark, gothic, green, grey, light, orange, red, tariBg, tariPurple, teal };

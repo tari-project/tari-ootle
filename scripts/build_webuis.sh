@@ -27,7 +27,6 @@ function usage() {
   echo "  -h|--help    This help"
   echo "  -t|--check-typescript    Check that typescript compiles without building"
   echo "  -b|--build-bindings     Generating bindings"
-  echo "  -s|--build-theming     Generating theming"
   exit 1
 }
 
@@ -44,15 +43,10 @@ while [[ $# -gt 0 ]]; do
     -bt|-tb)
       check_typescript=true
       build_bindings=true
-      build_theming=true
       shift
       ;;
     -b|--build-bindings)
       build_bindings=true
-      shift
-      ;;
-    -s|--build-theming)
-      build_theming=true
       shift
       ;;
     -t|--check-typescript)

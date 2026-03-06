@@ -16,9 +16,9 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "experimentalDecorators": true,
-    "types": ["react", "vite/client", "node", "./lib/augmentations.d.ts"],
     "baseUrl": ".",
-    "lib": ["esnext", "dom", "dom.iterable"]
+    "lib": ["esnext", "dom", "dom.iterable"],
+    "types": ["react", "vite/client", "node", "./lib/augmentations.d.ts"]
   },
   "include": ["lib", "*.d.ts"]
 }

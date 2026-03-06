@@ -12,7 +12,7 @@ import img_publish_template from "../../../assets/wallet-publish-template.png";
 
 In this guide, you will:
 - Compile your Rust template into a WebAssembly (WASM) binary.
-- Understand the process of deploying templates to the Tari Ootle network.
+- Understand the process of publishing templates to the Tari Ootle network.
 - Learn how to use the Tari Ootle Walletd to publish your template.
 
 This guide assumes you have already read <a href={basePath("/guides/template-overview/")}>Templates Overview</a>.
@@ -29,13 +29,13 @@ cargo build --target wasm32-unknown-unknown --release
 
 <Aside type="tip">
   The compiled WASM file will be located at `target/wasm32-unknown-unknown/release/your_template_name.wasm`. This is the
-  file you will deploy to the Tari Ootle network.
+  file you will publish to the Tari Ootle network.
 </Aside>
 
 ### Publishing Your Template
 
 To publish your template, you need to create a transaction that includes the `PublishTemplate` instruction.
-This transaction will deploy your compiled WASM template to the Tari Ootle network.
+This transaction will publish your compiled WASM template to the Tari Ootle network.
 
 **Using the Tari Ootle Wallet Web UI**
 
@@ -43,8 +43,8 @@ See <a href={basePath("/guides/setup-a-wallet/")}>Set up a Wallet</a> if you hav
 Ensure it is running before starting.
 
 <Aside type="tip">
-  You'll need some `tXTM` (testnet Tari) in your wallet to pay for transaction fees when publishing your template.
-  If you don't have any `tXTM`, you can claim testnet funds using the built-in faucet in the wallet. Simply click on
+  You'll need some `TTARI` in your wallet to pay for transaction fees when publishing your template.
+  If you don't have any `TTARI`, you can claim testnet funds using the built-in faucet in the wallet. Simply click on
   "Claim Testnet Funds" in the wallet UI.
 </Aside>
 
@@ -56,10 +56,10 @@ You should see a dialogue like the one below:
 
 In this dialogue:
 
-1. Select the fee account containing `tXTM` (testnet Tari) to pay for the transaction fees.
+1. Select the fee account containing `TTARI` to pay for the transaction fees.
 2. Upload the compiled WASM file of your template. You can find this file in the `target/wasm32-unknown-unknown/release/{name}.wasm` directory of your crate project after running the build command.
-3. Click "Estimate Fee" to calculate the estimated transaction fee. This will automatically fill in the fee field with the amount of `tXTM` required to publish your template.
-4. Click "Publish Template" to submit the transaction and deploy your template to the network.
+3. Click "Estimate Fee" to calculate the estimated transaction fee. This will automatically fill in the fee field with the amount of `TTARI` required to publish your template.
+4. Click "Publish Template" to submit the transaction and publish your template to the network.
 
 After the transaction is confirmed, your template will be published and available for use on the Tari Ootle network.
 You can view your published templates, including the addresses which we'll need later, by navigating to "Templates" in the left sidebar of the wallet web UI.

@@ -63,8 +63,8 @@ importers:
         specifier: workspace:*
         version: link:../../../bindings
       '@tari-project/ootle-web-ui-theming':
-        specifier: link:../theming
-        version: link:../theming
+        specifier: workspace:*
+        version: link:../../theming
       file-saver:
         specifier: ^2.0.5
         version: 2.0.5

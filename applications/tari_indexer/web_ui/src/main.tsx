@@ -29,7 +29,6 @@ import ErrorPage from "./routes/ErrorPage";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import queryClient from "./api/queryClient";
-
 const router = createBrowserRouter([
   {
     path: "*",

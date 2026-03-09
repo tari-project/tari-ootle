@@ -1,8 +1,5 @@
 [target.nanosplus]
-runner = "speculos -m flex"
-
-[build]
-target = "flex"
+runner = "speculos -m nanosplus" # Or change the target
 
 [unstable]
 avoid-dev-deps = true

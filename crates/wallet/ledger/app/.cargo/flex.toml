@@ -1,0 +1,15 @@
+[target.nanosplus]
+runner = "speculos -m flex"
+
+[build]
+target = "flex"
+
+[unstable]
+avoid-dev-deps = true
+build-std = ["core", "alloc"]
+build-std-features = ["compiler-builtins-mem"]
+host-config = true
+target-applies-to-host = true
+
+[host]
+rustflags = ["-Ctarget-feature=-crt-static"]

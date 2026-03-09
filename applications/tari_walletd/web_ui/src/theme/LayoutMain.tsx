@@ -19,7 +19,10 @@
 //  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-/// <reference types="@tari-project/ootle-web-ui-theming/lib/augmentations.d.ts" />
+
+import "@tari-project/ootle-web-ui-theming/overrides.ts";
+
+
 import { breadcrumbRoutes } from "@/App";
 import Logo from "@assets/Logo";
 import Breadcrumbs from "@components/Breadcrumbs";
@@ -45,7 +48,6 @@ import useAuthStore from "@store/authStore";
 import useSettingsStore from "@store/settingsStore";
 import useThemeStore from "@store/themeStore";
 import { componentSettings, dark, light } from "@tari-project/ootle-web-ui-theming";
-import "@tari-project/ootle-web-ui-theming/theme.css";
 import { settingsGet } from "@utils/json_rpc";
 import { useEffect, useState } from "react";
 import { Link, Outlet } from "react-router";

@@ -48,7 +48,7 @@ rg -i "Copyright.*The Tari Project" --files-without-match \
    -g '!*.{Dockerfile,asc,bat,config,config.js,css,csv,drawio,env,gitkeep,hbs,html,ini,iss,json,lock,md,mdx,min.js,ps1,py,rc,scss,sh,sql,svg,toml,txt,yml,yaml,vue,liquid,otf,d.ts,config.ts,mjs,astro}' . \
    -g '!bindings/src/types/*' \
    -g '!bindings/dist/types/*' \
-   -g '!applications/theming/src/fonts/**/*' \
+   -g '!applications/theming/public/**/*' \
    -g '!applications/theming/dist/fonts/**/*' \
     | while IFS= read -r file; do
         if [[ -n $(basename "${file}" | grep -E '\.') ]]; then

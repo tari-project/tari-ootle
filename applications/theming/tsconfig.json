@@ -1,5 +1,4 @@
 {
-  // test comment
   "compilerOptions": {
     "target": "esnext",
     "module": "esnext",
@@ -9,16 +8,15 @@
     "strict": true,
     "jsx": "react-jsx",
     "allowJs": true,
-    "sourceMap": true,
-    "resolveJsonModule": true,
-    "esModuleInterop": false,
     "allowSyntheticDefaultImports": true,
-    "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "experimentalDecorators": true,
-    "baseUrl": ".",
+    "noImplicitAny": true,
+    "noImplicitThis": true,
+    "strictNullChecks": true,
     "lib": ["esnext", "dom", "dom.iterable"],
-    "types": ["react", "vite/client", "node", "./lib/augmentations.d.ts"]
+    "types": ["react", "vite/client", "node"],
+    "baseUrl": "./"
   },
-  "include": ["lib", "*.d.ts"]
+  "include": ["./lib/**/*"],
+  "exclude": ["node_modules", "dist"]
 }

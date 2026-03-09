@@ -29,7 +29,7 @@
     "buffer": "^6.0.3",
     "cbor2": "^2.3.0",
     "file-saver": "^2.0.5",
-    "framer-motion": "^12.35.0",
+    "framer-motion": "^12.35.2",
     "jwt-decode": "^4.0.0",
     "prism-react-renderer": "^2.4.1",
     "react": "^19.2.4",

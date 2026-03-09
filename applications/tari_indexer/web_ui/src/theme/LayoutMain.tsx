@@ -34,15 +34,15 @@ import List from "@mui/material/List";
 import Stack from "@mui/material/Stack";
 import { createTheme, styled } from "@mui/material/styles";
 import Toolbar from "@mui/material/Toolbar";
+import { componentSettings, dark, light } from "@tari-project/ootle-web-ui-theming";
+import "@tari-project/ootle-web-ui-theming/overrides.ts";
 import { useState } from "react";
 import { Link, Outlet } from "react-router-dom";
 import { breadcrumbRoutes } from "../App";
 import Logo from "../assets/Logo";
 import Breadcrumbs from "../Components/Breadcrumbs";
 import { mainListItems } from "../Components/MenuItems";
-
 import useThemeStore from "../store/themeStore";
-import { light, dark, componentSettings } from "@tari-project/ootle-web-ui-theming";
 
 const drawerWidth = 300;
 
@@ -74,7 +74,7 @@ const Drawer = styled(MuiDrawer, {
   "& .MuiDrawer-paper": {
     position: "relative",
     whiteSpace: "nowrap",
-    borderRight: `1px solid ${theme.palette.divider}`,
+    borderRight: `1px solid ${theme?.palette?.accent.border}`,
     boxShadow: "10px 14px 28px rgb(35 11 73 / 5%)",
     width: drawerWidth,
     transition: theme.transitions.create("width", {

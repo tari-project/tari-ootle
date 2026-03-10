@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 /// <reference types="vite/client" />
 
-import "./augmentations.d.ts";
+import "../public/overrides";
 import "./theme.css";
 
 import type { Palette, PaletteOptions, TypographyVariants, TypographyVariantsOptions } from "@mui/material/styles";

@@ -80,37 +80,40 @@ const TransactionFilter = ({
   };
 
   // search function
-  const requestSearch = useCallback((searchedVal: string, filter: string) => {
-    const currentStateObject = stateObjectRef.current;
-    const filteredRows = currentStateObject.filter((row: any) => {
-      const index = filterItems.findIndex((item) => item.value === filter);
-      const filterFunction = filterItems[index].filterFn;
-      return filterFunction(searchedVal, row);
-    });
+  const requestSearch = useCallback(
+    (searchedVal: string, filter: string) => {
+      const currentStateObject = stateObjectRef.current;
+      const filteredRows = currentStateObject.filter((row: any) => {
+        const index = filterItems.findIndex((item) => item.value === filter);
+        const filterFunction = filterItems[index].filterFn;
+        return filterFunction(searchedVal, row);
+      });
 
-    // Create a new array that is a copy of the original
-    const updatedObject = [...currentStateObject];
+      // Create a new array that is a copy of the original
+      const updatedObject = [...currentStateObject];
 
-    // Set the "show" property of all transactions in the copy to false
-    updatedObject.forEach((template) => {
-      template.show = false;
-    });
+      // Set the "show" property of all transactions in the copy to false
+      updatedObject.forEach((template) => {
+        template.show = false;
+      });
 
-    // Loop over the filtered array, find the matching object in the
-    // original array, and set its "show" property to true
-    filteredRows.forEach((filteredRow: any) => {
-      const index = updatedObject.findIndex((item) => item.id === filteredRow.id);
-      if (index !== -1) {
-        updatedObject[index].show = true;
-      }
-    });
+      // Loop over the filtered array, find the matching object in the
+      // original array, and set its "show" property to true
+      filteredRows.forEach((filteredRow: any) => {
+        const index = updatedObject.findIndex((item) => item.id === filteredRow.id);
+        if (index !== -1) {
+          updatedObject[index].show = true;
+        }
+      });
 
-    // Update the state with the modified copy of the original array
-    setStateObject(updatedObject);
+      // Update the state with the modified copy of the original array
+      setStateObject(updatedObject);
 
-    // Set paging to first page
-    setPage(0);
-  }, []);
+      // Set paging to first page
+      setPage(0);
+    },
+    [filterItems, setStateObject, setPage],
+  );
 
   // when search input changes and formState has been updated
   useEffect(() => {

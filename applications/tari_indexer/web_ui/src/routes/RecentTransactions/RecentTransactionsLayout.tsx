@@ -24,7 +24,6 @@ import PageHeading from "../../Components/PageHeading";
 import Grid from "@mui/material/Grid";
 import { StyledPaper } from "../../Components/StyledComponents";
 import RecentTransactions from "./components/RecentTransactions";
-import { useEffect } from "react";
 
 function RecentTransactionsLayout() {
   return (

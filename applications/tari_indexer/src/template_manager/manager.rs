@@ -53,7 +53,7 @@ use tari_template_builtin::{
 };
 use tari_template_lib_types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
-use super::{LoadedTemplateWithMetadata, Template, TemplateCode, TemplateMetadata};
+use super::{Template, TemplateCode, TemplateMetadata};
 use crate::{substate_manager::SubstateManager, template_manager::error::TemplateManagerError};
 
 #[derive(Debug, Clone)]
@@ -151,21 +151,15 @@ impl TemplateManager {
         Ok(template.try_into()?)
     }
 
-    pub fn fetch_and_load_template(
+    pub async fn fetch_and_load_template(
         &self,
         address: &TemplateAddress,
-    ) -> Result<LoadedTemplateWithMetadata, TemplateManagerError> {
-        let template = self.fetch_cached_template(address)?;
-        let wasm = template
-            .code
-            .as_wasm_code()
-            .ok_or(TemplateManagerError::UnsupportedTemplateType)?;
-        let module = WasmModule::from_code(wasm);
-        let loaded = module.load_template()?;
-        Ok(LoadedTemplateWithMetadata {
-            metadata: template.metadata,
-            loaded,
-        })
+    ) -> Result<LoadedTemplate, TemplateManagerError> {
+        let mut templates = self.fetch_and_load_templates([address]).await?;
+        let template = templates
+            .remove(address)
+            .ok_or(TemplateManagerError::TemplateNotFound { address: *address })?;
+        Ok(template)
     }
 
     pub fn fetch_template_metadata(&self, limit: usize) -> Result<Vec<TemplateMetadata>, TemplateManagerError> {

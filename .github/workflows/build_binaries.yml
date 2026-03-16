@@ -331,6 +331,13 @@ jobs:
           pnpm install
           pnpm run build
 
+      - name: Build Dependencies - Node (web UI theming)
+        shell: bash
+        working-directory: ${{ github.workspace }}/applications/theming
+        run: |
+          pnpm install
+          pnpm run build
+
       - name: Build Dependencies - Node (wallet_daemon_client)
         shell: bash
         working-directory: ${{ github.workspace }}/clients/javascript/wallet_daemon_client

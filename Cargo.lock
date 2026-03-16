@@ -1692,7 +1692,7 @@ dependencies = [
 
 [[package]]
 name = "consensus_tests"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "fern",
  "futures 0.3.31",
@@ -1878,9 +1878,9 @@ dependencies = [
 
 [[package]]
 name = "cookie_store"
-version = "0.22.1"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15b2c103cf610ec6cae3da84a766285b42fd16aad564758459e6ecf128c75206"
+checksum = "3fc4bff745c9b4c7fb1e97b25d13153da2bc7796260141df62378998d070207f"
 dependencies = [
  "cookie",
  "document-features",
@@ -2656,12 +2656,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ab67060fc6b8ef687992d439ca0fa36e7ed17e9a0b16b25b601e8757df720de"
 dependencies = [
  "data-encoding",
- "syn 1.0.109",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "db-inspector"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -3796,7 +3796,7 @@ checksum = "8f5f3913fa0bfe7ee1fd8248b6b9f42a5af4b9d65ec2dd2c3c26132b950ecfc2"
 
 [[package]]
 name = "generate_ristretto_value_lookup"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "clap 3.2.25",
  "futures 0.3.31",
@@ -4902,7 +4902,7 @@ checksum = "8bb03732005da905c88227371639bf1ad885cc712789c011c31c5fb3ab3ccf02"
 
 [[package]]
 name = "integration_tests"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "config",
@@ -5618,7 +5618,7 @@ dependencies = [
 
 [[package]]
 name = "libp2p-messaging"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "async-trait",
  "futures-bounded",
@@ -5797,7 +5797,7 @@ dependencies = [
 
 [[package]]
 name = "libp2p-substream"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "libp2p",
  "prometheus-client",
@@ -8375,7 +8375,7 @@ dependencies = [
 
 [[package]]
 name = "proto_builder"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "prost-build 0.14.3",
  "sha2 0.10.9",
@@ -8530,9 +8530,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.14"
+version = "0.11.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "434b42fec591c96ef50e21e886936e66d3cc3f737104fdb9b737c40ffb94c098"
+checksum = "f1906b49b0c3bc04b5fe5d86a77925ae6524a19b816ae38ce1e426255f1d8a31"
 dependencies = [
  "aws-lc-rs",
  "bytes 1.11.1",
@@ -10183,7 +10183,7 @@ dependencies = [
 
 [[package]]
 name = "sqlite_message_logger"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "chrono",
  "diesel",
@@ -10556,7 +10556,7 @@ dependencies = [
 
 [[package]]
 name = "tari_base_node_client"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "futures-util",
  "log",
@@ -10781,7 +10781,7 @@ dependencies = [
 
 [[package]]
 name = "tari_consensus"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "indexmap 2.13.0",
@@ -10806,7 +10806,7 @@ dependencies = [
 
 [[package]]
 name = "tari_consensus_types"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "borsh",
  "ootle_serde",
@@ -10908,7 +10908,7 @@ dependencies = [
 
 [[package]]
 name = "tari_engine"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "blake2",
  "criterion",
@@ -10935,7 +10935,7 @@ dependencies = [
 
 [[package]]
 name = "tari_engine_types"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "bincode 2.0.1",
  "blake2",
@@ -10962,7 +10962,7 @@ dependencies = [
 
 [[package]]
 name = "tari_epoch_manager"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "log",
@@ -10982,7 +10982,7 @@ dependencies = [
 
 [[package]]
 name = "tari_epoch_oracles"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "blake2",
@@ -11035,7 +11035,7 @@ dependencies = [
 
 [[package]]
 name = "tari_indexer"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "async-graphql",
@@ -11104,7 +11104,7 @@ dependencies = [
 
 [[package]]
 name = "tari_indexer_client"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "bounded-vec",
@@ -11132,7 +11132,7 @@ dependencies = [
 
 [[package]]
 name = "tari_indexer_lib"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "log",
  "prometheus-client",
@@ -11224,7 +11224,7 @@ dependencies = [
 
 [[package]]
 name = "tari_networking"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11276,7 +11276,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_app_utilities"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "bincode 2.0.1",
@@ -11315,7 +11315,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_common_types"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "blake2",
  "borsh",
@@ -11341,7 +11341,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_p2p"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "libp2p-identity",
@@ -11365,7 +11365,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_storage"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "bitflags 2.10.0",
@@ -11392,7 +11392,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_storage_sqlite"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "diesel",
  "diesel_migrations",
@@ -11413,7 +11413,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_transaction"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "bincode 2.0.1",
  "borsh",
@@ -11437,7 +11437,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_cli"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -11560,7 +11560,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_storage_sqlite"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "bigdecimal",
  "diesel",
@@ -11584,7 +11584,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_walletd"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11695,7 +11695,7 @@ dependencies = [
 
 [[package]]
 name = "tari_rpc_framework"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "async-trait",
  "bitflags 2.10.0",
@@ -11719,7 +11719,7 @@ dependencies = [
 
 [[package]]
 name = "tari_rpc_macros"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -11728,7 +11728,7 @@ dependencies = [
 
 [[package]]
 name = "tari_rpc_state_sync"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "futures 0.3.31",
@@ -11805,7 +11805,7 @@ dependencies = [
 
 [[package]]
 name = "tari_state_store_rocksdb"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "bincode 2.0.1",
@@ -11836,7 +11836,7 @@ dependencies = [
 
 [[package]]
 name = "tari_state_tree"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "indexmap 2.13.0",
  "log",
@@ -11862,7 +11862,7 @@ dependencies = [
 
 [[package]]
 name = "tari_swarm"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "libp2p",
  "libp2p-messaging",
@@ -11873,7 +11873,7 @@ dependencies = [
 
 [[package]]
 name = "tari_swarm_daemon"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12101,7 +12101,7 @@ dependencies = [
 
 [[package]]
 name = "tari_transaction_manifest"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "proc-macro2",
  "serde_json",
@@ -12135,7 +12135,7 @@ dependencies = [
 
 [[package]]
 name = "tari_validator_node"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -12201,7 +12201,7 @@ dependencies = [
 
 [[package]]
 name = "tari_validator_node_client"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "indexmap 2.13.0",
  "multiaddr 0.18.3",
@@ -12225,7 +12225,7 @@ dependencies = [
 
 [[package]]
 name = "tari_validator_node_rpc"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "futures 0.3.31",
@@ -12248,7 +12248,7 @@ dependencies = [
 
 [[package]]
 name = "tari_watcher"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "clap 3.2.25",
@@ -12276,7 +12276,7 @@ dependencies = [
 
 [[package]]
 name = "tariswap_bench"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "clap 4.5.54",
@@ -12956,7 +12956,7 @@ dependencies = [
 
 [[package]]
 name = "traffic-sim"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "clap 4.5.54",
@@ -12978,7 +12978,7 @@ dependencies = [
 
 [[package]]
 name = "transaction_generator"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "bincode 2.0.1",
@@ -12999,7 +12999,7 @@ dependencies = [
 
 [[package]]
 name = "transaction_submitter"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "anyhow",
  "clap 4.5.54",

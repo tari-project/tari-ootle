@@ -20,21 +20,20 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import {  getConnections } from "../../../utils/api";
-import { shortenString } from "./helpers";
+import Stack from "@mui/material/Stack";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
-import {
-  DataTableCell,
-} from "../../../Components/StyledComponents";
-import CopyToClipboard from "../../../Components/CopyToClipboard";
 import type { IndexerConnection } from "@tari-project/ootle-ts-bindings";
+import { useCallback, useEffect, useRef, useState } from "react";
+import CopyToClipboard from "../../../Components/CopyToClipboard";
+import { DataTableCell } from "../../../Components/StyledComponents";
+import { getConnections } from "../../../utils/api";
 import { displayDuration } from "../../../utils/helpers";
+import { shortenString } from "./helpers";
 
 const useInterval = (fn: () => Promise<unknown>, ms: number) => {
   const timeout = useRef<number>(0);
@@ -79,33 +78,21 @@ function Connections() {
         </TableHead>
         <TableBody>
           {connections &&
-            connections.map(
-              ({
-                 connection_id,
-                 address,
-                 age,
-                 direction,
-                 peer_id,
-                 ping_latency,
-                 user_agent,
-               }) => (
-                <TableRow key={connection_id}>
-                  <DataTableCell>
+            connections.map(({ connection_id, address, age, direction, peer_id, ping_latency, user_agent }) => (
+              <TableRow key={connection_id}>
+                <DataTableCell>
+                  <Stack direction="row" alignItems="center">
                     {peer_id ? shortenString(peer_id) : "--"}
                     <CopyToClipboard copy={peer_id} />
-                  </DataTableCell>
-                  <DataTableCell>{address}</DataTableCell>
-                  <DataTableCell>{displayDuration(age)}</DataTableCell>
-                  <DataTableCell>{direction}</DataTableCell>
-                  <DataTableCell>
-                    {ping_latency ? displayDuration(ping_latency) : "--"}
-                  </DataTableCell>
-                  <DataTableCell>
-                    {user_agent ? user_agent.replace(/^\/tari\//, "") : "--"}
-                  </DataTableCell>
-                </TableRow>
-              ),
-            )}
+                  </Stack>
+                </DataTableCell>
+                <DataTableCell>{address}</DataTableCell>
+                <DataTableCell>{displayDuration(age)}</DataTableCell>
+                <DataTableCell>{direction}</DataTableCell>
+                <DataTableCell>{ping_latency ? displayDuration(ping_latency) : "--"}</DataTableCell>
+                <DataTableCell>{user_agent ? user_agent.replace(/^\/tari\//, "") : "--"}</DataTableCell>
+              </TableRow>
+            ))}
         </TableBody>
       </Table>
     </TableContainer>

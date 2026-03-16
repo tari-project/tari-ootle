@@ -20,29 +20,28 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
-import { styled } from "@mui/material/styles";
-import CssBaseline from "@mui/material/CssBaseline";
-import MuiDrawer from "@mui/material/Drawer";
-import Box from "@mui/material/Box";
-import MuiAppBar, { AppBarProps as MuiAppBarProps } from "@mui/material/AppBar";
-import Toolbar from "@mui/material/Toolbar";
-import Stack from "@mui/material/Stack";
-import List from "@mui/material/List";
-import IconButton from "@mui/material/IconButton";
 import MenuOpenOutlinedIcon from "@mui/icons-material/MenuOpenOutlined";
 import MenuOutlinedIcon from "@mui/icons-material/MenuOutlined";
-import { mainListItems } from "../Components/MenuItems";
 import { ThemeProvider } from "@mui/material";
-// import theme from "./theme";
-import { Outlet, Link } from "react-router-dom";
-import Logo from "../assets/Logo";
+import MuiAppBar, { AppBarProps as MuiAppBarProps } from "@mui/material/AppBar";
+import Box from "@mui/material/Box";
 import Container from "@mui/material/Container";
-import Breadcrumbs from "../Components/Breadcrumbs";
-import { breadcrumbRoutes } from "../App";
+import CssBaseline from "@mui/material/CssBaseline";
+import MuiDrawer from "@mui/material/Drawer";
 import Grid from "@mui/material/Grid";
-import { createTheme } from "@mui/material/styles";
-import { light, dark, componentSettings } from "./theme";
+import IconButton from "@mui/material/IconButton";
+import List from "@mui/material/List";
+import Stack from "@mui/material/Stack";
+import { createTheme, styled } from "@mui/material/styles";
+import Toolbar from "@mui/material/Toolbar";
+import { componentSettings, dark, light } from "@tari-project/ootle-web-ui-theming";
+import "@tari-project/ootle-web-ui-theming/overrides.ts";
+import { useState } from "react";
+import { Link, Outlet } from "react-router-dom";
+import { breadcrumbRoutes } from "../App";
+import Logo from "../assets/Logo";
+import Breadcrumbs from "../Components/Breadcrumbs";
+import { mainListItems } from "../Components/MenuItems";
 import useThemeStore from "../store/themeStore";
 
 const drawerWidth = 300;
@@ -75,7 +74,7 @@ const Drawer = styled(MuiDrawer, {
   "& .MuiDrawer-paper": {
     position: "relative",
     whiteSpace: "nowrap",
-    borderRight: `1px solid ${theme.palette.divider}`,
+    borderRight: `1px solid ${theme?.palette?.accent.border}`,
     boxShadow: "10px 14px 28px rgb(35 11 73 / 5%)",
     width: drawerWidth,
     transition: theme.transitions.create("width", {

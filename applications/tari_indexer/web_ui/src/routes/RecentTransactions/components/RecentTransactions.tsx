@@ -20,30 +20,30 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState, useEffect, useMemo } from "react";
-import { Link } from "react-router-dom";
-import { renderJson } from "../../../utils/helpers";
+import { ChevronRight } from "@mui/icons-material";
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
+import { Stack } from "@mui/material";
+import Collapse from "@mui/material/Collapse";
+import IconButton from "@mui/material/IconButton";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
 import TablePagination from "@mui/material/TablePagination";
-import { DataTableCell, CodeBlock, AccordionIconButton } from "../../../Components/StyledComponents";
-import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
-import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import Collapse from "@mui/material/Collapse";
-import IconButton from "@mui/material/IconButton";
-import { ChevronRight } from "@mui/icons-material";
+import TableRow from "@mui/material/TableRow";
 import { TransactionEntry } from "@tari-project/ootle-ts-bindings";
-
-type ExtendedTransactionEntry = TransactionEntry & { id: string; show?: boolean };
+import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useListRecentTransactions } from "../../../api/hooks/useTransactions";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
-import TimeChip from "./TimeChip";
-import { Stack } from "@mui/material";
+import { AccordionIconButton, CodeBlock, DataTableCell } from "../../../Components/StyledComponents";
+import { renderJson } from "../../../utils/helpers";
 import TransactionFilter from "./SearchFilter";
+import TimeChip from "./TimeChip";
+
+type ExtendedTransactionEntry = TransactionEntry & { id: string; show?: boolean };
 
 function RowData(props: { data: TransactionEntry }) {
   const [open1, setOpen1] = useState(false);
@@ -54,12 +54,8 @@ function RowData(props: { data: TransactionEntry }) {
 
   return (
     <>
-      <TableRow sx={{ borderBottom: "none" }}>
-        <DataTableCell
-          sx={{
-            borderBottom: "none",
-          }}
-        >
+      <TableRow>
+        <DataTableCell style={{ borderBottom: "none" }}>
           <Stack direction="row" spacing={2} alignItems="center" sx={{ width: "100%" }}>
             <Link to={`/transactions/${transaction_id}`} style={{ textDecoration: "none", color: "inherit" }}>
               {transaction_id}
@@ -100,21 +96,10 @@ function RowData(props: { data: TransactionEntry }) {
         </DataTableCell>
       </TableRow>
       <TableRow>
-        <DataTableCell
-          style={{
-            paddingBottom: 0,
-            paddingTop: 0,
-            borderBottom: "none",
-          }}
-          colSpan={4}
-        >
+        <DataTableCell colSpan={4} sx={{ padding: !open2 && !open1 ? 0 : undefined }}>
           <Collapse in={open1} timeout="auto" unmountOnExit>
             <CodeBlock style={{ marginBottom: "10px" }}>{renderJson(transaction.fee_instructions)}</CodeBlock>
           </Collapse>
-        </DataTableCell>
-      </TableRow>
-      <TableRow>
-        <DataTableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={4}>
           <Collapse in={open2} timeout="auto" unmountOnExit>
             <CodeBlock style={{ marginBottom: "10px" }}>{renderJson(transaction.instructions)}</CodeBlock>
           </Collapse>
@@ -136,20 +121,15 @@ function RecentTransactions() {
 
   const transactions = useMemo(
     () => (data?.transactions || []).map((tx) => ({ ...tx, id: tx.transaction_id })),
-    [data?.transactions]
+    [data?.transactions],
   );
 
   const visibleTransactions = filteredTransactions.filter((tx) => tx.show !== false);
   const paginatedTransactions = visibleTransactions.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
 
-  useEffect(() => {
-    setFilteredTransactions(transactions);
-  }, [transactions]);
-
   const handleChangePage = (_event: React.MouseEvent<HTMLButtonElement> | null, newPage: number) => {
     setPage(newPage);
   };
-
   const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setRowsPerPage(parseInt(event.target.value, 10));
     setPage(0);
@@ -187,9 +167,10 @@ function RecentTransactions() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {paginatedTransactions.map((data, i) => (
-                <RowData key={i} data={data} />
-              ))}
+              {paginatedTransactions.map((data) => {
+                const key = `tx-${data.id}`;
+                return <RowData key={key} data={data} />;
+              })}
             </TableBody>
           </Table>
         </TableContainer>

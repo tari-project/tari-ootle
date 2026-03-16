@@ -1,12 +1,17 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{path::PathBuf, time::Duration};
+use std::{
+    fmt::{Display, Formatter},
+    path::PathBuf,
+    time::Duration,
+};
 
 use anyhow::{Context, anyhow, bail};
 use tari_bor::{Deserialize, Serialize};
 use tari_common::SubConfigPath;
 use tari_epoch_oracles::configured;
+use tari_ootle_common_types::displayable::Displayable;
 use tokio::{fs::File, io::AsyncReadExt};
 use url::Url;
 
@@ -41,6 +46,8 @@ pub struct BaseLayerOracleConfig {
     /// Interval between base layer scans in seconds.
     #[serde(with = "ootle_serde::duration::seconds")]
     pub scanning_interval: Duration,
+    /// Height to start base layer scanning
+    pub start_height: u64,
 }
 
 impl Default for BaseLayerOracleConfig {
@@ -51,7 +58,20 @@ impl Default for BaseLayerOracleConfig {
             // epoch change. Therefore, the `epoch_end_grace_period` in consensus settings should always be
             // greater than this value to avoid a race condition resulting in leader failure.
             scanning_interval: Duration::from_secs(8),
+            start_height: 0,
         }
+    }
+}
+
+impl Display for BaseLayerOracleConfig {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "url[{}], {:.2?}, start[{}]",
+            self.base_node_grpc_url.as_ref().display(),
+            self.scanning_interval,
+            self.start_height
+        )
     }
 }
 

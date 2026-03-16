@@ -213,6 +213,16 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
     #[allow(clippy::too_many_lines)]
     async fn sync_blockchain(&mut self, tip: BaseLayerMetadata) -> Result<bool, BaseLayerOracleError> {
         let start_scan_height = self.last_scanned_height.max(self.start_height) + 1;
+        if tip.height_of_longest_chain <= start_scan_height {
+            info!(
+                target: LOG_TARGET,
+                "⛓️ Base layer blockchain has not progressed beyond the start scan height {}. Current tip height is {}.",
+                start_scan_height,
+                tip.height_of_longest_chain
+            );
+            return Ok(false);
+        }
+
         let Some(lag_tip_height) = tip.height_of_longest_chain.checked_sub(self.height_lag) else {
             debug!(
                 target: LOG_TARGET,
@@ -253,6 +263,10 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
         let limit = 1_000.min(num_blocks);
 
         let mut base_node_client = self.base_node_client.clone();
+        info!(
+            target: LOG_TARGET,
+            "⛓️Starting header stream from {}-{}", start_scan_height, start_scan_height + limit
+        );
         let mut stream = base_node_client.stream_headers(start_scan_height, limit).await?;
 
         if let Some(additional) = usize::try_from(limit)

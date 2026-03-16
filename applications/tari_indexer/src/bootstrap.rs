@@ -343,7 +343,7 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + BaseLayerBloc
         store,
         base_node_client,
         BaseLayerEpochOracleConfig {
-            start_height: 0,
+            start_height: config.epoch_oracle.base_layer.start_height,
             height_lag: consensus_constants.base_layer_confirmations,
             scanning_interval: config.epoch_oracle.base_layer.scanning_interval,
             sidechain_id: config.indexer.sidechain_id.as_ref().map(|p| p.to_byte_type()),

@@ -2,11 +2,12 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
+    fmt::Display,
     hash::{DefaultHasher, Hasher},
     time::Duration,
 };
 
-use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, SubstateAddress};
+use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, SubstateAddress, displayable::Displayable};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -28,6 +29,19 @@ impl Default for Config {
             base_time: time::OffsetDateTime::now_utc(),
             validators: vec![],
         }
+    }
+}
+
+impl Display for Config {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            fmt,
+            "Epoch time: {}, initial_epoch: {}, btime: {}, validators: {}",
+            self.epoch_time.as_ref().map(|d| d.as_secs()).display(),
+            self.initial_epoch,
+            self.base_time,
+            self.validators.len()
+        )
     }
 }
 

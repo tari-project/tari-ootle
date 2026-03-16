@@ -21,11 +21,10 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { ChevronRight } from "@mui/icons-material";
-import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
-import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import { Stack } from "@mui/material";
-import Collapse from "@mui/material/Collapse";
+import { Chip, Stack } from "@mui/material";
+import Fade from "@mui/material/Fade";
 import IconButton from "@mui/material/IconButton";
+import { useTheme } from "@mui/material/styles";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
@@ -33,79 +32,74 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TablePagination from "@mui/material/TablePagination";
 import TableRow from "@mui/material/TableRow";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import { TransactionEntry } from "@tari-project/ootle-ts-bindings";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { useListRecentTransactions } from "../../../api/hooks/useTransactions";
+import { useGetTransactionResult, useListRecentTransactions } from "../../../api/hooks/useTransactions";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
-import { AccordionIconButton, CodeBlock, DataTableCell } from "../../../Components/StyledComponents";
-import { renderJson } from "../../../utils/helpers";
+import StatusChip from "../../../Components/StatusChip";
+import { DataTableCell } from "../../../Components/StyledComponents";
+import { CURRENCY } from "../../../utils/constants";
+import { formatCurrency } from "../../../utils/helpers";
+import { shortenString } from "../../VN/Components/helpers";
 import TransactionFilter from "./SearchFilter";
 import TimeChip from "./TimeChip";
 
 type ExtendedTransactionEntry = TransactionEntry & { id: string; show?: boolean };
 
-function RowData(props: { data: TransactionEntry }) {
-  const [open1, setOpen1] = useState(false);
-  const [open2, setOpen2] = useState(false);
+function TransactionRow({ entry }: { entry: ExtendedTransactionEntry }) {
+  const { transaction_id, created_at } = entry;
+  const { data: resultData, isLoading: resultLoading } = useGetTransactionResult(transaction_id);
+  const theme = useTheme();
+  const isSm = useMediaQuery(theme.breakpoints.down("sm"));
+  const shortLen = isSm ? 4 : 8;
 
-  const { transaction_id, transaction: tx, created_at } = props.data;
-  const transaction = tx.V1.body.transaction;
+  const finalized =
+    resultData?.result && typeof resultData.result === "object" && "Finalized" in resultData.result
+      ? resultData.result.Finalized
+      : null;
+  const fees = finalized?.execution_result?.finalize?.fee_receipt?.total_fees_paid;
 
   return (
-    <>
-      <TableRow>
-        <DataTableCell style={{ borderBottom: "none" }}>
-          <Stack direction="row" spacing={2} alignItems="center" sx={{ width: "100%" }}>
-            <Link to={`/transactions/${transaction_id}`} style={{ textDecoration: "none", color: "inherit" }}>
-              {transaction_id}
-            </Link>
-            <TimeChip timestamp={created_at} />
-          </Stack>
-        </DataTableCell>
-        <DataTableCell sx={{ borderBottom: "none", textAlign: "center" }}>
-          <AccordionIconButton
-            open={open1}
-            aria-label="expand row"
-            size="small"
-            onClick={() => {
-              setOpen1(!open1);
-              setOpen2(false);
-            }}
+    <TableRow>
+      <DataTableCell>
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          spacing={isSm ? 0.1 : 1.5}
+          alignItems={isSm ? "flex-start" : "center"}
+        >
+          <Link
+            to={`/transactions/${transaction_id}`}
+            style={{ textDecoration: "none", color: theme.palette.text.secondary }}
           >
-            {open1 ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-          </AccordionIconButton>
-        </DataTableCell>
-        <DataTableCell sx={{ borderBottom: "none", textAlign: "center" }}>
-          <AccordionIconButton
-            open={open2}
-            aria-label="expand row"
-            size="small"
-            onClick={() => {
-              setOpen2(!open2);
-              setOpen1(false);
-            }}
-          >
-            {open2 ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-          </AccordionIconButton>
-        </DataTableCell>
-        <DataTableCell sx={{ borderBottom: "none", textAlign: "center" }}>
-          <IconButton component={Link} to={`/transactions/${transaction_id}`}>
-            <ChevronRight color="inherit" />
-          </IconButton>
-        </DataTableCell>
-      </TableRow>
-      <TableRow>
-        <DataTableCell colSpan={4} sx={{ padding: !open2 && !open1 ? 0 : undefined }}>
-          <Collapse in={open1} timeout="auto" unmountOnExit>
-            <CodeBlock style={{ marginBottom: "10px" }}>{renderJson(transaction.fee_instructions)}</CodeBlock>
-          </Collapse>
-          <Collapse in={open2} timeout="auto" unmountOnExit>
-            <CodeBlock style={{ marginBottom: "10px" }}>{renderJson(transaction.instructions)}</CodeBlock>
-          </Collapse>
-        </DataTableCell>
-      </TableRow>
-    </>
+            {shortenString(transaction_id, shortLen, shortLen)}
+          </Link>
+          <TimeChip timestamp={created_at} />
+        </Stack>
+      </DataTableCell>
+      <DataTableCell>
+        {resultLoading ? (
+          "--"
+        ) : finalized ? (
+          <StatusChip status={finalized.final_decision} showTitle={true} />
+        ) : (
+          <Chip label="Pending" color="warning" size="small" variant="outlined" />
+        )}
+      </DataTableCell>
+      <DataTableCell>
+        {resultLoading ? "--" : fees ? formatCurrency(fees, CURRENCY.DECIMALS, CURRENCY.SYMBOL) : "--"}
+      </DataTableCell>
+      <DataTableCell>
+        <IconButton
+          component={Link}
+          to={`/transactions/${transaction_id}`}
+          style={{ color: theme.palette.text.secondary }}
+        >
+          <ChevronRight />
+        </IconButton>
+      </DataTableCell>
+    </TableRow>
   );
 }
 
@@ -156,33 +150,34 @@ function RecentTransactions() {
           placeholder="Search transactions"
           defaultSearch="id"
         />
-        <TableContainer>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Transaction Hash</TableCell>
-                <TableCell style={{ textAlign: "center" }}>Fee Instructions</TableCell>
-                <TableCell style={{ textAlign: "center" }}>Instructions</TableCell>
-                <TableCell style={{ textAlign: "center" }}>Details</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {paginatedTransactions.map((data) => {
-                const key = `tx-${data.id}`;
-                return <RowData key={key} data={data} />;
-              })}
-            </TableBody>
-          </Table>
-        </TableContainer>
-        <TablePagination
-          component="div"
-          count={visibleTransactions.length}
-          page={page}
-          onPageChange={handleChangePage}
-          rowsPerPage={rowsPerPage}
-          onRowsPerPageChange={handleChangeRowsPerPage}
-          rowsPerPageOptions={[5, 10, 25, 50]}
-        />
+        <Fade in={!isLoading && !isError}>
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Transaction Hash</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Total Fees</TableCell>
+                  <TableCell>Details</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {paginatedTransactions.map((entry) => (
+                  <TransactionRow key={entry.transaction_id} entry={entry} />
+                ))}
+              </TableBody>
+            </Table>
+            <TablePagination
+              component="div"
+              count={visibleTransactions.length}
+              page={page}
+              onPageChange={handleChangePage}
+              rowsPerPage={rowsPerPage}
+              onRowsPerPageChange={handleChangeRowsPerPage}
+              rowsPerPageOptions={[5, 10, 25, 50]}
+            />
+          </TableContainer>
+        </Fade>
       </Stack>
     </FetchStatusCheck>
   );

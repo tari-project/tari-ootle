@@ -115,14 +115,11 @@ impl ConsensusHooks for PrometheusConsensusMetrics {
             .commands()
             .iter()
             .filter_map(|c| c.committing())
-            .map(|a| {
-                a.evidence
-                    .iter()
-                    .map(|(_, e)| e.outputs().iter().map(|(id, _)| id.is_template()).count() as u64)
-                    .sum::<u64>()
-            })
-            .sum();
-        self.published_templates_count.inc_by(num_templates_committed);
+            .flat_map(|a| a.evidence.all_outputs_iter())
+            .filter(|(_, id, _)| id.is_template())
+            .count();
+        self.published_templates_count
+            .inc_by(u64::try_from(num_templates_committed).unwrap_or(u64::MAX));
     }
 
     fn on_block_validation_failed<E: ToString>(&mut self, _err: &E) {

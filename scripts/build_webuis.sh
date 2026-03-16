@@ -81,7 +81,7 @@ popd > /dev/null
 
 function build() {
   pushd $base_path/$1 > /dev/null
-  pnpm install > /dev/null
+  pnpm install
   if [ -z ${check_typescript+x} ]; then
     pnpm run clean-dist
     pnpm run build

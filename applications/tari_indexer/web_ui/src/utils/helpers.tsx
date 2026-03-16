@@ -31,8 +31,8 @@ type JSONRenderItem = JSONArr | JSONObj | string | unknown;
 
 const renderJson = (json: JSONRenderItem) => {
   function handleObj(obj: JSONObj) {
-    const mapped = Object.entries(obj).map(([k, v]) => (
-      <li key={`${k}-${v}`}>
+    const mapped = Object.entries(obj).map(([k, v], i) => (
+      <li key={i}>
         <b>"{k}"</b>:{renderJson(v)}
       </li>
     ));

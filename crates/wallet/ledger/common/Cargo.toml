@@ -1,0 +1,13 @@
+[package]
+name = "ootle_ledger_common"
+version = "0.1.0"
+edition = "2024"
+authors = ["Tari Development Community"]
+license = "BSD-3-Clause"
+
+[dependencies]
+borsh = { version = "1.6.0", default-features = false, features = ["derive"] }
+
+[features]
+default = []
+std = ["borsh/std"]

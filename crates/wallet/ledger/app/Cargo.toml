@@ -1,0 +1,48 @@
+[workspace]
+[package]
+name = "ootle-ledger-app"
+version = "0.1.0"
+description = "Ootle Ledger App"
+edition = "2024"
+authors = ["Tari Development Community"]
+license = "BSD-3-Clause"
+
+[[bin]]
+name = "ootle"
+path = "src/main.rs"
+
+[dependencies]
+ootle_ledger_common = { path = "../common", default-features = false }
+
+ledger_device_sdk = { version = "1.33.1" }
+curve25519-dalek = { version = "4", default-features = false, features = ["alloc", "rand_core", "precomputed-tables", "zeroize"] }
+borsh = { version = "1.6.0", default-features = false, features = ["derive"] }
+zeroize = { version = "1.8.2", default-features = false, features = ["alloc"] }
+
+[features]
+bagl = []
+nbgl = ["ledger_device_sdk/io_new", "ledger_device_sdk/nano_nbgl"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = "debuginfo"
+panic = "abort"
+
+[package.metadata.ledger]
+curve = ["secp256k1"]
+flags = "0"
+path = ["44'/535348'"]
+name = "Tari Ootle Wallet"
+
+[package.metadata.ledger.nanox]
+icon = "images/key_14x14.gif"
+
+[package.metadata.ledger.nanosplus]
+icon = "images/key_14x14.gif"
+
+[package.metadata.ledger.stax]
+icon = "images/key_32x32.gif"
+
+[package.metadata.ledger.flex]
+icon = "images/key_40x40.gif"

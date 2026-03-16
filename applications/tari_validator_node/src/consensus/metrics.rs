@@ -23,6 +23,7 @@ pub struct PrometheusConsensusMetrics {
     commit_height: UnsignedGauge,
 
     commands_count: UnsignedGauge,
+    published_templates_count: Counter,
 
     messages_received: Counter,
 
@@ -52,6 +53,11 @@ impl PrometheusConsensusMetrics {
                 registry,
             ),
             commands_count: UnsignedGauge::default().register_at("num_commands", "Number of commands added", registry),
+            published_templates_count: Counter::default().register_at(
+                "published_templates_count",
+                "Number of templates published",
+                registry,
+            ),
             messages_received: Counter::default().register_at(
                 "messages_received",
                 "Number of messages received",
@@ -102,6 +108,18 @@ impl ConsensusHooks for PrometheusConsensusMetrics {
         self.blocks_committed.inc();
         self.commit_height.set(block.block().height().as_u64());
         self.commands_count.inc_by(block.block().commands().len() as u64);
+
+        // Count the number of template outputs created by this block
+        let num_templates_committed = block
+            .block()
+            .commands()
+            .iter()
+            .filter_map(|c| c.committing())
+            .flat_map(|a| a.evidence.all_outputs_iter())
+            .filter(|(_, id, _)| id.is_template())
+            .count();
+        self.published_templates_count
+            .inc_by(u64::try_from(num_templates_committed).unwrap_or(u64::MAX));
     }
 
     fn on_block_validation_failed<E: ToString>(&mut self, _err: &E) {

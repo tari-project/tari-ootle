@@ -58,7 +58,9 @@ function EventRow({ event, index }: { event: Event; index: number }) {
               </Typography>
               <CopyToClipboard copy={substateIdToString(substate_id)} />
             </Stack>
-          ) : "--"}
+          ) : (
+            "--"
+          )}
         </DataTableCell>
         <DataTableCell sx={{ borderBottom: "none" }}>
           {template_address ? (
@@ -68,7 +70,9 @@ function EventRow({ event, index }: { event: Event; index: number }) {
               </Typography>
               <CopyToClipboard copy={template_address} />
             </Stack>
-          ) : "--"}
+          ) : (
+            "--"
+          )}
         </DataTableCell>
         <DataTableCell width={90} sx={{ borderBottom: "none", textAlign: "center" }}>
           <AccordionIconButton open={open} size="small" onClick={() => setOpen(!open)}>
@@ -84,11 +88,13 @@ function EventRow({ event, index }: { event: Event; index: number }) {
                 Payload
               </Typography>
               <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-                {payload && typeof payload === "object"
-                  ? Object.entries(payload).map(([key, value]) => (
-                      <Chip key={key} label={`${key}: ${String(value)}`} size="small" variant="outlined" />
-                    ))
-                  : <Typography variant="body2">{JSON.stringify(payload)}</Typography>}
+                {payload && typeof payload === "object" ? (
+                  Object.entries(payload).map(([key, value], i) => (
+                    <Chip key={i} label={`${key}: ${value || "<null>"}`} size="small" variant="outlined" />
+                  ))
+                ) : (
+                  <Typography variant="body2">{JSON.stringify(payload)}</Typography>
+                )}
               </Box>
             </Box>
           </Collapse>

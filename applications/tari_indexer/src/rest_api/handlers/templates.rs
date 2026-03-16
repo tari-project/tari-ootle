@@ -39,6 +39,7 @@ pub async fn get_template_definition(
     let template = context
         .template_manager()
         .fetch_and_load_template(&template_address)
+        .await
         .optional()
         .map_err(|err| {
             // If it's pending, we return a 404 to the client - this allows them to retry later
@@ -61,7 +62,7 @@ pub async fn get_template_definition(
         code_size: template.code_size(),
     });
 
-    Ok(context.apply_cache_control(resp, 1000))
+    Ok(context.apply_cache_control(resp, 120 * 60))
 }
 
 #[utoipa::path(

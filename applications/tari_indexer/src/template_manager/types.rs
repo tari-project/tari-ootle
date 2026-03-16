@@ -3,7 +3,6 @@
 
 use std::borrow::Cow;
 
-use tari_engine::{abi::TemplateDef, template::LoadedTemplate};
 use tari_ootle_common_types::Epoch;
 use tari_ootle_storage::{StorageError, global::DbTemplate};
 use tari_template_lib_types::{Hash32, TemplateAddress, crypto::RistrettoPublicKeyBytes};
@@ -59,26 +58,6 @@ impl TemplateCode {
             TemplateCode::StaticWasm(code) => Cow::Borrowed(code),
             TemplateCode::CompiledWasm(code) => Cow::Owned(code.into_vec()),
         }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct LoadedTemplateWithMetadata {
-    pub metadata: TemplateMetadata,
-    pub loaded: LoadedTemplate,
-}
-
-impl LoadedTemplateWithMetadata {
-    pub fn template_def(&self) -> &TemplateDef {
-        self.loaded.template_def()
-    }
-
-    pub fn code_size(&self) -> usize {
-        self.metadata.code_size
-    }
-
-    pub fn template_name(&self) -> &str {
-        &self.metadata.name
     }
 }
 

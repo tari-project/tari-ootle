@@ -5,7 +5,7 @@ Client-side WebAssembly crypto for [Tari Ootle](https://www.tari.com/) L2. Handl
 ## Installation
 
 ```bash
-npm install ootle-wasm
+npm install @tari-project/ootle-wasm
 ```
 
 ## Setup

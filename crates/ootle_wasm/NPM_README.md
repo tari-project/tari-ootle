@@ -13,7 +13,7 @@ npm install @tari-project/ootle-wasm
 The WASM module must be initialised before calling any functions.
 
 ```typescript
-import init from "ootle-wasm";
+import init from "@tari-project/ootle-wasm";
 
 await init();
 ```

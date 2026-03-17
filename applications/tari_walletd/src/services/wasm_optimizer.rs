@@ -5,7 +5,7 @@ use std::io;
 
 use tempfile::tempdir;
 use thiserror::Error;
-use wasm_opt::{OptimizationError, OptimizationOptions};
+use wasm_opt::{Feature, OptimizationError, OptimizationOptions};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -40,7 +40,11 @@ pub async fn optimize_wasm_template(template_binary: &[u8]) -> Result<Vec<u8>, E
     let output_file_path = temp_dir.path().join("output.wasm");
     tokio::fs::write(&input_file_path, template_binary).await?;
 
-    OptimizationOptions::new_optimize_for_size().run(input_file_path, output_file_path.as_path())?;
+    OptimizationOptions::new_optimize_for_size()
+        .enable_feature(Feature::BulkMemory)
+        .enable_feature(Feature::ReferenceTypes)
+        .enable_feature(Feature::Simd)
+        .run(input_file_path, output_file_path.as_path())?;
 
     let result = tokio::fs::read(output_file_path).await?;
 

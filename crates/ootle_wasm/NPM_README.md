@@ -8,18 +8,6 @@ Client-side WebAssembly crypto for [Tari Ootle](https://www.tari.com/) L2. Handl
 npm install @tari-project/ootle-wasm
 ```
 
-## Setup
-
-The WASM module must be initialised before calling any functions.
-
-```typescript
-import init from "@tari-project/ootle-wasm";
-
-await init();
-```
-
-If you are using a bundler (webpack, vite, rollup, esbuild), the `.wasm` file is resolved automatically. For other environments you may need to pass the WASM binary URL or buffer to `init()`.
-
 ## API
 
 All keys and signatures are **lowercase hex-encoded strings**.
@@ -29,7 +17,7 @@ All keys and signatures are **lowercase hex-encoded strings**.
 Generate a new random Ristretto255 keypair.
 
 ```typescript
-import { generateKeypair } from "ootle-wasm";
+import { generateKeypair } from "@tari-project/ootle-wasm";
 
 const { secret_key, public_key } = generateKeypair();
 // secret_key: "a1b2c3..." (64 hex chars)
@@ -41,7 +29,7 @@ const { secret_key, public_key } = generateKeypair();
 Derive the public key from a secret key.
 
 ```typescript
-import { publicKeyFromSecretKey } from "ootle-wasm";
+import { publicKeyFromSecretKey } from "@tari-project/ootle-wasm";
 
 const publicKey = publicKeyFromSecretKey(secretKeyHex);
 ```
@@ -54,7 +42,7 @@ Hash an `UnsignedTransactionV1` for signing. Returns a 64-byte `Uint8Array` that
 - `sealSignerPublicKeyHex` — hex-encoded public key of the account owner (seal signer)
 
 ```typescript
-import { hashUnsignedTransaction } from "ootle-wasm";
+import { hashUnsignedTransaction } from "@tari-project/ootle-wasm";
 
 const hash = hashUnsignedTransaction(
   JSON.stringify(unsignedTransaction),
@@ -67,7 +55,7 @@ const hash = hashUnsignedTransaction(
 Schnorr-sign a message (typically the hash from `hashUnsignedTransaction`).
 
 ```typescript
-import { schnorrSign } from "ootle-wasm";
+import { schnorrSign } from "@tari-project/ootle-wasm";
 
 const { public_nonce, signature } = schnorrSign(secretKeyHex, hash);
 // public_nonce: hex string
@@ -79,7 +67,7 @@ const { public_nonce, signature } = schnorrSign(secretKeyHex, hash);
 BOR-encode a signed `Transaction` into a base64 `TransactionEnvelope` string, ready to submit to the network.
 
 ```typescript
-import { borEncodeTransaction } from "ootle-wasm";
+import { borEncodeTransaction } from "@tari-project/ootle-wasm";
 
 const envelope = borEncodeTransaction(JSON.stringify(transaction));
 ```
@@ -87,18 +75,15 @@ const envelope = borEncodeTransaction(JSON.stringify(transaction));
 ## Full example
 
 ```typescript
-import init, {
+import {
   generateKeypair,
   publicKeyFromSecretKey,
   hashUnsignedTransaction,
   schnorrSign,
   borEncodeTransaction,
-} from "ootle-wasm";
+} from "@tari-project/ootle-wasm";
 
-// 1. Initialise WASM
-await init();
-
-// 2. Generate or load a keypair
+// 1. Generate or load a keypair
 const { secret_key, public_key } = generateKeypair();
 
 // 3. Build an unsigned transaction (application-specific)

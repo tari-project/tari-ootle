@@ -34,8 +34,7 @@ pub fn bor_encode_transaction(transaction_json: &str) -> Result<String, JsError>
 /// Returns { public_nonce: Uint8Array, signature: Uint8Array }.
 #[wasm_bindgen(js_name = "schnorrSign")]
 pub fn schnorr_sign(secret_key: &[u8], message: &[u8]) -> Result<SchnorrSignatureResult, JsError> {
-    let result =
-        ootle_wasm_core::sign::schnorr_sign(secret_key, message).map_err(|e| JsError::new(&e.to_string()))?;
+    let result = ootle_wasm_core::sign::schnorr_sign(secret_key, message).map_err(|e| JsError::new(&e.to_string()))?;
     Ok(SchnorrSignatureResult {
         public_nonce: result.public_nonce,
         signature: result.signature,

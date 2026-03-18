@@ -48,6 +48,8 @@ members = [
     "crates/wallet/storage_sqlite",
     "crates/wallet/ledger/client",
     "crates/wallet/ledger/common",
+    "crates/ootle_wasm/core",
+    "crates/ootle_wasm/wasm",
     "crates/ootle_address",
     "crates/ootle_serde",
     "crates/ootle_byte_type",

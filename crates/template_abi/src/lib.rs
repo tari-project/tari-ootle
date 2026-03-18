@@ -38,9 +38,7 @@ pub use ops::*;
 
 pub mod rust;
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
 mod template_def;
-#[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
 pub use template_def::*;
 
 pub mod version;

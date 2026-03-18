@@ -7407,7 +7407,7 @@ dependencies = [
 
 [[package]]
 name = "ootle-wasm"
-version = "0.1.4"
+version = "0.2.0"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.2.17",
@@ -7420,10 +7420,8 @@ name = "ootle-wasm-core"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "hex",
  "ootle_byte_type",
  "rand 0.8.5",
- "serde",
  "serde_json",
  "tari_bor",
  "tari_crypto",

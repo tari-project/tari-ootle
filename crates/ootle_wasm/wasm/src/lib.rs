@@ -10,18 +10,18 @@ fn on_start() {
     console_error_panic_hook::set_once();
 }
 
-/// A generated keypair with hex-encoded keys.
+/// A generated keypair (raw bytes).
 #[wasm_bindgen(getter_with_clone)]
 pub struct KeypairResult {
-    pub secret_key: String,
-    pub public_key: String,
+    pub secret_key: Vec<u8>,
+    pub public_key: Vec<u8>,
 }
 
-/// Result of a Schnorr signature operation (hex-encoded).
+/// Result of a Schnorr signature operation (raw bytes).
 #[wasm_bindgen(getter_with_clone)]
 pub struct SchnorrSignatureResult {
-    pub public_nonce: String,
-    pub signature: String,
+    pub public_nonce: Vec<u8>,
+    pub signature: Vec<u8>,
 }
 
 /// BOR-encode a Transaction (JSON string) → base64 string (TransactionEnvelope format).
@@ -31,25 +31,25 @@ pub fn bor_encode_transaction(transaction_json: &str) -> Result<String, JsError>
 }
 
 /// Schnorr-sign a message with a secret key.
-/// Returns a JS object { public_nonce: string, signature: string } (hex-encoded).
+/// Returns { public_nonce: Uint8Array, signature: Uint8Array }.
 #[wasm_bindgen(js_name = "schnorrSign")]
-pub fn schnorr_sign(secret_key_hex: &str, message: &[u8]) -> Result<SchnorrSignatureResult, JsError> {
+pub fn schnorr_sign(secret_key: &[u8], message: &[u8]) -> Result<SchnorrSignatureResult, JsError> {
     let result =
-        ootle_wasm_core::sign::schnorr_sign(secret_key_hex, message).map_err(|e| JsError::new(&e.to_string()))?;
+        ootle_wasm_core::sign::schnorr_sign(secret_key, message).map_err(|e| JsError::new(&e.to_string()))?;
     Ok(SchnorrSignatureResult {
         public_nonce: result.public_nonce,
         signature: result.signature,
     })
 }
 
-/// Derive the public key from a secret key (hex-encoded).
+/// Derive the public key from a secret key (both raw bytes).
 #[wasm_bindgen(js_name = "publicKeyFromSecretKey")]
-pub fn public_key_from_secret_key(secret_key_hex: &str) -> Result<String, JsError> {
-    ootle_wasm_core::sign::public_key_from_secret_key(secret_key_hex).map_err(|e| JsError::new(&e.to_string()))
+pub fn public_key_from_secret_key(secret_key: &[u8]) -> Result<Vec<u8>, JsError> {
+    ootle_wasm_core::sign::public_key_from_secret_key(secret_key).map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Generate a new random Ristretto keypair.
-/// Returns a JS object { secret_key: string, public_key: string } (hex-encoded).
+/// Returns { secret_key: Uint8Array, public_key: Uint8Array }.
 #[wasm_bindgen(js_name = "generateKeypair")]
 pub fn generate_keypair() -> KeypairResult {
     let result = ootle_wasm_core::sign::generate_keypair();
@@ -62,9 +62,9 @@ pub fn generate_keypair() -> KeypairResult {
 /// Hash an UnsignedTransactionV1 (JSON string) for signing.
 /// Returns the 64-byte signing message that must be Schnorr-signed.
 ///
-/// `seal_signer_public_key_hex` is the hex-encoded public key of the seal signer (account owner).
+/// `seal_signer_public_key` is the raw bytes of the seal signer's public key (account owner).
 #[wasm_bindgen(js_name = "hashUnsignedTransaction")]
-pub fn hash_unsigned_transaction(unsigned_tx_json: &str, seal_signer_public_key_hex: &str) -> Result<Vec<u8>, JsError> {
-    ootle_wasm_core::hash::hash_unsigned_transaction_json(unsigned_tx_json, seal_signer_public_key_hex)
+pub fn hash_unsigned_transaction(unsigned_tx_json: &str, seal_signer_public_key: &[u8]) -> Result<Vec<u8>, JsError> {
+    ootle_wasm_core::hash::hash_unsigned_transaction_json(unsigned_tx_json, seal_signer_public_key)
         .map_err(|e| JsError::new(&e.to_string()))
 }

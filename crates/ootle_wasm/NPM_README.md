@@ -10,7 +10,7 @@ npm install @tari-project/ootle-wasm
 
 ## API
 
-All keys and signatures are **lowercase hex-encoded strings**.
+All keys and signatures are **`Uint8Array`** (raw 32-byte values).
 
 ### `generateKeypair()`
 
@@ -20,46 +20,47 @@ Generate a new random Ristretto255 keypair.
 import { generateKeypair } from "@tari-project/ootle-wasm";
 
 const { secret_key, public_key } = generateKeypair();
-// secret_key: "a1b2c3..." (64 hex chars)
-// public_key: "d4e5f6..." (64 hex chars)
+// secret_key: Uint8Array (32 bytes)
+// public_key: Uint8Array (32 bytes)
 ```
 
-### `publicKeyFromSecretKey(secretKeyHex)`
+### `publicKeyFromSecretKey(secretKey)`
 
 Derive the public key from a secret key.
 
 ```typescript
 import { publicKeyFromSecretKey } from "@tari-project/ootle-wasm";
 
-const publicKey = publicKeyFromSecretKey(secretKeyHex);
+const publicKey = publicKeyFromSecretKey(secretKey);
+// publicKey: Uint8Array (32 bytes)
 ```
 
-### `hashUnsignedTransaction(unsignedTxJson, sealSignerPublicKeyHex)`
+### `hashUnsignedTransaction(unsignedTxJson, sealSignerPublicKey)`
 
 Hash an `UnsignedTransactionV1` for signing. Returns a 64-byte `Uint8Array` that should be passed to `schnorrSign`.
 
 - `unsignedTxJson` — JSON-serialised `UnsignedTransactionV1`
-- `sealSignerPublicKeyHex` — hex-encoded public key of the account owner (seal signer)
+- `sealSignerPublicKey` — raw public key bytes of the account owner (seal signer)
 
 ```typescript
 import { hashUnsignedTransaction } from "@tari-project/ootle-wasm";
 
 const hash = hashUnsignedTransaction(
   JSON.stringify(unsignedTransaction),
-  sealSignerPublicKeyHex,
+  sealSignerPublicKey,
 );
 ```
 
-### `schnorrSign(secretKeyHex, message)`
+### `schnorrSign(secretKey, message)`
 
 Schnorr-sign a message (typically the hash from `hashUnsignedTransaction`).
 
 ```typescript
 import { schnorrSign } from "@tari-project/ootle-wasm";
 
-const { public_nonce, signature } = schnorrSign(secretKeyHex, hash);
-// public_nonce: hex string
-// signature:    hex string
+const { public_nonce, signature } = schnorrSign(secretKey, hash);
+// public_nonce: Uint8Array (32 bytes)
+// signature:    Uint8Array (32 bytes)
 ```
 
 ### `borEncodeTransaction(transactionJson)`
@@ -70,6 +71,22 @@ BOR-encode a signed `Transaction` into a base64 `TransactionEnvelope` string, re
 import { borEncodeTransaction } from "@tari-project/ootle-wasm";
 
 const envelope = borEncodeTransaction(JSON.stringify(transaction));
+```
+
+## Working with keys
+
+Keys and signatures are raw `Uint8Array` bytes. Convert to and from hex strings using the built-in methods (Node 22+, modern browsers):
+
+```typescript
+import { generateKeypair, publicKeyFromSecretKey } from "@tari-project/ootle-wasm";
+
+// Generate a keypair and display as hex
+const { secret_key, public_key } = generateKeypair();
+console.log("Public key:", public_key.toHex());
+
+// Load a key from a hex string
+const restored = Uint8Array.fromHex("a1b2c3...");
+const derivedPublicKey = publicKeyFromSecretKey(restored);
 ```
 
 ## Full example
@@ -86,24 +103,24 @@ import {
 // 1. Generate or load a keypair
 const { secret_key, public_key } = generateKeypair();
 
-// 3. Build an unsigned transaction (application-specific)
+// 2. Build an unsigned transaction (application-specific)
 const unsignedTx = {
   /* ... UnsignedTransactionV1 fields ... */
 };
 
-// 4. Hash for signing
+// 3. Hash for signing
 const hash = hashUnsignedTransaction(JSON.stringify(unsignedTx), public_key);
 
-// 5. Sign
+// 4. Sign
 const { public_nonce, signature } = schnorrSign(secret_key, hash);
 
-// 6. Assemble the signed transaction and BOR-encode
+// 5. Assemble the signed transaction and BOR-encode
 const signedTx = {
   /* ... Transaction with signature attached ... */
 };
 const envelope = borEncodeTransaction(JSON.stringify(signedTx));
 
-// 7. Submit envelope to the Ootle network
+// 6. Submit envelope to the Ootle network
 ```
 
 ## License

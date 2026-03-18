@@ -7,8 +7,6 @@ pub enum OotleWasmError {
     JsonDeserialize(#[from] serde_json::Error),
     #[error("BOR encoding failed: {0}")]
     BorEncode(#[from] tari_bor::BorError),
-    #[error("Hex decoding failed: {0}")]
-    HexDecode(#[from] hex::FromHexError),
     #[error("Invalid secret key: {0}")]
     InvalidSecretKey(String),
     #[error("Invalid public key: {0}")]

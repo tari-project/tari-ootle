@@ -11953,7 +11953,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_abi"
-version = "0.15.1"
+version = "0.15.2"
 dependencies = [
  "hashbrown 0.13.2",
  "serde",

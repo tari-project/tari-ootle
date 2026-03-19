@@ -11909,7 +11909,6 @@ dependencies = [
  "slug",
  "tari_common_types",
  "tari_crypto",
- "tari_engine_types",
  "tari_ootle_app_utilities",
  "tari_ootle_common_types",
  "tari_ootle_wallet_sdk",

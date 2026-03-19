@@ -3,6 +3,7 @@
 
 pub mod accounts;
 pub mod auth;
+pub mod burn_proofs;
 pub mod confidential;
 mod context;
 pub mod error;

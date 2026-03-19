@@ -34,9 +34,10 @@ use tari_engine_types::{
 };
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
 use tari_ootle_app_utilities::transaction_executor::{TariTransactionProcessor, TransactionExecutor as _};
-use tari_ootle_common_types::Epoch;
+use tari_ootle_common_types::{Epoch, SubstateRequirementRef};
 use tari_ootle_p2p::PeerAddress;
 use tari_ootle_transaction::Transaction;
+use tari_template_lib_types::constants::TARI_TOKEN;
 use tokio::task;
 
 use crate::{
@@ -84,7 +85,17 @@ impl DryRunTransactionProcessor {
         info!(target: LOG_TARGET, "process_transaction: {}", transaction.calculate_id());
 
         let epoch = self.epoch_manager.current_epoch().await?;
-        let found_substates = self.fetch_input_substates(&transaction).await?;
+        let mut found_substates = self.fetch_input_substates(&transaction).await?;
+        // Add the TARI resource - this is what consensus does, so we'll need to do it for dry runs
+        let id = TARI_TOKEN.into();
+        if !found_substates.contains_key(&id) {
+            let tari_token = self
+                .substate_manager
+                .get_substate(SubstateRequirementRef::unversioned(&id))
+                .await?;
+            found_substates.insert(TARI_TOKEN.into(), tari_token);
+        }
+
         let package = self.construct_template_package(&transaction, &found_substates).await?;
 
         let virtual_substates = self.get_virtual_substates(&transaction, epoch);

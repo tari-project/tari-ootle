@@ -2,9 +2,11 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_crypto::{
+    compressed_commitment::CompressedCommitment,
+    compressed_key::CompressedKey,
     hashing::DomainSeparation,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey, pedersen::PedersenCommitment},
-    signatures::{CommitmentSignature, SchnorrSignature},
+    signatures::{CommitmentSignature, CompressedSchnorrSignature, SchnorrSignature},
     tari_utilities,
     tari_utilities::ByteArray,
 };
@@ -99,5 +101,67 @@ impl ConvertFromByteType<CommitmentSignatureBytes> for CommitmentSignature<Ristr
         let signature = RistrettoSecretKey::from_canonical_bytes(bytes.u().as_bytes())?;
         let v = RistrettoSecretKey::from_canonical_bytes(bytes.v().as_bytes())?;
         Ok(CommitmentSignature::new(public_nonce, signature, v))
+    }
+}
+
+impl ToByteType for CompressedKey<RistrettoPublicKey> {
+    type ByteType = RistrettoPublicKeyBytes;
+
+    fn to_byte_type(&self) -> Self::ByteType {
+        // PANIC: CompressedKey protects the size invariant (incl serde, borsh)
+        self.as_bytes()
+            .try_into()
+            .expect("byte size of CompressedKeyBytes invariant")
+    }
+}
+
+impl ConvertFromByteType<RistrettoPublicKeyBytes> for CompressedKey<RistrettoPublicKey> {
+    type Error = tari_utilities::ByteArrayError;
+
+    fn convert_from_byte_type(bytes: &RistrettoPublicKeyBytes) -> Result<Self, Self::Error> {
+        Self::from_canonical_bytes(bytes.as_bytes())
+    }
+}
+
+impl ToByteType for CompressedCommitment<RistrettoPublicKey> {
+    type ByteType = PedersenCommitmentBytes;
+
+    fn to_byte_type(&self) -> Self::ByteType {
+        // PANIC: CompressedCommitment protects the size invariant
+        self.as_bytes()
+            .try_into()
+            .expect("byte size of CompressedCommitmentBytes invariant")
+    }
+}
+
+impl ConvertFromByteType<PedersenCommitmentBytes> for CompressedCommitment<RistrettoPublicKey> {
+    type Error = tari_utilities::ByteArrayError;
+
+    fn convert_from_byte_type(bytes: &PedersenCommitmentBytes) -> Result<Self, Self::Error> {
+        Self::from_canonical_bytes(bytes.as_bytes())
+    }
+}
+
+impl<H: DomainSeparation> ToByteType for CompressedSchnorrSignature<RistrettoPublicKey, RistrettoSecretKey, H> {
+    type ByteType = SchnorrSignatureBytes;
+
+    fn to_byte_type(&self) -> Self::ByteType {
+        SchnorrSignatureBytes::new(
+            self.get_compressed_public_nonce().to_byte_type(),
+            Scalar32Bytes::from_bytes(self.get_signature().as_bytes())
+                .expect("byte size of RistrettoSecretKey is not size_of::<Scalar32Bytes>() bytes."),
+        )
+    }
+}
+
+impl<H: DomainSeparation> ConvertFromByteType<SchnorrSignatureBytes>
+    for CompressedSchnorrSignature<RistrettoPublicKey, RistrettoSecretKey, H>
+{
+    type Error = tari_utilities::ByteArrayError;
+
+    fn convert_from_byte_type(schnorr_bytes: &SchnorrSignatureBytes) -> Result<Self, Self::Error> {
+        let public_nonce = CompressedKey::convert_from_byte_type(schnorr_bytes.public_nonce())?;
+        let signature = RistrettoSecretKey::from_canonical_bytes(schnorr_bytes.signature().as_bytes())?;
+        Ok(CompressedSchnorrSignature::new(public_nonce, signature))
     }
 }

@@ -25,6 +25,7 @@ tari_ootle_walletd_client = { workspace = true }
 tari_template_builtin = { workspace = true }
 tari_template_lib_types = { workspace = true }
 tari_transaction_manifest = { workspace = true }
+tari_sidechain = { workspace = true }
 ootle_byte_type = { workspace = true }
 tari_utilities = { workspace = true }
 
@@ -34,6 +35,7 @@ axum = { workspace = true }
 axum-extra = { workspace = true, features = ["typed-header", "cookie"] }
 axum-jrpc = { workspace = true, features = ["anyhow_error"] }
 clap = { workspace = true, features = ["derive", "env"] }
+dirs-next = "2.0.0"
 config = { workspace = true }
 either = { workspace = true }
 hex = { workspace = true }

@@ -15,7 +15,6 @@ use rand::{Rng, rngs::OsRng};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_transaction::args;
-use tari_ootle_wallet_sdk::models::KeyBranch;
 use tari_ootle_walletd_client::{
     ComponentAddressOrName,
     types::{TransactionSubmitRequest, TransactionWaitResultRequest},
@@ -233,11 +232,9 @@ async fn when_i_burn_funds_with_wallet_daemon(
     let mut wallet_daemon_client =
         wallet_daemon_client::get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
-    let nonce = wallet_daemon_client.create_key(KeyBranch::Nonce).await.unwrap();
-    // let private_ephemeral_key = RistrettoSecretKey::random(&mut OsRng);
-    // let public_key = private_ephemeral_key.public_key();
+    let account = wallet_daemon_client.accounts_get_default().await.unwrap();
 
-    let public_key = nonce.public_key;
+    let public_key = account.account.owner_public_key();
     integration_tests::cucumber_log!("Burning funds using claim key {}", public_key);
 
     let wallet = world
@@ -277,7 +274,6 @@ async fn when_i_burn_funds_with_wallet_daemon(
 
     world.claim_proofs.insert(proof_name, CucumberClaimProof::Pending {
         commitment,
-        nonce_id: nonce.id,
         kernel_excess_sig_nonce,
         kernel_excess_sig_signature,
     });

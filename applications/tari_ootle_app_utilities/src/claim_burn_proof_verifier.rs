@@ -66,9 +66,15 @@ where
     }
 }
 
-struct KernelMerkleProofVerifier<TGlobalBackend> {
+pub struct KernelMerkleProofVerifier<TGlobalBackend> {
     global_db: GlobalDb<TGlobalBackend>,
     network: Network,
+}
+
+impl<TGlobalBackend> KernelMerkleProofVerifier<TGlobalBackend> {
+    pub fn new(global_db: GlobalDb<TGlobalBackend>, network: Network) -> Self {
+        Self { global_db, network }
+    }
 }
 
 impl<TGlobalBackend> KernelMerkleProofVerifier<TGlobalBackend> {
@@ -189,8 +195,14 @@ where
     }
 }
 
-struct KnowledgeProofVerifier {
+pub struct KnowledgeProofVerifier {
     network: Network,
+}
+
+impl KnowledgeProofVerifier {
+    pub fn new(network: Network) -> Self {
+        Self { network }
+    }
 }
 
 impl ClaimProofVerifier for KnowledgeProofVerifier {

@@ -152,6 +152,7 @@ impl TariWalletDaemonProcess {
             account: ComponentAddressOrName::Name(account_name.into()),
             claim_proof,
             max_fee: Some(5000),
+            is_dry_run: false,
         };
 
         client

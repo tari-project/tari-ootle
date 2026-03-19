@@ -6,11 +6,10 @@ use tari_template_lib_types::crypto::PedersenCommitmentBytes;
 
 pub enum CucumberClaimProof {
     Confirmed {
-        proof: Box<ClaimBurnProof>,
+        proof: ClaimBurnProof,
     },
     Pending {
         commitment: PedersenCommitmentBytes,
-        nonce_id: u64,
         kernel_excess_sig_nonce: Vec<u8>,
         kernel_excess_sig_signature: Vec<u8>,
     },

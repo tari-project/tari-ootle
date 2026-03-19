@@ -159,6 +159,20 @@ impl SubstateManager {
         Ok(utxos)
     }
 
+    pub async fn get_substate(&self, req: SubstateRequirementRef<'_>) -> Result<Substate, SubstateManagerError> {
+        let substate_result = self
+            .cache_manager
+            .get_substate(req.substate_id(), req.version())
+            .await?;
+        let substate = substate_result
+            .into_up()
+            .ok_or_else(|| SubstateManagerError::InputSubstateIsDown {
+                substate_id: req.substate_id().clone(),
+            })?;
+
+        Ok(substate)
+    }
+
     pub async fn get_substates<'a, I: IntoIterator<Item = SubstateRequirementRef<'a>>>(
         &self,
         substate_req: I,
@@ -194,6 +208,10 @@ impl SubstateManager {
                     req.substate_id().clone(),
                     Substate::new(substate.version(), substate.into_substate_value()),
                 );
+            } else {
+                return Err(SubstateManagerError::InputSubstateIsDown {
+                    substate_id: req.substate_id().clone(),
+                });
             }
         }
         Ok(results)
@@ -270,4 +288,6 @@ pub enum SubstateManagerError {
     IndexerError(#[from] IndexerError),
     #[error("Storage error: {0}")]
     StorageError(#[from] StorageError),
+    #[error("Input substate {substate_id} is down")]
+    InputSubstateIsDown { substate_id: SubstateId },
 }

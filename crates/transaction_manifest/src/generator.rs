@@ -11,7 +11,7 @@ use tari_ootle_transaction::{
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
     call_arg,
 };
-use tari_template_lib::types::{ComponentAddress, TemplateAddress};
+use tari_template_lib::types::{ComponentAddress, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
     ManifestInstructions,
@@ -157,6 +157,42 @@ impl ManifestInstructionGenerator {
                     workspace_id,
                 }])
             },
+            ManifestIntent::CreateAccount(create_account) => {
+                let owner_public_key = self.extract_public_key(&create_account.owner_public_key.to_string())?;
+
+                let owner_rule = create_account
+                    .owner_rule
+                    .map(|ident| self.extract_from_global(&ident.to_string()))
+                    .transpose()?;
+
+                let access_rules = create_account
+                    .access_rules
+                    .map(|ident| self.extract_from_global(&ident.to_string()))
+                    .transpose()?;
+
+                let bucket_workspace_id = create_account
+                    .bucket
+                    .map(|ident| {
+                        let name = ident.to_string();
+                        self.workspace_ids
+                            .get(&name)
+                            .map(|id| WorkspaceOffsetId::new(*id))
+                            .ok_or_else(|| ManifestError::UndefinedVariable { name })
+                    })
+                    .transpose()?;
+
+                let mut instructions = vec![Instruction::CreateAccount {
+                    owner_public_key,
+                    owner_rule,
+                    access_rules,
+                    bucket_workspace_id,
+                }];
+                if let Some(var_name) = create_account.output_variable {
+                    let key = self.next_workspace_id(var_name.to_string());
+                    instructions.push(Instruction::PutLastInstructionOutputOnWorkspace { key });
+                }
+                Ok(instructions)
+            },
             ManifestIntent::AssignInput(assign) => {
                 self.global_aliases.insert(
                     assign.variable_name.to_string(),
@@ -252,6 +288,44 @@ impl ManifestInstructionGenerator {
             .ok_or_else(|| {
                 ManifestError::InvalidVariableType(format!("Expected component variable but got {:?}", value))
             })
+    }
+
+    fn extract_public_key(&self, name: &str) -> Result<RistrettoPublicKeyBytes, ManifestError> {
+        let value = self
+            .global_aliases
+            .get(name)
+            .or_else(|| self.globals.get(name))
+            .ok_or_else(|| ManifestError::UndefinedVariable {
+                name: name.to_string(),
+            })?;
+
+        match value {
+            ManifestValue::Value(tari_bor::Value::Bytes(bytes)) => {
+                RistrettoPublicKeyBytes::from_bytes(bytes).map_err(|e| ManifestError::InvalidVariableType(e.to_string()))
+            },
+            _ => Err(ManifestError::InvalidVariableType(format!(
+                "Expected public key bytes for variable '{name}' but got {value:?}"
+            ))),
+        }
+    }
+
+    fn extract_from_global<T: tari_bor::DeserializeOwned>(&self, name: &str) -> Result<T, ManifestError> {
+        let value = self
+            .global_aliases
+            .get(name)
+            .or_else(|| self.globals.get(name))
+            .ok_or_else(|| ManifestError::UndefinedVariable {
+                name: name.to_string(),
+            })?;
+
+        match value {
+            ManifestValue::Value(v) => tari_bor::from_value(v).map_err(|e| {
+                ManifestError::InvalidVariableType(format!("Failed to deserialize variable '{name}': {e}"))
+            }),
+            _ => Err(ManifestError::InvalidVariableType(format!(
+                "Expected serialized value for variable '{name}' but got {value:?}"
+            ))),
+        }
     }
 
     fn get_ident(&self, name: &str) -> Result<InstructionArg, ManifestError> {

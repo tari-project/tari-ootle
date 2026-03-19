@@ -51,6 +51,7 @@ pub enum ManifestIntent {
     InvokeComponent(InvokeIntent),
     AssignInput(AssignInputStmt),
     AllocateAddress(AllocateAddressStmt),
+    CreateAccount(CreateAccountIntent),
     Log(LogIntent),
     DropAllProofs,
     CallLocalFunction(Ident),
@@ -81,6 +82,15 @@ pub struct AssignInputStmt {
 pub struct AllocateAddressStmt {
     pub output_variable: Ident,
     pub allocatable_type: AllocatableAddressType,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateAccountIntent {
+    pub output_variable: Option<Ident>,
+    pub owner_public_key: Ident,
+    pub owner_rule: Option<Ident>,
+    pub access_rules: Option<Ident>,
+    pub bucket: Option<Ident>,
 }
 
 #[derive(Debug, Clone)]
@@ -385,6 +395,16 @@ fn assignment_from_macro(var_name: Ident, mac: &Ident, tokens: TokenStream) -> R
             output_variable: var_name,
             allocatable_type: AllocatableAddressType::Resource,
         })),
+        "create_account" => {
+            let args = parse_create_account_args(tokens)?;
+            Ok(ManifestIntent::CreateAccount(CreateAccountIntent {
+                output_variable: Some(var_name),
+                owner_public_key: args.owner_public_key,
+                owner_rule: args.owner_rule,
+                access_rules: args.access_rules,
+                bucket: args.bucket,
+            }))
+        },
         _ => Err(syn::Error::new_spanned(mac, "Invalid macro name")),
     }
 }
@@ -409,6 +429,16 @@ fn macro_call(mac: &Ident, tokens: TokenStream) -> Result<ManifestIntent, syn::E
             message: parse2::<LitStr>(tokens)?.value(),
         })),
         "drop_all_proofs" => Ok(ManifestIntent::DropAllProofs),
+        "create_account" => {
+            let args = parse_create_account_args(tokens)?;
+            Ok(ManifestIntent::CreateAccount(CreateAccountIntent {
+                output_variable: None,
+                owner_public_key: args.owner_public_key,
+                owner_rule: args.owner_rule,
+                access_rules: args.access_rules,
+                bucket: args.bucket,
+            }))
+        },
         _ => Err(syn::Error::new_spanned(mac, "Invalid macro name")),
     }
 }
@@ -618,6 +648,54 @@ fn handle_special_literals(name: &Ident, args: Punctuated<Expr, Comma>) -> Resul
             ),
         )),
     }
+}
+
+struct CreateAccountArgs {
+    owner_public_key: Ident,
+    owner_rule: Option<Ident>,
+    access_rules: Option<Ident>,
+    bucket: Option<Ident>,
+}
+
+fn parse_create_account_args(tokens: TokenStream) -> Result<CreateAccountArgs, syn::Error> {
+    syn::parse::Parser::parse2(
+        |input: ParseStream| {
+            let owner_public_key: Ident = input.parse()?;
+            let mut owner_rule = None;
+            let mut access_rules = None;
+            let mut bucket = None;
+
+            while input.peek(syn::Token![,]) {
+                input.parse::<syn::Token![,]>()?;
+                if input.is_empty() {
+                    break;
+                }
+                let key: Ident = input.parse()?;
+                input.parse::<syn::Token![=]>()?;
+                let value: Ident = input.parse()?;
+
+                match key.to_string().as_str() {
+                    "owner_rule" => owner_rule = Some(value),
+                    "access_rules" => access_rules = Some(value),
+                    "bucket" => bucket = Some(value),
+                    _ => {
+                        return Err(syn::Error::new_spanned(
+                            key,
+                            "Unknown create_account argument, expected 'owner_rule', 'access_rules', or 'bucket'",
+                        ));
+                    },
+                }
+            }
+
+            Ok(CreateAccountArgs {
+                owner_public_key,
+                owner_rule,
+                access_rules,
+                bucket,
+            })
+        },
+        tokens,
+    )
 }
 
 fn extract_single_var_name(expr: &Expr) -> Result<Ident, syn::Error> {

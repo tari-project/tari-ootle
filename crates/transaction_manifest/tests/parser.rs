@@ -24,7 +24,7 @@ use std::{collections::HashMap, fs, str::FromStr};
 
 use tari_bor::cbor;
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_transaction::{AllocatableAddressType, ComponentReference, Instruction, call_args};
+use tari_ootle_transaction::{AllocatableAddressType, ComponentReference, Instruction, args::WorkspaceOffsetId, call_args};
 use tari_template_lib::types::{
     ComponentAddress,
     ObjectKey,
@@ -32,6 +32,7 @@ use tari_template_lib::types::{
     constants::TARI_TOKEN,
     crypto::RistrettoPublicKeyBytes,
 };
+use tari_transaction_manifest::ManifestValue;
 use tari_transaction_manifest::{ManifestInstructions, parse_manifest};
 
 #[test]
@@ -262,4 +263,118 @@ fn recursive_function_exceeds_call_depth() {
         err.to_string().contains("Maximum call depth"),
         "Expected MaxCallDepthExceeded error, got: {err}"
     );
+}
+
+#[test]
+fn create_account_simple() {
+    let manifest = r#"
+        fn main() {
+            let owner_pk = var!["owner_pk"];
+            let account = create_account!(owner_pk);
+        }
+    "#;
+
+    let pk_bytes = [42u8; 32];
+    let globals = HashMap::from([(
+        "owner_pk".to_string(),
+        ManifestValue::Value(tari_bor::Value::Bytes(pk_bytes.to_vec())),
+    )]);
+
+    let ManifestInstructions {
+        instructions,
+        fee_instructions,
+    } = parse_manifest(manifest, globals, Default::default()).unwrap();
+
+    let expected = vec![
+        Instruction::CreateAccount {
+            owner_public_key: RistrettoPublicKeyBytes::from(pk_bytes),
+            owner_rule: None,
+            access_rules: None,
+            bucket_workspace_id: None,
+        },
+        Instruction::PutLastInstructionOutputOnWorkspace { key: 0 },
+    ];
+
+    assert_eq!(instructions, expected);
+    assert_eq!(fee_instructions, vec![]);
+}
+
+#[test]
+fn create_account_with_bucket() {
+    let manifest = r#"
+        fn main() {
+            let owner_pk = var!["owner_pk"];
+            let source = var!["source"];
+            let bucket = source.withdraw(TARI, 10);
+            let account = create_account!(owner_pk, bucket = bucket);
+        }
+    "#;
+
+    let pk_bytes = [42u8; 32];
+    let source_component = ComponentAddress::new([1u8; ObjectKey::LENGTH].into());
+    let globals = HashMap::from([
+        (
+            "owner_pk".to_string(),
+            ManifestValue::Value(tari_bor::Value::Bytes(pk_bytes.to_vec())),
+        ),
+        (
+            "source".to_string(),
+            SubstateId::Component(source_component).into(),
+        ),
+    ]);
+
+    let ManifestInstructions {
+        instructions,
+        fee_instructions,
+    } = parse_manifest(manifest, globals, Default::default()).unwrap();
+
+    let expected = vec![
+        Instruction::CallMethod {
+            call: source_component.into(),
+            method: "withdraw".try_into().unwrap(),
+            args: call_args![TARI_TOKEN, 10],
+        },
+        Instruction::PutLastInstructionOutputOnWorkspace { key: 0 },
+        Instruction::CreateAccount {
+            owner_public_key: RistrettoPublicKeyBytes::from(pk_bytes),
+            owner_rule: None,
+            access_rules: None,
+            bucket_workspace_id: Some(WorkspaceOffsetId::new(0)),
+        },
+        Instruction::PutLastInstructionOutputOnWorkspace { key: 1 },
+    ];
+
+    assert_eq!(instructions, expected);
+    assert_eq!(fee_instructions, vec![]);
+}
+
+#[test]
+fn create_account_without_assignment() {
+    let manifest = r#"
+        fn main() {
+            let owner_pk = var!["owner_pk"];
+            create_account!(owner_pk);
+        }
+    "#;
+
+    let pk_bytes = [42u8; 32];
+    let globals = HashMap::from([(
+        "owner_pk".to_string(),
+        ManifestValue::Value(tari_bor::Value::Bytes(pk_bytes.to_vec())),
+    )]);
+
+    let ManifestInstructions {
+        instructions,
+        fee_instructions,
+    } = parse_manifest(manifest, globals, Default::default()).unwrap();
+
+    let expected = vec![Instruction::CreateAccount {
+        owner_public_key: RistrettoPublicKeyBytes::from(pk_bytes),
+        owner_rule: None,
+        access_rules: None,
+        bucket_workspace_id: None,
+    }];
+
+    assert_eq!(instructions, expected);
+    assert_eq!(fee_instructions, vec![]);
 }

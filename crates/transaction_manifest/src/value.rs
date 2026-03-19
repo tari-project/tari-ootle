@@ -7,8 +7,10 @@ use syn::{Lit, parse2};
 use tari_bor::{BorError, Serialize};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_transaction::{args::InstructionArg, call_arg};
-use tari_template_lib::types::{NonFungibleId, hex::bytes_from_hex};
-use tari_template_lib::to_value;
+use tari_template_lib::{
+    to_value,
+    types::{NonFungibleId, hex::bytes_from_hex},
+};
 
 use crate::error::ManifestError;
 

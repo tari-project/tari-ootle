@@ -177,7 +177,7 @@ impl ManifestInstructionGenerator {
                         self.workspace_ids
                             .get(&name)
                             .map(|id| WorkspaceOffsetId::new(*id))
-                            .ok_or_else(|| ManifestError::UndefinedVariable { name })
+                            .ok_or(ManifestError::UndefinedVariable { name })
                     })
                     .transpose()?;
 
@@ -295,14 +295,11 @@ impl ManifestInstructionGenerator {
             .global_aliases
             .get(name)
             .or_else(|| self.globals.get(name))
-            .ok_or_else(|| ManifestError::UndefinedVariable {
-                name: name.to_string(),
-            })?;
+            .ok_or_else(|| ManifestError::UndefinedVariable { name: name.to_string() })?;
 
         match value {
-            ManifestValue::Value(tari_bor::Value::Bytes(bytes)) => {
-                RistrettoPublicKeyBytes::from_bytes(bytes).map_err(|e| ManifestError::InvalidVariableType(e.to_string()))
-            },
+            ManifestValue::Value(tari_bor::Value::Bytes(bytes)) => RistrettoPublicKeyBytes::from_bytes(bytes)
+                .map_err(|e| ManifestError::InvalidVariableType(e.to_string())),
             _ => Err(ManifestError::InvalidVariableType(format!(
                 "Expected public key bytes for variable '{name}' but got {value:?}"
             ))),
@@ -314,9 +311,7 @@ impl ManifestInstructionGenerator {
             .global_aliases
             .get(name)
             .or_else(|| self.globals.get(name))
-            .ok_or_else(|| ManifestError::UndefinedVariable {
-                name: name.to_string(),
-            })?;
+            .ok_or_else(|| ManifestError::UndefinedVariable { name: name.to_string() })?;
 
         match value {
             ManifestValue::Value(v) => tari_bor::from_value(v).map_err(|e| {

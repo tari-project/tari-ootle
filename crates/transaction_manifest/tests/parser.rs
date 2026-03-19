@@ -24,7 +24,13 @@ use std::{collections::HashMap, fs, str::FromStr};
 
 use tari_bor::cbor;
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_transaction::{AllocatableAddressType, ComponentReference, Instruction, args::WorkspaceOffsetId, call_args};
+use tari_ootle_transaction::{
+    AllocatableAddressType,
+    ComponentReference,
+    Instruction,
+    args::WorkspaceOffsetId,
+    call_args,
+};
 use tari_template_lib::types::{
     ComponentAddress,
     ObjectKey,
@@ -32,8 +38,7 @@ use tari_template_lib::types::{
     constants::TARI_TOKEN,
     crypto::RistrettoPublicKeyBytes,
 };
-use tari_transaction_manifest::ManifestValue;
-use tari_transaction_manifest::{ManifestInstructions, parse_manifest};
+use tari_transaction_manifest::{ManifestInstructions, ManifestValue, parse_manifest};
 
 #[test]
 #[allow(clippy::too_many_lines)]
@@ -317,10 +322,7 @@ fn create_account_with_bucket() {
             "owner_pk".to_string(),
             ManifestValue::Value(tari_bor::Value::Bytes(pk_bytes.to_vec())),
         ),
-        (
-            "source".to_string(),
-            SubstateId::Component(source_component).into(),
-        ),
+        ("source".to_string(), SubstateId::Component(source_component).into()),
     ]);
 
     let ManifestInstructions {

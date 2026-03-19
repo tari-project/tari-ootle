@@ -118,8 +118,8 @@ pub fn ootle_public_key_from_secret_key(owner_key: &[u8], view_key: &[u8]) -> Re
         owner_key: owner_key.to_vec(),
         view_key: view_key.to_vec(),
     };
-    let result =
-        ootle_wasm_core::address::ootle_public_key_from_secret_key(&secret).map_err(|e| JsError::new(&e.to_string()))?;
+    let result = ootle_wasm_core::address::ootle_public_key_from_secret_key(&secret)
+        .map_err(|e| JsError::new(&e.to_string()))?;
     Ok(OotlePublicKey {
         owner_key: result.owner_key,
         view_key: result.view_key,
@@ -137,21 +137,15 @@ pub fn generate_ootle_address(
     network: u8,
     memo: Option<Vec<u8>>,
 ) -> Result<String, JsError> {
-    ootle_wasm_core::address::generate_ootle_address(
-        owner_public_key,
-        view_public_key,
-        network,
-        memo.as_deref(),
-    )
-    .map_err(|e| JsError::new(&e.to_string()))
+    ootle_wasm_core::address::generate_ootle_address(owner_public_key, view_public_key, network, memo.as_deref())
+        .map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Parse a bech32m Ootle address string into its components.
 /// Returns { owner_key: Uint8Array, view_key: Uint8Array, network: number, memo: Uint8Array | undefined }.
 #[wasm_bindgen(js_name = "parseOotleAddress")]
 pub fn parse_ootle_address(address: &str) -> Result<ParsedOotleAddress, JsError> {
-    let result =
-        ootle_wasm_core::address::parse_ootle_address(address).map_err(|e| JsError::new(&e.to_string()))?;
+    let result = ootle_wasm_core::address::parse_ootle_address(address).map_err(|e| JsError::new(&e.to_string()))?;
     Ok(ParsedOotleAddress {
         owner_key: result.owner_key,
         view_key: result.view_key,

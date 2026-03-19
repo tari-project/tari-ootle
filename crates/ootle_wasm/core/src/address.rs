@@ -41,7 +41,9 @@ pub fn generate_ootle_secret_key() -> OotleSecretKeyResult {
 }
 
 /// Derive the public keys from a pair of Ootle secret keys.
-pub fn ootle_public_key_from_secret_key(secret_key: &OotleSecretKeyResult) -> Result<OotlePublicKeyResult, OotleWasmError> {
+pub fn ootle_public_key_from_secret_key(
+    secret_key: &OotleSecretKeyResult,
+) -> Result<OotlePublicKeyResult, OotleWasmError> {
     let owner_secret = RistrettoSecretKey::from_canonical_bytes(&secret_key.owner_key)
         .map_err(|e| OotleWasmError::InvalidSecretKey(e.to_string()))?;
     let view_secret = RistrettoSecretKey::from_canonical_bytes(&secret_key.view_key)
@@ -103,7 +105,7 @@ pub fn generate_ootle_address(
 
     if let Some(memo_bytes) = memo {
         let pay_ref =
-            PayRef::new_checked(memo_bytes.to_vec()).ok_or_else(|| OotleWasmError::InvalidPayRef(memo_bytes.len()))?;
+            PayRef::new_checked(memo_bytes.to_vec()).ok_or(OotleWasmError::InvalidPayRef(memo_bytes.len()))?;
         address = address.with_pay_ref(pay_ref);
     }
 
@@ -162,8 +164,7 @@ mod tests {
         let pk = ootle_public_key_from_secret_key(&sk).unwrap();
 
         let memo = b"invoice-12345";
-        let address =
-            generate_ootle_address(&pk.owner_key, &pk.view_key, Network::LocalNet as u8, Some(memo)).unwrap();
+        let address = generate_ootle_address(&pk.owner_key, &pk.view_key, Network::LocalNet as u8, Some(memo)).unwrap();
         assert!(address.starts_with("otl_loc_"));
 
         let parsed: OotleAddress = address.parse().unwrap();

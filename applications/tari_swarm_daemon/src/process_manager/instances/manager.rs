@@ -288,6 +288,9 @@ impl InstanceManager {
             },
         }
 
+        // Wait a bit after starting the instance
+        sleep(definition.after_start_delay()).await;
+
         Ok(instance_id)
     }
 

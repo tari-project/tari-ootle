@@ -32,9 +32,9 @@ import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import MenuItem from "@mui/material/MenuItem";
 import Select, { SelectChangeEvent } from "@mui/material/Select";
+import { useTheme } from "@mui/material/styles";
 import Tab from "@mui/material/Tab";
 import Tabs from "@mui/material/Tabs";
-import { useTheme } from "@mui/material/styles";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import useAccountStore from "@store/accountStore";
@@ -300,7 +300,7 @@ export default function ClaimBurn() {
                     <Typography variant="body2">Loading burn proof files...</Typography>
                   </Box>
                 ) : burnProofFiles.length === 0 ? (
-                  <Alert severity="info">No burn proof files found on the server.</Alert>
+                  <Alert severity="info">No burn proofs found.</Alert>
                 ) : (
                   <FormControl fullWidth>
                     <InputLabel id="proof-file-label">Burn Proof</InputLabel>

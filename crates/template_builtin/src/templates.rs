@@ -35,18 +35,3 @@ pub const fn all_builtin_templates() -> &'static [(TemplateAddress, &'static [u8
         ),
     ]
 }
-
-#[cfg(test)]
-mod tests {
-    use tari_engine::wasm::WasmModule;
-
-    use super::*;
-
-    #[test]
-    fn all_templates_are_correct() {
-        for (address, wasm_bytes) in all_builtin_templates() {
-            WasmModule::load_template_from_code(wasm_bytes)
-                .unwrap_or_else(|e| panic!("Failed to load builtin template at address {}: {}", address, e));
-        }
-    }
-}

@@ -11,7 +11,7 @@ use tari_ootle_transaction::{
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
     call_arg,
 };
-use tari_template_lib::types::{ComponentAddress, TemplateAddress, crypto::RistrettoPublicKeyBytes};
+use tari_template_lib_types::{ComponentAddress, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
     ManifestInstructions,

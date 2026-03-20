@@ -33,7 +33,7 @@ use syn::{
 use tari_engine_types::{json_cbor::convert_json_to_cbor, substate::SubstateId};
 use tari_ootle_transaction::AllocatableAddressType;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::types::{
+use tari_template_lib_types::{
     Amount,
     LogLevel,
     Metadata,

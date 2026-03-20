@@ -16,7 +16,7 @@ hex = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
-tari_template_lib = { workspace = true }
+tari_template_lib = { workspace = true, features = ["bincode-compat"] }
 bincode = { workspace = true, features = ["serde"] }
 
 [features]
@@ -24,4 +24,4 @@ default = ["hex", "cbor"]
 hex = ["dep:hex"]
 cbor = ["dep:tari_bor"]
 base64 = ["dep:base64"]
-bincode-compat = ["tari_template_lib/bincode-compat"]
+bincode-compat = []

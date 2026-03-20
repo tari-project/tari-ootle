@@ -31,7 +31,7 @@ use tari_ootle_transaction::{
     args::WorkspaceOffsetId,
     call_args,
 };
-use tari_template_lib::types::{
+use tari_template_lib_types::{
     ComponentAddress,
     ObjectKey,
     TemplateAddress,

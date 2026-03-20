@@ -7,10 +7,7 @@ use syn::{Lit, parse2};
 use tari_bor::{BorError, Serialize};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_transaction::{args::InstructionArg, call_arg};
-use tari_template_lib::{
-    to_value,
-    types::{NonFungibleId, hex::bytes_from_hex},
-};
+use tari_template_lib_types::{NonFungibleId, hex::bytes_from_hex};
 
 use crate::error::ManifestError;
 
@@ -24,7 +21,7 @@ pub enum ManifestValue {
 
 impl ManifestValue {
     pub fn new_value<T: Serialize>(value: &T) -> Result<Self, BorError> {
-        Ok(Self::Value(to_value(value)?))
+        Ok(Self::Value(tari_bor::to_value(value)?))
     }
 
     pub fn as_address(&self) -> Option<&SubstateId> {
@@ -137,7 +134,7 @@ pub struct ManifestParseError(String);
 
 #[cfg(test)]
 mod tests {
-    use tari_template_lib::types::{ComponentAddress, ResourceAddress, VaultId};
+    use tari_template_lib_types::{ComponentAddress, ResourceAddress, VaultId};
 
     use super::*;
 

@@ -24,7 +24,7 @@ use std::iter;
 use serde::{Deserialize, Serialize};
 use tari_engine::{
     template::{TemplateLoaderError, TemplateModuleLoader},
-    wasm::WasmExecutionError,
+    wasm::{WasmExecutionError, WasmModule},
 };
 use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason},
@@ -33,7 +33,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_ootle_transaction::{Transaction, args};
-use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
+use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, all_builtin_templates};
 use tari_template_lib::{
     models::NonFungible,
     types::{Amount, ComponentAddress, NonFungibleAddress, ResourceAddress, TemplateAddress, constants::TARI_TOKEN},
@@ -1106,4 +1106,12 @@ fn test_builtin_templates() {
     let account_nft_template_address: TemplateAddress =
         template_test.call_function("BuiltinTest", "get_account_nft_template_address", args![], vec![]);
     assert_eq!(account_nft_template_address, NFT_FAUCET_TEMPLATE_ADDRESS);
+}
+
+#[test]
+fn all_builtin_templates_are_correct() {
+    for (address, wasm_bytes) in all_builtin_templates() {
+        WasmModule::load_template_from_code(wasm_bytes)
+            .unwrap_or_else(|e| panic!("Failed to load builtin template at address {}: {}", address, e));
+    }
 }

@@ -81,7 +81,7 @@ tari_ootle_app_utilities = { path = "applications/tari_ootle_app_utilities" }
 
 # core crates
 tari_consensus = { path = "crates/consensus" }
-tari_ootle_address = { path = "crates/ootle_address", version = "0.1.0" }
+tari_ootle_address = { path = "crates/ootle_address", version = "0.1" }
 tari_engine = { path = "crates/engine", version = "0.25" }
 tari_ootle_p2p = { path = "crates/p2p" }
 tari_ootle_storage = { path = "crates/storage" }

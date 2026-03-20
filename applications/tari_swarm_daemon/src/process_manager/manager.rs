@@ -525,14 +525,14 @@ impl ProcessManager {
                     "No wallet daemon instances {wallet_instance_id} found. Please start a wallet before burning funds"
                 )
             })?;
-        let (claim_public_key, nonce_key_index) = wallet.create_nonce_key().await?;
+        let account = wallet.get_account_by_name(account_name).await?;
         let wallet = self
             .instance_manager
             .minotari_wallets()
             .next()
             .ok_or_else(|| anyhow!("No MinoTariConsoleWallet instances found"))?;
 
-        let burn_resp = wallet.burn_funds(amount, claim_public_key).await?;
+        let burn_resp = wallet.burn_funds(amount, account.owner_public_key).await?;
 
         let file_name = PathBuf::from(format!("burn_proof-{}.json", burn_resp.tx_id));
 
@@ -543,10 +543,9 @@ impl ProcessManager {
             path,
             burn_resp.commitment,
             amount,
-            nonce_key_index,
         ));
 
-        info!("🔥 Burned {amount} Tari to account {account_name}");
+        info!("🔥 Burned {amount} Tari to account");
         Ok(file_name)
     }
 

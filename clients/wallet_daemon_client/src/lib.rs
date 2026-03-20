@@ -95,6 +95,8 @@ use crate::{
         AuthListSessionsResponse,
         AuthRevokeTokenRequest,
         AuthRevokeTokenResponse,
+        BurnProofsListRequest,
+        BurnProofsListResponse,
         ClaimValidatorFeesRequest,
         ClaimValidatorFeesResponse,
         ConfidentialCreateOutputProofRequest,
@@ -435,6 +437,14 @@ impl WalletDaemonClient {
     ) -> Result<AccountsCreateStealthTransferStatementResponse, WalletDaemonClientError> {
         self.send_request("accounts.create_stealth_transfer_statement", req.borrow())
             .await
+    }
+
+    /// Lists the available burn proof files from the configured burn proofs directory.
+    pub async fn list_burn_proofs<T: Borrow<BurnProofsListRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<BurnProofsListResponse, WalletDaemonClientError> {
+        self.send_request("burn_proofs.list", req.borrow()).await
     }
 
     /// Claims a burn transaction, converting burned Minotari into Ootle funds.

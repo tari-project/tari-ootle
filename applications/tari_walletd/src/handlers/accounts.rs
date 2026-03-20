@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashSet, iter, time::Duration};
+use std::{collections::HashSet, fs, iter, path::Path, time::Duration};
 
 use anyhow::{Context, anyhow};
 use axum_extra::headers::authorization::Bearer;
@@ -25,7 +25,7 @@ use tari_ootle_wallet_sdk::{
         stealth_transfer::{StealthTransferParams, TransferOutput},
         substate::ValidatorScanResult,
     },
-    models::{KeyBranch, KeyId, NewAccountData, StealthUtxoSpendKeyId, TransactionSubmittedEvent},
+    models::{KeyBranch, NewAccountData, StealthUtxoSpendKeyId, TransactionSubmittedEvent},
 };
 use tari_ootle_walletd_client::{
     ComponentAddressOrName,
@@ -58,6 +58,7 @@ use tari_ootle_walletd_client::{
         AccountsTransferResponse,
         BalanceEntry,
         ClaimBurnProof,
+        ClaimBurnProofContents,
         ClaimBurnRequest,
         ClaimBurnResponse,
         ConfidentialTransferRequest,
@@ -79,6 +80,7 @@ use super::context::HandlerContext;
 use crate::{
     DEFAULT_FEE,
     handlers::helpers::{
+        complete_burn_proof_to_contents,
         general_error,
         get_account,
         get_account_by_key_index,
@@ -407,20 +409,31 @@ pub async fn handle_claim_burn(
 ) -> Result<ClaimBurnResponse, anyhow::Error> {
     context.check_auth(token, &[JrpcPermission::Admin])?;
     let sdk = context.wallet_sdk();
+    let network = sdk.network();
 
     let ClaimBurnRequest {
         account,
         claim_proof,
         max_fee,
+        is_dry_run,
     } = req;
 
     let max_fee = max_fee.unwrap_or(DEFAULT_FEE);
 
-    let ClaimBurnProof {
-        owner_nonce_key_index,
+    // Capture the file name before resolving so we can mark it as claimed after submission
+    let proof_file_name = match &claim_proof {
+        ClaimBurnProof::FromFile { file_name } => Some(file_name.clone()),
+        _ => None,
+    };
+
+    let proof_dir = context.config().get_burn_proof_dir(network);
+    let ClaimBurnProofContents {
         encrypted_data: claimed_encrypted_data,
         claim_proof,
-    } = claim_proof;
+    } = resolve_claim_proof(&proof_dir, claim_proof).await.map_err(|e| {
+        error!(target: LOG_TARGET, "Error resolving claim proof: {}", e);
+        invalid_request(format!("Could not resolve claim proof. {e} Is the file name correct?"))
+    })?;
 
     let accounts_api = sdk.accounts_api();
     let account = get_account(&account, &accounts_api)?;
@@ -432,10 +445,9 @@ pub async fn handle_claim_burn(
     let network = sdk.config_api().get_network()?;
     // We derive secrets directly here because claim burn is a unique case, making it difficult to use the higher
     // level stealth output api that takes care of keys but assumes that this is a regular transfer.
-    let claim_nonce_key = sdk
-        .key_manager_api()
-        .get_key(KeyId::derived(KeyBranch::Nonce, owner_nonce_key_index))?;
-    let claim_public_key = claim_nonce_key.to_public_key().to_byte_type();
+    let claim_key_id = account_owner_key_id;
+    let claim_key = sdk.key_manager_api().get_key(claim_key_id)?;
+    let claim_public_key = claim_key.to_public_key().to_byte_type();
 
     if !sdk.stealth_crypto_api().validate_burn_claim_ownership_proof(
         network,
@@ -474,7 +486,7 @@ pub async fn handle_claim_burn(
     let decrypted = sdk.stealth_crypto_api().decrypt_utxo_data(
         &claimed_encrypted_data,
         &claim_proof.commitment,
-        claim_nonce_key.secret(),
+        claim_key.secret(),
         &sender_offset_pub_key,
         true,
     )?;
@@ -491,16 +503,14 @@ pub async fn handle_claim_burn(
     }
 
     let (nonce, output_public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
-    let account_owner = sdk.key_manager_api().get_key(account_owner_key_id)?;
-    let account_owner_public_key = account_owner.to_public_key();
-    let view_only = sdk.key_manager_api().get_key(account.view_only_key_id())?;
-    let view_only_public_key = view_only.to_public_key();
+    let account_owner = sdk.key_manager_api().get_public_key(account_owner_key_id)?;
+    let view_only = sdk.key_manager_api().get_public_key(account.view_only_key_id())?;
     let memo = Memo::new_message("Burnt funds claimed from L1").expect("valid memo");
 
     let encrypted_data = sdk.stealth_crypto_api().encrypt_value_and_mask(
         final_amount,
         &mask.key,
-        &view_only_public_key,
+        view_only.public_key(),
         &nonce,
         Some(&memo),
     )?;
@@ -508,14 +518,14 @@ pub async fn handle_claim_burn(
     let tag = sdk.stealth_crypto_api().derive_stealth_output_tag(
         network,
         &nonce,
-        &view_only_public_key,
+        view_only.public_key(),
         &STEALTH_TARI_RESOURCE_ADDRESS,
     );
 
     // Create stealth address - used during spend time
     let stealth_output_owner_public_key =
         sdk.stealth_crypto_api()
-            .derive_stealth_owner_public_key(network, &account_owner_public_key, &nonce);
+            .derive_stealth_owner_public_key(network, account_owner.public_key(), &nonce);
 
     let output_witness = StealthOutputWitness {
         witness: OutputWitness {
@@ -559,14 +569,51 @@ pub async fn handle_claim_burn(
                 .put_last_instruction_output_on_workspace("fee")
                 .pay_fee_from_bucket("fee")
         })
+        .with_dry_run(is_dry_run)
         .finish();
 
     // Add the required spend signature to the transaction
-    let transaction = sdk.signer_api().sign(*claim_nonce_key.key_id(), transaction)?;
+    let transaction = sdk.signer_api().sign(*claim_key.key_id(), transaction)?;
+
+    if is_dry_run {
+        let transaction_id = transaction.calculate_id();
+        let result = context
+            .transaction_service()
+            .submit_dry_run_transaction(transaction)
+            .await?;
+        return Ok(ClaimBurnResponse {
+            transaction_id,
+            dry_run_result: Some(result),
+        });
+    }
 
     let tx_id = context.transaction_service().submit_transaction(transaction).await?;
 
-    Ok(ClaimBurnResponse { transaction_id: tx_id })
+    if let Some(file_name) = proof_file_name {
+        let proof_dir = context.config().get_burn_proof_dir(network);
+        super::burn_proofs::mark_as_claimed(&proof_dir, &file_name);
+    }
+
+    Ok(ClaimBurnResponse {
+        transaction_id: tx_id,
+        dry_run_result: None,
+    })
+}
+
+async fn resolve_claim_proof<P: AsRef<Path>>(
+    base_path: P,
+    proof: ClaimBurnProof,
+) -> anyhow::Result<ClaimBurnProofContents> {
+    match proof {
+        ClaimBurnProof::Contents(contents) => Ok(*contents),
+        ClaimBurnProof::FromFile { file_name } => {
+            let file_name = base_path.as_ref().join(file_name);
+            let mut file = fs::File::open(&file_name)
+                .with_context(|| format!("Failed to open claim proof file: {}", file_name.display()))?;
+            let proof = serde_json::from_reader(&mut file)?;
+            complete_burn_proof_to_contents(proof)
+        },
+    }
 }
 
 /// Takes tXTR from the testnet faucet and deposits them into an existing account.

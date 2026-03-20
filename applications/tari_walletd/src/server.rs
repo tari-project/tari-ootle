@@ -28,6 +28,7 @@ use crate::handlers::{
     Handler,
     accounts,
     auth::jwt::JwtApiError,
+    burn_proofs,
     confidential,
     error::HandlerError,
     keys,
@@ -211,6 +212,11 @@ async fn handler(
         Some(("stealth_utxos", method)) => match method {
             "list" => call_handler(context, value, token, stealth_utxos::handle_list).await,
             "decrypt_value" => call_handler(context, value, token, stealth_utxos::handle_decrypt_value).await,
+            _ => value.method_not_found(&value.method).into_response(),
+        },
+        Some(("burn_proofs", method)) => match method {
+            "list" => call_handler(context, value, token, burn_proofs::handle_list).await,
+            "get" => call_handler(context, value, token, burn_proofs::handle_get).await,
             _ => value.method_not_found(&value.method).into_response(),
         },
         Some(("wallet", "get_info")) => call_handler(context, value, token, wallet::handle_get_info).await,

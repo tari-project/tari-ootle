@@ -270,6 +270,41 @@ pub struct TransactionClaimBurnResponse {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct BurnProofsListRequest {
+    /// Optional filter by account public key. Only proofs whose file name starts with this key
+    /// will be returned. Proofs with file names that do not match the expected
+    /// `{public_key}_{commitment}.json` format are always included.
+    pub filter_by_public_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct BurnProofsListResponse {
+    pub proofs: Vec<BurnProofFileInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct BurnProofFileInfo {
+    pub file_name: String,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub value: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct BurnProofsGetRequest {
+    pub file_name: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct BurnProofsGetResponse {
+    pub proof: ClaimBurnProofContents,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct KeysListRequest {
     pub branch: KeyBranch,
 }
@@ -593,14 +628,19 @@ pub struct ClaimBurnRequest {
     pub claim_proof: ClaimBurnProof,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub max_fee: Option<u64>,
+    pub is_dry_run: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub struct ClaimBurnProof {
+pub enum ClaimBurnProof {
+    Contents(Box<ClaimBurnProofContents>),
+    FromFile { file_name: String },
+}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ClaimBurnProofContents {
     pub claim_proof: MinotariBurnClaimProof,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub owner_nonce_key_index: DerivedKeyIndex,
     pub encrypted_data: EncryptedData,
 }
 
@@ -608,6 +648,7 @@ pub struct ClaimBurnProof {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct ClaimBurnResponse {
     pub transaction_id: TransactionId,
+    pub dry_run_result: Option<ExecuteResult>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

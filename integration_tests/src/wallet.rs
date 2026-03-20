@@ -261,6 +261,7 @@ pub fn run_wallet(runtime: Runtime, config: &mut ApplicationConfig, shutdown: &m
         birthday: None,
         skip_recovery: false,
         print_env: false,
+        burn_proof_out: None,
     };
 
     run_wallet_with_cli(shutdown, runtime, config, cli)?;

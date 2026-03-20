@@ -2,12 +2,11 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use anyhow::anyhow;
-use tari_ootle_wallet_sdk::models::KeyBranch;
+use tari_ootle_wallet_sdk::models::Account;
 use tari_ootle_walletd_client::{
     WalletDaemonClient,
     types::{AuthCredentials, AuthLoginRequest, AuthLoginResponse, WebauthnFinishAuthRequest},
 };
-use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::process_manager::Instance;
 
@@ -43,10 +42,10 @@ impl WalletDaemonProcess {
         Ok(client)
     }
 
-    pub async fn create_nonce_key(&self) -> anyhow::Result<(RistrettoPublicKeyBytes, u64)> {
+    pub async fn get_account_by_name(&self, name: String) -> anyhow::Result<Account> {
         let mut client = self.connect_client(None).await?;
-        let response = client.create_key(KeyBranch::Nonce).await.map_err(|e| anyhow!(e))?;
-        Ok((response.public_key, response.id))
+        let resp = client.accounts_get(name.into()).await?;
+        Ok(resp.account)
     }
 
     pub fn instance(&self) -> &Instance {

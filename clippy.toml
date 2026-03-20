@@ -4,3 +4,4 @@ too-many-arguments-threshold = 7
 enum-variant-size-threshold = 216
 allow-indexing-slicing-in-tests = true
 suppress-restriction-lint-in-const = true
+large-error-threshold = 192

@@ -11,8 +11,7 @@ use minotari_app_grpc::{
     tari_rpc::{GetBalanceRequest, SubmitValidatorEvictionProofRequest, ValidateRequest},
 };
 use tari_engine_types::confidential::{AbridgedTransactionKernel, EncodedMerkleProof, MinotariBurnClaimProof};
-use tari_ootle_wallet_sdk::models::KeyBranch;
-use tari_ootle_walletd_client::types::ClaimBurnProof;
+use tari_ootle_walletd_client::types::{ClaimBurnProof, ClaimBurnProofContents};
 use tari_template_lib_types::{
     EncryptedData,
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
@@ -48,7 +47,7 @@ async fn when_i_burn_on_wallet(
 
     let walletd = world.get_wallet_daemon(&walletd_name);
     let mut client = walletd.get_authed_client().await;
-    let nonce = client.create_key(KeyBranch::Nonce).await.unwrap();
+    let account = client.accounts_get_default().await.unwrap();
 
     let amount = amount * T;
     let mut client = wallet.create_client().await;
@@ -59,7 +58,7 @@ async fn when_i_burn_on_wallet(
             payment_id: MemoField::new_open("Burn".as_bytes().to_vec(), TxType::Burn)
                 .unwrap()
                 .to_bytes(),
-            claim_public_key: nonce.public_key.as_bytes().to_vec(),
+            claim_public_key: account.account.owner_public_key().as_bytes().to_vec(),
             sidechain_deployment_key: vec![],
         })
         .await
@@ -80,7 +79,6 @@ async fn when_i_burn_on_wallet(
 
     world.claim_proofs.insert(proof_name, CucumberClaimProof::Pending {
         commitment: PedersenCommitmentBytes::from_bytes(&resp.commitment).unwrap(),
-        nonce_id: nonce.id,
         kernel_excess_sig_nonce,
         kernel_excess_sig_signature,
     });
@@ -99,10 +97,7 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
         panic!("Claim proof {} not found", proof_name);
     });
 
-    let CucumberClaimProof::Pending {
-        commitment, nonce_id, ..
-    } = proof
-    else {
+    let CucumberClaimProof::Pending { commitment, .. } = proof else {
         // Already confirmed
         return Ok(());
     };
@@ -206,7 +201,7 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
         .merkle_proof
         .ok_or_else(|| anyhow!("No merkle proof in claim proof"))?;
 
-    let proof = ClaimBurnProof {
+    let proof = ClaimBurnProofContents {
         claim_proof: MinotariBurnClaimProof {
             burn_public_key: reciprocal_claim_public_key,
             commitment,
@@ -227,13 +222,12 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
             value: proof_resp.value,
             sender_offset_public_key,
         },
-        owner_nonce_key_index: *nonce_id,
         encrypted_data: EncryptedData::try_from(proof_resp.encrypted_data)
             .map_err(|e| anyhow!("Encrypted data length is out of bounds: {e}",))?,
     };
 
     world.claim_proofs.insert(proof_name, CucumberClaimProof::Confirmed {
-        proof: Box::new(proof.clone()),
+        proof: ClaimBurnProof::Contents(Box::new(proof)),
     });
 
     Ok(())

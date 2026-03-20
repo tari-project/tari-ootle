@@ -1,10 +1,9 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
 use async_trait::async_trait;
-use log::debug;
 use tokio::process::Command;
 
 use crate::process_definitions::{ProcessContext, ProcessDefinition};
@@ -29,14 +28,6 @@ impl ProcessDefinition for MinotariNode {
         let listener_address = format!("/ip4/{listen_ip}/tcp/{p2p_port}");
         let public_ip = context.get_setting("public_ip").unwrap_or("127.0.0.1");
         let public_address = format!("/ip4/{public_ip}/tcp/{p2p_port}");
-
-        let base_nodes = context.minotari_nodes();
-        let mut base_node_addresses = Vec::new();
-        for base_node in base_nodes {
-            let identity = base_node.get_identity()?;
-            debug!("Base node identity: {identity}");
-            base_node_addresses.push(identity);
-        }
 
         let network = context.network();
 
@@ -74,5 +65,10 @@ impl ProcessDefinition for MinotariNode {
 
     fn get_relative_data_path(&self) -> Option<PathBuf> {
         Some("data".into())
+    }
+
+    fn after_start_delay(&self) -> Duration {
+        // The identity file take a little while to be created
+        Duration::from_secs(1)
     }
 }

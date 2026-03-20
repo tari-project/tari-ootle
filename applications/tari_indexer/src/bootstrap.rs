@@ -46,7 +46,7 @@ use tari_epoch_oracles::{
 use tari_indexer_client::event::IndexerEvent;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_ootle_app_utilities::{
-    claim_burn_proof_verifier::TariClaimBurnProofVerifier,
+    claim_burn_proof_verifier::KnowledgeProofVerifier,
     configuration::convert_network_to_l1_network,
     epoch_oracle_config::EpochOracleType,
     fee_tables::get_fee_table_by_network,
@@ -239,7 +239,9 @@ pub async fn spawn_services(
         epoch_manager.clone(),
         template_manager.clone(),
         substate_manager.clone(),
-        TariClaimBurnProofVerifier::new(config.network, global_db.clone()),
+        // We do not verify the kernel merkle proof, since that requires syncing L1 headers
+        // TODO: maybe at least validate the well-formedness of the proof
+        KnowledgeProofVerifier::new(config.network),
     );
 
     let transaction_manager = TransactionManager::new(network_client.clone(), store.clone());

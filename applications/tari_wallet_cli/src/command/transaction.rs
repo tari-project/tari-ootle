@@ -690,6 +690,9 @@ fn display_vec<W: fmt::Write>(writer: &mut W, ty: &Type, result: &InstructionRes
             let str = format_tuple(subtypes, result);
             write!(writer, "{}", str)?;
         },
+        Type::Option(ty) => {
+            write!(writer, "Option<{}>: <not implemented>", ty)?;
+        },
         Type::Other { name } if name == "Amount" => {
             write!(writer, "{}", stringify_slice(&result.decode::<Vec<Amount>>().unwrap()))?;
         },
@@ -768,6 +771,18 @@ pub fn print_execution_results(results: &[InstructionResult]) {
             Type::Tuple(subtypes) => {
                 let str = format_tuple(subtypes, result);
                 println!("{}", str);
+            },
+            Type::Option(ty) => {
+                let mut vec_ty = String::new();
+                display_vec(&mut vec_ty, ty, result).unwrap();
+                match &**ty {
+                    Type::Other { name } => {
+                        println!("Option<{}>: {}", name, vec_ty);
+                    },
+                    _ => {
+                        println!("Option<{:?}>: {}", ty, vec_ty);
+                    },
+                }
             },
             Type::Other { name } if name == "Amount" => {
                 println!("{}: {}", name, result.decode::<Amount>().unwrap());

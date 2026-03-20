@@ -693,6 +693,9 @@ where
 
                 runtime.interface_mut().validate_return_value(&result.indexed)?;
                 runtime.interface_mut().pop_call_frame()?;
+                runtime
+                    .interface_mut()
+                    .set_last_instruction_output(IndexedValue::from_type(&account_address)?)?;
 
                 Ok(InstructionResult::empty())
             },

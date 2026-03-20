@@ -40,6 +40,7 @@ CRATES = [
     ("tari_consensus_types", "crates/consensus_types"),
     ("ootle-wasm-core", "crates/ootle_wasm/core"),
     ("ootle-wasm", "crates/ootle_wasm/wasm"),
+    ("tari_template_test_tooling", "crates/template_test_tooling"),
 ]
 
 WAIT_SECS = 30

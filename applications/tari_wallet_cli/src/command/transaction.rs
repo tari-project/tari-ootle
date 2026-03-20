@@ -691,16 +691,7 @@ fn display_vec<W: fmt::Write>(writer: &mut W, ty: &Type, result: &InstructionRes
             write!(writer, "{}", str)?;
         },
         Type::Option(ty) => {
-            let mut vec_ty = String::new();
-            display_vec(&mut vec_ty, ty, result)?;
-            match &**ty {
-                Type::Other { name } => {
-                    write!(writer, "Option<{}>: {}", name, vec_ty)?;
-                },
-                _ => {
-                    write!(writer, "Option<{:?}>: {}", ty, vec_ty)?;
-                },
-            }
+            write!(writer, "Option<{}>: <not implemented>", ty)?;
         },
         Type::Other { name } if name == "Amount" => {
             write!(writer, "{}", stringify_slice(&result.decode::<Vec<Amount>>().unwrap()))?;

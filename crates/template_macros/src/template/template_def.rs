@@ -35,7 +35,7 @@ use tari_template_abi::{
 
 use crate::template::ast::{TemplateAst, TypeAst};
 
-pub fn generate_abi(ast: &TemplateAst) -> Result<TokenStream> {
+pub fn generate_template_def(ast: &TemplateAst) -> Result<TokenStream> {
     let template_name_as_str = ast.template_name.to_string();
 
     let template_def = TemplateDef::V1(TemplateDefV1 {
@@ -173,7 +173,7 @@ fn path_segment_to_arg_type(template_name: &str, segment: Option<&PathSegment>) 
                 ArgType::Option(Box::new(inner))
             },
             "Self" => ArgType::Other {
-                name: format!("Component<{}>", template_name),
+                name: template_name.to_string(),
             },
             type_name => {
                 let seg = segment.expect("segment is some");
@@ -183,11 +183,10 @@ fn path_segment_to_arg_type(template_name: &str, segment: Option<&PathSegment>) 
                             .iter()
                             .map(|arg| match arg {
                                 GenericArgument::Type(Type::Path(path)) => {
-                                    let inner = path_segment_to_arg_type(template_name, path.path.segments.first());
-                                    format!("{inner}")
+                                    path_segment_to_arg_type(template_name, path.path.segments.last()).to_string()
                                 },
                                 GenericArgument::Type(Type::Tuple(tuple)) => {
-                                    format!("{}", tuple_to_arg_type(template_name, tuple))
+                                    tuple_to_arg_type(template_name, tuple).to_string()
                                 },
                                 a => format!("{:?}", a),
                             })
@@ -205,12 +204,21 @@ fn path_segment_to_arg_type(template_name: &str, segment: Option<&PathSegment>) 
 
 fn extract_single_generic_arg(template_name: &str, segment: &PathSegment) -> ArgType {
     match &segment.arguments {
-        PathArguments::AngleBracketed(AngleBracketedGenericArguments { args, .. }) => match &args[0] {
-            GenericArgument::Type(Type::Path(path)) => {
-                path_segment_to_arg_type(template_name, path.path.segments.first())
-            },
-            GenericArgument::Type(Type::Tuple(tuple)) => tuple_to_arg_type(template_name, tuple),
-            a => panic!("Invalid generic argument {:?}", a),
+        PathArguments::AngleBracketed(AngleBracketedGenericArguments { args, .. }) => {
+            if args.len() != 1 {
+                panic!(
+                    "{} must have exactly one generic type argument, but has {}",
+                    segment.ident,
+                    args.len()
+                );
+            }
+            match &args[0] {
+                GenericArgument::Type(Type::Path(path)) => {
+                    path_segment_to_arg_type(template_name, path.path.segments.last())
+                },
+                GenericArgument::Type(Type::Tuple(tuple)) => tuple_to_arg_type(template_name, tuple),
+                a => panic!("Invalid generic argument {:?}", a),
+            }
         },
         _ => panic!("{} must specify a type argument: {:?}", segment.ident, segment),
     }
@@ -242,13 +250,13 @@ mod tests {
     use syn::parse2;
     use tari_template_abi::{TemplateDef, Type as ArgType};
 
-    use super::generate_abi;
+    use super::generate_template_def;
     use crate::template::ast::TemplateAst;
 
     fn parse_template_def(input: &str) -> TemplateDef {
         let tokens = TokenStream::from_str(input).unwrap();
         let ast = parse2::<TemplateAst>(tokens).unwrap();
-        let output = generate_abi(&ast).unwrap();
+        let output = generate_template_def(&ast).unwrap();
 
         // The generated code is: pub static TEMPLATE_DEF: [u8; N] = [b0, b1, ...] ;
         // Extract the byte array after "= ["

@@ -266,7 +266,10 @@ fn test_tuples() {
     let module = template_test.get_module("Tuple");
     // the "new" constructor returns a tuple (Component, String)
     let fn_new = module.find_func_by_name("new").unwrap();
-    assert_eq!(fn_new.output.to_string(), "Tuple<Other { name: \"Component\" },String>");
+    assert_eq!(
+        fn_new.output.to_string(),
+        "Tuple<Other { name: \"Component<Tuple>\" },String>"
+    );
     // the "get" method returns a tuple (String, u32)
     let fn_get = module.find_func_by_name("get").unwrap();
     assert_eq!(fn_get.output.to_string(), "Tuple<String,U32>");

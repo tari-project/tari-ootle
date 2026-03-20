@@ -11962,7 +11962,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_abi"
-version = "0.15.2"
+version = "0.16.0"
 dependencies = [
  "hashbrown 0.13.2",
  "serde",
@@ -11988,7 +11988,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_lib"
-version = "0.20.1"
+version = "0.21.0"
 dependencies = [
  "borsh",
  "serde",
@@ -12018,7 +12018,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_macros"
-version = "0.15.1"
+version = "0.16.0"
 dependencies = [
  "indoc",
  "proc-macro2",

@@ -32,15 +32,18 @@ CRATES = [
     ("tari_template_lib", "crates/template_lib"),
     ("tari_engine_types", "crates/engine_types"),
     ("tari_ootle_common_types", "crates/common_types"),
+    ("tari_ootle_wallet_crypto", "crates/wallet/crypto"),
     ("tari_ootle_address", "crates/ootle_address"),
     ("tari_ootle_transaction", "crates/transaction"),
-    ("tari_transaction_manifest", "crates/transaction_manifest"),
     ("tari_template_builtin", "crates/template_builtin"),
+    ("tari_transaction_manifest", "crates/transaction_manifest"),
     ("tari_engine", "crates/engine"),
     ("tari_consensus_types", "crates/consensus_types"),
+    ("tari_indexer_client", "clients/tari_indexer_client"),
     ("ootle-wasm-core", "crates/ootle_wasm/core"),
     ("ootle-wasm", "crates/ootle_wasm/wasm"),
     ("tari_template_test_tooling", "crates/template_test_tooling"),
+    ("ootle-rs", "crates/wallet/ootle-rs"),
 ]
 
 WAIT_SECS = 30
@@ -171,7 +174,7 @@ def main():
         print(f"{YELLOW}=== DRY RUN (pass --execute to publish for real) ==={NC}")
         print()
 
-    published = 0
+    published_crates = []
     skipped = 0
     last_name = crates_to_publish[-1][0] if crates_to_publish else ""
 
@@ -187,7 +190,7 @@ def main():
             print(f"  {YELLOW}▶{NC} Publishing {name} {ver} ...")
             if cargo_publish(name):
                 print(f"  {GREEN}✓{NC} {name} {ver} — published")
-                published += 1
+                published_crates.append((name, ver))
                 if name != last_name:
                     print(f"    {YELLOW}Waiting {args.wait}s for crates.io indexing...{NC}")
                     time.sleep(args.wait)
@@ -199,11 +202,17 @@ def main():
                 sys.exit(1)
         else:
             print(f"  {YELLOW}▶{NC} {name} {ver} — would publish")
-            published += 1
+            published_crates.append((name, ver))
 
     print()
-    print(f"{GREEN}Done.{NC} Published: {published}, Skipped: {skipped}")
-    if not args.execute and published > 0:
+    print(f"{GREEN}Done.{NC} Published: {len(published_crates)}, Skipped: {skipped}")
+    if published_crates:
+        print()
+        print("Published crates:")
+        for name, ver in published_crates:
+            print(f"  - {name} {ver}")
+    if not args.execute and published_crates:
+        print()
         print(f"{YELLOW}Add --execute to publish for real.{NC}")
 
 

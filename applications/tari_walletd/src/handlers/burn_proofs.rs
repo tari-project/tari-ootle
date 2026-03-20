@@ -39,9 +39,9 @@ pub async fn handle_list(
     req: BurnProofsListRequest,
 ) -> Result<BurnProofsListResponse, anyhow::Error> {
     context.check_auth(token, &[JrpcPermission::Admin])?;
-    let dir = &context.config().burn_proof_dir;
+    let dir = context.config().get_burn_proof_dir(context.wallet_sdk().network());
 
-    let entries = match fs::read_dir(dir) {
+    let entries = match fs::read_dir(&dir) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Ok(BurnProofsListResponse { proofs: Vec::new() });
@@ -110,10 +110,10 @@ pub async fn handle_get(
     req: BurnProofsGetRequest,
 ) -> Result<BurnProofsGetResponse, anyhow::Error> {
     context.check_auth(token, &[JrpcPermission::Admin])?;
-    let dir = &context.config().burn_proof_dir;
+    let dir = context.config().get_burn_proof_dir(context.wallet_sdk().network());
 
     // Prevent path traversal
-    let file_name = std::path::Path::new(&req.file_name);
+    let file_name = Path::new(&req.file_name);
     if file_name.components().count() != 1 || req.file_name.contains("..") {
         return Err(anyhow!("Invalid file name"));
     }

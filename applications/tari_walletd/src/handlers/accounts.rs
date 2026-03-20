@@ -409,6 +409,7 @@ pub async fn handle_claim_burn(
 ) -> Result<ClaimBurnResponse, anyhow::Error> {
     context.check_auth(token, &[JrpcPermission::Admin])?;
     let sdk = context.wallet_sdk();
+    let network = sdk.network();
 
     let ClaimBurnRequest {
         account,
@@ -425,15 +426,14 @@ pub async fn handle_claim_burn(
         _ => None,
     };
 
+    let proof_dir = context.config().get_burn_proof_dir(network);
     let ClaimBurnProofContents {
         encrypted_data: claimed_encrypted_data,
         claim_proof,
-    } = resolve_claim_proof(&context.config().burn_proof_dir, claim_proof)
-        .await
-        .map_err(|e| {
-            error!(target: LOG_TARGET, "Error resolving claim proof: {}", e);
-            invalid_request(format!("Could not resolve claim proof. {e} Is the file name correct?"))
-        })?;
+    } = resolve_claim_proof(&proof_dir, claim_proof).await.map_err(|e| {
+        error!(target: LOG_TARGET, "Error resolving claim proof: {}", e);
+        invalid_request(format!("Could not resolve claim proof. {e} Is the file name correct?"))
+    })?;
 
     let accounts_api = sdk.accounts_api();
     let account = get_account(&account, &accounts_api)?;
@@ -590,7 +590,8 @@ pub async fn handle_claim_burn(
     let tx_id = context.transaction_service().submit_transaction(transaction).await?;
 
     if let Some(file_name) = proof_file_name {
-        super::burn_proofs::mark_as_claimed(&context.config().burn_proof_dir, &file_name);
+        let proof_dir = context.config().get_burn_proof_dir(network);
+        super::burn_proofs::mark_as_claimed(&proof_dir, &file_name);
     }
 
     Ok(ClaimBurnResponse {

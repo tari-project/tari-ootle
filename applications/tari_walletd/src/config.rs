@@ -88,9 +88,19 @@ pub struct WalletDaemonConfig {
     /// The number of contiguous failures to find an account derived from a public key before abandoning recovery and
     /// assuming that there are no further accounts.
     pub recovery_abandon_count: usize,
-    /// The directory to search for burn proof files.
-    pub burn_proof_dir: PathBuf,
+    /// Directory where burn proof files are read from after a burn transaction completes.
+    /// If not set, defaults to the platform data directory (e.g. ~/.local/share/tari/{network}/burn_proofs on Linux,
+    /// ~/Library/Application Support/tari/{network}/burn_proofs on macOS).
+    pub burn_proof_dir: Option<PathBuf>,
     pub override_keyring_password: Option<SafePassword>,
+}
+
+impl WalletDaemonConfig {
+    pub fn get_burn_proof_dir(&self, network: Network) -> PathBuf {
+        self.burn_proof_dir
+            .clone()
+            .unwrap_or_else(|| default_burn_proof_dir(network))
+    }
 }
 
 fn return_default_jwt_expiry() -> Duration {
@@ -122,16 +132,17 @@ impl Default for WalletDaemonConfig {
                 rp_id: "localhost".to_string(),
                 session_ttl: Duration::from_secs(60 * 60),
             },
-            burn_proof_dir: default_burn_proof_dir(),
+            burn_proof_dir: None,
             override_keyring_password: None,
         }
     }
 }
 
-fn default_burn_proof_dir() -> PathBuf {
+fn default_burn_proof_dir(network: Network) -> PathBuf {
     dirs_next::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("tari")
+        .join(network.as_key_str())
         .join("burn_proofs")
 }
 

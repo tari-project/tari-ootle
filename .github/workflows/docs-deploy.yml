@@ -21,7 +21,7 @@ jobs:
       - name: Checkout your repository using git
         uses: actions/checkout@v6
       - name: Install, build, and upload your site
-        uses: withastro/action@v5
+        uses: withastro/action@v6
         with:
           path: "docs/developer-docs"
           node-version: 24 # The specific version of Node that should be used to build your site. Defaults to 22. (optional)

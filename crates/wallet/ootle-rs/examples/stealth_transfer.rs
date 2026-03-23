@@ -2,29 +2,27 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use ootle_rs::{
+    Network,
     ToAccountAddress,
     TransactionRequest,
+    address,
     builtin_templates::{UnsignedTransactionBuilder, faucet::IFaucet},
     const_nonzero_u64,
     default_indexer_url,
+    displayable::Displayable,
     key_provider::PrivateKeyProvider,
     keys::HasViewOnlyKeySecret,
     provider::{PendingTransaction, Provider, ProviderBuilder, WalletProvider},
     stealth::{Output, StealthTransfer},
+    template_types::{
+        UtxoAddress,
+        constants::{TARI, TARI_TOKEN},
+    },
     transaction::TransactionSigner,
     wallet::OotleWallet,
 };
-use tari_ootle_address::address;
-use tari_ootle_common_types::{
-    Network,
-    displayable::Displayable,
-    engine_types::transaction_receipt::TransactionReceipt,
-};
+use tari_ootle_common_types::engine_types::transaction_receipt::TransactionReceipt;
 use tari_ootle_transaction::Transaction;
-use tari_template_lib_types::{
-    UtxoAddress,
-    constants::{TARI, TARI_TOKEN},
-};
 
 #[tokio::main]
 async fn main() {
@@ -37,7 +35,7 @@ async fn main() {
     let indexer_api_url = default_indexer_url(NETWORK);
     // This is the address that we will transfer to (Feel free to change this another address!)
     let recipient = address!(
-        "otl_loc_10mc0v2lyy43kldl0ft4c2x5pe7j0ckduv8zej6jgr2z2g9m07fz7gl96ar5wwgu0qu0atmr5tl53ye7n38xr5u7ytlmudq0ruxcau0gge7rxk"
+        "otl_loc_1xfack4y62u3jr57q9j6kwuc5g78v9ckcasdzp6l9l9xknp2nrq0k9pvjkgutzsydtdw6ev64crqz9r8m2m7u3ms6z6dsu9p6shpkvvcnxtx79"
     );
 
     let sender_secret = PrivateKeyProvider::random(NETWORK);

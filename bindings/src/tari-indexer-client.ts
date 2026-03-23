@@ -46,3 +46,4 @@ export * from "./types/tari-indexer-client/IndexerSubmitTransactionResponse";
 export * from "./types/tari-indexer-client/ListTransactionReceiptsRequest";
 export * from "./types/tari-indexer-client/IndexerConnectionDirection";
 export * from "./types/tari-indexer-client/ListSubstateItem";
+export * from "./types/tari-indexer-client/StreamTransactionEventsRequest";

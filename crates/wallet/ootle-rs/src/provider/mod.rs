@@ -4,6 +4,7 @@
 mod balance;
 mod builder;
 mod error;
+mod event_watcher;
 mod indexer;
 mod input_resolver;
 mod traits;
@@ -14,6 +15,7 @@ mod want_input;
 pub use balance::*;
 pub use builder::*;
 pub use error::*;
+pub use event_watcher::*;
 pub use indexer::*;
 pub use traits::*;
 pub use tx_watcher::*;

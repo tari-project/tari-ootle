@@ -9,7 +9,7 @@ use axum::{
 };
 use ootle_byte_type::ToByteType;
 use tari_epoch_manager::service::EpochManagerHandle;
-use tari_indexer_client::event::IndexerEvent;
+use tari_indexer_client::event::{IndexerEvent, TransactionEvent};
 use tari_networking::NetworkingHandle;
 use tari_ootle_common_types::Network;
 use tari_ootle_p2p::{PeerAddress, TariMessagingSpec};
@@ -52,6 +52,7 @@ impl HandlerContext {
                 template_manager: services.template_manager.clone(),
                 dry_run_transaction_processor: services.dry_run_transaction_processor.clone(),
                 subscriber: services.event_notifier.to_subscriber(),
+                transaction_event_subscriber: services.transaction_event_notifier.to_subscriber(),
             }),
         }
     }
@@ -119,6 +120,10 @@ impl HandlerContext {
     pub fn subscribe_events(&self) -> broadcast::Receiver<IndexerEvent> {
         self.inner.subscriber.subscribe()
     }
+
+    pub fn subscribe_transaction_events(&self) -> broadcast::Receiver<TransactionEvent> {
+        self.inner.transaction_event_subscriber.subscribe()
+    }
 }
 
 struct InnerContext {
@@ -135,4 +140,5 @@ struct InnerContext {
     template_manager: TemplateManager,
     dry_run_transaction_processor: DryRunTransactionProcessor,
     subscriber: Subscriber<IndexerEvent>,
+    transaction_event_subscriber: Subscriber<TransactionEvent>,
 }

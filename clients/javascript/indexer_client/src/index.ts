@@ -4,36 +4,70 @@
  */
 
 import type {
+  Event,
   GetEpochManagerStatsResponse,
-  GetNetworkSyncStateResponse, GetNonFungiblesRequest, GetNonFungiblesResponse,
+  GetNetworkSyncStateResponse,
+  GetNonFungiblesRequest,
+  GetNonFungiblesResponse,
   GetResourceResponse,
   ResourceAddress,
   GetSubstatesRequest,
-  GetSubstatesResponse, GetTransactionReceiptResponse,
+  GetSubstatesResponse,
+  GetTransactionReceiptResponse,
   IndexerGetConnectionsResponse,
   IndexerGetIdentityResponse,
   IndexerGetSubstateRequest,
   IndexerGetSubstateResponse,
   IndexerGetTransactionResultResponse,
-  IndexerReadyResponse, ListRecentTransactionsRequest, ListRecentTransactionsResponse,
-
-   ListTemplatesResponse, ListTransactionReceiptsRequest, ListTransactionReceiptsResponse,
+  IndexerReadyResponse,
+  ListRecentTransactionsRequest,
+  ListRecentTransactionsResponse,
+  ListTemplatesResponse,
+  ListTransactionReceiptsRequest,
+  ListTransactionReceiptsResponse,
   rejectReasonToString,
   stringToSubstateId,
+  StreamTransactionEventsRequest,
   SubstateId,
   substateIdToString,
   TemplatesGetResponse,
   TemplatesListAuthoredRequest,
   TemplatesListAuthoredResponse,
-  TransactionId, TransactionReceiptAddress,
+  TransactionId,
+  TransactionReceiptAddress,
   TransactionSubmitRequest,
-  TransactionSubmitResponse, QueryTransactionEventsRequest, QueryTransactionEventsResponse, GetNetworkInfoResponse,
+  TransactionSubmitResponse,
+  QueryTransactionEventsRequest,
+  QueryTransactionEventsResponse,
+  GetNetworkInfoResponse,
 } from "@tari-project/ootle-ts-bindings";
 import { FetchTransport, HttpTransport } from "./transports";
+import type { SseStream } from "./sse";
 
 export * as transports from "./transports";
+export type { SseEvent, SseStream, SseStreamOptions } from "./sse";
 
 export { substateIdToString, stringToSubstateId, rejectReasonToString };
+
+/**
+ * A template-emitted event with its originating transaction ID.
+ * Streamed via the /transactions/events/stream SSE endpoint.
+ */
+export interface TransactionEvent {
+  transaction_id: TransactionId;
+  event: Event;
+}
+
+export interface TransactionEventStreamOptions {
+  /** Called for each received transaction event */
+  onEvent: (event: TransactionEvent) => void;
+  /** Called when the stream encounters an error */
+  onError?: (error: Error) => void;
+  /** Called when the stream closes */
+  onClose?: () => void;
+  /** AbortSignal to cancel the stream */
+  signal?: AbortSignal;
+}
 
 export class IndexerClient {
   private transport: HttpTransport;
@@ -69,7 +103,6 @@ export class IndexerClient {
     return this.transport.sendGet(`network`, {});
   }
 
-  p
   public networkStats(): Promise<GetNetworkSyncStateResponse> {
     return this.transport.sendGet(`network/stats`, {});
   }
@@ -86,7 +119,6 @@ export class IndexerClient {
     return this.transport.sendGet(`substates/${encodeURIComponent(id)}`, params);
   }
 
-
   public fetchSubstates(params: GetSubstatesRequest): Promise<GetSubstatesResponse> {
     return this.transport.sendPost(`substates/fetch`, params);
   }
@@ -98,7 +130,6 @@ export class IndexerClient {
   public getTransactionResult(transaction_id: TransactionId): Promise<IndexerGetTransactionResultResponse> {
     return this.transport.sendGet(`transactions/${encodeURIComponent(transaction_id)}/result`, {});
   }
-
 
   public listRecentTransactions(params: ListRecentTransactionsRequest): Promise<ListRecentTransactionsResponse> {
     return this.transport.sendGet(`transactions/recent`, params);
@@ -119,15 +150,38 @@ export class IndexerClient {
     return this.transport.sendGet(`templates/${encodeURIComponent(template_address)}`, {});
   }
 
-  public templatesList(limit: number = 0): Promise<ListTemplatesResponse> {
-    return this.transport.sendGet(`templates`, { limit });
-  }
-
-  public templatesListAuthored(params: TemplatesListAuthoredRequest): Promise<TemplatesListAuthoredResponse> {
-    return this.transport.sendPost(`templates`, params);
+  public templatesListCached(limit: number = 0): Promise<ListTemplatesResponse> {
+    return this.transport.sendGet(`templates/cached`, { limit });
   }
 
   public resourcesGet(address: ResourceAddress): Promise<GetResourceResponse> {
     return this.transport.sendGet(`resources/${encodeURIComponent(address)}`, {});
+  }
+
+  /**
+   * Subscribe to a filtered stream of template-emitted transaction events via SSE.
+   *
+   * Returns an `SseStream` handle — call `.close()` to disconnect.
+   */
+  public streamTransactionEvents(
+    params: Partial<StreamTransactionEventsRequest>,
+    options: TransactionEventStreamOptions,
+  ): SseStream {
+    return this.transport.sendSse(`transactions/events/stream`, params, {
+      onEvent(sseEvent) {
+        if (sseEvent.event !== "TransactionEvent") return;
+        let parsed: TransactionEvent;
+        try {
+          parsed = JSON.parse(sseEvent.data);
+        } catch (e) {
+          options.onError?.(new Error(`Failed to parse TransactionEvent: ${e}`));
+          return;
+        }
+        options.onEvent(parsed);
+      },
+      onError: options.onError,
+      onClose: options.onClose,
+      signal: options.signal,
+    });
   }
 }

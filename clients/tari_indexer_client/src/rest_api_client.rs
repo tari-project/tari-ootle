@@ -43,6 +43,7 @@ use crate::{
         ListUtxosResponse,
         QueryTransactionEventsRequest,
         QueryTransactionEventsResponse,
+        StreamTransactionEventsRequest,
         SubmitTransactionDryRunResponse,
         SubmitTransactionRequest,
         SubmitTransactionResponse,
@@ -234,6 +235,14 @@ impl IndexerRestApiClient {
 
     pub async fn sse_events(&self) -> Result<SseEventStream, IndexerRestClientError> {
         let sse = self.send_sse("events", ()).await?;
+        sse.into_stream()
+    }
+
+    pub async fn sse_transaction_events(
+        &self,
+        req: StreamTransactionEventsRequest,
+    ) -> Result<SseEventStream, IndexerRestClientError> {
+        let sse = self.send_sse("transactions/events/stream", req).await?;
         sse.into_stream()
     }
 

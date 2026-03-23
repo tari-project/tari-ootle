@@ -10,7 +10,7 @@
       "name": "BSD-3-Clause",
       "identifier": "BSD-3-Clause"
     },
-    "version": "0.25.3"
+    "version": "0.26.1"
   },
   "paths": {
     "/epoch-manager/stats": {
@@ -649,6 +649,45 @@
             }
           }
         }
+      }
+    },
+    "/transactions/events/stream": {
+      "get": {
+        "tags": [
+          "handlers::transaction_events"
+        ],
+        "description": "SSE stream of template-emitted transaction events",
+        "operationId": "sse_transaction_events",
+        "parameters": [
+          {
+            "name": "topic",
+            "in": "query",
+            "description": "Filter by event topic",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "substate_id",
+            "in": "query",
+            "description": "Filter by substate ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "template_address",
+            "in": "query",
+            "description": "Filter by template address",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {}
       }
     },
     "/transactions/recent": {

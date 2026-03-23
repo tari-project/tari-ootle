@@ -170,7 +170,13 @@ export class IndexerClient {
     return this.transport.sendSse(`transactions/events/stream`, params, {
       onEvent(sseEvent) {
         if (sseEvent.event !== "TransactionEvent") return;
-        const parsed: TransactionEvent = JSON.parse(sseEvent.data);
+        let parsed: TransactionEvent;
+        try {
+          parsed = JSON.parse(sseEvent.data);
+        } catch (e) {
+          options.onError?.(new Error(`Failed to parse TransactionEvent: ${e}`));
+          return;
+        }
         options.onEvent(parsed);
       },
       onError: options.onError,

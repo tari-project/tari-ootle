@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use futures::Stream;
 use reqwest::{header, header::HeaderValue};
 
@@ -138,7 +138,7 @@ impl Stream for SseEventStream {
                         // Handle \r\n as a single line ending: if we split on \r and the
                         // next byte is \n, consume it so it isn't treated as a second break.
                         if this.buf.as_ref().ends_with(b"\r") && rest.first() == Some(&b'\n') {
-                            rest = rest.split_off(1);
+                            rest.advance(1);
                         }
                         let line = mem::replace(&mut this.buf, rest);
 

@@ -154,8 +154,9 @@ export function connectSse(url: string, options: SseStreamOptions): SseStream {
         buffer += decoder.decode(value, { stream: true });
 
         // Process complete lines, splitting on \r\n, \r, or \n per the SSE spec
+        const LINE_ENDING = /\r\n|\r|\n/;
         let match: RegExpExecArray | null;
-        while ((match = /\r\n|\r|\n/.exec(buffer)) !== null) {
+        while ((match = LINE_ENDING.exec(buffer)) !== null) {
           const line = buffer.slice(0, match.index);
           buffer = buffer.slice(match.index + match[0].length);
           processLine(line);

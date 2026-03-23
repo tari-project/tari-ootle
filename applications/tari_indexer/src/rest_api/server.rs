@@ -51,7 +51,8 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
     handlers::utxos::list_utxos,
     handlers::utxos::stream_utxo_updates,
     handlers::transaction_receipts::list_transaction_receipts,
-    handlers::transaction_receipts::get_transaction_receipt
+    handlers::transaction_receipts::get_transaction_receipt,
+    handlers::transaction_events::sse_transaction_events
 ))]
 pub struct ApiDoc;
 
@@ -114,6 +115,7 @@ impl Server {
                     get(handlers::transactions::get_transaction_result),
                 )
                 .route("/events", get(handlers::transactions::query_transaction_events))
+                .route("/events/stream", get(handlers::transaction_events::sse_transaction_events))
             )
             .nest("/templates", Router::new()
                 .route("/cached", get(handlers::templates::list_cached_templates))

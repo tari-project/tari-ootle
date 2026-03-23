@@ -251,6 +251,18 @@ pub struct QueryTransactionEventsResponse {
     pub events: Vec<(TransactionId, Event)>,
 }
 
+/// Filter parameters for the transaction events SSE stream.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct StreamTransactionEventsRequest {
+    pub topic: Option<String>,
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub substate_id: Option<SubstateId>,
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub template_address: Option<TemplateAddress>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]

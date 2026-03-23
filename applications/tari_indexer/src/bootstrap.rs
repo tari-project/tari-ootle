@@ -43,7 +43,7 @@ use tari_epoch_oracles::{
     hybrid::{HybridEpochOracle, watch_ticker},
     store::EpochOracleStore,
 };
-use tari_indexer_client::event::IndexerEvent;
+use tari_indexer_client::event::{IndexerEvent, TransactionEvent};
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_ootle_app_utilities::{
     claim_burn_proof_verifier::KnowledgeProofVerifier,
@@ -204,6 +204,7 @@ pub async fn spawn_services(
     );
 
     let event_notifier = Notify::new(1000);
+    let transaction_event_notifier = Notify::new(1024);
 
     network_state_sync::NetworkWideStateSync::new(
         epoch_manager.clone(),
@@ -214,6 +215,7 @@ pub async fn spawn_services(
             work_interval: config.indexer.state_scanning_interval,
         },
         event_notifier.clone(),
+        transaction_event_notifier.clone(),
     )
     .spawn(shutdown.clone());
 
@@ -262,6 +264,7 @@ pub async fn spawn_services(
         transaction_manager,
         dry_run_transaction_processor,
         event_notifier,
+        transaction_event_notifier,
     })
 }
 
@@ -279,6 +282,7 @@ pub struct Services {
         TransactionManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SqliteIndexerStore>,
     pub dry_run_transaction_processor: DryRunTransactionProcessor,
     pub event_notifier: Notify<IndexerEvent>,
+    pub transaction_event_notifier: Notify<TransactionEvent>,
 }
 
 fn ensure_directories_exist(config: &ApplicationConfig) -> io::Result<()> {

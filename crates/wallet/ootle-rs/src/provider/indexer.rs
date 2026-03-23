@@ -30,6 +30,8 @@ use crate::{
         Provider,
         ProviderError,
         ProviderResult,
+        TransactionEventFilter,
+        TransactionEventStream,
         TransactionWatcher,
         WalletProvider,
         WantInput,
@@ -87,6 +89,14 @@ impl<Wallet> IndexerProvider<Wallet> {
     pub async fn get_epoch(&self) -> ProviderResult<Epoch> {
         let resp = self.client.get_network_info().await?;
         Ok(resp.epoch)
+    }
+
+    /// Subscribe to a filtered stream of template-emitted events via SSE.
+    /// Each event is a template `Event` paired with its originating `TransactionId`.
+    ///
+    /// This is independent from transaction finalization watching (`PendingTransaction`).
+    pub fn watch_events(&self, filter: TransactionEventFilter) -> TransactionEventStream {
+        TransactionEventStream::new(Arc::downgrade(&self.client), filter)
     }
 
     pub async fn get_substate<T: Into<SubstateId>>(&self, substate_id: T) -> ProviderResult<Option<Substate>> {

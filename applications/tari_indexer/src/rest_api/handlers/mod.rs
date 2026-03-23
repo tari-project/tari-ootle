@@ -9,6 +9,7 @@ pub mod nfts;
 pub mod resources;
 pub mod substates;
 pub mod templates;
+pub mod transaction_events;
 pub mod transaction_receipts;
 pub mod transactions;
 pub mod utxos;

@@ -3,6 +3,7 @@
  * //  SPDX-License-Identifier: BSD-3-Clause
  */
 
+import { connectSse, SseStream, SseStreamOptions } from "../sse";
 import { HttpTransport, TransportOptions } from "./index";
 
 export default class FetchTransport implements HttpTransport {
@@ -40,6 +41,28 @@ export default class FetchTransport implements HttpTransport {
 
   sendDelete<T>(path: string, body: any, options?: TransportOptions): Promise<T> {
     return this.sendRequest<T>(path, { method: "DELETE", body }, options);
+  }
+
+  sendSse(path: string, params: any, options: SseStreamOptions): SseStream {
+    if (path.startsWith("/")) {
+      path = path.slice(1);
+    }
+
+    let url = `${this.url}/${path}`;
+    if (typeof params === "object" && params !== null) {
+      const urlParams = new URLSearchParams();
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null) {
+          urlParams.append(key, (value as any).toString());
+        }
+      }
+      const query = urlParams.toString();
+      if (query.length > 0) {
+        url += `?${query}`;
+      }
+    }
+
+    return connectSse(url, options);
   }
 
   async sendRequest<T>(path: string, request: RequestSpec, options?: TransportOptions): Promise<T> {

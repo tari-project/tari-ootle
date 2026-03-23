@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, pin::pin};
+use std::{collections::HashMap, pin::pin, sync::Arc};
 
 use futures::StreamExt;
 use log::*;
@@ -10,7 +10,7 @@ use tari_engine_types::{
     transaction_receipt::TransactionReceipt,
 };
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader, service::EpochManagerHandle};
-use tari_indexer_client::event::{IndexerEvent, NewEpochEvent, TransactionFinalizedEvent};
+use tari_indexer_client::event::{IndexerEvent, NewEpochEvent, TransactionEvent, TransactionFinalizedEvent};
 use tari_networking::NetworkingHandle;
 use tari_ootle_common_types::{Epoch, ShardGroup, StateVersion, VotePower, optional::Optional, shard::Shard};
 use tari_ootle_p2p::{PeerAddress, TariMessagingSpec, proto::rpc};
@@ -52,6 +52,7 @@ pub struct NetworkWideStateSync {
     stats: SyncStats,
     config: NetworkWideStateSyncConfig,
     notify: Notify<IndexerEvent>,
+    transaction_event_notify: Notify<TransactionEvent>,
 }
 
 impl NetworkWideStateSync {
@@ -61,6 +62,7 @@ impl NetworkWideStateSync {
         storage: SqliteIndexerStore,
         config: NetworkWideStateSyncConfig,
         notify: Notify<IndexerEvent>,
+        transaction_event_notify: Notify<TransactionEvent>,
     ) -> Self {
         Self {
             epoch_manager,
@@ -69,6 +71,7 @@ impl NetworkWideStateSync {
             stats: SyncStats::new(),
             config,
             notify,
+            transaction_event_notify,
         }
     }
 
@@ -454,6 +457,23 @@ impl NetworkWideStateSync {
         tx: &mut SqliteStoreWriteTransaction<'_>,
         receipts: I,
     ) -> Result<(), StorageError> {
+        let receipts: Vec<_> = receipts.into_iter().collect();
+
+        // Broadcast filtered events to the transaction event channel
+        for (receipt_addr, receipt) in &receipts {
+            let transaction_id = TransactionId::from_receipt_address(*receipt_addr);
+            for event in receipt.events.iter() {
+                if self.config.event_filters.is_empty() ||
+                    self.config.event_filters.iter().any(|filter| filter.matches(event))
+                {
+                    self.transaction_event_notify.notify(TransactionEvent {
+                        transaction_id,
+                        event: Arc::new(event.clone()),
+                    });
+                }
+            }
+        }
+
         tx.batch_insert_transaction_receipts(receipts, &self.config.event_filters)?;
         Ok(())
     }

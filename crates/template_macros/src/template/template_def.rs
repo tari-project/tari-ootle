@@ -435,7 +435,7 @@ mod tests {
         assert_eq!(funcs[0].name, "create");
         assert!(!funcs[0].is_mut);
         assert_eq!(funcs[0].output, ArgType::Other {
-            name: "Component<TestTemplate>".to_string()
+            name: "TestTemplate".to_string()
         });
 
         // &self method

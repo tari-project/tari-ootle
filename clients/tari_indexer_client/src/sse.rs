@@ -134,7 +134,12 @@ impl Stream for SseEventStream {
                     this.buf.put(bytes);
 
                     while let Some(part) = memchr::memchr2(b'\n', b'\r', this.buf.as_ref()) {
-                        let rest = this.buf.split_off(part + 1);
+                        let mut rest = this.buf.split_off(part + 1);
+                        // Handle \r\n as a single line ending: if we split on \r and the
+                        // next byte is \n, consume it so it isn't treated as a second break.
+                        if this.buf.as_ref().ends_with(b"\r") && rest.first() == Some(&b'\n') {
+                            rest = rest.split_off(1);
+                        }
                         let line = mem::replace(&mut this.buf, rest);
 
                         match parse_sse_event(&line, &mut this.event_buffer) {

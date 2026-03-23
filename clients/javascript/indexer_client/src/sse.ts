@@ -153,11 +153,11 @@ export function connectSse(url: string, options: SseStreamOptions): SseStream {
 
         buffer += decoder.decode(value, { stream: true });
 
-        // Process complete lines
-        let newlineIdx: number;
-        while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
-          const line = buffer.slice(0, newlineIdx).replace(/\r$/, "");
-          buffer = buffer.slice(newlineIdx + 1);
+        // Process complete lines, splitting on \r\n, \r, or \n per the SSE spec
+        let match: RegExpExecArray | null;
+        while ((match = /\r\n|\r|\n/.exec(buffer)) !== null) {
+          const line = buffer.slice(0, match.index);
+          buffer = buffer.slice(match.index + match[0].length);
           processLine(line);
         }
       }

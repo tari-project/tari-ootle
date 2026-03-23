@@ -23,6 +23,76 @@ streaming interface for consuming UTXO updates from a running indexer.
 | `SseEventStream`       | Server-Sent Events stream for live indexer events                |
 | `ProtobufStream`       | Streaming protobuf reader for bulk UTXO update feeds             |
 
+## API Endpoints
+
+### Identity & Status
+
+| Method | HTTP | Path | Description |
+|--------|------|------|-------------|
+| `wait_until_ready()` | GET | `/wait-until-ready` | Blocks until the indexer is ready to serve requests |
+
+### Network
+
+| Method | HTTP | Path | Description |
+|--------|------|------|-------------|
+| `get_network_info()` | GET | `/network` | Get network info |
+| `get_network_sync_state()` | GET | `/network/stats` | Get network sync stats |
+| `get_connections()` | GET | `/network/connections` | Get active peer connections |
+| `get_epoch_manager_stats()` | GET | `/epoch-manager/stats` | Get epoch manager stats |
+
+### Substates
+
+| Method | HTTP | Path | Description |
+|--------|------|------|-------------|
+| `get_substate(id, req)` | GET | `/substates/{substate_id}` | Fetch a substate by ID |
+| `fetch_substates(req)` | POST | `/substates/fetch` | Fetch several substates by their IDs |
+
+### Transactions
+
+| Method | HTTP | Path | Description |
+|--------|------|------|-------------|
+| `submit_transaction(req)` | POST | `/transactions` | Submit a transaction to validators |
+| `submit_transaction_dry_run(req)` | POST | `/transactions/dry-run` | Submit a transaction as a dry-run (rate limited) |
+| `get_transaction_result(req)` | GET | `/transactions/{transaction_id}/result` | Get the result of a submitted transaction |
+| `list_recent_transactions(req)` | GET | `/transactions/recent` | List recent transactions |
+| `query_transaction_events(req)` | GET | `/transactions/events` | Query and filter transaction events by substate ID and/or topic |
+| `sse_transaction_events(req)` | GET (SSE) | `/transactions/events/stream` | Subscribe to a live stream of template-emitted transaction events |
+
+### Templates
+
+| Method | HTTP | Path | Description |
+|--------|------|------|-------------|
+| `get_template_definition(address)` | GET | `/templates/{template_address}` | Fetch a template definition by its address |
+| `list_cached_templates(req)` | GET | `/templates/cached` | List all templates cached by this indexer |
+
+### Resources & Non-Fungibles
+
+| Method | HTTP | Path | Description |
+|--------|------|------|-------------|
+| `get_resource(address)` | GET | `/resources/{resource_address}` | Fetch a resource by ID |
+| `get_non_fungibles(req)` | GET | `/non-fungibles` | Get non-fungibles by resource address |
+
+### UTXOs
+
+| Method | HTTP | Path | Description |
+|--------|------|------|-------------|
+| `list_utxos(req)` | GET | `/utxos` | List full UTXO data |
+| `get_utxos(req)` | POST | `/utxos/fetch` | Get full UTXO data for a list of UTXO IDs |
+| `stream_utxo_updates_protobuf(req)` | POST | `/utxos/stream` | Stream UTXO updates via protobuf encoding |
+
+### Transaction Receipts
+
+| Method | HTTP | Path | Description |
+|--------|------|------|-------------|
+| `list_transaction_receipts(req)` | GET | `/transaction-receipts` | List transaction receipts |
+| `get_transaction_receipt(address)` | GET | `/transaction-receipts/{address}` | Get a transaction receipt by address |
+
+### Events
+
+| Method | HTTP | Path | Description |
+|--------|------|------|-------------|
+| `sse_events()` | GET (SSE) | `/events` | Subscribe to live indexer events |
+
 ## Example
 
 ```rust

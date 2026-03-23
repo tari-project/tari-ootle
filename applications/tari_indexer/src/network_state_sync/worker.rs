@@ -462,7 +462,7 @@ impl NetworkWideStateSync {
         // Broadcast filtered events to the transaction event channel
         for (receipt_addr, receipt) in &receipts {
             let transaction_id = TransactionId::from_receipt_address(*receipt_addr);
-            for event in receipt.events.iter() {
+            for event in &receipt.events {
                 if self.config.event_filters.is_empty() ||
                     self.config.event_filters.iter().any(|filter| filter.matches(event))
                 {

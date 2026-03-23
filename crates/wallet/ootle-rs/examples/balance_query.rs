@@ -102,8 +102,8 @@ async fn main() {
     // Skip if placeholder values are still set.
     if VIEW_SECRET_KEY_HEX == "0000000000000000000000000000000000000000000000000000000000000000" {
         println!(
-            "\nSkipping UTXO decryption (placeholder config values). Set RESOURCE_ADDRESS_HEX, VIEW_SECRET_KEY_HEX, \
-             and UTXO_ID to real values to test."
+            "\nSkipping UTXO decryption (placeholder config values). Set RESOURCE_ADDRESS_WITH_VIEW_KEY_ENABLED, \
+             VIEW_SECRET_KEY_HEX, and UTXO_ID to real values to test."
         );
         return;
     }

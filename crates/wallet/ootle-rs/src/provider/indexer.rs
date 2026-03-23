@@ -67,6 +67,10 @@ impl<Wallet> IndexerProvider<Wallet> {
         self
     }
 
+    pub(crate) fn client(&self) -> &IndexerRestApiClient {
+        &self.client
+    }
+
     pub async fn get_network(&self) -> ProviderResult<Network> {
         let resp = self.client.get_network_info().await?;
         Ok(resp.network)

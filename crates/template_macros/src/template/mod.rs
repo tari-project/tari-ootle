@@ -55,15 +55,3 @@ pub fn generate_template(input: TokenStream) -> Result<TokenStream> {
 
     Ok(output)
 }
-
-pub fn generate_template_non_wasm(input: TokenStream) -> Result<TokenStream> {
-    let ast = parse2::<TemplateAst>(input).unwrap();
-
-    let definition = generate_definition(&ast);
-
-    let output = quote! {
-        #definition
-    };
-
-    Ok(output)
-}

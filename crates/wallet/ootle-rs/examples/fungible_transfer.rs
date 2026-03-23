@@ -2,19 +2,20 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use ootle_rs::{
+    Network,
     ToAccountAddress,
     TransactionRequest,
     address,
     builtin_templates::{UnsignedTransactionBuilder, account::IAccount, faucet::IFaucet},
     default_indexer_url,
+    displayable::Displayable,
     key_provider::PrivateKeyProvider,
     keys::HasViewOnlyKeySecret,
     provider::{PendingTransaction, Provider, ProviderBuilder, WalletProvider},
+    template_types::constants::{TARI, TARI_TOKEN},
     transaction::TransactionSigner,
     wallet::OotleWallet,
 };
-use tari_ootle_common_types::{Network, displayable::Displayable};
-use tari_template_lib_types::constants::{TARI, TARI_TOKEN};
 
 #[tokio::main]
 async fn main() {
@@ -124,6 +125,37 @@ async fn main() {
 
     let pending_tx = provider.send_transaction(transaction).await.unwrap();
     print_fancy_results(&pending_tx).await;
+
+    // ---- Balance Queries ----
+
+    // Query the sender's TARI balance
+    let sender_balance = provider
+        .get_account_balance(account_component_addr, tari_token)
+        .await
+        .unwrap();
+    println!("Sender TARI balance: {sender_balance}");
+
+    // Query all balances for the sender account
+    let all_balances = provider.get_account_balances(account_component_addr).await.unwrap();
+    println!("Sender account balances:");
+    for (resource, balance) in &all_balances {
+        println!("  {resource}: {balance}");
+    }
+
+    // Query recipient balances
+    let recipient1_balance = provider
+        .get_account_balance(recipient1.to_account_address(), tari_token)
+        .await
+        .unwrap();
+    println!("Recipient 1 TARI balance: {recipient1_balance}");
+    assert_eq!(recipient1_balance, 2 * TARI);
+
+    let recipient2_balance = provider
+        .get_account_balance(recipient2.to_account_address(), tari_token)
+        .await
+        .unwrap();
+    println!("Recipient 2 TARI balance: {recipient2_balance}");
+    assert_eq!(recipient2_balance, TARI);
 }
 
 async fn print_fancy_results(pending_tx: &PendingTransaction) {

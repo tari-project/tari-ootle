@@ -35,6 +35,8 @@ import {
   IoGitNetworkOutline,
   IoHome,
   IoHomeOutline,
+  IoReceipt,
+  IoReceiptOutline,
 } from "react-icons/io5";
 import { TbTimelineEventText, TbTemplate } from "react-icons/tb";
 
@@ -63,6 +65,12 @@ const mainItems = [
     icon: <IoBarChartOutline style={iconStyle} />,
     activeIcon: <IoBarChart style={activeIconStyle} />,
     link: "transactions",
+  },
+  {
+    title: "Transaction Receipts",
+    icon: <IoReceiptOutline style={iconStyle} />,
+    activeIcon: <IoReceipt style={activeIconStyle} />,
+    link: "transaction-receipts",
   },
   {
     title: "Events",

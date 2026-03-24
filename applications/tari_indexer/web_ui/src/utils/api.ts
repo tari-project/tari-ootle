@@ -25,12 +25,18 @@ import type {
   IndexerGetIdentityResponse,
   GetNonFungiblesRequest,
   GetNonFungiblesResponse,
+  GetTransactionReceiptResponse,
   IndexerGetSubstateResponse,
   IndexerGetTransactionResultRequest,
   IndexerGetTransactionResultResponse,
   ListRecentTransactionsRequest,
   ListRecentTransactionsResponse,
-   SubstateId, QueryTransactionEventsRequest, QueryTransactionEventsResponse,
+  ListTransactionReceiptsRequest,
+  ListTransactionReceiptsResponse,
+  SubstateId,
+  TransactionReceiptAddress,
+  QueryTransactionEventsRequest,
+  QueryTransactionEventsResponse,
 } from "@tari-project/ootle-ts-bindings";
 import { IndexerClient } from "@tari-project/indexer-client";
 
@@ -108,6 +114,16 @@ export const listRecentTransactions = (
 
 export const queryTransactionEvents = (req: QueryTransactionEventsRequest): Promise<QueryTransactionEventsResponse> =>
   client().then((c) => c.queryTransactionEvents(req));
+
+export const listTransactionReceipts = (
+  request: ListTransactionReceiptsRequest,
+): Promise<ListTransactionReceiptsResponse> =>
+  client().then((c) => c.listTransactionReceipts(request));
+
+export const getTransactionReceipt = (
+  address: TransactionReceiptAddress,
+): Promise<GetTransactionReceiptResponse> =>
+  client().then((c) => c.getTransactionReceipt(address));
 
 export const getTemplateDefinition = (templateAddress: string): Promise<any> =>
   client().then((c) => c.templatesGet(templateAddress));

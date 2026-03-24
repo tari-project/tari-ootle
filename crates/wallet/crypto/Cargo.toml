@@ -1,6 +1,6 @@
 [package]
 name = "tari_ootle_wallet_crypto"
-version = "0.2.0"
+version = "0.2.1"
 description = "Cryptographic utilities and types for Tari Ootle wallet"
 edition.workspace = true
 authors.workspace = true

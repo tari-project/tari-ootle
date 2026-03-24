@@ -28,7 +28,7 @@ prost = { workspace = true }
 serde_urlencoded = { version = "0.7.1", optional = true }
 futures = { workspace = true }
 utoipa = { workspace = true, optional = true, features = ["time"] }
-time = { workspace = true, features = ["serde"] }
+time = { workspace = true, features = ["serde", "serde-human-readable"] }
 memchr = "2.7.6"
 
 [dev-dependencies]

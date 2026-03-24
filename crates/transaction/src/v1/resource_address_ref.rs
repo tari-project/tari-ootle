@@ -15,6 +15,15 @@ pub enum ResourceAddressRef {
     Workspace(WorkspaceOffsetId),
 }
 
+impl ResourceAddressRef {
+    /// Shift any workspace ID by the given amount. Used when merging transaction builders.
+    pub fn remap_workspace_id(&mut self, id_offset: WorkspaceId) {
+        if let Self::Workspace(id) = self {
+            id.remap_id(id_offset);
+        }
+    }
+}
+
 impl From<ResourceAddress> for ResourceAddressRef {
     fn from(address: ResourceAddress) -> Self {
         Self::Address(address)

@@ -142,7 +142,7 @@ where TSpec: WalletSdkSpec
         while let Some(result) = stream.next().await {
             let update = result.map_err(|e| StealthScannerApiError::NetworkInterfaceError(e.into()))?;
             if let Some(recv_sos) = update.sos {
-                debug!(target: LOG_TARGET, "Received SOS for shard {}", recv_sos.shard);
+                debug!(target: LOG_TARGET, "Received StartOfShard for {}", recv_sos.shard);
                 // Commit the previous progress and start with the next shard
                 if let Some(sos) = sos.take() {
                     if num_received > 0 {

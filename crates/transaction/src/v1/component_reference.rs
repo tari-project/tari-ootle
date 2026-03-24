@@ -23,6 +23,13 @@ impl ComponentReference {
             Self::Workspace(_) => None,
         }
     }
+
+    /// Shift any workspace ID by the given amount. Used when merging transaction builders.
+    pub fn remap_workspace_id(&mut self, id_offset: WorkspaceId) {
+        if let Self::Workspace(id) = self {
+            *id = id.checked_add(id_offset).expect("Workspace ID overflow during merge");
+        }
+    }
 }
 
 impl From<ComponentAddress> for ComponentReference {

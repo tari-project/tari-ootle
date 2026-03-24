@@ -44,6 +44,42 @@ impl NamedArg {
     }
 }
 
+/// Trait for converting a value into a [`NamedArg`] for use in template method calls.
+///
+/// This enables macro-generated template methods to accept either:
+/// - Concrete values (any `T: Serialize`, CBOR-encoded into `NamedArg::Literal`)
+/// - Workspace references (`NamedArg::Workspace`, created via `workspace!("key")`)
+pub trait IntoArg {
+    fn into_arg(self) -> NamedArg;
+}
+
+impl IntoArg for NamedArg {
+    fn into_arg(self) -> NamedArg {
+        self
+    }
+}
+
+impl<T: Serialize> IntoArg for T {
+    /// Converts a serializable type to a `NamedArg::Literal` by CBOR-encoding it.
+    ///
+    /// ## Panics
+    /// if CBOR serialization fails.
+    fn into_arg(self) -> NamedArg {
+        NamedArg::from_type(&self).expect("Failed to serialize argument into NamedArg")
+    }
+}
+
+/// Utility macro for building a workspace argument.
+/// ```rust,ignore
+/// workspace!("foo") // expands to NamedArg::workspace("foo")
+/// ```
+#[macro_export]
+macro_rules! workspace {
+    ($name:expr) => {
+        $crate::builder::named_args::NamedArg::workspace($name)
+    };
+}
+
 /// Low-level macro used for counting characters in the encoding of arguments. Not intended for general usage
 #[macro_export]
 macro_rules! __expr_counter {

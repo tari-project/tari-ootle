@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Claus
 
 pub mod account;
+pub mod component;
 pub mod faucet;
 mod traits;
 

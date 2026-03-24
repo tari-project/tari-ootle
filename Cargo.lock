@@ -11988,7 +11988,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_lib_types"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "bincode 2.0.1",
  "bnum",

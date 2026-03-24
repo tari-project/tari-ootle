@@ -111,6 +111,9 @@ impl TransactionInputResolver {
             WantInput::SpecificSubstate { substate_id, required } => {
                 self.resolve_specific_substate(tx_mut, substates_to_cache, substate_id, *required)
             },
+            WantInput::AllComponentVaults { component_address } => {
+                self.resolve_all_component_vaults(tx_mut, substates_to_cache, component_address)
+            },
         }
     }
 
@@ -253,6 +256,81 @@ impl TransactionInputResolver {
             },
         }
         Ok(is_satisfied)
+    }
+
+    fn resolve_all_component_vaults(
+        &mut self,
+        tx_mut: &mut UnsignedTransaction,
+        substates_to_cache: &mut Vec<SubstateId>,
+        component_address: &ComponentAddress,
+    ) -> Result<bool, TransactionInputResolverError> {
+        let component_substate_id = SubstateId::Component(*component_address);
+        match self.cache.get(&component_substate_id) {
+            Some(Some(SubstateValue::Component(data))) => {
+                let component_state = data.body.to_indexed_well_known_types()?;
+                let vault_ids: Vec<_> = component_state
+                    .vault_ids()
+                    .iter()
+                    .map(|vault_id| SubstateId::Vault(*vault_id))
+                    .collect();
+
+                debug!(
+                    target: LOG_TARGET,
+                    "Discovering {} vault(s) in component {}",
+                    vault_ids.len(),
+                    component_address
+                );
+
+                let mut all_cached = true;
+                for vault_id in &vault_ids {
+                    match self.cache.get(vault_id) {
+                        Some(Some(vault)) => {
+                            let vault = vault.as_vault().ok_or_else(|| {
+                                TransactionInputResolverError::UnexpectedSubstateType {
+                                    expected: SubstateType::Vault,
+                                    found: SubstateType::from(vault),
+                                }
+                            })?;
+                            tx_mut.add_input(SubstateRequirement::unversioned(vault_id.clone()));
+                            if *vault.resource_address() != TARI_TOKEN {
+                                tx_mut.add_input(SubstateRequirement::unversioned(*vault.resource_address()));
+                            }
+                        },
+                        Some(None) => {
+                            // Vault not found, skip
+                        },
+                        None => {
+                            all_cached = false;
+                            debug!(
+                                target: LOG_TARGET,
+                                "Will try to cache vault substate {} for AllComponentVaults discovery",
+                                vault_id,
+                            );
+                            substates_to_cache.push(vault_id.clone());
+                        },
+                    }
+                }
+
+                Ok(all_cached)
+            },
+            Some(Some(found)) => Err(TransactionInputResolverError::UnexpectedSubstateType {
+                expected: SubstateType::Component,
+                found: SubstateType::from(found),
+            }),
+            Some(None) => Err(TransactionInputResolverError::RequiredSubstateNotFound {
+                substate_id: component_substate_id,
+                details: "Component does not exist".to_string(),
+            }),
+            None => {
+                debug!(
+                    target: LOG_TARGET,
+                    "Will try to cache component substate {} for AllComponentVaults discovery",
+                    component_address,
+                );
+                substates_to_cache.push(component_substate_id);
+                Ok(false)
+            },
+        }
     }
 
     async fn cache_substates(

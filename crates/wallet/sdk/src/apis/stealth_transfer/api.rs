@@ -743,6 +743,17 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 let fee_resource = params.fee_params.pay_fee_with_swap.as_ref().map(|swap| swap.input_resource).unwrap_or(TARI_TOKEN);
                 builder
                     .then(|b| {
+                        // When there are no stealth inputs or outputs, skip the stealth transfer instruction
+                        // and use a standard withdraw instead. A stealth transfer would still work correctly,
+                        // but a plain withdraw is more fee-efficient.
+                        let has_no_inputs_or_outputs = fee_transfer_statement.outputs_statement.outputs.is_empty() && fee_transfer_statement.inputs_statement.inputs.is_empty();
+                        if has_no_inputs_or_outputs {
+                            return b.call_method(*owner_account.component_address(), "withdraw", args![
+                                fee_resource,
+                                fee_transfer_statement.inputs_statement.revealed_amount,
+                            ]);
+                        }
+
                         if fee_transfer_statement.inputs_statement.revealed_amount.is_positive() {
                             // Withdraw from the owner's account
                             b.call_method(*owner_account.component_address(), "withdraw", args![
@@ -797,6 +808,18 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 }
             })
             .then(|builder| {
+                // When there are no stealth inputs or outputs, skip the stealth transfer instruction
+                // and use a standard withdraw instead. A stealth transfer would still work correctly,
+                // but a plain withdraw is more fee-efficient.
+                let has_no_inputs_or_outputs = transfer_statement.outputs_statement.outputs.is_empty() && transfer_statement.inputs_statement.inputs.is_empty();
+                if has_no_inputs_or_outputs {
+                    return builder.call_method(*owner_account.component_address(), "withdraw", args![
+                        params.resource_address,
+                        revealed_input_amount
+                    ])
+                    ;
+                }
+
                 if revealed_input_amount.is_positive() {
                     builder
                         .call_method(owner_account.account.component_address, "withdraw", args![

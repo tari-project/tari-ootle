@@ -29,7 +29,7 @@ pub const FAUCET_VAULT_ID: VaultId = VaultId::new(ObjectKey::from_array([1u8; 32
 
 pub fn setup_store() -> MemoryStateStore {
     let mut state_store = MemoryStateStore::new();
-    let xtr = Resource::new(
+    let tari = Resource::new(
         ResourceType::Stealth,
         SubstateOwnerRule::None,
         ResourceAccessRules::new(),
@@ -39,7 +39,9 @@ pub fn setup_store() -> MemoryStateStore {
         6,
         true,
     );
-    state_store.set_state(TARI_TOKEN.into(), Substate::new(0, xtr)).unwrap();
+    state_store
+        .set_state(TARI_TOKEN.into(), Substate::new(0, tari))
+        .unwrap();
 
     let resource_cont = ResourceContainer::Stealth {
         address: TARI_TOKEN,

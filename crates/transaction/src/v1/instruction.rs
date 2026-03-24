@@ -127,6 +127,86 @@ impl Instruction {
         matches!(self, Self::PayFeeFromBucket { .. })
     }
 
+    /// Shift all workspace IDs in this instruction by the given offset.
+    /// Used when merging two transaction builders to avoid workspace ID collisions.
+    ///
+    /// NOTE: Every variant is listed explicitly (no wildcard `_` arm) so that adding a new
+    /// `Instruction` variant produces a compile error here, forcing the author to handle
+    /// workspace ID remapping.
+    pub fn remap_workspace_ids(&mut self, id_offset: WorkspaceId) {
+        if id_offset == 0 {
+            return;
+        }
+        match self {
+            Self::CreateAccount {
+                bucket_workspace_id, ..
+            } => {
+                if let Some(id) = bucket_workspace_id {
+                    id.remap_id(id_offset);
+                }
+            },
+            Self::CallFunction { args, .. } => {
+                for arg in args {
+                    arg.remap_workspace_id(id_offset);
+                }
+            },
+            Self::CallMethod { call, args, .. } => {
+                call.remap_workspace_id(id_offset);
+                for arg in args {
+                    arg.remap_workspace_id(id_offset);
+                }
+            },
+            Self::PutLastInstructionOutputOnWorkspace { key } => {
+                *key = key.checked_add(id_offset).expect("Workspace ID overflow during merge");
+            },
+            Self::Assert { key, .. } => {
+                key.remap_id(id_offset);
+            },
+            Self::TakeFromBucket {
+                input_bucket,
+                output_bucket,
+                ..
+            } => {
+                input_bucket.remap_id(id_offset);
+                *output_bucket = output_bucket
+                    .checked_add(id_offset)
+                    .expect("Workspace ID overflow during merge");
+            },
+            Self::AllocateAddress { workspace_id, .. } => {
+                *workspace_id = workspace_id
+                    .checked_add(id_offset)
+                    .expect("Workspace ID overflow during merge");
+            },
+            Self::StealthTransfer {
+                resource_address_ref,
+                revealed_input_bucket,
+                ..
+            } => {
+                resource_address_ref.remap_workspace_id(id_offset);
+                if let Some(id) = revealed_input_bucket {
+                    id.remap_id(id_offset);
+                }
+            },
+            Self::PayFeeFromBucket { bucket } => {
+                bucket.remap_id(id_offset);
+            },
+            Self::UpdateComponentTemplate { component, migrate, .. } => {
+                component.remap_workspace_id(id_offset);
+                if let Some(migrate) = migrate {
+                    for arg in &mut migrate.args {
+                        arg.remap_workspace_id(id_offset);
+                    }
+                }
+            },
+            // No workspace IDs in these variants
+            Self::EmitLog { .. } |
+            Self::ClaimBurn { .. } |
+            Self::ClaimValidatorFees { .. } |
+            Self::DropAllProofsInWorkspace |
+            Self::PublishTemplate { .. } => {},
+        }
+    }
+
     pub fn allocated_workspace_id(&self) -> Option<WorkspaceId> {
         // These instructions allocate addresses a workspace ID
         match self {

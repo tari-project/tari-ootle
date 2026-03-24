@@ -233,6 +233,10 @@ impl IndexerRestApiClient {
         self.send_get(format!("resources/{addr}"), ()).await
     }
 
+    pub async fn get_tari_resource(&self) -> Result<GetResourceResponse, IndexerRestClientError> {
+        self.send_get("resources/tari", ()).await
+    }
+
     pub async fn sse_events(&self) -> Result<SseEventStream, IndexerRestClientError> {
         let sse = self.send_sse("events", ()).await?;
         sse.into_stream()

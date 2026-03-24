@@ -16,4 +16,7 @@ pub enum WantInput {
     },
     /// Adds a substate as an input. If required is false, the resolver only add the input if it was found.
     SpecificSubstate { substate_id: SubstateId, required: bool },
+    /// Fetches the component state and adds ALL vaults found in it as inputs.
+    /// Used by the generic component builder when the specific vault access pattern is unknown.
+    AllComponentVaults { component_address: ComponentAddress },
 }

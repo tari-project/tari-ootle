@@ -42,6 +42,15 @@ impl WorkspaceOffsetId {
     pub fn offset(&self) -> Option<usize> {
         self.offset
     }
+
+    /// Shift the workspace ID by the given amount. Used when merging transaction builders
+    /// to avoid workspace ID collisions.
+    pub fn remap_id(&mut self, id_offset: WorkspaceId) {
+        self.id = self
+            .id
+            .checked_add(id_offset)
+            .expect("Workspace ID overflow during merge");
+    }
 }
 
 impl fmt::Display for WorkspaceOffsetId {
@@ -101,6 +110,13 @@ impl InstructionArg {
         match self {
             Self::Literal(bytes) => Some(bytes),
             Self::Workspace(_) => None,
+        }
+    }
+
+    /// Shift any workspace ID by the given amount. Used when merging transaction builders.
+    pub fn remap_workspace_id(&mut self, id_offset: WorkspaceId) {
+        if let Self::Workspace(id) = self {
+            id.remap_id(id_offset);
         }
     }
 }

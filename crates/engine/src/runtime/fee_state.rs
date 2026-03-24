@@ -32,7 +32,7 @@ impl FeeState {
             return Err(RuntimeError::InvalidArgument {
                 argument: "vault_ref",
                 reason: format!(
-                    "Fees can only be paid using XTR, however the vault contained resource {}",
+                    "Fees can only be paid using TARI, however the vault contained resource {}",
                     resource_container.resource_address()
                 ),
             });

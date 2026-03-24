@@ -158,6 +158,10 @@ export class IndexerClient {
     return this.transport.sendGet(`resources/${encodeURIComponent(address)}`, {});
   }
 
+  public resourceGetTari(): Promise<GetResourceResponse> {
+    return this.transport.sendGet(`resources/tari`, {});
+  }
+
   /**
    * Subscribe to a filtered stream of template-emitted transaction events via SSE.
    *

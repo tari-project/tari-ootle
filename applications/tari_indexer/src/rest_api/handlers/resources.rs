@@ -75,6 +75,17 @@ pub async fn get_resource(
     }))
 }
 
-pub async fn get_xtr(context: Extension<HandlerContext>) -> HandlerResult<Json<GetResourceResponse>> {
+#[utoipa::path(
+    get,
+    path = "/resources/tari",
+    description = "Fetches the TARI resource",
+    responses(
+        (status = 200, description = "Resource details", body = GetResourceResponse),
+        (status = 404, description = "Resource not found", body = ErrorResponse),
+        (status = SERVICE_UNAVAILABLE, description = "Indexer is still syncing", body = ErrorResponse),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to fetch resource", body = ErrorResponse),
+    ),
+)]
+pub async fn get_tari(context: Extension<HandlerContext>) -> HandlerResult<Json<GetResourceResponse>> {
     get_resource(context, Path(TARI_TOKEN)).await
 }

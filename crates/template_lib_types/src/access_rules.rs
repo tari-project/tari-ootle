@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use tari_template_abi::rust::{collections::BTreeMap, prelude::*};
 
-use crate::{ComponentAddress, NonFungibleAddress, ResourceAddress, TemplateAddress};
+use crate::{ComponentAddress, NonFungibleAddress, ResourceAddress, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 /// Represents the types of possible access control rules over a component method or resource
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -101,6 +101,12 @@ impl From<ComponentAddress> for RuleRequirement {
 impl From<TemplateAddress> for RuleRequirement {
     fn from(address: TemplateAddress) -> Self {
         Self::ScopedToTemplate(address)
+    }
+}
+
+impl From<RistrettoPublicKeyBytes> for RuleRequirement {
+    fn from(public_key: RistrettoPublicKeyBytes) -> Self {
+        Self::NonFungibleAddress(NonFungibleAddress::from_public_key(public_key))
     }
 }
 
@@ -416,7 +422,7 @@ macro_rules! __rule_requirement {
         $crate::access_rules::RuleRequirement::Resource($x)
     };
     (non_fungible($x: expr)) => {
-        $crate::access_rules::RuleRequirement::NonFungibleAddress($x)
+        $crate::access_rules::RuleRequirement::NonFungibleAddress($x.into())
     };
     (public_key($x: expr)) => {
         $crate::access_rules::RuleRequirement::NonFungibleAddress($crate::NonFungibleAddress::from_public_key($x))

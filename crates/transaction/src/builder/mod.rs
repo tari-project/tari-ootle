@@ -298,6 +298,36 @@ impl<D> TransactionBuilder<D> {
         f(self)
     }
 
+    /// Merge another builder's instructions and inputs into this builder.
+    ///
+    /// Workspace IDs from `other` are remapped to avoid collisions with this builder's
+    /// workspace IDs. Fee instructions from `other` are NOT merged — fees should be
+    /// managed on the outer builder.
+    ///
+    /// This is the low-level primitive behind the higher-level `chain` method on
+    /// `OotleInvoke`.
+    pub fn merge(mut self, other: TransactionBuilder<D>) -> Self {
+        let id_offset = self.workspace_ids.next_id();
+        let other_next_id = other.workspace_ids.next_id();
+        let other_tx = other.unsigned_transaction;
+
+        // Merge inputs first (before consuming the transaction)
+        self.unsigned_transaction
+            .inputs_mut()
+            .extend(other_tx.inputs().iter().cloned());
+
+        // Remap workspace IDs in other's instructions and append them
+        for mut instruction in other_tx.into_instructions() {
+            instruction.remap_workspace_ids(id_offset);
+            self.unsigned_transaction.instructions_mut().push(instruction);
+        }
+
+        // Advance workspace ID counter past merged IDs
+        self.workspace_ids.set_next_id(id_offset + other_next_id);
+
+        self
+    }
+
     pub fn map<F: FnOnce(Self) -> T, T>(self, f: F) -> T {
         f(self)
     }

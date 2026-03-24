@@ -369,7 +369,7 @@ where TSpec: WalletSdkSpec
         let network = self.config_api.get_network()?;
         let transaction = Transaction::builder(network.as_byte())
             .with_dry_run(params.is_dry_run)
-            // TODO: we assume that from_account has XTR
+            // TODO: we assume that from_account has TARI
             .pay_fee_from_component(*from_account.component_address(), max_fee)
             .create_account(*params.destination_address.account_public_key())
             .then(|builder| {

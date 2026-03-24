@@ -34,9 +34,10 @@ use tari_ootle_common_types::engine_types::published_template::PublishedTemplate
 // ---------------------------------------------------------------------------
 // Step 1: Define the template interface
 //
-// The macro generates two types:
-//   - `StableCoin<'a, P>`          — for component methods (functions with &self / &mut self)
-//   - `StableCoinTemplate<'a, P>`  — for template functions (functions without self, e.g. constructors)
+// The macro generates a single generic struct `StableCoin<'a, P, I>` parameterized
+// by an interface marker. Use the constructors to select the interface:
+//   - `StableCoin::for_component(addr, &provider)` — component methods (&self / &mut self)
+//   - `StableCoin::for_template(addr, &provider)`  — template functions (no self, e.g. constructors)
 //
 // The method signatures should match the template's public API. Argument types
 // must implement `serde::Serialize` for CBOR encoding.

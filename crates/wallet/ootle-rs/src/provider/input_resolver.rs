@@ -268,22 +268,20 @@ impl TransactionInputResolver {
         match self.cache.get(&component_substate_id) {
             Some(Some(SubstateValue::Component(data))) => {
                 let component_state = data.body.to_indexed_well_known_types()?;
-                let vault_ids: Vec<_> = component_state
+                let vault_ids = component_state
                     .vault_ids()
                     .iter()
-                    .map(|vault_id| SubstateId::Vault(*vault_id))
-                    .collect();
+                    .map(|vault_id| SubstateId::Vault(*vault_id));
 
                 debug!(
                     target: LOG_TARGET,
-                    "Discovering {} vault(s) in component {}",
-                    vault_ids.len(),
+                    "Discovering vault(s) in component {}",
                     component_address
                 );
 
                 let mut all_cached = true;
-                for vault_id in &vault_ids {
-                    match self.cache.get(vault_id) {
+                for vault_id in vault_ids {
+                    match self.cache.get(&vault_id) {
                         Some(Some(vault)) => {
                             let vault = vault.as_vault().ok_or_else(|| {
                                 TransactionInputResolverError::UnexpectedSubstateType {
@@ -291,13 +289,21 @@ impl TransactionInputResolver {
                                     found: SubstateType::from(vault),
                                 }
                             })?;
-                            tx_mut.add_input(SubstateRequirement::unversioned(vault_id.clone()));
+                            tx_mut.add_input(SubstateRequirement::unversioned(vault_id));
                             if *vault.resource_address() != TARI_TOKEN {
                                 tx_mut.add_input(SubstateRequirement::unversioned(*vault.resource_address()));
                             }
                         },
                         Some(None) => {
-                            // Vault not found, skip
+                            // The vault ID came from the component's state but the indexer
+                            // reports it as missing — this indicates an inconsistent view.
+                            return Err(TransactionInputResolverError::RequiredSubstateNotFound {
+                                substate_id: vault_id,
+                                details: format!(
+                                    "Vault referenced by component {} was not found by the indexer",
+                                    component_address
+                                ),
+                            });
                         },
                         None => {
                             all_cached = false;
@@ -306,7 +312,7 @@ impl TransactionInputResolver {
                                 "Will try to cache vault substate {} for AllComponentVaults discovery",
                                 vault_id,
                             );
-                            substates_to_cache.push(vault_id.clone());
+                            substates_to_cache.push(vault_id);
                         },
                     }
                 }

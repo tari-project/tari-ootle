@@ -30,7 +30,14 @@ use tari_engine_types::{
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate, UtxoStateUpdateSet};
 use tari_indexer_lib::{cached_substate_manager::CachedSubstateManager, error::IndexerError};
-use tari_ootle_common_types::{Epoch, StateVersion, SubstateRequirementRef, shard::Shard, substate_type::SubstateType};
+use tari_ootle_common_types::{
+    Epoch,
+    StateVersion,
+    SubstateRequirementRef,
+    optional::IsNotFoundError,
+    shard::Shard,
+    substate_type::SubstateType,
+};
 use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::StorageError;
 use tari_template_lib_types::{
@@ -39,7 +46,7 @@ use tari_template_lib_types::{
     UtxoId,
     crypto::{RistrettoPublicKeyBytes, UtxoTag},
 };
-use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
+use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory};
 
 use crate::{
     storage_sqlite::SqliteIndexerStore,
@@ -164,13 +171,16 @@ impl SubstateManager {
             .cache_manager
             .get_substate(req.substate_id(), req.version())
             .await?;
-        let substate = substate_result
-            .into_up()
-            .ok_or_else(|| SubstateManagerError::InputSubstateIsDown {
+        match substate_result {
+            SubstateResult::Up { substate } => Ok(*substate),
+            SubstateResult::Down { version } => Err(SubstateManagerError::InputSubstateIsDown {
                 substate_id: req.substate_id().clone(),
-            })?;
-
-        Ok(substate)
+                version,
+            }),
+            SubstateResult::DoesNotExist => Err(SubstateManagerError::InputSubstateDoesNotExist {
+                substate_id: req.substate_id().clone(),
+            }),
+        }
     }
 
     pub async fn get_substates<'a, I: IntoIterator<Item = SubstateRequirementRef<'a>>>(
@@ -203,15 +213,22 @@ impl SubstateManager {
                 .cache_manager
                 .get_substate(req.substate_id(), req.version())
                 .await?;
-            if let Some(substate) = substate_result.into_up() {
-                results.insert(
-                    req.substate_id().clone(),
-                    Substate::new(substate.version(), substate.into_substate_value()),
-                );
-            } else {
-                return Err(SubstateManagerError::InputSubstateIsDown {
-                    substate_id: req.substate_id().clone(),
-                });
+            match substate_result {
+                SubstateResult::DoesNotExist => {
+                    // Skip, does not exist
+                },
+                SubstateResult::Up { substate } => {
+                    results.insert(
+                        req.substate_id().clone(),
+                        Substate::new(substate.version(), substate.into_substate_value()),
+                    );
+                },
+                SubstateResult::Down { version } => {
+                    return Err(SubstateManagerError::InputSubstateIsDown {
+                        substate_id: req.substate_id().clone(),
+                        version,
+                    });
+                },
             }
         }
         Ok(results)
@@ -288,6 +305,15 @@ pub enum SubstateManagerError {
     IndexerError(#[from] IndexerError),
     #[error("Storage error: {0}")]
     StorageError(#[from] StorageError),
-    #[error("Input substate {substate_id} is down")]
-    InputSubstateIsDown { substate_id: SubstateId },
+    #[error("Input substate {substate_id}v{version} is down")]
+    InputSubstateIsDown { substate_id: SubstateId, version: u32 },
+    #[error("Input substate {substate_id} does not exist")]
+    InputSubstateDoesNotExist { substate_id: SubstateId },
+}
+
+impl IsNotFoundError for SubstateManagerError {
+    fn is_not_found_error(&self) -> bool {
+        matches!(self, Self::InputSubstateDoesNotExist { .. }) ||
+            matches!(self, Self::StorageError(e) if e.is_not_found_error())
+    }
 }

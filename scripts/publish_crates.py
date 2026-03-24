@@ -6,7 +6,8 @@ Prerequisites:
     cargo login  # authenticate with crates.io
 
 Usage:
-    ./scripts/publish_crates.py                                     # dry-run
+    ./scripts/publish_crates.py                                     # show what would be published
+    ./scripts/publish_crates.py --dry-run                           # test builds without publishing
     ./scripts/publish_crates.py --execute                           # publish all
     ./scripts/publish_crates.py -p tari_engine --execute            # single crate
     ./scripts/publish_crates.py --from tari_engine_types --execute  # resume
@@ -46,7 +47,7 @@ CRATES = [
     ("ootle-rs", "crates/wallet/ootle-rs"),
 ]
 
-WAIT_SECS = 30
+WAIT_SECS = 20
 
 # Colors
 RED = "\033[0;31m"
@@ -104,11 +105,12 @@ def is_published(crate_name: str, version: str) -> bool:
     return False
 
 
-def cargo_publish(crate_name: str) -> bool:
+def cargo_publish(crate_name: str, dry_run: bool = False) -> bool:
     """Publish a crate using cargo publish."""
-    result = subprocess.run(
-        ["cargo", "publish", "-p", crate_name, "--no-verify", "--allow-dirty"],
-    )
+    cmd = ["cargo", "publish", "-p", crate_name, "--no-verify", "--allow-dirty"]
+    if dry_run:
+        cmd.append("--dry-run")
+    result = subprocess.run(cmd)
     return result.returncode == 0
 
 
@@ -116,9 +118,14 @@ def main():
     parser = argparse.ArgumentParser(
         description="Publish Tari Ootle crates to crates.io in dependency order.",
     )
-    parser.add_argument(
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
         "--execute", action="store_true",
         help="Actually publish. Without this flag, everything is a dry-run.",
+    )
+    mode_group.add_argument(
+        "--dry-run", action="store_true", dest="dry_run",
+        help="Test builds with 'cargo publish --dry-run' without actually publishing.",
     )
     parser.add_argument(
         "-p", "--package", action="append", default=[],
@@ -170,11 +177,14 @@ def main():
     else:
         crates_to_publish = list(CRATES)
 
-    if not args.execute:
+    if args.dry_run:
+        print(f"{YELLOW}=== DRY RUN (testing builds with cargo publish --dry-run) ==={NC}")
+    elif not args.execute:
         print(f"{YELLOW}=== DRY RUN (pass --execute to publish for real) ==={NC}")
-        print()
+    print()
 
     published_crates = []
+    failed_crates = []
     skipped = 0
     last_name = crates_to_publish[-1][0] if crates_to_publish else ""
 
@@ -200,20 +210,38 @@ def main():
                 print(f"{RED}Fix the issue and resume with:{NC}")
                 print(f"  ./scripts/publish_crates.py --from {name} --execute")
                 sys.exit(1)
+        elif args.dry_run:
+            print(f"  {YELLOW}▶{NC} {name} {ver} — would publish, testing build...")
+            if cargo_publish(name, dry_run=True):
+                print(f"  {GREEN}✓{NC} {name} {ver} — build OK")
+                published_crates.append((name, ver))
+            else:
+                print(f"  {RED}✗{NC} {name} {ver} — build failed")
+                failed_crates.append((name, ver))
         else:
             print(f"  {YELLOW}▶{NC} {name} {ver} — would publish")
             published_crates.append((name, ver))
 
     print()
-    print(f"{GREEN}Done.{NC} Published: {len(published_crates)}, Skipped: {skipped}")
+    if args.dry_run:
+        print(f"{GREEN}Done.{NC} Would publish: {len(published_crates)}, Failed: {len(failed_crates)}, Skipped: {skipped}")
+    else:
+        print(f"{GREEN}Done.{NC} Published: {len(published_crates)}, Skipped: {skipped}")
     if published_crates:
         print()
-        print("Published crates:")
+        print("Would publish:" if not args.execute else "Published crates:")
         for name, ver in published_crates:
             print(f"  - {name} {ver}")
-    if not args.execute and published_crates:
+    if failed_crates:
         print()
-        print(f"{YELLOW}Add --execute to publish for real.{NC}")
+        print(f"{RED}Failed crates:{NC}")
+        for name, ver in failed_crates:
+            print(f"  - {name} {ver}")
+    if not args.execute and not args.dry_run and published_crates:
+        print()
+        print(f"{YELLOW}Add --execute to publish for real, or --dry-run to test builds.{NC}")
+    if args.dry_run and failed_crates:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

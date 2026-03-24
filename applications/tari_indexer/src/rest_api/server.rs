@@ -39,6 +39,7 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
     handlers::substates::get_substate,
     handlers::substates::fetch_substates,
     handlers::nfts::get_non_fungibles,
+    handlers::resources::get_tari,
     handlers::resources::get_resource,
     handlers::indexer_events::sse_events,
     handlers::transactions::submit_transaction,
@@ -141,7 +142,8 @@ impl Server {
             )
             .nest("/resources/", Router::new()
                 // Convenience Shortcut
-                .route("/xtr" , get(handlers::resources::get_xtr))
+                .route("/xtr" , get(handlers::resources::get_tari))
+                .route("/tari" , get(handlers::resources::get_tari))
                 .route("/{resource_address}" , get(handlers::resources::get_resource)))
             .route("/events", get(handlers::indexer_events::sse_events))
             .layer(CorsLayer::permissive())

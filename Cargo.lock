@@ -11134,7 +11134,7 @@ dependencies = [
 
 [[package]]
 name = "tari_indexer_client"
-version = "0.27.0"
+version = "0.27.1"
 dependencies = [
  "anyhow",
  "bounded-vec",

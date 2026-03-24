@@ -49,7 +49,7 @@ mod tickets {
             let resource_address = ResourceBuilder::non_fungible().with_token_symbol("tix")
                 // The event description is common for all tickets
                 .add_metadata("event", event_description)
-                .mintable(rule!(all_of(component(component.get_address()), non_fungible(owner.into()))))
+                .mintable(rule!(all_of(component(component.get_address()), public_key(owner))))
                 // We'll track it from inside the component
                 .disable_total_supply_tracking()
                 .build();
@@ -62,7 +62,7 @@ mod tickets {
             );
             let tickets = Vault::from_bucket(ticket_bucket);
 
-            let earnings = Vault::new_empty(XTR);
+            let earnings = Vault::new_empty(TARI_TOKEN);
 
             Component::new(Self {
                 resource_address,

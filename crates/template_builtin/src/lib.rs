@@ -30,7 +30,7 @@ pub const ACCOUNT_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::from_arra
 pub const NFT_FAUCET_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::from_array([
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
 ]);
-/// Address of the XTR faucet template.
+/// Address of the TARI faucet template.
 /// 0102030000000000000000000000000000000000000000000000000000000000
 pub const XTR_FAUCET_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::from_array([
     1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,

@@ -24,8 +24,8 @@ fn first_claim_succeeds() {
 fn different_signers_can_each_claim_once() {
     let mut test = TemplateTest::new_builtin_only();
     // Each call uses a fresh key pair (auto-incrementing seed inside create_funded_account)
-    let _ = test.create_funded_account();
-    let _ = test.create_funded_account();
+    let _unused = test.create_funded_account();
+    let _unused = test.create_funded_account();
     // If we reach here without panic, both claims succeeded
 }
 

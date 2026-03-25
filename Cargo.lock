@@ -7401,7 +7401,7 @@ dependencies = [
 
 [[package]]
 name = "ootle-wasm"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.2.17",

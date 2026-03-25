@@ -55,6 +55,30 @@ pub struct ParsedOotleAddress {
     pub memo: Option<Vec<u8>>,
 }
 
+/// Seal a transaction (unsigned or unsealed JSON) with the seal signer's secret key.
+///
+/// Accepts either an `UnsignedTransactionV1` or `UnsealedTransactionV1` JSON string.
+/// Returns the sealed `Transaction` as a JSON string.
+#[wasm_bindgen(js_name = "sealTransaction")]
+pub fn seal_transaction(tx_json: &str, seal_signer_secret_key: &[u8]) -> Result<String, JsError> {
+    ootle_wasm_core::transaction::seal_transaction_json(tx_json, seal_signer_secret_key)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Add a signer to a transaction (unsigned or unsealed JSON).
+///
+/// Accepts either an `UnsignedTransactionV1` or `UnsealedTransactionV1` JSON string.
+/// Returns the `UnsealedTransactionV1` (with the new signature appended) as a JSON string.
+#[wasm_bindgen(js_name = "addTransactionSigner")]
+pub fn add_transaction_signer(
+    tx_json: &str,
+    signer_secret_key: &[u8],
+    seal_signer_public_key: &[u8],
+) -> Result<String, JsError> {
+    ootle_wasm_core::transaction::add_transaction_signer_json(tx_json, signer_secret_key, seal_signer_public_key)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
 /// BOR-encode a Transaction (JSON string) → base64 string (TransactionEnvelope format).
 #[wasm_bindgen(js_name = "borEncodeTransaction")]
 pub fn bor_encode_transaction(transaction_json: &str) -> Result<String, JsError> {

@@ -23,6 +23,7 @@
 pub mod claim_burn_proof_verifier;
 pub mod common_cli_args;
 pub mod configuration;
+#[cfg(feature = "epoch_oracle")]
 pub mod epoch_oracle_config;
 pub mod fee_tables;
 pub mod genesis_resources;

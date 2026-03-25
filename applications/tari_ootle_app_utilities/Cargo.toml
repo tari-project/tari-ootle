@@ -13,7 +13,7 @@ tari_crypto = { workspace = true, features = ["serde"] }
 tari_ootle_common_types = { workspace = true }
 tari_engine = { workspace = true }
 tari_ootle_storage = { workspace = true }
-tari_epoch_oracles = { workspace = true }
+tari_epoch_oracles = { workspace = true, optional = true }
 tari_engine_types = { workspace = true }
 tari_template_lib = { workspace = true }
 tari_ootle_transaction = { workspace = true }
@@ -41,3 +41,6 @@ tokio = { workspace = true, features = ["default", "macros", "time", "sync", "rt
 url = { workspace = true, features = ["serde"] }
 toml = { workspace = true }
 config = { workspace = true }
+
+[features]
+epoch_oracle = ["tari_epoch_oracles"]

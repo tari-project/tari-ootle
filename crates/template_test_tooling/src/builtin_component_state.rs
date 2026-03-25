@@ -23,6 +23,7 @@ use tari_template_lib::types::{
         PUBLIC_IDENTITY_RESOURCE_ADDRESS,
         STEALTH_TARI_RESOURCE_ADDRESS,
         TOKEN_SYMBOL,
+        XTR_FAUCET_CLAIM_RESOURCE_ADDRESS,
         XTR_FAUCET_VAULT_ADDRESS,
     },
     metadata,
@@ -104,6 +105,26 @@ pub fn initialize_builtin_faucet_state<TStore: StateWriter>(store: &mut TStore) 
                 entity_id,
                 body: ComponentBody { state },
             }),
+        )
+        .unwrap();
+
+    // Claim receipt resource: one NFT per claimant public key (minted then burned to record the claim).
+    let claim_resource = Resource::new(
+        ResourceType::NonFungible,
+        SubstateOwnerRule::None,
+        ResourceAccessRules::new()
+            .mintable(rule!(component(xtr_faucet_component())))
+            .burnable(rule!(allow_all)),
+        Metadata::new(),
+        None,
+        None,
+        0,
+        false,
+    );
+    store
+        .set_state(
+            SubstateId::Resource(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS),
+            Substate::new(0, claim_resource),
         )
         .unwrap();
 }

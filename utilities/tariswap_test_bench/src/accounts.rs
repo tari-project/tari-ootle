@@ -33,7 +33,7 @@ impl Runner {
             .new_transaction_builder()
             .with_fee_instructions_builder(|builder| {
                 builder
-                    .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![1_000_000_000])
+                    .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![])
                     .put_last_instruction_output_on_workspace("coins")
                     .create_account_with_bucket(owner_public_key, "coins")
                     .pay_fee_from_component(account_address, 1000u64)

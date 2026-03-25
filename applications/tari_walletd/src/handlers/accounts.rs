@@ -694,7 +694,7 @@ pub async fn handle_create_free_test_coins(
         .transaction_builder()
         .with_fee_instructions_builder(|fee_builder| {
             fee_builder
-                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![amount])
+                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![])
                 .put_last_instruction_output_on_workspace("faucet_funds")
                 .create_account_with_bucket(*account.address.account_public_key(), "faucet_funds")
                 .put_last_instruction_output_on_workspace("new_account")

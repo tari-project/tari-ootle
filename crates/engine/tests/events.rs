@@ -63,7 +63,7 @@ fn builtin_vault_events() {
     let (receiver_address, _, _) = test.create_empty_account();
     test.build_and_execute(
         Transaction::builder_localnet()
-            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![1000])
+            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![])
             .put_last_instruction_output_on_workspace("free_coins")
             .call_method(sender_address, "deposit", args![Workspace("free_coins")]),
         vec![test.owner_proof()],

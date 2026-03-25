@@ -570,9 +570,7 @@ impl TemplateTest {
         self.enable_fees = false;
         self.execute_expect_success(
             Transaction::builder_localnet()
-                .call_method(xtr_faucet_component(), "take", args![
-                    Self::FUNDED_ACCOUNT_INITIAL_BALANCE
-                ])
+                .call_method(xtr_faucet_component(), "take", args![])
                 .put_last_instruction_output_on_workspace("bucket")
                 .create_account_with_bucket(public_key.to_byte_type(), "bucket")
                 .build_and_seal(&secret_key),
@@ -593,7 +591,7 @@ impl TemplateTest {
     #[track_caller]
     pub fn create_custom_funded_account<A: Into<Amount>>(
         &mut self,
-        amount: A,
+        _amount: A,
     ) -> (
         ComponentAddress,
         NonFungibleAddress,
@@ -606,7 +604,7 @@ impl TemplateTest {
         let public_key_bytes = public_key.to_byte_type();
         self.execute_expect_success(
             Transaction::builder_localnet()
-                .call_method(xtr_faucet_component(), "take", args![amount.into()])
+                .call_method(xtr_faucet_component(), "take", args![])
                 .put_last_instruction_output_on_workspace("bucket")
                 .create_account_with_bucket(public_key_bytes, "bucket")
                 .build_and_seal(&secret_key),

@@ -164,7 +164,7 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
         let account_name = self.next_workspace_name();
         self.builder = self.builder.with_fee_instructions_builder(|builder| {
             builder
-                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![amount])
+                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![])
                 .add_input(XTR_FAUCET_VAULT_ADDRESS)
                 .put_last_instruction_output_on_workspace(&bucket_name)
                 // Create the recipient account if it doesn't exist

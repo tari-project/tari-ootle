@@ -20,7 +20,7 @@ pub fn builder(network: Network) -> impl Fn(u64) -> Transaction {
         Transaction::builder(network.as_byte())
             .with_fee_instructions_builder(|builder| {
                 builder
-                    .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![5000])
+                    .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![])
                     .put_last_instruction_output_on_workspace("free_coins")
                     .create_account_with_bucket(signer_public_key, "free_coins")
                     .call_method(account_address, "pay_fee", args![1000])

@@ -7411,11 +7411,12 @@ dependencies = [
 
 [[package]]
 name = "ootle-wasm-core"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "ootle_byte_type",
  "rand 0.8.5",
+ "serde",
  "serde_json",
  "tari_bor",
  "tari_crypto",

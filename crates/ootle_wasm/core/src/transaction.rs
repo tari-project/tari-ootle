@@ -1,15 +1,18 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use serde::Deserialize;
 use tari_crypto::{ristretto::RistrettoSecretKey, tari_utilities::ByteArray};
 use tari_ootle_transaction::{UnsealedTransactionV1, UnsignedTransactionV1};
 
 use crate::{error::OotleWasmError, hash::public_key_bytes_from_bytes};
 
 /// An unsigned or unsealed transaction parsed from JSON.
+#[derive(Deserialize)]
+#[serde(untagged)]
 enum TransactionInput {
-    Unsigned(UnsignedTransactionV1),
     Unsealed(UnsealedTransactionV1),
+    Unsigned(UnsignedTransactionV1),
 }
 
 impl TransactionInput {
@@ -21,13 +24,8 @@ impl TransactionInput {
     }
 }
 
-/// Parse JSON as either an UnsealedTransactionV1 or UnsignedTransactionV1.
 fn parse_transaction_json(tx_json: &str) -> Result<TransactionInput, OotleWasmError> {
-    if let Ok(unsealed) = serde_json::from_str::<UnsealedTransactionV1>(tx_json) {
-        return Ok(TransactionInput::Unsealed(unsealed));
-    }
-    let unsigned: UnsignedTransactionV1 = serde_json::from_str(tx_json)?;
-    Ok(TransactionInput::Unsigned(unsigned))
+    serde_json::from_str(tx_json).map_err(Into::into)
 }
 
 fn secret_key_from_bytes(bytes: &[u8]) -> Result<RistrettoSecretKey, OotleWasmError> {
@@ -94,12 +92,8 @@ mod tests {
 
         // First add a signer to get an unsealed tx
         let unsigned_json = serde_json::to_string(&make_unsigned_tx()).unwrap();
-        let unsealed_json = add_transaction_signer_json(
-            &unsigned_json,
-            signer_secret.as_bytes(),
-            seal_pk.as_bytes(),
-        )
-        .unwrap();
+        let unsealed_json =
+            add_transaction_signer_json(&unsigned_json, signer_secret.as_bytes(), seal_pk.as_bytes()).unwrap();
 
         // Now seal the unsealed tx
         let sealed_json = seal_transaction_json(&unsealed_json, seal_secret.as_bytes()).unwrap();
@@ -114,12 +108,8 @@ mod tests {
         let signer_secret = RistrettoSecretKey::random(&mut OsRng);
 
         let unsigned_json = serde_json::to_string(&make_unsigned_tx()).unwrap();
-        let unsealed_json = add_transaction_signer_json(
-            &unsigned_json,
-            signer_secret.as_bytes(),
-            seal_pk.as_bytes(),
-        )
-        .unwrap();
+        let unsealed_json =
+            add_transaction_signer_json(&unsigned_json, signer_secret.as_bytes(), seal_pk.as_bytes()).unwrap();
 
         let unsealed: UnsealedTransactionV1 = serde_json::from_str(&unsealed_json).unwrap();
         assert_eq!(unsealed.signatures().len(), 1);
@@ -136,20 +126,12 @@ mod tests {
         let unsigned_json = serde_json::to_string(&make_unsigned_tx()).unwrap();
 
         // Add first signer (unsigned → unsealed)
-        let unsealed_json = add_transaction_signer_json(
-            &unsigned_json,
-            signer1.as_bytes(),
-            seal_pk.as_bytes(),
-        )
-        .unwrap();
+        let unsealed_json =
+            add_transaction_signer_json(&unsigned_json, signer1.as_bytes(), seal_pk.as_bytes()).unwrap();
 
         // Add second signer (unsealed → unsealed)
-        let unsealed_json = add_transaction_signer_json(
-            &unsealed_json,
-            signer2.as_bytes(),
-            seal_pk.as_bytes(),
-        )
-        .unwrap();
+        let unsealed_json =
+            add_transaction_signer_json(&unsealed_json, signer2.as_bytes(), seal_pk.as_bytes()).unwrap();
 
         // Seal and verify
         let sealed_json = seal_transaction_json(&unsealed_json, seal_secret.as_bytes()).unwrap();

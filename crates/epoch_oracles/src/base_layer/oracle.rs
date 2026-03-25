@@ -105,6 +105,18 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + 'static> BaseLayerOr
 }
 
 impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<TStore> {
+    /// The configured start height adjusted for the height lag. This is the minimum height
+    /// that the scanner will scan from.
+    fn lag_start_height(&self) -> u64 {
+        self.start_height.saturating_sub(self.height_lag)
+    }
+
+    /// The effective last scanned height, which is the maximum of the last scanned height and
+    /// the lag start height. This ensures that we never scan below the lag start height.
+    fn effective_last_scanned_height(&self) -> u64 {
+        self.last_scanned_height.max(self.lag_start_height())
+    }
+
     fn load_initial_state(&mut self) -> Result<(), BaseLayerOracleError> {
         self.last_scanned_tip = self
             .store
@@ -143,11 +155,12 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
 
         match self.get_blockchain_progression(&tip).await? {
             BlockchainProgression::Progressed => {
+                let next_scan_height = self.effective_last_scanned_height() + 1;
                 info!(
                     target: LOG_TARGET,
                     "⛓️ Blockchain has progressed to height {}. We last scanned {}/{}",
                     tip.height_of_longest_chain,
-                    self.last_scanned_height,
+                    next_scan_height,
                     tip.height_of_longest_chain
                         .saturating_sub(self.height_lag)
                 );
@@ -193,7 +206,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
         &mut self,
         tip: &BaseLayerMetadata,
     ) -> Result<BlockchainProgression, BaseLayerOracleError> {
-        if tip.height_of_longest_chain <= self.start_height {
+        if tip.height_of_longest_chain <= self.lag_start_height() {
             return Ok(BlockchainProgression::NoProgress);
         }
         match &self.last_scanned_tip {
@@ -212,17 +225,6 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
 
     #[allow(clippy::too_many_lines)]
     async fn sync_blockchain(&mut self, tip: BaseLayerMetadata) -> Result<bool, BaseLayerOracleError> {
-        let start_scan_height = self.last_scanned_height.max(self.start_height) + 1;
-        if tip.height_of_longest_chain <= start_scan_height {
-            info!(
-                target: LOG_TARGET,
-                "⛓️ Base layer blockchain has not progressed beyond the start scan height {}. Current tip height is {}.",
-                start_scan_height,
-                tip.height_of_longest_chain
-            );
-            return Ok(false);
-        }
-
         let Some(lag_tip_height) = tip.height_of_longest_chain.checked_sub(self.height_lag) else {
             debug!(
                 target: LOG_TARGET,
@@ -230,6 +232,17 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
             );
             return Ok(false);
         };
+        let start_scan_height = self.effective_last_scanned_height() + 1;
+        if lag_tip_height < start_scan_height {
+            info!(
+                target: LOG_TARGET,
+                "⛓️ Base layer blockchain has not progressed beyond the start scan height {}. Lagged tip height is {}.",
+                start_scan_height,
+                lag_tip_height
+            );
+            return Ok(false);
+        }
+
         let Some(num_blocks) = lag_tip_height.checked_sub(start_scan_height - 1) else {
             debug!(
                 target: LOG_TARGET,

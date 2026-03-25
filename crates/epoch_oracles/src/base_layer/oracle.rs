@@ -155,12 +155,11 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
 
         match self.get_blockchain_progression(&tip).await? {
             BlockchainProgression::Progressed => {
-                let next_scan_height = self.effective_last_scanned_height() + 1;
                 info!(
                     target: LOG_TARGET,
                     "⛓️ Blockchain has progressed to height {}. We last scanned {}/{}",
                     tip.height_of_longest_chain,
-                    next_scan_height,
+                    self.effective_last_scanned_height(),
                     tip.height_of_longest_chain
                         .saturating_sub(self.height_lag)
                 );

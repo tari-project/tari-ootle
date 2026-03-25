@@ -13,12 +13,8 @@ fn first_claim_succeeds() {
     // create_funded_account calls faucet.take() internally and commits the result
     let (account, _proof, _sk) = test.create_funded_account();
 
-    let balance: tari_template_lib::types::Amount = test.call_method(
-        account,
-        "balance",
-        args![STEALTH_TARI_RESOURCE_ADDRESS],
-        vec![],
-    );
+    let balance: tari_template_lib::types::Amount =
+        test.call_method(account, "balance", args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
     assert!(balance > tari_template_lib::types::Amount::zero());
 }
 

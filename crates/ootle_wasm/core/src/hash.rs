@@ -32,7 +32,7 @@ pub fn hash_unsigned_transaction_json(
     hash_unsigned_transaction(&tx, seal_signer_public_key)
 }
 
-fn public_key_bytes_from_bytes(bytes: &[u8]) -> Result<RistrettoPublicKeyBytes, OotleWasmError> {
+pub(crate) fn public_key_bytes_from_bytes(bytes: &[u8]) -> Result<RistrettoPublicKeyBytes, OotleWasmError> {
     // Validate that it's a valid curve point
     let pk =
         RistrettoPublicKey::from_canonical_bytes(bytes).map_err(|e| OotleWasmError::InvalidPublicKey(e.to_string()))?;

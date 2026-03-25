@@ -6,3 +6,4 @@ pub mod bor;
 pub mod error;
 pub mod hash;
 pub mod sign;
+pub mod transaction;

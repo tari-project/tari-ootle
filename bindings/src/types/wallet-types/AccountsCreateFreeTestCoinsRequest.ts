@@ -4,6 +4,5 @@ import type { ComponentAddressOrName } from "./ComponentAddressOrName";
 
 export type AccountsCreateFreeTestCoinsRequest = {
   account: ComponentAddressOrName;
-  amount: Amount;
   max_fee: number | null;
 };

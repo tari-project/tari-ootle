@@ -213,16 +213,13 @@ export const useAccountsTransfer = () => {
 export const useAccountsCreateFreeTestCoins = () => {
   const createFreeTestCoins = async ({
     account,
-    amount,
     fee,
   }: {
     account: ComponentAddressOrName;
-    amount: number;
     fee: number | null;
   }) =>
     accountsCreateFreeTestCoins({
       account,
-      amount,
       max_fee: fee,
     });
 

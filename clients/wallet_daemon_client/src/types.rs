@@ -659,7 +659,6 @@ pub struct ProofsCancelResponse {}
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AccountsCreateFreeTestCoinsRequest {
     pub account: ComponentAddressOrName,
-    pub amount: Amount,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub max_fee: Option<u64>,
 }

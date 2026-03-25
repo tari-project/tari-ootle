@@ -627,11 +627,9 @@ pub async fn handle_create_free_test_coins(
     let sdk = context.wallet_sdk();
     let accounts_api = sdk.accounts_api();
 
-    let AccountsCreateFreeTestCoinsRequest {
-        account,
-        amount,
-        max_fee,
-    } = req;
+    let AccountsCreateFreeTestCoinsRequest { account, max_fee } = req;
+    // Fixed amount: always 1,000 TARI (matches the on-chain faucet template constant)
+    let amount = Amount::from(1_000_000_000u64);
 
     let max_fee = max_fee.unwrap_or(DEFAULT_FEE);
 

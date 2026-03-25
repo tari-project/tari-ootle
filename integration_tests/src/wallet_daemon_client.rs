@@ -235,7 +235,7 @@ pub async fn create_account_with_free_coins<A: Into<Amount>>(
     world: &mut TariWorld,
     account_name: String,
     wallet_daemon_name: String,
-    amount: A,
+    _amount: A,
 ) {
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
@@ -267,7 +267,6 @@ pub async fn create_account_with_free_coins<A: Into<Amount>>(
 
     let request = AccountsCreateFreeTestCoinsRequest {
         account: account.account.component_address.into(),
-        amount: amount.into(),
         max_fee: None,
     };
 

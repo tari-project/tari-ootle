@@ -45,7 +45,6 @@ function ClaimCoinsButton() {
     claimTestnetFaucetFunds(
       {
         account: { ComponentAddress: substateIdToString(account.component_address) },
-        amount: 1_000_000_000,
         fee: 1000,
       },
       {
@@ -65,7 +64,10 @@ function ClaimCoinsButton() {
         },
         onError: (error: any) => {
           console.error("Error claiming coins:", error);
-          const errorMessage = error?.message || "Failed to claim testnet funds. Please try again.";
+          const message: string = error?.message ?? "";
+          const errorMessage = message.includes("Duplicate NFT token id")
+            ? "You have already claimed your testnet funds. Each account can only claim once."
+            : message || "Failed to claim testnet funds. Please try again.";
           showError(errorMessage);
         },
       },

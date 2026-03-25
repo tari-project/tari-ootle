@@ -29,7 +29,7 @@ tari_epoch_oracles = { workspace = true, features = ["base_layer"] }
 tari_indexer_client = { workspace = true, default-features = false, features = ["utoipa"] }
 tari_indexer_lib = { workspace = true }
 tari_networking = { workspace = true }
-tari_ootle_app_utilities = { workspace = true }
+tari_ootle_app_utilities = { workspace = true, features = ["epoch_oracle"] }
 tari_ootle_common_types = { workspace = true }
 tari_ootle_p2p = { workspace = true }
 tari_ootle_storage = { workspace = true }

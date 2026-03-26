@@ -64,10 +64,10 @@ function ClaimCoinsButton() {
         },
         onError: (error: any) => {
           console.error("Error claiming coins:", error);
-          const message: string = error?.message ?? "";
-          const errorMessage = message.includes("Duplicate NFT token id")
-            ? "You have already claimed your testnet funds. Each account can only claim once."
-            : message || "Failed to claim testnet funds. Please try again.";
+          const errorMessage =
+            (error?.cause as any)?.code === 1001
+              ? "You have already claimed your testnet funds. Each account can only claim once."
+              : error?.message || "Failed to claim testnet funds. Please try again.";
           showError(errorMessage);
         },
       },

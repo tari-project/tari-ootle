@@ -74,6 +74,7 @@ use tari_template_lib_types::{
     constants::{
         STEALTH_TARI_RESOURCE_ADDRESS,
         TARI_TOKEN,
+        XTR_FAUCET_AMOUNT,
         XTR_FAUCET_CLAIM_RESOURCE_ADDRESS,
         XTR_FAUCET_COMPONENT_ADDRESS,
         XTR_FAUCET_VAULT_ADDRESS,
@@ -87,6 +88,7 @@ use crate::{
     DEFAULT_FEE,
     handlers::helpers::{
         complete_burn_proof_to_contents,
+        faucet_already_claimed,
         general_error,
         get_account,
         get_account_by_key_index,
@@ -635,7 +637,7 @@ pub async fn handle_create_free_test_coins(
 
     let AccountsCreateFreeTestCoinsRequest { account, max_fee } = req;
     // Fixed amount: always 1,000 TARI (matches the on-chain faucet template constant)
-    let amount = Amount::from(1_000_000_000u64);
+    let amount = Amount::from(XTR_FAUCET_AMOUNT);
 
     let max_fee = max_fee.unwrap_or(DEFAULT_FEE);
 
@@ -735,6 +737,10 @@ pub async fn handle_create_free_test_coins(
         return Err(transaction_rejected(format!("Fee transaction rejected: {}", reject)));
     }
     if let Some(reason) = finalized.finalize.any_reject() {
+        let reason_str = reason.to_string();
+        if reason_str.contains("Duplicate NFT token id") {
+            return Err(faucet_already_claimed());
+        }
         return Err(anyhow::anyhow!(
             "Fee transaction succeeded (fees charged) however, the transaction failed: {}",
             reason

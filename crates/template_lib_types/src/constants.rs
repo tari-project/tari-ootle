@@ -50,6 +50,10 @@ pub const XTR_FAUCET_CLAIM_RESOURCE_ADDRESS: ResourceAddress = ResourceAddress::
     1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
 ]));
 
+/// The fixed amount dispensed per faucet claim: 1,000 TARI in microtari.
+/// Matches the on-chain `FAUCET_AMOUNT` constant in the faucet template.
+pub const XTR_FAUCET_AMOUNT: u64 = 1_000 * TARI;
+
 /// Address of the NFT faucet component
 pub const NFT_FAUCET_COMPONENT_ADDRESS: ComponentAddress = ComponentAddress::new(ObjectKey::from_array([
     0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,

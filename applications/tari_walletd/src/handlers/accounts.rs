@@ -742,7 +742,9 @@ pub async fn handle_create_free_test_coins(
                 }
                 Err(transaction_rejected(reason))
             },
-            RejectReason::FailedToLockOutputs(reason) => {
+            // TODO: consensus can emit failed to lock inputs when an output fails to lock and vice versa because it
+            // locks them together in some cases. so we take both as meaning already claimed
+            RejectReason::FailedToLockOutputs(reason) | RejectReason::FailedToLockInputs(reason) => {
                 if reason.contains("is already UP and conflicts with an existing output") {
                     return Err(faucet_already_claimed());
                 }

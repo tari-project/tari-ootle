@@ -12017,7 +12017,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_test_tooling"
-version = "0.26.3"
+version = "0.26.4"
 dependencies = [
  "anyhow",
  "cargo_toml 0.22.3",

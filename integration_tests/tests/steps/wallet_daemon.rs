@@ -207,16 +207,11 @@ async fn when_i_create_account_via_wallet_daemon_with_free_coins(
     step: &Step,
     account_name: String,
     wallet_daemon_name: String,
-    amount: u64,
+    // TODO: remove
+    _amount: u64,
 ) {
     cucumber_log!("==== Step: {}", step.value);
-    wallet_daemon_client::create_account_with_free_coins(
-        world,
-        account_name,
-        wallet_daemon_name,
-        amount * 1_000_000u64,
-    )
-    .await;
+    wallet_daemon_client::create_account_with_free_coins(world, account_name, wallet_daemon_name).await;
 }
 
 #[when(expr = "I burn {int}T on wallet {word} for wallet daemon {word} into proof {word}")]

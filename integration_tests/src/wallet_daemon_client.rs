@@ -231,12 +231,7 @@ pub async fn create_account(
     account
 }
 
-pub async fn create_account_with_free_coins<A: Into<Amount>>(
-    world: &mut TariWorld,
-    account_name: String,
-    wallet_daemon_name: String,
-    _amount: A,
-) {
+pub async fn create_account_with_free_coins(world: &mut TariWorld, account_name: String, wallet_daemon_name: String) {
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let account = world.wallet_accounts.get(&account_name).cloned();

@@ -11,6 +11,7 @@ use ootle_byte_type::{FromByteType, ToByteType};
 use rand::rngs::OsRng;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
+    commit_result::RejectReason,
     component::derive_component_address_from_public_key,
     confidential::ClaimBurnOutputData,
     substate::SubstateId,
@@ -733,18 +734,22 @@ pub async fn handle_create_free_test_coins(
 
     // Wait for the monitor to pick up the new or updated account
     let (finalized, _) = wait_for_result_and_account(&mut events, &tx_id, account.component_address()).await?;
-    if let Some(reject) = finalized.finalize.fee_reject() {
-        return Err(transaction_rejected(format!("Fee transaction rejected: {}", reject)));
-    }
     if let Some(reason) = finalized.finalize.any_reject() {
-        let reason_str = reason.to_string();
-        if reason_str.contains("Duplicate NFT token id") {
-            return Err(faucet_already_claimed());
-        }
-        return Err(anyhow::anyhow!(
-            "Fee transaction succeeded (fees charged) however, the transaction failed: {}",
-            reason
-        ));
+        return match reason {
+            RejectReason::ExecutionFailure(reason) => {
+                if reason.contains("Duplicate NFT token id") {
+                    return Err(faucet_already_claimed());
+                }
+                Err(anyhow::anyhow!("Transaction failed: {}", reason))
+            },
+            RejectReason::FailedToLockOutputs(reason) => {
+                if reason.contains("is already UP and conflicts with an existing output") {
+                    return Err(faucet_already_claimed());
+                }
+                Err(anyhow::anyhow!("Transaction failed: {}", reason))
+            },
+            _ => Err(anyhow::anyhow!("Transaction failed: {}", reason)),
+        };
     }
 
     info!(

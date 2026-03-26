@@ -8,7 +8,12 @@ use tari_ootle_transaction::{TransactionBuilder, UnsignedTransaction, args};
 use tari_template_lib_types::{
     Amount,
     UtxoAddress,
-    constants::{TARI, TARI_TOKEN, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
+    constants::{
+        TARI_TOKEN,
+        XTR_FAUCET_CLAIM_RESOURCE_ADDRESS,
+        XTR_FAUCET_COMPONENT_ADDRESS,
+        XTR_FAUCET_VAULT_ADDRESS,
+    },
     stealth::StealthTransferStatement,
 };
 
@@ -81,13 +86,6 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
         format!("__AccountInvokeBuilder_{}", self.builder.next_workspace_id())
     }
 
-    /// Takes the maximum permitted funds from the faucet and deposits them into the default signer's account.
-    pub fn take_max_faucet_funds(self) -> Self {
-        // NOTE: that the actual maximum is currently 10_000, but we set it to 1_000 here to be conservative.
-        const FAUCET_MAX_TAKE_AMOUNT: u64 = 1_000 * TARI;
-        self.take_faucet_funds(FAUCET_MAX_TAKE_AMOUNT)
-    }
-
     pub fn take_faucet_funds_stealth(
         mut self,
         transfer: StealthTransferStatement,
@@ -118,6 +116,7 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
         self.builder = self.builder.with_fee_instructions_builder(|builder| {
             builder
                 .add_input(XTR_FAUCET_VAULT_ADDRESS)
+                .add_input(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS)
                 .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take_confidential", args![transfer])
                 .then(|builder| {
                     if let Some((account_ws_name, bucket_name)) = &workspace_names {
@@ -141,12 +140,8 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
         self
     }
 
-    /// Takes the specified amount of funds from the faucet and deposits them into the default signer's account.
-    pub fn take_faucet_funds<A: Into<Amount>>(mut self, amount: A) -> Self {
-        let amount: Amount = amount.into();
-        if !amount.is_positive() {
-            panic!("Transfer amount must be positive");
-        }
+    /// Takes the fixed faucet amount (1,000 TARI) and deposits them into the default signer's account.
+    pub fn take_faucet_funds(mut self) -> Self {
         let bucket_name = self.next_workspace_name();
         let recipient_account_pk = *self.default_signer_address().account_public_key();
         let recipient_account_addr = self.default_signer_address().to_account_address();
@@ -166,6 +161,7 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
             builder
                 .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![])
                 .add_input(XTR_FAUCET_VAULT_ADDRESS)
+                .add_input(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS)
                 .put_last_instruction_output_on_workspace(&bucket_name)
                 // Create the recipient account if it doesn't exist
                 .create_account_with_bucket(recipient_account_pk, &bucket_name)

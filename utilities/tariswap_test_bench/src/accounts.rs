@@ -12,7 +12,12 @@ use tari_ootle_wallet_sdk::models::{Account, KeyBranch, KeyId};
 use tari_template_lib_types::{
     Amount,
     ResourceType,
-    constants::{TARI_TOKEN, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
+    constants::{
+        TARI_TOKEN,
+        XTR_FAUCET_CLAIM_RESOURCE_ADDRESS,
+        XTR_FAUCET_COMPONENT_ADDRESS,
+        XTR_FAUCET_VAULT_ADDRESS,
+    },
 };
 
 use crate::{faucet::Faucet, runner::Runner};
@@ -41,6 +46,7 @@ impl Runner {
             .with_inputs([
                 SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
                 SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
+                SubstateRequirement::unversioned(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS),
             ])
             .finish();
 
@@ -185,7 +191,7 @@ impl Runner {
                             .call_method(faucet.component_address, "take_free_coins", args![])
                             .put_last_instruction_output_on_workspace("faucet")
                             .call_method(account.component_address, "deposit", args![Workspace("faucet")])
-                            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![1_000_000])
+                            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![])
                             .put_last_instruction_output_on_workspace("funds")
                             .call_method(account.component_address, "deposit", args![Workspace("funds")])
                             .add_input(SubstateRequirement::unversioned(account.component_address))
@@ -194,6 +200,7 @@ impl Runner {
                 .with_inputs([
                     SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
                     SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
+                    SubstateRequirement::unversioned(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS),
                     SubstateRequirement::unversioned(faucet.component_address),
                     SubstateRequirement::unversioned(faucet.resource_address),
                     SubstateRequirement::unversioned(faucet.vault_address),

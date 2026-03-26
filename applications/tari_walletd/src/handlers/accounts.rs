@@ -71,7 +71,13 @@ use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib_types::{
     Amount,
     ResourceType,
-    constants::{STEALTH_TARI_RESOURCE_ADDRESS, TARI_TOKEN, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
+    constants::{
+        STEALTH_TARI_RESOURCE_ADDRESS,
+        TARI_TOKEN,
+        XTR_FAUCET_CLAIM_RESOURCE_ADDRESS,
+        XTR_FAUCET_COMPONENT_ADDRESS,
+        XTR_FAUCET_VAULT_ADDRESS,
+    },
     stealth::SpendCondition,
 };
 use tokio::task;
@@ -655,6 +661,7 @@ pub async fn handle_create_free_test_coins(
     let mut inputs = vec![
         SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
         SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
+        SubstateRequirement::unversioned(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS),
     ];
 
     if account.is_confirmed_on_chain() {

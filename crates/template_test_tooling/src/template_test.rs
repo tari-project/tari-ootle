@@ -53,7 +53,6 @@ use tari_ootle_transaction::{
     },
 };
 use tari_template_lib::types::{
-    Amount,
     ComponentAddress,
     NonFungibleAddress,
     TemplateAddress,
@@ -583,15 +582,14 @@ impl TemplateTest {
         (account_address, owner_proof, secret_key)
     }
 
-    /// Creates a new account funded with a custom `amount` of tokens from the XTR faucet,
-    /// using a fresh key pair.
+    /// Creates a new account funded from the XTR faucet using a fresh key pair.
     /// Returns `(account_address, owner_proof, secret_key, public_key)`.
     ///
+    /// Unlike [`create_funded_account`], this also returns the public key.
     /// Fees are temporarily disabled for the account creation transaction.
     #[track_caller]
-    pub fn create_custom_funded_account<A: Into<Amount>>(
+    pub fn create_funded_account_with_keypair(
         &mut self,
-        _amount: A,
     ) -> (
         ComponentAddress,
         NonFungibleAddress,

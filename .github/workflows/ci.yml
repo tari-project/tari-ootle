@@ -25,6 +25,7 @@ env:
   stable_toolchain: stable
   CARGO_HTTP_MULTIPLEXING: false
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
   TARI_TARGET_NETWORK: localnet
   TARI_NETWORK: localnet
   # https://github.com/rust-lang/rustup/issues/2949#issuecomment-2584968659
@@ -46,14 +47,6 @@ jobs:
         with:
           toolchain: ${{ env.nightly_toolchain }}
           components: rustfmt
-
-      - name: ubuntu dependencies
-        run: |
-          sudo apt-get update
-          sudo bash scripts/install_ubuntu_dependencies.sh
-
-      - name: wasm target install
-        run: rustup target add wasm32-unknown-unknown
 
       - name: cargo format
         run: cargo +${{ env.nightly_toolchain }} fmt --all -- --check
@@ -88,6 +81,8 @@ jobs:
           toolchain: ${{ env.stable_toolchain }}
           components: clippy
 
+      - uses: ./.github/actions/rust-cache
+
       - name: ubuntu dependencies
         run: |
           sudo apt-get update
@@ -119,6 +114,8 @@ jobs:
           toolchain: ${{ env.stable_toolchain }}
           components: clippy, rustfmt
 
+      - uses: ./.github/actions/rust-cache
+
       - name: ubuntu dependencies
         run: |
           sudo apt-get update
@@ -144,7 +141,7 @@ jobs:
         with:
           toolchain: stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/rust-cache
 
       - name: ubuntu dependencies
         run: |
@@ -197,6 +194,8 @@ jobs:
         with:
           toolchain: ${{ env.stable_toolchain }}
 
+      - uses: ./.github/actions/rust-cache
+
       - name: ubuntu dependencies
         run: |
           sudo apt-get update
@@ -208,7 +207,9 @@ jobs:
         run: rustup target add wasm32-unknown-unknown
 
       - name: Install cargo-nextest
-        run: cargo install cargo-nextest --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
 
       - name: cargo test compile
         run: cargo test --no-run --locked --all-features --release
@@ -222,6 +223,31 @@ jobs:
         with:
           name: test-results
           path: ${{ github.workspace }}/target/nextest/ci/junit.xml
+
+  integration-test:
+    name: integration test
+    runs-on: [ ubuntu-latest ]
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v6
+
+      - name: toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.stable_toolchain }}
+
+      - uses: ./.github/actions/rust-cache
+
+      - name: ubuntu dependencies
+        run: |
+          sudo apt-get update
+          sudo bash scripts/install_ubuntu_dependencies.sh
+
+      - uses: rui314/setup-mold@v1
+
+      - name: wasm target install
+        run: rustup target add wasm32-unknown-unknown
 
       - name: cargo test cucumber
         run: cargo test --release --package integration_tests --test cucumber

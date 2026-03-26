@@ -1,0 +1,18 @@
+name: 'Rust Cache'
+description: 'Cache Rust build artifacts using local cache with restoreKeys for partial hits'
+runs:
+  using: composite
+  steps:
+    - name: caching
+      uses: maxnowack/local-cache@v2
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/registry/CACHEDIR.TAG
+          ~/.cargo/git
+          target
+        key: ootle-${{ runner.os }}-${{ runner.cpu-model }}-${{ env.stable_toolchain }}-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ootle-${{ runner.os }}-${{ runner.cpu-model }}-${{ env.stable_toolchain }}-${{ hashFiles('**/Cargo.lock') }}
+          ootle-${{ runner.os }}-${{ runner.cpu-model }}-${{ env.stable_toolchain }}

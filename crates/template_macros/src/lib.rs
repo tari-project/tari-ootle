@@ -52,14 +52,12 @@ pub fn template_non_wasm(_attr: TokenStream, item: TokenStream) -> TokenStream {
             .drain(..)
             .map(|item| match item {
                 syn::Item::Struct(mut s) => {
-                    let derive: syn::Attribute = syn::parse_quote! {
+                    s.attrs.push(syn::parse_quote! {
                         #[derive(::tari_template_lib::serde::Serialize, ::tari_template_lib::serde::Deserialize)]
-                    };
-                    let serde_crate: syn::Attribute = syn::parse_quote! {
+                    });
+                    s.attrs.push(syn::parse_quote! {
                         #[serde(crate = "::tari_template_lib::serde")]
-                    };
-                    s.attrs.push(derive);
-                    s.attrs.push(serde_crate);
+                    });
                     syn::Item::Struct(s)
                 },
                 other => other,

@@ -66,5 +66,5 @@ pub fn template_non_wasm(_attr: TokenStream, item: TokenStream) -> TokenStream {
         module.content = Some((*brace, new_items));
     }
 
-    quote::quote!(#module).into()
+    quote::quote!(#[allow(dead_code)] #module).into()
 }

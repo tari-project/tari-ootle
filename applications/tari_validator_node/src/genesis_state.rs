@@ -140,7 +140,7 @@ where
         SubstateOwnerRule::None,
         ResourceAccessRules::new()
             .mintable(rule!(component(XTR_FAUCET_COMPONENT_ADDRESS)))
-            .burnable(rule!(allow_all)),
+            .burnable(rule!(component(XTR_FAUCET_COMPONENT_ADDRESS))),
         Metadata::new(),
         None,
         None,

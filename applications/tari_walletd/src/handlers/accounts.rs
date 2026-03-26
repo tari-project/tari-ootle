@@ -740,15 +740,15 @@ pub async fn handle_create_free_test_coins(
                 if reason.contains("Duplicate NFT token id") {
                     return Err(faucet_already_claimed());
                 }
-                Err(anyhow::anyhow!("Transaction failed: {}", reason))
+                Err(transaction_rejected(reason))
             },
             RejectReason::FailedToLockOutputs(reason) => {
                 if reason.contains("is already UP and conflicts with an existing output") {
                     return Err(faucet_already_claimed());
                 }
-                Err(anyhow::anyhow!("Transaction failed: {}", reason))
+                Err(transaction_rejected(reason))
             },
-            _ => Err(anyhow::anyhow!("Transaction failed: {}", reason)),
+            _ => Err(transaction_rejected(reason)),
         };
     }
 

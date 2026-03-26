@@ -47,7 +47,7 @@ async fn run(cli: cli::CommonArgs, _args: cli::RunArgs) -> anyhow::Result<()> {
         // We have to break up the transactions into batches due to log and event limits
         let start = i * 50;
         let end = start + 50;
-        accounts.extend(runner.create_accounts(&primary_account, start + 1..=end).await?);
+        accounts.extend(runner.create_accounts(start + 1..=end).await?);
         info!("⏳️ Created {}/1000 accounts...", end);
     }
     info!("✅ Created all accounts");

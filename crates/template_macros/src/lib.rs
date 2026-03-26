@@ -37,8 +37,32 @@ pub fn template(_attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// Returns the template code without the wasm ABI code. This allows the code to compile for non-WASM targets and allows
-/// "intellisense" to work in IDEs.
+/// "intellisense" to work in IDEs. Struct items within the module get serde derives injected so that
+/// `Component::new` (which requires `T: serde::Serialize`) compiles on non-wasm targets.
 #[proc_macro_attribute]
 pub fn template_non_wasm(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    item
+    let mut module: syn::ItemMod = match syn::parse(item.clone()) {
+        Ok(m) => m,
+        // If it doesn't parse as a module, return verbatim
+        Err(_) => return item,
+    };
+
+    if let Some((brace, items)) = &mut module.content {
+        let new_items = items
+            .drain(..)
+            .map(|item| match item {
+                syn::Item::Struct(mut s) => {
+                    let derive: syn::Attribute = syn::parse_quote! {
+                        #[derive(::tari_template_lib::serde::Serialize, ::tari_template_lib::serde::Deserialize)]
+                    };
+                    s.attrs.push(derive);
+                    syn::Item::Struct(s)
+                },
+                other => other,
+            })
+            .collect();
+        module.content = Some((*brace, new_items));
+    }
+
+    quote::quote!(#module).into()
 }

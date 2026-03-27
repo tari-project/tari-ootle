@@ -181,6 +181,8 @@ jobs:
         run: rustup show
 
       - uses: ./.github/actions/rust-cache
+        with:
+          save-if: ${{ matrix.partition == '1/3' }}
 
       - name: ubuntu dependencies
         run: |
@@ -198,7 +200,7 @@ jobs:
           tool: cargo-nextest
 
       - name: cargo test
-        run: cargo nextest run --all-features --release --profile ci --partition hash:${{ matrix.partition }}
+        run: cargo nextest run --all-features --cargo-profile ci-build --profile ci --partition hash:${{ matrix.partition }}
 
       - name: target dir size
         if: always()
@@ -274,7 +276,7 @@ jobs:
         run: rustup target add wasm32-unknown-unknown
 
       - name: cargo test cucumber
-        run: cargo test --release --package integration_tests --test cucumber
+        run: cargo test --profile ci-build --package integration_tests --test cucumber
 
       - name: target dir size
         if: always()

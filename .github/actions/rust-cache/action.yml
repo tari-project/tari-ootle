@@ -1,5 +1,10 @@
 name: 'Rust Cache'
 description: 'Cache Rust build artifacts using Swatinem/rust-cache'
+inputs:
+  save-if:
+    description: 'Whether to save the cache after the job'
+    required: false
+    default: 'true'
 runs:
   using: composite
   steps:
@@ -18,8 +23,8 @@ runs:
     - name: caching
       uses: Swatinem/rust-cache@v2
       with:
-        shared-key: ootle
         cache-all-crates: true
+        save-if: ${{ inputs.save-if }}
 
     - name: cache diagnostics (after restore)
       shell: bash

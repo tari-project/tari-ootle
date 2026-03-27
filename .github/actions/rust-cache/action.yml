@@ -1,18 +1,33 @@
 name: 'Rust Cache'
-description: 'Cache Rust build artifacts using local cache with restoreKeys for partial hits'
+description: 'Cache Rust build artifacts using Swatinem/rust-cache'
 runs:
   using: composite
   steps:
+    - name: cache diagnostics (before restore)
+      shell: bash
+      run: |
+        echo "=== Disk space ==="
+        df -h
+        echo "=== target/ ==="
+        du -sh target/ 2>/dev/null || echo "(no target dir)"
+        echo "=== ~/.cargo/registry/ ==="
+        du -sh ~/.cargo/registry/ 2>/dev/null || echo "(no cargo registry)"
+        echo "=== ~/.cargo/git/ ==="
+        du -sh ~/.cargo/git/ 2>/dev/null || echo "(no cargo git)"
+
     - name: caching
-      uses: maxnowack/local-cache@v2
+      uses: Swatinem/rust-cache@v2
       with:
-        path: |
-          ~/.cargo/registry/index
-          ~/.cargo/registry/cache
-          ~/.cargo/registry/CACHEDIR.TAG
-          ~/.cargo/git
-          target
-        key: ootle-${{ runner.os }}-${{ runner.cpu-model }}-${{ env.stable_toolchain }}-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ootle-${{ runner.os }}-${{ runner.cpu-model }}-${{ env.stable_toolchain }}-${{ hashFiles('**/Cargo.lock') }}
-          ootle-${{ runner.os }}-${{ runner.cpu-model }}-${{ env.stable_toolchain }}
+        cache-all-crates: true
+
+    - name: cache diagnostics (after restore)
+      shell: bash
+      run: |
+        echo "=== Disk space after cache restore ==="
+        df -h
+        echo "=== target/ ==="
+        du -sh target/ 2>/dev/null || echo "(no target dir — cache miss or not cached)"
+        echo "=== ~/.cargo/registry/ ==="
+        du -sh ~/.cargo/registry/ 2>/dev/null || echo "(no cargo registry)"
+        echo "=== ~/.cargo/git/ ==="
+        du -sh ~/.cargo/git/ 2>/dev/null || echo "(no cargo git)"

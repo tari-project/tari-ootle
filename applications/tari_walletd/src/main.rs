@@ -200,7 +200,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
             let timestamp = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .context("System time is before the UNIX epoch")?
                 .as_secs();
             let bak_path = db_path.with_extension(format!("sqlite.{timestamp}.bak"));
             match tokio::fs::rename(&db_path, &bak_path).await {

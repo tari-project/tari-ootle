@@ -1,0 +1,3048 @@
+//   Copyright 2022. The Tari Project
+//
+//   Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
+//   following conditions are met:
+//
+//   1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following
+//   disclaimer.
+//
+//   2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
+//   following disclaimer in the documentation and/or other materials provided with the distribution.
+//
+//   3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote
+//   products derived from this software without specific prior written permission.
+//
+//   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+//   INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+//   DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+//   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+//   SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+//   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+use std::sync::{Arc, atomic, atomic::AtomicPtr};
+
+use log::{warn, *};
+use tari_bor::{MaybeTagged, decode_exact};
+use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
+use tari_engine_types::{
+    Utxo,
+    UtxoOutput,
+    commit_result::{FinalizeResult, RejectReason},
+    component::ComponentHeader,
+    confidential::{ClaimBurnOutputData, ClaimedOutputTombstone, MinotariBurnClaimProof},
+    crypto::OutputBody,
+    entity_id_provider::EntityIdProvider,
+    events::Event,
+    hashing::hash_template_code,
+    indexed_value::IndexedValue,
+    instruction_result::InstructionResult,
+    limits,
+    lock::LockFlag,
+    logs::LogEntry,
+    proof::{ContainerRef, LockedResource},
+    published_template::{PublishedTemplate, PublishedTemplateAddress, TemplateBlob},
+    resource::Resource,
+    resource_container::{ResourceContainer, ResourceError},
+    stealth,
+    substate::{SubstateId, SubstateValue},
+    vault::Vault,
+};
+use tari_ootle_common_types::{GetVerifier, services::template_provider::TemplateProvider};
+use tari_ootle_transaction::{
+    AllocatableAddressType,
+    Assertion,
+    ComponentReference,
+    ResourceAddressRef,
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
+};
+use tari_template_abi::{TemplateDef, Type};
+use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, is_builtin_template_address};
+use tari_template_lib::{
+    args::{
+        AddressAllocationInvokeArg,
+        AllocateAddressResult,
+        BucketAction,
+        BucketGetAmountArg,
+        BucketRef,
+        BuiltinTemplateAction,
+        BurnStealthUtxoArg,
+        CallAction,
+        CallFunctionArg,
+        CallMethodArg,
+        CallerContextAction,
+        ComponentAction,
+        ComponentRef,
+        ConsensusAction,
+        CreateComponentArg,
+        CreateResourceArg,
+        FreezeResourceArg,
+        GenerateRandomAction,
+        InvokeResult,
+        MintResourceArg,
+        NonFungibleAction,
+        PayFeeArg,
+        ProofAction,
+        ProofRef,
+        RecallResourceArg,
+        ResourceAction,
+        ResourceGetNonFungibleArg,
+        ResourceRef,
+        ResourceUpdateNonFungibleDataArg,
+        SetFreezeStealthUtxosArg,
+        StealthTransferResourceArg,
+        VaultAction,
+        VaultCreateProofByFungibleAmountArg,
+        VaultCreateProofByNonFungiblesArg,
+        VaultFreezeFlag,
+        VaultWithdrawArg,
+        WorkspaceAction,
+    },
+    invoke_args,
+    models::{BucketId, ComponentAddressAllocation, NonFungible, NotAuthorized, ResourceAddressAllocation, VaultRef},
+    template::BuiltinTemplate,
+    types::{
+        Amount,
+        AuthHook,
+        AuthHookCaller,
+        ClaimedOutputTombstoneAddress,
+        ComponentAddress,
+        EntityId,
+        LogLevel,
+        Metadata,
+        NonFungibleAddress,
+        OwnerRule,
+        ResourceInfo,
+        ResourceType,
+        SubstateOwnerRule,
+        TemplateAddress,
+        UtxoAddress,
+        ValidatorFeePoolAddress,
+        access_rules::{ComponentAccessRules, ResourceAccessRules, ResourceAuthAction},
+        bytes::Bytes,
+        constants::{IMAGE_URL, TARI_TOKEN, TOKEN_SYMBOL},
+        crypto::{RistrettoPublicKeyBytes, UtxoTag},
+        engine_args::{SignatureAction, SignatureVerifyArg},
+        metadata,
+        stealth::{SpendCondition, StealthTransferStatement},
+    },
+};
+
+use super::{ActionIdent, Runtime, RuntimeEvent, working_state::WorkingState};
+use crate::{
+    runtime::{
+        RuntimeError,
+        RuntimeInterface,
+        engine_args::EngineArgs,
+        error::ArgumentValidationError,
+        locking::{LockError, LockedSubstate},
+        pay_fee::PayFee,
+        scope::PushCallFrame,
+        tracker::StateTracker,
+    },
+    state_store::StateReader,
+    template::LoadedTemplate,
+    traits::ClaimProofVerifier,
+    transaction::{ModulesCollection, TransactionProcessor},
+};
+
+const LOG_TARGET: &str = "tari::ootle::engine::runtime::impl";
+
+pub struct RuntimeInterfaceImpl<TStore, TTemplateProvider> {
+    tracker: StateTracker<TStore>,
+    template_provider: Arc<TTemplateProvider>,
+    entity_id_provider: EntityIdProvider,
+    seal_signer_public_key: RistrettoPublicKeyBytes,
+    modules: ModulesCollection<TStore>,
+    claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
+    /// A pointer to the runtime that is set after initialization to allow for cross-template calls.
+    /// This is using an atomic pointer simply to make RuntimeInterfaceImpl Send + Sync to satisfy wasmer trait bounds.
+    runtime_pointer: Option<AtomicPtr<Box<dyn RuntimeInterface>>>,
+}
+
+impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<Template = LoadedTemplate>>
+    RuntimeInterfaceImpl<TStore, TTemplateProvider>
+{
+    pub fn initialize(
+        tracker: StateTracker<TStore>,
+        template_provider: Arc<TTemplateProvider>,
+        signer_public_key: RistrettoPublicKeyBytes,
+        entity_id_provider: EntityIdProvider,
+        modules: ModulesCollection<TStore>,
+        claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
+    ) -> Result<Self, RuntimeError> {
+        let mut runtime = Self {
+            tracker,
+            template_provider,
+            entity_id_provider,
+            seal_signer_public_key: signer_public_key,
+            modules,
+            claim_burn_proof_verifier,
+            runtime_pointer: None,
+        };
+        runtime.invoke_modules_on_initialize()?;
+        Ok(runtime)
+    }
+
+    fn invoke_modules_on_initialize(&mut self) -> Result<(), RuntimeError> {
+        for module in self.modules.iter() {
+            module.on_initialize(&mut self.tracker)?;
+        }
+        Ok(())
+    }
+
+    fn invoke_modules_on_runtime_call(&mut self, function: &'static str) -> Result<(), RuntimeError> {
+        for module in self.modules.iter() {
+            module.on_runtime_call(&mut self.tracker, function)?;
+        }
+        Ok(())
+    }
+
+    fn invoke_modules_on_before_finalize(&mut self) -> Result<(), RuntimeError> {
+        for module in self.modules.iter() {
+            module.on_before_finalize(&mut self.tracker)?;
+        }
+        Ok(())
+    }
+
+    fn invoke_modules_on_runtime_event(&mut self, event: RuntimeEvent) -> Result<(), RuntimeError> {
+        for module in self.modules.iter() {
+            module.on_runtime_event(&mut self.tracker, &event)?;
+        }
+        Ok(())
+    }
+
+    pub fn get_template_def(&self, template_address: &TemplateAddress) -> Result<TemplateDef, RuntimeError> {
+        let loaded = self
+            .template_provider
+            .get_template(template_address)
+            .map_err(|e| RuntimeError::FailedToLoadTemplate {
+                address: *template_address,
+                details: e.to_string(),
+            })?
+            .ok_or(RuntimeError::TemplateNotFound {
+                template_address: *template_address,
+            })?;
+
+        Ok(loaded.into_template_def())
+    }
+
+    fn validate_return_value(&self, value: &IndexedValue) -> Result<(), RuntimeError> {
+        self.tracker.read_with(|state| {
+            for bucket_id in value.bucket_ids() {
+                let _ignore = state.get_bucket(*bucket_id)?;
+            }
+
+            for proof_id in value.proof_ids() {
+                let _ignore = state.get_proof(*proof_id)?;
+            }
+
+            for id in value.referenced_substates() {
+                if !state.substate_exists(&id)? {
+                    debug!(
+                        target: LOG_TARGET,
+                        "Returned substate {id} does not exist",
+                    );
+
+                    return Err(RuntimeError::NonExistentSubstateReturned { id });
+                }
+            }
+
+            Ok(())
+        })
+    }
+
+    fn emit_std_event<T: Into<SubstateId>>(
+        object_name: &str,
+        action: &str,
+        substate_id: T,
+        payload: Metadata,
+        state_mut: &mut WorkingState<TStore>,
+    ) -> Result<(), RuntimeError> {
+        let (&template_address, _) = state_mut.current_template()?;
+        let event = Event::std(Some(substate_id.into()), template_address, object_name, action, payload);
+        debug!(target: LOG_TARGET, "Emitted event {}", event);
+        state_mut.push_event(event)?;
+        Ok(())
+    }
+
+    fn invoke_resource_access_hook(
+        &mut self,
+        auth_hook: AuthHook,
+        mut auth_caller: AuthHookCaller,
+        action: ResourceAuthAction,
+    ) -> Result<(), RuntimeError> {
+        self.invoke_modules_on_runtime_call("invoke_resource_access_hook")?;
+        // Check if the component exist
+        let skip_hook = self.tracker.read_with(|state| {
+            let current_component = state.current_component()?;
+            // Only execute hooks if the resource is being acted upon by an external component
+            if current_component == Some(auth_hook.component_address) {
+                return Ok::<_, RuntimeError>(true);
+            }
+            // We know that the auth hook has been validated before this is called. However, the component may not yet
+            // exist if it is being created in the same call as the resource action is taking place. For
+            // example, commonly a user creates a resource with initial supply and deposits it into a bucket
+            // before creating the component. In this case, we "skip" the hook.
+            let exists = state.store().exists(&auth_hook.component_address.into())?;
+            Ok::<_, RuntimeError>(!exists)
+        })?;
+
+        if skip_hook {
+            return Ok(());
+        }
+
+        let caller = auth_caller
+            .component()
+            .map(|component| self.load_component((*component).into()))
+            .transpose()?;
+
+        if let Some((_, caller)) = caller {
+            auth_caller.with_component_state(caller.into_component().state);
+        }
+
+        // The signature of a call back is (action: ResourceAuthAction, auth_caller: AuthHookCaller)
+        let ret = self
+            .invoke_component_method(auth_hook.component_address, &auth_hook.method, invoke_args![
+                action,
+                auth_caller
+            ])
+            .map_err(|e| match e {
+                RuntimeError::CrossTemplateCallMethodError { details, .. } => RuntimeError::AccessDeniedAuthHook {
+                    action_ident: action.into(),
+                    details: details.to_string(),
+                },
+                _ => e,
+            })?;
+        // Enforce that the return type is actually empty. We cannot rely on InstructionResult::return_type field
+        // because that comes from the template definition which is defined by the template author and may not reflect
+        // actual behaviour.
+        if !ret.indexed.value().is_null() {
+            return Err(RuntimeError::UnexpectedNonNullInAuthHookReturn);
+        }
+        Ok(())
+    }
+
+    fn get_call_runtime(&self) -> Runtime {
+        // Load the runtime pointer that must be set by whoever initialized this interface
+        let ptr = self
+            .runtime_pointer
+            .as_ref()
+            .expect("BUG: Runtime pointer not set")
+            .load(atomic::Ordering::Acquire);
+        Runtime::from_pointer(ptr).expect("Runtime pointer is null")
+    }
+
+    fn invoke_component_method(
+        &mut self,
+        component_address: ComponentAddress,
+        method: &str,
+        args: Vec<Bytes>,
+    ) -> Result<InstructionResult, RuntimeError> {
+        let mut call_runtime = self.get_call_runtime();
+
+        TransactionProcessor::<TStore, _>::call_method(
+            &*self.template_provider,
+            &mut call_runtime,
+            component_address.into(),
+            method,
+            args.into_iter().map(InstructionArg::Literal).collect(),
+        )
+        .map_err(|e| RuntimeError::CrossTemplateCallMethodError {
+            component_address,
+            method: method.to_string(),
+            details: e.to_string(),
+        })
+    }
+
+    fn invoke_template_function(
+        &mut self,
+        template_address: &TemplateAddress,
+        function: &str,
+        args: Vec<Bytes>,
+    ) -> Result<InstructionResult, RuntimeError> {
+        let mut call_runtime = self.get_call_runtime();
+
+        TransactionProcessor::<TStore, _>::call_function(
+            &*self.template_provider,
+            &mut call_runtime,
+            template_address,
+            function,
+            args.into_iter().map(InstructionArg::Literal).collect(),
+        )
+        .map_err(|e| RuntimeError::CrossTemplateCallFunctionError {
+            template_address: *template_address,
+            function: function.to_string(),
+            details: e.to_string(),
+        })
+    }
+
+    fn check_resource_auth_hook(&mut self, hook: &AuthHook) -> Result<(), RuntimeError> {
+        let template_address = self
+            .tracker
+            .write_with(|state| state.get_template_for_component(hook.component_address))?;
+        let template = self.get_template_def(&template_address)?;
+        let func = template
+            .get_function(&hook.method)
+            .ok_or(RuntimeError::InvalidArgument {
+                argument: "CreateResourceArg",
+                reason: format!("Authorize hook '{}' not found", hook),
+            })?;
+
+        if func.is_mut {
+            return Err(RuntimeError::InvalidArgument {
+                argument: "CreateResourceArg",
+                reason: format!("Authorize hook '{}' cannot be mutable", hook),
+            });
+        }
+        if !matches!(func.output, Type::Unit) {
+            return Err(RuntimeError::InvalidArgument {
+                argument: "CreateResourceArg",
+                reason: format!("Authorize hook '{}' must return unit", hook),
+            });
+        }
+
+        if func.arguments.len() != 3 {
+            return Err(RuntimeError::InvalidArgument {
+                argument: "CreateResourceArg",
+                reason: format!(
+                    "Authorize hook '{}' must take 3 arguments (incl &self), but found {}",
+                    hook,
+                    func.arguments.len()
+                ),
+            });
+        }
+
+        if !matches!(
+            func.arguments.get(1).expect("length checked").arg_type.other(),
+            Some("ResourceAuthAction")
+        ) {
+            return Err(RuntimeError::InvalidArgument {
+                argument: "CreateResourceArg",
+                reason: format!("Authorize hook '{}' must take a ResourceAuthAction as argument 1", hook),
+            });
+        }
+
+        if !matches!(
+            func.arguments.get(2).expect("length checked").arg_type.other(),
+            Some("AuthHookCaller")
+        ) {
+            return Err(RuntimeError::InvalidArgument {
+                argument: "CreateResourceArg",
+                reason: format!("Authorize hook '{}' must take an AuthHookCaller as argument 2", hook),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+impl<TStore, TTemplateProvider> RuntimeInterface for RuntimeInterfaceImpl<TStore, TTemplateProvider>
+where
+    TStore: StateReader + Clone + 'static,
+    TTemplateProvider: TemplateProvider<Template = LoadedTemplate>,
+{
+    fn next_entity_id(&self) -> Result<EntityId, RuntimeError> {
+        let id = self.entity_id_provider.next_entity_id()?;
+        Ok(id)
+    }
+
+    fn emit_event(&mut self, topic: String, payload: Metadata) -> Result<(), RuntimeError> {
+        if let Err(reason) = Event::validate_custom_topic(&topic) {
+            return Err(RuntimeError::InvalidEventTopic { topic, reason });
+        }
+
+        self.invoke_modules_on_runtime_call("emit_event")?;
+
+        let component_address_option = self.tracker.read_with(|state| {
+            Ok::<_, RuntimeError>(
+                state
+                    .current_call_scope()?
+                    .get_current_component_lock()
+                    .and_then(|l| l.substate_id().as_component_address()),
+            )
+        })?;
+        let substate_id = component_address_option.map(SubstateId::Component);
+        let template_address = self.tracker.get_template_address()?;
+        let module = self.tracker.get_template_module_name()?;
+        let topic = format!("{module}.{topic}");
+
+        self.tracker
+            .add_event(Event::custom(substate_id, template_address, topic, payload))?;
+        Ok(())
+    }
+
+    fn emit_log(&mut self, level: LogLevel, message: String) -> Result<(), RuntimeError> {
+        self.invoke_modules_on_runtime_call("emit_log")?;
+
+        let log_level = match level {
+            LogLevel::Error => log::Level::Error,
+            LogLevel::Warn => log::Level::Warn,
+            LogLevel::Info => log::Level::Info,
+            LogLevel::Debug => log::Level::Debug,
+        };
+
+        // eprintln!("{}: {}", log_level, message);
+        log::log!(target: "tari::ootle::engine::runtime", log_level, "{}", message);
+        self.tracker.add_log(LogEntry::new(level, message))?;
+        Ok(())
+    }
+
+    fn load_component(
+        &mut self,
+        call: ComponentReference,
+    ) -> Result<(ComponentAddress, ComponentHeader), RuntimeError> {
+        self.invoke_modules_on_runtime_call("load_component")?;
+        match call {
+            ComponentReference::Address(address) => self.tracker.write_with(|state_mut| {
+                state_mut
+                    .load_and_cache_component(address)
+                    .cloned()
+                    .map(|c| (address, c))
+            }),
+            ComponentReference::Workspace(id) => self.tracker.write_with(|state_mut| {
+                let id = WorkspaceOffsetId::new(id);
+                let value = state_mut
+                    .workspace()
+                    .get(id)?
+                    .ok_or_else(|| RuntimeError::ItemNotOnWorkspace {
+                        id,
+                        existing_ids: state_mut.workspace().all_ids_iter().collect(),
+                    })?;
+
+                // If the value is a ComponentAddress, use it directly. If it's an integer, treat it as an allocation
+                // ID.
+                let address = if value.is_tag_of::<ComponentAddress>() {
+                    tari_bor::from_value(value).map_err(|e| RuntimeError::InvalidArgument {
+                        argument: "ComponentCall::FromWorkspace",
+                        reason: format!("Item on workspace at key '{id}' is not a valid ComponentAddress: {e}",),
+                    })?
+                } else if value.is_tag_of::<ComponentAddressAllocation>() {
+                    let allocation_id: ComponentAddressAllocation =
+                        tari_bor::from_value(value).map_err(|e| RuntimeError::InvalidArgument {
+                            argument: "ComponentCall::FromWorkspace",
+                            reason: format!(
+                                "Item on workspace at key '{id}' is not a valid ComponentAddressAllocation: {e}",
+                            ),
+                        })?;
+                    let substate_id = state_mut.get_substate_id_from_used_address_allocation(allocation_id.id())?;
+                    match substate_id {
+                        SubstateId::Component(addr) => addr,
+                        substate_id => {
+                            let substate_type =
+                                tari_ootle_common_types::substate_type::SubstateType::from(&substate_id);
+                            return Err(RuntimeError::InvalidArgument {
+                                argument: "ComponentCall::Allocation",
+                                reason: format!(
+                                    "Invalid attempt to load component with an address allocation ID ({}) with \
+                                     substate type {substate_type}",
+                                    allocation_id.id()
+                                ),
+                            });
+                        },
+                    }
+                } else {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "ComponentCall::FromWorkspace",
+                        reason: format!(
+                            "Item on workspace at key '{id}' is not a valid ComponentAddress or \
+                             ComponentAddressAllocation",
+                        ),
+                    });
+                };
+                state_mut
+                    .load_and_cache_component(address)
+                    .cloned()
+                    .map(|c| (address, c))
+            }),
+        }
+    }
+
+    fn lock_component(
+        &mut self,
+        address: ComponentAddress,
+        lock_flag: LockFlag,
+    ) -> Result<LockedSubstate, RuntimeError> {
+        self.tracker.lock_substate(SubstateId::Component(address), lock_flag)
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn component_invoke(
+        &mut self,
+        component_ref: ComponentRef,
+        action: ComponentAction,
+        args: EngineArgs,
+    ) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("component_invoke")?;
+
+        debug!(
+            target: LOG_TARGET,
+            "Component invoke: {} {:?}",
+            component_ref,
+            action,
+        );
+
+        match action {
+            ComponentAction::Create => {
+                let CreateComponentArg {
+                    encoded_state,
+                    owner_rule,
+                    access_rules,
+                    address_allocation,
+                } = args.assert_one_arg()?;
+
+                let template_addr = self.tracker.get_template_address()?;
+                let template_def = self.get_template_def(&template_addr)?;
+                validate_component_access_rule_methods(&access_rules, &template_def)?;
+
+                let owner_rule = match owner_rule {
+                    OwnerRule::OwnedBySigner => SubstateOwnerRule::ByPublicKey(self.seal_signer_public_key),
+                    OwnerRule::None => SubstateOwnerRule::None,
+                    OwnerRule::ByAccessRule(rule) => SubstateOwnerRule::ByAccessRule(rule),
+                    OwnerRule::ByPublicKey(key) => SubstateOwnerRule::ByPublicKey(key),
+                };
+
+                let component_address =
+                    self.tracker
+                        .new_component(encoded_state, owner_rule, access_rules, address_allocation)?;
+                Ok(InvokeResult::encode(&component_address)?)
+            },
+            ComponentAction::GetState => {
+                let component_address =
+                    component_ref
+                        .as_component_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "component_ref",
+                            reason: "GetState component action should not define a specific component address"
+                                .to_string(),
+                        })?;
+                args.assert_no_args("ComponentAction::GetState")?;
+                self.tracker.write_with(|state| {
+                    let is_already_locked = state
+                        .current_call_scope()?
+                        .get_current_component_lock()
+                        .map(|l| *l.substate_id() == component_address)
+                        .unwrap_or(false);
+
+                    let component_lock = if is_already_locked {
+                        state
+                            .current_call_scope()?
+                            .get_current_component_lock()
+                            .cloned()
+                            .ok_or(RuntimeError::NotInComponentContext {
+                                action: ComponentAction::GetState.into(),
+                            })?
+                    } else {
+                        state.read_lock_substate(SubstateId::Component(component_address))?
+                    };
+
+                    // We only allow mutating of the current component.
+                    if *component_lock.substate_id() != component_address {
+                        return Err(RuntimeError::LockError(LockError::SubstateNotLocked {
+                            address: SubstateId::Component(component_address),
+                        }));
+                    }
+
+                    let component = state.get_component(&component_lock)?;
+                    let result = InvokeResult::encode(component.state())?;
+                    if !is_already_locked {
+                        state.unlock_substate(component_lock)?;
+                    }
+
+                    Ok(result)
+                })
+            },
+            ComponentAction::SetState => {
+                let component_address =
+                    component_ref
+                        .as_component_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "component_ref",
+                            reason: "SetState component action should not define a specific component address"
+                                .to_string(),
+                        })?;
+                let component_state = args.assert_one_arg()?;
+                self.tracker.write_with(|state| {
+                    let component_lock = state
+                        .current_call_scope()?
+                        .get_current_component_lock()
+                        .cloned()
+                        .ok_or(RuntimeError::NotInComponentContext {
+                            action: ComponentAction::SetState.into(),
+                        })?;
+
+                    // We only allow mutating of the current component. Note this check doesnt actually provide any
+                    // security itself, it's just checking the engine call is made correctly. The security comes from
+                    // the fact that the engine creates the lock on the currently executing component and that is the
+                    // lock we use to gain access.
+                    if *component_lock.substate_id() != component_address {
+                        return Err(RuntimeError::AccessDeniedSetComponentState {
+                            attempted_on: component_address.into(),
+                            attempted_by: Box::new(component_lock.substate_id().clone()),
+                        });
+                    }
+
+                    state.modify_component_with(&component_lock, |component| {
+                        if component_state == *component.state() {
+                            return false;
+                        }
+                        component.body.set(component_state);
+                        true
+                    })?;
+
+                    Ok(InvokeResult::unit())
+                })
+            },
+            ComponentAction::SetAccessRules => {
+                let component_address =
+                    component_ref
+                        .as_component_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "component_ref",
+                            reason: "SetAccessRules component action requires a component address".to_string(),
+                        })?;
+
+                let access_rules: ComponentAccessRules = args.assert_one_arg()?;
+
+                self.tracker.write_with(|state| {
+                    let component_lock = state
+                        .current_call_scope()?
+                        .get_current_component_lock()
+                        .cloned()
+                        .ok_or(RuntimeError::NotInComponentContext {
+                            action: ComponentAction::SetAccessRules.into(),
+                        })?;
+                    // We only allow mutating of the current component. Note this check doesnt actually provide any
+                    // security itself, it's just checking the engine call is made correctly. The security comes from
+                    // the fact that the engine creates the lock on the currently executing component and that is the
+                    // lock we use to gain access.
+                    if *component_lock.substate_id() != component_address {
+                        return Err(RuntimeError::LockError(LockError::SubstateNotLocked {
+                            address: SubstateId::Component(component_address),
+                        }));
+                    }
+                    let component = state.get_component(&component_lock)?;
+                    state
+                        .authorization()
+                        .require_ownership(ComponentAction::SetAccessRules, component.as_ownership())?;
+
+                    state.modify_component_with(&component_lock, |component| {
+                        if access_rules == component.access_rules {
+                            return false;
+                        }
+                        component.set_access_rules(access_rules);
+                        true
+                    })?;
+
+                    Ok::<_, RuntimeError>(())
+                })?;
+
+                Ok(InvokeResult::unit())
+            },
+            ComponentAction::GetTemplateAddress => {
+                let component_address =
+                    component_ref
+                        .as_component_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "component_ref",
+                            reason: "SetAccessRules component action requires a component address".to_string(),
+                        })?;
+
+                args.assert_no_args("Component::GetTemplateAddress")?;
+
+                // The template can never change so we'll just fetch the component
+                self.tracker.read_with(|state| {
+                    let substate = state.store().get_unmodified_substate(&component_address.into())?;
+                    let component = substate
+                        .substate_value()
+                        .component()
+                        .ok_or(RuntimeError::InvariantError {
+                            function: "GetTemplateAddress",
+                            details: format!("Substate at {} is not a component", component_address),
+                        })?;
+
+                    Ok(InvokeResult::encode(&component.template_address)?)
+                })
+            },
+            ComponentAction::GetOwnerProof => {
+                let component_address =
+                    component_ref
+                        .as_component_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "component_ref",
+                            reason: "GetOwnerRule component action requires a component address".to_string(),
+                        })?;
+
+                args.assert_no_args("Component::GetOwnerRule")?;
+
+                // The owner rule can never change so we'll just fetch the component
+                self.tracker.write_with(|state_mut| {
+                    let substate = state_mut.store().get_unmodified_substate(&component_address.into())?;
+                    let component = substate
+                        .substate_value()
+                        .component()
+                        .ok_or(RuntimeError::InvariantError {
+                            function: "GetOwnerProof",
+                            details: format!("Substate at {} is not a component", component_address),
+                        })?;
+
+                    let Some(owner) = component.owner_rule.owned_by_public_key().copied() else {
+                        return Ok(InvokeResult::encode(&None::<tari_template_lib::models::Proof>)?);
+                    };
+
+                    let call_scope = state_mut.current_call_scope()?;
+                    let badge = NonFungibleAddress::from_public_key(owner);
+                    if !call_scope.auth_scope().contains_badge(&badge) {
+                        return Err(RuntimeError::SignerBadgeNotInScope { public_key: owner });
+                    }
+
+                    let proof_id = state_mut.id_provider()?.new_proof_id();
+                    let container = ResourceContainer::public_key(owner);
+                    let locked = LockedResource::new(ContainerRef::Runtime, container);
+                    state_mut.new_proof(proof_id, locked)?;
+
+                    Ok(InvokeResult::encode(&Some(tari_template_lib::models::Proof::from_id(
+                        proof_id,
+                    )))?)
+                })
+            },
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn resource_invoke(
+        &mut self,
+        resource_ref: ResourceRef,
+        action: ResourceAction,
+        args: EngineArgs,
+    ) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("resource_invoke")?;
+
+        debug!(
+            target: LOG_TARGET,
+            "Resource invoke: {} {:?}",
+            resource_ref,
+            action,
+        );
+
+        match action {
+            ResourceAction::Create => {
+                let arg: CreateResourceArg = args.assert_one_arg()?;
+
+                if arg
+                    .mint_arg
+                    .as_ref()
+                    .map(|mint| mint.as_resource_type() != arg.resource_type)
+                    .unwrap_or(false)
+                {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "CreateResourceArg",
+                        reason: "Mint argument type does not match resource type".to_string(),
+                    });
+                }
+
+                if arg.view_key.is_some() && !arg.resource_type.is_confidential() && !arg.resource_type.is_stealth() {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "CreateResourceArg",
+                        reason: "View key can only be set for stealth or confidential resources".to_string(),
+                    });
+                }
+
+                if arg.divisibility > limits::MAX_DIVISIBILITY {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "CreateResourceArg",
+                        reason: format!("Divisibility must be between 0 and {}", limits::MAX_DIVISIBILITY),
+                    });
+                }
+
+                if arg.resource_type.is_non_fungible() && arg.divisibility > 0 {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "CreateResourceArg",
+                        reason: "Non-fungible resources cannot have divisibility".to_string(),
+                    });
+                }
+
+                let owner_rule = match arg.owner_rule {
+                    OwnerRule::OwnedBySigner => SubstateOwnerRule::ByPublicKey(self.seal_signer_public_key),
+                    OwnerRule::ByPublicKey(key) => SubstateOwnerRule::ByPublicKey(key),
+                    OwnerRule::None => SubstateOwnerRule::None,
+                    OwnerRule::ByAccessRule(rule) => SubstateOwnerRule::ByAccessRule(rule),
+                };
+
+                // Check that auth hook is valid
+                if let Some(hook) = arg.authorize_hook.as_ref() {
+                    self.check_resource_auth_hook(hook)?;
+                }
+
+                self.tracker.write_with(|state_mut| {
+                    let resource = Resource::new(
+                        arg.resource_type,
+                        owner_rule,
+                        arg.access_rules,
+                        arg.metadata,
+                        arg.view_key,
+                        arg.authorize_hook,
+                        arg.divisibility,
+                        arg.is_total_supply_tracking_enabled,
+                    );
+
+                    let resource_address = match arg.address_allocation {
+                        Some(allocation) => {
+                            let alloc = state_mut.use_allocated_address(allocation.id())?;
+                            alloc.substate_id().as_resource_address().ok_or_else(|| {
+                                RuntimeError::AddressAllocationTypeMismatch {
+                                    id: alloc.substate_id().clone(),
+                                    expected: "ResourceAddress",
+                                }
+                            })?
+                        },
+                        None => state_mut.id_provider()?.new_resource_address()?,
+                    };
+
+                    let mut payload = Metadata::from_iter([("resource_type", resource.resource_type().to_string())]);
+                    if let Some(symbol) = resource.metadata().get(TOKEN_SYMBOL) {
+                        payload.insert(TOKEN_SYMBOL, symbol);
+                    }
+                    if let Some(image_url) = resource.metadata().get(IMAGE_URL) {
+                        payload.insert(IMAGE_URL, image_url);
+                    }
+
+                    Self::emit_std_event("resource", "create", resource_address, payload, state_mut)?;
+
+                    state_mut.new_substate(resource_address, resource)?;
+                    let resource_lock = state_mut.write_lock_substate(SubstateId::Resource(resource_address))?;
+
+                    let mut output_bucket = None;
+                    if let Some(mint_arg) = arg.mint_arg {
+                        let container = state_mut.mint_resource(&resource_lock, mint_arg)?;
+                        let bucket_id = state_mut.id_provider()?.new_bucket_id();
+                        state_mut.new_bucket(bucket_id, container)?;
+                        output_bucket = Some(tari_template_lib::models::Bucket::from_id(bucket_id));
+                    }
+
+                    state_mut.unlock_substate(resource_lock)?;
+
+                    Ok(InvokeResult::encode(&(resource_address, output_bucket))?)
+                })
+            },
+
+            ResourceAction::GetTotalSupply => {
+                let resource_address =
+                    resource_ref
+                        .as_resource_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "GetResourceType resource action requires a resource address".to_string(),
+                        })?;
+                args.assert_no_args("ResourceAction::GetTotalSupply")?;
+                self.tracker.write_with(|state| {
+                    let locked = state.read_lock_substate(SubstateId::Resource(resource_address))?;
+                    let resource = state.get_resource(&locked)?;
+                    let total_supply = resource.total_supply();
+                    state.unlock_substate(locked)?;
+                    Ok(InvokeResult::encode(&total_supply)?)
+                })
+            },
+            ResourceAction::GetResourceInfo => {
+                let resource_address =
+                    resource_ref
+                        .as_resource_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "GetResourceType resource action requires a resource address".to_string(),
+                        })?;
+
+                args.assert_no_args("ResourceAction::GetResourceType")?;
+
+                self.tracker.write_with(|state| {
+                    let locked = state.read_lock_substate(SubstateId::Resource(resource_address))?;
+                    let resource = state.get_resource(&locked)?;
+                    let resource_type = resource.resource_type();
+                    let divisibility = resource.divisibility();
+                    state.unlock_substate(locked)?;
+                    Ok(InvokeResult::encode(&ResourceInfo {
+                        resource_type,
+                        divisibility,
+                    })?)
+                })
+            },
+            ResourceAction::Mint => {
+                let resource_address =
+                    resource_ref
+                        .as_resource_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "Mint resource action requires a resource address".to_string(),
+                        })?;
+                let mint_resource: MintResourceArg = args.assert_one_arg()?;
+
+                let (resource_lock, maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                    let resource_lock = state_mut.write_lock_substate(SubstateId::Resource(resource_address))?;
+
+                    let resource = state_mut.get_resource(&resource_lock)?;
+
+                    state_mut.authorization().check_resource_access_rules(
+                        ResourceAuthAction::Mint,
+                        resource.as_ownership(),
+                        resource.access_rules(),
+                    )?;
+
+                    let auth_caller = state_mut.get_auth_caller()?;
+                    Ok::<_, RuntimeError>((resource_lock, resource.auth_hook().cloned(), auth_caller))
+                })?;
+
+                if let Some(auth_hook) = maybe_auth_hook {
+                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Mint)?;
+                }
+
+                self.tracker.write_with(|state_mut| {
+                    let mint_arg = mint_resource.mint_arg;
+
+                    let resource = state_mut.mint_resource(&resource_lock, mint_arg)?;
+                    let bucket_id = state_mut.id_provider()?.new_bucket_id();
+
+                    let payload = Metadata::from_iter([
+                        ("resource_type", resource.resource_type().to_string()),
+                        ("amount", resource.unlocked_amount().to_string()),
+                    ]);
+                    Self::emit_std_event("resource", "mint", resource_address, payload, state_mut)?;
+
+                    state_mut.new_bucket(bucket_id, resource)?;
+                    let bucket = tari_template_lib::models::Bucket::from_id(bucket_id);
+
+                    state_mut.unlock_substate(resource_lock)?;
+
+                    Ok(InvokeResult::encode(&bucket)?)
+                })
+            },
+            ResourceAction::Recall => {
+                let resource_address =
+                    resource_ref
+                        .as_resource_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "Recall resource action requires a resource address".to_string(),
+                        })?;
+                let arg: RecallResourceArg = args.assert_one_arg()?;
+
+                let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                    let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
+
+                    let resource = state_mut.get_resource(&resource_lock)?;
+                    state_mut.authorization().check_resource_access_rules(
+                        ResourceAuthAction::Recall,
+                        resource.as_ownership(),
+                        resource.access_rules(),
+                    )?;
+
+                    let auth_hook = resource.auth_hook().cloned();
+                    let auth_caller = state_mut.get_auth_caller()?;
+
+                    state_mut.unlock_substate(resource_lock)?;
+                    Ok::<_, RuntimeError>((auth_hook, auth_caller))
+                })?;
+
+                if let Some(auth_hook) = maybe_auth_hook {
+                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Recall)?;
+                }
+
+                self.tracker.write_with(|state_mut| {
+                    let vault_lock = state_mut.write_lock_substate(arg.vault_id.into())?;
+
+                    let resource = state_mut.recall_resource_from_vault(&vault_lock, &arg.resource)?;
+
+                    let payload = Metadata::from_iter([
+                        ("resource_type", resource.resource_type().to_string()),
+                        ("vault_id", arg.vault_id.to_string()),
+                        ("recall_desc", arg.resource.to_string()),
+                    ]);
+                    Self::emit_std_event("resource", "recall", resource_address, payload, state_mut)?;
+
+                    let bucket_id = state_mut.id_provider()?.new_bucket_id();
+                    state_mut.new_bucket(bucket_id, resource)?;
+
+                    state_mut.unlock_substate(vault_lock)?;
+
+                    Ok(InvokeResult::encode(&tari_template_lib::models::Bucket::from_id(
+                        bucket_id,
+                    ))?)
+                })
+            },
+            ResourceAction::GetNonFungible => {
+                let resource_address =
+                    resource_ref
+                        .as_resource_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "GetNonFungible resource action requires a resource address".to_string(),
+                        })?;
+                let arg: ResourceGetNonFungibleArg = args.assert_one_arg()?;
+
+                self.tracker.write_with(|state| {
+                    let nft_addr = NonFungibleAddress::new(resource_address, arg.id.clone());
+                    let addr = SubstateId::NonFungible(nft_addr.clone());
+                    let nft_lock = state.read_lock_substate(addr)?;
+
+                    let nf_container = state.get_non_fungible(&nft_lock)?;
+
+                    if nf_container.is_burnt() {
+                        return Err(RuntimeError::InvalidOpNonFungibleBurnt {
+                            op: "GetNonFungible",
+                            nf_id: arg.id,
+                            resource_address,
+                        });
+                    }
+
+                    state.unlock_substate(nft_lock)?;
+
+                    Ok(InvokeResult::encode(&nft_addr)?)
+                })
+            },
+            ResourceAction::UpdateNonFungibleData => {
+                let resource_address =
+                    resource_ref
+                        .as_resource_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "UpdateNonFungibleData resource action requires a resource address".to_string(),
+                        })?;
+                let arg: ResourceUpdateNonFungibleDataArg = args.assert_one_arg()?;
+
+                let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                    let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
+
+                    let resource = state_mut.get_resource(&resource_lock)?;
+
+                    state_mut.authorization().check_resource_access_rules(
+                        ResourceAuthAction::UpdateNonFungibleData,
+                        resource.as_ownership(),
+                        resource.access_rules(),
+                    )?;
+
+                    let auth_hook = resource.auth_hook().cloned();
+                    let auth_caller = state_mut.get_auth_caller()?;
+
+                    state_mut.unlock_substate(resource_lock)?;
+                    Ok::<_, RuntimeError>((auth_hook, auth_caller))
+                })?;
+
+                if let Some(auth_hook) = maybe_auth_hook {
+                    self.invoke_resource_access_hook(
+                        auth_hook,
+                        auth_caller,
+                        ResourceAuthAction::UpdateNonFungibleData,
+                    )?;
+                }
+
+                self.tracker.write_with(|state_mut| {
+                    let addr = NonFungibleAddress::new(resource_address, arg.id);
+                    let locked = state_mut.write_lock_substate(SubstateId::NonFungible(addr.clone()))?;
+
+                    let nft = state_mut.get_non_fungible_mut(&locked)?;
+
+                    let contents = nft
+                        .contents_mut()
+                        .ok_or_else(|| RuntimeError::InvalidOpNonFungibleBurnt {
+                            op: "UpdateNonFungibleData",
+                            resource_address,
+                            nf_id: addr.id().clone(),
+                        })?;
+                    contents.set_mutable_data(arg.data);
+
+                    let payload = Metadata::from_iter([("resource_type", ResourceType::NonFungible.to_string())]);
+                    Self::emit_std_event(
+                        "resource",
+                        "update_nonfungible_data",
+                        resource_address,
+                        payload,
+                        state_mut,
+                    )?;
+
+                    state_mut.unlock_substate(locked)?;
+
+                    Ok(InvokeResult::unit())
+                })
+            },
+            ResourceAction::UpdateAccessRules => {
+                let resource_address =
+                    resource_ref
+                        .as_resource_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "UpdateAccessRules resource action requires a resource address".to_string(),
+                        })?;
+                let access_rules: ResourceAccessRules = args.assert_one_arg()?;
+
+                let (resource_lock, maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                    let resource_lock = state_mut.write_lock_substate(SubstateId::Resource(resource_address))?;
+
+                    let resource = state_mut.get_resource(&resource_lock)?;
+
+                    state_mut.authorization().check_resource_access_rules(
+                        ResourceAuthAction::UpdateAccessRules,
+                        resource.as_ownership(),
+                        resource.access_rules(),
+                    )?;
+
+                    let auth_caller = state_mut.get_auth_caller()?;
+                    Ok::<_, RuntimeError>((resource_lock, resource.auth_hook().cloned(), auth_caller))
+                })?;
+
+                if let Some(auth_hook) = maybe_auth_hook {
+                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::UpdateAccessRules)?;
+                }
+
+                self.tracker.write_with(|state_mut| {
+                    let resource_mut = state_mut.get_resource_mut(&resource_lock)?;
+                    resource_mut.set_access_rules(access_rules);
+                    let payload = Metadata::from_iter([("resource_type", resource_mut.resource_type().to_string())]);
+                    Self::emit_std_event("resource", "update_access_rules", resource_address, payload, state_mut)?;
+
+                    state_mut.unlock_substate(resource_lock)?;
+
+                    Ok(InvokeResult::unit())
+                })
+            },
+            ResourceAction::SetVaultFreeze => {
+                let resource_address =
+                    resource_ref
+                        .as_resource_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "Freeze resource action requires a resource address".to_string(),
+                        })?;
+                let arg: FreezeResourceArg = args.assert_one_arg()?;
+
+                if !arg.flags.validate() {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "FreezeResourceArg",
+                        reason: "Invalid freeze flags".to_string(),
+                    });
+                }
+
+                let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                    let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
+
+                    let resource = state_mut.get_resource(&resource_lock)?;
+
+                    state_mut.authorization().check_resource_access_rules(
+                        ResourceAuthAction::Freeze,
+                        resource.as_ownership(),
+                        resource.access_rules(),
+                    )?;
+
+                    let auth_hook = resource.auth_hook().cloned();
+                    let auth_caller = state_mut.get_auth_caller()?;
+
+                    state_mut.unlock_substate(resource_lock)?;
+                    Ok::<_, RuntimeError>((auth_hook, auth_caller))
+                })?;
+
+                if let Some(auth_hook) = maybe_auth_hook {
+                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Freeze)?;
+                }
+
+                self.tracker.write_with(|state_mut| {
+                    let vault_lock = state_mut.write_lock_substate(arg.vault_id.into())?;
+                    state_mut.set_vault_freeze(&vault_lock, arg.flags)?;
+                    let payload =
+                        Metadata::from_iter([("vault_id", arg.vault_id.to_string()), ("flags", arg.flags.to_string())]);
+                    let action = if arg.flags.is_empty() { "unfreeze" } else { "freeze" };
+                    Self::emit_std_event("resource", action, resource_address, payload, state_mut)?;
+
+                    state_mut.unlock_substate(vault_lock)?;
+
+                    Ok(InvokeResult::unit())
+                })
+            },
+            ResourceAction::StealthTransfer => {
+                let resource_address =
+                    resource_ref
+                        .as_resource_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "StealthTransfer resource action requires a resource address".to_string(),
+                        })?;
+                let arg: StealthTransferResourceArg = args.assert_one_arg()?;
+                let maybe_bucket = self.stealth_transfer(resource_address.into(), arg.transfer, arg.input_bucket)?;
+                Ok(InvokeResult::encode(
+                    &maybe_bucket.map(tari_template_lib::models::Bucket::from_id),
+                )?)
+            },
+            ResourceAction::SetStealthUtxosFreeze => {
+                let resource_address =
+                    resource_ref
+                        .as_resource_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "FreezeStealthUtxo resource action requires a resource address".to_string(),
+                        })?;
+                let arg: SetFreezeStealthUtxosArg = args.assert_one_arg()?;
+
+                if arg.utxos.is_empty() {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "SetFreezeStealthUtxosArg",
+                        reason: "Utxos list cannot be empty".to_string(),
+                    });
+                }
+
+                self.tracker.write_with(|state_mut| {
+                    let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
+
+                    let resource = state_mut.get_resource(&resource_lock)?;
+
+                    if !resource.resource_type().is_stealth() {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "FreezeStealthUtxo can only be called on stealth resources".to_string(),
+                        });
+                    }
+
+                    state_mut.authorization().check_resource_access_rules(
+                        ResourceAuthAction::Freeze,
+                        resource.as_ownership(),
+                        resource.access_rules(),
+                    )?;
+
+                    for utxo in arg.utxos {
+                        let id = SubstateId::Utxo(UtxoAddress::new(resource_address, utxo));
+                        let locked = state_mut.write_lock_substate(id.clone())?;
+
+                        let utxo_mut = state_mut
+                            .get_locked_substate_mut(&locked)?
+                            .as_utxo_mut()
+                            .ok_or_else(|| RuntimeError::LockSubstateMismatch {
+                                lock_id: locked.lock_id(),
+                                expected_type: "Utxo",
+                                id,
+                            })?;
+
+                        // Freeze is idempotent.
+                        if arg.freeze {
+                            utxo_mut.freeze();
+                        } else {
+                            utxo_mut.unfreeze();
+                        }
+                        state_mut.unlock_substate(locked)?;
+                    }
+
+                    state_mut.unlock_substate(resource_lock)?;
+
+                    Ok(InvokeResult::unit())
+                })
+            },
+            ResourceAction::StealthUtxoBurn => {
+                let resource_address =
+                    resource_ref
+                        .as_resource_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "BurnStealthUtxo resource action requires a resource address".to_string(),
+                        })?;
+                let arg: BurnStealthUtxoArg = args.assert_one_arg()?;
+
+                self.tracker.write_with(|state_mut| {
+                    let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
+
+                    let resource = state_mut.get_resource(&resource_lock)?;
+
+                    if !resource.resource_type().is_stealth() {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "FreezeStealthUtxo can only be called on stealth resources".to_string(),
+                        });
+                    }
+
+                    let is_total_supply_tracking_enabled = resource.is_supply_tracking_enabled();
+                    if is_total_supply_tracking_enabled && arg.value_proof.is_none() {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "BurnStealthUtxoArg",
+                            reason: "Burning from a total supply tracking resource requires a value proof".to_string(),
+                        });
+                    }
+
+                    state_mut.authorization().check_resource_access_rules(
+                        ResourceAuthAction::Burn,
+                        resource.as_ownership(),
+                        resource.access_rules(),
+                    )?;
+
+                    state_mut.unlock_substate(resource_lock)?;
+
+                    let id = SubstateId::Utxo(UtxoAddress::new(resource_address, arg.utxo_id));
+                    let utxo_lock = state_mut.write_lock_substate(id.clone())?;
+
+                    let utxo_mut = state_mut
+                        .get_locked_substate_mut(&utxo_lock)?
+                        .as_utxo_mut()
+                        .ok_or_else(|| RuntimeError::LockSubstateMismatch {
+                            lock_id: utxo_lock.lock_id(),
+                            expected_type: "Utxo",
+                            id,
+                        })?;
+
+                    if utxo_mut.is_burnt() {
+                        return Err(RuntimeError::ResourceError(ResourceError::UtxoBurnFailed {
+                            id: arg.utxo_id,
+                            details: "already burnt".to_string(),
+                        }));
+                    }
+
+                    utxo_mut.burn();
+
+                    if is_total_supply_tracking_enabled {
+                        let value_proof = arg.value_proof.as_ref().expect(
+                            "BUG: is_total_supply_tracking_enabled is true and value proof is some has been checked",
+                        );
+                        let commitment = arg.utxo_id.into_commitment_bytes();
+                        let elgamal_proof = utxo_mut
+                            .output
+                            .as_ref()
+                            .and_then(|o| o.output.viewable_balance.as_ref());
+                        let value = stealth::validate_value_proof(&commitment, elgamal_proof, value_proof)?;
+                        if value.is_positive() {
+                            let resource_lock =
+                                state_mut.write_lock_substate(SubstateId::Resource(resource_address))?;
+                            let resource_mut = state_mut.get_resource_mut(&resource_lock)?;
+                            resource_mut.decrease_total_supply(value);
+                            state_mut.unlock_substate(resource_lock)?;
+                        }
+                    }
+
+                    state_mut.unlock_substate(utxo_lock)?;
+
+                    Ok(InvokeResult::unit())
+                })
+            },
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn vault_invoke(
+        &mut self,
+        vault_ref: VaultRef,
+        action: VaultAction,
+        args: EngineArgs,
+    ) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("vault_invoke")?;
+
+        debug!(target: LOG_TARGET, "Vault invoke: {} {:?}", vault_ref, action,);
+
+        // Check vault ownership if referencing an ID
+        if action.requires_write_access() &&
+            let Some(vault_id) = vault_ref.vault_id()
+        {
+            self.tracker
+                .read_with(|state| state.check_component_scope(&vault_id.into(), action))?;
+        }
+
+        match action {
+            VaultAction::Create => {
+                let resource_address = vault_ref
+                    .resource_address()
+                    .ok_or_else(|| RuntimeError::InvalidArgument {
+                        argument: "vault_ref",
+                        reason: "Create vault action requires a resource address".to_string(),
+                    })?;
+                args.assert_no_args("CreateVault")?;
+
+                self.tracker.write_with(|state| {
+                    let resource_substate_id = SubstateId::Resource(*resource_address);
+                    let resource_lock = state.read_lock_substate(resource_substate_id.clone())?;
+                    let resource = state.get_resource(&resource_lock)?;
+
+                    // Require deposit permissions on the resource to create the vault (even if empty)
+                    state.authorization().check_resource_access_rules(
+                        ResourceAuthAction::Deposit,
+                        resource.as_ownership(),
+                        resource.access_rules(),
+                    )?;
+
+                    let resource_type = state.get_resource(&resource_lock)?.resource_type();
+                    let vault_id = state.id_provider()?.new_vault_id()?;
+                    let resource = match resource_type {
+                        ResourceType::Fungible => ResourceContainer::public_fungible(*resource_address, Amount::zero()),
+                        ResourceType::NonFungible => {
+                            ResourceContainer::non_fungible(*resource_address, Default::default())
+                        },
+                        ResourceType::Confidential => {
+                            ResourceContainer::confidential(*resource_address, None, Amount::zero())
+                        },
+                        ResourceType::Stealth => ResourceContainer::stealth(*resource_address, Amount::zero()),
+                    };
+
+                    let vault = Vault::new(resource);
+
+                    state.new_substate(vault_id, vault)?;
+                    debug!(
+                        target: LOG_TARGET,
+                        "Created vault {} for resource {} ({})",
+                        vault_id,
+                        resource_address,
+                        resource_type
+                    );
+                    state.unlock_substate(resource_lock)?;
+
+                    // The resource is not orphaned because of the new vault.
+                    state
+                        .current_call_scope_mut()?
+                        .move_node_to_owned(&resource_substate_id)?;
+
+                    Ok(InvokeResult::encode(&vault_id)?)
+                })
+            },
+            VaultAction::Deposit => {
+                let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "vault_ref",
+                    reason: "Put vault action requires a vault id".to_string(),
+                })?;
+
+                let bucket_id: BucketId = args.assert_one_arg()?;
+
+                let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
+                    self.tracker.write_with(|state_mut| {
+                        let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
+
+                        let vault = state_mut.get_vault(&vault_lock)?;
+                        if vault.freeze_flags().contains(VaultFreezeFlag::Deposits) {
+                            return Err(RuntimeError::VaultFrozen {
+                                vault_id,
+                                freeze_flag: VaultFreezeFlag::Deposits,
+                            });
+                        }
+                        let resource_address = *vault.resource_address();
+
+                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
+
+                        let resource = state_mut.get_resource(&resource_lock)?;
+
+                        state_mut.authorization().check_resource_access_rules(
+                            ResourceAuthAction::Deposit,
+                            resource.as_ownership(),
+                            resource.access_rules(),
+                        )?;
+
+                        let auth_caller = state_mut.get_auth_caller()?;
+                        Ok::<_, RuntimeError>((vault_lock, resource_lock, resource.auth_hook().cloned(), auth_caller))
+                    })?;
+
+                if let Some(auth_hook) = maybe_auth_hook {
+                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Deposit)?;
+                }
+
+                self.tracker.write_with(move |state_mut| {
+                    let bucket = state_mut.take_bucket(bucket_id)?;
+                    // It is invalid to deposit a bucket that has locked funds
+                    if !bucket.locked_amount().is_zero() {
+                        return Err(RuntimeError::InvalidOpDepositLockedBucket {
+                            bucket_id,
+                            locked_amount: bucket.locked_amount(),
+                        });
+                    }
+
+                    // Emit a builtin event for the deposit
+                    let payload = Metadata::from_iter([
+                        ("resource_address", bucket.resource_address().to_string()),
+                        ("resource_type", bucket.resource_type().to_string()),
+                        ("amount", bucket.unlocked_amount().to_string()),
+                    ]);
+
+                    Self::emit_std_event("vault", "deposit", vault_id, payload, state_mut)?;
+
+                    let vault_mut = state_mut.get_vault_mut(&vault_lock)?;
+
+                    vault_mut.deposit(bucket)?;
+
+                    state_mut.unlock_substate(resource_lock)?;
+                    state_mut.unlock_substate(vault_lock)?;
+
+                    Ok(InvokeResult::unit())
+                })
+            },
+            VaultAction::Withdraw => {
+                let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "vault_ref",
+                    reason: "Withdraw vault action requires a vault id".to_string(),
+                })?;
+                let arg: VaultWithdrawArg = args.assert_one_arg()?;
+
+                let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
+                    self.tracker.write_with(|state_mut| {
+                        let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
+
+                        let vault = state_mut.get_vault(&vault_lock)?;
+                        if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
+                            return Err(RuntimeError::VaultFrozen {
+                                vault_id,
+                                freeze_flag: VaultFreezeFlag::Withdrawals,
+                            });
+                        }
+                        let resource_address = vault.resource_address();
+
+                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(*resource_address))?;
+
+                        let resource = state_mut.get_resource(&resource_lock)?;
+
+                        state_mut.authorization().check_resource_access_rules(
+                            ResourceAuthAction::Withdraw,
+                            resource.as_ownership(),
+                            resource.access_rules(),
+                        )?;
+
+                        let auth_caller = state_mut.get_auth_caller()?;
+                        Ok::<_, RuntimeError>((vault_lock, resource_lock, resource.auth_hook().cloned(), auth_caller))
+                    })?;
+
+                if let Some(auth_hook) = maybe_auth_hook {
+                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Withdraw)?;
+                }
+
+                self.tracker.write_with(|state| {
+                    let resource = state.get_resource(&resource_lock)?;
+                    let maybe_view_key =
+                        resource
+                            .to_view_key_public_key()
+                            .map_err(|e| RuntimeError::InvariantError {
+                                function: "VaultAction::Withdraw",
+                                details: format!(
+                                    "Resource {} has a malformed view key: {}",
+                                    resource_lock.substate_id(),
+                                    e
+                                ),
+                            })?;
+
+                    let vault_mut = state.get_vault_mut(&vault_lock)?;
+                    let (resource_container, public_amount) = match arg {
+                        VaultWithdrawArg::Fungible { amount } | VaultWithdrawArg::Stealth { amount } => {
+                            let container = vault_mut.withdraw(amount)?;
+                            (container, amount)
+                        },
+                        VaultWithdrawArg::NonFungible { ids } => {
+                            let container = vault_mut.withdraw_non_fungibles(&ids)?;
+                            let amount = ids.len() as u128;
+                            (container, amount.into())
+                        },
+                        VaultWithdrawArg::Confidential { proof } => {
+                            let amount = proof.revealed_input_amount();
+                            let container = vault_mut.withdraw_confidential(*proof, maybe_view_key.as_ref())?;
+                            (container, amount)
+                        },
+                    };
+
+                    // Emit a builtin event for the withdraw
+                    let payload = Metadata::from_iter([
+                        ("resource_address", resource_container.resource_address().to_string()),
+                        ("resource_type", resource_container.resource_type().to_string()),
+                        ("amount", public_amount.to_string()),
+                    ]);
+
+                    Self::emit_std_event("vault", "withdraw", vault_id, payload, state)?;
+
+                    let bucket_id = state.id_provider()?.new_bucket_id();
+                    state.new_bucket(bucket_id, resource_container)?;
+
+                    state.unlock_substate(vault_lock)?;
+                    state.unlock_substate(resource_lock)?;
+
+                    let bucket = tari_template_lib::models::Bucket::from_id(bucket_id);
+                    Ok(InvokeResult::encode(&bucket)?)
+                })
+            },
+            VaultAction::GetBalance => {
+                let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "vault_ref",
+                    reason: "GetBalance vault action requires a vault id".to_string(),
+                })?;
+                args.assert_no_args("Vault::GetBalance")?;
+
+                self.tracker.write_with(|state| {
+                    let vault_lock = state.read_lock_substate(SubstateId::Vault(vault_id))?;
+                    let balance = state.get_vault(&vault_lock)?.balance();
+                    state.unlock_substate(vault_lock)?;
+                    Ok(InvokeResult::encode(&balance)?)
+                })
+            },
+            VaultAction::GetLockedBalance => {
+                let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "vault_ref",
+                    reason: "GetBalance vault action requires a vault id".to_string(),
+                })?;
+                args.assert_no_args("Vault::GetBalance")?;
+
+                self.tracker.write_with(|state| {
+                    let vault_lock = state.read_lock_substate(SubstateId::Vault(vault_id))?;
+                    let balance = state.get_vault(&vault_lock)?.locked_balance();
+                    state.unlock_substate(vault_lock)?;
+                    Ok(InvokeResult::encode(&balance)?)
+                })
+            },
+            VaultAction::GetResourceAddress => {
+                let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "vault_ref",
+                    reason: "vault action requires a vault id".to_string(),
+                })?;
+                args.assert_no_args("Vault::GetResourceAddress")?;
+
+                self.tracker.write_with(|state| {
+                    let vault_lock = state.read_lock_substate(SubstateId::Vault(vault_id))?;
+                    let resource_address = *state.get_vault(&vault_lock)?.resource_address();
+                    state.unlock_substate(vault_lock)?;
+                    Ok(InvokeResult::encode(&resource_address)?)
+                })
+            },
+            VaultAction::GetNonFungibleIds => {
+                let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "vault_ref",
+                    reason: "vault action requires a vault id".to_string(),
+                })?;
+                args.assert_no_args("Vault::GetNonFungibleIds")?;
+
+                self.tracker.write_with(|state| {
+                    let vault_lock = state.read_lock_substate(SubstateId::Vault(vault_id))?;
+                    let non_fungible_ids = state.get_vault(&vault_lock)?.get_non_fungible_ids();
+                    let result = InvokeResult::encode(&non_fungible_ids)?;
+                    state.unlock_substate(vault_lock)?;
+                    Ok(result)
+                })
+            },
+            VaultAction::GetCommitmentCount => {
+                let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "vault_ref",
+                    reason: "vault action requires a vault id".to_string(),
+                })?;
+
+                args.assert_no_args("Vault::GetCommitmentCount")?;
+
+                self.tracker.write_with(|state| {
+                    let vault_lock = state.read_lock_substate(SubstateId::Vault(vault_id))?;
+                    let commitment_count = state.get_vault(&vault_lock)?.get_commitment_count();
+                    state.unlock_substate(vault_lock)?;
+                    Ok(InvokeResult::encode(&commitment_count)?)
+                })
+            },
+            VaultAction::PayFee => {
+                let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "vault_ref",
+                    reason: "PayFee vault action requires a vault id".to_string(),
+                })?;
+
+                let arg: PayFeeArg = args.assert_one_arg()?;
+                if arg.amount.is_negative() {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "amount",
+                        reason: "Amount must be positive".to_string(),
+                    });
+                }
+
+                if self.tracker.is_fee_intent_checkpointed() {
+                    return Err(RuntimeError::FeePaymentInMainIntent);
+                }
+
+                self.tracker.write_with(|state_mut| {
+                    let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
+
+                    let vault = state_mut.get_vault(&vault_lock)?;
+                    if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
+                        return Err(RuntimeError::VaultFrozen {
+                            vault_id,
+                            freeze_flag: VaultFreezeFlag::Withdrawals,
+                        });
+                    }
+                    let resource_address = vault.resource_address();
+                    if *resource_address != TARI_TOKEN {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "vault_ref",
+                            reason: format!(
+                                "Fees can only be paid using XTR, however the vault contained resource {}",
+                                resource_address
+                            ),
+                        });
+                    }
+                    let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(TARI_TOKEN))?;
+                    let resource = state_mut.get_resource(&resource_lock)?;
+
+                    state_mut.authorization().check_resource_access_rules(
+                        ResourceAuthAction::Withdraw,
+                        resource.as_ownership(),
+                        resource.access_rules(),
+                    )?;
+
+                    let vault_mut = state_mut.get_vault_mut(&vault_lock)?;
+
+                    let mut container = ResourceContainer::stealth(TARI_TOKEN, Amount::zero());
+                    if arg.amount.is_positive() {
+                        let withdrawn = vault_mut.withdraw(arg.amount)?;
+                        container.deposit(withdrawn)?;
+                    }
+                    if let Some(statement) = arg.statement &&
+                        let Some(revealed) =
+                            state_mut.execute_stealth_transfer(TARI_TOKEN.into(), statement, None)?
+                    {
+                        container.deposit(revealed)?;
+                    }
+                    if container.unlocked_amount().is_zero() {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "TakeFeesArg",
+                            reason: "Fee payment has zero value".to_string(),
+                        });
+                    }
+
+                    Self::emit_std_event(
+                        "vault",
+                        "pay_fee",
+                        vault_id,
+                        Metadata::from_iter([("amount", container.unlocked_amount().to_string())]),
+                        state_mut,
+                    )?;
+
+                    state_mut.pay_fee(container, Some(vault_id))?;
+
+                    state_mut.unlock_substate(resource_lock)?;
+                    state_mut.unlock_substate(vault_lock)?;
+
+                    Ok(InvokeResult::unit())
+                })
+            },
+            VaultAction::CreateProofByResource => {
+                let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "vault_ref",
+                    reason: "CreateProofByResource vault action requires a vault id".to_string(),
+                })?;
+                args.assert_no_args("CreateProofByResource")?;
+
+                let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
+                    self.tracker.write_with(|state_mut| {
+                        let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
+
+                        let vault = state_mut.get_vault(&vault_lock)?;
+                        if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
+                            return Err(RuntimeError::VaultFrozen {
+                                vault_id,
+                                freeze_flag: VaultFreezeFlag::Withdrawals,
+                            });
+                        }
+                        let resource_address = vault.resource_address();
+
+                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(*resource_address))?;
+
+                        let resource = state_mut.get_resource(&resource_lock)?;
+
+                        state_mut.authorization().check_resource_access_rules(
+                            ResourceAuthAction::Withdraw,
+                            resource.as_ownership(),
+                            resource.access_rules(),
+                        )?;
+
+                        let auth_caller = state_mut.get_auth_caller()?;
+                        Ok::<_, RuntimeError>((vault_lock, resource_lock, resource.auth_hook().cloned(), auth_caller))
+                    })?;
+
+                if let Some(auth_hook) = maybe_auth_hook {
+                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Withdraw)?;
+                }
+
+                self.tracker.write_with(|state| {
+                    let proof_id = state.id_provider()?.new_proof_id();
+                    let vault_mut = state.get_vault_mut(&vault_lock)?;
+                    let locked_funds = vault_mut.lock_all(vault_id)?;
+                    state.new_proof(proof_id, locked_funds)?;
+
+                    state.unlock_substate(vault_lock)?;
+                    state.unlock_substate(resource_lock)?;
+
+                    Ok(InvokeResult::encode(&proof_id)?)
+                })
+            },
+            VaultAction::CreateProofByFungibleAmount => {
+                let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "vault_ref",
+                    reason: "CreateProofByFungibleAmount vault action requires a vault id".to_string(),
+                })?;
+                let arg: VaultCreateProofByFungibleAmountArg = args.assert_one_arg()?;
+
+                let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
+                    self.tracker.write_with(|state_mut| {
+                        let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
+
+                        let vault = state_mut.get_vault(&vault_lock)?;
+                        if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
+                            return Err(RuntimeError::VaultFrozen {
+                                vault_id,
+                                freeze_flag: VaultFreezeFlag::Withdrawals,
+                            });
+                        }
+                        let resource_address = vault.resource_address();
+
+                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(*resource_address))?;
+
+                        let resource = state_mut.get_resource(&resource_lock)?;
+
+                        state_mut.authorization().check_resource_access_rules(
+                            ResourceAuthAction::Withdraw,
+                            resource.as_ownership(),
+                            resource.access_rules(),
+                        )?;
+
+                        let auth_caller = state_mut.get_auth_caller()?;
+                        Ok::<_, RuntimeError>((vault_lock, resource_lock, resource.auth_hook().cloned(), auth_caller))
+                    })?;
+
+                if let Some(auth_hook) = maybe_auth_hook {
+                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Withdraw)?;
+                }
+
+                self.tracker.write_with(|state| {
+                    let proof_id = state.id_provider()?.new_proof_id();
+                    let vault_mut = state.get_vault_mut(&vault_lock)?;
+                    let locked_funds = vault_mut.lock_by_amount(vault_id, arg.amount)?;
+                    state.new_proof(proof_id, locked_funds)?;
+
+                    state.unlock_substate(vault_lock)?;
+                    state.unlock_substate(resource_lock)?;
+
+                    Ok(InvokeResult::encode(&proof_id)?)
+                })
+            },
+            VaultAction::CreateProofByNonFungibles => {
+                let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "vault_ref",
+                    reason: "CreateProofByNonFungibles vault action requires a vault id".to_string(),
+                })?;
+                let arg: VaultCreateProofByNonFungiblesArg = args.assert_one_arg()?;
+
+                let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
+                    self.tracker.write_with(|state_mut| {
+                        let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
+
+                        let vault = state_mut.get_vault(&vault_lock)?;
+                        if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
+                            return Err(RuntimeError::VaultFrozen {
+                                vault_id,
+                                freeze_flag: VaultFreezeFlag::Withdrawals,
+                            });
+                        }
+                        let resource_address = vault.resource_address();
+
+                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(*resource_address))?;
+
+                        let resource = state_mut.get_resource(&resource_lock)?;
+
+                        state_mut.authorization().check_resource_access_rules(
+                            ResourceAuthAction::Withdraw,
+                            resource.as_ownership(),
+                            resource.access_rules(),
+                        )?;
+
+                        let auth_caller = state_mut.get_auth_caller()?;
+                        Ok::<_, RuntimeError>((vault_lock, resource_lock, resource.auth_hook().cloned(), auth_caller))
+                    })?;
+
+                if let Some(auth_hook) = maybe_auth_hook {
+                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Withdraw)?;
+                }
+
+                self.tracker.write_with(|state| {
+                    let proof_id = state.id_provider()?.new_proof_id();
+                    let vault_mut = state.get_vault_mut(&vault_lock)?;
+                    let locked_funds = vault_mut.lock_by_non_fungible_ids(vault_id, arg.ids)?;
+                    state.new_proof(proof_id, locked_funds)?;
+
+                    state.unlock_substate(vault_lock)?;
+                    state.unlock_substate(resource_lock)?;
+
+                    Ok(InvokeResult::encode(&proof_id)?)
+                })
+            },
+            VaultAction::CreateProofByConfidentialResource => Err(RuntimeError::NotSupported {
+                details: "CreateProofByConfidentialResource not implemented".to_string(),
+            }),
+            VaultAction::GetNonFungibles => {
+                let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "vault_ref",
+                    reason: "GetNonFungibles vault action requires a vault id".to_string(),
+                })?;
+                args.assert_no_args("Vault::GetNonFungibles")?;
+
+                self.tracker.write_with(|state| {
+                    let vault_lock = state.read_lock_substate(SubstateId::Vault(vault_id))?;
+                    let resource_address = state.get_vault(&vault_lock)?.resource_address();
+                    let nft_ids = state.get_vault(&vault_lock)?.get_non_fungible_ids();
+                    let nfts: Vec<NonFungible> = nft_ids
+                        .iter()
+                        .map(|id| NonFungibleAddress::new(*resource_address, id.clone()))
+                        .map(NonFungible::new)
+                        .collect();
+
+                    let result = InvokeResult::encode(&nfts)?;
+                    state.unlock_substate(vault_lock)?;
+                    Ok(result)
+                })
+            },
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn bucket_invoke(
+        &mut self,
+        bucket_ref: BucketRef,
+        action: BucketAction,
+        args: EngineArgs,
+    ) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("bucket_invoke")?;
+
+        debug!(target: LOG_TARGET, "Bucket invoke: {} {:?}", bucket_ref, action,);
+
+        match action {
+            BucketAction::GetResourceAddress => {
+                let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "bucket_ref",
+                    reason: "GetResourceAddress action requires a bucket id".to_string(),
+                })?;
+                args.assert_no_args("Bucket::GetResourceAddress")?;
+
+                self.tracker.read_with(|state| {
+                    let bucket = state.get_bucket(bucket_id)?;
+                    Ok(InvokeResult::encode(bucket.resource_address())?)
+                })
+            },
+            BucketAction::GetResourceType => {
+                let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "bucket_ref",
+                    reason: "GetResourceType action requires a bucket id".to_string(),
+                })?;
+                args.assert_no_args("Bucket::GetResourceType")?;
+
+                self.tracker.read_with(|state| {
+                    let bucket = state.get_bucket(bucket_id)?;
+                    Ok(InvokeResult::encode(&bucket.resource_type())?)
+                })
+            },
+            BucketAction::GetAmount => {
+                let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "bucket_ref",
+                    reason: "GetAmount bucket action requires a bucket id".to_string(),
+                })?;
+
+                let arg: BucketGetAmountArg = args.assert_one_arg()?;
+                self.tracker.read_with(|state| {
+                    let bucket = state.get_bucket(bucket_id)?;
+                    match arg {
+                        BucketGetAmountArg::AmountOnly => Ok(InvokeResult::encode(&bucket.unlocked_amount())?),
+                        BucketGetAmountArg::LockedOnly => Ok(InvokeResult::encode(&bucket.locked_amount())?),
+                        BucketGetAmountArg::AmountAndLocked => {
+                            let amount = bucket
+                                .unlocked_amount()
+                                .checked_add(bucket.locked_amount())
+                                .ok_or_else(|| RuntimeError::InvariantError {
+                                    function: "BucketAction::GetAmount",
+                                    details: "Total amount overflowed".to_string(),
+                                })?;
+                            Ok(InvokeResult::encode(&amount)?)
+                        },
+                        BucketGetAmountArg::Everything => {
+                            let amount = bucket
+                                .unlocked_amount()
+                                .checked_add(bucket.locked_amount())
+                                .and_then(|a| {
+                                    a.checked_add(Amount::from_usize(bucket.number_of_confidential_commitments()))
+                                })
+                                .ok_or_else(|| RuntimeError::InvariantError {
+                                    function: "BucketAction::GetAmount",
+                                    details: "Total amount overflowed".to_string(),
+                                })?;
+                            Ok(InvokeResult::encode(&amount)?)
+                        },
+                    }
+                })
+            },
+            BucketAction::Take => {
+                let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "bucket_ref",
+                    reason: "Take bucket action requires a bucket id".to_string(),
+                })?;
+                let amount = args.assert_one_arg()?;
+
+                self.tracker.write_with(|state| {
+                    let bucket = state.get_bucket_mut(bucket_id)?;
+                    let resource = bucket.take(amount)?;
+                    let bucket_id = state.new_bucket_id();
+                    state.new_bucket(bucket_id, resource)?;
+                    Ok(InvokeResult::encode(&bucket_id)?)
+                })
+            },
+            BucketAction::TakeConfidential => {
+                let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "bucket_ref",
+                    reason: "Take bucket action requires a bucket id".to_string(),
+                })?;
+                let proof = args.assert_one_arg()?;
+
+                self.tracker.write_with(|state| {
+                    let bucket = state.get_bucket(bucket_id)?;
+                    let resource_lock = state.read_lock_substate((*bucket.resource_address()).into())?;
+                    let resource = state.get_resource(&resource_lock)?;
+                    let view_key = resource
+                        .to_view_key_public_key()
+                        .map_err(|e| RuntimeError::InvariantError {
+                            function: "BucketAction::TakeConfidential",
+                            details: format!(
+                                "Resource {} has a malformed view key: {}",
+                                resource_lock.substate_id(),
+                                e
+                            ),
+                        })?;
+                    let bucket_mut = state.get_bucket_mut(bucket_id)?;
+                    let resource = bucket_mut.take_confidential(proof, view_key.as_ref())?;
+                    let bucket_id = state.id_provider()?.new_bucket_id();
+                    state.new_bucket(bucket_id, resource)?;
+                    state.unlock_substate(resource_lock)?;
+                    Ok(InvokeResult::encode(&bucket_id)?)
+                })
+            },
+            BucketAction::Join => {
+                let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "bucket_ref",
+                    reason: "Join bucket action requires a bucket id".to_string(),
+                })?;
+                let other_bucket_id = args.assert_one_arg()?;
+
+                self.tracker.write_with(|state| {
+                    let other_bucket = state.take_bucket(other_bucket_id)?;
+                    let bucket = state.get_bucket_mut(bucket_id)?;
+                    bucket.join(other_bucket)?;
+                    Ok(InvokeResult::encode(&bucket_id)?)
+                })
+            },
+            BucketAction::Burn => {
+                let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "bucket_ref",
+                    reason: "Burn bucket action requires a bucket id".to_string(),
+                })?;
+
+                let (resource_lock, maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                    let bucket = state_mut.get_bucket(bucket_id)?;
+
+                    let resource_lock =
+                        state_mut.write_lock_substate(SubstateId::Resource(*bucket.resource_address()))?;
+
+                    let resource = state_mut.get_resource(&resource_lock)?;
+
+                    state_mut.authorization().check_resource_access_rules(
+                        ResourceAuthAction::Burn,
+                        resource.as_ownership(),
+                        resource.access_rules(),
+                    )?;
+
+                    let auth_caller = state_mut.get_auth_caller()?;
+                    Ok::<_, RuntimeError>((resource_lock, resource.auth_hook().cloned(), auth_caller))
+                })?;
+
+                if let Some(auth_hook) = maybe_auth_hook {
+                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Burn)?;
+                }
+
+                self.tracker.write_with(|state| {
+                    let bucket = state.take_bucket(bucket_id)?;
+                    let burnt_amount = bucket.unlocked_amount();
+                    state.burn_bucket(bucket)?;
+
+                    let resource_mut = state.get_resource_mut(&resource_lock)?;
+                    resource_mut.decrease_total_supply(burnt_amount);
+
+                    state.unlock_substate(resource_lock)?;
+
+                    Ok(InvokeResult::unit())
+                })
+            },
+            BucketAction::CreateProof => {
+                let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "bucket_ref",
+                    reason: "CreateProof bucket action requires a bucket id".to_string(),
+                })?;
+
+                args.assert_no_args("Bucket::CreateProof")?;
+
+                let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                    let bucket = state_mut.get_bucket(bucket_id)?;
+
+                    let resource_lock =
+                        state_mut.read_lock_substate(SubstateId::Resource(*bucket.resource_address()))?;
+
+                    let resource = state_mut.get_resource(&resource_lock)?;
+
+                    state_mut.authorization().check_resource_access_rules(
+                        ResourceAuthAction::Withdraw,
+                        resource.as_ownership(),
+                        resource.access_rules(),
+                    )?;
+
+                    let auth_hook = resource.auth_hook().cloned();
+                    let auth_caller = state_mut.get_auth_caller()?;
+
+                    state_mut.unlock_substate(resource_lock)?;
+                    Ok::<_, RuntimeError>((auth_hook, auth_caller))
+                })?;
+
+                if let Some(auth_hook) = maybe_auth_hook {
+                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Withdraw)?;
+                }
+
+                self.tracker.write_with(|state| {
+                    let locked_funds = state.get_bucket_mut(bucket_id)?.lock_all()?;
+
+                    let proof_id = state.id_provider()?.new_proof_id();
+                    state.new_proof(proof_id, locked_funds)?;
+
+                    Ok(InvokeResult::encode(&proof_id)?)
+                })
+            },
+            BucketAction::GetNonFungibleIds => {
+                let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "bucket_ref",
+                    reason: "GetNonFungibleIds bucket action requires a bucket id".to_string(),
+                })?;
+                args.assert_no_args("Bucket::GetNonFungibleIds")?;
+
+                self.tracker.write_with(|state| {
+                    let bucket = state.get_bucket(bucket_id)?;
+                    Ok(InvokeResult::encode(bucket.non_fungible_ids())?)
+                })
+            },
+            BucketAction::GetNonFungibles => {
+                let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "bucket_ref",
+                    reason: "GetNonFungibles bucket action requires a bucket id".to_string(),
+                })?;
+                args.assert_no_args("Bucket::GetNonFungibles")?;
+
+                self.tracker.write_with(|state| {
+                    let bucket = state.get_bucket(bucket_id)?;
+                    let resource_address = bucket.resource_address();
+                    let nft_ids = bucket.non_fungible_ids();
+                    let nfts: Vec<NonFungible> = nft_ids
+                        .iter()
+                        .map(|id| NonFungibleAddress::new(*resource_address, id.clone()))
+                        .map(NonFungible::new)
+                        .collect();
+
+                    Ok(InvokeResult::encode(&nfts)?)
+                })
+            },
+            BucketAction::CountConfidentialCommitments => {
+                let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "bucket_ref",
+                    reason: "CountConfidentialCommitments bucket action requires a bucket id".to_string(),
+                })?;
+                args.assert_no_args("Bucket::CountConfidentialCommitments")?;
+
+                self.tracker.write_with(|state| {
+                    let bucket = state.get_bucket(bucket_id)?;
+                    Ok(InvokeResult::encode(&bucket.number_of_confidential_commitments())?)
+                })
+            },
+            BucketAction::DropEmpty => {
+                let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "bucket_ref",
+                    reason: "DropEmpty bucket action requires a bucket id".to_string(),
+                })?;
+                args.assert_no_args("Bucket::DropEmpty")?;
+
+                self.tracker.write_with(|state| {
+                    let bucket = state.take_bucket(bucket_id)?;
+                    if !bucket.is_empty() {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "bucket_ref",
+                            reason: "Cannot drop a non-empty bucket".to_string(),
+                        });
+                    }
+                    // Drop
+                    Ok(InvokeResult::unit())
+                })
+            },
+        }
+    }
+
+    fn proof_invoke(
+        &mut self,
+        proof_ref: ProofRef,
+        action: ProofAction,
+        args: EngineArgs,
+    ) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("proof_invoke")?;
+
+        debug!(
+            target: LOG_TARGET,
+            "Proof invoke: {} {:?}",
+            proof_ref,
+            action,
+        );
+
+        match action {
+            ProofAction::GetAmount => {
+                let proof_id = proof_ref.proof_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "proof_ref",
+                    reason: "GetAmount proof action requires a proof id".to_string(),
+                })?;
+                args.assert_no_args("Proof.GetAmount")?;
+                self.tracker.write_with(|state| {
+                    let proof = state.get_proof(proof_id)?;
+                    Ok(InvokeResult::encode(&proof.amount())?)
+                })
+            },
+            ProofAction::GetResourceAddress => {
+                let proof_id = proof_ref.proof_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "proof_ref",
+                    reason: "GetResourceAddress proof action requires a proof id".to_string(),
+                })?;
+                args.assert_no_args("Proof.GetResourceAddress")?;
+                self.tracker.write_with(|state| {
+                    let proof = state.get_proof(proof_id)?;
+                    Ok(InvokeResult::encode(proof.resource_address())?)
+                })
+            },
+            ProofAction::GetResourceType => {
+                let proof_id = proof_ref.proof_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "proof_ref",
+                    reason: "GetResourceType proof action requires a proof id".to_string(),
+                })?;
+
+                args.assert_no_args("Proof.GetResourceType")?;
+
+                self.tracker.write_with(|state| {
+                    let proof = state.get_proof(proof_id)?;
+                    Ok(InvokeResult::encode(&proof.resource_type())?)
+                })
+            },
+            ProofAction::GetNonFungibles => {
+                let proof_id = proof_ref.proof_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "proof_ref",
+                    reason: "GetNonFungibles proof action requires a proof id".to_string(),
+                })?;
+
+                args.assert_no_args("Proof.GetNonFungibles")?;
+
+                self.tracker.write_with(|state| {
+                    let proof = state.get_proof(proof_id)?;
+                    let nfts = proof.non_fungible_token_ids();
+                    Ok(InvokeResult::encode(&nfts)?)
+                })
+            },
+            ProofAction::Authorize => {
+                let proof_id = proof_ref.proof_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "proof_ref",
+                    reason: "Authorize proof action requires a proof id".to_string(),
+                })?;
+                args.assert_no_args("Proof.CreateAccess")?;
+
+                self.tracker.write_with(|state| {
+                    if !state.proof_exists(proof_id) {
+                        return Ok(InvokeResult::encode(&Err::<(), _>(NotAuthorized))?);
+                    }
+                    state.current_call_scope_mut()?.auth_scope_mut().add_proof(proof_id);
+                    Ok(InvokeResult::encode(&Ok::<_, NotAuthorized>(()))?)
+                })
+            },
+            ProofAction::DropAuthorize => {
+                let proof_id = proof_ref.proof_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "proof_ref",
+                    reason: "DropAuthorize proof action requires a proof id".to_string(),
+                })?;
+                args.assert_no_args("Proof.DropAuthorize")?;
+
+                self.tracker.write_with(|state| {
+                    if !state.proof_exists(proof_id) {
+                        return Err(RuntimeError::ProofNotFound { proof_id });
+                    }
+                    state.current_call_scope_mut()?.auth_scope_mut().remove_proof(&proof_id);
+
+                    Ok(InvokeResult::unit())
+                })
+            },
+            ProofAction::Drop => {
+                let proof_id = proof_ref.proof_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "proof_ref",
+                    reason: "Drop proof action requires a proof id".to_string(),
+                })?;
+                args.assert_no_args("Proof.Drop")?;
+
+                self.tracker.write_with(|state| state.drop_proof(proof_id))?;
+
+                Ok(InvokeResult::unit())
+            },
+        }
+    }
+
+    fn workspace_invoke(&mut self, action: WorkspaceAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("workspace_invoke")?;
+
+        debug!(target: LOG_TARGET, "Workspace invoke: {:?}", action,);
+
+        match action {
+            // Names an output on the workspace so that you can refer to it as an
+            // Arg::Variable
+            WorkspaceAction::PutLastInstructionOutput => {
+                let key = args.assert_one_arg()?;
+                let last_output = self
+                    .tracker
+                    .take_last_instruction_output()
+                    .ok_or(RuntimeError::NoLastInstructionOutput)?;
+
+                self.validate_return_value(&last_output)?;
+
+                self.tracker
+                    .with_workspace_mut(|workspace| workspace.insert(key, last_output))?;
+                Ok(InvokeResult::unit())
+            },
+            WorkspaceAction::Get => {
+                let id: WorkspaceOffsetId = args.assert_one_arg()?;
+                self.tracker.read_with(|state| {
+                    let value =
+                        state
+                            .workspace()
+                            .get(id)?
+                            .cloned()
+                            .ok_or_else(|| RuntimeError::ItemNotOnWorkspace {
+                                id,
+                                existing_ids: state.workspace().all_ids_iter().collect(),
+                            })?;
+                    Ok(InvokeResult::from_value(value))
+                })
+            },
+
+            WorkspaceAction::DropAllProofs => {
+                args.assert_no_args("WorkspaceAction::DropAllProofs")?;
+                let proofs = self
+                    .tracker
+                    .with_workspace_mut(|workspace| workspace.drain_all_proofs());
+
+                self.tracker.write_with(|state| {
+                    for proof_id in proofs {
+                        state.drop_proof(proof_id)?;
+                    }
+                    Ok(InvokeResult::unit())
+                })
+            },
+            WorkspaceAction::Assert => {
+                args.assert_n_args(2)?;
+                let key: WorkspaceOffsetId = args.get(0)?;
+                let assertion: Assertion = args.get(1)?;
+
+                self.tracker.read_with(|state| {
+                    state.workspace_assert(key, assertion)?;
+                    Ok(InvokeResult::unit())
+                })
+            },
+            WorkspaceAction::DropAll => {
+                args.assert_no_args("WorkspaceAction::DropAll")?;
+                let proofs = self.tracker.with_workspace_mut(|workspace| {
+                    workspace.clear_items();
+                    workspace.drain_all_proofs()
+                });
+
+                self.tracker.write_with(|state| {
+                    for proof_id in proofs {
+                        state.drop_proof(proof_id)?;
+                    }
+                    Ok(InvokeResult::unit())
+                })
+            },
+        }
+    }
+
+    fn non_fungible_invoke(
+        &mut self,
+        nf_addr: NonFungibleAddress,
+        action: NonFungibleAction,
+        args: EngineArgs,
+    ) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("non_fungible_invoke")?;
+        debug!(
+            target: LOG_TARGET,
+            "NonFungible invoke: {} {:?}",
+            nf_addr,
+            action,
+        );
+
+        match action {
+            NonFungibleAction::GetData => {
+                args.assert_no_args("NonFungibleAction::GetData")?;
+                self.tracker.write_with(|state| {
+                    let nft_lock = state.read_lock_substate(SubstateId::NonFungible(nf_addr.clone()))?;
+                    let nft = state.get_non_fungible(&nft_lock)?;
+                    let contents = nft
+                        .contents()
+                        .ok_or_else(|| RuntimeError::InvalidOpNonFungibleBurnt {
+                            op: "GetData",
+                            resource_address: *nf_addr.resource_address(),
+                            nf_id: nf_addr.id().clone(),
+                        })?
+                        .data()
+                        .clone();
+                    state.unlock_substate(nft_lock)?;
+                    Ok(InvokeResult::from_value(contents))
+                })
+            },
+            NonFungibleAction::GetMutableData => {
+                args.assert_no_args("NonFungibleAction::GetMutableData")?;
+
+                self.tracker.write_with(|state| {
+                    let nft_lock = state.read_lock_substate(SubstateId::NonFungible(nf_addr.clone()))?;
+                    let nft = state.get_non_fungible(&nft_lock)?;
+                    let contents = nft
+                        .contents()
+                        .ok_or_else(|| RuntimeError::InvalidOpNonFungibleBurnt {
+                            op: "GetMutableData",
+                            resource_address: *nf_addr.resource_address(),
+                            nf_id: nf_addr.id().clone(),
+                        })?
+                        .mutable_data()
+                        .clone();
+                    state.unlock_substate(nft_lock)?;
+
+                    Ok(InvokeResult::from_value(contents))
+                })
+            },
+        }
+    }
+
+    fn consensus_invoke(&mut self, action: ConsensusAction) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("consensus_invoke")?;
+        match action {
+            ConsensusAction::GetCurrentEpoch => {
+                let epoch = self.tracker.get_current_epoch()?;
+                Ok(InvokeResult::encode(&epoch)?)
+            },
+        }
+    }
+
+    fn generate_random_invoke(&mut self, action: GenerateRandomAction) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("generate_random_invoke")?;
+        match action {
+            GenerateRandomAction::GetRandomBytes { len } => {
+                let random = self.tracker.get_pseudorandom_bytes(len as usize)?;
+                Ok(InvokeResult::encode(&random)?)
+            },
+        }
+    }
+
+    fn generate_uuid(&mut self) -> Result<[u8; 32], RuntimeError> {
+        self.invoke_modules_on_runtime_call("generate_uuid")?;
+        self.tracker.read_with(|state| {
+            let id_provider = state.id_provider()?;
+            Ok(id_provider.new_uuid()?)
+        })
+    }
+
+    fn set_last_instruction_output(&mut self, value: IndexedValue) -> Result<(), RuntimeError> {
+        self.invoke_modules_on_runtime_call("set_last_instruction_output")?;
+        self.tracker.write_with(|state| {
+            state.set_last_instruction_output(value);
+        });
+        Ok(())
+    }
+
+    fn claim_burn(
+        &mut self,
+        claim: MinotariBurnClaimProof,
+        output_data: ClaimBurnOutputData,
+    ) -> Result<(), RuntimeError> {
+        let epoch = self.tracker.get_current_epoch()?;
+        self.claim_burn_proof_verifier
+            .verify_claim_proof(epoch, &self.seal_signer_public_key, &claim)
+            .map_err(|e| {
+                warn!(target: LOG_TARGET, "Claim burn failed - proof verification failed: {}", e);
+                RuntimeError::InvalidClaimProof { details: e }
+            })?;
+
+        self.tracker.write_with(|state_mut| {
+            // 2. Create a tombstone
+            let address = ClaimedOutputTombstoneAddress::from_commitment(claim.commitment);
+            state_mut.new_substate(address, ClaimedOutputTombstone { value: claim.value })?;
+
+            // 3. Create the stealth UTXO
+            let address = UtxoAddress::new(TARI_TOKEN, claim.commitment.into());
+            let utxo = Utxo::new(UtxoOutput {
+                output: OutputBody {
+                    public_nonce: claim.burn_public_key,
+                    encrypted_data: output_data.encrypted_data,
+                    minimum_value_promise: 0,
+                    viewable_balance: None,
+                },
+                spend_condition: SpendCondition::Signed(self.seal_signer_public_key),
+                tag: UtxoTag::new(0),
+            });
+
+            state_mut.new_substate(address, utxo)?;
+
+            Ok::<_, RuntimeError>(())
+        })?;
+
+        Ok(())
+    }
+
+    fn claim_validator_fees(&mut self, pool_address: ValidatorFeePoolAddress) -> Result<(), RuntimeError> {
+        self.tracker.write_with(|state| {
+            let resource = state.withdraw_all_fees_from_pool(pool_address)?;
+            let bucket_id = state.new_bucket_id();
+            state.new_bucket(bucket_id, resource)?;
+            state.set_last_instruction_output(IndexedValue::from_type(&bucket_id)?);
+            Ok(())
+        })
+    }
+
+    fn checkpoint_fee_intent(&mut self) -> Result<(), RuntimeError> {
+        if self.tracker.total_fee_payments() < self.tracker.total_fee_charges() {
+            return Err(RuntimeError::InsufficientFeesPaid {
+                required_fee: self.tracker.total_fee_charges(),
+                fees_paid: self.tracker.total_fee_payments(),
+            });
+        }
+        self.tracker.fee_checkpoint()
+    }
+
+    fn finalize(&mut self) -> Result<FinalizeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("finalize")?;
+        // If the fee module is present, this will add substate storage fees
+        self.invoke_modules_on_before_finalize()?;
+        let finalized = self.tracker.finalize(None)?;
+        Ok(finalized)
+    }
+
+    fn finalize_failure(&mut self, reason: RejectReason) -> Result<FinalizeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("finalize_failure")?;
+        // If the fee module is present, this will add substate storage fees
+        self.invoke_modules_on_before_finalize()?;
+        let finalized = self.tracker.finalize(Some(reason))?;
+        Ok(finalized)
+    }
+
+    fn validate_finalized(&self) -> Result<(), RuntimeError> {
+        self.tracker.read_with(|state| {
+            state.validate_finalized()?;
+            Ok(())
+        })
+    }
+
+    fn caller_context_invoke(
+        &mut self,
+        action: CallerContextAction,
+        args: EngineArgs,
+    ) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("caller_context_invoke")?;
+
+        match action {
+            CallerContextAction::GetCallerPublicKey => {
+                args.assert_no_args("CallerContextAction::GetCallerPublicKey")?;
+                Ok(InvokeResult::encode(&self.seal_signer_public_key)?)
+            },
+            CallerContextAction::GetComponentAddress => self.tracker.read_with(|state| {
+                args.assert_no_args("CallerContextAction::GetComponentAddress")?;
+                let call_scope = state.current_call_scope()?;
+                let maybe_address = call_scope
+                    .get_current_component_lock()
+                    .map(|l| l.substate_id().as_component_address().unwrap());
+                Ok(InvokeResult::encode(&maybe_address)?)
+            }),
+            CallerContextAction::GetSignerProof => {
+                let public_key = args
+                    .get_opt::<RistrettoPublicKeyBytes>(0)?
+                    .unwrap_or(self.seal_signer_public_key);
+
+                self.tracker.write_with(|state_mut| {
+                    let call_scope = state_mut.current_call_scope()?;
+                    let badge = NonFungibleAddress::from_public_key(public_key);
+                    if !call_scope.auth_scope().contains_badge(&badge) {
+                        return Err(RuntimeError::SignerBadgeNotInScope { public_key });
+                    }
+
+                    let proof_id = state_mut.id_provider()?.new_proof_id();
+                    let resx = ResourceContainer::public_key(public_key);
+                    let locked = LockedResource::new(ContainerRef::Runtime, resx);
+                    state_mut.new_proof(proof_id, locked)?;
+
+                    Ok(InvokeResult::encode(&proof_id)?)
+                })
+            },
+        }
+    }
+
+    fn allocate_address_invoke(&mut self, action: AddressAllocationInvokeArg) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("allocate_address_invoke")?;
+
+        self.tracker.write_with(|state| {
+            match action {
+                AddressAllocationInvokeArg::GetAddress(id) => {
+                    let allocation = state.get_allocated_address(id)?;
+                    match allocation.substate_id() {
+                        SubstateId::Component(addr) => Ok(InvokeResult::encode(&addr)?),
+                        SubstateId::Resource(addr) => Ok(InvokeResult::encode(&addr)?),
+                        // Engine creates the allocations, so never creates other unsupported variants
+                        _ => unreachable!("Invalid SubstateId variant. Allocation created for unsupported substate"),
+                    }
+                },
+                AddressAllocationInvokeArg::CreateComponentAllocation { public_key } => {
+                    // Validate the public key
+                    let _ignore = public_key
+                        .map(|pk| {
+                            RistrettoPublicKey::from_canonical_bytes(pk.as_bytes()).map_err(|_| {
+                                RuntimeError::InvalidArgument {
+                                    argument: "public_key",
+                                    reason: "Invalid RistrettoPublicKeyBytes".to_string(),
+                                }
+                            })
+                        })
+                        .transpose()?;
+
+                    let (template, _) = state.current_template()?;
+                    let id_provider = state.id_provider()?;
+                    let address = public_key
+                        .as_ref()
+                        .map(|public_key| id_provider.derive_new_component_address(template, public_key))
+                        .unwrap_or_else(|| id_provider.new_component_address())?;
+
+                    let id = state.new_address_allocation(address)?;
+                    Ok(InvokeResult::encode(&ComponentAddressAllocation::new(id))?)
+                },
+                AddressAllocationInvokeArg::CreateResourceAllocation => {
+                    let address = state.id_provider()?.new_resource_address()?;
+                    let id = state.new_address_allocation(address)?;
+                    Ok(InvokeResult::encode(&ResourceAddressAllocation::new(id))?)
+                },
+            }
+        })
+    }
+
+    fn call_invoke(&mut self, action: CallAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("call_invoke")?;
+        self.tracker.read_with(|state| {
+            let frame = state.current_call_frame()?;
+            if !frame.is_cross_template_calls_allowed() {
+                return Err(RuntimeError::CrossTemplateCallNotAllowed { action });
+            }
+            Ok(())
+        })?;
+
+        debug!(
+            target: LOG_TARGET,
+            "Call invoke: {:?} {:?}",
+            action,
+            args,
+        );
+
+        let exec_result = match action {
+            CallAction::CallFunction => {
+                let CallFunctionArg {
+                    template_address,
+                    function,
+                    args,
+                } = args.assert_one_arg()?;
+
+                self.invoke_template_function(&template_address, &function, args)?
+            },
+            CallAction::CallMethod => {
+                let CallMethodArg {
+                    component_address,
+                    method,
+                    args,
+                } = args.assert_one_arg()?;
+
+                self.invoke_component_method(component_address, &method, args)?
+            },
+        };
+
+        Ok(InvokeResult::from_value(exec_result.indexed.into_value()))
+    }
+
+    fn builtin_template_invoke(&mut self, action: BuiltinTemplateAction) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("builtin_template_invoke")?;
+
+        let address = match action {
+            BuiltinTemplateAction::GetTemplateAddress { bultin } => match bultin {
+                BuiltinTemplate::Account => ACCOUNT_TEMPLATE_ADDRESS,
+                BuiltinTemplate::AccountNft => NFT_FAUCET_TEMPLATE_ADDRESS,
+            },
+        };
+
+        Ok(InvokeResult::encode(&address)?)
+    }
+
+    fn check_component_access_rules(&self, method: &str) -> Result<(), RuntimeError> {
+        self.tracker
+            .read_with(|state| state.authorization().check_current_component_access_rules(method))
+    }
+
+    fn check_component_ownership(&self, action: ActionIdent) -> Result<(), RuntimeError> {
+        self.tracker.read_with(|state| {
+            let locked = state
+                .current_call_scope()?
+                .get_current_component_lock()
+                .ok_or_else(|| RuntimeError::InvariantError {
+                    function: "check_component_ownership",
+                    details: "No current component lock in call scope".to_string(),
+                })?;
+
+            let component = state.get_component(locked)?;
+            state
+                .authorization()
+                .require_ownership(action, component.as_ownership())
+        })
+    }
+
+    fn update_component_template(&mut self, new_template: TemplateAddress) -> Result<(), RuntimeError> {
+        self.tracker.write_with(|state_mut| {
+            let locked = state_mut
+                .current_call_scope()?
+                .get_current_component_lock()
+                .cloned()
+                .ok_or_else(|| RuntimeError::InvariantError {
+                    function: "update_component_template",
+                    details: "No current component lock in call scope".to_string(),
+                })?;
+
+            let component_mut = state_mut.get_component_mut(&locked)?;
+            let prev_template = component_mut.template_address;
+            component_mut.set_template_address(new_template);
+
+            state_mut.push_event(Event::std(
+                Some(locked.substate_id().clone()),
+                new_template,
+                "component",
+                "template_update",
+                metadata!["prev_template" => prev_template.to_string()],
+            ))?;
+            Ok(())
+        })
+    }
+
+    fn validate_return_value(&self, value: &IndexedValue) -> Result<(), RuntimeError> {
+        self.tracker
+            .read_with(|state| state.check_all_substates_known(value.well_known_types()))
+    }
+
+    fn push_call_frame(&mut self, frame: PushCallFrame) -> Result<(), RuntimeError> {
+        self.tracker.push_call_frame(frame)?;
+        Ok(())
+    }
+
+    fn pop_call_frame(&mut self) -> Result<(), RuntimeError> {
+        self.tracker.pop_call_frame()?;
+        Ok(())
+    }
+
+    fn publish_template(&mut self, template: TemplateBlob) -> Result<(), RuntimeError> {
+        self.invoke_modules_on_runtime_call("publish_template")?;
+        self.tracker.write_with(|state_mut| {
+            let template_byte_size = template.len();
+            let code_hash = hash_template_code(&template);
+            let template_address =
+                PublishedTemplateAddress::from_author_and_binary_hash(&self.seal_signer_public_key, &code_hash);
+            let epoch = state_mut.get_current_epoch()?;
+            state_mut.new_substate(
+                template_address,
+                SubstateValue::Template(PublishedTemplate {
+                    binary: template,
+                    author: self.seal_signer_public_key,
+                    at_epoch: epoch.as_u64(),
+                }),
+            )?;
+            // Mark template substate as owned by current call stack
+            let scope_mut = state_mut.current_call_scope_mut()?;
+            scope_mut.move_node_to_owned(&template_address.into())?;
+            // Publish template event
+            let mut metadata = Metadata::new();
+            metadata.insert("template_byte_size".to_string(), template_byte_size.to_string());
+            state_mut.push_event(Event::std(
+                Some(template_address.into()),
+                template_address.as_hash(),
+                "template",
+                "publish",
+                metadata,
+            ))?;
+
+            Ok(())
+        })
+    }
+
+    fn put_on_workspace(&mut self, id: WorkspaceId, value: IndexedValue) -> Result<(), RuntimeError> {
+        self.invoke_modules_on_runtime_call("put_on_workspace")?;
+
+        self.validate_return_value(&value)?;
+
+        self.tracker
+            .with_workspace_mut(|workspace| workspace.insert(id, value))?;
+        Ok(())
+    }
+
+    fn signature_invoke(&mut self, action: SignatureAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("signature_invoke")?;
+
+        match action {
+            SignatureAction::Verify => {
+                self.invoke_modules_on_runtime_event(RuntimeEvent::SignatureVerified)?;
+
+                let SignatureVerifyArg {
+                    public_key,
+                    domain,
+                    message,
+                    payload,
+                } = args.assert_one_arg()?;
+
+                let is_valid = payload.get_verifier().verify(&domain, &message, &public_key, &payload);
+                Ok(InvokeResult::encode(&is_valid)?)
+            },
+        }
+    }
+
+    /// Create a new address allocation for the provided substate type and entity id
+    fn allocate_address(
+        &mut self,
+        substate_type: AllocatableAddressType,
+        entity_id: EntityId,
+        workspace_id: WorkspaceId,
+    ) -> Result<AllocateAddressResult, RuntimeError> {
+        self.tracker.write_with(|state| {
+            let id_provider = state.id_provider_for_entity(entity_id);
+
+            match substate_type {
+                AllocatableAddressType::Component => {
+                    let address = id_provider.new_component_address()?;
+                    let id = state.new_address_allocation(address)?;
+                    let value = IndexedValue::from_type(&ComponentAddressAllocation::new(id))?;
+                    state.workspace_mut().insert(workspace_id, value)?;
+                    Ok(AllocateAddressResult::ComponentAddress(
+                        ComponentAddressAllocation::new(id),
+                    ))
+                },
+                AllocatableAddressType::Resource => {
+                    let address = id_provider.new_resource_address()?;
+                    let id = state.new_address_allocation(address)?;
+                    let value = IndexedValue::from_type(&ResourceAddressAllocation::new(id))?;
+                    state.workspace_mut().insert(workspace_id, value)?;
+                    Ok(AllocateAddressResult::ResourceAddress(ResourceAddressAllocation::new(
+                        id,
+                    )))
+                },
+            }
+        })
+    }
+
+    fn stealth_transfer(
+        &mut self,
+        resource_address: ResourceAddressRef,
+        statement: StealthTransferStatement,
+        revealed_funds_bucket_id: Option<BucketId>,
+    ) -> Result<Option<BucketId>, RuntimeError> {
+        self.tracker.write_with(|state_mut| {
+            let Some(container) =
+                state_mut.execute_stealth_transfer(resource_address, statement, revealed_funds_bucket_id)?
+            else {
+                return Ok(None);
+            };
+            let bucket_id = state_mut.new_bucket_id();
+            state_mut.new_bucket(bucket_id, container)?;
+            Ok(Some(bucket_id))
+        })
+    }
+
+    fn pay_fee(&mut self, pay_fee: PayFee) -> Result<(), RuntimeError> {
+        if self.tracker.is_fee_intent_checkpointed() {
+            return Err(RuntimeError::FeePaymentInMainIntent);
+        }
+
+        self.tracker.write_with(|state_mut| {
+            match pay_fee {
+                PayFee::FromBucket { bucket } => {
+                    let value = state_mut
+                        .workspace()
+                        .get(bucket)?
+                        .ok_or_else(|| RuntimeError::ItemNotOnWorkspace {
+                            id: bucket,
+                            existing_ids: state_mut.workspace().all_ids_iter().collect(),
+                        })?;
+                    let input_bucket =
+                        tari_bor::from_value::<BucketId>(value).map_err(|e| RuntimeError::InvalidArgument {
+                            argument: "bucket",
+                            reason: format!("PayFee::FromBucket: Expected workspace ID to contain a BucketId: {e}"),
+                        })?;
+                    let bucket = state_mut.take_bucket(input_bucket)?;
+
+                    // No refunds
+                    state_mut.pay_fee(bucket.take_all(), None)?;
+                    Ok(())
+                },
+            }
+        })
+    }
+
+    fn track_template_loaded(
+        &mut self,
+        template_address: &TemplateAddress,
+        bytes_loaded: usize,
+    ) -> Result<(), RuntimeError> {
+        // Built-in templates are zero-cost
+        if is_builtin_template_address(template_address) {
+            return Ok(());
+        }
+
+        for module in self.modules.iter() {
+            module.on_template_loaded(&mut self.tracker, bytes_loaded)?;
+        }
+        Ok(())
+    }
+
+    fn resolve_args(
+        &self,
+        prepend: Option<InstructionArg>,
+        args: &[InstructionArg],
+    ) -> Result<Vec<tari_bor::Value>, RuntimeError> {
+        let prepend_len = usize::from(prepend.is_some());
+        let total_len = prepend_len + args.len();
+        if total_len > limits::WASM_LIMITS.max_function_arguments {
+            return Err(ArgumentValidationError::TooManyArguments {
+                got: total_len,
+                max: limits::WASM_LIMITS.max_function_arguments,
+            }
+            .into());
+        }
+
+        prepend
+            .iter()
+            .chain(args.iter())
+            .map(|arg| match arg {
+                InstructionArg::Workspace(id) => self.resolve_workspace_id(id),
+                InstructionArg::Literal(v) => Ok(decode_exact(v)?),
+            })
+            .collect()
+    }
+
+    fn resolve_workspace_id(&self, workspace_id: &WorkspaceOffsetId) -> Result<tari_bor::Value, RuntimeError> {
+        self.tracker.with_workspace(|workspace| {
+            let id = *workspace_id;
+            workspace.get(id).map(|opt| opt.cloned()).map(|opt| {
+                opt.ok_or_else(|| RuntimeError::ItemNotOnWorkspace {
+                    id,
+                    existing_ids: workspace.all_ids_iter().collect(),
+                })
+            })
+        })?
+    }
+
+    fn set_runtime_pointer(&mut self, pointer: *mut Box<dyn RuntimeInterface>) {
+        self.runtime_pointer = Some(AtomicPtr::new(pointer));
+    }
+}
+
+fn validate_component_access_rule_methods(
+    access_rules: &ComponentAccessRules,
+    template_def: &TemplateDef,
+) -> Result<(), RuntimeError> {
+    for (name, _) in access_rules.method_access_rules_iter() {
+        if template_def.functions().iter().all(|f| f.name != *name) {
+            return Err(RuntimeError::InvalidMethodAccessRule {
+                template_name: template_def.template_name().to_string(),
+                details: format!("No method '{}' found in template", name),
+            });
+        }
+    }
+    Ok(())
+}

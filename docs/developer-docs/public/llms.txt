@@ -1,0 +1,40 @@
+# Tari Ootle Documentation
+
+> Tari Ootle is a decentralized application layer built on the Tari L2 network. Templates (smart contracts) are written in Rust, compiled to WASM, and published on-chain. This documentation covers template authoring, resources, vaults, access rules, transactions, and client-side integration.
+
+## Getting Started
+
+- [Overview](https://ootle.tari.com/introduction/): Key concepts — templates, components, resources, vaults, buckets, transactions
+- [Getting Started](https://ootle.tari.com/guides/getting-started/): Prerequisites and first steps
+- [Setup a Wallet](https://ootle.tari.com/guides/setup-a-wallet/): Install and configure a wallet for publishing templates
+
+## Guides
+
+- [Templates Overview](https://ootle.tari.com/guides/template-overview/): The `#[template]` macro, constructors, state, and component lifecycle
+- [Building a Guessing Game](https://ootle.tari.com/guides/build-a-guessing-game/): End-to-end walkthrough of writing a template
+- [Publishing Templates](https://ootle.tari.com/guides/publishing-templates/): Compile to WASM and publish via wallet or CLI
+- [Play the Guessing Game](https://ootle.tari.com/guides/play-the-guessing-game/): Interact with a published component
+- [Transaction Overview](https://ootle.tari.com/guides/transaction-overview/): How transactions are constructed and executed
+- [Tari CLI](https://ootle.tari.com/guides/cli/): Command-line tools for development
+- [Resources](https://ootle.tari.com/guides/resources/): Fungible, non-fungible, confidential, and stealth resource types
+- [Authorization and Access](https://ootle.tari.com/guides/authorization-and-access/): `rule!` macro, `ComponentAccessRules`, `OwnerRule`, `CallerContext`
+
+## Reference
+
+- [API Overview](https://ootle.tari.com/reference/api-overview/): Full API reference for `tari_template_lib` and related crates
+- [Types Reference](https://ootle.tari.com/reference/types/): `Amount`, `ComponentAddress`, `ResourceAddress`, `NonFungibleId`, and more
+- [Indexer API](https://ootle.tari.com/indexer/indexer-api.html): OpenAPI docs for the Tari Indexer REST API
+- [crates.io (tari_template_lib)](https://docs.rs/tari_template_lib/latest/tari_template_lib/): Rust crate documentation
+
+## AI Coding Agent Skills
+
+- [Agent Skills Discovery](https://ootle.tari.com/.well-known/skills/): Machine-readable index of all available agent skills
+- [Claude Code skill](https://ootle.tari.com/.well-known/skills/claude-code/SKILL.md): Tari Ootle development instructions for Claude Code
+- [Cursor skill](https://ootle.tari.com/.well-known/skills/cursor/SKILL.md): Tari Ootle development instructions for Cursor
+- [GitHub Copilot skill](https://ootle.tari.com/.well-known/skills/github-copilot/SKILL.md): Tari Ootle development instructions for GitHub Copilot
+- [Windsurf skill](https://ootle.tari.com/.well-known/skills/windsurf/SKILL.md): Tari Ootle development instructions for Windsurf
+- [Aider skill](https://ootle.tari.com/.well-known/skills/aider/SKILL.md): Tari Ootle development instructions for Aider
+- [OpenAI Codex skill](https://ootle.tari.com/.well-known/skills/openai-codex/SKILL.md): Tari Ootle development instructions for OpenAI Codex
+- [Amp skill](https://ootle.tari.com/.well-known/skills/amp/SKILL.md): Tari Ootle development instructions for Amp
+- [Google Gemini skill](https://ootle.tari.com/.well-known/skills/google-gemini/SKILL.md): Tari Ootle development instructions for Google Gemini
+- [Antigravity skill](https://ootle.tari.com/.well-known/skills/antigravity/SKILL.md): Tari Ootle development instructions for Antigravity

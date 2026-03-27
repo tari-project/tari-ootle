@@ -1,0 +1,77 @@
+//   Copyright 2025 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+use std::{
+    fmt::Display,
+    hash::{DefaultHasher, Hasher},
+    time::Duration,
+};
+
+use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, SubstateAddress, displayable::Displayable};
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Config {
+    #[serde(with = "ootle_serde::duration::optional_seconds")]
+    pub epoch_time: Option<Duration>,
+    pub initial_epoch: Epoch,
+    #[serde(with = "time::serde::iso8601")]
+    pub base_time: time::OffsetDateTime,
+    #[serde(default)]
+    pub validators: Vec<Validator>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            epoch_time: None,
+            initial_epoch: Epoch(0),
+            base_time: time::OffsetDateTime::now_utc(),
+            validators: vec![],
+        }
+    }
+}
+
+impl Display for Config {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            fmt,
+            "Epoch time: {}, initial_epoch: {}, btime: {}, validators: {}",
+            self.epoch_time.as_ref().map(|d| d.as_secs()).display(),
+            self.initial_epoch,
+            self.base_time,
+            self.validators.len()
+        )
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Validator {
+    pub public_key: RistrettoPublicKeyBytes,
+    pub claim_key: RistrettoPublicKeyBytes,
+    pub shard_group: ShardGroup,
+    pub registration_epoch: Epoch,
+}
+
+impl Validator {
+    /// Generates a deterministic shard key that naturally falls within the ShardGroup for this Validator node.
+    pub(crate) fn calculate_shard_key(&self) -> SubstateAddress {
+        let range = self.shard_group.to_substate_address_range(NumPreshards::current());
+        let mut hasher = DefaultHasher::new();
+        hasher.write(&self.shard_group.encode_as_u32().to_be_bytes());
+        hasher.write(self.public_key.as_bytes());
+        hasher.write(self.claim_key.as_bytes());
+        hasher.write(&self.registration_epoch.to_be_bytes());
+        let hash = hasher.finish();
+
+        let start = range.start();
+        let len = start.object_key_bytes().len();
+        let hash_size = size_of_val(&hash);
+        let mut start = start.into_array();
+        start
+            .get_mut(len - hash_size..len)
+            .expect("bounds checked")
+            .copy_from_slice(&hash.to_be_bytes());
+        SubstateAddress::from_array(start)
+    }
+}

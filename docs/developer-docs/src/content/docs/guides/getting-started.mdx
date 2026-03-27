@@ -1,0 +1,38 @@
+---
+title: Getting Started
+description: Set up your development environment and create your first Tari Ootle Template.
+---
+import { basePath } from '../../../helpers/path';
+import { Aside } from '@astrojs/starlight/components';
+
+<Aside type="tip" title="Using an AI coding agent?">
+Install the Ootle skill so Claude Code (or another agent) understands the SDK, CLI
+workflow, and common pitfalls:
+
+```bash
+mkdir -p .claude/skills/ootle && curl -fsSo .claude/skills/ootle/SKILL.md \
+  https://ootle.tari.com/.well-known/skills/claude-code/SKILL.md
+```
+
+Skills for Cursor, Windsurf, and Aider are listed at [ootle.tari.com/llms.txt](https://ootle.tari.com/llms.txt).
+</Aside>
+
+### Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+-   **Rust:** The Rust programming language and Cargo package manager. We recommend using [`rustup`](https://rustup.rs) to manage your Rust toolchains.
+You'll need the `wasm32-unknown-unknown` target.
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup target add wasm32-unknown-unknown
+```
+
+<span style={{ display: 'none' }}>
+-   **Tari Ootle CLI (Optional but Recommended):** For local testing and publishing templates, we suggest using the Tari Ootle CLI.
+Install it with `cargo install tari-ootle-cli` (this creates a binary called `tari`).
+</span>
+
+### Next Steps
+
+-   Set up a wallet to interact with the Ootle network. Follow our <a href={basePath("/guides/setup-a-wallet/")}>Wallet Setup guide</a> to get started.

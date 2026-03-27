@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "esnext",
+    "moduleResolution": "node",
+    "importHelpers": true,
+    "outDir": "dist",
+    "strict": true,
+    "jsx": "react-jsx",
+    "allowJs": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "noImplicitAny": true,
+    "noImplicitThis": true,
+    "strictNullChecks": true,
+    "lib": ["esnext", "dom", "dom.iterable"],
+    "types": ["react", "vite/client", "node"],
+    "baseUrl": "./"
+  },
+  "include": ["./lib/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

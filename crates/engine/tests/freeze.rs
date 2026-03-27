@@ -1,0 +1,79 @@
+//   Copyright 2025 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+use std::collections::BTreeMap;
+
+use tari_engine::runtime::RuntimeError;
+use tari_ootle_transaction::{Transaction, args};
+use tari_template_lib::{
+    args::VaultFreezeFlag,
+    types::{ComponentAddress, ResourceAddress, VaultId},
+};
+use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
+
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
+#[test]
+fn it_freezes_vaults_containing_a_freezable_resource() {
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/freeze"]);
+    let template = test.get_template_address("Freeze");
+    let (account, account_proof, _) = test.create_empty_account();
+
+    // Create a new Freeze component and deposit some resources into the account
+    let result = test.execute_expect_success(
+        Transaction::builder_localnet()
+            .allocate_component_address("freeze_comp")
+            .call_function(template, "new", args![Workspace("freeze_comp")])
+            .call_method("freeze_comp", "withdraw", args![1000])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(account, "deposit", args![Workspace("bucket")])
+            .build_and_seal(test.secret_key()),
+        vec![test.owner_proof()],
+    );
+
+    let component: ComponentAddress = result.finalize.execution_results[1].get_value("$.0").unwrap().unwrap();
+    let resource: ResourceAddress = result.finalize.execution_results[1].get_value("$.1").unwrap().unwrap();
+    let vaults: BTreeMap<ResourceAddress, VaultId> = test.extract_component_value(account, "$.vaults");
+    let vault_id = vaults[&resource];
+
+    // Freeze the account's vault
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_method(component, "freeze", args![vault_id])
+            .build_and_seal(test.secret_key()),
+        vec![test.owner_proof()],
+    );
+
+    // Attempt to withdraw from the frozen vault - FAIL
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .call_method(account, "withdraw", args![resource, 10])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(account, "deposit", args![Workspace("bucket")])
+            .build_and_seal(test.secret_key()),
+        vec![account_proof.clone()],
+    );
+
+    assert_reject_reason(reason, RuntimeError::VaultFrozen {
+        vault_id,
+        freeze_flag: VaultFreezeFlag::Withdrawals,
+    });
+
+    // Unfreeze the vault
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_method(component, "unfreeze", args![vault_id])
+            .build_and_seal(test.secret_key()),
+        vec![test.owner_proof()],
+    );
+
+    // Withdraw from the un-frozen vault - SUCCESS
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_method(account, "withdraw", args![resource, 10])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(account, "deposit", args![Workspace("bucket")])
+            .build_and_seal(test.secret_key()),
+        vec![account_proof],
+    );
+}

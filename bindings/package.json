@@ -1,0 +1,42 @@
+{
+  "name": "@tari-project/ootle-ts-bindings",
+  "version": "1.30.1",
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "description": "TypeScript types synchronized to the Tari Ootle Rust codebase",
+  "homepage": "https://github.com/tari-project/tari-ootle#readme",
+  "bugs": {
+    "url": "https://github.com/tari-project/tari-ootle/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tari-project/tari-ootle.git"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build-dist": "tsc --project tsconfig.prod.json",
+    "build-dev": "tsc",
+    "build": "sh build.sh && pnpm run fmt && tsc --project tsconfig.prod.json && echo '✅ Build complete!'",
+    "fmt": "pnpm npx prettier --write \"./**/*.{ts,tsx,css,json}\" --log-level=warn",
+    "test": "vitest run"
+  },
+  "files": [
+    "/dist"
+  ],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.28.0",
+  "dependencies": {
+    "bech32": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "prettier": "^3.8.1",
+    "shx": "^0.4.0",
+    "typescript": "catalog:",
+    "vitest": "^4.0.18"
+  }
+}

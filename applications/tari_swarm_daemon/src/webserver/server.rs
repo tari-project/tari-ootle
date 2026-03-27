@@ -1,0 +1,199 @@
+//   Copyright 2024 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+use std::{str::FromStr, sync::Arc};
+
+use anyhow::Context;
+use axum::{
+    Extension,
+    Router,
+    handler::HandlerWithoutStateExt,
+    http::{HeaderValue, Response, StatusCode, Uri, header},
+    response::IntoResponse,
+    routing::post,
+};
+use axum_extra::{
+    TypedHeader,
+    headers::{Authorization, authorization::Basic},
+};
+use axum_jrpc::{
+    JrpcResult,
+    JsonRpcAnswer,
+    JsonRpcExtractor,
+    JsonRpcResponse,
+    error::{JsonRpcError, JsonRpcErrorReason},
+};
+use include_dir::{Dir, include_dir};
+use log::*;
+use serde::{Serialize, de::DeserializeOwned};
+use serde_json::json;
+use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
+use tokio::fs;
+use tower_http::{cors::CorsLayer, services::ServeDir};
+
+use crate::webserver::{context::HandlerContext, error::HandlerError, handler::JrpcHandler, rpc};
+
+const LOG_TARGET: &str = "tari::ootle::swarm::webserver";
+
+pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
+    let bind_address = context.config().webserver.bind_address;
+
+    async fn not_found() -> (StatusCode, &'static str) {
+        (StatusCode::NOT_FOUND, "Resource not found")
+    }
+
+    let templates_dir = context.config().base_dir.join("templates");
+    if !templates_dir.exists() {
+        fs::create_dir_all(&templates_dir)
+            .await
+            .context("create template dir")?;
+    }
+
+    let serve_templates = ServeDir::new(templates_dir).not_found_service(not_found.into_service());
+
+    let misc_dir = context.config().base_dir.join("misc");
+    if !misc_dir.exists() {
+        fs::create_dir_all(&misc_dir).await.context("create misc dir")?;
+    }
+    let serve_misc = ServeDir::new(misc_dir).not_found_service(not_found.into_service());
+
+    let router = Router::new()
+        .route("/json_rpc", post(json_rpc_handler))
+        .nest_service("/templates", serve_templates)
+        .nest_service("/misc", serve_misc)
+        .fallback(handler)
+        .layer(Extension(Arc::new(context)))
+        .layer(CorsLayer::permissive());
+
+    let listener = try_bind_with_fallback(bind_address).await?;
+    let server = axum::serve(listener, router);
+    info!(target: LOG_TARGET, "🕸️ Webserver listening on {}", server.local_addr()?);
+    server.await?;
+
+    Ok(())
+}
+
+static WEB_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/webui/dist");
+
+async fn handler(
+    uri: Uri,
+    Extension(context): Extension<Arc<HandlerContext>>,
+    auth: Option<TypedHeader<Authorization<Basic>>>,
+) -> impl IntoResponse {
+    if let Some(ref basic_auth) = context.config().webserver.base_auth {
+        // NOTE: this does not have to be secure (timing attacks etc), this is to prevent easy access to the Web UI
+        if auth.is_none_or(|a| a.username() != basic_auth.username || a.password() != basic_auth.password) {
+            return Response::builder()
+                .status(StatusCode::UNAUTHORIZED)
+                .header("WWW-Authenticate", "Basic realm=\"tari-swarm\"")
+                .body("Not authorized".to_string())
+                .unwrap();
+        }
+    }
+    let path = uri.path();
+
+    // If path starts with /, strip it.
+    let path = path.strip_prefix('/').unwrap_or(path);
+
+    // If the path is a file, return it. Otherwise, use index.html (SPA)
+    if let Some(body) = WEB_DIR
+        .get_file(path)
+        .or_else(|| WEB_DIR.get_file("index.html"))
+        .and_then(|file| file.contents_utf8())
+    {
+        let mime_type = mime_guess::from_path(path).first_or_else(|| mime_guess::Mime::from_str("text/html").unwrap());
+        return Response::builder()
+            .header(header::CONTENT_TYPE, HeaderValue::from_str(mime_type.as_ref()).unwrap())
+            .status(StatusCode::OK)
+            .body(body.to_owned())
+            .unwrap();
+    }
+    warn!(target: LOG_TARGET, "Not found {:?}", path);
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .body(String::new())
+        .unwrap()
+}
+
+async fn json_rpc_handler(Extension(context): Extension<Arc<HandlerContext>>, value: JsonRpcExtractor) -> JrpcResult {
+    info!(target: LOG_TARGET, "🌐 JSON-RPC request: {}", value.method);
+    debug!(target: LOG_TARGET, "🌐 JSON-RPC request: {:?}", value);
+
+    match value.method.as_str() {
+        "ping" => Ok(JsonRpcResponse::success(value.get_answer_id(), "pong")),
+        "vns" => call_handler(context, value, rpc::validator_nodes::list).await,
+        "list_wallet_daemons" => call_handler(context, value, rpc::tari_wallets::list).await,
+        "indexers" => call_handler(context, value, rpc::indexers::list).await,
+        "get_logs" => call_handler(context, value, rpc::logs::list_log_files).await,
+        "get_stdout" => call_handler(context, value, rpc::logs::list_stdout_files).await,
+        "get_file" => call_handler(context, value, rpc::logs::get_log_file).await,
+        "mine" => call_handler(context, value, rpc::miners::mine).await,
+        "is_mining" => call_handler(context, value, rpc::miners::is_mining).await,
+        "start_mining" => call_handler(context, value, rpc::miners::start_mining).await,
+        "stop_mining" => call_handler(context, value, rpc::miners::stop_mining).await,
+        "add_base_node" | "add_minotari_node" => call_handler(context, value, rpc::minotari_nodes::create).await,
+        "add_base_wallet" | "add_minotari_wallet" => call_handler(context, value, rpc::minotari_wallets::create).await,
+        "add_asset_wallet" | "add_wallet_daemon" => call_handler(context, value, rpc::tari_wallets::create).await,
+        "add_indexer" => call_handler(context, value, rpc::indexers::create).await,
+        "add_validator_node" => call_handler(context, value, rpc::validator_nodes::create).await,
+        "register_validator_node" => call_handler(context, value, rpc::validator_nodes::register).await,
+        "exit_validator_node" => call_handler(context, value, rpc::validator_nodes::exit).await,
+        "start_instance" => call_handler(context, value, rpc::instances::start).await,
+        "start_all" => call_handler(context, value, rpc::instances::start_all).await,
+        "stop_instance" => call_handler(context, value, rpc::instances::stop).await,
+        "stop_all" => call_handler(context, value, rpc::instances::stop_all).await,
+        "list_instances" => call_handler(context, value, rpc::instances::list).await,
+        "delete_data" => call_handler(context, value, rpc::instances::delete_data).await,
+        "burn_funds" => call_handler(context, value, rpc::minotari_wallets::burn_funds).await,
+        "get_minotari_node" => call_handler(context, value, rpc::minotari_nodes::get).await,
+        _ => Ok(value.method_not_found(&value.method)),
+    }
+}
+
+async fn call_handler<H, TReq, TResp>(
+    context: Arc<HandlerContext>,
+    value: JsonRpcExtractor,
+    mut handler: H,
+) -> JrpcResult
+where
+    TReq: DeserializeOwned,
+    TResp: Serialize,
+    H: for<'a> JrpcHandler<'a, TReq, Response = TResp>,
+{
+    let answer_id = value.get_answer_id();
+    let params = value.parse_params().inspect_err(|e| match &e.result {
+        JsonRpcAnswer::Result(_) => {
+            unreachable!("parse_params() error should not return a result")
+        },
+        JsonRpcAnswer::Error(e) => {
+            warn!(target: LOG_TARGET, "🌐 JSON-RPC params error: {}", e);
+        },
+    })?;
+    let resp = handler
+        .handle(&context, params)
+        .await
+        .map_err(|e| resolve_handler_error(answer_id.clone(), &e))?;
+    Ok(JsonRpcResponse::success(answer_id, resp))
+}
+
+fn resolve_handler_error(answer_id: axum_jrpc::Id, e: &HandlerError) -> JsonRpcResponse {
+    match e {
+        HandlerError::Anyhow(e) => resolve_any_error(answer_id, e),
+        // HandlerError::NotFound => JsonRpcResponse::error(
+        //     answer_id,
+        //     JsonRpcError::new(JsonRpcErrorReason::ApplicationError(404), e.to_string(), json!({})),
+        // ),
+    }
+}
+
+fn resolve_any_error(answer_id: axum_jrpc::Id, e: &anyhow::Error) -> JsonRpcResponse {
+    warn!(target: LOG_TARGET, "🌐 JSON-RPC error: {}", e);
+    if let Some(handler_err) = e.downcast_ref::<HandlerError>() {
+        return resolve_handler_error(answer_id, handler_err);
+    }
+
+    JsonRpcResponse::error(
+        answer_id,
+        JsonRpcError::new(JsonRpcErrorReason::ApplicationError(500), e.to_string(), json!({})),
+    )
+}

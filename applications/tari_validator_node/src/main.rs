@@ -20,220 +20,151 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-mod base_layer_scanner;
-mod bootstrap;
 mod cli;
-mod comms;
-mod config;
-mod dan_node;
-mod default_service_specification;
-mod grpc;
-mod http_ui;
-mod json_rpc;
-mod p2p;
-mod template_registration_signing;
-mod validator_node_registration_signing;
 
-use std::{fs, io, process};
+use std::{fs, fs::OpenOptions, panic, time::SystemTime};
 
 use clap::Parser;
 use log::*;
-use serde::{Deserialize, Serialize};
-use tari_app_utilities::identity_management::setup_node_identity;
-use tari_common::{
-    exit_codes::{ExitCode, ExitError},
-    initialize_logging,
-    load_configuration,
-};
-use tari_comms::NodeIdentity;
-use tari_dan_common_types::ShardId;
-use tari_dan_core::{
-    services::{base_node_error::BaseNodeError, BaseNodeClient},
-    storage::DbFactory,
-    DigitalAssetError,
-};
-use tari_dan_storage_sqlite::SqliteDbFactory;
-use tari_shutdown::{Shutdown, ShutdownSignal};
-use tokio::{runtime, runtime::Runtime, task};
+use tari_bor::Write;
+use tari_common::initialize_logging;
+use tari_ootle_app_utilities::{configuration::load_configuration, keypair::setup_keypair_prompt};
+use tari_shutdown::Shutdown;
+use tari_validator_node::{ApplicationConfig, node, run_validator_node};
 
-use crate::{
-    bootstrap::{spawn_services, Services},
-    cli::Cli,
-    config::{ApplicationConfig, ValidatorNodeConfig},
-    dan_node::DanNode,
-    grpc::services::{base_node_client::GrpcBaseNodeClient, wallet_client::GrpcWalletClient},
-    http_ui::server::run_http_ui_server,
-    json_rpc::{run_json_rpc, JsonRpcHandlers},
-    p2p::services::networking::DAN_PEER_FEATURES,
-};
+use crate::cli::Cli;
 
 const LOG_TARGET: &str = "tari::validator_node::app";
 
-fn main() {
-    // Uncomment to enable tokio tracing via tokio-console
-    // console_subscriber::init();
+#[cfg(feature = "tokio_debug")]
+const DEBUG_PORT: u16 = console_subscriber::Server::DEFAULT_PORT;
 
-    if let Err(err) = main_inner() {
-        let exit_code = err.exit_code;
-        eprintln!("{:?}", err);
-        error!(
-            target: LOG_TARGET,
-            "Exiting with code ({}): {:?}", exit_code as i32, exit_code
-        );
-        process::exit(exit_code as i32);
-    }
-}
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // Setup a panic hook which prints the default rust panic message but also exits the process. This makes a panic in
+    // any thread "crash" the system instead of silently continuing.
+    let default_hook = panic::take_hook();
+    panic::set_hook(Box::new(move |info| {
+        handle_panic(info);
+        default_hook(info);
+        node::trigger_panic_notifier();
+    }));
 
-fn main_inner() -> Result<(), ExitError> {
     let cli = Cli::parse();
+    // enable tokio tracing via tokio-console
+    #[cfg(feature = "tokio_debug")]
+    console_subscriber::Builder::default()
+        .server_addr((
+            std::net::Ipv4Addr::LOCALHOST,
+            cli.tokio_console_port.unwrap_or(DEBUG_PORT),
+        ))
+        .init();
+
     let config_path = cli.common.config_path();
-    let cfg = load_configuration(config_path, true, &cli)?;
-    initialize_logging(
-        &cli.common.log_config_path("validator"),
-        include_str!("../log4rs_sample.yml"),
-    )?;
+    let cfg = load_configuration(config_path, true, &cli, Some(cli.network()))?;
     let config = ApplicationConfig::load_from(&cfg)?;
-    println!("Starting validator node on network {}", config.network);
-    let runtime = build_runtime()?;
-    runtime.block_on(run_node(&config))?;
 
-    Ok(())
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ShardKeyError {
-    #[error("Path is not a file")]
-    NotFile,
-    #[error("Malformed shard key file: {0}")]
-    JsonError(#[from] json5::Error),
-    #[error(transparent)]
-    Io(#[from] io::Error),
-    #[error("Not yet mined")]
-    NotYetMined,
-    #[error("Not yet registered")]
-    NotYetRegistered,
-    #[error("Registration failed")]
-    RegistrationFailed,
-    #[error("Registration error {0}")]
-    RegistrationError(#[from] DigitalAssetError),
-    #[error("Base node error: {0}")]
-    BaseNodeError(#[from] BaseNodeError),
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct ShardKey {
-    is_registered: bool,
-    shard_id: Option<ShardId>,
-}
-
-async fn auto_register_vn(
-    wallet_client: &mut GrpcWalletClient,
-    base_node_client: &mut GrpcBaseNodeClient,
-    node_identity: &NodeIdentity,
-    config: &ApplicationConfig,
-) -> Result<ShardId, ShardKeyError> {
-    let path = &config.validator_node.shard_key_file;
-
-    // We already sent the registration tx, we are just waiting for it to be mined.
-    let tip = base_node_client.get_tip_info().await?.height_of_longest_chain;
-    let shard_id = base_node_client
-        .get_shard_key(tip, node_identity.public_key())
-        .await
-        .map_err(ShardKeyError::BaseNodeError)?;
-    if let Some(shard_id) = shard_id {
-        let shard_key = ShardKey {
-            is_registered: true,
-            shard_id: Some(shard_id),
-        };
-        let json = json5::to_string(&shard_key)?;
-        fs::write(path, json.as_bytes())?;
-        Ok(shard_id)
-    } else {
-        let vn = wallet_client.register_validator_node(node_identity).await?;
-        if vn.is_success {
-            println!("Registering VN was successful {:?}", vn);
-            let shard_key = ShardKey {
-                is_registered: true,
-                shard_id: None,
-            };
-            let json = json5::to_string(&shard_key)?;
-            if let Some(p) = path.parent() {
-                if !p.exists() {
-                    fs::create_dir_all(p)?;
-                }
-            }
-            fs::write(path, json.as_bytes())?;
-            Err(ShardKeyError::NotYetRegistered)
-        } else {
-            Err(ShardKeyError::RegistrationFailed)
+    // Remove the pid file if it exists
+    let _file = fs::remove_file(config.common.base_path.join("pid")).inspect_err(|e| {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            warn!(
+                target: LOG_TARGET,
+                "Failed to remove existing pid file: {}", e
+            );
         }
+    });
+    if let Err(e) = initialize_logging(
+        &cli.common.log_config_path("validator"),
+        &cli.common.get_base_path(),
+        include_str!("../log4rs_sample.yml"),
+    ) {
+        eprintln!("{}", e);
     }
-}
 
-async fn run_node(config: &ApplicationConfig) -> Result<(), ExitError> {
-    let shutdown = Shutdown::new();
+    match cli.command {
+        Some(cli::Subcommand::CompactDb) => {
+            let timer = std::time::Instant::now();
+            tari_validator_node::consensus::spec::ValidatorNodeStateStore::compact_all(
+                &config.validator_node.state_db_path,
+            )?;
 
-    let node_identity = setup_node_identity(
-        &config.validator_node.identity_file,
-        config.validator_node.public_address.as_ref(),
-        true,
-        DAN_PEER_FEATURES,
-    )?;
-    let db_factory = SqliteDbFactory::new(config.validator_node.data_dir.clone());
-    let global_db = db_factory
-        .get_or_create_global_db()
-        .map_err(|e| ExitError::new(ExitCode::DatabaseError, e))?;
+            info!(
+                target: LOG_TARGET,
+                "Compacted state database in {:.2?}",
+                timer.elapsed()
+            );
+            return Ok(());
+        },
+        Some(cli::Subcommand::Start) | None => {
+            let shutdown = Shutdown::new();
+            let keypair = setup_keypair_prompt(
+                &config.validator_node.identity_file,
+                !config.validator_node.dont_create_id,
+            )?;
 
+            run_validator_node(keypair, config, shutdown).await?;
+            info!(target: LOG_TARGET, "Validator node shutdown successfully");
+        },
+        Some(cli::Subcommand::GenerateIdentity) => {
+            let keypair = setup_keypair_prompt(
+                &config.validator_node.identity_file,
+                !config.validator_node.dont_create_id,
+            )?;
+
+            info!(
+                target: LOG_TARGET,
+                "Generated identity with public key: {}",
+                keypair.public_key()
+            );
+        },
+    }
+
+    let metrics = tokio::runtime::Handle::current().metrics();
     info!(
         target: LOG_TARGET,
-        "Node starting with pub key: {}, node_id: {}",
-        node_identity.public_key(),
-        node_identity.node_id()
+        "Tokio runtime metrics: num_alive_tasks={}, num_workers={}, global_queue_depth={}",
+        metrics.num_alive_tasks(),
+        metrics.num_workers(),
+        metrics.global_queue_depth(),
     );
-
-    // Show the validator node identity
-    info!(target: LOG_TARGET, "🚀 Validator node started!");
-    info!(target: LOG_TARGET, "{}", node_identity);
-
-    // fs::create_dir_all(&global.peer_db_path).map_err(|err| ExitError::new(ExitCode::ConfigError, err))?;
-    let mut base_node_client = GrpcBaseNodeClient::new(config.validator_node.base_node_grpc_address);
-    let mut wallet_client = GrpcWalletClient::new(config.validator_node.wallet_grpc_address);
-    let vn_registration = auto_register_vn(&mut wallet_client, &mut base_node_client, &node_identity, config).await;
-    println!("VN Registration result : {:?}", vn_registration);
-    let services = spawn_services(
-        config,
-        shutdown.to_signal(),
-        node_identity.clone(),
-        global_db,
-        db_factory,
-    )
-    .await?;
-
-    // Run the http ui
-    if let Some(address) = config.validator_node.http_ui_address {
-        info!(target: LOG_TARGET, "Started HTTP UI server on {}", address);
-
-        task::spawn(run_http_ui_server(address));
-    }
-
-    // Show the validator node identity
-    info!(target: LOG_TARGET, "🚀 Validator node started!");
-    info!(target: LOG_TARGET, "{}", node_identity);
-
-    run_dan_node(services, shutdown.to_signal()).await?;
 
     Ok(())
 }
 
-fn build_runtime() -> Result<Runtime, ExitError> {
-    let mut builder = runtime::Builder::new_multi_thread();
-    builder
-        .enable_all()
-        .build()
-        .map_err(|e| ExitError::new(ExitCode::UnknownError, e))
-}
+fn handle_panic(panic_info: &panic::PanicHookInfo) {
+    fn format_current_time() -> String {
+        let now = SystemTime::now();
+        ::time::OffsetDateTime::from(now)
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|e| format!("format time fail: {e}"))
+    }
 
-async fn run_dan_node(services: Services, shutdown_signal: ShutdownSignal) -> Result<(), ExitError> {
-    let node = DanNode::new(services);
-    node.start(shutdown_signal).await
+    let location = panic_info
+        .location()
+        .map(|loc| format!("file: '{}', line: {}", loc.file(), loc.line()))
+        .unwrap_or_else(|| "unknown location".to_string());
+
+    let message = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+        *s
+    } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
+        s.as_str()
+    } else {
+        "Unknown panic message"
+    };
+
+    error!(target: LOG_TARGET, "Panic occurred at {location}: {message}");
+
+    if let Err(err) = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open("ootle-node-panic.log")
+        .and_then(|mut file| {
+            file.write_all(b"---\n")?;
+            file.write_all(format!("Timestamp: {}\n", format_current_time()).as_bytes())?;
+            file.write_all(format!("Panic at {}: {}\n", location, message).as_bytes())?;
+            file.write_all(b"---\n")
+        })
+    {
+        warn!(target: LOG_TARGET, "Failed to write panic log file: {}", err);
+    }
 }

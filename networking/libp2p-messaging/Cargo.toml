@@ -1,0 +1,22 @@
+[package]
+name = "libp2p-messaging"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+libp2p = { workspace = true }
+
+async-trait = { workspace = true }
+prost = { workspace = true, optional = true }
+smallvec = { workspace = true }
+futures-bounded = { workspace = true }
+tracing = { workspace = true }
+prometheus-client = { workspace = true, optional = true }
+
+[features]
+default = []
+prost = ["dep:prost"]
+metrics = ["prometheus-client"]

@@ -1,0 +1,16 @@
+[package]
+name = "ootle_byte_type"
+version = "0.4.0"
+description = "Conversion traits that define conversions to/from light-weight byte types"
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_crypto = { workspace = true, optional = true }
+tari_template_lib_types = { workspace = true, optional = true }
+
+[features]
+default = ["crypto"]
+crypto = ["dep:tari_crypto", "dep:tari_template_lib_types"]

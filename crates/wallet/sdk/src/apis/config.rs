@@ -1,0 +1,136 @@
+//   Copyright 2023 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+use std::{str::FromStr, sync::OnceLock};
+
+use serde::{Serialize, de::DeserializeOwned};
+use tari_ootle_common_types::{Network, optional::IsNotFoundError};
+
+use crate::storage::{CommittableStore, WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter};
+
+#[derive(Debug, Clone)]
+pub struct ConfigApi<'a, TStore> {
+    store: &'a TStore,
+    cached_network: OnceLock<Network>,
+}
+
+impl<'a, TStore: WalletStore> ConfigApi<'a, TStore> {
+    pub fn new(store: &'a TStore) -> Self {
+        Self {
+            store,
+            cached_network: OnceLock::new(),
+        }
+    }
+
+    pub fn get_network(&self) -> Result<Network, ConfigApiError> {
+        if let Some(network) = self.cached_network.get() {
+            return Ok(*network);
+        }
+        let network = self.get::<String>(ConfigKey::Network)?;
+        let network = Network::from_str(&network).map_err(|e| ConfigApiError::FailedToParseNetwork {
+            string: network,
+            details: e.to_string(),
+        })?;
+        self.cached_network
+            .set(network)
+            .expect("Network should only be set once");
+        Ok(network)
+    }
+
+    pub fn get<T: DeserializeOwned>(&self, key: ConfigKey) -> Result<T, ConfigApiError> {
+        let mut tx = self.store.create_read_tx()?;
+        let record = tx.config_get(key.as_key_str())?;
+        if record.is_encrypted {
+            return Err(ConfigApiError::EncryptedItem { key });
+        }
+        Ok(record.value)
+    }
+
+    pub fn get_decrypted<T: DeserializeOwned>(
+        &self,
+        key: ConfigKey,
+        _decryption_key: impl AsRef<[u8]>,
+    ) -> Result<T, ConfigApiError> {
+        let mut tx = self.store.create_read_tx()?;
+        let record = tx.config_get(key.as_key_str())?;
+        // TODO: decryption if record.is_encrypted
+        Ok(record.value)
+    }
+
+    pub fn exists(&self, key: ConfigKey) -> Result<bool, ConfigApiError> {
+        let mut tx = self.store.create_read_tx()?;
+        let exists = tx.config_exists(key.as_key_str())?;
+        Ok(exists)
+    }
+
+    pub fn set<T: Serialize + ?Sized>(&self, key: ConfigKey, value: &T) -> Result<(), ConfigApiError> {
+        self.set_opts(key, value, false)
+    }
+
+    pub fn set_encrypted<T: Serialize + ?Sized>(
+        &self,
+        key: ConfigKey,
+        value: &T,
+        _encryption_key: impl AsRef<[u8]>,
+    ) -> Result<(), ConfigApiError> {
+        // TODO: encrypt
+        self.set_opts(key, value, true)
+    }
+
+    fn set_opts<T: Serialize + ?Sized>(
+        &self,
+        key: ConfigKey,
+        value: &T,
+        is_encrypted: bool,
+    ) -> Result<(), ConfigApiError> {
+        let mut tx = self.store.create_write_tx()?;
+        tx.config_set(key.as_key_str(), value, is_encrypted)?;
+        tx.commit()?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ConfigKey {
+    /// The network the wallet is running on. type: String
+    Network,
+    /// The cipher seed used to encrypt the wallet. type: Vec<u8>
+    CipherSeed,
+    /// The URL of the indexer. type: String
+    IndexerUrl,
+    /// Indicates whether the wallet needs to be recovered. type: bool
+    RecoveryNeeded,
+    /// The keyring key that stored the decryption password
+    KeyringPasswordEntryKey,
+    /// Advanced UI features. type: AdvancedUiFeatures
+    AdvancedUiFeatures,
+}
+
+impl ConfigKey {
+    pub fn as_key_str(&self) -> &'static str {
+        match self {
+            Self::Network => "network",
+            Self::CipherSeed => "cipher_seed",
+            Self::IndexerUrl => "indexer_url",
+            Self::RecoveryNeeded => "recovery_needed",
+            Self::KeyringPasswordEntryKey => "keyring_password_entry_key",
+            Self::AdvancedUiFeatures => "advanced_ui_features",
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigApiError {
+    #[error("Store error: {0}")]
+    StoreError(#[from] WalletStorageError),
+    #[error("Failed to parse network string '{string}': {details}")]
+    FailedToParseNetwork { string: String, details: String },
+    #[error("The requested item is encrypted and cannot be retrieved without decryption: {key:?}")]
+    EncryptedItem { key: ConfigKey },
+}
+
+impl IsNotFoundError for ConfigApiError {
+    fn is_not_found_error(&self) -> bool {
+        matches!(self, Self::StoreError(e) if e.is_not_found_error())
+    }
+}

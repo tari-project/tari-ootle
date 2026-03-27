@@ -1,0 +1,22 @@
+[package]
+name = "tari_template_abi"
+description = "Defines the low-level Tari engine ABI for WASM targets"
+version = "0.16.0"
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_bor = { workspace = true, default-features = false }
+serde = { workspace = true, default-features = false, features = ["alloc", "derive"] }
+hashbrown = { workspace = true, optional = true }
+ts-rs = { workspace = true, optional = true }
+xxhash-rust = { workspace = true, optional = true, features = ["xxh32"] }
+
+[features]
+default = ["std"]
+std = ["tari_bor/std", "xxhash-rust?/std"]
+alloc = ["hashbrown"]
+func-hasher = ["xxhash-rust"]
+ts = ["std", "ts-rs", "tari_bor/ts"]

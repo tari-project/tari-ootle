@@ -1,0 +1,41 @@
+[package]
+name = "ootle-rs"
+version = "0.3.0"
+description = "A Rust library for interacting with the Tari Ootle network."
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_ootle_common_types = { workspace = true }
+tari_ootle_transaction = { workspace = true }
+tari_template_lib_types = { workspace = true, features = ["extra-arith", "borsh"] }
+tari_ootle_wallet_crypto = { workspace = true }
+tari_crypto = { workspace = true }
+tari_bor = { workspace = true }
+ootle_byte_type = { workspace = true, features = ["crypto"] }
+tari_indexer_client = { workspace = true, features = ["client"] }
+tari_ootle_address = { workspace = true }
+tari_template_builtin = { workspace = true }
+
+async-trait = { workspace = true }
+indexmap = { workspace = true }
+rand = { workspace = true }
+tokio = { workspace = true, features = ["sync", "macros"] }
+futures = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+async-stream = { workspace = true }
+signature = "3.0.0-rc.8"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
+env_logger = { workspace = true }
+tracing = { workspace = true, features = ["log-always"] }
+
+[features]
+default = []
+mmap-value-lookup = ["tari_ootle_wallet_crypto/mmap-value-lookup"]

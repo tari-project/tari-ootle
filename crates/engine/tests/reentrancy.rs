@@ -1,0 +1,99 @@
+//   Copyright 2023 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+use tari_engine::runtime::{LockError, LockState};
+use tari_engine_types::lock::LockFlag;
+use tari_ootle_transaction::{Transaction, args};
+use tari_template_lib::types::{ComponentAddress, constants::XTR_FAUCET_COMPONENT_ADDRESS};
+use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
+
+const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
+#[test]
+fn it_prevents_reentrant_withdraw() {
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/reentrancy"]);
+    let template_addr = test.get_template_address("Reentrancy");
+    let (account, _, _) = test.create_empty_account();
+
+    let result = test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![1000])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_function(template_addr, "with_bucket", args![Workspace("bucket")])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    let reentrancy = result.finalize.execution_results[2]
+        .decode::<ComponentAddress>()
+        .unwrap();
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .call_method(reentrancy, "get_balance", args![])
+            .call_method(reentrancy, "reentrant_withdraw", args![1000])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(reentrancy, "get_balance", args![])
+            .call_method(account, "deposit", args![Workspace("bucket")])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    // Locked for read but attempted to lock the same component for write
+    assert_reject_reason(reason, LockError::MultipleWriteLockRequested {
+        address: reentrancy.into(),
+    });
+}
+
+#[test]
+fn it_allows_multiple_immutable_access_to_component() {
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/reentrancy"]);
+
+    let reentrancy: ComponentAddress = test.call_function("Reentrancy", "new", args![], vec![]);
+
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_method(reentrancy, "reentrant_access_immutable", args![])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+}
+
+#[test]
+fn it_prevents_read_access_to_mutating_component() {
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/reentrancy"]);
+
+    let reentrancy: ComponentAddress = test.call_function("Reentrancy", "new", args![], vec![]);
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .call_method(reentrancy, "reentrant_access", args![])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    // Locked for read but attempted to lock the same component for write
+    assert_reject_reason(reason, LockError::InvalidLockRequest {
+        address: reentrancy.into(),
+        requested_lock: LockFlag::Read,
+        lock_state: LockState::Write,
+    });
+}
+
+#[test]
+fn it_prevents_multiple_mutable_access_to_component() {
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/reentrancy"]);
+
+    let reentrancy: ComponentAddress = test.call_function("Reentrancy", "new", args![], vec![]);
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .call_method(reentrancy, "reentrant_access_mut", args![])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    // Locked for read but attempted to lock the same component for write
+    assert_reject_reason(reason, LockError::MultipleWriteLockRequested {
+        address: reentrancy.into(),
+    });
+}

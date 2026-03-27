@@ -1,0 +1,44 @@
+{
+  "name": "@tari-project/ootle-web-ui-theming",
+  "type": "module",
+  "version": "0.1.1",
+  "private": false,
+  "homepage": "https://github.com/tari-project/tari-ootle#readme",
+  "bugs": {
+    "url": "https://github.com/tari-project/tari-ootle/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tari-project/tari-ootle.git"
+  },
+  "scripts": {
+    "build": "tsc && vite build",
+    "build:dev": "vite build"
+  },
+  "devDependencies": {
+    "@mui/material": "^7.3.9",
+    "@types/node": "catalog:",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "catalog:",
+    "unplugin-dts": "1.0.0-beta.6",
+    "vite": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "packageManager": "pnpm@10.28.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./overrides.ts": "./dist/overrides.ts",
+    "./theme.css": "./dist/theme.css"
+  }
+}

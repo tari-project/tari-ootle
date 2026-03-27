@@ -20,27 +20,60 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_dan_engine::instruction::Transaction;
-use tokio::{
-    sync::{broadcast, mpsc},
-    task,
+use libp2p::{PeerId, gossipsub};
+use log::*;
+use tari_epoch_manager::service::EpochManagerHandle;
+use tari_networking::NetworkingHandle;
+use tari_ootle_p2p::{PeerAddress, TariMessagingSpec};
+use tari_ootle_storage::StateStore;
+use tari_ootle_transaction::Transaction;
+use tokio::{sync::mpsc, task, task::JoinHandle};
+
+#[cfg(feature = "metrics")]
+use super::metrics::PrometheusMempoolMetrics;
+use crate::{
+    consensus::ConsensusHandle,
+    p2p::services::mempool::{handle::MempoolHandle, service::MempoolService},
+    transaction_validators::TransactionValidationError,
+    validator::Validator,
 };
 
-use crate::p2p::services::{
-    mempool::{handle::MempoolHandle, service::MempoolService},
-    messaging::OutboundMessaging,
-};
+const LOG_TARGET: &str = "tari::ootle::validator_node::mempool";
 
-pub fn spawn(
-    new_transactions: mpsc::Receiver<Transaction>,
-    new_transactions_sender: mpsc::Sender<Transaction>,
-    outbound: OutboundMessaging,
-) -> MempoolHandle {
-    let (tx_valid_transactions, rx_valid_transactions) = broadcast::channel(100);
-    let mempool = MempoolService::new(new_transactions, outbound, tx_valid_transactions);
-    let handle = MempoolHandle::new(rx_valid_transactions, new_transactions_sender);
+pub fn spawn<TValidator, TStateStore>(
+    epoch_manager: EpochManagerHandle<PeerAddress>,
+    transaction_validator: TValidator,
+    state_store: TStateStore,
+    consensus_handle: ConsensusHandle,
+    networking: NetworkingHandle<TariMessagingSpec>,
+    rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,
+    #[cfg(feature = "metrics")] metrics_registry: &mut prometheus_client::registry::Registry,
+) -> (MempoolHandle, JoinHandle<anyhow::Result<()>>)
+where
+    TValidator: Validator<Transaction, Context = (), Error = TransactionValidationError> + Send + Sync + 'static,
+    TStateStore: StateStore<Addr = PeerAddress> + Send + Sync + 'static,
+{
+    // This channel only needs to be size 1, because each mempool request must wait for a reply and the mempool is
+    // running on a single task and so there is no benefit to buffering multiple requests.
+    let (tx_mempool_request, rx_mempool_request) = mpsc::channel(1);
 
-    task::spawn(mempool.run());
+    #[cfg(feature = "metrics")]
+    let metrics = PrometheusMempoolMetrics::new(metrics_registry);
+    let mempool = MempoolService::new(
+        rx_mempool_request,
+        epoch_manager,
+        transaction_validator,
+        state_store,
+        consensus_handle,
+        networking,
+        rx_gossip,
+        #[cfg(feature = "metrics")]
+        metrics,
+    );
+    let handle = MempoolHandle::new(tx_mempool_request);
 
-    handle
+    let join_handle = task::spawn(mempool.run());
+    debug!(target: LOG_TARGET, "Spawning mempool service (task: {:?})", join_handle);
+
+    (handle, join_handle)
 }

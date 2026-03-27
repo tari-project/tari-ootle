@@ -1,0 +1,145 @@
+//  Copyright 2022. The Tari Project
+//
+//  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
+//  following conditions are met:
+//
+//  1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following
+//  disclaimer.
+//
+//  2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
+//  following disclaimer in the documentation and/or other materials provided with the distribution.
+//
+//  3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote
+//  products derived from this software without specific prior written permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+//  INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+//  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+//  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+//  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+//  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+import { NavLink } from "react-router-dom";
+import Fade from "@mui/material/Fade";
+import ListItemButton from "@mui/material/ListItemButton";
+import ListItemIcon from "@mui/material/ListItemIcon";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+import Tooltip from "@mui/material/Tooltip";
+import { PiPuzzlePiece } from "react-icons/pi";
+import {
+  IoBarChart,
+  IoBarChartOutline,
+  IoGitNetwork,
+  IoGitNetworkOutline,
+  IoHome,
+  IoHomeOutline,
+  IoReceipt,
+  IoReceiptOutline,
+} from "react-icons/io5";
+import { TbTimelineEventText, TbTemplate } from "react-icons/tb";
+
+import ThemeSwitcher from "./ThemeSwitcher";
+
+const iconStyle = {
+  height: 22,
+  width: 22,
+};
+
+const activeIconStyle = {
+  height: 22,
+  width: 22,
+  color: "#9330FF",
+};
+
+const mainItems = [
+  {
+    title: "Home",
+    icon: <IoHomeOutline style={iconStyle} />,
+    activeIcon: <IoHome style={activeIconStyle} />,
+    link: "/",
+  },
+  {
+    title: "Recent Transactions",
+    icon: <IoBarChartOutline style={iconStyle} />,
+    activeIcon: <IoBarChart style={activeIconStyle} />,
+    link: "transactions",
+  },
+  {
+    title: "Transaction Receipts",
+    icon: <IoReceiptOutline style={iconStyle} />,
+    activeIcon: <IoReceipt style={activeIconStyle} />,
+    link: "transaction-receipts",
+  },
+  {
+    title: "Events",
+    icon: <TbTimelineEventText style={iconStyle} />,
+    activeIcon: <TbTimelineEventText style={activeIconStyle} />,
+    link: "events",
+  },
+  {
+    title: "Substates",
+    icon: <PiPuzzlePiece style={iconStyle} />,
+    activeIcon: <PiPuzzlePiece style={activeIconStyle} />,
+    link: "substates",
+  },
+  {
+    title: "Templates",
+    icon: <TbTemplate style={iconStyle} />,
+    activeIcon: <TbTemplate style={activeIconStyle} />,
+    link: "templates",
+  },
+  {
+    title: "Connections",
+    icon: <IoGitNetworkOutline style={iconStyle} />,
+    activeIcon: <IoGitNetwork style={activeIconStyle} />,
+    link: "connections",
+  },
+];
+
+const MainMenu = mainItems.map(({ title, icon, activeIcon, link }) => (
+  <NavLink to={link} key={title} style={{ textDecoration: "none" }}>
+    {({ isActive }) => (
+      <ListItemButton
+        sx={{
+          paddingLeft: "22px",
+          paddingRight: "22px",
+          paddingTop: "16px",
+          paddingBottom: "16px",
+        }}
+        disableRipple
+      >
+        <Tooltip
+          TransitionComponent={Fade}
+          TransitionProps={{ timeout: 300 }}
+          title={title}
+          placement="right"
+          arrow
+        >
+          <ListItemIcon>{isActive ? activeIcon : icon}</ListItemIcon>
+        </Tooltip>
+        <Typography
+          variant="body1"
+          color={isActive ? "primary" : "textSecondary"}
+        >
+          {title}
+        </Typography>
+      </ListItemButton>
+    )}
+  </NavLink>
+));
+
+export const mainListItems = (
+  <Stack
+    direction="column"
+    justifyContent="space-between"
+    spacing={1}
+    height={"100%"}
+  >
+    <Stack direction="column" justifyContent="flex-start">
+      {MainMenu}
+    </Stack>
+    <ThemeSwitcher />
+  </Stack>
+);

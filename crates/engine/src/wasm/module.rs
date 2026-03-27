@@ -1,0 +1,322 @@
+//  Copyright 2022. The Tari Project
+//
+//  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
+//  following conditions are met:
+//
+//  1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following
+//  disclaimer.
+//
+//  2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
+//  following disclaimer in the documentation and/or other materials provided with the distribution.
+//
+//  3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote
+//  products derived from this software without specific prior written permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+//  INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+//  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+//  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+//  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+//  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+use std::{fmt, fmt::Formatter, sync::Arc};
+
+use tari_engine_types::limits;
+use tari_template_abi::{ABI_TEMPLATE_DEF_GLOBAL_NAME, FunctionDef, TemplateDef, Type};
+use wasmer::{
+    AsStoreMut,
+    Engine,
+    ExportError,
+    Function,
+    Instance,
+    Pages,
+    Store,
+    TypedFunction,
+    WasmPtr,
+    imports,
+    sys::{BaseTunables, CompilerConfig, Cranelift, CraneliftOptLevel, EngineBuilder, Target},
+};
+
+use crate::{
+    template::{LoadedTemplate, TemplateLoaderError, TemplateModuleLoader},
+    wasm::{
+        WasmExecutionError,
+        WasmProcess,
+        WasmValidationError,
+        environment::WasmEnv,
+        limiting_tunable::LimitingTunables,
+        metering,
+    },
+};
+
+pub type MainFunction = TypedFunction<(WasmPtr<u8>, u32), WasmPtr<u8>>;
+#[derive(Debug, Clone)]
+pub struct WasmModule {
+    code: Box<[u8]>,
+}
+
+impl WasmModule {
+    pub fn from_code(code: impl Into<Box<[u8]>>) -> Self {
+        Self { code: code.into() }
+    }
+
+    pub fn load_template_from_code(code: &[u8]) -> Result<LoadedTemplate, TemplateLoaderError> {
+        let engine = Self::create_engine();
+        let module = wasmer::Module::new(&engine, code)?;
+        let mut store = Store::new(engine);
+
+        let imports = imports! {
+            "env" => {
+                "tari_engine" => Function::new_typed(&mut store, |_op: i32, _arg_ptr: i32, _arg_len: i32| 0i32),
+                "tari_debug" => Function::new_typed(&mut store, |_arg_ptr: i32, _arg_len: i32| {  }),
+                "on_panic" => Function::new_typed(&mut store, |_msg_ptr: i32, _msg_len: i32, _line: i32, _col: i32| {  }),
+            }
+        };
+        let instance = Instance::new(&mut store, &module, &imports)?;
+        let mut env = WasmEnv::new(());
+        let memory = instance.exports.get_memory("memory")?.clone();
+        env.set_memory(memory);
+
+        let template = env.load_template_def(&mut store, &instance)?;
+        let main_fn = format!("{}_main", template.template_name());
+
+        WasmProcess::validate_template_abi_version(&template)?;
+        validate_instance(&mut store, &instance, &main_fn)?;
+        validate_functions(&template)?;
+
+        let engine = store.engine().clone();
+
+        Ok(LoadedWasmTemplate::new(template, module, engine, code.len()).into())
+    }
+
+    pub fn code(&self) -> &[u8] {
+        &self.code
+    }
+
+    pub fn into_code(self) -> Box<[u8]> {
+        self.code
+    }
+
+    fn create_engine() -> Engine {
+        const MEMORY_PAGE_LIMIT: Pages = Pages(limits::WASM_LIMITS.max_memory_pages as u32);
+        let base = BaseTunables::for_target(&Target::default());
+        let tunables = LimitingTunables::new(base, MEMORY_PAGE_LIMIT);
+        let mut compiler = Cranelift::new();
+        compiler
+            .opt_level(CraneliftOptLevel::SpeedAndSize)
+            .canonicalize_nans(true);
+        // TODO: Configure metering limit
+        compiler.push_middleware(Arc::new(metering::middleware(100_000_000)));
+
+        let mut features = wasmer::sys::Features::default();
+        features
+            // Explicitly disable threads and multi value, the remaining defaults are repeated here for clarity
+            .threads(false)
+            .bulk_memory(true)
+            .multi_value(false)
+            .reference_types(true)
+            .simd(true)
+            .tail_call(false)
+            .memory64(false)
+            .multi_memory(false)
+            .exceptions(false)
+            .module_linking(false);
+
+        let mut engine = EngineBuilder::new(compiler).set_features(Some(features)).engine();
+        engine.set_tunables(tunables);
+        Engine::from(engine)
+    }
+}
+
+impl TemplateModuleLoader for WasmModule {
+    fn load_template(&self) -> Result<LoadedTemplate, TemplateLoaderError> {
+        Self::load_template_from_code(&self.code)
+    }
+}
+
+#[derive(Clone)]
+pub struct LoadedWasmTemplate {
+    template_def: Arc<TemplateDef>,
+    module: wasmer::Module,
+    engine: Engine,
+    code_size: usize,
+}
+
+impl LoadedWasmTemplate {
+    pub fn new(template_def: TemplateDef, module: wasmer::Module, engine: Engine, code_size: usize) -> Self {
+        Self {
+            template_def: Arc::new(template_def),
+            module,
+            engine,
+            code_size,
+        }
+    }
+
+    pub fn wasm_module(&self) -> &wasmer::Module {
+        &self.module
+    }
+
+    pub fn engine(&self) -> &Engine {
+        &self.engine
+    }
+
+    pub fn create_store(&self) -> Store {
+        Store::new(self.engine.clone())
+    }
+
+    pub fn template_name(&self) -> &str {
+        self.template_def.template_name()
+    }
+
+    pub fn template_def(&self) -> &TemplateDef {
+        &self.template_def
+    }
+
+    pub fn into_template_def(self) -> TemplateDef {
+        Arc::try_unwrap(self.template_def).unwrap_or_else(|arc| (*arc).clone())
+    }
+
+    pub fn find_func_by_name(&self, function_name: &str) -> Option<&FunctionDef> {
+        self.template_def.functions().iter().find(|f| f.name == *function_name)
+    }
+
+    pub fn code_size(&self) -> usize {
+        self.code_size
+    }
+}
+
+impl fmt::Debug for LoadedWasmTemplate {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LoadedWasmTemplate")
+            .field("template_name", &self.template_name())
+            .field("code_size", &self.code_size())
+            .field("main", &"<main func>")
+            .field("module", &self.module)
+            .finish()
+    }
+}
+
+fn validate_instance<S: AsStoreMut>(
+    store: &mut S,
+    instance: &Instance,
+    main_fn: &str,
+) -> Result<(), WasmExecutionError> {
+    fn is_func_permitted(name: &str, main_fn: &str) -> bool {
+        name == main_fn || name == "tari_alloc" || name == "tari_free"
+    }
+
+    instance.exports.get_memory("memory")?;
+
+    // Enforce that only permitted functions are allowed
+    let unexpected_abi_func = instance
+        .exports
+        .iter()
+        .functions()
+        .find(|(name, _)| !is_func_permitted(name, main_fn));
+
+    if let Some((name, _)) = unexpected_abi_func {
+        return Err(WasmExecutionError::UnexpectedAbiFunction { name: name.to_string() });
+    }
+
+    instance
+        .exports
+        .get_global(ABI_TEMPLATE_DEF_GLOBAL_NAME)?
+        .get(store)
+        .i32()
+        .ok_or(WasmExecutionError::ExportError(ExportError::IncompatibleType))?;
+
+    // Check that the main function exists and it's signature is correct
+    let _main: MainFunction = instance.exports.get_typed_function(store, main_fn)?;
+
+    Ok(())
+}
+
+fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionError> {
+    match template_def {
+        TemplateDef::V1(def) => {
+            let function_count = def.functions.len();
+            if function_count > limits::WASM_LIMITS.max_functions {
+                return Err(WasmValidationError::TooManyFunctions {
+                    max_functions: limits::WASM_LIMITS.max_functions,
+                }
+                .into());
+            }
+            for func in &def.functions {
+                if func.name.len() > limits::WASM_LIMITS.max_function_name_length {
+                    return Err(WasmValidationError::FunctionNameTooLong {
+                        name: func.name.clone(),
+                        max_length: limits::WASM_LIMITS.max_function_name_length,
+                    }
+                    .into());
+                }
+
+                if func.arguments.len() > limits::WASM_LIMITS.max_function_arguments {
+                    return Err(WasmValidationError::FunctionTooManyArguments {
+                        name: func.name.clone(),
+                        max_args: limits::WASM_LIMITS.max_function_arguments,
+                        num_args: func.arguments.len(),
+                    }
+                    .into());
+                }
+                for arg in &func.arguments {
+                    if arg.name.len() > limits::WASM_LIMITS.max_function_name_length {
+                        return Err(WasmValidationError::FunctionNameTooLong {
+                            name: arg.name.clone(),
+                            max_length: limits::WASM_LIMITS.max_function_name_length,
+                        }
+                        .into());
+                    }
+                    match &arg.arg_type {
+                        Type::Tuple(tuple) => {
+                            if tuple.len() > limits::WASM_LIMITS.max_function_arguments {
+                                return Err(WasmValidationError::FunctionTooManyTupleReturn {
+                                    name: func.name.clone(),
+                                    max_tuple_size: limits::WASM_LIMITS.max_function_arguments,
+                                    tuple_size: tuple.len(),
+                                }
+                                .into());
+                            }
+                        },
+                        Type::Other { name } => {
+                            if name.len() > limits::WASM_LIMITS.max_function_name_length {
+                                return Err(WasmValidationError::FunctionNameTooLong {
+                                    name: name.clone(),
+                                    max_length: limits::WASM_LIMITS.max_function_name_length,
+                                }
+                                .into());
+                            }
+                        },
+                        _ => {},
+                    }
+                }
+                if func.is_migration {
+                    // Note that we are checking the TemplateDef, not the actual return type of the function in Wasm.
+                    match &func.output {
+                        Type::Other { name } => {
+                            if name != "Self" &&
+                                name != template_def.template_name() &&
+                                name != "Component<Self>" &&
+                                *name != format!("Component<{}>", template_def.template_name())
+                            {
+                                return Err(WasmValidationError::InvalidMigrationReturnType {
+                                    function_name: func.name.clone(),
+                                    return_type: func.output.clone(),
+                                }
+                                .into());
+                            }
+                        },
+                        _ => {
+                            return Err(WasmValidationError::InvalidMigrationReturnType {
+                                function_name: func.name.clone(),
+                                return_type: func.output.clone(),
+                            }
+                            .into());
+                        },
+                    }
+                }
+            }
+        },
+    }
+    Ok(())
+}

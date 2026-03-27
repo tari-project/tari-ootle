@@ -1,0 +1,224 @@
+---
+title: Resources
+description: Understand Tari Ootle Resources — fungible tokens, NFTs, confidential assets, and vaults — and how agents and templates create, transfer, and manage them on-chain.
+---
+import { basePath } from '../../../helpers/path';
+
+### Covered in this guide
+
+In this guide, you will:
+- Understand the four types of resources in Tari Ootle: Public Fungible, Public Non-Fungible, Confidential, and Stealth.
+- Learn how to create fungible and non-fungible resources using `ResourceBuilder`.
+- Explore the specialized features and privacy benefits of stealth resources.
+- Master resource operations such as minting, burning, depositing, and withdrawing.
+- Understand the role of `Vaults` as secure on-chain containers for assets.
+- Learn how to use `Buckets` as temporary containers during transaction execution.
+- Implement a practical example of minting and burning tokens within a template.
+
+In the Tari Ootle ecosystem, **Resources** represent digital assets, while **Components** are the on-chain entities that manage these
+assets and implement business logic. Understanding how to create and interact with them is fundamental to building powerful Templates.
+
+Resources are digital assets on the Tari blockchain. There are four resource types:
+
+- **Public Fungible:** Interchangeable assets where each unit is identical (e.g., tokens). These resources are not private and can be viewed by anyone on the blockchain in the same way as Bitcoin, Ethereum etc.
+- **Public Non-Fungible:** Unique assets where each unit has distinct properties (e.g., NFTs). These resources are not private and can be viewed by anyone on the blockchain.
+- **Confidential:** Tokens can be transferred in confidential outputs. These outputs are stored within vaults, and therefore only hide the amounts i.e. everyone can see this vault holds some amount of a resource, but the actual amount is hidden.
+- **Stealth:** Tokens can be transferred in confidential UTXOs. The native tTARI token is an example of a stealth resource. Stealth resources provide enhanced privacy for asset holdings. Learn more about stealth resources in the <a href={basePath("/guides/stealth-resources/")}>Stealth Resources guide</a>.
+
+#### Creating Fungible Resources
+
+Fungible resources are typically used for tokens, currencies, or any asset where individual units are identical and interchangeable and privacy is not useful.
+
+```rust
+use tari_template_lib::prelude::*;
+
+// ..snip..
+
+impl MyComponent {
+  pub fn create_fungible_token() -> ResourceAddress {
+      // Create a new fungible resource.
+      let token_address = ResourceBuilder::public_fungible()
+          // Set the token symbol, typically 3-4 letters.
+          .with_token_symbol("MFT")
+          .metadata("url", "https://token.example")
+          // Set the number of decimal places (optional, default is 8)
+          .with_divisibility(10)
+          // No initial supply — tokens can be minted later by the owner.
+          .build();
+      token_address
+  }
+}
+```
+
+#### Creating Non-Fungible Resources (NFTs)
+
+Non-fungible resources are unique assets, each with its own distinct identity and optional metadata.
+
+```rust
+use tari_template_lib::prelude::*;
+
+// ..snip..
+
+impl MyComponent {
+  pub fn create_nft_resource() -> ResourceAddress {
+      // Create a new non-fungible resource
+      let nft_address = ResourceBuilder::non_fungible()
+          .metadata("name", "My Awesome NFTs")
+          .build();
+      nft_address
+  }
+}
+```
+
+#### Stealth Resources
+
+Stealth resources represent the highest level of confidentiality within the Tari Ootle ecosystem. Unlike other resource types,
+funds associated with stealth resources are not kept in traditional vaults. Instead, each output is a confidential UTXO substate
+that lives directly on the ledger. This mechanism provides enhanced privacy for transactions and asset holdings.
+
+```rust
+use tari_template_lib::prelude::*;
+
+// ..snip..
+
+impl MyComponent {
+  pub fn create_stealth_resource() -> ResourceAddress {
+      // Create a new non-fungible resource
+      let nft_address = ResourceBuilder::stealth()
+          .metadata("name", "Stealth Tokens")
+          .with_token_symbol("STLTH")
+          .with_divisibility(6)
+          .build();
+      nft_address
+  }
+}
+```
+
+#### Resource Operations
+
+Resources have various actions that can be performed on them. Each of these can be restricted by access rules as required.
+
+-   **Minting:** Creating new units of a resource. Default access: DenyAll (only `OwnerRule` applies)
+-   **Burning:** Destroying units of a resource. Default access: DenyAll (only `OwnerRule` applies)
+-   **Depositing/Withdrawing:** Moving resources into or out of vaults. Default access: AllowAll (anyone can deposit or withdraw from vaults they control)
+-   **Recall:** The resource owner can recall resources from any vault on the ledger. This is a powerful feature that
+can be used for regulatory compliance, recovering lost tokens, or implementing certain business logic. Explorers should
+make it clear when this is anything other than DenyAll. NOTE: An owner cannot recall if this is set to DenyAll.
+-   **Freezable:** The resource owner can freeze resources in any vault on the ledger.
+-   **Update Access Rule:** Defines an AccessRule that controls who can update the access rules of the resource. Default access: DenyAll (only `OwnerRule` applies)
+-   **Update Non-Fungible Data:** Applies to non-fungible resources. Defines an AccessRule that controls who can update the mutable data of non-fungible tokens. Default access: DenyAll (only `OwnerRule` applies)
+
+These operations are typically exposed through methods on the `ResourceManager`.
+
+### Vaults
+
+Vaults are secure containers used to hold resources. Every component can have many or no vaults.
+A vault can only ever hold one resource.
+
+```rust
+use tari_template_lib::prelude::*;
+
+impl MyComponent {
+  // Inside a component method:
+  pub fn deposit_funds(&mut self, bucket: Bucket) {
+      // Deposit resources from a Bucket into the vault.
+      // If the Bucket contains a different resource than the vault,
+      // the transaction will panic and fail.
+      self.fungible_vault.deposit(bucket);
+  }
+
+  pub fn withdraw_funds(&mut self, amount: Amount) -> Bucket {
+      // Withdraw resources from a vault into a Bucket
+      self.fungible_vault.withdraw(amount)
+  }
+
+  pub fn withdraw_nft(&mut self) -> Bucket {
+      // Withdraw resources from a vault into a Bucket
+      self.nft_vault.withdraw_non_fungible(NonFungibleId::from_string("nft1"))
+  }
+
+    pub fn deposit_nft(&mut self, bucket: Bucket) {
+      // No different from depositing fungible tokens — the vault
+      // checks the bucket contains the correct resource.
+      self.nft_vault.deposit(bucket);
+  }
+}
+```
+
+### Buckets
+
+`Bucket`s are temporary containers for "some amount" of a _single_ resource. They only exist at runtime / during the execution of a transaction.
+All buckets MUST be either deposited into a vault, consumed by a stealth transfer or burnt. If a bucket is not consumed by the end of a transaction,
+the transaction will fail and no state changes will be committed.
+
+### Minting and Burning Resources Example
+
+```rust
+use tari_template_lib::prelude::*;
+
+
+#[template]
+mod template {
+    use super::*;
+
+    pub struct MyBurnToken {
+        // Store the tokens in a vault controlled by this component manages
+        tokens: Vault,
+    }
+
+    impl MyBurnToken {
+        pub fn new(initial_supply: Option<Amount>) -> Component<Self> {
+            const INITIAL_SUPPLY: Amount =
+                amount![10_000_000_000_000_000_000_000_000_000];
+            // Mint a new fungible stealth token with an initial supply
+            let bucket = ResourceBuilder::stealth()
+                // Set the token symbol (optional)
+                .with_token_symbol("BRN")
+                // Add custom metadata (optional)
+                .metadata("description", "A token that you (yes, you) can burn")
+                .with_divisibility(6) // 6 decimal places
+                // Burnable by anyone (for demonstration purposes)
+                .burnable(rule![allow_all])
+                .initial_supply(initial_supply.unwrap_or(INITIAL_SUPPLY));
+
+            Component::new(Self {
+                tokens: Vault::from_bucket(bucket),
+            })
+            .with_access_rules(ComponentAccessRules::new()
+                // Allow anyone to call the burn_one method
+                .method("burn_one", rule![allow_all])
+                // Deny all other methods by default
+                .default(rule![deny_all])
+            )
+            .create()
+        }
+
+        pub fn burn_one(&self) {
+            // Withdraw 0.000001 token from the vault into a bucket
+            // If the vault is empty, this will panic and the
+            // transaction will fail
+            let bucket = self.tokens.withdraw(1u64);
+            // Burn the token in the bucket
+            bucket.burn();
+
+            let caller_pub_key = CallerContext::transaction_signer_public_key();
+            emit_event("burn_one", metadata![
+              "caller" => caller_pub_key.to_string(),
+            ]);
+        }
+
+        pub fn mint_more(&self, amount: Amount) {
+            // Mint new tokens into a bucket
+            let bucket = self.tokens.get_resource_manager().mint(amount);
+            // Deposit the newly minted tokens into the vault
+            self.tokens.deposit(bucket);
+
+            let caller_pub_key = CallerContext::transaction_signer_public_key();
+            emit_event("mint_more", metadata![
+              "caller" => caller_pub_key.to_string(),
+              "amount" => amount.to_string(),
+            ]);
+        }
+    }
+}
+```

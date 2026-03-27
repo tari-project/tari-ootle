@@ -1,0 +1,28 @@
+[package]
+name = "tari_base_node_client"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+minotari_app_grpc = { workspace = true }
+minotari_node_grpc_client = { workspace = true }
+tari_common_types = { workspace = true }
+tari_transaction_components = { workspace = true }
+tari_node_components = { workspace = true }
+tari_utilities = { workspace = true }
+tari_ootle_common_types = { workspace = true }
+tari_template_lib = { workspace = true }
+
+log = { workspace = true }
+serde = { workspace = true, default-features = true }
+thiserror = { workspace = true }
+tonic = { workspace = true }
+futures-util = { workspace = true }
+ts-rs = { workspace = true, optional = true }
+url = { workspace = true }
+
+[features]
+ts = ["ts-rs"]

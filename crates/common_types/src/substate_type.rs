@@ -1,0 +1,97 @@
+//   Copyright 2024 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+use std::fmt::Display;
+
+use serde::{Deserialize, Serialize};
+use tari_engine_types::substate::{Substate, SubstateId, SubstateValue};
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum SubstateType {
+    Component,
+    Resource,
+    Vault,
+    ClaimedOutputTombstone,
+    NonFungible,
+    TransactionReceipt,
+    ValidatorFeePool,
+    Template,
+    Utxo,
+}
+
+impl SubstateType {
+    pub fn as_prefix_str(&self) -> &str {
+        match self {
+            SubstateType::Component => "component",
+            SubstateType::Resource => "resource",
+            SubstateType::Vault => "vault",
+            SubstateType::ClaimedOutputTombstone => "commitment",
+            SubstateType::NonFungible => "nft",
+            SubstateType::TransactionReceipt => "txreceipt",
+            SubstateType::ValidatorFeePool => "vnfp",
+            SubstateType::Template => "template",
+            SubstateType::Utxo => "utxo",
+        }
+    }
+
+    pub fn matches(&self, addr: &SubstateId) -> bool {
+        #[allow(clippy::match_like_matches_macro)]
+        match (self, addr) {
+            (SubstateType::Component, SubstateId::Component(_)) => true,
+            (SubstateType::Resource, SubstateId::Resource(_)) => true,
+            (SubstateType::Vault, SubstateId::Vault(_)) => true,
+            (SubstateType::NonFungible, SubstateId::NonFungible(_)) => true,
+            (SubstateType::ClaimedOutputTombstone, SubstateId::ClaimedOutputTombstone(_)) => true,
+            (SubstateType::TransactionReceipt, SubstateId::TransactionReceipt(_)) => true,
+            (SubstateType::ValidatorFeePool, SubstateId::ValidatorFeePool(_)) => true,
+            (SubstateType::Template, SubstateId::Template(_)) => true,
+            (SubstateType::Utxo, SubstateId::Utxo(_)) => true,
+            _ => false,
+        }
+    }
+}
+
+impl From<&SubstateValue> for SubstateType {
+    fn from(value: &SubstateValue) -> Self {
+        match value {
+            SubstateValue::Component(_) => SubstateType::Component,
+            SubstateValue::Resource(_) => SubstateType::Resource,
+            SubstateValue::Vault(_) => SubstateType::Vault,
+            SubstateValue::ClaimedOutputTombstone(_) => SubstateType::ClaimedOutputTombstone,
+            SubstateValue::NonFungible(_) => SubstateType::NonFungible,
+            SubstateValue::TransactionReceipt(_) => SubstateType::TransactionReceipt,
+            SubstateValue::Template(_) => SubstateType::Template,
+            SubstateValue::ValidatorFeePool(_) => SubstateType::ValidatorFeePool,
+            SubstateValue::Utxo(_) => SubstateType::Utxo,
+        }
+    }
+}
+
+impl From<&SubstateId> for SubstateType {
+    fn from(value: &SubstateId) -> Self {
+        match value {
+            SubstateId::Component(_) => SubstateType::Component,
+            SubstateId::Resource(_) => SubstateType::Resource,
+            SubstateId::Vault(_) => SubstateType::Vault,
+            SubstateId::ClaimedOutputTombstone(_) => SubstateType::ClaimedOutputTombstone,
+            SubstateId::NonFungible(_) => SubstateType::NonFungible,
+            SubstateId::TransactionReceipt(_) => SubstateType::TransactionReceipt,
+            SubstateId::ValidatorFeePool(_) => SubstateType::ValidatorFeePool,
+            SubstateId::Template(_) => SubstateType::Template,
+            SubstateId::Utxo(_) => SubstateType::Utxo,
+        }
+    }
+}
+
+impl From<&Substate> for SubstateType {
+    fn from(value: &Substate) -> Self {
+        value.substate_value().into()
+    }
+}
+
+impl Display for SubstateType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}

@@ -1,0 +1,302 @@
+//  Copyright 2022. The Tari Project
+//
+//  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
+//  following conditions are met:
+//
+//  1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following
+//  disclaimer.
+//
+//  2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
+//  following disclaimer in the documentation and/or other materials provided with the distribution.
+//
+//  3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote
+//  products derived from this software without specific prior written permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+//  INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+//  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+//  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+//  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+//  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
+import { Accordion, AccordionDetails, AccordionSummary } from "../../Components/Accordion";
+import { Alert, Button, Fade, Grid, Table, TableBody, TableCell, TableContainer, TableRow } from "@mui/material";
+import Typography from "@mui/material/Typography";
+import { DataTableCell, StyledPaper } from "../../Components/StyledComponents";
+import PageHeading from "../../Components/PageHeading";
+import Events from "./Events";
+import Logs from "./Logs";
+import Instructions from "./Instructions";
+import Substates from "./Substates";
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
+import Loading from "../../Components/Loading";
+import { getTransaction, getTransactionResult } from "../../utils/json_rpc";
+import { displayDuration } from "../../utils/helpers";
+import type {
+  Event,
+  ExecuteResult,
+  LogEntry,
+  VersionedSubstateId,
+  SubstateId,
+  Substate,
+} from "@tari-project/ootle-ts-bindings";
+import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tari-project/ootle-ts-bindings";
+import StatusChip from "../../Components/StatusChip";
+import { getSubstateDiffFromTransactionResult } from "@tari-project/ootle-ts-bindings/dist/helpers/helpers";
+import { Transaction } from "@tari-project/ootle-ts-bindings/dist/types/Transaction";
+import { Decision } from "@tari-project/ootle-ts-bindings/dist/types/Decision";
+
+export default function TransactionDetails() {
+  const { transactionHash } = useParams();
+  const [state, setState] = useState<{
+    transaction: Transaction;
+    final_decision: Decision;
+    finalized_at: string;
+    result: ExecuteResult;
+  }>();
+  const [upSubstate, setUpSubstate] = useState<[SubstateId, Substate][]>([]);
+  const [downSubstate, setDownSubstate] = useState<VersionedSubstateId[]>([]);
+  const [events, setEvents] = useState<Event[]>();
+  const [fee, setFee] = useState<bigint>();
+  const [logs, setLogs] = useState<LogEntry[]>();
+  const [expandedPanels, setExpandedPanels] = useState<string[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<String>();
+
+  const getTransactionByHash = () => {
+    setLoading(true);
+    Promise.all([
+      getTransaction({ transaction_id: String(transactionHash) }),
+      getTransactionResult({ transaction_id: String(transactionHash) }),
+    ])
+      .then(([transaction, resultResp]) => {
+        const { result } = resultResp.transaction_execution;
+        setState({
+          transaction: transaction.transaction,
+          final_decision: resultResp.final_decision,
+          finalized_at: resultResp.finalize_at,
+          result,
+        });
+        if (result && ("Accept" in result.finalize.result || "AcceptFeeRejectRest" in result.finalize.result)) {
+          let diff = getSubstateDiffFromTransactionResult(result.finalize.result);
+          if (diff) {
+            setDownSubstate(
+              diff.down_substates.map(([substate_id, version]) => ({
+                substate_id,
+                version,
+              })),
+            );
+            setUpSubstate(diff.up_substates);
+          }
+        }
+        setError(undefined);
+        setEvents(result?.finalize.events);
+        setLogs(result?.finalize.logs);
+        setFee(result?.finalize.fee_receipt.total_fees_paid);
+      })
+      .catch((err) => {
+        setError(err && err.message ? err.message : `Unknown error: ${JSON.stringify(err)}`);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  };
+
+  useEffect(() => {
+    getTransactionByHash();
+  }, []);
+
+  const handleChange = (panel: string) => (event: React.SyntheticEvent, isExpanded: boolean) => {
+    setExpandedPanels((prevExpandedPanels) => {
+      if (isExpanded) {
+        return [...prevExpandedPanels, panel];
+      } else {
+        return prevExpandedPanels.filter((p) => p !== panel);
+      }
+    });
+  };
+
+  const renderResult = (result: ExecuteResult) => {
+    if (result) {
+      if ("Accept" in result.finalize.result) {
+        return <span>Accepted</span>;
+      }
+      return <span>{rejectReasonToString(getRejectReasonFromTransactionResult(result.finalize.result))}</span>;
+    } else {
+      return <span>In progress</span>;
+    }
+  };
+
+  const expandAll = () => {
+    setExpandedPanels(["panel1", "panel2", "panel3", "panel4", "panel5"]);
+  };
+
+  const collapseAll = () => {
+    setExpandedPanels([]);
+  };
+  if (state === undefined) {
+    return <Loading />;
+  }
+  const { transaction: container, final_decision, finalized_at: finalized_time, result } = state;
+  const transaction = container?.V1.body.transaction;
+  const decision = typeof final_decision === "object" ? "Abort" : final_decision;
+  const abortReason = final_decision !== null && typeof final_decision === "object" ? final_decision.Abort : null;
+  return (
+    <>
+      <Grid size={12}>
+        <PageHeading>Transaction Details</PageHeading>
+      </Grid>
+      <Grid size={12}>
+        <StyledPaper>
+          {loading ? (
+            <Loading />
+          ) : (
+            <Fade in={!loading}>
+              <div>
+                {error ? (
+                  <Alert severity="error">{error}</Alert>
+                ) : (
+                  <>
+                    <TableContainer>
+                      <Table>
+                        <TableBody>
+                          <TableRow>
+                            <TableCell>Transaction Hash</TableCell>
+                            <DataTableCell>{transactionHash}</DataTableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell>Timestamp</TableCell>
+                            <DataTableCell>Timestamp</DataTableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell>Total Fees</TableCell>
+                            <DataTableCell>{fee?.toString()}</DataTableCell>
+                          </TableRow>
+                          {final_decision && (
+                            <TableRow>
+                              <TableCell>Status</TableCell>
+                              <DataTableCell>
+                                <StatusChip status={decision} />
+                              </DataTableCell>
+                            </TableRow>
+                          )}
+                          {abortReason && (
+                            <TableRow>
+                              <TableCell>Abort reason</TableCell>
+                              <DataTableCell>{abortReason}</DataTableCell>
+                            </TableRow>
+                          )}
+                          <TableRow>
+                            <TableCell>Result</TableCell>
+                            <DataTableCell>
+                              {renderResult(result)}
+                              <br />
+                              Executed in {result.execution_time ? displayDuration(result.execution_time) : "--"},
+                              Finalized at {finalized_time}
+                            </DataTableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "2rem 1rem 0.5rem 1rem",
+                      }}
+                      // className="flex-container"
+                    >
+                      <Typography variant="h5">More Info</Typography>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "flex-end",
+                          gap: "1rem",
+                        }}
+                      >
+                        <Button
+                          onClick={expandAll}
+                          style={{
+                            fontSize: "0.85rem",
+                          }}
+                          startIcon={<KeyboardArrowDownIcon />}
+                        >
+                          Expand All
+                        </Button>
+                        <Button
+                          onClick={collapseAll}
+                          style={{
+                            fontSize: "0.85rem",
+                          }}
+                          startIcon={<KeyboardArrowUpIcon />}
+                          disabled={expandedPanels.length === 0}
+                        >
+                          Collapse All
+                        </Button>
+                      </div>
+                    </div>
+                  </>
+                )}
+                <Accordion expanded={expandedPanels.includes("panel1")} onChange={handleChange("panel1")}>
+                  <AccordionSummary aria-controls="panel1bh-content" id="panel1bh-header">
+                    <Typography>Fee Instructions</Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    {transaction?.fee_instructions?.length ? (
+                      <Instructions data={transaction.fee_instructions} />
+                    ) : (
+                      "Empty"
+                    )}
+                  </AccordionDetails>
+                </Accordion>
+                <Accordion expanded={expandedPanels.includes("panel2")} onChange={handleChange("panel2")}>
+                  <AccordionSummary aria-controls="panel2bh-content" id="panel1bh-header">
+                    <Typography>Instructions</Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    {transaction?.instructions?.length ? <Instructions data={transaction.instructions} /> : "Empty"}
+                  </AccordionDetails>
+                </Accordion>
+                {result && events && (
+                  <Accordion expanded={expandedPanels.includes("panel3")} onChange={handleChange("panel3")}>
+                    <AccordionSummary aria-controls="panel3bh-content" id="panel1bh-header">
+                      <Typography>Events</Typography>
+                    </AccordionSummary>
+                    <AccordionDetails>
+                      <Events data={events} />
+                    </AccordionDetails>
+                  </Accordion>
+                )}
+                {result && logs && (
+                  <Accordion expanded={expandedPanels.includes("panel4")} onChange={handleChange("panel4")}>
+                    <AccordionSummary aria-controls="panel4bh-content" id="panel1bh-header">
+                      <Typography>Logs</Typography>
+                    </AccordionSummary>
+                    <AccordionDetails>
+                      <Logs data={logs} />
+                    </AccordionDetails>
+                  </Accordion>
+                )}
+                {upSubstate && (
+                  <Accordion expanded={expandedPanels.includes("panel5")} onChange={handleChange("panel5")}>
+                    <AccordionSummary aria-controls="panel5bh-content" id="panel1bh-header">
+                      <Typography>Substates</Typography>
+                    </AccordionSummary>
+                    <AccordionDetails>
+                      <Substates upData={upSubstate} downData={downSubstate} />
+                    </AccordionDetails>
+                  </Accordion>
+                )}
+              </div>
+            </Fade>
+          )}
+        </StyledPaper>
+      </Grid>
+    </>
+  );
+}

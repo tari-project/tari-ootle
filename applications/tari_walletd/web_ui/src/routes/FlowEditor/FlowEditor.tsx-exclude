@@ -1,0 +1,536 @@
+//  Copyright 2022. The Tari Project
+//
+//  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
+//  following conditions are met:
+//
+//  1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following
+//  disclaimer.
+//
+//  2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
+//  following disclaimer in the documentation and/or other materials provided with the distribution.
+//
+//  3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote
+//  products derived from this software without specific prior written permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+//  INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+//  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+//  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+//  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+//  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+import "@tari-project/tari-extension-query-builder/dist/tari-extension-query-builder.css";
+import PageHeading from "@components/PageHeading";
+import Grid from "@mui/material/Grid";
+import { StyledPaper } from "@components/StyledComponents";
+import { QueryBuilder, TemplateReader, useStore } from "@tari-project/tari-extension-query-builder";
+import useThemeStore from "@store/themeStore";
+import { useCallback, useEffect, useRef } from "react";
+import {
+  Button,
+  TextField,
+  Typography,
+  IconButton,
+  List,
+  ListItem,
+  Divider,
+  Drawer,
+  Box,
+  Tooltip,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  SelectChangeEvent,
+  FormHelperText,
+} from "@mui/material";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
+import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
+import { useTheme } from "@mui/material/styles";
+import Loading from "@components/Loading";
+import { useTemplateGet } from "@api/hooks/useTemplate";
+import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
+import FunctionsIcon from "@mui/icons-material/Functions";
+import SettingsEthernetIcon from "@mui/icons-material/SettingsEthernet";
+import { GeneratedCodeType, TariNetwork, TransactionProps } from "@tari-project/tari-extension-common";
+import { substateIdToString } from "@utils/helpers";
+import CloseIcon from "@mui/icons-material/Close";
+import { Highlight } from "prism-react-renderer";
+import useFlowEditorStore from "@store/flowEditorStore";
+import {
+  shortenString,
+  UnsignedTransactionV1,
+  NetworkByte,
+  ACCOUNT_TEMPLATE_ADDRESS,
+  TESTNET_NFT_FAUCET_ADDRESS,
+  TESTNET_XTR_FAUCET_ADDRESS,
+} from "@tari-project/ootle-ts-bindings";
+import { settingsGet, submitTransactionDryRun, transactionsSubmit, transactionsWaitResult } from "@utils/json_rpc";
+import { useAccountsList } from "@api/hooks/useAccounts";
+import CopyAddress from "@components/CopyAddress";
+
+const KNOWN_TEMPLATES = [
+  {
+    address: ACCOUNT_TEMPLATE_ADDRESS,
+    name: "Account",
+  },
+  {
+    address: TESTNET_NFT_FAUCET_ADDRESS,
+    name: "NFT Faucet",
+    testnet: true,
+  },
+  {
+    address: TESTNET_XTR_FAUCET_ADDRESS,
+    name: "tTARI faucet",
+  },
+];
+
+function FlowEditor() {
+  const { themeMode } = useThemeStore();
+  const {
+    panelOpen,
+    setPanelOpen,
+    templateId,
+    setTemplateId,
+    codeDialogOpen,
+    setCodeDialogOpen,
+    generatedCode,
+    setGeneratedCode,
+    generatedCodeType,
+    setGeneratedCodeType,
+    account,
+    setAccount,
+    fee,
+    setFee,
+    currentState,
+    setCurrentState,
+  } = useFlowEditorStore();
+  const theme = useTheme();
+  const addNodeAt = useStore((store) => store.addNodeAt);
+  const getState = useStore((store) => store.getState);
+  const setState = useStore((store) => store.setState);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { data: dataAccountsList } = useAccountsList(0, 20);
+
+  const { data, isLoading, error, refetch } = useTemplateGet(
+    { template_address: templateId },
+    { enabled: !!templateId },
+  );
+
+  const templateDef = data?.template_definition;
+  const methods = templateDef?.V1.functions || [];
+
+  const addNodesToCenter = useCallback(
+    (functionName: string) => {
+      if (templateId && templateDef) {
+        const reader = new TemplateReader(templateDef, templateId);
+        const nodeData = reader.getGenericNode(functionName);
+        if (nodeData) {
+          addNodeAt(nodeData);
+          setCurrentState(getState());
+        }
+      }
+    },
+    [addNodeAt, templateId, templateDef],
+  );
+
+  const getTariNetwork = async (): Promise<TariNetwork> => {
+    const settings = await settingsGet();
+    switch (settings.network.byte) {
+      case NetworkByte.MainNet:
+        return TariNetwork.MainNet;
+      case NetworkByte.StageNet:
+        return TariNetwork.StageNet;
+      case NetworkByte.NextNet:
+        return TariNetwork.NextNet;
+      case NetworkByte.LocalNet:
+        return TariNetwork.LocalNet;
+      case NetworkByte.Igor:
+        return TariNetwork.Igor;
+      case NetworkByte.Esmeralda:
+        return TariNetwork.Esmeralda;
+      default:
+        return TariNetwork.LocalNet;
+    }
+  };
+
+  useEffect(() => {
+    if (dataAccountsList?.accounts && dataAccountsList.accounts.length > 0) {
+      const defaultAcc = dataAccountsList.accounts.find((acc: any) => acc.account.is_default);
+      setAccount(defaultAcc || dataAccountsList.accounts[0]);
+    }
+  }, [dataAccountsList]);
+
+  useEffect(() => {
+    try {
+      if (currentState) {
+        setState(currentState);
+      }
+    } catch (err) {
+      console.error("Failed to load flow state:", err, currentState);
+    }
+  }, [currentState]);
+
+  const onAccountChange = (e: SelectChangeEvent) => {
+    const selected = dataAccountsList?.accounts.find(
+      (acc: any) => substateIdToString(acc.account.component_address) === e.target.value,
+    );
+    setAccount(selected);
+  };
+
+  const getTransactionProps = async (): Promise<TransactionProps> => {
+    if (!account) {
+      throw new Error("Account is not available");
+    }
+    const network = await getTariNetwork();
+    const accountAddress = substateIdToString(account.account.component_address);
+    return {
+      network,
+      accountAddress,
+      fee,
+    };
+  };
+
+  const showGeneratedCode = async (code: string, type: GeneratedCodeType): Promise<void> => {
+    setGeneratedCode(code);
+    setGeneratedCodeType(type);
+    setCodeDialogOpen(true);
+  };
+
+  const executeTransaction = async (transaction: UnsignedTransactionV1): Promise<void> => {
+    if (!account) {
+      throw new Error("Account is not available");
+    }
+    if (!account.account.owner_key_id) {
+      throw new Error("Selected account does not have an owner key");
+    }
+    const request = {
+      transaction: { V1: transaction },
+      seal_signer: account.account.owner_key_id!,
+      other_signers: [],
+      detect_inputs: true,
+      detect_inputs_use_unversioned: true,
+      lock_ids: [],
+    };
+    const submitResp = transaction.dry_run ? await submitTransactionDryRun(request) : await transactionsSubmit(request);
+    const result = await transactionsWaitResult({
+      transaction_id: submitResp.transaction_id,
+      timeout_secs: 60,
+    });
+    const txResult = result.result?.result;
+    const success = txResult && "Accept" in txResult;
+    if (success) {
+      if (transaction.dry_run) {
+        setFee(result.final_fee);
+      }
+    } else {
+      let failureReason;
+      if (!txResult) {
+        failureReason = "Execution failed";
+      } else if ("Reject" in txResult) {
+        failureReason = JSON.stringify(txResult.Reject);
+      } else {
+        failureReason = JSON.stringify(txResult.AcceptFeeRejectRest[1]);
+      }
+      throw new Error(failureReason);
+    }
+  };
+
+  const handleSaveFlow = () => {
+    const state = getState();
+    setCurrentState(state);
+    const blob = new Blob([JSON.stringify(state, undefined, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "flow.tari";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleLoadFlow = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        setCurrentState(JSON.parse(event.target?.result as string));
+      } catch (err) {
+        alert("Failed to load flow: " + err);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const onChange = () => {
+    const state = getState();
+    console.log(state);
+    setCurrentState(state);
+  };
+
+  return (
+    <Grid container spacing={2}>
+      <Grid size={panelOpen ? 9 : 12}>
+        <Grid
+          container
+          spacing={3}
+          style={{
+            margin: 0,
+            width: "100%",
+          }}
+        >
+          <Grid size={12}>
+            <PageHeading>Flow Editor</PageHeading>
+          </Grid>
+          <Grid size={12}>
+            <StyledPaper>
+              <div style={{ height: "600px", width: "100%" }}>
+                <QueryBuilder
+                  theme={themeMode}
+                  getTransactionProps={getTransactionProps}
+                  showGeneratedCode={showGeneratedCode}
+                  executeTransaction={executeTransaction}
+                  onNodesChange={onChange}
+                  onEdgesChange={onChange}
+                  onConnect={onChange}
+                />
+              </div>
+            </StyledPaper>
+          </Grid>
+        </Grid>
+      </Grid>
+      <Drawer
+        variant="persistent"
+        anchor="right"
+        open={panelOpen}
+        PaperProps={{
+          sx: {
+            width: 340,
+            p: 2,
+            top: 64, // height of the toolbar
+            height: "calc(100% - 64px)",
+            position: "fixed",
+            zIndex: 20,
+          },
+        }}
+      >
+        <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
+          <Typography variant="h6">Details</Typography>
+          <IconButton onClick={() => setPanelOpen(false)} size="small">
+            <ChevronRightIcon />
+          </IconButton>
+        </Box>
+        <Box mb={2}>
+          <FormControl fullWidth size="small">
+            <InputLabel id="account-select-label">Account</InputLabel>
+            <Select
+              labelId="account-select-label"
+              name="account"
+              label="Account"
+              placeholder="Select an account"
+              value={account ? substateIdToString(account.account.component_address) : ""}
+              onChange={onAccountChange}
+            >
+              {dataAccountsList?.accounts?.map((acc: any) => (
+                <MenuItem
+                  key={substateIdToString(acc.account.component_address)}
+                  value={substateIdToString(acc.account.component_address)}
+                >
+                  {acc.account.name || substateIdToString(acc.account.component_address)}
+                </MenuItem>
+              ))}
+            </Select>
+            <FormHelperText>Select the account used to pay fees</FormHelperText>
+          </FormControl>
+          {account ? (
+            <Typography variant="subtitle2" mt={1}>
+              Address: <CopyAddress address={substateIdToString(account.account.component_address)} />
+            </Typography>
+          ) : (
+            <Typography color="error" variant="subtitle2" mt={1}>
+              No account selected
+            </Typography>
+          )}
+        </Box>
+        <Divider />
+        <Box mt={2} mb={2}>
+          <TextField
+            size="small"
+            type="number"
+            label="Transaction Fee"
+            value={fee}
+            onChange={(e) => setFee(Number(e.target.value))}
+            inputProps={{ min: 0 }}
+            fullWidth
+          />
+        </Box>
+        <Box mt={2} mb={2} display="flex" gap={1}>
+          <Button variant="outlined" onClick={handleSaveFlow} size="small">
+            Save Flow
+          </Button>
+          <Button variant="outlined" onClick={() => fileInputRef.current?.click()} size="small">
+            Load Flow
+          </Button>
+          <input
+            type="file"
+            accept=".tari,application/json"
+            ref={fileInputRef}
+            style={{ display: "none" }}
+            onChange={handleLoadFlow}
+          />
+        </Box>
+        <Box mt={2} mb={2}>
+          <Box display="flex" gap={1}>
+            <TextField
+              size="small"
+              value={templateId}
+              label="Template ID"
+              onChange={(e) => setTemplateId(e.target.value)}
+              placeholder="Enter template id"
+              fullWidth
+            />
+          </Box>
+          <Box mt={2} mb={2}>
+            <FormControl fullWidth size="small">
+              <InputLabel id="template-select-label">Builtin Templates</InputLabel>
+              <Select
+                labelId="template-select-label"
+                name="templateId"
+                label="Builtin Templates"
+                placeholder="Select a builtin template"
+                value={KNOWN_TEMPLATES.find((t) => t.address === templateId)?.address || ""}
+                onChange={(e) => setTemplateId(e.target.value)}
+              >
+                <MenuItem key={""} value={""}>
+                  <em>None</em>
+                </MenuItem>
+                {KNOWN_TEMPLATES.map((template) => (
+                  <MenuItem key={template.address} value={template.address}>
+                    {template.name} {shortenString(template.address)}
+                  </MenuItem>
+                ))}
+              </Select>
+              <FormHelperText>Select a builtin template</FormHelperText>
+            </FormControl>
+          </Box>
+          <Box>
+            <Button variant="contained" onClick={() => refetch()} disabled={!templateId || isLoading}>
+              Fetch
+            </Button>
+          </Box>
+        </Box>
+        {templateId && isLoading && <Loading />}
+        {templateId && error && (
+          <Typography color="error" variant="body2">
+            {error.message || "Failed to fetch methods"}
+          </Typography>
+        )}
+        <List>
+          {methods.map((m: any, i: number) => (
+            <ListItem
+              key={i}
+              sx={{ display: "flex", alignItems: "center", gap: 1, cursor: "grab" }}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData(
+                  "CALL_NODE_DRAG_DROP_TYPE",
+                  JSON.stringify({
+                    template: templateDef,
+                    templateAddress: templateId,
+                    functionName: m.name,
+                  }),
+                );
+              }}
+              secondaryAction={
+                <IconButton
+                  edge="end"
+                  onClick={() => {
+                    addNodesToCenter(m.name);
+                  }}
+                >
+                  <AddCircleOutlineIcon />
+                </IconButton>
+              }
+            >
+              {m.arguments.length && m.arguments[0].name === "self" ? (
+                <SettingsEthernetIcon color="secondary" fontSize="small" />
+              ) : (
+                <FunctionsIcon color="primary" fontSize="small" />
+              )}
+              <Tooltip title={m.name} placement="top" arrow>
+                <Typography
+                  variant="body1"
+                  sx={{
+                    ml: 1,
+                    flex: 1,
+                    minWidth: 0,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {m.name}
+                </Typography>
+              </Tooltip>
+            </ListItem>
+          ))}
+        </List>
+      </Drawer>
+      <Dialog open={codeDialogOpen} onClose={() => setCodeDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>
+          {generatedCodeType === GeneratedCodeType.Typescript ? "TypeScript code" : "JavaScript code"}
+          <IconButton
+            onClick={() => setCodeDialogOpen(false)}
+            sx={{ position: "absolute", right: 8, top: 8 }}
+            size="small"
+          >
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {generatedCodeType && (
+            <Highlight
+              code={generatedCode}
+              language={generatedCodeType === GeneratedCodeType.Typescript ? "typescript" : "javascript"}
+            >
+              {({ className, style, tokens, getLineProps, getTokenProps }) => (
+                <pre
+                  className={className}
+                  style={{ ...style, margin: 0, borderRadius: 4, fontSize: 14, overflowX: "auto" }}
+                >
+                  {tokens.map((line, i) => (
+                    <div key={i} {...getLineProps({ line, key: i })}>
+                      {line.map((token, key) => (
+                        <span key={key} {...getTokenProps({ token, key })} />
+                      ))}
+                    </div>
+                  ))}
+                </pre>
+              )}
+            </Highlight>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCodeDialogOpen(false)} color="primary">
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+      {!panelOpen && (
+        <Box position="fixed" right={0} top={80} sx={{ zIndex: theme.zIndex.drawer + 1 }}>
+          <IconButton onClick={() => setPanelOpen(true)} size="small">
+            <ChevronLeftIcon />
+          </IconButton>
+        </Box>
+      )}
+    </Grid>
+  );
+}
+
+export default FlowEditor;

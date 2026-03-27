@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "@tari-project/ootle-ts-bindings": "link:bindings",
+    "@tari-project/ootle-web-ui-theming": "link:applications/theming",
+    "@tari-project/wallet_jrpc_client": "link:clients/javascript/wallet_daemon_client"
+  }
+}

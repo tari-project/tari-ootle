@@ -1,0 +1,55 @@
+//   Copyright 2023 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+#[derive(Debug, Clone)]
+pub struct FeeTable {
+    pub per_transaction_weight_cost: u64,
+    pub per_module_call_cost: u64,
+    pub per_byte_storage_cost: u64,
+    pub per_event_cost: u64,
+    pub per_log_cost: u64,
+    pub per_signature_verification_cost: u64,
+    pub per_template_load_cost_unit: u64,
+}
+
+impl FeeTable {
+    pub fn zero_rated() -> Self {
+        Self {
+            per_transaction_weight_cost: 0,
+            per_module_call_cost: 0,
+            per_byte_storage_cost: 0,
+            per_event_cost: 0,
+            per_log_cost: 0,
+            per_signature_verification_cost: 0,
+            per_template_load_cost_unit: 0,
+        }
+    }
+
+    pub fn per_transaction_weight_cost(&self) -> u64 {
+        self.per_transaction_weight_cost
+    }
+
+    pub fn per_module_call_cost(&self) -> u64 {
+        self.per_module_call_cost
+    }
+
+    pub fn per_byte_storage_cost(&self) -> u64 {
+        self.per_byte_storage_cost
+    }
+
+    pub fn per_event_cost(&self) -> u64 {
+        self.per_event_cost
+    }
+
+    pub fn per_log_cost(&self) -> u64 {
+        self.per_log_cost
+    }
+
+    pub fn per_signature_verification_cost(&self) -> u64 {
+        self.per_signature_verification_cost
+    }
+
+    pub fn per_template_load_cost_unit(&self) -> u64 {
+        self.per_template_load_cost_unit
+    }
+}

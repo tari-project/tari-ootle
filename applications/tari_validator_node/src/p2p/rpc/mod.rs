@@ -20,36 +20,28 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-mod service_impl;
+mod block_sync_task;
+mod rpc_impl;
+mod state_sync_task;
 
-pub use service_impl::ValidatorNodeRpcServiceImpl;
-use tari_comms::protocol::rpc::{Request, Response, RpcStatus, Streaming};
-use tari_comms_rpc_macros::tari_rpc;
-use tari_dan_core::services::PeerProvider;
+pub use rpc_impl::ValidatorNodeRpcServiceImpl;
+use tari_epoch_manager::service::EpochManagerHandle;
+use tari_ootle_p2p::PeerAddress;
+use tari_ootle_storage::StateStore;
+use tari_validator_node_rpc::rpc_service::ValidatorNodeRpcServer;
 
-use crate::p2p::{proto, services::messaging::DanMessageSenders};
+use crate::{consensus::ConsensusHandle, p2p::services::mempool::MempoolHandle};
 
-#[tari_rpc(protocol_name = b"t/vn/1", server_struct = ValidatorNodeRpcServer, client_struct = ValidatorNodeRpcClient)]
-pub trait ValidatorNodeRpcService: Send + Sync + 'static {
-    #[rpc(method = 1)]
-    async fn submit_transaction(
-        &self,
-        request: Request<proto::validator_node::SubmitTransactionRequest>,
-    ) -> Result<Response<proto::validator_node::SubmitTransactionResponse>, RpcStatus>;
-
-    #[rpc(method = 2)]
-    async fn get_peers(
-        &self,
-        request: Request<proto::network::GetPeersRequest>,
-    ) -> Result<Streaming<proto::network::GetPeersResponse>, RpcStatus>;
-}
-
-pub fn create_validator_node_rpc_service<TPeerProvider>(
-    message_senders: DanMessageSenders,
-    peer_provider: TPeerProvider,
-) -> ValidatorNodeRpcServer<ValidatorNodeRpcServiceImpl<TPeerProvider>>
-where
-    TPeerProvider: PeerProvider + Clone + Send + Sync + 'static,
-{
-    ValidatorNodeRpcServer::new(ValidatorNodeRpcServiceImpl::new(message_senders, peer_provider))
+pub fn create_tari_validator_node_rpc_service<TStateStore: StateStore + Send + Sync + Clone + 'static>(
+    epoch_manager: EpochManagerHandle<PeerAddress>,
+    shard_store_store: TStateStore,
+    mempool: MempoolHandle,
+    consensus: ConsensusHandle,
+) -> ValidatorNodeRpcServer<ValidatorNodeRpcServiceImpl<TStateStore>> {
+    ValidatorNodeRpcServer::new(ValidatorNodeRpcServiceImpl::new(
+        epoch_manager,
+        shard_store_store,
+        mempool,
+        consensus,
+    ))
 }

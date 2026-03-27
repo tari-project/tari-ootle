@@ -21,25 +21,27 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::SocketAddr,
     path::{Path, PathBuf},
 };
 
 use config::Config;
 use serde::{Deserialize, Serialize};
-use tari_common::{
-    configuration::{CommonConfig, Network},
-    ConfigurationError,
-    DefaultConfigLoader,
-    SubConfigPath,
+use tari_common::{ConfigurationError, DefaultConfigLoader, SubConfigPath, configuration::CommonConfig};
+use tari_crypto::ristretto::RistrettoPublicKey;
+use tari_ootle_app_utilities::{
+    epoch_oracle_config::EpochOracleConfig,
+    p2p_config::{P2pConfig, PeerSeedsConfig, RpcConfig},
 };
-use tari_comms::multiaddr::Multiaddr;
-use tari_p2p::{P2pConfig, PeerSeedsConfig};
+use tari_ootle_common_types::Network;
+
+use crate::state_store_template_provider::TemplateConfig;
 
 #[derive(Debug, Clone)]
 pub struct ApplicationConfig {
     pub common: CommonConfig,
     pub validator_node: ValidatorNodeConfig,
+    pub epoch_oracle: EpochOracleConfig,
     pub peer_seeds: PeerSeedsConfig,
     pub network: Network,
 }
@@ -49,59 +51,64 @@ impl ApplicationConfig {
         let mut config = Self {
             common: CommonConfig::load_from(cfg)?,
             validator_node: ValidatorNodeConfig::load_from(cfg)?,
+            epoch_oracle: EpochOracleConfig::load_from(cfg)?,
             peer_seeds: PeerSeedsConfig::load_from(cfg)?,
             network: cfg.get("network")?,
         };
         config.validator_node.set_base_path(config.common.base_path());
         Ok(config)
     }
+
+    pub fn get_layer_one_transaction_base_path(&self) -> PathBuf {
+        if self.validator_node.layer_one_transaction_path.is_absolute() {
+            return self.validator_node.layer_one_transaction_path.clone();
+        }
+        self.common
+            .base_path()
+            .join(&self.validator_node.layer_one_transaction_path)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ValidatorNodeConfig {
     override_from: Option<String>,
     pub shard_key_file: PathBuf,
     /// A path to the file that stores your node identity and secret key
     pub identity_file: PathBuf,
-    /// A path to the file that stores the tor hidden service private key, if using the tor transport
-    pub tor_identity_file: PathBuf,
-    /// The node's publicly-accessible hostname
-    pub public_address: Option<Multiaddr>,
-    /// The asset worker will adhere to this phased timeout for the asset
-    pub phase_timeout: u64,
-    /// The Tari base node's GRPC address
-    pub base_node_grpc_address: SocketAddr,
-    /// The Tari console wallet's GRPC address
-    pub wallet_grpc_address: SocketAddr,
-    /// If set to false, there will be no base layer scanning at all
-    pub scan_base_layer: bool,
-    /// How often do we want to scan the base layer for changes
-    pub base_layer_scanning_interval_in_seconds: u64,
-    /// If set to true, it will constantly scan for new assets on the base layer
-    pub scan_for_assets: bool,
-    /// How often do we want to scan the base layer for changes
-    pub new_asset_scanning_interval: u64,
-    /// If set then only the specific assets will be checked
-    pub assets_allow_list: Option<Vec<String>>,
     /// The relative path to store persistent data
     pub data_dir: PathBuf,
+    /// An absolute or relative (to data_dir) path to the state database
+    pub state_db_path: PathBuf,
+    /// Database config
+    // pub database: tari_any_state_store::Config,
     /// The p2p configuration settings
     pub p2p: P2pConfig,
-    /// The constitution will auto accept contracts if true
-    pub constitution_auto_accept: bool,
-    /// Constitution confirmation time in block height
-    pub constitution_management_confirmation_time: u64,
-    /// Constitution polling interval in block height
-    pub constitution_management_polling_interval: u64,
-    /// Constitution polling interval in time (seconds)
-    pub constitution_management_polling_interval_in_seconds: u64,
-    /// GRPC address of the validator node  application
-    pub grpc_address: Option<Multiaddr>,
+    /// P2P RPC configuration
+    pub rpc: RpcConfig,
     /// JSON-RPC address of the validator node  application
-    pub json_rpc_address: Option<SocketAddr>,
-    /// The address of the HTTP UI
-    pub http_ui_address: Option<SocketAddr>,
+    pub json_rpc_listener_address: Option<SocketAddr>,
+    /// The public JSON-RPC url that the Web UI uses, if specified.
+    pub json_rpc_public_url: Option<String>,
+    /// The address to listen on for the Web UI
+    pub web_ui_listener_address: Option<SocketAddr>,
+    /// Template config
+    pub templates: TemplateConfig,
+    /// Fee claim public key
+    pub fee_claim_public_key: RistrettoPublicKey,
+    /// Create identity file if not exists
+    pub dont_create_id: bool,
+    /// The (optional) sidechain to run this on
+    pub validator_node_sidechain_id: Option<RistrettoPublicKey>,
+    /// The templates sidechain id
+    pub template_sidechain_id: Option<RistrettoPublicKey>,
+    /// The burnt utxo sidechain id
+    pub burnt_utxo_sidechain_id: Option<RistrettoPublicKey>,
+    /// The path to store layer-one transactions.
+    pub layer_one_transaction_path: PathBuf,
+    /// Consensus configuration
+    pub consensus: ConsensusConfig,
 }
 
 impl ValidatorNodeConfig {
@@ -112,46 +119,54 @@ impl ValidatorNodeConfig {
         if !self.identity_file.is_absolute() {
             self.identity_file = base_path.as_ref().join(&self.identity_file);
         }
-        if !self.tor_identity_file.is_absolute() {
-            self.tor_identity_file = base_path.as_ref().join(&self.tor_identity_file);
-        }
         if !self.data_dir.is_absolute() {
             self.data_dir = base_path.as_ref().join(&self.data_dir);
         }
-        self.p2p.set_base_path(base_path);
+        if !self.state_db_path.is_absolute() {
+            self.state_db_path = self.data_dir.join(&self.state_db_path);
+        }
+        // if !self.database.rocks_db.path.is_absolute() {
+        //     self.database.rocks_db.path = self.data_dir.as_ref().join(&self.database.rocks_db.path);
+        // }
+        // if !self.database.sqlite.path.is_absolute() {
+        //     self.database.sqlite.path = self.data_dir.as_ref().join(&self.database.sqlite.path);
+        // }
+    }
+
+    pub fn get_global_db_path(&self) -> PathBuf {
+        self.data_dir.join("global_storage.sqlite")
     }
 }
 
 impl Default for ValidatorNodeConfig {
     fn default() -> Self {
-        let p2p = P2pConfig {
-            datastore_path: PathBuf::from("peer_db/validator_node"),
-            ..Default::default()
-        };
-
         Self {
             override_from: None,
             shard_key_file: PathBuf::from("shard_key.json"),
             identity_file: PathBuf::from("validator_node_id.json"),
-            tor_identity_file: PathBuf::from("validator_node_tor_id.json"),
-            public_address: None,
-            phase_timeout: 30,
-            base_node_grpc_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 18142),
-            wallet_grpc_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 18143),
-            scan_base_layer: true,
-            base_layer_scanning_interval_in_seconds: 10,
-            scan_for_assets: false,
-            new_asset_scanning_interval: 10,
-            assets_allow_list: None,
             data_dir: PathBuf::from("data/validator_node"),
-            constitution_auto_accept: false,
-            constitution_management_confirmation_time: 20,
-            constitution_management_polling_interval: 120,
-            constitution_management_polling_interval_in_seconds: 60,
-            p2p,
-            grpc_address: Some("/ip4/127.0.0.1/tcp/18144".parse().unwrap()),
-            json_rpc_address: Some("127.0.0.1:18145".parse().unwrap()),
-            http_ui_address: Some("127.0.0.1:5000".parse().unwrap()),
+            state_db_path: PathBuf::from("rocksdb"),
+            // database: tari_any_state_store::Config {
+            //     database_type: AnyDatabaseType::Sqlite,
+            //     rocks_db: RocksConfig { path: "rocksdb".into() },
+            //     sqlite: SqliteConfig {
+            //         path: "state.db".into(),
+            //     },
+            // },
+            p2p: P2pConfig::default(),
+            rpc: RpcConfig::default(),
+            json_rpc_listener_address: Some("127.0.0.1:18200".parse().unwrap()),
+            json_rpc_public_url: None,
+            web_ui_listener_address: Some("127.0.0.1:5001".parse().unwrap()),
+            templates: TemplateConfig::default(),
+            // Burn your fees
+            fee_claim_public_key: RistrettoPublicKey::default(),
+            dont_create_id: false,
+            validator_node_sidechain_id: None,
+            template_sidechain_id: None,
+            burnt_utxo_sidechain_id: None,
+            layer_one_transaction_path: PathBuf::from("data/layer_one_transactions"),
+            consensus: ConsensusConfig::default(),
         }
     }
 }
@@ -159,5 +174,22 @@ impl Default for ValidatorNodeConfig {
 impl SubConfigPath for ValidatorNodeConfig {
     fn main_key_prefix() -> &'static str {
         "validator_node"
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct ConsensusConfig {
+    /// Enable proposing evictions for inactive validators. If disabled, this validator will still vote on eviction
+    /// proposals from other validators, including voting in the affirmative if applicable, but will never propose
+    /// evictions itself.
+    pub enable_eviction_proposal: bool,
+}
+
+impl Default for ConsensusConfig {
+    fn default() -> Self {
+        Self {
+            enable_eviction_proposal: true,
+        }
     }
 }

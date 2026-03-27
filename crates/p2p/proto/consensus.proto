@@ -1,0 +1,263 @@
+// Copyright 2022 The Tari Project
+// SPDX-License-Identifier: BSD-3-Clause
+
+syntax = "proto3";
+
+package tari.ootle.consensus;
+
+import "common.proto";
+import "transaction.proto";
+
+message HotStuffMessage {
+  oneof message {
+    NewViewMessage new_view = 1;
+    ProposalMessage proposal = 2;
+    ForeignProposalMessage foreign_proposal = 3;
+    ForeignProposalNotification foreign_proposal_notification = 4;
+    ForeignProposalRequest foreign_proposal_request = 5;
+    VoteMessage vote = 6;
+    MissingTransactionsRequest request_missing_transactions = 7;
+    MissingTransactionsResponse requested_transaction = 8;
+    SyncRequest sync_request = 9;
+  }
+}
+
+message NewViewMessage {
+  QuorumCertificate high_qc = 1;
+  VoteMessage last_vote = 2; // optional
+  TimeoutVote timeout = 3;
+}
+
+message ProposalMessage {
+  Block block = 1;
+  repeated ForeignProposal foreign_proposals = 2;
+}
+
+message TimeoutVote {
+  uint64 epoch = 1;
+  uint64 height = 2;
+  tari.ootle.common.SignatureAndPublicKey signature = 3;
+}
+
+message ForeignProposalMessage {
+  ForeignProposal proposal = 1;
+}
+
+message ForeignProposalNotification {
+  bytes block_id = 1;
+  uint64 epoch = 2;
+}
+
+message ForeignProposalRequest {
+  oneof request {
+    ForeignProposalRequestByBlockId by_block_id = 1;
+  }
+}
+
+message ForeignProposalRequestByBlockId {
+  bytes block_id = 1;
+  uint32 for_shard_group = 2;
+  uint64 epoch = 3;
+}
+
+message ForeignProposal {
+  bytes encoded_commit_proof = 1;
+  bytes encoded_block_pledge = 2;
+}
+
+message VoteMessage {
+  uint64 epoch = 1;
+  bytes block_id = 2;
+  uint64 block_height = 3;
+  QuorumDecision decision = 4;
+  tari.ootle.common.SignatureAndPublicKey signature = 5;
+}
+
+message BlockHeader {
+  bytes parent_id = 1;
+  int32 network = 2;
+  uint64 height = 3;
+  uint64 epoch = 4;
+  uint32 shard_group = 5;
+  bytes proposed_by = 6;
+  bytes state_merkle_root = 7;
+  uint64 total_leader_fee = 8;
+  tari.ootle.common.Signature signature = 10;
+  uint64 timestamp = 11;
+  bytes epoch_hash = 12;
+  ExtraData extra_data = 13;
+  ShardGroupAccumulatedData accumulated_data = 14;
+}
+
+message Block {
+  BlockHeader header = 1;
+  QuorumCertificate justify = 2;
+  repeated Command commands = 3;
+  TimeoutCertificate timeout_certificate = 4; // optional
+}
+
+message ShardStateVersions {
+  repeated uint64 versions = 1;
+}
+
+message ExtraData {
+  bytes encoded_extra_data = 1;
+}
+
+message LeaderFee {
+  uint64 leader_fee = 1;
+  uint64 exhaust_burn = 2;
+}
+
+message Command {
+  oneof command {
+    TransactionAtom local_only = 1;
+    TransactionAtom local_prepare = 2;
+    TransactionAtom local_accept = 3;
+    TransactionAtom all_accept = 4;
+    TransactionAtom some_accept = 5;
+
+    ForeignProposalAtom foreign_proposal = 6;
+    EvictNodeAtom evict_node = 8;
+    bool end_epoch = 9;
+  }
+}
+
+message ForeignProposalAtom {
+  bytes block_id = 1;
+  uint32 shard_group = 2;
+}
+
+message TransactionAtom {
+  bytes id = 1;
+  Decision decision = 3;
+  Evidence evidence = 4;
+  uint64 fee = 5;
+  LeaderFee leader_fee = 6;
+}
+
+message Decision {
+  oneof decision {
+    bool commit = 1;
+    AbortReason abort = 2;
+  }
+}
+
+enum AbortReason {
+  NONE = 0;
+  LOCK_INPUTS_FAILED = 1;
+  LOCK_OUTPUTS_FAILED = 2;
+  LOCK_INPUTS_OUTPUTS_FAILED = 3;
+  EXECUTION_FAILURE = 4;
+  ONE_OR_MORE_INPUTS_NOT_FOUND = 5;
+  FOREIGN_PLEDGE_INPUT_CONFLICT = 6;
+  INSUFFICIENT_FEES_PAID = 7;
+  FEE_PAYMENT_IN_MAIN_INTENT = 8;
+}
+
+message Evidence {
+  bytes encoded_evidence = 1;
+}
+
+
+message QuorumCertificate {
+  bytes header_hash = 1;
+  bytes parent_id = 2;
+  uint64 block_height = 3;
+  uint64 epoch = 4;
+  repeated tari.ootle.common.SignatureAndPublicKey signatures = 5;
+  QuorumDecision decision = 7;
+  uint32 shard_group = 8;
+}
+
+message TimeoutCertificate {
+  uint64 epoch = 1;
+  uint64 block_height = 2;
+  repeated tari.ootle.common.SignatureAndPublicKey signatures = 3;
+}
+
+message ValidatorMetadata {
+  bytes public_key = 1;
+  bytes vn_shard_key = 2;
+  tari.ootle.common.Signature signature = 3;
+}
+
+message TariDanPayload {
+  tari.ootle.transaction.Transaction transaction = 1;
+}
+
+enum QuorumDecision {
+  QUORUM_DECISION_UNKNOWN = 0;
+  QUORUM_DECISION_ACCEPT = 1;
+  QUORUM_DECISION_REJECT = 2;
+}
+
+message SubstateState {
+  oneof state {
+    bool does_not_exist = 1;
+    UpState up = 2;
+    DownState down = 3;
+  }
+}
+
+message UpState {
+  bytes created_by = 1;
+  bytes address = 2;
+  bytes data = 3;
+  uint64 fees_accrued = 4;
+}
+
+message DownState {
+  bytes deleted_by = 1;
+  uint64 fees_accrued = 2;
+}
+
+message MissingTransactionsRequest {
+  uint32 request_id = 1;
+  uint64 epoch = 2;
+  bytes block_id = 3;
+  repeated bytes transaction_ids = 4;
+}
+
+message MissingTransactionsResponse {
+  uint32 request_id = 1;
+  uint64 epoch = 2;
+  bytes block_id = 3;
+  repeated tari.ootle.transaction.Transaction transactions = 4;
+}
+
+message Substate {
+  bytes substate_id = 1;
+  uint32 version = 2;
+  bytes substate = 3;
+
+  // Required
+  SubstateCreatedMetadata created = 4;
+  // Optional
+  SubstateDestroyedMetadata destroyed = 5;
+}
+
+message SubstateCreatedMetadata {
+  tari.ootle.common.Epoch at_epoch = 1;
+  uint32 in_shard = 2;
+  uint64 at_state_version = 3;
+}
+
+message SubstateDestroyedMetadata {
+  tari.ootle.common.Epoch at_epoch = 1;
+  uint64 at_state_version = 2;
+}
+
+message SyncRequest {
+  uint64 epoch = 1;
+  uint64 block_height = 2;
+}
+
+message EvictNodeAtom {
+  bytes public_key = 1;
+}
+
+message ShardGroupAccumulatedData {
+  uint64 total_exhaust_burn_msb = 1;
+  uint64 total_exhaust_burn_lsb = 2;
+}

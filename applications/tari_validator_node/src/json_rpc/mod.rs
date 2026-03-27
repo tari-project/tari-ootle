@@ -24,7 +24,9 @@ mod handlers;
 pub use handlers::JsonRpcHandlers;
 
 mod jrpc_errors;
-pub mod messages;
 mod server;
 
-pub use server::run_json_rpc;
+pub use server::spawn_json_rpc;
+
+#[cfg(feature = "metrics")]
+mod metrics;

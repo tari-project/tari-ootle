@@ -1,0 +1,28 @@
+[package]
+name = "tari_ootle_address"
+description = "Tari Ootle address using bech32 encoding"
+version = "0.1.2"
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_crypto = { workspace = true }
+tari_ootle_common_types = { workspace = true }
+tari_template_lib_types = { workspace = true }
+ootle_byte_type = { workspace = true, features = ["crypto"] }
+
+bech32 = { workspace = true }
+thiserror = { workspace = true }
+
+ts-rs = { workspace = true, optional = true }
+serde = { workspace = true, default-features = true, optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+bincode = { workspace = true, features = ["serde"] }
+
+[features]
+ts = ["ts-rs"]
+serde = ["dep:serde"]

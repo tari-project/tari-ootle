@@ -1,0 +1,168 @@
+---
+# Publishing all NPM packages to the npm registry when the version number changes
+# See https://github.com/marketplace/actions/npm-publish for more information
+name: Publish Packages to npmjs
+
+on:
+  push:
+    branches: development
+
+env:
+  # Set the Node.js version to use
+  NODE_VERSION: '24'
+  # Set the pnpm version to use
+  PNPM_VERSION: '10'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # Publish the TypeScript bindings to the NPM registry
+  publish-typescript-bindings:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bindings
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - name: Use Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v6
+        with:
+          registry-url: "https://registry.npmjs.org"
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build-dist
+      - name: Publish to NPM
+        run: |
+          #set -euo pipefail
+
+          echo "== Local package.json =="
+          node -e "const p=require('./package.json'); console.log({name:p.name, version:p.version})"
+
+          LOCAL_VERSION=$(node -p "require('./package.json').version")
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+
+          echo "Local version: $LOCAL_VERSION"
+          echo "Package name:  $PACKAGE_NAME"
+
+          echo "== Registry check =="
+          echo "Running: pnpm info $PACKAGE_NAME version"
+
+          REMOTE_VERSION=$(pnpm info "$PACKAGE_NAME" version 2>/dev/null || echo "NOT_FOUND")
+          echo "Remote version: $REMOTE_VERSION"
+
+          if [ "$REMOTE_VERSION" = "$LOCAL_VERSION" ]; then
+            echo "Version $LOCAL_VERSION already published, skipping."
+            exit 0
+          fi
+
+          echo "== Publishing =="
+          pnpm publish --provenance
+
+  # Publish the Tari Wallet Daemon client to the NPM registry
+  publish-wallet-daemon-client:
+    runs-on: ubuntu-latest
+    needs: publish-typescript-bindings
+    defaults:
+      run:
+        working-directory: clients/javascript/wallet_daemon_client
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - name: Use Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v6
+        with:
+          registry-url: "https://registry.npmjs.org"
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - name: "Build Bindings Dist"
+        working-directory: bindings
+        run: pnpm run build-dist
+      - run: pnpm run build
+      - name: Publish to NPM
+        run: |
+          #set -euo pipefail
+
+          echo "== Local package.json =="
+          node -e "const p=require('./package.json'); console.log({name:p.name, version:p.version})"
+
+          LOCAL_VERSION=$(node -p "require('./package.json').version")
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+
+          echo "Local version: $LOCAL_VERSION"
+          echo "Package name:  $PACKAGE_NAME"
+
+          echo "== Registry check =="
+          echo "Running: pnpm info $PACKAGE_NAME version"
+
+          REMOTE_VERSION=$(pnpm info "$PACKAGE_NAME" version 2>/dev/null || echo "NOT_FOUND")
+          echo "Remote version: $REMOTE_VERSION"
+
+          if [ "$REMOTE_VERSION" = "$LOCAL_VERSION" ]; then
+            echo "Version $LOCAL_VERSION already published, skipping."
+            exit 0
+          fi
+
+          echo "== Publishing =="
+          pnpm publish --provenance
+
+  # Publish the Tari Indexer client to the NPM registry
+  publish-indexer-client:
+    runs-on: ubuntu-latest
+    needs: publish-typescript-bindings
+    defaults:
+      run:
+        working-directory: clients/javascript/indexer_client
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - name: Use Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v6
+        with:
+          registry-url: "https://registry.npmjs.org"
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - name: "Build Bindings Dist"
+        working-directory: bindings
+        run: pnpm run build-dist
+      - run: pnpm run build
+      - name: Publish to NPM
+        run: |
+          #set -euo pipefail
+
+          echo "== Local package.json =="
+          node -e "const p=require('./package.json'); console.log({name:p.name, version:p.version})"
+
+          LOCAL_VERSION=$(node -p "require('./package.json').version")
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+
+          echo "Local version: $LOCAL_VERSION"
+          echo "Package name:  $PACKAGE_NAME"
+
+          echo "== Registry check =="
+          echo "Running: pnpm info $PACKAGE_NAME version"
+
+          REMOTE_VERSION=$(pnpm info "$PACKAGE_NAME" version 2>/dev/null || echo "NOT_FOUND")
+          echo "Remote version: $REMOTE_VERSION"
+
+          if [ "$REMOTE_VERSION" = "$LOCAL_VERSION" ]; then
+            echo "Version $LOCAL_VERSION already published, skipping."
+            exit 0
+          fi
+
+          echo "== Publishing =="
+          pnpm publish --provenance

@@ -1,0 +1,59 @@
+//   Copyright 2024 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+use std::path::PathBuf;
+
+use anyhow::Context;
+use async_trait::async_trait;
+use tokio::process::Command;
+
+use crate::process_definitions::{ProcessContext, ProcessDefinition, wallet_daemon, wallet_daemon::WalletDaemon};
+
+#[derive(Debug, Default)]
+pub struct WalletDaemonCreateAccount;
+
+impl WalletDaemonCreateAccount {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl ProcessDefinition for WalletDaemonCreateAccount {
+    async fn get_command(&self, context: ProcessContext<'_>) -> anyhow::Result<Command> {
+        let mut command = Command::new(context.bin());
+        let output_path = context.processes_path().join("claim_key.json");
+
+        command
+            .envs(context.environment())
+            .arg("-b")
+            .arg(context.base_path())
+            .arg("--network")
+            .arg(context.network().to_string());
+
+        if let Some(override_keyring_password) =
+            context.get_setting(wallet_daemon::OVERRIDE_KEYRING_PASSWORD_SETTINGS_KEY)
+        {
+            command
+                .arg("--override-keyring-password")
+                .arg(override_keyring_password);
+        }
+
+        command.args([
+            "create-account",
+            "--name",
+            "Validator Fees",
+            "--set-active",
+            "--output",
+            output_path
+                .to_str()
+                .context("Non-UTF8 output path in WalletDaemonCreateAccount")?,
+        ]);
+
+        Ok(command)
+    }
+
+    fn get_relative_data_path(&self) -> Option<PathBuf> {
+        WalletDaemon::new().get_relative_data_path()
+    }
+}

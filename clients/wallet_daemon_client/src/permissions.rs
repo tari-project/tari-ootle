@@ -1,0 +1,160 @@
+//   Copyright 2025 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+use std::{
+    collections::HashSet,
+    fmt::{Display, Formatter},
+    str::FromStr,
+};
+
+use serde::{Deserialize, Serialize};
+use tari_engine_types::substate::SubstateId;
+use tari_template_lib_types::{ComponentAddress, ResourceAddress};
+
+#[derive(Debug, Clone, Deserialize, Serialize, Hash, Eq, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum JrpcPermission {
+    AccountInfo,
+    NftGetOwnershipProof(Option<ResourceAddress>),
+    AccountBalance(SubstateId),
+    AccountList(Option<ComponentAddress>),
+    SubstatesRead,
+    TemplatesRead,
+    KeyList,
+    TransactionGet,
+    TransactionSend(Option<SubstateId>),
+    // This can't be set via cli, after we agree on the permissions I can add the from_str.
+    GetNft(Option<SubstateId>, Option<ResourceAddress>),
+    // User should never grant this permission, it will be generated only by the UI to start the webrtc session.
+    StartWebrtc,
+    Admin,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Invalid permissions '{0}'")]
+pub struct InvalidJrpcPermissionsFormat(String);
+
+impl FromStr for JrpcPermission {
+    type Err = InvalidJrpcPermissionsFormat;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // First the empty and optional
+        match s.split_once('_') {
+            Some(("NftGetOwnershipProof", addr)) => Ok(JrpcPermission::NftGetOwnershipProof(Some(
+                ResourceAddress::from_str(addr).map_err(|e| InvalidJrpcPermissionsFormat(e.to_string()))?,
+            ))),
+            Some(("AccountBalance", addr)) => Ok(JrpcPermission::AccountBalance(
+                SubstateId::from_str(addr).map_err(|e| InvalidJrpcPermissionsFormat(e.to_string()))?,
+            )),
+            Some(("AccountList", addr)) => Ok(JrpcPermission::AccountList(Some(
+                ComponentAddress::from_str(addr).map_err(|e| InvalidJrpcPermissionsFormat(e.to_string()))?,
+            ))),
+            Some(("TransactionSend", addr)) => Ok(JrpcPermission::TransactionSend(Some(
+                SubstateId::from_str(addr).map_err(|e| InvalidJrpcPermissionsFormat(e.to_string()))?,
+            ))),
+            Some(_) => Err(InvalidJrpcPermissionsFormat(s.to_string())),
+            None => match s {
+                "AccountInfo" => Ok(JrpcPermission::AccountInfo),
+                "NftGetOwnershipProof" => Ok(JrpcPermission::NftGetOwnershipProof(None)),
+                "AccountList" => Ok(JrpcPermission::AccountList(None)),
+                "SubstatesRead" => Ok(JrpcPermission::SubstatesRead),
+                "TemplatesRead" => Ok(JrpcPermission::TemplatesRead),
+                "KeyList" => Ok(JrpcPermission::KeyList),
+                "GetNft" => Ok(JrpcPermission::GetNft(None, None)),
+                "TransactionGet" => Ok(JrpcPermission::TransactionGet),
+                "TransactionSend" => Ok(JrpcPermission::TransactionSend(None)),
+                "StartWebrtc" => Ok(JrpcPermission::StartWebrtc),
+                "Admin" => Ok(JrpcPermission::Admin),
+                _ => Err(InvalidJrpcPermissionsFormat(s.to_string())),
+            },
+        }
+    }
+}
+
+impl Display for JrpcPermission {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            JrpcPermission::AccountInfo => f.write_str("AccountInfo"),
+            JrpcPermission::NftGetOwnershipProof(Some(a)) => f.write_str(&format!("NftGetOwnershipProof_{}", a)),
+            JrpcPermission::NftGetOwnershipProof(None) => f.write_str("NftGetOwnershipProof"),
+            JrpcPermission::AccountBalance(a) => f.write_str(&format!("AccountBalance_{}", a)),
+            JrpcPermission::AccountList(None) => f.write_str("AccountList"),
+            JrpcPermission::AccountList(Some(a)) => f.write_str(&format!("AccountList_{}", a)),
+            JrpcPermission::KeyList => f.write_str("KeyList"),
+            JrpcPermission::TransactionGet => f.write_str("TransactionGet"),
+            JrpcPermission::TransactionSend(None) => f.write_str("TransactionSend"),
+            JrpcPermission::TransactionSend(Some(s)) => f.write_str(&format!("TransactionSend_{}", s)),
+            JrpcPermission::GetNft(_, _) => f.write_str("GetNft"),
+            JrpcPermission::StartWebrtc => f.write_str("StartWebrtc"),
+            JrpcPermission::Admin => f.write_str("Admin"),
+            JrpcPermission::SubstatesRead => f.write_str("SubstatesRead"),
+            JrpcPermission::TemplatesRead => f.write_str("TemplatesRead"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct JrpcPermissions(HashSet<JrpcPermission>);
+
+impl FromStr for JrpcPermissions {
+    type Err = InvalidJrpcPermissionsFormat;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(JrpcPermissions(
+            s.split(',')
+                .map(|s| s.trim())
+                .map(JrpcPermission::from_str)
+                .collect::<Result<_, _>>()?,
+        ))
+    }
+}
+
+impl JrpcPermissions {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn has_permission(&self, permission: &JrpcPermission) -> bool {
+        self.0.contains(permission)
+    }
+
+    pub fn into_vec(self) -> Vec<JrpcPermission> {
+        self.0.into_iter().collect()
+    }
+}
+
+impl TryFrom<&[String]> for JrpcPermissions {
+    type Error = InvalidJrpcPermissionsFormat;
+
+    fn try_from(value: &[String]) -> Result<Self, Self::Error> {
+        let mut permissions = HashSet::with_capacity(value.len());
+        for permission in value {
+            permissions.insert(JrpcPermission::from_str(permission)?);
+        }
+        Ok(JrpcPermissions(permissions))
+    }
+}
+
+impl From<Vec<JrpcPermission>> for JrpcPermissions {
+    fn from(value: Vec<JrpcPermission>) -> Self {
+        JrpcPermissions(value.into_iter().collect())
+    }
+}
+
+impl FromIterator<JrpcPermission> for JrpcPermissions {
+    fn from_iter<T: IntoIterator<Item = JrpcPermission>>(iter: T) -> Self {
+        JrpcPermissions(iter.into_iter().collect())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct Claims {
+    pub permissions: JrpcPermissions,
+    pub exp: u64,
+}

@@ -1,0 +1,383 @@
+//   Copyright 2024 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+use std::collections::HashMap;
+
+use log::info;
+use ootle_byte_type::ToByteType;
+use tari_engine_types::indexed_value::decode_value_at_path;
+use tari_ootle_common_types::{SubstateRequirement, optional::Optional};
+use tari_ootle_transaction::args;
+use tari_ootle_wallet_sdk::models::Account;
+use tari_template_lib_types::{
+    Amount,
+    ComponentAddress,
+    ResourceAddress,
+    ResourceType,
+    VaultId,
+    constants::TARI_TOKEN,
+};
+
+use crate::{faucet::Faucet, runner::Runner, timer::TraceTimer};
+
+pub struct TariSwap {
+    pub component_address: ComponentAddress,
+    pub vaults: HashMap<ResourceAddress, VaultId>,
+    pub lp_resource_address: ResourceAddress,
+}
+
+impl Runner {
+    pub async fn create_tariswaps(
+        &mut self,
+        in_account: &Account,
+        faucet: &Faucet,
+        num_tariswaps: usize,
+    ) -> anyhow::Result<Vec<TariSwap>> {
+        let key = self.sdk.key_manager_api().derive_account_key(0)?;
+
+        let fee_vault = self
+            .sdk
+            .accounts_api()
+            .get_vault_by_resource(&in_account.component_address, &TARI_TOKEN)?;
+
+        let transaction = self
+            .new_transaction_builder()
+            .pay_fee_from_component(
+                in_account.component_address,
+                Amount::from_usize(num_tariswaps) * 1000u64,
+            )
+            .then(|mut builder| {
+                for _ in 0..num_tariswaps {
+                    builder = builder.call_function(self.tariswap_template, "new", args![
+                        TARI_TOKEN,
+                        faucet.resource_address,
+                        1 // fee
+                    ]);
+                }
+                builder
+            })
+            .with_inputs([
+                SubstateRequirement::unversioned(in_account.component_address),
+                SubstateRequirement::unversioned(fee_vault.id),
+                SubstateRequirement::unversioned(TARI_TOKEN),
+                SubstateRequirement::unversioned(faucet.resource_address),
+            ])
+            .build_and_seal(&key.key);
+
+        let finalize = self.submit_transaction_and_wait(transaction).await?;
+        let diff = finalize.result.any_accept().unwrap();
+        Ok(diff
+            .up_iter()
+            .filter_map(|(addr, value)| {
+                let addr = addr
+                    .as_component_address()
+                    .filter(|_| value.substate_value().component().unwrap().module_name == "TariSwapPool")?;
+                let vaults = decode_value_at_path(value.substate_value().component().unwrap().state(), "$.pools")
+                    .unwrap()
+                    .unwrap();
+                let lp_resource_address =
+                    decode_value_at_path(value.substate_value().component().unwrap().state(), "$.lp_resource")
+                        .unwrap()
+                        .unwrap();
+                Some(TariSwap {
+                    component_address: addr,
+                    vaults,
+                    lp_resource_address,
+                })
+            })
+            .collect())
+    }
+
+    #[allow(clippy::too_many_lines)]
+    pub async fn add_liquidity(
+        &mut self,
+        tariswaps: &[TariSwap],
+        primary_account: &Account,
+        accounts: &[Account],
+        amount_a: Amount,
+        amount_b: Amount,
+        faucet: &Faucet,
+    ) -> anyhow::Result<()> {
+        let primary_account_key = self
+            .sdk
+            .key_manager_api()
+            .get_public_key(primary_account.owner_key_id.expect("no owner key id"))?;
+        let primary_account_pk = primary_account_key.public_key().to_byte_type();
+
+        const BATCH_SIZE: usize = 100;
+        let mut tx_ids = Vec::with_capacity(BATCH_SIZE);
+
+        for i in 0..(tariswaps.len() / BATCH_SIZE) {
+            let _timer = TraceTimer::info("tariswap", "add_liquidity")
+                .with_iterations(BATCH_SIZE.min(tariswaps.len().saturating_sub(i * BATCH_SIZE)));
+
+            for (i, tariswap) in tariswaps.iter().enumerate().skip(i * BATCH_SIZE).take(BATCH_SIZE) {
+                let account = &accounts[i % accounts.len()];
+                let xtr_vault = self
+                    .sdk
+                    .accounts_api()
+                    .get_vault_by_resource(&account.component_address, &TARI_TOKEN)?;
+                let faucet_vault = self
+                    .sdk
+                    .accounts_api()
+                    .get_vault_by_resource(&account.component_address, &faucet.resource_address)?;
+                let maybe_lp_vault = self
+                    .sdk
+                    .accounts_api()
+                    .get_vault_by_resource(&account.component_address, &tariswap.lp_resource_address)
+                    .optional()?;
+
+                let transaction = self
+                    .new_transaction_builder()
+                    .with_inputs(maybe_lp_vault.map(|v| SubstateRequirement::unversioned(v.id)))
+                    .with_inputs([
+                        SubstateRequirement::unversioned(account.component_address),
+                        SubstateRequirement::unversioned(xtr_vault.id),
+                        SubstateRequirement::unversioned(faucet_vault.id),
+                        SubstateRequirement::unversioned(tariswap.component_address),
+                        SubstateRequirement::unversioned(tariswap.lp_resource_address),
+                        SubstateRequirement::unversioned(faucet.resource_address),
+                    ])
+                    .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
+                    .pay_fee_from_component(account.component_address, 2000u64)
+                    .call_method(account.component_address, "withdraw", args![TARI_TOKEN, amount_a])
+                    .put_last_instruction_output_on_workspace("a")
+                    .call_method(account.component_address, "withdraw", args![
+                        faucet.resource_address,
+                        amount_b
+                    ])
+                    .put_last_instruction_output_on_workspace("b")
+                    .call_method(tariswap.component_address, "add_liquidity", args![
+                        Workspace("a"),
+                        Workspace("b")
+                    ])
+                    .put_last_instruction_output_on_workspace("lp")
+                    .call_method(account.component_address, "deposit", args![Workspace("lp")])
+                    .finish();
+
+                // First sign with the account key to authorize the use of the account component
+                let transaction = self
+                    .sdk
+                    .signer_api()
+                    .with_context(&primary_account_pk)
+                    .sign(account.owner_key_id.expect("no owner key id"), transaction)?;
+
+                // Then sign with the primary account key to pay the fee
+                let transaction = self.sdk.signer_api().sign(primary_account_key.key_id(), transaction)?;
+
+                assert!(
+                    transaction.verify_all_signatures(),
+                    "Transaction signature verification failed"
+                );
+
+                tx_ids.push((
+                    account.component_address,
+                    tariswap.lp_resource_address,
+                    self.submit_transaction(transaction).await?,
+                ));
+            }
+
+            info!(
+                "⏳️ Added liquidity to pools {}-{}",
+                i * BATCH_SIZE,
+                (i + 1) * BATCH_SIZE
+            );
+        }
+
+        info!("⏳️ Waiting for {} transactions to finalize", tariswaps.len());
+        for (account, lp_resource, tx_id) in tx_ids.drain(..) {
+            let result = self.wait_for_transaction(tx_id).await?;
+            if let Some(reject) = result.result.any_reject() {
+                return Err(anyhow::anyhow!("Transaction failed: {}", reject));
+            }
+            let diff = result.result.any_accept().unwrap();
+            let lp_vault = diff
+                .up_iter()
+                .find_map(|(addr, s)| {
+                    let addr = addr.as_vault_id()?;
+                    if *s.substate_value().vault().unwrap().resource_address() == lp_resource {
+                        Some(addr)
+                    } else {
+                        None
+                    }
+                })
+                .ok_or_else(|| anyhow::anyhow!("LP Vault not found in {tx_id} result"))?;
+            self.sdk.accounts_api().add_vault(
+                account,
+                lp_vault,
+                tariswaps[0].lp_resource_address,
+                ResourceType::NonFungible,
+                Some("LP".to_string()),
+                0,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_lines)]
+    pub async fn do_tariswap_swaps(
+        &mut self,
+        tariswaps: &[TariSwap],
+        primary_account: &Account,
+        accounts: &[Account],
+        amount_a_for_b: Amount,
+        amount_b_for_a: Amount,
+        faucet: &Faucet,
+    ) -> anyhow::Result<()> {
+        const SWAP_FEE: u64 = 1500;
+        let primary_account_key = self
+            .sdk
+            .key_manager_api()
+            .get_public_key(primary_account.owner_key_id.expect("no owner key id"))?;
+        let primary_account_pk = primary_account_key.public_key.to_byte_type();
+
+        let mut tx_ids = vec![];
+        // Swap XTR for faucet
+        for i in 0..5 {
+            for (i, account) in accounts.iter().enumerate().skip(i * 200).take(200) {
+                let tariswap = &tariswaps[i % tariswaps.len()];
+                let xtr_vault = self
+                    .sdk
+                    .accounts_api()
+                    .get_vault_by_resource(&account.component_address, &TARI_TOKEN)?;
+                let faucet_vault = self
+                    .sdk
+                    .accounts_api()
+                    .get_vault_by_resource(&account.component_address, &faucet.resource_address)?;
+                let maybe_lp_vault = self
+                    .sdk
+                    .accounts_api()
+                    .get_vault_by_resource(&account.component_address, &tariswap.lp_resource_address)
+                    .optional()?;
+                let transaction = self
+                    .new_transaction_builder()
+                    .with_inputs(maybe_lp_vault.map(|v| SubstateRequirement::unversioned(v.id)))
+                    .with_inputs([
+                        SubstateRequirement::unversioned(account.component_address),
+                        SubstateRequirement::unversioned(xtr_vault.id),
+                        SubstateRequirement::unversioned(faucet_vault.id),
+                        SubstateRequirement::unversioned(tariswap.component_address),
+                        SubstateRequirement::unversioned(faucet.resource_address),
+                        SubstateRequirement::unversioned(TARI_TOKEN),
+                        SubstateRequirement::unversioned(tariswap.lp_resource_address),
+                    ])
+                    .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
+                    .pay_fee_from_component(account.component_address, SWAP_FEE)
+                    .call_method(tariswap.component_address, "get_pool_balance", args![TARI_TOKEN])
+                    .call_method(tariswap.component_address, "get_pool_balance", args![
+                        faucet.resource_address,
+                    ])
+                    .call_method(tariswap.component_address, "get_pool_ratio", args![TARI_TOKEN, 1000])
+                    .call_method(tariswap.component_address, "get_pool_ratio", args![
+                        faucet.resource_address,
+                        1000
+                    ])
+                    .call_method(account.component_address, "withdraw", args![TARI_TOKEN, amount_a_for_b])
+                    .put_last_instruction_output_on_workspace("a")
+                    .call_method(tariswap.component_address, "swap", args![
+                        Workspace("a"),
+                        faucet.resource_address,
+                    ])
+                    .put_last_instruction_output_on_workspace("swapped")
+                    .call_method(account.component_address, "deposit", args![Workspace("swapped")])
+                    .finish();
+
+                let transaction = self
+                    .sdk
+                    .signer_api()
+                    .with_context(&primary_account_pk)
+                    .sign(account.owner_key_id.expect("no owner key id"), transaction)?;
+
+                let transaction = self.sdk.signer_api().sign(primary_account_key.key_id(), transaction)?;
+
+                tx_ids.push(self.submit_transaction(transaction).await?);
+            }
+
+            for (j, tx_id) in tx_ids.drain(..).enumerate() {
+                let result = self.wait_for_transaction(tx_id).await?;
+                let balance_a = result.execution_results[0].decode::<Amount>()?;
+                let balance_b = result.execution_results[1].decode::<Amount>()?;
+                let ratio_a = result.execution_results[2].decode::<Amount>()?;
+                let ratio_b = result.execution_results[3].decode::<Amount>()?;
+                let amount_swapped = amount_a_for_b.to_u64_checked().expect("overflow") as f64 *
+                    (ratio_b.to_u64_checked().expect("overflow") as f64 / 1000.0);
+                info!(
+                    "Swap {n} for {amount_a_for_b} XTR -> {amount_swapped} FAUCET @ {ratio_a}:{ratio_b} | pool \
+                     liquidity: {balance_a} XTR {balance_b} FAUCET",
+                    n = (i + 1) * (j + 1)
+                );
+            }
+        }
+
+        // Swap faucet for XTR
+        for i in 0..5 {
+            for (i, account) in accounts.iter().enumerate().skip(i * 200).take(200) {
+                let xtr_vault = self
+                    .sdk
+                    .accounts_api()
+                    .get_vault_by_resource(&account.component_address, &TARI_TOKEN)?;
+                let faucet_vault = self
+                    .sdk
+                    .accounts_api()
+                    .get_vault_by_resource(&account.component_address, &faucet.resource_address)?;
+                let tariswap = &tariswaps[i % tariswaps.len()];
+                let transaction = self
+                    .new_transaction_builder()
+                    .with_inputs([
+                        SubstateRequirement::unversioned(account.component_address),
+                        SubstateRequirement::unversioned(xtr_vault.id),
+                        SubstateRequirement::unversioned(faucet_vault.id),
+                        SubstateRequirement::unversioned(tariswap.component_address),
+                        SubstateRequirement::unversioned(faucet.resource_address),
+                        SubstateRequirement::unversioned(TARI_TOKEN),
+                        SubstateRequirement::unversioned(tariswap.lp_resource_address),
+                    ])
+                    .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
+                    .pay_fee_from_component(account.component_address, SWAP_FEE)
+                    .call_method(tariswap.component_address, "get_pool_balance", args![TARI_TOKEN])
+                    .call_method(tariswap.component_address, "get_pool_balance", args![
+                        faucet.resource_address
+                    ])
+                    .call_method(tariswap.component_address, "get_pool_ratio", args![TARI_TOKEN, 1000])
+                    .call_method(tariswap.component_address, "get_pool_ratio", args![
+                        faucet.resource_address,
+                        1000
+                    ])
+                    .call_method(account.component_address, "withdraw", args![
+                        faucet.resource_address,
+                        amount_b_for_a
+                    ])
+                    .put_last_instruction_output_on_workspace("b")
+                    .call_method(tariswap.component_address, "swap", args![Workspace("b"), TARI_TOKEN,])
+                    .put_last_instruction_output_on_workspace("swapped")
+                    .call_method(account.component_address, "deposit", args![Workspace("swapped")])
+                    .finish();
+
+                let transaction = self
+                    .sdk
+                    .signer_api()
+                    .sign(account.owner_key_id().expect("no owner key id"), transaction)?;
+
+                tx_ids.push(self.submit_transaction(transaction).await?);
+            }
+
+            for (j, tx_id) in tx_ids.drain(..).enumerate() {
+                let result = self.wait_for_transaction(tx_id).await?;
+                let balance_a = result.execution_results[0].decode::<Amount>()?;
+                let balance_b = result.execution_results[1].decode::<Amount>()?;
+                let ratio_a = result.execution_results[2].decode::<Amount>()?;
+                let ratio_b = result.execution_results[3].decode::<Amount>()?;
+                let amount_swapped = amount_b_for_a.to_u64_checked().expect("overflow") as f64 *
+                    (ratio_a.to_u64_checked().expect("overflow") as f64 / 1000.0);
+                info!(
+                    "Swap {n} for {amount_b_for_a} FAUCET -> {amount_swapped} XTR @ {ratio_b}:{ratio_a} | pool \
+                     liquidity: {balance_a} XTR {balance_b} FAUCET",
+                    n = (i + 1) * (j + 1) * 2
+                );
+            }
+        }
+
+        Ok(())
+    }
+}

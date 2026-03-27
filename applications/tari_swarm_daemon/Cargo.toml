@@ -1,0 +1,53 @@
+[package]
+name = "tari_swarm_daemon"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tari_transaction_components = { workspace = true } # Used for VN registration signature
+tari_common_types = { workspace = true }
+tari_ootle_common_types = { workspace = true }
+tari_crypto = { workspace = true }
+tari_shutdown = { workspace = true }
+tari_sidechain = { workspace = true }
+minotari_node_grpc_client = { workspace = true }
+minotari_wallet_grpc_client = { workspace = true }
+tari_validator_node_client = { workspace = true }
+tari_ootle_walletd_client = { workspace = true }
+tari_template_lib_types = { workspace = true }
+tari_ootle_app_utilities = { workspace = true }
+tari_ootle_wallet_sdk = { workspace = true }
+
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+axum-extra = { workspace = true, features = ["typed-header"] }
+axum-jrpc = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+fern = { workspace = true, features = ["colored", "date-based"] }
+futures = { workspace = true }
+humantime = { workspace = true }
+include_dir = { workspace = true }
+serde_json5 = { workspace = true }
+lockfile = "0.4.0"
+indexmap = { workspace = true }
+slug = "0.1.6"
+log = { workspace = true }
+mime_guess = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "process", "time", "fs"] }
+toml = { workspace = true }
+tonic = { workspace = true }
+tower-http = { workspace = true, features = ["fs", "cors"] }
+url = { workspace = true, features = ["default", "serde"] }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.28.0", default-features = false, features = ["signal"] }
+

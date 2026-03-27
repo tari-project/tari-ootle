@@ -1,0 +1,241 @@
+/*
+ * Custom CSS to revert common HTML elements to approximate browser default styles.
+ *
+ * This should be loaded AFTER Tailwind CSS's base styles to override Preflight.
+ */
+
+/* Box sizing for all elements - keep standard browser behavior (content-box for most) */
+*,
+::before,
+::after {
+  box-sizing: border-box; /* Or content-box if you want true legacy browser box model */
+}
+
+/* Headings */
+h1 {
+  font-size: 2em; /* ~32px */
+  margin-block-start: 0.67em;
+  margin-block-end: 0.67em;
+  font-weight: bold;
+}
+
+h2 {
+  font-size: 1.5em; /* ~24px */
+  margin-block-start: 0.83em;
+  margin-block-end: 0.83em;
+  font-weight: bold;
+}
+
+h3 {
+  font-size: 1.17em; /* ~18.72px */
+  margin-block-start: 1em;
+  margin-block-end: 1em;
+  font-weight: bold;
+}
+
+h4 {
+  font-size: 1em; /* ~16px */
+  margin-block-start: 1.33em;
+  margin-block-end: 1.33em;
+  font-weight: bold;
+}
+
+h5 {
+  font-size: 0.83em; /* ~13.28px */
+  margin-block-start: 1.67em;
+  margin-block-end: 1.67em;
+  font-weight: bold;
+}
+
+h6 {
+  font-size: 0.67em; /* ~10.72px */
+  margin-block-start: 2.33em;
+  margin-block-end: 2.33em;
+  font-weight: bold;
+}
+
+/* Paragraphs */
+p {
+  margin-block-start: 1em;
+  margin-block-end: 1em;
+  line-height: normal; /* Restore typical browser line-height for paragraphs */
+}
+
+/* Lists */
+ul,
+ol {
+  list-style-type: initial; /* Restore bullet/number styles */
+  margin-block-start: 1em;
+  margin-block-end: 1em;
+  padding-inline-start: 40px; /* Default indentation */
+}
+
+li {
+  display: list-item; /* Ensure list items behave as such */
+}
+
+/* Blockquote */
+blockquote {
+  margin-block-start: 1em;
+  margin-block-end: 1em;
+  margin-inline-start: 40px;
+  margin-inline-end: 40px;
+}
+
+/* Preformatted text */
+pre {
+  font-family: monospace, monospace;
+  font-size: 1em;
+  margin-block-start: 1em;
+  margin-block-end: 1em;
+  white-space: pre; /* Ensure proper whitespace handling */
+}
+
+/* Code */
+code,
+kbd,
+samp {
+  font-family: monospace, monospace;
+  font-size: 1em; /* Restore browser default size */
+}
+
+/* Links */
+a {
+  text-decoration: underline; /* Default underline */
+}
+
+a:active,
+a:hover {
+  outline-width: 0;
+}
+
+/* Images */
+img {
+  display: inline-block; /* Or block if that's more suitable for your layout */
+  vertical-align: middle; /* Common default */
+  max-width: 100%; /* Important for responsive images */
+  height: auto; /* Maintain aspect ratio */
+}
+
+/* Figures */
+figure {
+  margin-block-start: 1em;
+  margin-block-end: 1em;
+  margin-inline-start: 40px;
+  margin-inline-end: 40px;
+}
+
+button,
+[type="button"],
+[type="reset"],
+[type="submit"] {
+  -webkit-appearance: button; /* Restore default button appearance for webkit */
+}
+
+button::-moz-focus-inner,
+[type="button"]::-moz-focus-inner,
+[type="reset"]::-moz-focus-inner,
+[type="submit"]::-moz-focus-inner {
+  border-style: none; /* Remove focus inner border for Firefox */
+  padding: 0;
+}
+
+button:-moz-focusring,
+[type="button"]:-moz-focusring,
+[type="reset"]:-moz-focusring,
+[type="submit"]:-moz-focusring {
+  outline: 1px dotted ButtonText; /* Restore Firefox focus ring */
+}
+
+textarea {
+  overflow: auto; /* Scrollbars when content overflows */
+  resize: vertical; /* Allow vertical resizing by default */
+  vertical-align: top; /* Align with top for multi-line input */
+}
+
+[type="search"] {
+  -webkit-appearance: textfield; /* Restore textfield appearance for search inputs */
+  outline-offset: -2px; /* Restore outline offset */
+}
+
+[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
+}
+
+/* Details and Summary */
+details {
+  display: block;
+}
+
+summary {
+  display: list-item; /* Allow browser default disclosure triangle */
+  cursor: pointer; /* Indicate interactivity */
+}
+
+/* Small, Strong, Em, etc. */
+small {
+  font-size: 0.83em; /* Approximate default for <small> */
+}
+
+strong,
+b {
+  font-weight: bolder; /* Make sure they are bolder than parent, not just bold */
+}
+
+em,
+i {
+  font-style: italic;
+}
+
+/* hr */
+hr {
+  box-sizing: content-box; /* Or border-box depending on your preference */
+  height: 0; /* No height by default */
+  overflow: visible; /* Ensure borders are visible */
+  border-top: 1px solid #e5e7eb; /* Tailwind's default border-color-200 */
+  margin: 1em 0; /* Add vertical margin */
+}
+
+/* Audio/Video */
+audio,
+video {
+  display: inline-block; /* Or block depending on typical usage */
+}
+
+/* Progress */
+progress {
+  vertical-align: baseline;
+}
+
+/* Sub/Sup */
+sub,
+sup {
+  font-size: 75%;
+  line-height: 0;
+  position: relative;
+  vertical-align: baseline;
+}
+
+sub {
+  bottom: -0.25em;
+}
+
+sup {
+  top: -0.5em;
+}
+
+/* Tables */
+table {
+  border-collapse: collapse; /* Ensure standard table rendering */
+  border-spacing: 2px;
+  text-indent: 0;
+}
+
+caption {
+  text-align: center;
+}
+
+th {
+  text-align: -webkit-match-parent; /* Default align for table headers */
+  font-weight: bold;
+}

@@ -20,12 +20,57 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::{env, fs, process::Command};
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tari_common::build::ProtobufCompiler::new()
-        .proto_paths(&["proto/dan"])
-        .include_paths(&["proto/dan"])
-        .emit_rerun_if_changed_directives()
-        .compile()
-        .unwrap();
+    println!("cargo:rerun-if-changed=./web_ui/src");
+    println!("cargo:rerun-if-changed=./web_ui/public");
+
+    // Regardless of whether the web UI is built, we need to create the dist directory so that the rust code will
+    // compile (include_dir! macro)
+    fs::create_dir_all("./web_ui/dist")?;
+
+    if env::var("CARGO_FEATURE_TS").is_ok() {
+        println!("cargo:warning=The web ui will not be built because the tx feature is enabled.");
+        return Ok(());
+    }
+    if env::var("CARGO_FEATURE_WEB_UI").is_err() {
+        println!("cargo:warning=The web ui will not be built because the web_ui feature is not enabled.");
+        return Ok(());
+    }
+
+    if cfg!(debug_assertions) {
+        println!("cargo:warning=The web ui will not be compiled in debug mode.");
+        return Ok(());
+    }
+
+    #[cfg(windows)]
+    const NPM: &str = "pnpm.cmd";
+    #[cfg(not(windows))]
+    const NPM: &str = "pnpm";
+
+    if let Err(error) = Command::new(NPM).arg("install").current_dir("./web_ui").status() {
+        println!("cargo:warning='{NPM} install' error : {:?}", error);
+        return Ok(());
+    }
+    match Command::new(NPM)
+        .args(["run", "build"])
+        .current_dir("./web_ui")
+        .output()
+    {
+        Ok(output) if !output.status.success() => {
+            println!("cargo:warning='{NPM} run build' exited with non-zero status code");
+            println!("cargo:warning=Output: {}", String::from_utf8_lossy(&output.stdout));
+            println!("cargo:warning=Error: {}", String::from_utf8_lossy(&output.stderr));
+        },
+        Err(error) => {
+            println!(
+                "cargo:warning='{NPM} run build' error (is {NPM} installed?): {:?}",
+                error
+            );
+            println!("cargo:warning=The web ui will not be included!");
+        },
+        _ => {},
+    }
     Ok(())
 }

@@ -20,9 +20,9 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-pub mod proto;
-
 mod rpc;
-pub use rpc::create_validator_node_rpc_service;
+pub use rpc::create_tari_validator_node_rpc_service;
 
+mod logging;
+pub use logging::*;
 pub mod services;

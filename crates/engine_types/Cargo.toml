@@ -1,0 +1,39 @@
+[package]
+name = "tari_engine_types"
+description = "Shared Tari engine data types"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_bor = { workspace = true, features = ["std", "cbor_value_encoding_fix"] }
+tari_crypto = { workspace = true, features = ["borsh"] }
+tari_hashing = { workspace = true }
+tari_template_abi = { workspace = true, features = ["std"] }
+tari_template_lib = { workspace = true, features = ["borsh", "precision"] }
+ootle_serde = { workspace = true, features = ["base64", "bincode-compat"] }
+ootle_byte_type = { workspace = true, features = ["crypto"] }
+
+blake2 = { workspace = true }
+borsh = { workspace = true, features = ["indexmap"] }
+bounded-vec = { workspace = true, features = ["serde"] }
+rand = { workspace = true }
+digest = { workspace = true }
+hex = { workspace = true, features = ["serde"] }
+indexmap = { workspace = true, features = ["serde"] }
+lazy_static = { workspace = true }
+serde = { workspace = true, default-features = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+ts-rs = { workspace = true, optional = true }
+log = { workspace = true }
+
+[dev-dependencies]
+bincode = { workspace = true, features = ["serde"] }
+
+[features]
+default = []
+ts = ["ts-rs", "tari_template_lib/ts", "tari_template_abi/ts"]
+

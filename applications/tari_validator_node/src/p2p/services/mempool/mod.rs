@@ -20,10 +20,17 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+mod handle;
+pub use handle::{MempoolHandle, MempoolRequest};
+
 mod initializer;
 pub use initializer::spawn;
 
-mod handle;
-pub use handle::MempoolHandle;
-
+mod error;
+mod gossip;
+pub use gossip::TOPIC_PREFIX;
+#[cfg(feature = "metrics")]
+mod metrics;
 mod service;
+
+pub use error::*;

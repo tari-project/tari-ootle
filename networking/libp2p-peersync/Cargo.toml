@@ -1,0 +1,25 @@
+[package]
+name = "libp2p-peersync"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-trait = { workspace = true }
+futures-bounded = { workspace = true }
+libp2p = { workspace = true }
+quick-protobuf = { workspace = true }
+quick-protobuf-codec = { workspace = true }
+asynchronous-codec = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+async-semaphore = { workspace = true }
+blake2 = { workspace = true }
+prometheus-client = { workspace = true, optional = true }
+
+[build-dependencies]
+# default features include very old versions of clap and env_logger, and are not needed for build scripts
+pb-rs = { version = "0.10.0", default-features = false }
+
+[features]
+default = []
+metrics = ["prometheus-client"]

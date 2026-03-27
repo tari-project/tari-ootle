@@ -1,0 +1,38 @@
+########################################################################################################################
+#                                                                                                                      #
+#                                    Epoch Oracle Configuration Options                                                #
+#                                                                                                                      #
+########################################################################################################################
+
+[epoch_oracle]
+# The oracle type can be either "BaseLayer", "Configured" or "Hybrid".
+# "BaseLayer" oracle uses the Tari base node to determine the epoch and scans layer 2 UTXOs.
+# "Configured" oracle uses a pre-defined configuration file to determine the epoch and validators.
+# "Hybrid" oracle combines both the base layer and configured oracles. i.e. base layer determines the epoch, burnt UTXOs
+# and the configured oracle provides the validators.
+
+#oracle = "BaseLayer"
+
+[epoch_oracle.base_layer]
+# The Tari base node's GRPC URL. If none is specified, http://localhost:{port} will be used where {port} is the network-specific default.
+#base_node_grpc_url = "http://localhost:18142"
+
+# Interval between base layer scans in seconds. Default is 30 seconds.
+#scanning_interval = 30
+
+[epoch_oracle.configured]
+
+# The configured epoch oracle's toml or json configuration file path.
+# E.g
+#{
+# "epoch_time: 120,
+# "initial_epoch": 3,
+#  "validators": [{
+#    "public_key": "04efea68c9bff8f9c25fe89310abf91955e33344f4b77bb0d31ea80a80128e67",
+#    "claim_key": "04efea68c9bff8f9c25fe89310abf91955e33344f4b77bb0d31ea80a80128e67",
+#    "shard_group": {"start": 1,"end_inclusive": 256},
+#    "registration_epoch": 5
+#  }]
+#}
+#config_file = "epoch_oracle_config.toml"
+

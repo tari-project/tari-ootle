@@ -1,0 +1,83 @@
+---
+name: Publish ootle-wasm to npmjs
+
+on:
+  push:
+    branches: development
+    paths:
+      - 'crates/ootle_wasm/**'
+
+env:
+  NODE_VERSION: '24'
+  PNPM_VERSION: '10'
+  stable_toolchain: stable
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish-ootle-wasm:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crates/ootle_wasm
+    steps:
+      - name: checkout
+        uses: actions/checkout@v6
+
+      - name: toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.stable_toolchain }}
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: ubuntu dependencies
+        run: |
+          sudo apt-get update
+          sudo bash ../../scripts/install_ubuntu_dependencies.sh
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Use Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v6
+        with:
+          registry-url: "https://registry.npmjs.org"
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build WASM package
+        run: bash build.sh bundler release
+
+      - name: Publish to NPM
+        working-directory: crates/ootle_wasm/pkg
+        run: |
+          echo "== Local package.json =="
+          node -e "const p=require('./package.json'); console.log({name:p.name, version:p.version})"
+
+          LOCAL_VERSION=$(node -p "require('./package.json').version")
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+
+          echo "Local version: $LOCAL_VERSION"
+          echo "Package name:  $PACKAGE_NAME"
+
+          echo "== Registry check =="
+          echo "Running: pnpm info $PACKAGE_NAME version"
+
+          REMOTE_VERSION=$(pnpm info "$PACKAGE_NAME" version 2>/dev/null || echo "NOT_FOUND")
+          echo "Remote version: $REMOTE_VERSION"
+
+          if [ "$REMOTE_VERSION" = "$LOCAL_VERSION" ]; then
+            echo "Version $LOCAL_VERSION already published, skipping."
+            exit 0
+          fi
+
+          echo "== Publishing =="
+          pnpm publish --provenance --no-git-checks

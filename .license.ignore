@@ -1,7 +1,4 @@
-./CODEOWNERS
-./LICENSE
-./integration_tests/Makefile
-./integration_tests/cucumber.js
-./integration_tests/environment
-./integration_tests/generate_report.js
-./scripts/env_sample
+./applications/tari_indexer/src/storage_sqlite/schema.rs
+./crates/storage_sqlite/src/global/schema.rs
+./crates/wallet/storage_sqlite/src/schema.rs
+./networking/sqlite_message_logger/src/schema.rs

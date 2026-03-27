@@ -1,0 +1,40 @@
+[package]
+name = "tari_ootle_storage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tari_common_types = { workspace = true }
+tari_ootle_common_types = { workspace = true }
+tari_template_lib_types = { workspace = true, features = ["borsh"] }
+tari_sidechain = { workspace = true }
+tari_consensus_types = { workspace = true }
+
+# Shard store deps
+tari_engine_types = { workspace = true }
+tari_ootle_transaction = { workspace = true }
+ootle_serde = { workspace = true, features = ["cbor", "bincode-compat"] }
+tari_crypto = { workspace = true }
+tari_state_tree = { workspace = true }
+
+anyhow = { workspace = true }
+bitflags = { workspace = true }
+borsh = { workspace = true }
+indexmap = { workspace = true, features = ["serde"] }
+log = { workspace = true }
+rand = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true, default-features = true }
+time = { workspace = true, features = ["serde", "serde-human-readable"] }
+ts-rs = { workspace = true, optional = true }
+
+[dev-dependencies]
+tari_template_lib = { workspace = true, features = ["borsh"] }
+
+[features]
+ts = ["ts-rs"]

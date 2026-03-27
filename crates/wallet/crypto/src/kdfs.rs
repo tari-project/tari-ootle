@@ -1,0 +1,141 @@
+//   Copyright 2024 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+use chacha20poly1305::Key;
+use tari_crypto::{
+    dhke::DiffieHellmanSharedSecret,
+    keys::{PublicKey, SecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+};
+use tari_ootle_common_types::{Network, base_layer_hashing::encrypted_data_hasher};
+use tari_template_lib_types::{ResourceAddress, crypto::UtxoTag};
+use tari_utilities::{Hidden, hidden_type, safe_array::SafeArray};
+use zeroize::Zeroize;
+
+use crate::{
+    hashers::{KdfHasher, stealth_output_tag_hasher64, stealth_owner_hasher64},
+    safe_key::SafeAeadKey,
+};
+
+pub(crate) const AEAD_KEY_LEN: usize = size_of::<Key>();
+
+// Type for hiding aead key encryption
+hidden_type!(EncryptedDataKey, SafeArray<u8, AEAD_KEY_LEN>);
+pub type SafeKey64 = SafeAeadKey<64>;
+
+fn dh(
+    public_key: &RistrettoPublicKey,
+    private_key: &RistrettoSecretKey,
+) -> DiffieHellmanSharedSecret<RistrettoPublicKey> {
+    DiffieHellmanSharedSecret::<RistrettoPublicKey>::new(private_key, public_key)
+}
+
+/// Generate a decryption key from a private key and nonce
+pub fn encrypted_data_dh_kdf_aead(
+    private_key: &RistrettoSecretKey,
+    public_key: &RistrettoPublicKey,
+) -> RistrettoSecretKey {
+    // Must match base layer burn
+    let hasher = encrypted_data_hasher();
+    dh_kdf_aead(hasher, private_key, public_key)
+}
+
+/// Generate a Diffie-Hellman secret key `H(DH(s1, s2*G))`
+pub fn dh_kdf_aead<H>(
+    hasher: H,
+    private_key: &RistrettoSecretKey,
+    public_key: &RistrettoPublicKey,
+) -> RistrettoSecretKey
+where
+    H: KdfHasher<[u8]>,
+    H::HashOutput: AsRef<[u8]>,
+{
+    let shared_secret = dh(public_key, private_key);
+    let hash = hasher.kdf_digest(shared_secret.as_bytes());
+    RistrettoSecretKey::from_uniform_bytes(hash.as_ref()).unwrap()
+}
+
+/// Generate a secret key for the owner key from a private key and nonce
+pub fn owner_stealth_dh_secret(
+    network: Network,
+    private_key: &RistrettoSecretKey,
+    public_nonce: &RistrettoPublicKey,
+) -> RistrettoSecretKey {
+    // c = H(r.G * k)
+    let c = stealth_owner_dh(network, public_nonce, private_key);
+    // c + k
+    c + private_key
+}
+
+fn stealth_owner_dh(
+    network: Network,
+    public_key: &RistrettoPublicKey,
+    secret_nonce: &RistrettoSecretKey,
+) -> RistrettoSecretKey {
+    let hasher = stealth_owner_hasher64(network);
+    dh_kdf_aead(hasher, secret_nonce, public_key)
+}
+
+pub fn owner_stealth_dh_stealth_address(
+    network: Network,
+    public_key: &RistrettoPublicKey,
+    secret_nonce: &RistrettoSecretKey,
+) -> RistrettoPublicKey {
+    // c = H(k.G * r)
+    let c = stealth_owner_dh(network, public_key, secret_nonce);
+    // C = c.G
+    let c_g = RistrettoPublicKey::from_secret_key(&c);
+    // c.G + k.G
+    c_g + public_key
+}
+
+pub fn utxo_tag_stealth_dh(
+    network: Network,
+    public_key: &RistrettoPublicKey,
+    secret_nonce: &RistrettoSecretKey,
+    resource_address: &ResourceAddress,
+) -> UtxoTag {
+    let shared_secret = dh(public_key, secret_nonce);
+    let result = stealth_output_tag_hasher64(network)
+        .chain(shared_secret.as_bytes())
+        .chain(resource_address)
+        .finalize();
+
+    let mut buf = [0u8; size_of::<u32>()];
+    buf.copy_from_slice(&result[..size_of::<u32>()]);
+    let tag = u32::from_le_bytes(buf);
+    UtxoTag::new(tag)
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_common_types::crypto::create_key_pair;
+
+    use super::*;
+
+    #[test]
+    fn it_generates_the_correct_private_stealth_address() {
+        let network = Network::LocalNet;
+        let (secret_key, public_key) = create_key_pair();
+        let (secret_nonce, public_nonce) = create_key_pair();
+
+        let stealth_address = owner_stealth_dh_stealth_address(network, &public_key, &secret_nonce);
+        let stealth_secret = owner_stealth_dh_secret(network, &secret_key, &public_nonce);
+        let expected_stealth_address = RistrettoPublicKey::from_secret_key(&stealth_secret);
+        assert_eq!(stealth_address, expected_stealth_address);
+    }
+
+    #[test]
+    fn it_does_not_produce_the_same_secret_when_switching_params() {
+        let network = Network::LocalNet;
+        let (secret_key, public_key) = create_key_pair();
+        let (secret_nonce, public_nonce) = create_key_pair();
+
+        let stealth_address1 = owner_stealth_dh_stealth_address(network, &public_key, &secret_nonce);
+        let stealth_address2 = owner_stealth_dh_stealth_address(network, &public_nonce, &secret_key);
+
+        // c + k.G != c + r.G
+        // Just makes this fact clear if it isn't obvious
+        assert_ne!(stealth_address1, stealth_address2);
+    }
+}

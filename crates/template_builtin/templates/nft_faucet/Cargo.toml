@@ -1,0 +1,18 @@
+[workspace]
+[package]
+name = "nft_faucet"
+version = "0.9.1"
+edition = "2024"
+
+[dependencies]
+tari_template_lib = { path = "../../../template_lib" }
+
+[profile.release]
+opt-level = 3       # Optimize for performance at the cost of compilation speed.
+lto = true          # Enable Link Time Optimization.
+codegen-units = 1   # Reduce number of codegen units to increase optimizations.
+panic = 'abort'     # Abort on panic.
+strip = "debuginfo" # Strip debug info.
+
+[lib]
+crate-type = ["cdylib"]

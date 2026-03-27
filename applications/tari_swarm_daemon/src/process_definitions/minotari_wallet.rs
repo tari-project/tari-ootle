@@ -1,0 +1,84 @@
+//   Copyright 2024 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+use std::path::PathBuf;
+
+use anyhow::anyhow;
+use async_trait::async_trait;
+use log::*;
+use tokio::process::Command;
+
+use crate::process_definitions::{ProcessContext, ProcessDefinition};
+
+#[derive(Debug, Default)]
+pub struct MinotariWallet;
+
+impl MinotariWallet {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl ProcessDefinition for MinotariWallet {
+    async fn get_command(&self, mut context: ProcessContext<'_>) -> anyhow::Result<Command> {
+        let mut command = Command::new(context.bin());
+        let p2p_port = context.get_free_port("p2p").await?;
+        let grpc_port = context.get_free_port("grpc").await?;
+        let listen_ip = context.listen_ip();
+        let listener_address = format!("/ip4/{listen_ip}/tcp/{p2p_port}");
+        let public_ip = context.get_setting("public_ip").unwrap_or("127.0.0.1");
+        let public_address = format!("/ip4/{public_ip}/tcp/{p2p_port}");
+
+        let base_nodes = context.minotari_nodes().collect::<Vec<_>>();
+
+        let Some(base_node) = base_nodes.first() else {
+            return Err(anyhow!("Base nodes should be started before the console wallet"));
+        };
+        let base_node_api_port = base_node
+            .instance()
+            .allocated_ports()
+            .get("http_api")
+            .ok_or_else(|| anyhow!("Base node HTTP port should be allocated before starting the console wallet"))?;
+
+        let mut base_node_addresses = Vec::with_capacity(base_nodes.len());
+        for base_node in base_nodes {
+            let identity = base_node.get_identity()?;
+            debug!("Base node identity: {identity}");
+            base_node_addresses.push(identity);
+        }
+
+        command
+            .envs(context.environment())
+            .arg("-b")
+            .arg(context.base_path())
+            .arg("--network")
+            .arg(context.network().to_string())
+            .arg("--enable-grpc")
+            .arg("--password")
+            .arg("password")
+            .arg("-pwallet.p2p.transport.type=tcp")
+            .arg(format!(
+                "-pwallet.p2p.transport.tcp.listener_address={listener_address}"
+            ))
+            .arg(format!("-pwallet.p2p.public_addresses={public_address}"))
+            .arg(format!("-pwallet.grpc_address=/ip4/{listen_ip}/tcp/{grpc_port}"))
+            .arg(format!(
+                "-pwallet.http_server_url=http://{listen_ip}:{base_node_api_port}"
+            ))
+            .args(["--non-interactive", "-pwallet.p2p.allow_test_addresses=true"])
+            .arg(format!(
+                "-p{}.p2p.seeds.peer_seeds={}",
+                context.network(),
+                base_node_addresses.join(",")
+            ));
+
+        debug!("Command: {:?}", command);
+
+        Ok(command)
+    }
+
+    fn get_relative_data_path(&self) -> Option<PathBuf> {
+        Some("data".into())
+    }
+}

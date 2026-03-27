@@ -1,0 +1,32 @@
+[package]
+name = "tari_ootle_walletd_client"
+description = "Tari wallet daemon client library"
+version = "0.3.1"
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_ootle_common_types = { workspace = true }
+tari_engine_types = { workspace = true }
+tari_ootle_transaction = { workspace = true }
+tari_ootle_wallet_sdk = { workspace = true }
+tari_template_lib_types = { workspace = true }
+tari_template_abi = { workspace = true }
+tari_ootle_address = { workspace = true, features = ["serde"] }
+ootle_serde = { workspace = true, features = ["base64"] }
+
+time = { workspace = true }
+reqwest = { workspace = true, features = ["json", "cookies"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+ts-rs = { workspace = true, optional = true }
+webauthn-rs-proto = { workspace = true }
+hex = { workspace = true }
+url = { workspace = true, features = ["serde"] }
+zeroize = { workspace = true, features = ["serde", "simd"] }
+
+[features]
+ts = ["ts-rs", "tari_ootle_wallet_sdk/ts", "tari_ootle_common_types/ts", "tari_ootle_address/ts", "tari_template_lib_types/ts"]

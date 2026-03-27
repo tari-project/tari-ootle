@@ -1,3 +1,6 @@
+//   Copyright 2024 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
 //  Copyright 2021. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
@@ -20,176 +23,116 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use async_trait::async_trait;
-use log::*;
-use tari_comms::types::CommsPublicKey;
-use tari_dan_core::{
-    message::DanMessage,
-    models::TariDanPayload,
-    services::infrastructure_services::OutboundService,
-    DigitalAssetError,
-};
+use tari_consensus::{messages::HotstuffMessage, traits::OutboundMessagingError};
+use tari_networking::{NetworkingHandle, NetworkingService};
+use tari_ootle_common_types::ShardGroup;
+use tari_ootle_p2p::{PeerAddress, TariMessagingSpec, proto};
 use tokio::sync::mpsc;
 
-use crate::comms::Destination;
+use crate::p2p::{logging::MessageLogger, services::consensus_gossip::ConsensusGossipHandle};
 
-const LOG_TARGET: &str = "tari::validator_node::messages::outbound::validator_node";
-
-// pub struct TariCommsOutboundService {
-//     outbound_messaging: OutboundMessaging,
-//     loopback: mpsc::Sender<(CommsPublicKey, DanMessage<TariDanPayload, CommsPublicKey>)>,
-// }
-//
-// impl TariCommsOutboundService {
-//     #[allow(dead_code)]
-//     pub fn new(
-//         outbound_messaging: OutboundMessaging,
-//         loopback: mpsc::Sender<(CommsPublicKey, DanMessage<TariDanPayload, CommsPublicKey>)>,
-//     ) -> Self {
-//         Self {
-//             outbound_messaging,
-//             loopback,
-//         }
-//     }
-// }
-//
-// #[async_trait]
-// impl OutboundService for TariCommsOutboundService {
-//     type Addr = CommsPublicKey;
-//     type Payload = TariDanPayload;
-//
-//     async fn send(
-//         &mut self,
-//         from: CommsPublicKey,
-//         to: CommsPublicKey,
-//         message: DanMessage<TariDanPayload, CommsPublicKey>,
-//     ) -> Result<(), DigitalAssetError> {
-//         debug!(target: LOG_TARGET, "Outbound message to be sent:{} {:?}", to, message);
-//
-//         // Messages destined to ourselves are added to the loopback queue
-//         if from == to {
-//             debug!(target: LOG_TARGET, "Sending {:?} to self", message.message_type());
-//             self.loopback
-//                 .send((from, dan_message))
-//                 .await
-//                 .map_err(|_| DigitalAssetError::SendError {
-//                     context: "Sending to loopback".to_string(),
-//                 })?;
-//             return Ok(());
-//         }
-//
-//         self.outbound_messaging.send(to, tari_message).await?;
-//         Ok(())
-//     }
-//
-//     async fn broadcast(
-//         &mut self,
-//         from: CommsPublicKey,
-//         committee: &[CommsPublicKey],
-//         message: DanMessage<TariDanPayload, CommsPublicKey>,
-//     ) -> Result<(), DigitalAssetError> {
-//         for committee_member in committee {
-//             self.send(from.clone(), committee_member.clone(), message.clone())
-//                 .await?;
-//         }
-//         Ok(())
-//     }
-// }
+const _LOG_TARGET: &str = "tari::ootle::messages::outbound::validator_node";
 
 #[derive(Debug, Clone)]
-pub struct OutboundMessaging {
-    our_node_addr: CommsPublicKey,
-    sender: mpsc::Sender<(Destination<CommsPublicKey>, DanMessage<TariDanPayload, CommsPublicKey>)>,
-    loopback_sender: mpsc::Sender<DanMessage<TariDanPayload, CommsPublicKey>>,
+pub struct ConsensusOutboundMessaging<TMsgLogger> {
+    our_node_addr: PeerAddress,
+    loopback_sender: mpsc::UnboundedSender<HotstuffMessage>,
+    consensus_gossip: ConsensusGossipHandle,
+    networking: NetworkingHandle<TariMessagingSpec>,
+    msg_logger: TMsgLogger,
 }
 
-impl OutboundMessaging {
+impl<TMsgLogger: MessageLogger> ConsensusOutboundMessaging<TMsgLogger> {
     pub fn new(
-        our_node_addr: CommsPublicKey,
-        sender: mpsc::Sender<(Destination<CommsPublicKey>, DanMessage<TariDanPayload, CommsPublicKey>)>,
-        loopback_sender: mpsc::Sender<DanMessage<TariDanPayload, CommsPublicKey>>,
+        loopback_sender: mpsc::UnboundedSender<HotstuffMessage>,
+        consensus_gossip: ConsensusGossipHandle,
+        networking: NetworkingHandle<TariMessagingSpec>,
+        msg_logger: TMsgLogger,
     ) -> Self {
         Self {
-            our_node_addr,
-            sender,
+            our_node_addr: (*networking.local_peer_id()).into(),
             loopback_sender,
+            consensus_gossip,
+            networking,
+            msg_logger,
         }
     }
 }
 
-#[async_trait]
-impl OutboundService for OutboundMessaging {
-    type Addr = CommsPublicKey;
-    type Payload = TariDanPayload;
+impl<TMsgLogger: MessageLogger + Send> tari_consensus::traits::OutboundMessaging
+    for ConsensusOutboundMessaging<TMsgLogger>
+{
+    type Addr = PeerAddress;
 
-    async fn send(
+    async fn send_self<T: Into<HotstuffMessage> + Send>(&mut self, message: T) -> Result<(), OutboundMessagingError> {
+        let message = message.into();
+        self.msg_logger.log_outbound_message(
+            "self",
+            &self.our_node_addr.as_peer_id().to_string(),
+            message.as_type_str(),
+            "",
+            &message,
+        );
+        self.loopback_sender
+            .send(message)
+            .map_err(|_| OutboundMessagingError::FailedToEnqueueMessage {
+                reason: "loopback sender closed".to_string(),
+            })?;
+        Ok(())
+    }
+
+    async fn send<T: Into<HotstuffMessage> + Send>(
         &mut self,
-        _from: Self::Addr,
         to: Self::Addr,
-        message: DanMessage<Self::Payload, Self::Addr>,
-    ) -> Result<(), DigitalAssetError> {
+        message: T,
+    ) -> Result<(), OutboundMessagingError> {
         if to == self.our_node_addr {
-            debug!(target: LOG_TARGET, "Sending {:?} to self", message);
-            self.loopback_sender
-                .send(message)
-                .await
-                .map_err(|_| DigitalAssetError::SendError {
-                    context: "Sending to loopback".to_string(),
-                })?;
-            return Ok(());
+            return self.send_self(message).await;
         }
 
-        self.sender
-            .send((Destination::Peer(to), message))
+        let msg = message.into();
+
+        self.msg_logger
+            .log_outbound_message("send", &to.to_string(), msg.as_type_str(), "", &msg);
+        self.networking
+            .send_message(to.as_peer_id(), proto::consensus::HotStuffMessage::from(&msg))
             .await
-            .map_err(|_| DigitalAssetError::SendError {
-                context: "Sending to outbound messaging".to_string(),
-            })?;
+            .map_err(OutboundMessagingError::from_error)?;
+
         Ok(())
     }
 
-    async fn broadcast(
-        &mut self,
-        _from: Self::Addr,
-        committee: &[Self::Addr],
-        message: DanMessage<Self::Payload, Self::Addr>,
-    ) -> Result<(), DigitalAssetError> {
-        let (ours, theirs) = committee
-            .iter()
-            .cloned()
-            .partition::<Vec<_>, _>(|x| *x == self.our_node_addr);
+    async fn multicast<T, I>(&mut self, addresses: I, message: T) -> Result<(), OutboundMessagingError>
+    where
+        I: IntoIterator<Item = Self::Addr> + Send,
+        T: Into<HotstuffMessage> + Send,
+    {
+        let message = message.into();
 
-        // send it more than once to ourselves??
-        for _ in ours {
-            debug!(target: LOG_TARGET, "Sending {:?} to self", message);
-            self.loopback_sender
-                .send(message.clone())
-                .await
-                .map_err(|_| DigitalAssetError::SendError {
-                    context: "Sending to loopback".to_string(),
-                })?;
-        }
-
-        self.sender
-            .send((Destination::Selected(theirs), message))
+        self.networking
+            .send_multicast(
+                addresses
+                    .into_iter()
+                    .filter(|addr| *addr != self.our_node_addr)
+                    .map(|addr| addr.as_peer_id())
+                    .collect::<Vec<_>>(),
+                proto::consensus::HotStuffMessage::from(&message),
+            )
             .await
-            .map_err(|_| DigitalAssetError::SendError {
-                context: "Sending to outbound messaging".to_string(),
-            })?;
+            .map_err(OutboundMessagingError::from_error)?;
+
         Ok(())
     }
 
-    async fn flood(
-        &mut self,
-        _from: Self::Addr,
-        message: DanMessage<Self::Payload, Self::Addr>,
-    ) -> Result<(), DigitalAssetError> {
-        self.sender
-            .send((Destination::Flood, message))
+    async fn broadcast<T>(&mut self, shard_group: ShardGroup, message: T) -> Result<(), OutboundMessagingError>
+    where T: Into<HotstuffMessage> + Send {
+        let message = message.into();
+
+        self.consensus_gossip
+            .publish(shard_group, message)
             .await
-            .map_err(|_| DigitalAssetError::SendError {
-                context: "Sending to outbound messaging".to_string(),
-            })?;
+            .map_err(OutboundMessagingError::from_error)?;
+
         Ok(())
     }
 }

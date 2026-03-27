@@ -1,0 +1,96 @@
+[webserver]
+bind_address = "127.0.0.1:9090"
+
+[[dbs]]
+path = "data/swarm/processes/validator-node-00/localnet/data/validator_node/rocksdb"
+secondary_path = "data/db_inspector/secondaries/vn0"
+name = "VN0"
+
+[[dbs]]
+path = "data/swarm/processes/validator-node-01/localnet/data/validator_node/rocksdb"
+secondary_path = "data/db_inspector/secondaries/vn1"
+name = "VN1"
+
+[[dbs]]
+path = "data/swarm/processes/validator-node-02/localnet/data/validator_node/rocksdb"
+secondary_path = "data/db_inspector/secondaries/vn2"
+name = "VN2"
+
+[[dbs]]
+path = "data/swarm/processes/validator-node-03/localnet/data/validator_node/rocksdb"
+secondary_path = "data/db_inspector/secondaries/vn3"
+name = "VN3"
+
+[[dbs]]
+path = "data/swarm/processes/validator-node-04/localnet/data/validator_node/rocksdb"
+secondary_path = "data/db_inspector/secondaries/vn4"
+name = "VN4"
+
+[[dbs]]
+path = "data/swarm/processes/validator-node-05/localnet/data/validator_node/rocksdb"
+secondary_path = "data/db_inspector/secondaries/vn5"
+name = "VN5"
+
+[[dbs]]
+path = "data/swarm/processes/validator-node-06/localnet/data/validator_node/rocksdb"
+secondary_path = "data/db_inspector/secondaries/vn6"
+name = "VN6"
+
+[[dbs]]
+path = "data/swarm/processes/validator-node-07/localnet/data/validator_node/rocksdb"
+secondary_path = "data/db_inspector/secondaries/vn7"
+name = "VN7"
+
+[[dbs]]
+path = "data/swarm/processes/validator-node-08/localnet/data/validator_node/rocksdb"
+secondary_path = "data/db_inspector/secondaries/vn8"
+name = "VN8"
+
+[[dbs]]
+path = "data/swarm/processes/validator-node-09/localnet/data/validator_node/rocksdb"
+secondary_path = "data/db_inspector/secondaries/vn9"
+name = "VN9"
+
+
+[[dbs]]
+path = "/tmp/test1"
+secondary_path = "data/db_inspector/secondaries/test1"
+name = "Test 1"
+group = "test"
+
+[[dbs]]
+path = "/tmp/test2"
+secondary_path = "data/db_inspector/secondaries/test2"
+name = "Test 2"
+group = "test"
+
+[[dbs]]
+path = "/tmp/test3"
+secondary_path = "data/db_inspector/secondaries/test3"
+name = "Test 3"
+group = "test"
+
+[[dbs]]
+path = "/tmp/test4"
+secondary_path = "data/db_inspector/secondaries/test4"
+name = "Test 4"
+group = "test"
+
+[[dbs]]
+path = "/tmp/test5"
+secondary_path = "data/db_inspector/secondaries/test5"
+name = "Test 5"
+group = "test"
+
+
+[[dbs]]
+path = "/tmp/test6"
+secondary_path = "data/db_inspector/secondaries/test6"
+name = "Test 6"
+group = "test"
+
+[[dbs]]
+path = "/tmp/test7"
+secondary_path = "data/db_inspector/secondaries/test7"
+name = "Test 7"
+group = "test"

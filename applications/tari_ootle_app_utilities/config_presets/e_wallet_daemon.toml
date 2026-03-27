@@ -1,0 +1,20 @@
+########################################################################################################################
+#                                                                                                                      #
+#                                     Wallet Daemon Configuration Options ()                                           #
+#                                                                                                                      #
+########################################################################################################################
+
+[ootle_wallet_daemon]
+# JSON-RPC listener address (default = "127.0.0.1:9000")
+# listen_addr = "127.0.0.1:9000"
+
+# Signaling server address (default = "127.0.0.1:9100")
+# signaling_server_addr = "127.0.0.1:9100"
+
+[localnet.ootle_wallet_daemon]
+# Indexer API url (default: http://127.0.0.1:18200)
+# indexer_api_url = "http://127.0.0.1:18200"
+[esmeralda.ootle_wallet_daemon]
+#authentication = "webauthn"
+# Indexer API url for Esme.
+indexer_api_url = "https://ootle-indexer-a.tari.com/"

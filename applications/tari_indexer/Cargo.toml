@@ -1,0 +1,108 @@
+[package]
+name = "tari_indexer"
+description = "The Tari indexer implementation"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "tari_indexer"
+path = "src/bin/main.rs"
+
+[[bin]]
+name = "indexer-gen-openapi"
+path = "src/bin/indexer_gen_openapi.rs"
+
+[dependencies]
+tari_base_node_client = { workspace = true }
+tari_bor = { workspace = true }
+tari_common = { workspace = true }
+tari_consensus = { workspace = true }
+tari_template_builtin = { workspace = true, features = ["templates"] }
+tari_crypto = { workspace = true }
+tari_engine = { workspace = true }
+tari_engine_types = { workspace = true }
+tari_epoch_manager = { workspace = true, features = ["service"] }
+tari_epoch_oracles = { workspace = true, features = ["base_layer"] }
+tari_indexer_client = { workspace = true, default-features = false, features = ["utoipa"] }
+tari_indexer_lib = { workspace = true }
+tari_networking = { workspace = true }
+tari_ootle_app_utilities = { workspace = true, features = ["epoch_oracle"] }
+tari_ootle_common_types = { workspace = true }
+tari_ootle_p2p = { workspace = true }
+tari_ootle_storage = { workspace = true }
+tari_ootle_storage_sqlite = { workspace = true }
+tari_rpc_framework = { workspace = true }
+tari_shutdown = { workspace = true }
+tari_template_lib_types = { workspace = true }
+tari_ootle_transaction = { workspace = true }
+tari_validator_node_rpc = { workspace = true }
+ootle_byte_type = { workspace = true, features = ["crypto"] }
+
+anyhow = { workspace = true }
+axum = { workspace = true, features = ["query", "matched-path"] }
+async-graphql = { workspace = true }
+async-graphql-axum = { workspace = true }
+bytes = { workspace = true }
+bincode = { workspace = true, features = ["serde"] }
+clap = { workspace = true, features = ["derive", "env"] }
+config = { workspace = true }
+diesel = { workspace = true, default-features = false, features = [
+    "sqlite",
+    "returning_clauses_for_sqlite_3_35",
+    "time",
+] }
+indexmap = { workspace = true }
+diesel_migrations = { workspace = true }
+futures = { workspace = true }
+include_dir = { workspace = true, optional = true }
+libp2p = { workspace = true }
+log = { workspace = true, features = ["std"] }
+hex = { workspace = true }
+headers-accept = "0.2.1"
+log4rs = { workspace = true, features = [
+    "rolling_file_appender",
+    "compound_policy",
+    "size_trigger",
+    "fixed_window_roller",
+] }
+mime_guess = { workspace = true }
+mediatype = "0.20.0"
+serde = { workspace = true, features = ["default", "derive"] }
+serde_json = { workspace = true }
+serde_with = { workspace = true, features = ["indexmap_2"] }
+thiserror = { workspace = true }
+time = { workspace = true, features = ["serde"] }
+tokio = { workspace = true, features = [
+    "default",
+    "macros",
+    "time",
+    "sync",
+    "rt-multi-thread",
+] }
+tokio-stream = { workspace = true }
+tower = { workspace = true, features = ["limit"] }
+tower-http = { workspace = true, features = ["default", "cors", "limit", "trace"] }
+url = { workspace = true, features = ["serde"] }
+cacache = { version = "13.1.0", default-features = false, features = ["mmap", "tokio-runtime"] }
+prometheus-client = { workspace = true, optional = true }
+prost = { workspace = true }
+tracing = "0.1.41"
+tracing-subscriber = "0.3.20"
+tracing-appender = "0.2.4"
+logroller = "0.1"
+utoipa = { workspace = true }
+utoipa-swagger-ui = { workspace = true, features = ["axum"] }
+
+[package.metadata.cargo-machete]
+ignored = [
+    # Want to enable some log4rs features
+    "log4rs",
+]
+
+[features]
+default = ["web_ui", "metrics"]
+web_ui = ["include_dir"]
+metrics = ["prometheus-client", "tari_networking/metrics", "tari_indexer_lib/metrics"]

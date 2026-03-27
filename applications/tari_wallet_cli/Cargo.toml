@@ -1,0 +1,34 @@
+[package]
+name = "tari_ootle_wallet_cli"
+description = "The Tari wallet CLI"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_ootle_common_types = { workspace = true }
+tari_engine = { workspace = true }
+tari_engine_types = { workspace = true }
+tari_utilities = { workspace = true }
+tari_ootle_walletd_client = { workspace = true }
+tari_template_lib = { workspace = true }
+tari_ootle_transaction = { workspace = true }
+tari_transaction_manifest = { workspace = true }
+tari_bor = { workspace = true, default-features = true }
+tari_ootle_wallet_sdk = { workspace = true }
+tari_ootle_address = { workspace = true }
+
+anyhow = { workspace = true }
+base64 = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+log = { workspace = true }
+multiaddr = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+serde_json = { workspace = true }
+time = { workspace = true }
+thiserror = { workspace = true }
+tokio = { version = "1", features = ["macros"] }
+url = { workspace = true }
+urlencoding = "2.1.3"

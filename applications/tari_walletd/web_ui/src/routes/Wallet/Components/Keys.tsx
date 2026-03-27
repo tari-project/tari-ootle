@@ -1,0 +1,119 @@
+//  Copyright 2022. The Tari Project
+//
+//  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
+//  following conditions are met:
+//
+//  1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following
+//  disclaimer.
+//
+//  2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
+//  following disclaimer in the documentation and/or other materials provided with the distribution.
+//
+//  3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote
+//  products derived from this software without specific prior written permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+//  INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+//  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+//  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+//  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+//  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+import { useKeysCreate, useKeysList, useKeysSetActive } from "@api/hooks/useKeys";
+import FetchStatusCheck from "@components/FetchStatusCheck";
+import { BoxHeading2, DataTableCell } from "@components/StyledComponents";
+import AddIcon from "@mui/icons-material/Add";
+import Button from "@mui/material/Button";
+import Fade from "@mui/material/Fade";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableHead from "@mui/material/TableHead";
+import TableRow from "@mui/material/TableRow";
+import { KeyId } from "@tari-project/ootle-ts-bindings";
+import { useState } from "react";
+import { Form } from "react-router";
+
+function Key([keyId, pk, active]: [KeyId, string, boolean], setActive: (key_id: KeyId) => void) {
+  const rowKey =
+    "Derived" in keyId
+      ? `derived-${keyId.Derived.index.toString()}`
+      : `imported-${keyId.Imported.local_key_id.toString()}`;
+  return (
+    <TableRow key={`row-${rowKey}`}>
+      <DataTableCell>{rowKey}</DataTableCell>
+      <DataTableCell>{pk}</DataTableCell>
+      <DataTableCell>{active ? <b>Active</b> : <div onClick={() => setActive(keyId)}>Activate</div>}</DataTableCell>
+    </TableRow>
+  );
+}
+
+function Keys() {
+  const [showKeyDialog, setShowAddKeyDialog] = useState(false);
+  const { data, isLoading, isError, error } = useKeysList("account");
+  const { mutate: mutateSetActive } = useKeysSetActive();
+  const { mutate: mutateCreateKey } = useKeysCreate("account");
+
+  const showAddKeyDialog = (setElseToggle: boolean = !showKeyDialog) => {
+    setShowAddKeyDialog(setElseToggle);
+  };
+
+  const setActive = (keyId: KeyId) => {
+    if ("Derived" in keyId) {
+      mutateSetActive(keyId.Derived.index);
+    }
+  };
+
+  const onSubmitAddKey = () => {
+    mutateCreateKey();
+    setShowAddKeyDialog(false);
+  };
+
+  return (
+    <FetchStatusCheck isLoading={isLoading} isError={isError} errorMessage={error?.message || "Error fetching data"}>
+      <Fade in={!isLoading && !isError}>
+        <div>
+          <BoxHeading2>
+            {showKeyDialog && (
+              <Fade in={showKeyDialog}>
+                <Form onSubmit={onSubmitAddKey} className="flex-container">
+                  <Button variant="contained" type="submit">
+                    Add Key
+                  </Button>
+                  <Button variant="outlined" onClick={() => showAddKeyDialog(false)}>
+                    Cancel
+                  </Button>
+                </Form>
+              </Fade>
+            )}
+            {!showKeyDialog && (
+              <Fade in={!showKeyDialog}>
+                <div className="flex-container">
+                  <Button variant="outlined" startIcon={<AddIcon />} onClick={() => showAddKeyDialog()}>
+                    Add Key
+                  </Button>
+                </div>
+              </Fade>
+            )}
+          </BoxHeading2>{" "}
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Index</TableCell>
+                  <TableCell>Public key</TableCell>
+                  <TableCell>Active</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>{data && data.keys.map((key: [KeyId, string, boolean]) => Key(key, setActive))}</TableBody>
+            </Table>
+          </TableContainer>
+        </div>
+      </Fade>
+    </FetchStatusCheck>
+  );
+}
+
+export default Keys;

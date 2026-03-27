@@ -20,50 +20,131 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{future::IntoFuture, net::SocketAddr, sync::Arc};
 
 use axum::{
-    extract::{ContentLengthLimit, Extension},
-    routing::post,
+    Json,
     Router,
+    extract::Extension,
+    response::IntoResponse,
+    routing::{get, post},
 };
-use axum_jrpc::{JrpcResult, JsonRpcExtractor};
+use axum_jrpc::{JrpcResult, JsonRpcAnswer, JsonRpcExtractor, error::JsonRpcErrorReason};
 use log::*;
+use serde_json::json;
+use tari_consensus::hotstuff::ConsensusCurrentState;
+use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
+use tower_http::cors::CorsLayer;
 
 use super::handlers::JsonRpcHandlers;
 
 const LOG_TARGET: &str = "tari::validator_node::json_rpc";
-const JSON_SIZE_LIMIT_BYTES: u64 = 25 * 1024; // 25 kb
 
-pub async fn run_json_rpc(address: SocketAddr, handlers: JsonRpcHandlers) -> Result<(), anyhow::Error> {
+pub async fn spawn_json_rpc(
+    preferred_address: SocketAddr,
+    handlers: JsonRpcHandlers,
+    #[cfg(feature = "metrics")] registry: prometheus_client::registry::Registry,
+) -> Result<SocketAddr, anyhow::Error> {
     let router = Router::new()
         .route("/", post(handler))
         .route("/json_rpc", post(handler))
-        .layer(Extension(Arc::new(handlers)));
+        .route("/health", get(health_check));
+    #[cfg(feature = "metrics")]
+    let router = router.route(
+        "/_metrics",
+        axum::routing::get(super::metrics::MetricsHandler::new(registry)),
+    );
+    let router = router
+        .layer(Extension(Arc::new(handlers)))
+        .layer(CorsLayer::permissive());
 
-    info!(target: LOG_TARGET, "🌐 RPC started at {}", address);
-    axum::Server::bind(&address)
-        .serve(router.into_make_service())
-        .await
-        .map_err(|err| {
-            error!(target: LOG_TARGET, "JSON-RPC encountered an error: {}", err);
-            err
-        })?;
+    let listener = try_bind_with_fallback(preferred_address).await?;
+    let server = axum::serve(listener, router);
+    let addr = server.local_addr()?;
+    info!(target: LOG_TARGET, "🌐 JSON-RPC listening on {}", addr);
+    tokio::spawn(server.into_future());
 
-    info!(target: LOG_TARGET, "Stopping JSON-RPC");
-    Ok(())
+    Ok(addr)
 }
 
-async fn handler(
-    Extension(handlers): Extension<Arc<JsonRpcHandlers>>,
-    ContentLengthLimit(value): ContentLengthLimit<JsonRpcExtractor, JSON_SIZE_LIMIT_BYTES>,
-) -> JrpcResult {
-    info!(target: LOG_TARGET, "🌐 JSON-RPC request: {}", value.method);
-    match value.method.as_str() {
-        "get_identity" => handlers.get_identity(value),
+async fn handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: JsonRpcExtractor) -> JrpcResult {
+    debug!(target: LOG_TARGET, "🌐 JSON-RPC request: {}", value.method);
+    let result = match value.method.as_str() {
+        // Transaction
+        // "get_transaction_status" => handlers.get_transaction_status(value).await,
         "submit_transaction" => handlers.submit_transaction(value).await,
-        "register_validator_node" => handlers.register_validator_node(value).await,
-        "register_template" => handlers.register_template(value).await,
+        "get_transaction" => handlers.get_transaction(value).await,
+        "get_transaction_result" => handlers.get_transaction_result(value).await,
+        "get_state" => handlers.get_state(value).await,
+        "get_substate" => handlers.get_substate(value).await,
+        "list_blocks" => handlers.list_blocks(value).await,
+        "get_tx_pool" => handlers.get_tx_pool(value).await,
+        // Blocks
+        "get_block" => handlers.get_block(value).await,
+        "get_blocks" => handlers.get_blocks(value).await,
+        "get_filtered_blocks_count" => handlers.get_filtered_blocks_count(value).await,
+        // Template
+        "get_template" => handlers.get_template(value).await,
+        // Validator Node
+        "get_identity" => handlers.get_identity(value).await,
+        "get_mempool_stats" => handlers.get_mempool_stats(value).await,
+        "get_epoch_manager_stats" => handlers.get_epoch_manager_stats(value).await,
+        "get_shard_key" => handlers.get_shard_key(value).await,
+        "get_committee" => handlers.get_committee(value).await,
+        "get_all_vns" => handlers.get_all_vns(value).await,
+        "get_consensus_status" => handlers.get_consensus_status(value).await,
+        // "get_network_committees" => handlers.get_network_committees(value).await,
+        // Comms
+        "add_peer" => handlers.add_peer(value).await,
+        "get_comms_stats" => handlers.get_comms_stats(value).await,
+        "get_connections" => handlers.get_connections(value).await,
+        "prepare_layer_one_transaction" => handlers.prepare_layer_one_transaction(value).await,
         method => Ok(value.method_not_found(method)),
+    };
+
+    if let Err(ref e) = result {
+        match &e.result {
+            JsonRpcAnswer::Result(val) => {
+                error!(
+                    target: LOG_TARGET,
+                    "🚨 JSON-RPC request failed: {}",
+                    serde_json::to_string_pretty(val).unwrap_or_else(|e| e.to_string())
+                );
+            },
+            // Log application errors as debug as these are typically intentional
+            JsonRpcAnswer::Error(err) if matches!(err.error_reason(), JsonRpcErrorReason::ApplicationError(_)) => {
+                debug!(target: LOG_TARGET, "JSON-RPC: {}", err);
+            },
+            JsonRpcAnswer::Error(err) => {
+                error!(target: LOG_TARGET, "JSON-RPC request failed: {}", err);
+            },
+        }
+    }
+    result
+}
+
+async fn health_check(Extension(handlers): Extension<Arc<JsonRpcHandlers>>) -> impl IntoResponse {
+    let is_net_ok = handlers.networking_is_active();
+    let status = handlers.consensus_status();
+    let is_ok = is_net_ok &&
+        matches!(
+            status,
+            ConsensusCurrentState::Idle |
+                ConsensusCurrentState::Running |
+                ConsensusCurrentState::Syncing |
+                ConsensusCurrentState::CheckSync
+        );
+
+    let body = json!({
+        "status": if is_ok { "ok" } else { "error" },
+        "networking_ok": is_net_ok,
+        "consensus_status": status,
+        "version": env!("CARGO_PKG_VERSION"),
+    });
+
+    if is_ok {
+        (axum::http::StatusCode::OK, Json(body)).into_response()
+    } else {
+        (axum::http::StatusCode::SERVICE_UNAVAILABLE, Json(body)).into_response()
     }
 }

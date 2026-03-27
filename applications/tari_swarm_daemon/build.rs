@@ -1,0 +1,53 @@
+//   Copyright 2024 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+use std::{env, fs, process::Command};
+
+const BUILD: &[(&str, &str)] = &[("./webui", "build")];
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("cargo:rerun-if-changed=./webui/src");
+
+    // Ensure that dist path exists
+    fs::create_dir_all("./webui/dist")?;
+    fs::File::create("./webui/dist/.gitkeep")?;
+
+    if env::var("CARGO_FEATURE_TS").is_ok() {
+        println!("cargo:warning=The web ui will not be compiled when we are generating typescript types/interfaces.");
+        return Ok(());
+    }
+
+    if cfg!(debug_assertions) {
+        println!("cargo:warning=The web ui will not be compiled in debug mode.");
+        return Ok(());
+    }
+
+    let npm = if cfg!(windows) { "npm.cmd" } else { "npm" };
+
+    for (target, build_cmd) in BUILD {
+        if let Err(error) = Command::new(npm).arg("ci").current_dir(target).status() {
+            println!("cargo:warning='npm ci' error : {:?}", error);
+            // We dont error for CI here if the webui build fails for swarm, since it is a dev tool
+        }
+        match Command::new(npm).args(["run", build_cmd]).current_dir(target).output() {
+            Ok(output) if !output.status.success() => {
+                println!("cargo:warning='npm run build' exited with non-zero status code");
+                println!("cargo:warning=Output: {}", String::from_utf8_lossy(&output.stdout));
+                println!("cargo:warning=Error: {}", String::from_utf8_lossy(&output.stderr));
+                break;
+            },
+            Err(error) => {
+                println!("cargo:warning='npm run build' error : {:?}", error);
+                println!("cargo:warning=The web ui will not be included!");
+                break;
+            },
+            _ => {},
+        }
+    }
+
+    // Ensure that .gitkeep exists
+    // This is a hack because the build removes .gitkeep
+    fs::File::create("./webui/dist/.gitkeep")?;
+
+    Ok(())
+}

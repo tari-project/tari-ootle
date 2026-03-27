@@ -20,29 +20,62 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, str::FromStr, sync::Arc};
 
-use axum::{routing::get, Router};
-use log::{error, info};
+use axum::{
+    Router,
+    http::{HeaderValue, Response, StatusCode, Uri, header},
+    response::IntoResponse,
+    routing::get,
+};
+use include_dir::{Dir, include_dir};
+use log::*;
+use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
 
-const LOG_TARGET: &str = "tari_validator_node::http_ui::server";
+const LOG_TARGET: &str = "tari::validator_node::web_ui::server";
 
-pub async fn run_http_ui_server(address: SocketAddr) -> Result<(), anyhow::Error> {
-    let router = Router::new().route("/", get(index));
+pub async fn run_http_ui_server(address: SocketAddr, json_rpc_address: String) -> Result<(), anyhow::Error> {
+    let json_rpc_address = Arc::new(json_rpc_address);
+    let router = Router::new()
+        .route("/json_rpc_address", get(|| async move { json_rpc_address.to_string() }))
+        .fallback(handler);
 
-    info!(target: LOG_TARGET, "🌐 HTTP UI started at {}", address);
-    axum::Server::bind(&address)
-        .serve(router.into_make_service())
-        .await
-        .map_err(|err| {
-            error!(target: LOG_TARGET, "HTTP UI encountered an error: {}", err);
-            err
-        })?;
+    info!(target: LOG_TARGET, "🕸️ Web UI started at http://{}", address);
+    let listener = try_bind_with_fallback(address).await?;
+    let server = axum::serve(listener, router);
 
-    info!(target: LOG_TARGET, "Stopping HTTP UI");
+    info!(target: LOG_TARGET, "🕸️ Web UI listening on {}", server.local_addr()?);
+    server.await?;
+
+    info!(target: LOG_TARGET, "Stopping Web UI");
     Ok(())
 }
 
-async fn index() -> &'static str {
-    "Hello, World!"
+static PROJECT_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/web_ui/dist");
+
+async fn handler(uri: Uri) -> impl IntoResponse {
+    let path = uri.path();
+
+    // If path starts with /, strip it.
+    let path = path.strip_prefix('/').unwrap_or(path);
+
+    // If the path is a file, return it. Otherwise use index.html (SPA)
+    if let Some(body) = PROJECT_DIR
+        .get_file(path)
+        .or_else(|| PROJECT_DIR.get_file("index.html"))
+        .and_then(|file| file.contents_utf8())
+    {
+        let mime_type = mime_guess::from_path(path).first_or_else(|| mime_guess::Mime::from_str("text/html").unwrap());
+        let content_type = mime_type.to_string();
+        return Response::builder()
+            .header(header::CONTENT_TYPE, HeaderValue::from_str(&content_type).unwrap())
+            .status(StatusCode::OK)
+            .body(body.to_owned())
+            .unwrap();
+    }
+    println!("Not found {:?}", path);
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .body("".to_string())
+        .unwrap()
 }

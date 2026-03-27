@@ -1,0 +1,15 @@
+[workspace]
+[package]
+name = "basic_nft"
+version = "0.1.0"
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tari_template_lib = { path = "../../../../../template_lib" }
+serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
+
+
+[lib]
+crate-type = ["cdylib"]

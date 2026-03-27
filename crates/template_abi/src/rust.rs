@@ -1,0 +1,129 @@
+//  Copyright 2022. The Tari Project
+//
+//  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
+//  following conditions are met:
+//
+//  1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following
+//  disclaimer.
+//
+//  2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
+//  following disclaimer in the documentation and/or other materials provided with the distribution.
+//
+//  3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote
+//  products derived from this software without specific prior written permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+//  INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+//  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+//  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+//  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+//  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+#[cfg(not(feature = "std"))]
+mod no_std {
+    extern crate alloc;
+
+    pub mod alloc_internal {
+        pub use super::alloc::alloc::{Layout, alloc, alloc_zeroed, dealloc};
+    }
+
+    pub use alloc::{boxed, format, str, string, vec};
+    pub use core::{
+        any,
+        borrow,
+        clone,
+        cmp,
+        convert,
+        default,
+        fmt,
+        iter,
+        marker,
+        mem,
+        num,
+        ops,
+        option,
+        panic,
+        ptr,
+        result,
+        slice,
+        sync,
+        write,
+        writeln,
+    };
+
+    pub mod collections {
+        extern crate alloc;
+        pub use alloc::collections::{BTreeMap, BTreeSet, btree_map, btree_set};
+
+        #[cfg(feature = "alloc")]
+        pub use hashbrown::{HashMap, HashSet};
+    }
+}
+
+#[cfg(not(feature = "std"))]
+pub use no_std::*;
+
+#[cfg(feature = "std")]
+mod rust_std {
+    pub use ::std::{
+        any,
+        borrow,
+        boxed,
+        clone,
+        cmp,
+        convert,
+        default,
+        fmt,
+        format,
+        iter,
+        marker,
+        mem,
+        num,
+        ops,
+        option,
+        panic,
+        ptr,
+        result,
+        slice,
+        str,
+        string,
+        sync,
+        vec,
+        write,
+        writeln,
+    };
+
+    pub mod alloc_internal {
+        pub use ::std::alloc::{Layout, alloc, alloc_zeroed, dealloc};
+    }
+
+    pub mod collections {
+        pub use ::std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, btree_map, btree_set};
+    }
+}
+
+#[cfg(feature = "std")]
+pub use rust_std::*;
+
+/// An (incomplete) standard rust prelude module. Provides commonly used std library types e.g.
+/// String, Vec etc
+pub mod prelude {
+    // See https://doc.rust-lang.org/std/prelude/index.html
+
+    pub use super::{
+        boxed::Box,
+        clone::Clone,
+        cmp::{Eq, Ord, PartialEq, PartialOrd},
+        convert::{AsMut, AsRef, From, Into, TryFrom, TryInto},
+        default::Default,
+        iter::{DoubleEndedIterator, ExactSizeIterator, Extend, FromIterator, IntoIterator, Iterator},
+        marker::{Copy, Send, Sized, Sync, Unpin},
+        mem::drop,
+        ops::{Drop, Fn, FnMut, FnOnce},
+        option::Option::{self, None, Some},
+        result::Result::{self, Err, Ok},
+        string::{String, ToString},
+        vec::Vec,
+    };
+}

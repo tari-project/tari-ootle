@@ -1,0 +1,49 @@
+// Copyright 2022 The Tari Project
+// SPDX-License-Identifier: BSD-3-Clause
+
+syntax = "proto3";
+
+package tari.ootle.common;
+
+message Signature {
+  bytes public_nonce = 1;
+  bytes signature = 2;
+}
+
+message SignatureAndPublicKey {
+  bytes public_nonce = 1;
+  bytes signature = 2;
+  bytes public_key = 3;
+}
+
+message SubstateAddress {
+  bytes bytes = 1;
+}
+
+message Epoch {
+  uint64 epoch = 1;
+}
+
+// Represents an Amount. Using three fields is more compact than using bytes and allows for infallible conversion.
+message Amount {
+  // LSD
+  uint64 digit1 = 1;
+  // MSD
+  uint64 digit2 = 2;
+}
+
+message CommitmentSignature {
+  bytes public_nonce_commitment = 1;
+  bytes signature_u = 2;
+  bytes signature_v = 3;
+}
+
+
+message SubstateRequirement {
+  bytes substate_id = 1;
+  OptionalVersion version = 2;
+}
+
+message OptionalVersion {
+  uint32 version = 1;
+}

@@ -1,0 +1,114 @@
+//   Copyright 2024 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+use std::time::Instant;
+
+use rand::rngs::OsRng;
+use tari_crypto::{
+    keys::{PublicKey, SecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey, pedersen::PedersenCommitment},
+};
+use tari_engine_types::crypto::validate_elgamal_verifiable_balance_proof;
+use tari_ootle_wallet_crypto::{GenerateValueLookup, OutputWitness, confidential};
+use tari_template_lib_types::{Amount, EncryptedData};
+use tari_utilities::ByteArray;
+
+fn create_output_statement(value: u64, view_key: &RistrettoPublicKey) -> OutputWitness {
+    let mask = RistrettoSecretKey::random(&mut OsRng);
+    OutputWitness {
+        amount: value,
+        mask,
+        sender_public_nonce: Default::default(),
+        minimum_value_promise: 0,
+        encrypted_data: EncryptedData::try_from(vec![123; EncryptedData::min_size()]).unwrap(),
+        resource_view_key: Some(view_key.clone()),
+    }
+}
+
+fn keypair_from_seed(seed: u8) -> (RistrettoSecretKey, RistrettoPublicKey) {
+    let secret_key = RistrettoSecretKey::from_canonical_bytes(&[seed; 32]).unwrap();
+    let public_key = RistrettoPublicKey::from_secret_key(&secret_key);
+    (secret_key, public_key)
+}
+
+#[test]
+fn it_allows_no_balance_proof_for_no_view_key() {
+    let commitment = PedersenCommitment::from_public_key(&RistrettoPublicKey::default());
+    let proof = validate_elgamal_verifiable_balance_proof(&commitment, None, None).unwrap();
+    assert!(proof.is_none());
+}
+
+#[test]
+fn it_errors_no_balance_proof_with_view_key() {
+    let (_, view_key) = keypair_from_seed(1);
+    let output_statement = create_output_statement(123, &view_key);
+
+    let proof =
+        confidential::create_output_statement(Some(&output_statement), Amount::zero(), None, Amount::zero()).unwrap();
+    let output_statement = proof.output.as_ref().unwrap();
+    let viewable_balance_proof = proof.output.as_ref().unwrap().viewable_balance_proof.as_ref().unwrap();
+    let commitment = PedersenCommitment::from_canonical_bytes(output_statement.commitment.as_ref()).unwrap();
+    validate_elgamal_verifiable_balance_proof(&commitment, None, Some(viewable_balance_proof)).unwrap_err();
+}
+
+#[test]
+fn it_errors_with_balance_proof_and_no_view_key() {
+    let commitment = PedersenCommitment::from_public_key(&RistrettoPublicKey::default());
+    validate_elgamal_verifiable_balance_proof(&commitment, Some(&RistrettoPublicKey::default()), None).unwrap_err();
+}
+
+#[test]
+fn it_generates_a_valid_proof() {
+    let (view_key_secret, view_key) = keypair_from_seed(1);
+    let output_statement = create_output_statement(123, &view_key);
+
+    let timer = Instant::now();
+    let proof =
+        confidential::create_output_statement(Some(&output_statement), Amount::zero(), None, Amount::zero()).unwrap();
+    let gen_proof_time = timer.elapsed();
+
+    let output_statement = proof.output.as_ref().unwrap();
+    let viewable_balance_proof = proof.output.as_ref().unwrap().viewable_balance_proof.as_ref().unwrap();
+    let commitment = PedersenCommitment::from_canonical_bytes(output_statement.commitment.as_ref()).unwrap();
+    let timer = Instant::now();
+    let proof = validate_elgamal_verifiable_balance_proof(&commitment, Some(&view_key), Some(viewable_balance_proof))
+        .unwrap()
+        .unwrap();
+    let validate_proof_time = timer.elapsed();
+
+    let timer = Instant::now();
+    let balance = proof
+        .brute_force_balance(&view_key_secret, 0..=1000, &mut GenerateValueLookup)
+        .unwrap();
+    let brute_force_time = timer.elapsed();
+    assert_eq!(balance, Some(123));
+
+    println!("Generate proof time: {:?}", gen_proof_time);
+    println!("Validate proof time: {:?}", validate_proof_time);
+    println!("Brute force time: {:?}", brute_force_time);
+}
+
+#[test]
+fn serialize_deserialize() {
+    let (_view_key_secret, view_key) = keypair_from_seed(1);
+    let output_statement = create_output_statement(123, &view_key);
+    let change_statement = create_output_statement(123, &view_key);
+
+    let proof = confidential::create_withdraw_proof(
+        &[],
+        Amount::from(123u64),
+        Some(&output_statement),
+        Amount::from(123u64),
+        Some(&change_statement),
+        Amount::from(0u64),
+    )
+    .unwrap();
+
+    let json = serde_json::to_string(&proof).unwrap();
+    let deser_proof = serde_json::from_str(&json).unwrap();
+    assert_eq!(proof, deser_proof);
+
+    let cbor = tari_bor::encode(&proof).unwrap();
+    let deser_proof = tari_bor::decode_exact(&cbor).unwrap();
+    assert_eq!(proof, deser_proof);
+}

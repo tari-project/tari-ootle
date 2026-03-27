@@ -1,0 +1,37 @@
+//   Copyright 2023 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+use tari_template_abi::rust::{
+    fmt,
+    fmt::{Display, Formatter},
+};
+
+/// Represents an error that occurs when reading byte data with an unexpected length
+#[derive(Debug, PartialEq, Eq)]
+pub struct InvalidByteLengthError {
+    pub(crate) size: usize,
+    pub(crate) expected: usize,
+}
+
+impl InvalidByteLengthError {
+    pub fn new(size: usize, expected: usize) -> Self {
+        Self { size, expected }
+    }
+
+    pub fn actual_size(&self) -> usize {
+        self.size
+    }
+}
+
+impl Display for InvalidByteLengthError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Invalid byte length. Expected {} bytes, got {}",
+            self.expected, self.size
+        )
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for InvalidByteLengthError {}

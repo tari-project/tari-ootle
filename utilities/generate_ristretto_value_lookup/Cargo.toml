@@ -1,0 +1,18 @@
+[package]
+name = "tari_value_lookup_generator"
+version = "0.1.0"
+description = "CLI utility to generate and validate Ristretto value-to-public-key lookup tables"
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_crypto = { workspace = true }
+tari_ootle_wallet_crypto = { workspace = true, features = ["mmap-value-lookup"] }
+
+clap = { workspace = true, features = ["derive"] }
+human_bytes = { version = "0.4.3", default-features = false }
+humantime = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+futures = { workspace = true }

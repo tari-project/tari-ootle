@@ -3,7 +3,7 @@
 #    * Console: For log messages with level INFO and higher
 #    * log/validator-node/network.log: INFO-level logs related to the comms crate. This file will be quite busy since there
 #      are lots of P2P debug messages, and so this traffic is segregated from the application log messages
-#    * log/validator-node/dan_layer.log: Non-comms related INFO-level messages and higher are logged into this file
+#    * log/validator-node/ootle.log: Non-comms related INFO-level messages and higher are logged into this file
 #    * log/validator-node/other.log: Third-party crates' messages will be logged here at an ERROR level
 #
 #  See https://docs.rs/log4rs/0.8.3/log4rs/encode/pattern/index.html for deciphering the log pattern. The log format
@@ -24,24 +24,75 @@ appenders:
   # An appender named "network" that writes to a file with a custom pattern encoder
   network:
     kind: rolling_file
-    path: "log/validator-node/network.log"
+    path: "{{log_dir}}/log/validator-node/network.log"
     policy:
       kind: compound
       trigger:
         kind: size
-        limit: 10mb
+        limit: 100mb
       roller:
         kind: fixed_window
         base: 1
         count: 5
-        pattern: "log/validator-node/network.{}.log"
+        pattern: "{{log_dir}}/log/validator-node/network.{}.log"
     encoder:
-      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [Thread:{I}] {l:5} {m}{n} // {f}:{L}"
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [Thread:{I}] {l:5} {m}// {f}:{L}{n}"
 
-  # An appender named "dan_layer" that writes to a file with a custom pattern encoder
-  dan_layer:
+  # An appender named "ootle" that writes to a file with a custom pattern encoder
+  ootle:
     kind: rolling_file
-    path: "log/validator-node/dan_layer.log"
+    path: "{{log_dir}}/log/validator-node/ootle.log"
+    policy:
+      kind: compound
+      trigger:
+        kind: size
+        limit: 100mb
+      roller:
+        kind: fixed_window
+        base: 1
+        count: 5
+        pattern: "{{log_dir}}/log/validator-node/ootle.{}.log"
+    encoder:
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
+
+  # An appender named "ootle" that writes to a file with a custom pattern encoder
+  engine:
+    kind: rolling_file
+    path: "{{log_dir}}/log/validator-node/engine.log"
+    policy:
+      kind: compound
+      trigger:
+        kind: size
+        limit: 100mb
+      roller:
+        kind: fixed_window
+        base: 1
+        count: 5
+        pattern: "{{log_dir}}/log/validator-node/engine.{}.log"
+    encoder:
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
+
+  # An appender named "ootle" that writes to a file with a custom pattern encoder
+  consensus:
+    kind: rolling_file
+    path: "{{log_dir}}/log/validator-node/consensus.log"
+    policy:
+      kind: compound
+      trigger:
+        kind: size
+        limit: 100mb
+      roller:
+        kind: fixed_window
+        base: 1
+        count: 5
+        pattern: "{{log_dir}}/log/validator-node/consensus.{}.log"
+    encoder:
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
+
+  # An appender named "libp2p" that writes to a file with a custom pattern encoder
+  libp2p:
+    kind: rolling_file
+    path: "{{log_dir}}/log/validator-node/libp2p.log"
     policy:
       kind: compound
       trigger:
@@ -51,27 +102,27 @@ appenders:
         kind: fixed_window
         base: 1
         count: 5
-        pattern: "log/validator-node/dan_layer.{}.log"
+        pattern: "{{log_dir}}/log/validator-node/libp2p.{}.log"
     encoder:
-      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [{X(node-public-key)},{X(node-id)}] {l:5} {m}{n} // {f}:{L} "
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [Thread:{I}] {l:5} {m}{n} // {f}:{L} "
 
 
   # An appender named "other" that writes to a file with a custom pattern encoder
   other:
     kind: rolling_file
-    path: "log/validator-node/other.log"
+    path: "{{log_dir}}/log/validator-node/other.log"
     policy:
       kind: compound
       trigger:
         kind: size
-        limit: 10mb
+        limit: 100mb
       roller:
         kind: fixed_window
         base: 1
         count: 5
-        pattern: "log/validator-node/other.{}.log"
+        pattern: "{{log_dir}}/log/validator-node/other.{}.log"
     encoder:
-      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [Thread:{I}] {l:5} {m}{n} // {f}:{L} "
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [Thread:{I}] {l:5} {m} // {f}:{L} {n}"
 
 # Set the default logging level to "info"
 root:
@@ -85,40 +136,190 @@ loggers:
   tari::application:
     level: info
     appenders:
-      - dan_layer
+      - ootle
       - other
       - stdout
     additive: false
 
   tari::validator_node:
-    level: info
+    level: debug
     appenders:
-      - dan_layer
+      - ootle
       - stdout
     additive: false
 
-  tari::dan:
-    level: info
+  tari::ootle:
+    level: debug
     appenders:
-      - dan_layer
       - stdout
     additive: false
 
-  tari::dan_layer:
-    level: info
+  tari::ootle::epoch_manager:
+    level: debug
     appenders:
-      - dan_layer
-      - stdout
+      - ootle
     additive: false
 
-  # Route log events sent to the "comms" logger to the "network" appender
-  comms:
+  tari::ootle::epoch_oracles:
+    level: debug
+    appenders:
+      - ootle
+    additive: false
+
+  c::sidechain::validations:
+    level: debug
+    appenders:
+      - consensus
+
+  tari::consensus:
+    level: debug
+    appenders:
+      - consensus
+
+  tari::ootle::rpc_state_sync:
+    level: debug
+    appenders:
+      - consensus
+
+  tari::ootle::storage:
+    level: debug
+    appenders:
+      - consensus
+
+  tari::ootle::consensus:
+    level: debug
+    appenders:
+      - consensus
+
+  tari::ootle::hotstuff:
+    level: debug
+    appenders:
+      - consensus
+
+  tari::networking:
     level: debug
     appenders:
       - network
 
-    # Route log events sent to the "yamux" logger to the "network" appender
-  yamux:
-    level: info
+  tari::ootle::p2p:
+    level: debug
     appenders:
       - network
+      - ootle
+
+  tari::ootle::engine:
+    level: debug
+    appenders:
+      - engine
+
+  # spits out the whole wasm if in debug mode
+  regalloc:
+    level: info
+    appenders:
+      - other
+      - stdout
+    additive: false
+
+  # spits out the whole wasm if in debug mode
+  cranelift_codegen:
+    level: info
+    appenders:
+      - other
+      - stdout
+    additive: false
+  wasmer_compiler_cranelift:
+    level: warn
+    appenders:
+      - other
+    additive: false
+  hyper:
+    level: info
+    appenders:
+      - other
+    additive: false
+  tower:
+    level: info
+    appenders:
+      - other
+    additive: false
+  # libp2p
+  libp2p_identify:
+    level: debug
+    appenders:
+      - libp2p
+    additive: false
+  libp2p_noise:
+    level: debug
+    appenders:
+      - libp2p
+    additive: false
+  libp2p_peersync:
+    level: debug
+    appenders:
+      - libp2p
+    additive: false
+  libp2p_gossipsub:
+    level: info
+    appenders:
+      - libp2p
+    additive: false
+  quinn:
+    level: info
+    appenders:
+      - libp2p
+    additive: false
+  quinn_proto:
+    level: info
+    appenders:
+      - libp2p
+    additive: false
+  libp2p_core:
+    level: info
+    appenders:
+      - libp2p
+    additive: false
+  libp2p_mdns:
+    level: debug
+    appenders:
+      - libp2p
+    additive: false
+  libp2p_swarm:
+    level: debug
+    appenders:
+      - libp2p
+    additive: false
+  hickory_proto:
+    level: info
+    appenders:
+      - libp2p
+    additive: false
+  multistream_select:
+    level: info
+    appenders:
+      - libp2p
+    additive: false
+  libp2p_tcp:
+    level: debug
+    appenders:
+      - libp2p
+    additive: false
+  libp2p_quic:
+    level: debug
+    appenders:
+      - libp2p
+    additive: false
+  libp2p_kad:
+    level: debug
+    appenders:
+      - libp2p
+    additive: false
+  libp2p_ping:
+    level: debug
+    appenders:
+      - libp2p
+    additive: false
+  libp2p_messaging:
+    level: debug
+    appenders:
+      - libp2p
+    additive: false

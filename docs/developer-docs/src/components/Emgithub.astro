@@ -1,0 +1,9 @@
+---
+const {src} = Astro.props;
+const mode = 'dark'; // TODO get this passed in properly
+const encodedTarget = encodeURI(src);
+const encodedStyle = encodeURI(mode === 'dark' ? 'github-dark-dimmed' : 'github-light');
+const url = `https://emgithub.com/embed-v2.js?target=${encodedTarget}&type=code&showBorder=on&showLineNumbers=on&showFileMeta=on&showFullPath=on&showCopy=on&style=${encodedStyle}`;
+---
+
+<script src={url}></script>

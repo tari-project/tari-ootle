@@ -1,0 +1,39 @@
+[package]
+name = "tari_epoch_oracles"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_base_node_client = { workspace = true, optional = true }
+tari_common_types = { workspace = true }
+tari_transaction_components = { workspace = true, optional = true }
+tari_node_components = { workspace = true, optional = true }
+tari_ootle_common_types = { workspace = true }
+tari_ootle_storage = { workspace = true }
+tari_ootle_storage_sqlite = { workspace = true }
+tari_epoch_manager = { workspace = true }
+tari_template_lib = { workspace = true }
+tari_hashing = { workspace = true }
+ootle_serde = { workspace = true }
+
+anyhow = { workspace = true }
+blake2 = { workspace = true }
+log = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+thiserror = { workspace = true }
+serde = { workspace = true }
+time = { workspace = true, features = ["serde", "serde-human-readable"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["time", "macros", "rt"] }
+serde_json = { workspace = true }
+
+[features]
+base_layer = [
+    "tari_base_node_client",
+    "tari_transaction_components",
+    "tari_node_components",
+]

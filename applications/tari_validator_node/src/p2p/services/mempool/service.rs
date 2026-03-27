@@ -20,70 +20,357 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::{collections::HashSet, fmt::Display};
+
+use libp2p::{PeerId, gossipsub};
 use log::*;
-use tari_dan_common_types::ShardId;
-use tari_dan_core::{
-    message::DanMessage,
-    models::{Payload, TariDanPayload, TreeNodeHash},
-    services::infrastructure_services::OutboundService,
+use tari_consensus::hotstuff::HotstuffEvent;
+use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
+use tari_networking::NetworkingHandle;
+use tari_ootle_common_types::{ShardGroup, optional::Optional};
+use tari_ootle_p2p::{NewTransactionMessage, PeerAddress, TariMessage, TariMessagingSpec};
+use tari_ootle_storage::{StateStore, StateStoreReadTransaction, consensus_models::TransactionRecord};
+use tari_ootle_transaction::{Transaction, TransactionId};
+use tokio::sync::{broadcast, mpsc, oneshot};
+
+use super::MempoolError;
+#[cfg(feature = "metrics")]
+use super::metrics::PrometheusMempoolMetrics;
+use crate::{
+    consensus::ConsensusHandle,
+    p2p::services::mempool::{
+        gossip::{IncomingMessage, MempoolGossip},
+        handle::MempoolRequest,
+    },
+    transaction_validators::TransactionValidationError,
+    validator::Validator,
 };
-use tari_dan_engine::instruction::Transaction;
-use tokio::sync::{broadcast, mpsc};
 
-use crate::p2p::services::messaging::OutboundMessaging;
+const LOG_TARGET: &str = "tari::validator_node::mempool::service";
 
-const LOG_TARGET: &str = "dan::mempool::service";
+const MEM_MAX_TRANSACTIONS_DEDUP_ALLOC: usize = 1_000_000; // 32Mb
 
-pub struct MempoolService {
-    // TODO: Should be a HashSet
-    transactions: Vec<(Transaction, Option<TreeNodeHash>)>,
-    new_transactions: mpsc::Receiver<Transaction>,
-    outbound: OutboundMessaging,
-    tx_valid_transactions: broadcast::Sender<(Transaction, ShardId)>,
+#[derive(Debug)]
+pub struct MempoolService<TValidator, TStateStore> {
+    transactions: HashSet<TransactionId>,
+    mempool_requests: mpsc::Receiver<MempoolRequest>,
+    epoch_manager: EpochManagerHandle<PeerAddress>,
+    before_execute_validator: TValidator,
+    state_store: TStateStore,
+    gossip: MempoolGossip<PeerAddress>,
+    consensus_handle: ConsensusHandle,
+    #[cfg(feature = "metrics")]
+    metrics: PrometheusMempoolMetrics,
 }
 
-impl MempoolService {
+impl<TValidator, TStateStore> MempoolService<TValidator, TStateStore>
+where
+    TValidator: Validator<Transaction, Context = (), Error = TransactionValidationError>,
+    TStateStore: StateStore,
+{
     pub(super) fn new(
-        new_transactions: mpsc::Receiver<Transaction>,
-        outbound: OutboundMessaging,
-        tx_valid_transactions: broadcast::Sender<(Transaction, ShardId)>,
+        mempool_requests: mpsc::Receiver<MempoolRequest>,
+        epoch_manager: EpochManagerHandle<PeerAddress>,
+        before_execute_validator: TValidator,
+        state_store: TStateStore,
+        consensus_handle: ConsensusHandle,
+        networking: NetworkingHandle<TariMessagingSpec>,
+        rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,
+        #[cfg(feature = "metrics")] metrics: PrometheusMempoolMetrics,
     ) -> Self {
         Self {
-            transactions: Vec::new(),
-            new_transactions,
-            outbound,
-            tx_valid_transactions,
+            gossip: MempoolGossip::new(epoch_manager.clone(), networking, rx_gossip),
+            transactions: Default::default(),
+            mempool_requests,
+            epoch_manager,
+            before_execute_validator,
+            state_store,
+            consensus_handle,
+            #[cfg(feature = "metrics")]
+            metrics,
         }
     }
 
-    pub async fn run(mut self) {
+    pub async fn run(mut self) -> anyhow::Result<()> {
+        let mut consensus_events = self.consensus_handle.subscribe_to_hotstuff_events()?;
+
         loop {
             tokio::select! {
-                Some(transaction) = self.new_transactions.recv() => {
-                    self.handle_new_transaction(transaction).await;
+                req = self.mempool_requests.recv() => {
+                    match req {
+                        Some(req) => self.handle_request(req).await,
+                        None => {
+                            info!(target: LOG_TARGET, "Mempool request channel closed, shutting down");
+                            break;
+                        }
+                    }
+                },
+                result = self.gossip.next_message() => {
+                    match result {
+                        Some(msg) => {
+                            if let Err(e) = self.handle_new_transaction_from_remote(msg).await {
+                                warn!(target: LOG_TARGET, "Mempool rejected transaction: {}", e);
+                            }
+                        }
+                        None => {
+                            info!(target: LOG_TARGET, "Gossip channel closed, shutting down mempool service");
+                            break;
+                        }
+                    };
                 }
+                event = consensus_events.recv() => {
+                    match event {
+                        Ok(HotstuffEvent::EpochChanged { epoch, registered_shard_group})  => {
+                            if let Some(shard_group) = registered_shard_group {
+                                info!(target: LOG_TARGET, "Mempool service subscribing transaction messages for {shard_group} in {epoch}");
+                                self.gossip.subscribe(shard_group).await?;
+                            } else {
+                                info!(target: LOG_TARGET, "Not registered for epoch {epoch}, unsubscribing from gossip if necessary");
+                                self.gossip.unsubscribe().await?;
+                            }
+                        },
+                        Ok(_) => {},
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            warn!(target: LOG_TARGET, "Missed {} consensus events", n);
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            info!(target: LOG_TARGET, "Consensus event channel closed, shutting down mempool service");
+                            break;
+                        }
+                    }
+                },
 
                 else => {
-                    info!(target: LOG_TARGET, "Mempool service shutting down");
                     break;
                 }
             }
         }
+
+        self.gossip.unsubscribe().await?;
+
+        info!(target: LOG_TARGET, "💤 Mempool service shutting down");
+        Ok(())
     }
 
-    async fn handle_new_transaction(&mut self, transaction: Transaction) {
-        // TODO: validate transaction
-        let payload = TariDanPayload::new(transaction.clone());
-        for shard_id in payload.involved_shards() {
-            self.tx_valid_transactions
-                .send((transaction.clone(), shard_id))
-                // TODO: handle, if channel is closed I would say we can ignore it since we're probably shutting down
-                .unwrap();
+    async fn handle_request(&mut self, request: MempoolRequest) {
+        match request {
+            MempoolRequest::SubmitTransaction { transaction, reply } => {
+                handle(reply, self.handle_new_transaction_from_local(*transaction).await);
+            },
+            MempoolRequest::RemoveTransactions { transaction_ids, reply } => {
+                let num_found = self.remove_transactions(&transaction_ids);
+                handle::<_, MempoolError>(reply, Ok(num_found));
+            },
+            MempoolRequest::GetMempoolSize { reply } => {
+                let _ignore = reply.send(self.transactions.len());
+            },
         }
-        self.transactions.push((transaction.clone(), None));
-        let msg = DanMessage::NewTransaction(transaction);
-        if let Err(err) = self.outbound.flood(Default::default(), msg).await {
-            error!(target: LOG_TARGET, "Failed to broadcast new transaction: {}", err);
+    }
+
+    fn remove_transactions(&mut self, ids: &[TransactionId]) -> usize {
+        let mut num_found = 0;
+        for id in ids {
+            if self.transactions.remove(id) {
+                num_found += 1;
+            }
         }
+        if self.transactions.capacity() > MEM_MAX_TRANSACTIONS_DEDUP_ALLOC {
+            self.transactions.shrink_to(MEM_MAX_TRANSACTIONS_DEDUP_ALLOC);
+        }
+        num_found
+    }
+
+    async fn handle_new_transaction_from_local(&mut self, transaction: Transaction) -> Result<(), MempoolError> {
+        if self.transaction_exists(&transaction.calculate_id())? {
+            return Ok(());
+        }
+        info!(
+            target: LOG_TARGET,
+            "🎱 Received NEW transaction from local: {transaction}",
+        );
+
+        self.handle_new_transaction(transaction, None, self.gossip.get_num_incoming_messages())
+            .await?;
+
+        Ok(())
+    }
+
+    async fn handle_new_transaction_from_remote(
+        &mut self,
+        result: Result<IncomingMessage, MempoolError>,
+    ) -> Result<(), MempoolError> {
+        let IncomingMessage {
+            address: from,
+            message: msg,
+            num_pending,
+            message_size,
+        } = result?;
+        let TariMessage::NewTransaction(msg) = msg;
+        let NewTransactionMessage { transaction } = *msg;
+        let transaction_id = transaction.calculate_id();
+
+        if !self.consensus_handle.is_running() {
+            info!(
+                target: LOG_TARGET,
+                "🎱 Transaction {transaction_id} received while not in running state. Ignoring",
+            );
+            return Ok(());
+        }
+
+        if self.transaction_exists(&transaction_id)? {
+            return Ok(());
+        }
+        debug!(
+            target: LOG_TARGET,
+            "Received NEW transaction from {}: (size={}) {} {:?}",
+            from,
+            message_size,
+            transaction_id,
+            transaction
+        );
+
+        let current_epoch = self.consensus_handle.current_view().get_epoch();
+        let maybe_sender_committee_info = self
+            .epoch_manager
+            .get_committee_info_by_validator_address(current_epoch, &from)
+            .await
+            .optional()?;
+
+        self.handle_new_transaction(
+            transaction,
+            maybe_sender_committee_info.map(|c| c.shard_group()),
+            num_pending,
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_lines)]
+    async fn handle_new_transaction(
+        &mut self,
+        transaction: Transaction,
+        sender_shard_group: Option<ShardGroup>,
+        num_pending: usize,
+    ) -> Result<(), MempoolError> {
+        #[cfg(feature = "metrics")]
+        self.metrics.on_transaction_received(&transaction);
+        let tx_id = transaction.calculate_id();
+
+        if let Err(e) = self.before_execute_validator.validate(&(), &transaction) {
+            // Throw the transaction away
+            #[cfg(feature = "metrics")]
+            self.metrics.on_transaction_validation_error(&tx_id, &e);
+            return Err(e.into());
+        }
+
+        let current_epoch = self.consensus_handle.current_view().get_epoch();
+
+        let local_committee_shard = self.epoch_manager.get_local_committee_info(current_epoch).await?;
+        let is_involved = transaction.is_involved(&local_committee_shard);
+
+        if is_involved {
+            debug!(target: LOG_TARGET, "🎱 New transaction {tx_id} in mempool");
+            self.transactions.insert(tx_id);
+            self.consensus_handle
+                .notify_new_transaction(transaction.clone(), num_pending)
+                .await
+                .map_err(|_| MempoolError::ConsensusChannelClosed)?;
+
+            // If we received the message from gossip (sender_shard_group is Some), we don't need to gossip it again on
+            // the topic (prevents Duplicate errors)
+            if sender_shard_group.is_none() {
+                // This validator is involved, we to send the transaction to local replicas
+                if let Err(e) = self
+                    .gossip
+                    .forward_to_local_replicas(
+                        current_epoch,
+                        NewTransactionMessage {
+                            transaction: transaction.clone(),
+                        }
+                        .into(),
+                    )
+                    .await
+                {
+                    warn!(
+                        target: LOG_TARGET,
+                        "⚠️ Failed to propagate transaction to local replicas: {}",
+                        e
+                    );
+                }
+            }
+        } else {
+            debug!(
+                target: LOG_TARGET,
+                "🙇 Not in committee for transaction {tx_id}",
+            );
+        }
+
+        debug!(
+            target: LOG_TARGET,
+            "🎱 Propagating transaction {} ({} input(s))",
+            tx_id,
+            transaction.num_inputs(),
+        );
+        if let Err(e) = self
+            .gossip
+            .forward_to_foreign_replicas(current_epoch, NewTransactionMessage { transaction }, sender_shard_group)
+            .await
+        {
+            warn!(
+                target: LOG_TARGET,
+                "⚠️ Failed to propagate transaction to foreign committee: {}",
+                e
+            );
+        }
+
+        Ok(())
+    }
+
+    fn transaction_exists(&self, id: &TransactionId) -> Result<bool, MempoolError> {
+        if self.transactions.contains(id) {
+            debug!(
+                target: LOG_TARGET,
+                "🎱 Transaction {} already in mempool",
+                id
+            );
+            return Ok(true);
+        }
+
+        let transaction_exists = self.state_store.with_read_tx(|tx| {
+            if tx
+                .finalized_transaction_execution_get_finalized_time(id)
+                .optional()?
+                .is_some()
+            {
+                debug!(
+                    target: LOG_TARGET,
+                    "🎱 Transaction {} already finalized. Ignoring",
+                    id
+                );
+                return Ok(true);
+            }
+            TransactionRecord::exists(tx, id)
+        })?;
+
+        if transaction_exists {
+            debug!(
+                target: LOG_TARGET,
+                "🎱 Transaction {} already exists. Ignoring",
+                id
+            );
+            return Ok(true);
+        }
+
+        Ok(false)
+    }
+}
+
+fn handle<T, E: Display>(reply: oneshot::Sender<Result<T, E>>, result: Result<T, E>) {
+    if let Err(ref e) = result {
+        error!(target: LOG_TARGET, "Request failed with error: {}", e);
+    }
+    if reply.send(result).is_err() {
+        error!(target: LOG_TARGET, "Requester abandoned request");
     }
 }

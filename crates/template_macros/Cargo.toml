@@ -1,0 +1,22 @@
+[package]
+name = "tari_template_macros"
+description = "Tari template macro"
+version = "0.17.3"
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+tari_template_abi = { workspace = true, features = ["std", "func-hasher"] }
+
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+syn = { workspace = true, features = ["full", "extra-traits"] }
+
+[dev-dependencies]
+indoc = { workspace = true }
+tari_bor = { workspace = true }

@@ -1,0 +1,277 @@
+// Copyright 2021. The Tari Project
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice,
+// this list of conditions and the following disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+// this list of conditions and the following disclaimer in the documentation
+// and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its contributors
+// may be used to endorse or promote products derived from this software without
+// specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+// POSSIBILITY OF SUCH DAMAGE.
+syntax = "proto3";
+
+package tari.ootle.rpc;
+
+import "common.proto";
+import "consensus.proto";
+import "network.proto";
+import "transaction.proto";
+
+enum Status {
+  Accepted = 0;
+  Errored = 1;
+}
+
+message InvokeReadMethodRequest {
+  bytes contract_id = 1;
+  uint32 template_id = 2;
+  string method = 3;
+  bytes args = 4;
+  bytes sender = 5;
+}
+
+message InvokeReadMethodResponse {
+  bytes result = 1;
+}
+
+message InvokeMethodRequest {
+  bytes contract_id = 1;
+  uint32 template_id = 2;
+  string method = 3;
+  bytes args = 4;
+  bytes sender = 5;
+}
+
+message InvokeMethodResponse {
+  bytes result = 1;
+  Status status = 2;
+}
+
+message GetIdentityRequest {}
+
+message GetIdentityResponse {
+  bytes public_key = 1;
+  string public_address = 2;
+  bytes node_id = 3;
+}
+
+message SubmitTransactionRequest {
+  tari.ootle.transaction.Transaction transaction = 1;
+}
+
+message SubmitTransactionResponse {
+  bytes transaction_id = 1;
+}
+
+message GetPeersRequest {
+  uint64 since = 1;
+}
+
+message GetPeersResponse {
+  bytes identity = 1;
+  repeated tari.ootle.network.PeerIdentityClaim claims = 2;
+}
+
+message GetSubstateRequest {
+  tari.ootle.common.SubstateRequirement substate_requirement = 1;
+}
+
+message GetSubstateResponse {
+  bytes address = 1;
+  uint32 version = 2;
+  // Encoded Substate
+  bytes substate = 3;
+  SubstateStatus status = 4;
+  uint64 created_at_state_version = 5;
+  // Optional (i.e. 0 if not destroyed)
+  uint64 destroyed_at_state_version = 6;
+}
+
+enum SubstateStatus {
+  DoesNotExist = 0;
+  Up = 1;
+  Down = 2;
+}
+
+message GetTransactionResultRequest {
+  bytes transaction_id = 1;
+}
+
+message GetTransactionResultResponse {
+  PayloadResultStatus status = 1;
+  bytes execution_result = 2;
+  tari.ootle.consensus.Decision final_decision = 3;
+  string abort_details = 4;
+  int64 finalized_timestamp = 5;
+  uint64 execution_time_ms = 6;
+}
+
+enum PayloadResultStatus {
+  Pending = 0;
+  Finalized = 1;
+}
+
+// Minimal substate data
+message SubstateData {
+  bytes substate_id = 1;
+  uint32 version = 2;
+  oneof substate_value_or_hash {
+    bytes value = 3;
+    bytes hash = 4;
+  }
+}
+
+message SubstateUpdate {
+  oneof update {
+    SubstateCreate create = 1;
+    SubstateDestroy destroy = 2;
+  }
+}
+
+message SubstateCreate {
+  SubstateData substate = 1;
+}
+
+message SubstateDestroy {
+  bytes substate_id = 1;
+  uint32 version = 2;
+}
+
+message SyncBlocksRequest {
+  // Optional (empty for None). Must be provided if the epoch is not provided
+  bytes start_block_id = 1;
+  // Optional - If start_block_id is provided, this is ignored. Must be provided if start_block_id is not provided. 
+  // In which case, start block is implicitly the first block of the epoch.
+  tari.ootle.common.Epoch epoch = 2;
+  // If true, QCs will be streamed.
+  bool stream_qcs = 3;
+  // Weather to stream all substates, only transaction receipts or do not stream any substates
+  StreamSubstateSelection stream_substates = 4;
+  // If true, transactions in the block will be streamed
+  bool stream_transactions = 5;
+}
+
+// Clippy complains about too many bools and prefers an enum
+enum StreamSubstateSelection {
+  No = 0;
+  AllSubstates = 1;
+  TransactionReceiptsOnly = 2;
+}
+
+message SyncBlocksResponse {
+  oneof sync_data {
+    tari.ootle.consensus.Block block = 1;
+    QuorumCertificates quorum_certificates = 2;
+    uint32 substate_count = 3;
+    SubstateUpdate substate_update = 4;
+    uint32 transaction_count = 5;
+    tari.ootle.transaction.Transaction transaction = 6;
+    uint32 transaction_receipt_count = 7;
+    SubstateCreate transaction_receipt = 8;
+  }
+}
+
+message QuorumCertificates {
+  repeated tari.ootle.consensus.QuorumCertificate quorum_certificates = 1;
+}
+
+message GetCheckpointsRequest {
+  tari.ootle.common.Epoch from_epoch = 1;
+  uint32 num_to_return = 2;
+}
+
+message GetCheckpointsResponse {
+  repeated EpochCheckpoint checkpoints = 1;
+}
+
+message EpochCheckpoint {
+  bytes proof = 1;
+  map<uint32, TreeRootSummary> shard_tree_summary = 2;
+}
+
+message TreeRootSummary {
+  bytes root_hash = 1;
+  uint64 state_version = 2;
+}
+
+message SyncStateRequest {
+  uint64 start_state_version = 1;
+  uint32 shard = 2;
+  // Optional - If not provided, state will be streamed until the current epoch
+  tari.ootle.common.Epoch until_epoch = 3;
+  // Bitflags representing which substates to return.
+  // enum StateSyncValueFilterFlags {
+  //  // Includes all substates
+  //  None = 0;
+  //  All = 0x0001;
+  //  // Includes Components
+  //  Component = 0x0002;
+  //  // Includes resources
+  //  Resource = 0x0004;
+  //  // Includes vaults
+  //  Vault = 0x0008;
+  //  // Includes fungible and non-fungible assets
+  //  NonFungible = 0x0010;
+  //  // Includes transaction receipts
+  //  TransactionReceipt = 0x0020;
+  //  // Includes published template metadata
+  //  Template = 0x0040;
+  //  // Includes validator fee pool substates
+  //  ValidatorFeePool = 0x0080;
+  //  // Includes UTXOs
+  //  Utxo = 0x0100;
+  //}
+  uint32 value_filters = 4;
+}
+
+message SyncStateResponse {
+  uint64 state_version = 1;
+  repeated SubstateUpdate updates = 2;
+  bool has_more = 3;
+  tari.ootle.common.Epoch epoch = 4;
+}
+
+enum TemplateType {
+  Wasm = 0;
+}
+
+message SyncTemplatesRequest {
+  repeated bytes addresses = 1;
+}
+
+message SyncTemplatesResponse {
+  bytes address = 1;
+  bytes author_public_key = 2;
+  TemplateType template_type = 3;
+  string template_name = 4;
+  bytes binary = 5;
+}
+
+message GetChainSummary {}
+
+message GetSubstatesBatchRequest {
+  // Encoded SubstateIds
+  repeated bytes substate_ids = 1;
+}
+
+// Streaming response
+message GetSubstatesBatchResponse {
+  tari.ootle.consensus.Substate substate = 1;
+}

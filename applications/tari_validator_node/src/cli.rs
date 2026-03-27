@@ -20,40 +20,140 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
-use tari_app_utilities::common_cli_args::CommonCliArgs;
-use tari_common::configuration::{ConfigOverrideProvider, Network};
+use tari_common::{
+    ConfigPath,
+    configuration::{ConfigOverrideProvider, Network as L1Network},
+};
+use tari_ootle_app_utilities::{
+    common_cli_args::CommonCliArgs,
+    p2p_config::{PeerSeedsConfig, ReachabilityMode},
+};
+use tari_ootle_common_types::Network;
+use url::Url;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 #[clap(propagate_version = true)]
-pub(crate) struct Cli {
+pub struct Cli {
     #[clap(flatten)]
     pub common: CommonCliArgs,
     /// Enable tracing
     #[clap(long, aliases = &["tracing", "enable-tracing"])]
     pub tracing_enabled: bool,
-    /// Supply a network (overrides existing configuration)
-    #[clap(long, env = "TARI_NETWORK")]
-    pub network: Option<String>,
     /// Bind address for JSON-rpc server
-    #[clap(long, alias = "rpc-address")]
-    pub json_rpc_address: Option<SocketAddr>,
+    #[clap(long, alias = "json-rpc-address")]
+    pub json_rpc_listener_address: Option<SocketAddr>,
+    #[clap(long, env = "TARI_VN_WEB_UI_LISTENER_ADDRESS", alias = "http-ui-address")]
+    pub web_ui_listener_address: Option<SocketAddr>,
+    #[clap(long, env = "TARI_VN_JSON_RPC_PUBLIC_URL")]
+    pub json_rpc_public_url: Option<String>,
+    #[clap(long, alias = "node-grpc", short = 'g', env = "TARI_VN_MINOTARI_NODE_GRPC_URL")]
+    pub epoch_oracle_minotari_node_grpc_url: Option<Url>,
+    #[clap(long, alias = "oracle-config")]
+    pub epoch_oracle_config: Option<PathBuf>,
+    #[clap(long, short = 's')]
+    pub peer_seeds: Vec<String>,
+    #[clap(long)]
+    pub listener_port: Option<u16>,
+    /// Set the node to unreachable mode, the node will not act as a relay and will attempt relayed connections.
+    #[clap(long)]
+    pub reachability: Option<ReachabilityMode>,
+    #[clap(long)]
+    pub disable_mdns: bool,
+    /// A replacement of a template address with a local WASM file, in the format <template_address>=<local file path>.
+    /// FOR DEBUGGING PURPOSES ONLY
+    #[clap(long, short = 'd')]
+    pub debug_templates: Vec<String>,
+    #[clap(long, env = "TARI_VN_TOKIO_CONSOLE_PORT")]
+    pub tokio_console_port: Option<u16>,
+    #[clap(subcommand)]
+    pub command: Option<Subcommand>,
+}
+
+impl Cli {
+    pub fn network(&self) -> Network {
+        self.common.network
+    }
 }
 
 impl ConfigOverrideProvider for Cli {
-    fn get_config_property_overrides(&self, default_network: Network) -> Vec<(String, String)> {
-        let mut overrides = self.common.get_config_property_overrides(default_network);
-        let network = self.network.clone().unwrap_or_else(|| default_network.to_string());
-        overrides.push(("network".to_string(), network.clone()));
-        overrides.push(("validator_node.override_from".to_string(), network.clone()));
-        overrides.push(("p2p.seeds.override_from".to_string(), network));
+    fn get_config_property_overrides(&self, network: &L1Network) -> Vec<(String, String)> {
+        let mut overrides = self.common.get_config_property_overrides(network);
+        overrides.push(("network".to_string(), network.to_string()));
+        overrides.push(("validator_node.override_from".to_string(), network.to_string()));
+        overrides.push(("p2p.seeds.override_from".to_string(), network.to_string()));
 
-        if let Some(ref addr) = self.json_rpc_address {
-            overrides.push(("validator_node.json_rpc_address".to_string(), addr.to_string()));
+        if let Some(ref json_rpc_address) = self.json_rpc_listener_address {
+            overrides.push((
+                "validator_node.json_rpc_listener_address".to_string(),
+                json_rpc_address.to_string(),
+            ));
+        }
+        if let Some(ref json_rpc_url) = self.json_rpc_public_url {
+            overrides.push((
+                "validator_node.json_rpc_public_url".to_string(),
+                json_rpc_url.to_string(),
+            ));
+        }
+        if let Some(ref web_ui_address) = self.web_ui_listener_address {
+            overrides.push((
+                "validator_node.web_ui_listener_address".to_string(),
+                web_ui_address.to_string(),
+            ));
+        }
+        if !self.peer_seeds.is_empty() {
+            overrides.push((
+                format!("{}.peer_seeds", PeerSeedsConfig::main_key_prefix()),
+                self.peer_seeds.join(","),
+            ));
+            overrides.push((
+                format!("{}.{}.peer_seeds", network, PeerSeedsConfig::main_key_prefix()),
+                self.peer_seeds.join(","),
+            ));
+        }
+        if let Some(listener_port) = self.listener_port {
+            overrides.push((
+                "validator_node.p2p.listener_port".to_string(),
+                listener_port.to_string(),
+            ));
+        }
+        if let Some(reachability) = self.reachability {
+            overrides.push((
+                "validator_node.p2p.reachability_mode".to_string(),
+                reachability.to_string(),
+            ));
+        }
+        if self.disable_mdns {
+            overrides.push(("validator_node.p2p.enable_mdns".to_string(), "false".to_string()));
+        }
+        if let Some(url) = self.epoch_oracle_minotari_node_grpc_url.as_ref() {
+            overrides.push((
+                "epoch_oracle.base_layer.base_node_grpc_url".to_string(),
+                url.to_string(),
+            ));
+        }
+        if let Some(ref config_path) = self.epoch_oracle_config {
+            overrides.push((
+                "epoch_oracle.configured.config_file".to_string(),
+                config_path
+                    .to_str()
+                    .expect("epoch_oracle_config must be a UTF-8 string")
+                    .to_string(),
+            ));
         }
         overrides
     }
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum Subcommand {
+    /// Start the validator node
+    Start,
+    /// Compact the database and exit
+    CompactDb,
+    /// Generate an identity keypair if one does not exist and exit
+    GenerateIdentity,
 }

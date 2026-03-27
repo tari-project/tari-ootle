@@ -1,0 +1,171 @@
+@font-face {
+  font-family: "AvenirRegular";
+  src: url("../public/fonts/AvenirLTStd-Book.otf");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "AvenirMedium";
+  src: url("../public/fonts/AvenirLTStd-Medium.otf");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "AvenirHeavy";
+  src: url("../public/fonts/AvenirLTStd-Heavy.otf");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "PoppinsRegular";
+  src: url("../public/fonts/poppins/Poppins-Regular.ttf");
+  font-display: swap;
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: "PoppinsMedium";
+  src: url("../public/fonts/poppins/Poppins-Medium.ttf");
+  font-display: swap;
+  font-weight: 500;
+}
+
+@font-face {
+  font-family: "PoppinsSemiBold";
+  src: url("../public/fonts/poppins/Poppins-SemiBold.ttf");
+  font-display: swap;
+  font-weight: 600;
+}
+
+@font-face {
+  font-family: "PoppinsBold";
+  src: url("../public/fonts/poppins/Poppins-Bold.ttf");
+  font-display: swap;
+  font-weight: 700;
+}
+
+@font-face {
+  font-family: "DrukMedium";
+  src: url("../public/fonts/druk/DrukLCG-Medium.ttf");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "DrukBold";
+  src: url("../public/fonts/druk/DrukLCG-Bold.ttf");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "DrukHeavy";
+  src: url("../public/fonts/druk/DrukLCG-Heavy.ttf");
+  font-display: swap;
+}
+
+body {
+  margin: 0;
+  font-family: "PoppinsRegular", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f5f5f7;
+  font-size: 12px;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+}
+
+.add-confirm-form {
+  display: flex;
+  flex-direction: column;
+  align-content: center;
+  gap: 8px;
+}
+
+.flex-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: stretch;
+  width: 100%;
+  gap: 8px;
+}
+
+.flex-container-vertical {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.heading-menu {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 5px;
+}
+
+.dialog-content {
+  width: clamp(450px, 40vw, 600px);
+}
+
+@media screen and (max-width: 767px) {
+  .flex-container > * {
+    width: 100%;
+  }
+}
+
+@media screen and (min-width: 768px) {
+  .add-confirm-form {
+    flex-direction: row;
+  }
+  .flex-container {
+    flex-direction: row;
+    align-items: stretch;
+  }
+}
+
+.MuiDataGrid-columnHeaderTitle {
+  font-family: "AvenirHeavy", sans-serif;
+}
+
+@keyframes purple-flash {
+  0% {
+    background-color: rgb(159, 66, 255, 0);
+  }
+  25% {
+    background-color: rgb(159, 66, 255, 0.1);
+  }
+  75% {
+    background-color: rgb(159, 66, 255, 0.1);
+  }
+  100% {
+    background-color: rgb(159, 66, 255, 0);
+  }
+}
+
+.purple-flash {
+  animation: purple-flash 0.5s ease-in-out;
+}
+
+p {
+  font-family: "PoppinsRegular", sans-serif;
+  font-weight: 400;
+  font-style: normal;
+}
+
+h1,
+h2,
+h3 {
+  font-family: "PoppinsBold", sans-serif;
+  font-weight: 700;
+  font-style: normal;
+}
+
+h4,
+h5,
+h6 {
+  font-family: "PoppinsSemiBold", sans-serif;
+  font-weight: 600;
+  font-style: normal;
+}

@@ -1,0 +1,21 @@
+[workspace]
+[package]
+name = "faucet"
+version = "0.9.1"
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tari_template_lib = { path = "../../../../crates/template_lib" }
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3       # Optimize for performance at the cost of compilation time.
+lto = true          # Enable Link Time Optimization.
+codegen-units = 1   # Reduce number of codegen units to increase optimizations.
+panic = 'abort'     # Abort on panic (reduces binary size).
+strip = 'debuginfo' # Strip debug info to reduce binary size.
+

@@ -1,0 +1,14 @@
+// Copyright 2022 The Tari Project
+// SPDX-License-Identifier: BSD-3-Clause
+
+syntax = "proto3";
+
+package tari.ootle.transaction;
+
+message NewTransactionMessage {
+  Transaction transaction = 1;
+}
+
+message Transaction {
+  bytes bor_encoded = 1;
+}

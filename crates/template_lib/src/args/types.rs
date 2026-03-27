@@ -1,0 +1,682 @@
+//   Copyright 2022. The Tari Project
+//
+//   Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
+//   following conditions are met:
+//
+//   1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following
+//   disclaimer.
+//
+//   2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
+//   following disclaimer in the documentation and/or other materials provided with the distribution.
+//
+//   3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote
+//   products derived from this software without specific prior written permission.
+//
+//   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+//   INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+//   DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+//   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+//   SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+//   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+use serde::{Deserialize, Serialize};
+use tari_template_abi::rust::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+    fmt::{Display, Formatter},
+    prelude::*,
+};
+use tari_template_lib_types::{
+    AuthHook,
+    ComponentAddress,
+    LogLevel,
+    Metadata,
+    NonFungibleAddress,
+    NonFungibleId,
+    OwnerRule,
+    ResourceAddress,
+    ResourceType,
+    UtxoId,
+    VaultId,
+    access_rules::{ComponentAccessRules, ResourceAccessRules},
+    bytes::Bytes,
+    confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
+    crypto::StealthValueProof,
+    stealth::StealthTransferStatement,
+};
+
+use crate::{
+    args::freeze_flags::VaultFreezeFlags,
+    models::{AddressAllocationId, BucketId, ComponentAddressAllocation, ProofId, ResourceAddressAllocation, VaultRef},
+    template::BuiltinTemplate,
+    types::{
+        Amount,
+        TemplateAddress,
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    },
+};
+// -------------------------------- LOGS -------------------------------- //
+
+/// Data needed for log emission from templates
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmitLogArg {
+    pub message: String,
+    pub level: LogLevel,
+}
+
+// -------------------------------- Component -------------------------------- //
+
+/// An operation over a component
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComponentInvokeArg {
+    pub component_ref: ComponentRef,
+    pub action: ComponentAction,
+    pub args: Vec<Bytes>,
+}
+
+/// The possible actions that can be performed on components
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ComponentAction {
+    Create,
+    GetState,
+    SetState,
+    SetAccessRules,
+    GetTemplateAddress,
+    GetOwnerProof,
+}
+
+/// Encapsulates all the ways that a component can be referenced
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub enum ComponentRef {
+    Component,
+    Ref(ComponentAddress),
+}
+
+impl ComponentRef {
+    pub fn as_component_address(&self) -> Option<ComponentAddress> {
+        match self {
+            ComponentRef::Component => None,
+            ComponentRef::Ref(addr) => Some(*addr),
+        }
+    }
+}
+
+impl Display for ComponentRef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            ComponentRef::Component => write!(f, "Component"),
+            ComponentRef::Ref(addr) => write!(f, "Ref({})", addr),
+        }
+    }
+}
+
+/// A component creation operation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateComponentArg {
+    pub encoded_state: tari_bor::Value,
+    pub owner_rule: OwnerRule,
+    pub access_rules: ComponentAccessRules,
+    pub address_allocation: Option<ComponentAddressAllocation>,
+}
+
+// -------------------------------- Events -------------------------------- //
+
+/// An event emission operation
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EmitEventArg {
+    pub topic: String,
+    pub payload: Metadata,
+}
+
+// -------------------------------- Resource -------------------------------- //
+
+/// An operation over a resource
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ResourceInvokeArg {
+    pub resource_ref: ResourceRef,
+    pub action: ResourceAction,
+    pub args: Vec<Bytes>,
+}
+
+/// Encapsulates all the ways that a resource can be referenced
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub enum ResourceRef {
+    Resource,
+    Ref(ResourceAddress),
+}
+
+impl ResourceRef {
+    pub fn as_resource_address(&self) -> Option<ResourceAddress> {
+        match self {
+            ResourceRef::Resource => None,
+            ResourceRef::Ref(addr) => Some(*addr),
+        }
+    }
+}
+
+impl From<ResourceAddress> for ResourceRef {
+    fn from(addr: ResourceAddress) -> Self {
+        ResourceRef::Ref(addr)
+    }
+}
+
+impl Display for ResourceRef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            ResourceRef::Resource => write!(f, "Resource"),
+            ResourceRef::Ref(addr) => write!(f, "Ref({})", addr),
+        }
+    }
+}
+
+/// An action performed on a Resource
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ResourceAction {
+    /// Create a new resource
+    Create,
+    /// Mint more of a resource
+    Mint,
+    /// Recall an amount resource from a vault
+    Recall,
+    /// Update on a non-fungible
+    UpdateNonFungibleData,
+    /// Get the total supply of a resource
+    GetTotalSupply,
+    /// Get the [ResourceInfo](tari_template_lib_types::ResourceType) of a resource
+    GetResourceInfo,
+    /// Gets a non-fungible resource by its ID
+    GetNonFungible,
+    /// Update the access rules of a resource
+    UpdateAccessRules,
+    /// Sets the freeze flags on a vault of a resource.
+    SetVaultFreeze,
+    /// Executes a stealth transfer for the resource
+    StealthTransfer,
+    /// Un/freezes one or more stealth UTXOs of a resource
+    SetStealthUtxosFreeze,
+    /// Burns a stealth UTXO of a resource
+    StealthUtxoBurn,
+}
+
+/// All the possible minting operation types
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum MintArg {
+    Fungible {
+        amount: Amount,
+    },
+    NonFungible {
+        tokens: BTreeMap<NonFungibleId, (tari_bor::Value, tari_bor::Value)>,
+    },
+    Confidential {
+        statement: Box<ConfidentialOutputStatement>,
+    },
+    Stealth {
+        amount: Amount,
+    },
+}
+
+impl MintArg {
+    pub fn as_resource_type(&self) -> ResourceType {
+        match self {
+            MintArg::Fungible { .. } => ResourceType::Fungible,
+            MintArg::NonFungible { .. } => ResourceType::NonFungible,
+            MintArg::Confidential { .. } => ResourceType::Confidential,
+            MintArg::Stealth { .. } => ResourceType::Stealth,
+        }
+    }
+}
+
+/// A resource creation operation
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateResourceArg {
+    pub resource_type: ResourceType,
+    pub owner_rule: OwnerRule,
+    pub access_rules: ResourceAccessRules,
+    pub metadata: Metadata,
+    pub mint_arg: Option<MintArg>,
+    pub view_key: Option<RistrettoPublicKeyBytes>,
+    pub authorize_hook: Option<AuthHook>,
+    pub address_allocation: Option<ResourceAddressAllocation>,
+    pub divisibility: u8,
+    pub is_total_supply_tracking_enabled: bool,
+}
+
+/// A resource minting operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MintResourceArg {
+    pub mint_arg: MintArg,
+}
+
+/// Stealth transfer operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StealthTransferResourceArg {
+    pub transfer: StealthTransferStatement,
+    pub input_bucket: Option<BucketId>,
+}
+
+/// A resource minting operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ResourceGetNonFungibleArg {
+    pub id: NonFungibleId,
+}
+
+/// A non-fungible resource update operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ResourceUpdateNonFungibleDataArg {
+    pub id: NonFungibleId,
+    pub data: tari_bor::Value,
+}
+
+/// A convenience enum that allows to specify resource types
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ResourceDiscriminator {
+    /// Select all tokens
+    Everything,
+    /// Select a specific amount of fungible (public or stealth) tokens
+    Fungible { amount: Amount },
+    /// Select specific non-fungible tokens
+    NonFungible { tokens: BTreeSet<NonFungibleId> },
+    /// Select specific confidential commitments and a revealed amount
+    Confidential {
+        commitments: BTreeSet<PedersenCommitmentBytes>,
+        revealed_amount: Amount,
+    },
+}
+
+impl Display for ResourceDiscriminator {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            ResourceDiscriminator::Everything => write!(f, "Everything"),
+            ResourceDiscriminator::Fungible { amount } => write!(f, "Fungible({})", amount),
+            ResourceDiscriminator::NonFungible { tokens } => write!(f, "NonFungible({} token(s))", tokens.len()),
+            ResourceDiscriminator::Confidential {
+                commitments,
+                revealed_amount,
+            } => {
+                write!(
+                    f,
+                    "Confidential({} commitment(s), {})",
+                    commitments.len(),
+                    revealed_amount
+                )
+            },
+        }
+    }
+}
+
+/// A resource recall operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RecallResourceArg {
+    pub vault_id: VaultId,
+    pub resource: ResourceDiscriminator,
+}
+
+/// A resource freeze operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FreezeResourceArg {
+    pub vault_id: VaultId,
+    pub flags: VaultFreezeFlags,
+}
+
+// -------------------------------- Vault -------------------------------- //
+
+/// A vault operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VaultInvokeArg {
+    pub vault_ref: VaultRef,
+    pub action: VaultAction,
+    pub args: Vec<Bytes>,
+}
+
+/// The possible actions that can be performed on vaults
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum VaultAction {
+    Create,
+    Deposit,
+    Withdraw,
+    GetBalance,
+    GetLockedBalance,
+    GetResourceAddress,
+    GetNonFungibleIds,
+    GetCommitmentCount,
+    PayFee,
+    CreateProofByResource,
+    CreateProofByFungibleAmount,
+    CreateProofByNonFungibles,
+    CreateProofByConfidentialResource,
+    GetNonFungibles,
+}
+
+impl VaultAction {
+    pub fn requires_write_access(&self) -> bool {
+        use VaultAction::*;
+        !matches!(
+            self,
+            GetBalance |
+                GetLockedBalance |
+                GetResourceAddress |
+                GetNonFungibleIds |
+                GetCommitmentCount |
+                GetNonFungibles
+        )
+    }
+}
+
+/// A vault withdraw operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum VaultWithdrawArg {
+    Fungible { amount: Amount },
+    NonFungible { ids: BTreeSet<NonFungibleId> },
+    Confidential { proof: Box<ConfidentialWithdrawProof> },
+    Stealth { amount: Amount },
+}
+
+// -------------------------------- Fees -------------------------------- //
+
+/// A fee payment operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PayFeeArg {
+    pub amount: Amount,
+    pub statement: Option<StealthTransferStatement>,
+}
+
+// -------------------------------- Bucket -------------------------------- //
+
+/// A bucket operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BucketInvokeArg {
+    pub bucket_ref: BucketRef,
+    pub action: BucketAction,
+    pub args: Vec<Bytes>,
+}
+
+/// Encapsulates all the ways that a bucket can be referenced
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub enum BucketRef {
+    Bucket(ResourceAddress),
+    Ref(BucketId),
+}
+
+impl BucketRef {
+    pub fn resource_address(&self) -> Option<ResourceAddress> {
+        match self {
+            BucketRef::Bucket(addr) => Some(*addr),
+            BucketRef::Ref(_) => None,
+        }
+    }
+
+    pub fn bucket_id(&self) -> Option<BucketId> {
+        match self {
+            BucketRef::Bucket(_) => None,
+            BucketRef::Ref(id) => Some(*id),
+        }
+    }
+}
+
+impl Display for BucketRef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            BucketRef::Bucket(addr) => write!(f, "Bucket({})", addr),
+            BucketRef::Ref(id) => write!(f, "Ref({})", id),
+        }
+    }
+}
+
+/// The possible actions that can be performed on buckets
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub enum BucketAction {
+    GetResourceAddress,
+    GetResourceType,
+    GetAmount,
+    Take,
+    TakeConfidential,
+    Join,
+    Burn,
+    CreateProof,
+    GetNonFungibleIds,
+    GetNonFungibles,
+    CountConfidentialCommitments,
+    DropEmpty,
+}
+
+/// A bucket burn operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BucketBurnArg {
+    pub bucket_id: BucketId,
+}
+
+/// BucketAction::GetAmount argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum BucketGetAmountArg {
+    AmountOnly,
+    LockedOnly,
+    AmountAndLocked,
+    Everything,
+}
+
+// -------------------------------- Workspace -------------------------------- //
+
+/// The possible actions that can be performed on workspace variables
+#[derive(Clone, Copy, Debug)]
+pub enum WorkspaceAction {
+    PutLastInstructionOutput,
+    Get,
+    DropAllProofs,
+    Assert,
+    DropAll,
+}
+
+// -------------------------------- NonFungible -------------------------------- //
+
+/// A non-fungible operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NonFungibleInvokeArg {
+    pub address: NonFungibleAddress,
+    pub action: NonFungibleAction,
+    pub args: Vec<Bytes>,
+}
+
+/// The possible actions that can be performed on non-fungible resources
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum NonFungibleAction {
+    GetData,
+    GetMutableData,
+}
+
+// -------------------------------- Consensus -------------------------------- //
+
+/// A consensus operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConsensusInvokeArg {
+    pub action: ConsensusAction,
+}
+
+/// The possible actions that can be performed related to consensus
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ConsensusAction {
+    GetCurrentEpoch,
+}
+
+// -------------------------------- GenerateRandom -------------------------------- //
+
+/// A random generation operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GenerateRandomInvokeArg {
+    pub action: GenerateRandomAction,
+}
+
+/// The possible actions that can be performed related to random generation
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum GenerateRandomAction {
+    GetRandomBytes { len: u32 },
+}
+
+// -------------------------------- CallerContext -------------------------------- //
+
+/// The possible actions that can be performed related to the caller context
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum CallerContextAction {
+    GetCallerPublicKey,
+    GetComponentAddress,
+    GetSignerProof,
+}
+
+/// A caller context operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CallerContextInvokeArg {
+    pub action: CallerContextAction,
+    pub args: Vec<Bytes>,
+}
+
+// -------------------------------- AddressAllocation -------------------------------- //
+
+/// The possible actions that can be performed related to the caller context
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum AddressAllocationInvokeArg {
+    GetAddress(AddressAllocationId),
+    CreateComponentAllocation {
+        public_key: Option<RistrettoPublicKeyBytes>,
+    },
+    CreateResourceAllocation,
+}
+
+/// Result af an address allocation based on the input substate type
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum AllocateAddressResult {
+    ComponentAddress(ComponentAddressAllocation),
+    ResourceAddress(ResourceAddressAllocation),
+}
+
+// -------------------------------- CallInvoke -------------------------------- //
+
+/// A call operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CallInvokeArg {
+    pub action: CallAction,
+    pub args: Vec<Bytes>,
+}
+
+/// All the possible call operation types
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum CallAction {
+    /// Call to a template's function
+    CallFunction,
+    /// Call to a component's method
+    CallMethod,
+}
+
+/// A template's function call operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CallFunctionArg {
+    pub template_address: TemplateAddress,
+    pub function: String,
+    pub args: Vec<Bytes>,
+}
+
+/// A component's method call operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CallMethodArg {
+    pub component_address: ComponentAddress,
+    pub method: String,
+    pub args: Vec<Bytes>,
+}
+
+// -------------------------------- ProofInvoke -------------------------------- //
+
+/// A proof-related operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProofInvokeArg {
+    pub proof_ref: ProofRef,
+    pub action: ProofAction,
+    pub args: Vec<Bytes>,
+}
+
+/// All the possible ways to reference a proof
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub enum ProofRef {
+    Proof(ResourceAddress),
+    Ref(ProofId),
+}
+
+impl ProofRef {
+    pub fn resource_address(&self) -> Option<ResourceAddress> {
+        match self {
+            ProofRef::Proof(addr) => Some(*addr),
+            ProofRef::Ref(_) => None,
+        }
+    }
+
+    pub fn proof_id(&self) -> Option<ProofId> {
+        match self {
+            ProofRef::Proof(_) => None,
+            ProofRef::Ref(id) => Some(*id),
+        }
+    }
+}
+
+impl Display for ProofRef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            ProofRef::Proof(addr) => write!(f, "Proof({})", addr),
+            ProofRef::Ref(id) => write!(f, "Ref({})", id),
+        }
+    }
+}
+
+/// All the possible actions that can be performed on proofs
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ProofAction {
+    GetAmount,
+    GetResourceAddress,
+    GetResourceType,
+    GetNonFungibles,
+    Authorize,
+    DropAuthorize,
+    Drop,
+}
+
+/// An argument to represent a proof of a vault's fungible amount
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VaultCreateProofByFungibleAmountArg {
+    pub amount: Amount,
+}
+
+/// An argument to represent a proof of a vault's non-fungible presence
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VaultCreateProofByNonFungiblesArg {
+    pub ids: BTreeSet<NonFungibleId>,
+}
+
+/// TODO: confidential. Zero knowledge proof of commitment factors
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateProofOfResourceByConfidentialArg {
+    // pub proof: ConfidentialProofOfKnowledge
+}
+
+// -------------------------------- BuiltinTemplate -------------------------------- //
+
+/// A template builtin operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BuiltinTemplateInvokeArg {
+    pub action: BuiltinTemplateAction,
+}
+
+/// The possible actions that can be performed related to builtin templates
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum BuiltinTemplateAction {
+    GetTemplateAddress { bultin: BuiltinTemplate },
+}
+
+// -------------------------------- UTXOs -------------------------------- //
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SetFreezeStealthUtxosArg {
+    pub utxos: Vec<UtxoId>,
+    pub freeze: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BurnStealthUtxoArg {
+    pub utxo_id: UtxoId,
+    pub value_proof: Option<StealthValueProof>,
+}

@@ -186,7 +186,9 @@ async fn main() -> Result<(), anyhow::Error> {
             );
 
             if !confirm {
-                eprint!("\nAre you sure you want to reset the wallet? Type 'yes' to continue: ");
+                use std::io::Write;
+                print!("\nAre you sure you want to reset the wallet? Type 'yes' to continue: ");
+                std::io::stdout().flush()?;
                 let mut input = String::new();
                 tokio::io::AsyncBufReadExt::read_line(&mut tokio::io::BufReader::new(tokio::io::stdin()), &mut input)
                     .await?;

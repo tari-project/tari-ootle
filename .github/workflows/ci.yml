@@ -230,7 +230,7 @@ jobs:
 
   # Required status check placeholder — satisfies the "check stable" branch protection
   # rule. The full workspace is already compiled by the test shards on stable.
-  check stable:
+  check-stable:
     name: check stable
     if: always()
     needs: [ test-shards ]

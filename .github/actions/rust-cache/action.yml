@@ -18,6 +18,7 @@ runs:
     - name: caching
       uses: Swatinem/rust-cache@v2
       with:
+        shared-key: ootle
         cache-all-crates: true
 
     - name: cache diagnostics (after restore)

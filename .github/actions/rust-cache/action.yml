@@ -23,6 +23,7 @@ runs:
     - name: caching
       uses: Swatinem/rust-cache@v2
       with:
+        prefix-key: v0-rust-ci-build
         cache-all-crates: true
         save-if: ${{ inputs.save-if }}
 

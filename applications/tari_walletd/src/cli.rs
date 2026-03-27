@@ -170,4 +170,14 @@ pub enum Subcommand {
         about = "Get current seed words of wallet (used for wallet retrieval)"
     )]
     SeedWords,
+    #[clap(
+        name = "reset",
+        about = "Reset the wallet by deleting all on-chain state. Intended for testnet resets only. The seed key is \
+                 preserved in the OS keyring."
+    )]
+    Reset {
+        /// Skip the interactive confirmation prompt
+        #[clap(long)]
+        confirm: bool,
+    },
 }

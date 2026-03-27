@@ -170,6 +170,54 @@ async fn main() -> Result<(), anyhow::Error> {
 
             return Ok(());
         },
+        Some(Subcommand::Reset { confirm }) => {
+            let network = cli.network();
+            if !network.is_testnet() {
+                anyhow::bail!("The reset command is not available on mainnet");
+            }
+
+            let db_path = config.to_data_dir().join("wallet.sqlite");
+
+            println!(
+                "This command is intended for testnet resets only.\nIt will move the wallet database at '{}' to a \
+                 .bak file, removing all accounts,\ntransactions, balances and other on-chain state.\nYour seed key \
+                 is preserved in the OS keyring and can be used to recover accounts.",
+                db_path.display()
+            );
+
+            if !confirm {
+                use std::io::Write;
+                print!("\nAre you sure you want to reset the wallet? Type 'yes' to continue: ");
+                std::io::stdout().flush()?;
+                let mut input = String::new();
+                tokio::io::AsyncBufReadExt::read_line(&mut tokio::io::BufReader::new(tokio::io::stdin()), &mut input)
+                    .await?;
+                if input.trim() != "yes" {
+                    println!("Reset cancelled.");
+                    return Ok(());
+                }
+            }
+
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .context("System time is before the UNIX epoch")?
+                .as_secs();
+            let bak_path = db_path.with_extension(format!("sqlite.{timestamp}.bak"));
+            match tokio::fs::rename(&db_path, &bak_path).await {
+                Ok(()) => println!(
+                    "Wallet database moved to '{}'.\nThe wallet will be recreated on next startup.",
+                    bak_path.display()
+                ),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    println!("No wallet database found at '{}'. Nothing to reset.", db_path.display());
+                },
+                Err(e) => {
+                    anyhow::bail!("Failed to move wallet database: {}", e);
+                },
+            }
+
+            return Ok(());
+        },
         Some(Subcommand::SeedWords) => {
             let wallet_store = init_wallet_store(&config)?;
             let mut sdk = initialize_wallet_sdk(&config, wallet_store)?;

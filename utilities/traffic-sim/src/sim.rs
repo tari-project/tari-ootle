@@ -279,7 +279,6 @@ impl TrafficSim {
                     .client
                     .create_free_test_coins(AccountsCreateFreeTestCoinsRequest {
                         account: resp.account.component_address.into(),
-                        amount: 1_000_000_000u64.into(),
                         max_fee: None,
                     })
                     .await?;
@@ -418,7 +417,6 @@ impl TrafficSim {
                 client
                     .create_free_test_coins(AccountsCreateFreeTestCoinsRequest {
                         account: (*account.component_address()).into(),
-                        amount: 1_000_000_000u64.into(),
                         max_fee: None,
                     })
                     .await?;

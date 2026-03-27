@@ -26,7 +26,7 @@ use ootle_rs::{
     key_provider::PrivateKeyProvider,
     ootle_template,
     provider::{PendingTransaction, ProviderBuilder, WalletProvider},
-    template_types::{Amount, ComponentAddress, constants::TARI},
+    template_types::{Amount, ComponentAddress},
     transaction::TransactionSigner,
     wallet::OotleWallet,
 };
@@ -111,7 +111,7 @@ async fn main() {
 
     // Fund the account from faucet
     let unsigned_tx = IFaucet::new(&provider)
-        .take_faucet_funds(10 * TARI)
+        .take_faucet_funds()
         .pay_fee(500u64)
         .prepare()
         .await

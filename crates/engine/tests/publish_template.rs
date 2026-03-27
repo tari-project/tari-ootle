@@ -25,7 +25,7 @@ const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 #[test]
 fn publish_template_success() {
     let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
-    let (account_address, owner_proof, account_key, public_key) = test.create_custom_funded_account(250_000u64);
+    let (account_address, owner_proof, account_key, public_key) = test.create_funded_account_with_keypair();
     let template = compile_template("tests/templates/hello_world", &[]).unwrap();
     let expected_binary_hash = hash_template_code(template.code());
     let expected_template_address =
@@ -61,7 +61,7 @@ fn publish_template_success() {
 #[test]
 fn publish_template_invalid_binary() {
     let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
-    let (account_address, owner_proof, account_key, _) = test.create_custom_funded_account(250_000u64);
+    let (account_address, owner_proof, account_key, _) = test.create_funded_account_with_keypair();
     let result = test.execute_expect_failure(
         Transaction::builder_localnet()
             .pay_fee_from_component(account_address, 200_000u64)
@@ -81,7 +81,7 @@ fn publish_template_invalid_binary() {
 #[test]
 fn publish_template_too_big_binary() {
     let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
-    let (account_address, owner_proof, account_key, _) = test.create_custom_funded_account(250_000u64);
+    let (account_address, owner_proof, account_key, _) = test.create_funded_account_with_keypair();
     let random_wasm_binary = generate_random_binary(limits::ENGINE_LIMITS.max_template_binary_size_bytes + 1);
     let wasm_binary_size = random_wasm_binary.len();
     let reason = test.execute_expect_failure(

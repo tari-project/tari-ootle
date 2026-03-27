@@ -193,6 +193,13 @@ pub(super) fn transaction_rejected<T: Display>(details: T) -> anyhow::Error {
     )
 }
 
+pub(super) fn faucet_already_claimed() -> anyhow::Error {
+    application_error(
+        ApplicationErrorCode::FaucetAlreadyClaimed,
+        "This account has already claimed testnet funds",
+    )
+}
+
 pub(super) fn general_error<T: Display>(details: T) -> anyhow::Error {
     application_error(ApplicationErrorCode::GeneralError, details)
 }

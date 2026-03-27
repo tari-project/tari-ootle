@@ -44,7 +44,7 @@ impl Executable for CreateAndFundAccountExecutable {
                 Instruction::CallMethod {
                     call: FAUCET_COMPONENT_ADDRESS.into(),
                     method: "take".try_into().unwrap(),
-                    args: call_args![1000],
+                    args: call_args![],
                 },
                 Instruction::PutLastInstructionOutputOnWorkspace { key: 0 },
                 Instruction::CreateAccount {

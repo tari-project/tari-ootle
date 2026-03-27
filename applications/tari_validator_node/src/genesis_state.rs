@@ -43,6 +43,7 @@ use tari_template_lib::types::{
         PUBLIC_IDENTITY_RESOURCE_ADDRESS,
         STEALTH_TARI_RESOURCE_ADDRESS,
         TOKEN_SYMBOL,
+        XTR_FAUCET_CLAIM_RESOURCE_ADDRESS,
         XTR_FAUCET_COMPONENT_ADDRESS,
         XTR_FAUCET_VAULT_ADDRESS,
     },
@@ -131,6 +132,22 @@ where
         ),
     };
     create_substate(tx, num_preshards, XTR_FAUCET_COMPONENT_ADDRESS, value)?;
+
+    // Create the claim receipt resource: one NFT per claimant public key, immediately burned after minting.
+    // The burned substate key persists on-chain, preventing duplicate claims.
+    let claim_resource = Resource::new(
+        ResourceType::NonFungible,
+        SubstateOwnerRule::None,
+        ResourceAccessRules::new()
+            .mintable(rule!(component(XTR_FAUCET_COMPONENT_ADDRESS)))
+            .burnable(rule!(component(XTR_FAUCET_COMPONENT_ADDRESS))),
+        Metadata::new(),
+        None,
+        None,
+        0,
+        false,
+    );
+    create_substate(tx, num_preshards, XTR_FAUCET_CLAIM_RESOURCE_ADDRESS, claim_resource)?;
 
     Ok(())
 }

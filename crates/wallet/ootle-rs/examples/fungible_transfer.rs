@@ -62,7 +62,7 @@ async fn main() {
 
     // First let's transfer some faucet TARI to our account to have funds for fees and transfers.
     let unsigned_tx = IFaucet::new(&provider)
-        .take_faucet_funds(10 * TARI)
+        .take_faucet_funds()
         // NOTE that pay fee must be called after the faucet funds are taken because fees are paid from the faucet funds
         .pay_fee(500u64)
         .prepare()

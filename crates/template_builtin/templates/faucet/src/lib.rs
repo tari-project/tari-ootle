@@ -1,11 +1,12 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_lib::prelude::*;
+use tari_template_lib::{prelude::*, types::constants::XTR_FAUCET_CLAIM_RESOURCE_ADDRESS};
 
 #[template]
 mod template {
-    const FAUCET_MAX: u64 = 10_000 * 1_000_000;
+    /// Faucet amount in microtari: 1,000 TARI per claim. Fixed for take(), ceiling for take_confidential().
+    const FAUCET_AMOUNT: u64 = 1_000 * 1_000_000;
     use super::*;
 
     pub struct XtrFaucet {
@@ -13,26 +14,32 @@ mod template {
     }
 
     impl XtrFaucet {
-        pub fn take(&self, amount: Amount) -> Bucket {
-            assert!(
-                amount <= FAUCET_MAX,
-                "Requested amount {} exceeds faucet max of {}",
-                amount,
-                FAUCET_MAX
-            );
-            emit_event("take", metadata!["amount" => amount.to_string()]);
-            self.vault.withdraw(amount)
+        /// Mints a claim-receipt NFT keyed to the caller's public key, then immediately burns it.
+        /// The burned substate key persists on-chain, so a second attempt panics with DuplicateNonFungibleId.
+        fn record_claim(&self) {
+            let pk = CallerContext::transaction_signer_public_key();
+            let receipt = ResourceManager::get(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS)
+                .mint_non_fungible(NonFungibleId::from_public_key(pk), &(), &());
+            receipt.burn();
+        }
+
+        /// Gives exactly 1,000 TARI to the caller. Can only be called once per signing public key.
+        pub fn take(&self) -> Bucket {
+            self.record_claim();
+            emit_event("take", metadata!["amount" => FAUCET_AMOUNT.to_string()]);
+            self.vault.withdraw(FAUCET_AMOUNT)
         }
 
         pub fn take_confidential(&self, transfer: StealthTransferStatement) -> Option<Bucket> {
             let amount = transfer.inputs_statement.revealed_amount;
             assert!(
-                amount <= FAUCET_MAX,
+                amount <= FAUCET_AMOUNT,
                 "Requested amount {} exceeds faucet max of {}",
                 amount,
-                FAUCET_MAX
+                FAUCET_AMOUNT
             );
 
+            self.record_claim();
             emit_event("take", metadata![
                 "amount" => amount.to_string(),
                 "confidential" => "true".to_string()

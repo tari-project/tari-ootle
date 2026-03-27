@@ -17,7 +17,7 @@ fn it_prevents_reentrant_withdraw() {
 
     let result = test.execute_expect_success(
         Transaction::builder_localnet()
-            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![1000])
+            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![])
             .put_last_instruction_output_on_workspace("bucket")
             .call_function(template_addr, "with_bucket", args![Workspace("bucket")])
             .build_and_seal(test.secret_key()),

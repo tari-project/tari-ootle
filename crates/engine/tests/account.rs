@@ -31,7 +31,7 @@ fn basic_faucet_transfer() {
     let _result = template_test
         .build_and_execute(
             Transaction::builder_localnet()
-                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![1000])
+                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![])
                 .put_last_instruction_output_on_workspace("free_coins")
                 .call_method(sender_address, "deposit", args![Workspace("free_coins")]),
             vec![template_test.owner_proof()],
@@ -53,7 +53,7 @@ fn basic_faucet_transfer() {
 
     assert_eq!(
         result.finalize.execution_results[3].decode::<Amount>().unwrap(),
-        Amount::from(900u64)
+        Amount::from(999_999_900u64)
     );
     assert_eq!(
         result.finalize.execution_results[4].decode::<Amount>().unwrap(),
@@ -74,7 +74,7 @@ fn withdraw_from_account_prevented() {
                 let source_account = var!["source_account"];
                 let faucet_component = var!["faucet_component"];
                 
-                let free_coins = faucet_component.take(1000);
+                let free_coins = faucet_component.take();
                 source_account.deposit(free_coins);
             "#,
             [
@@ -189,7 +189,7 @@ fn create_account_is_idempotent_with_deposit() {
 
     let result = test.execute_expect_success(
         Transaction::builder_localnet()
-            .call_method(xtr_faucet_component(), "take", args![1000])
+            .call_method(xtr_faucet_component(), "take", args![])
             .put_last_instruction_output_on_workspace("bucket")
             // Create component with the same ID
             .create_account_with_bucket(source_account_pk.to_byte_type(), "bucket")
@@ -210,7 +210,7 @@ fn create_account_is_idempotent_with_deposit() {
     let account = store.get_account(source_account).unwrap();
     let vault = account.get_vault_by_resource(&TARI_TOKEN).unwrap();
     let vault = store.get_vault(&vault.vault_id()).unwrap();
-    assert_eq!(vault.balance(), 1000u64);
+    assert_eq!(vault.balance(), 1_000_000_000u64);
 }
 
 #[test]
@@ -261,7 +261,7 @@ fn custom_access_rules() {
 
     test.execute_expect_success(
         Transaction::builder_localnet()
-            .call_method(xtr_faucet_component(), "take", args![1000])
+            .call_method(xtr_faucet_component(), "take", args![])
             .put_last_instruction_output_on_workspace("bucket")
             // Create component with the same ID
             .create_account_custom(
@@ -303,11 +303,11 @@ fn take_from_bucket() {
 
     test.execute_expect_success(
         Transaction::builder_localnet()
-            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![1000])
+            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![])
             .put_last_instruction_output_on_workspace("free_coins")
             .take_from_bucket("free_coins", 100u64, "foo_bucket")
-            // Take all to test what happens when free_coins is empty (should not fail due to dangling buckets)
-            .take_from_bucket("free_coins", 900u64, "bar_bucket")
+            // Take all remaining coins — tests that an empty bucket does not cause a dangling bucket error
+            .take_from_bucket("free_coins", 999_999_900u64, "bar_bucket")
             .call_method(alice, "deposit", args![Workspace("foo_bucket")])
             .call_method(bob, "deposit", args![Workspace("bar_bucket")])
             .build_and_seal(test.secret_key()),
@@ -327,6 +327,6 @@ fn take_from_bucket() {
         .unwrap()
         .balance();
 
-    assert_eq!(alice_balance, 100);
-    assert_eq!(bob_balance, 900);
+    assert_eq!(alice_balance, 100u64);
+    assert_eq!(bob_balance, 999_999_900u64);
 }

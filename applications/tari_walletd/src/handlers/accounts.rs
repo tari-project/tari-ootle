@@ -11,6 +11,7 @@ use ootle_byte_type::{FromByteType, ToByteType};
 use rand::rngs::OsRng;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
+    commit_result::RejectReason,
     component::derive_component_address_from_public_key,
     confidential::ClaimBurnOutputData,
     substate::SubstateId,
@@ -71,7 +72,14 @@ use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib_types::{
     Amount,
     ResourceType,
-    constants::{STEALTH_TARI_RESOURCE_ADDRESS, TARI_TOKEN, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
+    constants::{
+        STEALTH_TARI_RESOURCE_ADDRESS,
+        TARI_TOKEN,
+        XTR_FAUCET_AMOUNT,
+        XTR_FAUCET_CLAIM_RESOURCE_ADDRESS,
+        XTR_FAUCET_COMPONENT_ADDRESS,
+        XTR_FAUCET_VAULT_ADDRESS,
+    },
     stealth::SpendCondition,
 };
 use tokio::task;
@@ -81,6 +89,7 @@ use crate::{
     DEFAULT_FEE,
     handlers::helpers::{
         complete_burn_proof_to_contents,
+        faucet_already_claimed,
         general_error,
         get_account,
         get_account_by_key_index,
@@ -627,11 +636,9 @@ pub async fn handle_create_free_test_coins(
     let sdk = context.wallet_sdk();
     let accounts_api = sdk.accounts_api();
 
-    let AccountsCreateFreeTestCoinsRequest {
-        account,
-        amount,
-        max_fee,
-    } = req;
+    let AccountsCreateFreeTestCoinsRequest { account, max_fee } = req;
+    // Fixed amount: always 1,000 TARI (matches the on-chain faucet template constant)
+    let amount = Amount::from(XTR_FAUCET_AMOUNT);
 
     let max_fee = max_fee.unwrap_or(DEFAULT_FEE);
 
@@ -657,6 +664,7 @@ pub async fn handle_create_free_test_coins(
     let mut inputs = vec![
         SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
         SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
+        SubstateRequirement::unversioned(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS),
     ];
 
     if account.is_confirmed_on_chain() {
@@ -694,7 +702,7 @@ pub async fn handle_create_free_test_coins(
         .transaction_builder()
         .with_fee_instructions_builder(|fee_builder| {
             fee_builder
-                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![amount])
+                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![])
                 .put_last_instruction_output_on_workspace("faucet_funds")
                 .create_account_with_bucket(*account.address.account_public_key(), "faucet_funds")
                 .put_last_instruction_output_on_workspace("new_account")
@@ -726,14 +734,24 @@ pub async fn handle_create_free_test_coins(
 
     // Wait for the monitor to pick up the new or updated account
     let (finalized, _) = wait_for_result_and_account(&mut events, &tx_id, account.component_address()).await?;
-    if let Some(reject) = finalized.finalize.fee_reject() {
-        return Err(transaction_rejected(format!("Fee transaction rejected: {}", reject)));
-    }
     if let Some(reason) = finalized.finalize.any_reject() {
-        return Err(anyhow::anyhow!(
-            "Fee transaction succeeded (fees charged) however, the transaction failed: {}",
-            reason
-        ));
+        return match reason {
+            RejectReason::ExecutionFailure(reason) => {
+                if reason.contains("Duplicate NFT token id") {
+                    return Err(faucet_already_claimed());
+                }
+                Err(transaction_rejected(reason))
+            },
+            // TODO: consensus can emit failed to lock inputs when an output fails to lock and vice versa because it
+            // locks them together in some cases. so we take both as meaning already claimed
+            RejectReason::FailedToLockOutputs(reason) | RejectReason::FailedToLockInputs(reason) => {
+                if reason.contains("is already UP and conflicts with an existing output") {
+                    return Err(faucet_already_claimed());
+                }
+                Err(transaction_rejected(reason))
+            },
+            _ => Err(transaction_rejected(reason)),
+        };
     }
 
     info!(

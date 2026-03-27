@@ -11964,8 +11964,6 @@ name = "tari_template_builtin"
 version = "0.27.2"
 dependencies = [
  "anyhow",
- "ootle_byte_type",
- "tari_crypto",
  "tari_engine_types",
  "tari_ootle_transaction",
  "tari_template_lib",

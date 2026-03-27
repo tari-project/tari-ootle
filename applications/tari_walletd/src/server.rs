@@ -346,5 +346,6 @@ pub enum ApplicationErrorCode {
     InvalidRequest = 400,
     Unauthorized = 401,
     TransactionRejected = 1000,
+    FaucetAlreadyClaimed = 1001,
     GeneralError = 500,
 }

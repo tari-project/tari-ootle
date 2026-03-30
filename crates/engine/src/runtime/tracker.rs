@@ -304,7 +304,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         }
 
         // Finalise will always reset the state
-        let mut state = self.take_working_state();
+        let mut state = self.take_working_state()?;
         // Resolve the transfers to the fee pool resource and vault refunds
         let mut substates_to_persist = state.take_mutated_substates();
         let fee_receipt = state.finalize_fees_and_refunds(&mut substates_to_persist)?;
@@ -333,8 +333,11 @@ impl<TStore: StateReader> StateTracker<TStore> {
         self.fee_checkpoint.take()
     }
 
-    fn take_working_state(&mut self) -> WorkingState<TStore> {
-        self.working_state.take().expect("Working state has been taken")
+    fn take_working_state(&mut self) -> Result<WorkingState<TStore>, RuntimeError> {
+        self.working_state.take().ok_or_else(|| RuntimeError::InvariantError {
+            function: "StateTracker::take_working_state",
+            details: "Working state has already been taken (double finalize?)".to_string(),
+        })
     }
 
     pub fn with_substates_to_persist<F: FnMut(&IndexMap<SubstateId, SubstateValue>) -> R, R>(&mut self, mut f: F) -> R {
@@ -358,11 +361,17 @@ impl<TStore: StateReader> StateTracker<TStore> {
     }
 
     pub(super) fn read_with<R, F: FnOnce(&WorkingState<TStore>) -> R>(&self, f: F) -> R {
-        f(self.working_state.as_ref().expect("Working state has been taken"))
+        f(self
+            .working_state
+            .as_ref()
+            .expect("BUG: read_with called after finalize consumed working state"))
     }
 
     pub(super) fn write_with<R, F: FnOnce(&mut WorkingState<TStore>) -> R>(&mut self, f: F) -> R {
-        f(self.working_state.as_mut().expect("Working state has been taken"))
+        f(self
+            .working_state
+            .as_mut()
+            .expect("BUG: write_with called after finalize consumed working state"))
     }
 
     pub(super) fn is_fee_intent_checkpointed(&self) -> bool {

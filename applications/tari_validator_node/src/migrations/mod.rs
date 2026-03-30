@@ -12,7 +12,9 @@ use tari_state_store_rocksdb::{
 
 use crate::genesis_state::create_genesis_state;
 
+pub mod common;
 pub mod v1;
+pub mod v2;
 
 const LOG_TARGET: &str = "tari::validator::migrations";
 
@@ -22,7 +24,7 @@ pub fn migrate<TAddr: NodeAddressable + 'static>(
     consensus_constants: &ConsensusConstants,
 ) -> anyhow::Result<()> {
     const OPERATION: &str = "migrate";
-    const CURRENT_VERSION: u64 = 1;
+    const CURRENT_VERSION: u64 = 2;
     let maybe_version = {
         let db = tx.db();
         db.cf(DatabaseMigrationVersion)?
@@ -32,7 +34,6 @@ pub fn migrate<TAddr: NodeAddressable + 'static>(
 
     match maybe_version {
         Some(mut version) => {
-            let db = tx.db();
             info!(
                 target: LOG_TARGET,
                 "🔨 Migration required from version {version} to {CURRENT_VERSION}"
@@ -40,7 +41,11 @@ pub fn migrate<TAddr: NodeAddressable + 'static>(
             while version < CURRENT_VERSION {
                 match version {
                     0 => {
+                        let db = tx.db();
                         v1::migrate(&db, network)?;
+                    },
+                    1 => {
+                        v2::migrate(tx, network, consensus_constants.num_preshards)?;
                     },
                     _ => unreachable!("version somehow went over CURRENT_VERSION. This is a bug"),
                 }
@@ -51,7 +56,9 @@ pub fn migrate<TAddr: NodeAddressable + 'static>(
                     version + 1
                 );
                 version += 1;
-                db.cf(DatabaseMigrationVersion)?.put(&ByteColumn, &version, OPERATION)?;
+                tx.db()
+                    .cf(DatabaseMigrationVersion)?
+                    .put(&ByteColumn, &version, OPERATION)?;
             }
         },
         None => {

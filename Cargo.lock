@@ -11526,7 +11526,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_sdk"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "digest 0.10.7",
@@ -11675,7 +11675,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_walletd_client"
-version = "0.3.1"
+version = "0.4.1"
 dependencies = [
  "hex",
  "ootle_serde",

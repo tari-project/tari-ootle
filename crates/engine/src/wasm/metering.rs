@@ -463,8 +463,7 @@ fn cost_function(op: &Operator) -> u64 {
         Operator::F64x2ConvertLowI32x4S |
         Operator::F64x2ConvertLowI32x4U |
         Operator::F64x2PromoteLowF32x4 => 16,
-        Operator::F32x4Sqrt |
-        Operator::F64x2Sqrt => 40,
+        Operator::F32x4Sqrt | Operator::F64x2Sqrt => 40,
         // Relaxed SIMD instructions
         Operator::I8x16RelaxedSwizzle |
         Operator::I8x16RelaxedLaneselect |

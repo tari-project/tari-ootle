@@ -31,9 +31,7 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
         let transaction_weight_cost = transaction_weight
             .as_u64()
             .checked_mul(self.fee_table.per_transaction_weight_cost())
-            .ok_or_else(|| {
-                RuntimeModuleError::Overflow("Overflow calculating transaction weight cost".to_string())
-            })?;
+            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating transaction weight cost".to_string()))?;
         track.add_fee_charge(FeeSource::TransactionWeight, transaction_weight_cost);
 
         Ok(())

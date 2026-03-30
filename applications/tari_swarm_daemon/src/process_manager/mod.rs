@@ -1,6 +1,8 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::path::PathBuf;
+
 use tokio::task;
 
 use crate::config::Config;
@@ -20,9 +22,10 @@ pub use processes::*;
 
 pub fn spawn(
     config: &Config,
+    config_path: PathBuf,
     shutdown: tari_shutdown::ShutdownSignal,
 ) -> (task::JoinHandle<anyhow::Result<()>>, ProcessManagerHandle) {
-    let (manager, handle) = manager::ProcessManager::new(config, shutdown);
+    let (manager, handle) = manager::ProcessManager::new(config, config_path, shutdown);
     let task_handle = tokio::spawn(manager.start());
     (task_handle, handle)
 }

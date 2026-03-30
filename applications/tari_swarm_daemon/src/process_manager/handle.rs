@@ -79,6 +79,9 @@ pub struct InstanceInfo {
     pub instance_type: InstanceType,
     pub settings: HashMap<String, String>,
     pub is_running: bool,
+    /// True if the config file has been modified since this instance was last started.
+    /// The user should restart the instance to apply the new configuration.
+    pub is_config_dirty: bool,
 }
 
 impl InstanceInfo {
@@ -190,6 +193,7 @@ impl From<&Instance> for InstanceInfo {
             instance_type: instance.instance_type(),
             settings: instance.settings().clone(),
             is_running: instance.is_running(),
+            is_config_dirty: instance.is_config_dirty(),
         }
     }
 }

@@ -8,33 +8,9 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: cache diagnostics (before restore)
-      shell: bash
-      run: |
-        echo "=== Disk space ==="
-        df -h
-        echo "=== target/ ==="
-        du -sh target/ 2>/dev/null || echo "(no target dir)"
-        echo "=== ~/.cargo/registry/ ==="
-        du -sh ~/.cargo/registry/ 2>/dev/null || echo "(no cargo registry)"
-        echo "=== ~/.cargo/git/ ==="
-        du -sh ~/.cargo/git/ 2>/dev/null || echo "(no cargo git)"
-
     - name: caching
       uses: Swatinem/rust-cache@v2
       with:
         prefix-key: v0-rust-ci-build
         cache-all-crates: true
         save-if: ${{ inputs.save-if }}
-
-    - name: cache diagnostics (after restore)
-      shell: bash
-      run: |
-        echo "=== Disk space after cache restore ==="
-        df -h
-        echo "=== target/ ==="
-        du -sh target/ 2>/dev/null || echo "(no target dir — cache miss or not cached)"
-        echo "=== ~/.cargo/registry/ ==="
-        du -sh ~/.cargo/registry/ 2>/dev/null || echo "(no cargo registry)"
-        echo "=== ~/.cargo/git/ ==="
-        du -sh ~/.cargo/git/ 2>/dev/null || echo "(no cargo git)"

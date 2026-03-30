@@ -19,6 +19,7 @@ pub struct Instance {
     settings: HashMap<String, String>,
     envs: Vec<(String, String)>,
     exit_status: Option<ExitStatus>,
+    is_config_dirty: bool,
 }
 
 impl Instance {
@@ -42,6 +43,7 @@ impl Instance {
             envs,
             settings,
             exit_status: None,
+            is_config_dirty: false,
         }
     }
 
@@ -79,6 +81,22 @@ impl Instance {
 
     pub fn settings(&self) -> &HashMap<String, String> {
         &self.settings
+    }
+
+    pub fn set_settings(&mut self, settings: HashMap<String, String>) {
+        self.settings = settings;
+    }
+
+    pub fn set_envs(&mut self, envs: Vec<(String, String)>) {
+        self.envs = envs;
+    }
+
+    pub fn is_config_dirty(&self) -> bool {
+        self.is_config_dirty
+    }
+
+    pub fn set_config_dirty(&mut self, dirty: bool) {
+        self.is_config_dirty = dirty;
     }
 
     pub fn is_running(&self) -> bool {

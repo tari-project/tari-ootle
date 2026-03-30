@@ -447,6 +447,39 @@ to check that the prize is awarded correctly.
 To run your tests, simply run `cargo test` in your template crate directory.
 The test harness will compile your template to WASM and run the tests against it.
 
+### Speeding up template tests
+
+Template tests use the wasmer runtime with the Cranelift JIT compiler to compile and execute WASM.
+In debug/test builds (the default for `cargo test`), these dependencies are compiled without
+optimizations, which makes the JIT compilation step roughly **10x slower** than it needs to be.
+
+You can fix this by adding the following to your `Cargo.toml`, which tells Cargo to
+optimize just the wasmer/cranelift crates even in debug builds:
+
+```toml
+# Optional but highly recommended — makes template tests ~10x faster.
+# Without this, each test spends most of its time in the Cranelift JIT
+# rather than actually testing your template logic.
+[profile.dev.package.wasmer]
+opt-level = 2
+[profile.dev.package.wasmer-compiler]
+opt-level = 2
+[profile.dev.package.wasmer-compiler-cranelift]
+opt-level = 2
+[profile.dev.package.cranelift-codegen]
+opt-level = 2
+[profile.dev.package.cranelift-frontend]
+opt-level = 2
+[profile.dev.package.cranelift-entity]
+opt-level = 2
+```
+
+<Aside type="note">
+  The first build after adding these lines will take a bit longer as Cargo recompiles
+  the affected crates with optimizations. Subsequent builds will be fast as usual, and
+  your template tests will run significantly faster.
+</Aside>
+
 ## Full annotated code
 
 <p>

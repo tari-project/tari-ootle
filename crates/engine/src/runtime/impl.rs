@@ -613,8 +613,7 @@ where
                         .as_component_address()
                         .ok_or_else(|| RuntimeError::InvalidArgument {
                             argument: "component_ref",
-                            reason: "GetState component action should not define a specific component address"
-                                .to_string(),
+                            reason: "GetState component action requires a component address".to_string(),
                         })?;
                 args.assert_no_args("ComponentAction::GetState")?;
                 self.tracker.write_with(|state| {
@@ -745,23 +744,17 @@ where
                         .as_component_address()
                         .ok_or_else(|| RuntimeError::InvalidArgument {
                             argument: "component_ref",
-                            reason: "SetAccessRules component action requires a component address".to_string(),
+                            reason: "GetTemplateAddress component action requires a component address".to_string(),
                         })?;
 
                 args.assert_no_args("Component::GetTemplateAddress")?;
 
-                // The template can never change so we'll just fetch the component
-                self.tracker.read_with(|state| {
-                    let substate = state.store().get_unmodified_substate(&component_address.into())?;
-                    let component = substate
-                        .substate_value()
-                        .component()
-                        .ok_or(RuntimeError::InvariantError {
-                            function: "GetTemplateAddress",
-                            details: format!("Substate at {} is not a component", component_address),
-                        })?;
-
-                    Ok(InvokeResult::encode(&component.template_address)?)
+                self.tracker.write_with(|state| {
+                    let locked = state.read_lock_substate(SubstateId::Component(component_address))?;
+                    let component = state.get_component(&locked)?;
+                    let template_address = component.template_address;
+                    state.unlock_substate(locked)?;
+                    Ok(InvokeResult::encode(&template_address)?)
                 })
             },
             ComponentAction::GetOwnerProof => {
@@ -2143,6 +2136,13 @@ where
 
                 self.tracker.write_with(|state| {
                     let bucket = state.take_bucket(bucket_id)?;
+                    // It is invalid to burn a bucket that has locked funds (e.g. via a proof)
+                    if !bucket.locked_amount().is_zero() {
+                        return Err(RuntimeError::InvalidOpDepositLockedBucket {
+                            bucket_id,
+                            locked_amount: bucket.locked_amount(),
+                        });
+                    }
                     let burnt_amount = bucket.unlocked_amount();
                     state.burn_bucket(bucket)?;
 

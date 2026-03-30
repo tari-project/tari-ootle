@@ -45,6 +45,9 @@ CRATES = [
     ("ootle-wasm", "crates/ootle_wasm/wasm"),
     ("tari_template_test_tooling", "crates/template_test_tooling"),
     ("ootle-rs", "crates/wallet/ootle-rs"),
+    ("tari_ootle_wallet_sdk", "crates/wallet/sdk"),
+    ("tari_ootle_wallet_storage_sqlite", "crates/wallet/storage_sqlite"),
+    ("tari_ootle_walletd_client", "clients/wallet_daemon_client"),
 ]
 
 WAIT_SECS = 20

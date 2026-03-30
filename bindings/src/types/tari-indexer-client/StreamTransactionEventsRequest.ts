@@ -9,4 +9,9 @@ export type StreamTransactionEventsRequest = {
   topic: string | null;
   substate_id: SubstateId | null;
   template_address: Hash32 | null;
+  /**
+   * Resume the event stream from this event ID (exclusive). Events with id > after_id will be
+   * replayed from the database before switching to the live stream.
+   */
+  after_id: bigint | null;
 };

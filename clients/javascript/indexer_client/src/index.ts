@@ -54,6 +54,7 @@ export { substateIdToString, stringToSubstateId, rejectReasonToString };
  * Streamed via the /transactions/events/stream SSE endpoint.
  */
 export interface TransactionEvent {
+  id: number;
   transaction_id: TransactionId;
   event: Event;
 }

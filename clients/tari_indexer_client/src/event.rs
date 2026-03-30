@@ -49,6 +49,8 @@ pub struct TransactionFinalizedEvent {
 /// Streamed via the /transactions/events/stream SSE endpoint.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TransactionEvent {
+    /// The database auto-increment ID for this event, used as the SSE event ID for catch-up/replay.
+    pub id: i64,
     pub transaction_id: TransactionId,
     pub event: Arc<tari_engine_types::events::Event>,
 }

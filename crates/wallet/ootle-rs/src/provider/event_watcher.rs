@@ -29,6 +29,7 @@ impl TransactionEventFilter {
             topic: self.topic,
             substate_id: self.substate_id,
             template_address: self.template_address,
+            after_id: None,
         }
     }
 }

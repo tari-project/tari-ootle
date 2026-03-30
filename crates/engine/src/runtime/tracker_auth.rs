@@ -188,7 +188,11 @@ fn check_require_rule<TStore: StateReader>(
             Ok(true)
         },
         RequireRule::MOfN(n, requirements) => {
-            let mut satisfied = 0;
+            // 0-of-N is vacuously satisfied: no requirements need to be met
+            if *n == 0 {
+                return Ok(true);
+            }
+            let mut satisfied = 0u16;
             for requirement in requirements {
                 if check_requirement(state, scope, requirement)? {
                     satisfied += 1;

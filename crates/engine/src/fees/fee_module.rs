@@ -28,7 +28,12 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
     fn on_initialize(&self, track: &mut StateTracker<TStore>) -> Result<(), RuntimeModuleError> {
         track.add_fee_charge(FeeSource::Initial, self.initial_cost);
         let transaction_weight = track.get_transaction_weight();
-        let transaction_weight_cost = transaction_weight.as_u64() * self.fee_table.per_transaction_weight_cost();
+        let transaction_weight_cost = transaction_weight
+            .as_u64()
+            .checked_mul(self.fee_table.per_transaction_weight_cost())
+            .ok_or_else(|| {
+                RuntimeModuleError::Overflow("Overflow calculating transaction weight cost".to_string())
+            })?;
         track.add_fee_charge(FeeSource::TransactionWeight, transaction_weight_cost);
 
         Ok(())
@@ -80,12 +85,15 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
             cost / STORAGE_COST_REDUCTION_DIVISOR,
         );
 
-        track.add_fee_charge(FeeSource::Logs, track.num_logs() as u64 * self.fee_table.per_log_cost());
+        let log_cost = (track.num_logs() as u64)
+            .checked_mul(self.fee_table.per_log_cost())
+            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating log cost".to_string()))?;
+        track.add_fee_charge(FeeSource::Logs, log_cost);
 
-        track.add_fee_charge(
-            FeeSource::Events,
-            track.num_events() as u64 * self.fee_table.per_event_cost(),
-        );
+        let event_cost = (track.num_events() as u64)
+            .checked_mul(self.fee_table.per_event_cost())
+            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating event cost".to_string()))?;
+        track.add_fee_charge(FeeSource::Events, event_cost);
 
         Ok(())
     }

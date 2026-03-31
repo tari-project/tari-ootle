@@ -1325,7 +1325,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 };
 
                 if let Some(stage) = stage &&
-                    tx_pool_rec.pending_stage() != Some(stage)
+                    tx_pool_rec.current_stage() != stage
                 {
                     continue;
                 }

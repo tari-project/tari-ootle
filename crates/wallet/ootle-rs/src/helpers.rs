@@ -10,6 +10,6 @@ pub fn default_indexer_url(network: Network) -> &'static str {
         Network::StageNet => unimplemented!("StageNet indexer URL is not set"),
         Network::NextNet => unimplemented!("NextNet indexer URL is not set"),
         Network::Igor => unimplemented!("Igor indexer URL is not set"),
-        Network::Esmeralda => "http://217.182.93.35:50124",
+        Network::Esmeralda => "https://ootle-indexer-a.tari.com/",
     }
 }

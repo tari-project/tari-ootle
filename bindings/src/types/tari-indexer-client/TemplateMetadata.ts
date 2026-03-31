@@ -10,4 +10,8 @@ export type TemplateMetadata = {
   author_public_key: RistrettoPublicKeyBytes;
   code_size: number;
   epoch: Epoch;
+  /**
+   * Optional multihash of off-chain CBOR metadata
+   */
+  metadata_hash?: string | null;
 };

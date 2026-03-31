@@ -11,4 +11,8 @@ export type PublishTemplateRequest = {
    */
   detect_inputs: boolean;
   dry_run: boolean;
+  /**
+   * Optional multihash of off-chain CBOR metadata
+   */
+  metadata_hash?: string | null;
 };

@@ -35,7 +35,15 @@ export type Instruction =
   | "DropAllProofsInWorkspace"
   | { Assert: { key: WorkspaceOffsetId; assertion: Assertion } }
   | { TakeFromBucket: { input_bucket: WorkspaceOffsetId; amount: Amount; output_bucket: number } }
-  | { PublishTemplate: { binary: string } }
+  | {
+      PublishTemplate: {
+        binary: string;
+        /**
+         * Optional multihash of off-chain CBOR metadata
+         */
+        metadata_hash: string | null;
+      };
+    }
   | { AllocateAddress: { allocatable_type: AllocatableAddressType; workspace_id: number } }
   | {
       StealthTransfer: {

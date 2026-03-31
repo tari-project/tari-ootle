@@ -312,12 +312,17 @@ pub async fn spawn_services(
     #[cfg(not(feature = "metrics"))]
     let metrics = NoopHooks;
 
-    let template_metadata_hooks =
-        consensus::template_metadata_hooks::TemplateMetadataHooks::new(template_provider.clone(), state_store.clone());
-    // Backfill metadata for templates that were published before this code was deployed.
-    // Runs on the blocking thread pool so it does not stall the async runtime during WASM loads.
-    let backfill_hooks = template_metadata_hooks.clone();
-    tokio::task::spawn_blocking(move || backfill_hooks.backfill_missing());
+    let (tx_template_addresses, rx_template_addresses) = tokio::sync::mpsc::unbounded_channel();
+    let template_metadata_hooks = consensus::template_metadata_hooks::TemplateMetadataHooks::new(tx_template_addresses);
+    // The worker backfills metadata for pre-existing templates, then processes newly committed
+    // template addresses sent by the hook. Runs on the blocking thread pool so that synchronous
+    // WASM loading and RocksDB I/O do not stall the async runtime.
+    let template_metadata_worker = consensus::template_metadata_hooks::TemplateMetadataWorker::new(
+        template_provider.clone(),
+        state_store.clone(),
+        rx_template_addresses,
+    );
+    tokio::task::spawn_blocking(move || template_metadata_worker.run());
     let hooks = consensus::template_metadata_hooks::CompositeHooks::new(metrics, template_metadata_hooks);
 
     let sidechain_id = config

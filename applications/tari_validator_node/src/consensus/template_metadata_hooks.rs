@@ -16,38 +16,105 @@ use tari_ootle_storage::{StateStore, StorageError, consensus_models::ValidBlock}
 use tari_ootle_transaction::TransactionId;
 use tari_state_store_rocksdb::{RocksDbStateStore, writer::RocksDbStateStoreWriteTransaction};
 use tari_template_lib::types::TemplateAddress;
+use tokio::sync::mpsc;
 
 use crate::state_store_template_provider::StateStoreTemplateProvider;
 
 const LOG_TARGET: &str = "tari::validator::consensus::template_metadata_hooks";
 
-/// Writes template metadata to the `TemplateMetadataCf` column family at block-commit time.
+/// Consensus hook that forwards newly committed template addresses to a background worker.
 ///
-/// Holds a handle to:
-/// - `template_provider`: Supplies the WASM-derived template name (with an LRU cache) and the on-chain metadata
-///   (author, binary hash, epoch).
-/// - `store`: Used to open a write transaction that persists the metadata CF entry.
+/// All methods are non-blocking: `on_local_block_committed` sends template addresses through
+/// an unbounded channel to [`TemplateMetadataWorker`], which performs the expensive WASM
+/// loading and RocksDB writes off the consensus thread.
 #[derive(Clone)]
 pub struct TemplateMetadataHooks {
-    template_provider: StateStoreTemplateProvider<RocksDbStateStore<tari_ootle_p2p::PeerAddress>>,
-    store: RocksDbStateStore<tari_ootle_p2p::PeerAddress>,
+    tx_template_addresses: mpsc::UnboundedSender<TemplateAddress>,
 }
 
 impl TemplateMetadataHooks {
+    pub fn new(tx_template_addresses: mpsc::UnboundedSender<TemplateAddress>) -> Self {
+        Self { tx_template_addresses }
+    }
+}
+
+impl ConsensusHooks for TemplateMetadataHooks {
+    fn on_local_block_committed(&mut self, block: &ValidBlock) {
+        // Collect template addresses committed in this block.
+        let template_addresses = block
+            .block()
+            .commands()
+            .iter()
+            .filter_map(|c| c.committing())
+            .flat_map(|a| a.evidence.all_outputs_iter())
+            .filter(|(_, id, _)| id.is_template())
+            .filter_map(|(_, id, _)| id.as_template())
+            .map(|published_addr| published_addr.as_template_address());
+
+        for address in template_addresses {
+            // Non-blocking: if the receiver has dropped (shutdown), silently discard.
+            let _ = self.tx_template_addresses.send(address);
+        }
+    }
+
+    fn on_block_validation_failed<E: ToString>(&mut self, _err: &E) {}
+
+    fn on_message_received(&mut self, _message: &HotstuffMessage) {}
+
+    fn on_error(&mut self, _err: &HotStuffError) {}
+
+    fn on_pacemaker_height_changed(&mut self, _height: NodeHeight) {}
+
+    fn on_leader_timeout(&mut self, _new_height: NodeHeight) {}
+
+    fn on_needs_sync(&mut self, _local_height: NodeHeight, _remote_qc_height: NodeHeight) {}
+
+    fn on_transaction_ready(&mut self, _tx_id: &TransactionId) {}
+
+    fn on_transaction_batch_finalized(&mut self, _num_committed: usize, _num_aborted: usize) {}
+}
+
+/// Background worker that extracts and persists template metadata.
+///
+/// Runs on the blocking thread pool (via [`tokio::task::spawn_blocking`]) so that
+/// synchronous WASM loading and RocksDB I/O do not block the async runtime.
+///
+/// At startup it backfills metadata for any templates that predate this deployment,
+/// then enters a loop processing addresses sent by [`TemplateMetadataHooks`].
+pub struct TemplateMetadataWorker {
+    template_provider: StateStoreTemplateProvider<RocksDbStateStore<tari_ootle_p2p::PeerAddress>>,
+    store: RocksDbStateStore<tari_ootle_p2p::PeerAddress>,
+    rx_template_addresses: mpsc::UnboundedReceiver<TemplateAddress>,
+}
+
+impl TemplateMetadataWorker {
     pub fn new(
         template_provider: StateStoreTemplateProvider<RocksDbStateStore<tari_ootle_p2p::PeerAddress>>,
         store: RocksDbStateStore<tari_ootle_p2p::PeerAddress>,
+        rx_template_addresses: mpsc::UnboundedReceiver<TemplateAddress>,
     ) -> Self {
         Self {
             template_provider,
             store,
+            rx_template_addresses,
+        }
+    }
+
+    /// Entry point for the blocking thread pool task.
+    ///
+    /// First backfills any templates that lack metadata, then processes new addresses
+    /// from the channel until the sender is dropped (node shutdown).
+    pub fn run(mut self) {
+        self.backfill_missing();
+
+        while let Some(address) = self.rx_template_addresses.blocking_recv() {
+            self.write_template_metadata(&address);
         }
     }
 
     /// Backfills `TemplateMetadataCf` for all live template substates that currently lack a
-    /// metadata entry.  Intended to be called once at startup (via `tokio::task::spawn_blocking`)
-    /// to cover templates published before this code was deployed.
-    pub fn backfill_missing(mut self) {
+    /// metadata entry. Covers templates published before this code was deployed.
+    fn backfill_missing(&mut self) {
         let addresses = match self.store.scan_template_addresses_missing_metadata() {
             Ok(a) => a,
             Err(e) => {
@@ -143,42 +210,6 @@ impl TemplateMetadataHooks {
             );
         }
     }
-}
-
-impl ConsensusHooks for TemplateMetadataHooks {
-    fn on_local_block_committed(&mut self, block: &ValidBlock) {
-        // Collect template addresses committed in this block.
-        let template_addresses: Vec<TemplateAddress> = block
-            .block()
-            .commands()
-            .iter()
-            .filter_map(|c| c.committing())
-            .flat_map(|a| a.evidence.all_outputs_iter())
-            .filter(|(_, id, _)| id.is_template())
-            .filter_map(|(_, id, _)| id.as_template())
-            .map(|published_addr| published_addr.as_template_address())
-            .collect();
-
-        for address in template_addresses {
-            self.write_template_metadata(&address);
-        }
-    }
-
-    fn on_block_validation_failed<E: ToString>(&mut self, _err: &E) {}
-
-    fn on_message_received(&mut self, _message: &HotstuffMessage) {}
-
-    fn on_error(&mut self, _err: &HotStuffError) {}
-
-    fn on_pacemaker_height_changed(&mut self, _height: NodeHeight) {}
-
-    fn on_leader_timeout(&mut self, _new_height: NodeHeight) {}
-
-    fn on_needs_sync(&mut self, _local_height: NodeHeight, _remote_qc_height: NodeHeight) {}
-
-    fn on_transaction_ready(&mut self, _tx_id: &TransactionId) {}
-
-    fn on_transaction_batch_finalized(&mut self, _num_committed: usize, _num_aborted: usize) {}
 }
 
 /// Composes two [`ConsensusHooks`] implementations into one, calling both in sequence.

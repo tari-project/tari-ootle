@@ -24,24 +24,24 @@ const LOG_TARGET: &str = "tari::validator::consensus::template_metadata_hooks";
 
 /// Consensus hook that forwards newly committed template addresses to a background worker.
 ///
-/// All methods are non-blocking: `on_local_block_committed` sends template addresses through
-/// an unbounded channel to [`TemplateMetadataWorker`], which performs the expensive WASM
-/// loading and RocksDB writes off the consensus thread.
+/// All methods are non-blocking: `on_local_block_committed` collects all template addresses
+/// from the block into a `Vec` and sends them as a single batch through an unbounded channel
+/// to [`TemplateMetadataWorker`], which performs the expensive WASM loading and RocksDB
+/// writes off the consensus thread.
 #[derive(Clone)]
 pub struct TemplateMetadataHooks {
-    tx_template_addresses: mpsc::UnboundedSender<TemplateAddress>,
+    tx_template_addresses: mpsc::UnboundedSender<Vec<TemplateAddress>>,
 }
 
 impl TemplateMetadataHooks {
-    pub fn new(tx_template_addresses: mpsc::UnboundedSender<TemplateAddress>) -> Self {
+    pub fn new(tx_template_addresses: mpsc::UnboundedSender<Vec<TemplateAddress>>) -> Self {
         Self { tx_template_addresses }
     }
 }
 
 impl ConsensusHooks for TemplateMetadataHooks {
     fn on_local_block_committed(&mut self, block: &ValidBlock) {
-        // Collect template addresses committed in this block.
-        let template_addresses = block
+        let template_addresses: Vec<TemplateAddress> = block
             .block()
             .commands()
             .iter()
@@ -49,12 +49,15 @@ impl ConsensusHooks for TemplateMetadataHooks {
             .flat_map(|a| a.evidence.all_outputs_iter())
             .filter(|(_, id, _)| id.is_template())
             .filter_map(|(_, id, _)| id.as_template())
-            .map(|published_addr| published_addr.as_template_address());
+            .map(|published_addr| published_addr.as_template_address())
+            .collect();
 
-        for address in template_addresses {
-            // Non-blocking: if the receiver has dropped (shutdown), silently discard.
-            let _ = self.tx_template_addresses.send(address);
+        if template_addresses.is_empty() {
+            return;
         }
+
+        // Non-blocking: if the receiver has dropped (shutdown), silently discard.
+        let _unused = self.tx_template_addresses.send(template_addresses);
     }
 
     fn on_block_validation_failed<E: ToString>(&mut self, _err: &E) {}
@@ -80,18 +83,19 @@ impl ConsensusHooks for TemplateMetadataHooks {
 /// synchronous WASM loading and RocksDB I/O do not block the async runtime.
 ///
 /// At startup it backfills metadata for any templates that predate this deployment,
-/// then enters a loop processing addresses sent by [`TemplateMetadataHooks`].
+/// then enters a loop processing batches sent by [`TemplateMetadataHooks`]. Each batch
+/// corresponds to one committed block and is written in a single RocksDB transaction.
 pub struct TemplateMetadataWorker {
     template_provider: StateStoreTemplateProvider<RocksDbStateStore<tari_ootle_p2p::PeerAddress>>,
     store: RocksDbStateStore<tari_ootle_p2p::PeerAddress>,
-    rx_template_addresses: mpsc::UnboundedReceiver<TemplateAddress>,
+    rx_template_addresses: mpsc::UnboundedReceiver<Vec<TemplateAddress>>,
 }
 
 impl TemplateMetadataWorker {
     pub fn new(
         template_provider: StateStoreTemplateProvider<RocksDbStateStore<tari_ootle_p2p::PeerAddress>>,
         store: RocksDbStateStore<tari_ootle_p2p::PeerAddress>,
-        rx_template_addresses: mpsc::UnboundedReceiver<TemplateAddress>,
+        rx_template_addresses: mpsc::UnboundedReceiver<Vec<TemplateAddress>>,
     ) -> Self {
         Self {
             template_provider,
@@ -102,13 +106,13 @@ impl TemplateMetadataWorker {
 
     /// Entry point for the blocking thread pool task.
     ///
-    /// First backfills any templates that lack metadata, then processes new addresses
+    /// First backfills any templates that lack metadata, then processes batches of addresses
     /// from the channel until the sender is dropped (node shutdown).
     pub fn run(mut self) {
         self.backfill_missing();
 
-        while let Some(address) = self.rx_template_addresses.blocking_recv() {
-            self.write_template_metadata(&address);
+        while let Some(addresses) = self.rx_template_addresses.blocking_recv() {
+            self.write_metadata_batch(&addresses);
         }
     }
 
@@ -136,23 +140,52 @@ impl TemplateMetadataWorker {
             addresses.len()
         );
 
-        let mut succeeded = 0usize;
-        for address in &addresses {
-            self.write_template_metadata(address);
-            succeeded += 1;
-        }
+        let before = addresses.len();
+        self.write_metadata_batch(&addresses);
 
         info!(
             target: LOG_TARGET,
-            "Template metadata backfill complete: {}/{} entries written",
-            succeeded,
-            addresses.len()
+            "Template metadata backfill complete: {} entries written",
+            before
         );
     }
 
-    fn write_template_metadata(&mut self, address: &TemplateAddress) {
+    /// Prepares and writes metadata for all addresses in `batch` using a single write transaction.
+    ///
+    /// Addresses for which metadata cannot be prepared (template not found, WASM load failure)
+    /// are skipped with an error log; the remaining entries are still written.
+    fn write_metadata_batch(&mut self, addresses: &[TemplateAddress]) {
+        let prepared: Vec<(TemplateAddress, TemplateMetadata)> = addresses
+            .iter()
+            .filter_map(|address| self.prepare_metadata(address).map(|m| (*address, m)))
+            .collect();
+
+        if prepared.is_empty() {
+            return;
+        }
+
+        if let Err(e) = self.store.with_write_tx(
+            |tx: &mut RocksDbStateStoreWriteTransaction<'_, _>| -> Result<(), StorageError> {
+                for (address, metadata) in &prepared {
+                    tx.template_metadata_upsert(address, metadata)?;
+                }
+                Ok(())
+            },
+        ) {
+            error!(
+                target: LOG_TARGET,
+                "Failed to persist template metadata batch ({} entries): {}", prepared.len(), e
+            );
+        }
+    }
+
+    /// Loads on-chain fields and the WASM-derived name for one template address.
+    ///
+    /// Returns `None` and logs an error/warning if either the state store or the template
+    /// provider cannot supply the required data.
+    fn prepare_metadata(&mut self, address: &TemplateAddress) -> Option<TemplateMetadata> {
         // One store read for all on-chain fields (author, binary, epoch).
-        // PublishedTemplate carries the raw WASM binary but we only hash it here; we do not parse it.
+        // PublishedTemplate carries the raw WASM binary but we only hash it; we do not parse it.
         let published = match self.store.get_template(address) {
             Ok(Some(t)) => t,
             Ok(None) => {
@@ -160,14 +193,14 @@ impl TemplateMetadataWorker {
                     target: LOG_TARGET,
                     "Template {} not found in state store when trying to write metadata", address
                 );
-                return;
+                return None;
             },
             Err(e) => {
                 error!(
                     target: LOG_TARGET,
                     "Failed to load template {} for metadata extraction: {}", address, e
                 );
-                return;
+                return None;
             },
         };
 
@@ -181,34 +214,23 @@ impl TemplateMetadataWorker {
                     target: LOG_TARGET,
                     "Parsed template {} not available when writing metadata", address
                 );
-                return;
+                return None;
             },
             Err(e) => {
                 error!(
                     target: LOG_TARGET,
                     "Failed to get parsed template {} for name extraction: {}", address, e
                 );
-                return;
+                return None;
             },
         };
 
-        let metadata = TemplateMetadata {
+        Some(TemplateMetadata {
             template_name: loaded.template_name().to_string(),
             author_public_key: published.author,
             binary_hash: published.to_binary_hash(),
             at_epoch: published.at_epoch,
-        };
-
-        if let Err(e) = self.store.with_write_tx(
-            |tx: &mut RocksDbStateStoreWriteTransaction<'_, _>| -> Result<(), StorageError> {
-                tx.template_metadata_upsert(address, &metadata)
-            },
-        ) {
-            error!(
-                target: LOG_TARGET,
-                "Failed to persist template metadata for {}: {}", address, e
-            );
-        }
+        })
     }
 }
 

@@ -198,6 +198,7 @@ pub struct TemplateMetadata {
     /// Optional multihash of off-chain CBOR metadata
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     pub metadata_hash: Option<MetadataHash>,
 }
 

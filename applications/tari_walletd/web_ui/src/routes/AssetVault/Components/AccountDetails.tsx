@@ -66,6 +66,9 @@ function AccountDetails() {
     setAccount({ ...account, name: newName });
   };
 
+  const decodedAddress = address ? decodeOotleAddressOrNull(address) : null;
+  const accountPublicKey = decodedAddress?.accountPublicKey;
+
   return (
     <TableContainer>
       <PayRefDialog address={address} open={payRefDialogOpen} onClose={() => setPayRefDialogOpen(false)} />
@@ -101,11 +104,7 @@ function AccountDetails() {
               </Stack>
             </DataTableCell>
             <DataTableCell>
-              {address && decodeOotleAddressOrNull(address)?.accountPublicKey && (
-                <CopyAddress
-                  address={decodeOotleAddressOrNull(address)!.accountPublicKey}
-                />
-              )}
+              {accountPublicKey && <CopyAddress address={decodeOotleAddressOrNull(address)!.accountPublicKey} />}
             </DataTableCell>
           </TableRow>
         </TableBody>

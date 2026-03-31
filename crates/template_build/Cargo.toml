@@ -1,0 +1,15 @@
+[package]
+name = "tari_ootle_template_build"
+description = "Build-time metadata generation for Tari Ootle templates"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_ootle_template_metadata = { path = "../template_metadata", features = ["json"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

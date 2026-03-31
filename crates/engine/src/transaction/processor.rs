@@ -35,6 +35,7 @@ use tari_engine_types::{
     virtual_substate::VirtualSubstates,
 };
 use tari_ootle_common_types::{optional::Optional, services::template_provider::TemplateProvider};
+use tari_ootle_template_metadata::MetadataHash;
 use tari_ootle_transaction::{
     AllocatableAddressType,
     ComponentReference,
@@ -358,7 +359,9 @@ where
                 runtime_mut.put_on_workspace(output_bucket, IndexedValue::from_value(bucket.into_value()?)?)?;
                 Ok(InstructionResult::empty())
             },
-            Instruction::PublishTemplate { binary } => Self::publish_template(runtime, binary),
+            Instruction::PublishTemplate { binary, metadata_hash } => {
+                Self::publish_template(runtime, binary, metadata_hash)
+            },
             Instruction::AllocateAddress {
                 allocatable_type: substate_type,
                 workspace_id,
@@ -564,6 +567,7 @@ where
     fn publish_template(
         runtime: &mut Runtime,
         binary: TemplateBlob,
+        metadata_hash: Option<MetadataHash>,
     ) -> Result<InstructionResult, TransactionErrorKind> {
         if binary.len() > limits::ENGINE_LIMITS.max_template_binary_size_bytes {
             // Technically, not possible, but this check is kept in to make a test pass, and potentially for additional
@@ -577,7 +581,7 @@ where
         // validate binary
         WasmModule::load_template_from_code(&binary)?;
         // creating new substate
-        runtime.interface_mut().publish_template(binary)?;
+        runtime.interface_mut().publish_template(binary, metadata_hash)?;
 
         Ok(InstructionResult::empty())
     }

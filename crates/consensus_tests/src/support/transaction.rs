@@ -81,6 +81,7 @@ pub fn create_execution_result_for_transaction(
                             author: *transaction.seal_signature().public_key(),
                             binary: binary.to_vec().try_into().expect("Template binary too large"),
                             at_epoch: 0,
+                            metadata_hash: None,
                         }),
                     );
                 },

@@ -94,6 +94,7 @@ pub struct DbTemplate {
     pub url: Option<String>,
     pub status: TemplateStatus,
     pub added_at: PrimitiveDateTime,
+    pub metadata_hash: Option<Vec<u8>>,
 }
 
 impl DbTemplate {
@@ -113,6 +114,7 @@ impl DbTemplate {
             template_type: DbTemplateType::Wasm,
             url: None,
             epoch,
+            metadata_hash: None,
         }
     }
 }
@@ -131,6 +133,7 @@ pub struct DbTemplateUpdate {
     pub status: Option<TemplateStatus>,
     pub epoch: Option<Epoch>,
     pub code: Option<Vec<u8>>,
+    pub metadata_hash: Option<Option<Vec<u8>>>,
 }
 
 #[derive(Debug, Clone)]

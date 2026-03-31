@@ -49,6 +49,7 @@ use tari_engine_types::{
     vault::Vault,
 };
 use tari_ootle_common_types::{GetVerifier, services::template_provider::TemplateProvider};
+use tari_ootle_template_metadata::MetadataHash;
 use tari_ootle_transaction::{
     AllocatableAddressType,
     Assertion,
@@ -2829,7 +2830,11 @@ where
         Ok(())
     }
 
-    fn publish_template(&mut self, template: TemplateBlob) -> Result<(), RuntimeError> {
+    fn publish_template(
+        &mut self,
+        template: TemplateBlob,
+        metadata_hash: Option<MetadataHash>,
+    ) -> Result<(), RuntimeError> {
         self.invoke_modules_on_runtime_call("publish_template")?;
         self.tracker.write_with(|state_mut| {
             let template_byte_size = template.len();
@@ -2843,6 +2848,7 @@ where
                     binary: template,
                     author: self.seal_signer_public_key,
                     at_epoch: epoch.as_u64(),
+                    metadata_hash,
                 }),
             )?;
             // Mark template substate as owned by current call stack

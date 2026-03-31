@@ -37,6 +37,7 @@ use tari_ootle_common_types::{
     shard::Shard,
     substate_type::SubstateType,
 };
+use tari_ootle_template_metadata::MetadataHash;
 use tari_ootle_transaction::{Instruction, Transaction, TransactionId, UnsignedTransaction};
 use tari_ootle_wallet_sdk::{
     apis::{
@@ -186,6 +187,10 @@ pub struct PublishTemplateRequest {
     /// contain the required inputs.
     pub detect_inputs: bool,
     pub dry_run: bool,
+    /// Optional multihash of off-chain CBOR metadata
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    pub metadata_hash: Option<MetadataHash>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

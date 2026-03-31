@@ -65,6 +65,10 @@ bitflags! {
         const VALIDATOR_FEE_POOL = 0x0000_0040;
         const UTXO = 0x0000_0080;
         const CLAIMED_OUTPUT_TOMBSTONE = 0x0000_0100;
+        /// Return only template metadata (name, author, hash, epoch) instead of the full WASM binary.
+        /// When set for a template substate, the sync response carries `SubstateData.template_metadata`
+        /// and `SubstateValueOrHash::Hash` (the state hash) rather than the full value.
+        const TEMPLATE_METADATA = 0x0000_0200;
         /// Include all hashes for substates even if filtered out
         const ALL_HASHES = 0x1000_0000;
         const UP_ONLY = 0x0100_0000;
@@ -99,7 +103,7 @@ impl SubstateValueFilterFlags {
             SubstateId::Vault(_) => self.contains(Self::VAULT),
             SubstateId::NonFungible(_) => self.contains(Self::NON_FUNGIBLE),
             SubstateId::TransactionReceipt(_) => self.contains(Self::TRANSACTION_RECEIPT),
-            SubstateId::Template(_) => self.contains(Self::TEMPLATE),
+            SubstateId::Template(_) => self.contains(Self::TEMPLATE) || self.contains(Self::TEMPLATE_METADATA),
             SubstateId::ValidatorFeePool(_) => self.contains(Self::VALIDATOR_FEE_POOL),
             SubstateId::Utxo(_) => self.contains(Self::UTXO),
             SubstateId::ClaimedOutputTombstone(_) => self.contains(Self::CLAIMED_OUTPUT_TOMBSTONE),

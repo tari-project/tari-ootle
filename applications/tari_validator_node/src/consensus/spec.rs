@@ -2,8 +2,6 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use tari_consensus::traits::ConsensusSpec;
-#[cfg(not(feature = "metrics"))]
-use tari_consensus::traits::hooks::NoopHooks;
 use tari_engine::state_store::memory::ReadOnlyMemoryStateStore;
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_ootle_app_utilities::transaction_executor::TariTransactionProcessor;
@@ -18,6 +16,7 @@ use crate::{
         TarBlockTransactionExecutor,
         leader_selection::RoundRobinLeaderStrategy,
         signer_service::TariSignatureService,
+        template_metadata_hooks::{CompositeHooks, TemplateMetadataHooks},
     },
     p2p::{
         NopLogger,
@@ -36,9 +35,9 @@ impl ConsensusSpec for TariConsensusSpec {
     type Addr = PeerAddress;
     type EpochManager = EpochManagerHandle<Self::Addr>;
     #[cfg(not(feature = "metrics"))]
-    type Hooks = NoopHooks;
+    type Hooks = CompositeHooks<tari_consensus::traits::hooks::NoopHooks, TemplateMetadataHooks>;
     #[cfg(feature = "metrics")]
-    type Hooks = PrometheusConsensusMetrics;
+    type Hooks = CompositeHooks<PrometheusConsensusMetrics, TemplateMetadataHooks>;
     type InboundMessaging = ConsensusInboundMessaging<NopLogger>;
     type LeaderStrategy = RoundRobinLeaderStrategy;
     type OutboundMessaging = ConsensusOutboundMessaging<NopLogger>;

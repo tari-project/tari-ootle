@@ -11,6 +11,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use tari_engine_types::{
     Utxo,
     events::Event,
+    published_template::TemplateMetadata,
     substate::{Substate, SubstateId},
     transaction_receipt::TransactionReceipt,
 };
@@ -40,7 +41,7 @@ use tari_template_lib_types::{
 
 use crate::{
     network_state_sync::{EventFilter, SyncProgress},
-    storage_sqlite::models::{Key, KeyValue, SubstateRecord, UtxoUpdateRecord},
+    storage_sqlite::models::{Key, KeyValue, SubstateRecord, TemplateCatalogueEntry, UtxoUpdateRecord},
 };
 
 const LOG_TARGET: &str = "tari::indexer::store";
@@ -182,6 +183,20 @@ pub trait IndexerStoreReadTransaction {
         resource_address: &ResourceAddress,
         public_nonce_and_tag: &[(UtxoTag, RistrettoPublicKeyBytes)],
     ) -> Result<Vec<(UtxoId, Utxo)>, StorageError>;
+
+    // -------------------------------- Template Catalogue -------------------------------- //
+
+    fn list_template_catalogue(
+        &mut self,
+        name_filter: Option<&str>,
+        limit: u64,
+        offset: u64,
+    ) -> Result<Vec<TemplateCatalogueEntry>, StorageError>;
+
+    fn get_template_catalogue_entry(
+        &mut self,
+        template_address: &TemplateAddress,
+    ) -> Result<Option<TemplateCatalogueEntry>, StorageError>;
 }
 
 pub trait IndexerStoreWriteTransaction {
@@ -207,6 +222,11 @@ pub trait IndexerStoreWriteTransaction {
     ) -> Result<Vec<InsertedEvent>, StorageError>;
     fn insert_or_ignore_transaction(&mut self, transaction: &Transaction) -> Result<(), StorageError>;
     fn insert_or_ignore_epoch_checkpoint(&mut self, epoch_checkpoint: &EpochCheckpoint) -> Result<(), StorageError>;
+    fn upsert_template_catalogue(
+        &mut self,
+        template_address: &TemplateAddress,
+        metadata: &TemplateMetadata,
+    ) -> Result<(), StorageError>;
 }
 
 /// An event that was inserted into the database, with its assigned auto-increment ID.
@@ -308,5 +328,23 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
                 limit,
             )
         })
+    }
+
+    pub fn list_template_catalogue(
+        &self,
+        name_filter: Option<&str>,
+        limit: u64,
+        offset: u64,
+    ) -> Result<Vec<crate::storage_sqlite::models::TemplateCatalogueEntry>, StorageError> {
+        self.inner
+            .with_read_tx(|tx| tx.list_template_catalogue(name_filter, limit, offset))
+    }
+
+    pub fn get_template_catalogue_entry(
+        &self,
+        template_address: &TemplateAddress,
+    ) -> Result<Option<crate::storage_sqlite::models::TemplateCatalogueEntry>, StorageError> {
+        self.inner
+            .with_read_tx(|tx| tx.get_template_catalogue_entry(template_address))
     }
 }

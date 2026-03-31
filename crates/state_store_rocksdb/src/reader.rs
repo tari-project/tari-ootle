@@ -144,6 +144,7 @@ use crate::{
         substate::SubstateCf,
         substate_locks,
         substate_locks::SubstateLockModel,
+        template_metadata::TemplateMetadataCf,
         transaction::TransactionCf,
         transaction_pool::TransactionPoolCf,
         transaction_pool_state_update,
@@ -1658,6 +1659,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let mut updates = Vec::with_capacity(data.transitions.len());
         let all_hashes = value_filter.include_filtered_hashes();
         let up_only = value_filter.is_up_only();
+        let metadata_cf = self.db().cf(TemplateMetadataCf)?;
         // multi_get returns the substates in the same order as queried, so ordered by transitions
         for (rec, substate) in data.transitions.iter().zip(substates) {
             let update = match rec.transition {
@@ -1667,26 +1669,48 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                         // value, skip it
                         None
                     } else {
-                        value_filter
-                            .contains_substate(&substate.substate_id)
-                            // filter includes substate, return full value if available, otherwise return hash
-                            .then(|| {
-                                substate
-                                    .substate_value
-                                    .map(|v| SubstateValueOrHash::Value(Box::new(v)))
-                                    .unwrap_or_else(|| SubstateValueOrHash::Hash(substate.state_hash))
-                            })
-                            // Otherwise if the client still wants all hashes for filtered out substates
-                            .or_else(|| all_hashes.then_some(SubstateValueOrHash::Hash(substate.state_hash)))
-                            .map(|value| {
-                                SubstateUpdateProof::Create(SubstateCreate {
-                                    substate: SubstateData {
-                                        substate_id: substate.substate_id,
-                                        version: substate.version,
-                                        value,
-                                    },
+                        let template_metadata_opt = if substate.substate_id.is_template() &&
+                            value_filter.contains(SubstateValueFilterFlags::TEMPLATE_METADATA)
+                        {
+                            let template_addr = substate
+                                .substate_id
+                                .as_template()
+                                .expect("substate_id.is_template() is true")
+                                .as_template_address();
+                            metadata_cf
+                                .get(&template_addr, "state_transitions_get_starting_at:template_metadata")
+                                .optional()?
+                        } else {
+                            None
+                        };
+
+                        let resolved_value = if template_metadata_opt.is_some() {
+                            // Metadata mode: send only the state hash, the receiver uses template_metadata
+                            Some(SubstateValueOrHash::Hash(substate.state_hash))
+                        } else {
+                            value_filter
+                                .contains_substate(&substate.substate_id)
+                                // filter includes substate, return full value if available, otherwise return hash
+                                .then(|| {
+                                    substate
+                                        .substate_value
+                                        .map(|v| SubstateValueOrHash::Value(Box::new(v)))
+                                        .unwrap_or_else(|| SubstateValueOrHash::Hash(substate.state_hash))
                                 })
+                                // Otherwise if the client still wants all hashes for filtered out substates
+                                .or_else(|| all_hashes.then_some(SubstateValueOrHash::Hash(substate.state_hash)))
+                        };
+
+                        resolved_value.map(|value| {
+                            SubstateUpdateProof::Create(SubstateCreate {
+                                substate: SubstateData {
+                                    substate_id: substate.substate_id,
+                                    version: substate.version,
+                                    value,
+                                    template_metadata: template_metadata_opt,
+                                },
                             })
+                        })
                     }
                 },
                 StateTransitionType::Down => (!up_only)

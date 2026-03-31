@@ -25,6 +25,21 @@ use crate::{
     limits,
 };
 
+/// Lightweight template metadata that can be exchanged without transmitting the full WASM binary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, borsh::BorshSerialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct TemplateMetadata {
+    /// Human-readable template name extracted from the WASM ABI.
+    pub template_name: String,
+    /// Author's public key.
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub author_public_key: RistrettoPublicKeyBytes,
+    /// SHA-256 hash of the WASM binary.
+    pub binary_hash: Hash32,
+    /// Epoch at which the template was published.
+    pub at_epoch: u64,
+}
+
 const TAG: u64 = BinaryTag::TemplateAddress.as_u64();
 
 #[derive(

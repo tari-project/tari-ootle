@@ -43,6 +43,7 @@ pub mod state_tree;
 pub mod state_tree_shard_versions;
 pub mod substate;
 pub mod substate_locks;
+pub mod template_metadata;
 pub mod transaction;
 pub mod transaction_pool;
 pub mod transaction_pool_state_update;
@@ -58,4 +59,5 @@ pub(crate) mod cf_names {
     pub(crate) const DIAGNOSTICS: &str = "diagnostics";
     pub(crate) const SUBSTATES: &str = "substates";
     pub(crate) const STATE_TREE: &str = "state_tree";
+    pub(crate) const TEMPLATE_METADATA: &str = "template_metadata";
 }

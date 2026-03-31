@@ -4,7 +4,10 @@
 use std::convert::{TryFrom, TryInto};
 
 use anyhow::{Context, anyhow};
-use tari_engine_types::substate::{SubstateId, SubstateValue};
+use tari_engine_types::{
+    published_template::TemplateMetadata,
+    substate::{SubstateId, SubstateValue},
+};
 use tari_jellyfish::TreeHash;
 use tari_ootle_common_types::shard::Shard;
 use tari_ootle_storage::consensus_models::{
@@ -22,6 +25,10 @@ use crate::{
     encoding::{decode_from_slice, encode_to_vec},
     proto,
 };
+
+fn decode_template_metadata(bytes: &[u8]) -> Result<TemplateMetadata, anyhow::Error> {
+    decode_from_slice(bytes).context("TemplateMetadata")
+}
 
 impl TryFrom<proto::rpc::SubstateCreate> for SubstateCreate {
     type Error = anyhow::Error;
@@ -92,6 +99,12 @@ impl TryFrom<proto::rpc::SubstateData> for SubstateData {
     type Error = anyhow::Error;
 
     fn try_from(value: proto::rpc::SubstateData) -> Result<Self, Self::Error> {
+        let template_metadata = if value.template_metadata.is_empty() {
+            None
+        } else {
+            Some(decode_template_metadata(&value.template_metadata)?)
+        };
+
         Ok(Self {
             substate_id: SubstateId::from_bytes(&value.substate_id)?,
             version: value.version,
@@ -99,6 +112,7 @@ impl TryFrom<proto::rpc::SubstateData> for SubstateData {
                 .substate_value_or_hash
                 .ok_or_else(|| anyhow!("substate_value_or_hash not provided"))?
                 .try_into()?,
+            template_metadata,
         })
     }
 }
@@ -109,6 +123,10 @@ impl From<SubstateData> for proto::rpc::SubstateData {
             substate_id: value.substate_id.to_bytes(),
             version: value.version,
             substate_value_or_hash: Some(value.value().into()),
+            template_metadata: value
+                .template_metadata
+                .map(|m| encode_to_vec(&m).unwrap_or_default())
+                .unwrap_or_default(),
         }
     }
 }

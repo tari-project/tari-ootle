@@ -3,10 +3,13 @@
 
 use tari_engine_types::published_template::{PublishedTemplate, PublishedTemplateAddress};
 use tari_ootle_common_types::{SubstateAddress, services::template_provider::TemplateProvider};
-use tari_ootle_storage::StorageError;
+use tari_ootle_storage::{Ordering, StorageError};
 use tari_template_lib_types::TemplateAddress;
 
-use crate::{RocksDbStateStore, column_families::substate::SubstateCf};
+use crate::{
+    RocksDbStateStore,
+    column_families::{substate, substate::SubstateCf, template_metadata::TemplateMetadataCf},
+};
 
 impl<TAddr: Send + Sync + 'static> TemplateProvider for RocksDbStateStore<TAddr> {
     type Error = StorageError;
@@ -37,6 +40,34 @@ impl<TAddr: Send + Sync + 'static> TemplateProvider for RocksDbStateStore<TAddr>
         let address = template_address_to_substate_address(*id);
         let exists = cf.exists(&address, OPERATION)?;
         Ok(exists)
+    }
+}
+
+impl<TAddr: Send + Sync + 'static> RocksDbStateStore<TAddr> {
+    /// Scans the substate head index and returns the addresses of all currently *up* (live)
+    /// template substates that are **missing** from `TemplateMetadataCf`.
+    ///
+    /// Called once at validator-node startup to backfill metadata for templates that were
+    /// published before this code was deployed. On subsequent restarts, templates that already
+    /// have metadata entries are skipped, keeping the operation near-instant.
+    pub fn scan_template_addresses_missing_metadata(&self) -> Result<Vec<TemplateAddress>, StorageError> {
+        const OPERATION: &str = "scan_template_addresses_missing_metadata";
+        let cx = self.snapshot();
+        let head_index = cx.cf(substate::HeadIndex)?;
+        let metadata_cf = cx.cf(TemplateMetadataCf)?;
+        let mut addresses = Vec::new();
+        for result in head_index.iterator(Ordering::Ascending, OPERATION) {
+            let (id, data) = result?;
+            if data.is_up &&
+                let Some(published) = id.as_template()
+            {
+                let addr = published.as_template_address();
+                if !metadata_cf.exists(&addr, OPERATION)? {
+                    addresses.push(addr);
+                }
+            }
+        }
+        Ok(addresses)
     }
 }
 

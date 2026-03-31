@@ -42,7 +42,7 @@ use tari_consensus_types::{
     ProposalCertificate,
     TimeoutCertificate,
 };
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::{published_template::TemplateMetadata, substate::SubstateId};
 use tari_ootle_common_types::{
     Epoch,
     NodeAddressable,
@@ -89,7 +89,7 @@ use tari_ootle_storage::{
 };
 use tari_ootle_transaction::TransactionId;
 use tari_state_tree::{Child, Nibble, Node, NodeKey, NodeType, StaleTreeNode, StateTreePayload, Version};
-use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+use tari_template_lib_types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
     cf_api::{CfContext, DbContext},
@@ -149,6 +149,7 @@ use crate::{
         substate::{SubstateCf, SubstateHeadData},
         substate_locks,
         substate_locks::{SubstateLockKey, SubstateLockModel},
+        template_metadata::TemplateMetadataCf,
         transaction::TransactionCf,
         transaction_pool::TransactionPoolCf,
         transaction_pool_state_update,
@@ -192,6 +193,18 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
             .as_ref()
             .expect("DB transaction already taken")
             .rocksdb_transaction()
+    }
+
+    pub fn template_metadata_upsert(
+        &mut self,
+        address: &TemplateAddress,
+        metadata: &TemplateMetadata,
+    ) -> Result<(), StorageError> {
+        const OPERATION: &str = "template_metadata_upsert";
+        self.db()
+            .cf(TemplateMetadataCf)?
+            .put(address, metadata, OPERATION)
+            .map_err(StorageError::from)
     }
 
     fn parked_blocks_insert(

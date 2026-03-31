@@ -46,7 +46,7 @@ use tari_template_lib_types::{
 use crate::{
     storage_sqlite::{
         models,
-        models::{EventRecord, KeyValue, SubstateRecord},
+        models::{EventRecord, KeyValue, SubstateRecord, TemplateCatalogueEntry, TemplateCatalogueRow},
         serialization::{deserialize_hex_try_from, deserialize_json, serialize_hex},
     },
     store::IndexerStoreReadTransaction,
@@ -725,6 +725,68 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         }
 
         Ok(utxos)
+    }
+
+    fn list_template_catalogue(
+        &mut self,
+        name_filter: Option<&str>,
+        limit: u64,
+        offset: u64,
+    ) -> Result<Vec<TemplateCatalogueEntry>, StorageError> {
+        const OPERATION: &str = "list_template_catalogue";
+        use crate::storage_sqlite::schema::template_catalogue;
+
+        let mut query = template_catalogue::table
+            .order_by(template_catalogue::id.asc())
+            .into_boxed();
+
+        if let Some(name) = name_filter {
+            query = query.filter(template_catalogue::template_name.like(format!("%{name}%")));
+        }
+
+        let rows = query
+            .limit(limit as i64)
+            .offset(offset as i64)
+            .load::<TemplateCatalogueRow>(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {e}"),
+            })?;
+
+        rows.into_iter()
+            .map(|row| {
+                TemplateCatalogueEntry::try_from(row).map_err(|e| StorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "TemplateCatalogueEntry",
+                    details: e.to_string(),
+                })
+            })
+            .collect()
+    }
+
+    fn get_template_catalogue_entry(
+        &mut self,
+        template_address: &TemplateAddress,
+    ) -> Result<Option<TemplateCatalogueEntry>, StorageError> {
+        const OPERATION: &str = "get_template_catalogue_entry";
+        use crate::storage_sqlite::schema::template_catalogue;
+
+        let addr_hex = hex::encode(template_address.as_slice());
+        let row = template_catalogue::table
+            .filter(template_catalogue::template_address.eq(&addr_hex))
+            .first::<TemplateCatalogueRow>(self.connection())
+            .optional()
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {e}"),
+            })?;
+
+        row.map(|r| {
+            TemplateCatalogueEntry::try_from(r).map_err(|e| StorageError::DecodingError {
+                operation: OPERATION,
+                item: "TemplateCatalogueEntry",
+                details: e.to_string(),
+            })
+        })
+        .transpose()
     }
 }
 

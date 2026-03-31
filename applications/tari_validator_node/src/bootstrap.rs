@@ -312,6 +312,14 @@ pub async fn spawn_services(
     #[cfg(not(feature = "metrics"))]
     let metrics = NoopHooks;
 
+    let template_metadata_hooks =
+        consensus::template_metadata_hooks::TemplateMetadataHooks::new(template_provider.clone(), state_store.clone());
+    // Backfill metadata for templates that were published before this code was deployed.
+    // Runs on the blocking thread pool so it does not stall the async runtime during WASM loads.
+    let backfill_hooks = template_metadata_hooks.clone();
+    tokio::task::spawn_blocking(move || backfill_hooks.backfill_missing());
+    let hooks = consensus::template_metadata_hooks::CompositeHooks::new(metrics, template_metadata_hooks);
+
     let sidechain_id = config
         .validator_node
         .validator_node_sidechain_id
@@ -331,7 +339,7 @@ pub async fn spawn_services(
         inbound_messaging,
         outbound_messaging.clone(),
         validator_node_client_factory.clone(),
-        metrics,
+        hooks,
         shutdown.clone(),
         transaction_executor,
         tx_hotstuff_events,

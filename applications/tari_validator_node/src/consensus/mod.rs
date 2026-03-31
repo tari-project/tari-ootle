@@ -34,6 +34,7 @@ mod leader_selection;
 pub mod metrics;
 mod signer_service;
 pub mod spec;
+pub mod template_metadata_hooks;
 
 pub use block_transaction_executor::*;
 pub use handle::*;

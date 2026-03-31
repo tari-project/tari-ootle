@@ -6384,8 +6384,8 @@ dependencies = [
 
 [[package]]
 name = "minotari_app_grpc"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "argon2 0.4.1",
  "base64 0.22.1",
@@ -6415,8 +6415,8 @@ dependencies = [
 
 [[package]]
 name = "minotari_app_utilities"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "clap 3.2.25",
  "dialoguer 0.10.4",
@@ -6438,8 +6438,8 @@ dependencies = [
 
 [[package]]
 name = "minotari_console_wallet"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6475,7 +6475,7 @@ dependencies = [
  "tari_core",
  "tari_crypto",
  "tari_features",
- "tari_hashing 5.3.0-pre.3 (git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c)",
+ "tari_hashing 5.3.0-pre.4 (git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4)",
  "tari_p2p",
  "tari_script",
  "tari_shutdown",
@@ -6494,8 +6494,8 @@ dependencies = [
 
 [[package]]
 name = "minotari_ledger_wallet_common"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "bs58 0.5.1",
  "serde",
@@ -6503,8 +6503,8 @@ dependencies = [
 
 [[package]]
 name = "minotari_ledger_wallet_comms"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "borsh",
  "dialoguer 0.11.0",
@@ -6525,8 +6525,8 @@ dependencies = [
 
 [[package]]
 name = "minotari_node"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6584,16 +6584,16 @@ dependencies = [
 
 [[package]]
 name = "minotari_node_grpc_client"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "minotari_app_grpc",
 ]
 
 [[package]]
 name = "minotari_node_wallet_client"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6610,8 +6610,8 @@ dependencies = [
 
 [[package]]
 name = "minotari_wallet"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "anyhow",
  "argon2 0.4.1",
@@ -6646,7 +6646,7 @@ dependencies = [
  "tari_comms",
  "tari_comms_dht",
  "tari_crypto",
- "tari_hashing 5.3.0-pre.3 (git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c)",
+ "tari_hashing 5.3.0-pre.4 (git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4)",
  "tari_max_size",
  "tari_p2p",
  "tari_script",
@@ -6667,8 +6667,8 @@ dependencies = [
 
 [[package]]
 name = "minotari_wallet_grpc_client"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "minotari_app_grpc",
  "tari_common",
@@ -10642,8 +10642,8 @@ dependencies = [
 
 [[package]]
 name = "tari_common"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "anyhow",
  "cargo_toml 0.20.5",
@@ -10668,8 +10668,8 @@ dependencies = [
 
 [[package]]
 name = "tari_common_sqlite"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "diesel",
  "diesel_migrations",
@@ -10685,8 +10685,8 @@ dependencies = [
 
 [[package]]
 name = "tari_common_types"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "argon2 0.4.1",
  "base64 0.22.1",
@@ -10711,7 +10711,7 @@ dependencies = [
  "subtle",
  "tari_common",
  "tari_crypto",
- "tari_hashing 5.3.0-pre.3 (git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c)",
+ "tari_hashing 5.3.0-pre.4 (git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4)",
  "tari_max_size",
  "tari_utilities",
  "thiserror 2.0.18",
@@ -10721,8 +10721,8 @@ dependencies = [
 
 [[package]]
 name = "tari_comms"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10768,8 +10768,8 @@ dependencies = [
 
 [[package]]
 name = "tari_comms_dht"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "anyhow",
  "bitflags 2.10.0",
@@ -10802,8 +10802,8 @@ dependencies = [
 
 [[package]]
 name = "tari_comms_rpc_macros"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10845,7 +10845,7 @@ dependencies = [
  "tari_common_types",
  "tari_crypto",
  "tari_engine_types",
- "tari_hashing 5.3.0-pre.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tari_hashing 5.3.0-pre.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "tari_ootle_common_types",
  "tari_sidechain",
  "tari_template_lib",
@@ -10854,8 +10854,8 @@ dependencies = [
 
 [[package]]
 name = "tari_core"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10895,7 +10895,7 @@ dependencies = [
  "tari_comms_rpc_macros",
  "tari_crypto",
  "tari_features",
- "tari_hashing 5.3.0-pre.3 (git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c)",
+ "tari_hashing 5.3.0-pre.4 (git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4)",
  "tari_max_size",
  "tari_mmr",
  "tari_node_components",
@@ -10984,7 +10984,7 @@ dependencies = [
  "serde_json",
  "tari_bor",
  "tari_crypto",
- "tari_hashing 5.3.0-pre.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tari_hashing 5.3.0-pre.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "tari_template_abi",
  "tari_template_lib",
  "thiserror 2.0.18",
@@ -11024,7 +11024,7 @@ dependencies = [
  "tari_base_node_client",
  "tari_common_types",
  "tari_epoch_manager",
- "tari_hashing 5.3.0-pre.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tari_hashing 5.3.0-pre.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "tari_node_components",
  "tari_ootle_common_types",
  "tari_ootle_storage",
@@ -11038,14 +11038,14 @@ dependencies = [
 
 [[package]]
 name = "tari_features"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 
 [[package]]
 name = "tari_hashing"
-version = "5.3.0-pre.3"
+version = "5.3.0-pre.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85f0b770e9f5c583e62d260cad675b707aa8020a0ab0de53f390c898e5240d01"
+checksum = "2a5302039a1a4765e2a39e26425c6d6b8375136c0159ad378dcd16b591331622"
 dependencies = [
  "blake2",
  "borsh",
@@ -11055,8 +11055,8 @@ dependencies = [
 
 [[package]]
 name = "tari_hashing"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "blake2",
  "borsh",
@@ -11177,15 +11177,15 @@ dependencies = [
 
 [[package]]
 name = "tari_jellyfish"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "borsh",
  "digest 0.10.7",
  "indexmap 2.13.0",
  "serde",
  "tari_crypto",
- "tari_hashing 5.3.0-pre.3 (git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c)",
+ "tari_hashing 5.3.0-pre.4 (git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4)",
  "thiserror 2.0.18",
 ]
 
@@ -11207,8 +11207,8 @@ dependencies = [
 
 [[package]]
 name = "tari_libtor"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "derivative",
  "libtor",
@@ -11221,8 +11221,8 @@ dependencies = [
 
 [[package]]
 name = "tari_max_size"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "borsh",
  "serde",
@@ -11232,8 +11232,8 @@ dependencies = [
 
 [[package]]
 name = "tari_metrics"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "once_cell",
  "prometheus",
@@ -11242,8 +11242,8 @@ dependencies = [
 
 [[package]]
 name = "tari_mmr"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "borsh",
  "digest 0.10.7",
@@ -11272,8 +11272,8 @@ dependencies = [
 
 [[package]]
 name = "tari_node_components"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "blake2",
  "borsh",
@@ -11283,7 +11283,7 @@ dependencies = [
  "primitive-types",
  "serde",
  "tari_common_types",
- "tari_hashing 5.3.0-pre.3 (git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c)",
+ "tari_hashing 5.3.0-pre.4 (git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4)",
  "tari_transaction_components",
  "tari_utilities",
  "thiserror 2.0.18",
@@ -11329,7 +11329,7 @@ dependencies = [
  "tari_engine",
  "tari_engine_types",
  "tari_epoch_oracles",
- "tari_hashing 5.3.0-pre.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tari_hashing 5.3.0-pre.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "tari_mmr",
  "tari_networking",
  "tari_ootle_common_types",
@@ -11364,7 +11364,7 @@ dependencies = [
  "tari_bor",
  "tari_crypto",
  "tari_engine_types",
- "tari_hashing 5.3.0-pre.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tari_hashing 5.3.0-pre.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "tari_template_lib_types",
  "thiserror 2.0.18",
  "ts-rs",
@@ -11459,7 +11459,7 @@ dependencies = [
  "tari_bor",
  "tari_crypto",
  "tari_engine_types",
- "tari_hashing 5.3.0-pre.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tari_hashing 5.3.0-pre.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "tari_ootle_common_types",
  "tari_template_lib_types",
  "thiserror 2.0.18",
@@ -11515,7 +11515,7 @@ dependencies = [
  "tari_bor",
  "tari_crypto",
  "tari_engine_types",
- "tari_hashing 5.3.0-pre.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tari_hashing 5.3.0-pre.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "tari_ootle_common_types",
  "tari_template_lib_types",
  "tari_utilities",
@@ -11699,8 +11699,8 @@ dependencies = [
 
 [[package]]
 name = "tari_p2p"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "anyhow",
  "futures 0.3.31",
@@ -11780,8 +11780,8 @@ dependencies = [
 
 [[package]]
 name = "tari_script"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "blake2",
  "borsh",
@@ -11798,8 +11798,8 @@ dependencies = [
 
 [[package]]
 name = "tari_service_framework"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11813,16 +11813,16 @@ dependencies = [
 
 [[package]]
 name = "tari_shutdown"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "futures 0.3.31",
 ]
 
 [[package]]
 name = "tari_sidechain"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "borsh",
  "hex",
@@ -11830,7 +11830,7 @@ dependencies = [
  "serde",
  "tari_common_types",
  "tari_crypto",
- "tari_hashing 5.3.0-pre.3 (git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c)",
+ "tari_hashing 5.3.0-pre.4 (git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4)",
  "tari_jellyfish",
  "tari_utilities",
  "thiserror 2.0.18",
@@ -11883,8 +11883,8 @@ dependencies = [
 
 [[package]]
 name = "tari_storage"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "bincode 1.3.3",
  "lmdb-zero",
@@ -12038,8 +12038,8 @@ dependencies = [
 
 [[package]]
 name = "tari_test_utils"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "futures 0.3.31",
  "rand 0.8.5",
@@ -12050,8 +12050,8 @@ dependencies = [
 
 [[package]]
 name = "tari_transaction_components"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -12083,7 +12083,7 @@ dependencies = [
  "tari_common",
  "tari_common_types",
  "tari_crypto",
- "tari_hashing 5.3.0-pre.3 (git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c)",
+ "tari_hashing 5.3.0-pre.4 (git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4)",
  "tari_max_size",
  "tari_script",
  "tari_sidechain",
@@ -12097,8 +12097,8 @@ dependencies = [
 
 [[package]]
 name = "tari_transaction_key_manager"
-version = "5.3.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c#5a278cb8834acc10ebe714c39f012249ea2e966c"
+version = "5.3.0-pre.4"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4#cd40a655abb117e43a87fcdbd9bb7d78f18cd6a3"
 dependencies = [
  "async-trait",
  "blake2",
@@ -12118,7 +12118,7 @@ dependencies = [
  "tari_common_sqlite",
  "tari_common_types",
  "tari_crypto",
- "tari_hashing 5.3.0-pre.3 (git+https://github.com/tari-project/tari.git?rev=5a278cb8834acc10ebe714c39f012249ea2e966c)",
+ "tari_hashing 5.3.0-pre.4 (git+https://github.com/tari-project/tari.git?tag=v5.3.0-pre.4)",
  "tari_script",
  "tari_service_framework",
  "tari_transaction_components",

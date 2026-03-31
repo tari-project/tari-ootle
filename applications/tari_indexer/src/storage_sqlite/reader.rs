@@ -319,7 +319,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         use crate::storage_sqlite::schema::events;
 
         let mut query = events::table.into_boxed();
-        query = query.filter(events::id.gt(after_id as i32));
+        query = query.filter(events::id.gt(after_id));
 
         if let Some(topic) = topic_filter {
             query = query.filter(events::topic.eq(topic));
@@ -345,7 +345,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                     reason: format!("get_events_after_id: {}", e),
                 })
                 .and_then(|row| {
-                    let id = i64::from(row.id);
+                    let id = row.id;
                     let substate_id = row
                         .substate_id
                         .as_ref()

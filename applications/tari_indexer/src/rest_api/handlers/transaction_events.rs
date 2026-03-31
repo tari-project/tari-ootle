@@ -177,19 +177,30 @@ async fn run_replay_then_live(
             },
             Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                 warn!(target: LOG_TARGET, "SSE broadcast lagged by {} events, catching up from DB (highest_id={})", n, highest_id);
-                // Re-query DB for the gap
-                let batch = store.get_events_after_id(
-                    highest_id,
-                    filter.topic.as_deref(),
-                    filter.substate_id.as_ref(),
-                    filter.template_address.as_ref(),
-                    n.min(u64::from(MAX_REPLAY_EVENTS)) as u32,
-                )?;
-                for (id, transaction_id, event) in &batch {
-                    highest_id = *id;
-                    let sse_event = encode_replay_event(*id, transaction_id, event);
-                    if tx.send(sse_event).await.is_err() {
-                        return Ok(());
+                // Iteratively catch up from DB in pages until we've replayed everything
+                loop {
+                    let batch = store.get_events_after_id(
+                        highest_id,
+                        filter.topic.as_deref(),
+                        filter.substate_id.as_ref(),
+                        filter.template_address.as_ref(),
+                        REPLAY_PAGE_SIZE,
+                    )?;
+
+                    if batch.is_empty() {
+                        break;
+                    }
+
+                    for (id, transaction_id, event) in &batch {
+                        highest_id = *id;
+                        let sse_event = encode_replay_event(*id, transaction_id, event);
+                        if tx.send(sse_event).await.is_err() {
+                            return Ok(());
+                        }
+                    }
+
+                    if batch.len() < REPLAY_PAGE_SIZE as usize {
+                        break;
                     }
                 }
             },

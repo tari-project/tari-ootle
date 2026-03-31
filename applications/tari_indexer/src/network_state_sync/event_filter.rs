@@ -15,7 +15,7 @@ pub struct EventFilter {
 
 impl EventFilter {
     pub fn matches(&self, event: &Event) -> bool {
-        if self.topic.as_ref().is_some_and(|t| t.as_ref() != event.topic()) {
+        if self.topic.as_ref().is_some_and(|t| !Self::topic_matches(t, event.topic())) {
             return false;
         }
 
@@ -41,5 +41,14 @@ impl EventFilter {
                 .map(|s| s.to_object_key().as_entity_id() == *entity_id)
                 .unwrap_or(false)
         })
+    }
+
+    /// Match a topic filter against an event topic.
+    /// Supports exact match and prefix wildcard (e.g. "std.vault.*" matches "std.vault.withdraw").
+    fn topic_matches(filter: &str, topic: &str) -> bool {
+        match filter.strip_suffix('*') {
+            Some(prefix) => topic.starts_with(prefix),
+            None => filter == topic,
+        }
     }
 }

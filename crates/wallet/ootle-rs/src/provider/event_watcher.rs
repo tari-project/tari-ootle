@@ -84,22 +84,15 @@ impl TransactionEventStream {
                 },
             };
 
-            const TX_EVENT_TYPE: &str = "TransactionEvent";
-
             loop {
                 match events.next().await {
                     Some(Ok(evt)) => {
-                        if evt.event_type != TX_EVENT_TYPE {
-                            continue;
-                        }
                         match evt.try_parse_event::<TransactionEvent>() {
                             Ok(mut tx_event) => {
                                 // The event ID is transmitted via the SSE `id:` field,
                                 // not in the JSON payload.
-                                if let Some(id_str) = &evt.last_event_id {
-                                    if let Ok(id) = id_str.parse::<i64>() {
-                                        tx_event.id = id;
-                                    }
+                                if let Some(Ok(id)) = evt.last_event_id.as_deref().map(str::parse::<i64>) {
+                                    tx_event.id = id;
                                 }
                                 yield Ok(tx_event);
                             },

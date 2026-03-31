@@ -217,9 +217,10 @@ async fn run_replay_then_live(
 }
 
 /// Encode a live TransactionEvent (which already carries its DB id) as an SSE event.
+/// The SSE event type is set to the event topic (e.g. "std.vault.withdraw").
 fn encode_transaction_event(event: &TransactionEvent) -> Result<sse::Event, axum::Error> {
     sse::Event::default()
-        .event("TransactionEvent")
+        .event(event.event.topic())
         .id(event.id.to_string())
         .json_data(event)
 }
@@ -230,14 +231,13 @@ fn encode_replay_event(
     transaction_id: &tari_ootle_transaction::TransactionId,
     event: &tari_engine_types::events::Event,
 ) -> Result<sse::Event, axum::Error> {
-    // Build a TransactionEvent for serialization
     let tx_event = TransactionEvent {
         id,
         transaction_id: *transaction_id,
         event: Arc::new(event.clone()),
     };
     sse::Event::default()
-        .event("TransactionEvent")
+        .event(event.topic())
         .id(id.to_string())
         .json_data(&tx_event)
 }

@@ -257,7 +257,14 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         }
 
         if let Some(topic) = topic_filter {
-            query = query.filter(events::topic.eq(topic));
+            match topic.strip_suffix('*') {
+                Some(prefix) => {
+                    query = query.filter(events::topic.like(format!("{}%", prefix)));
+                },
+                None => {
+                    query = query.filter(events::topic.eq(topic));
+                },
+            }
         }
 
         let event_rows = query
@@ -322,7 +329,14 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         query = query.filter(events::id.gt(after_id));
 
         if let Some(topic) = topic_filter {
-            query = query.filter(events::topic.eq(topic));
+            match topic.strip_suffix('*') {
+                Some(prefix) => {
+                    query = query.filter(events::topic.like(format!("{}%", prefix)));
+                },
+                None => {
+                    query = query.filter(events::topic.eq(topic));
+                },
+            }
         }
         if let Some(substate_id) = substate_id_filter {
             query = query.filter(events::substate_id.eq(substate_id.to_string()));

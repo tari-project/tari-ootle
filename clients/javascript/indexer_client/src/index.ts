@@ -174,7 +174,6 @@ export class IndexerClient {
   ): SseStream {
     return this.transport.sendSse(`transactions/events/stream`, params, {
       onEvent(sseEvent) {
-        if (sseEvent.event !== "TransactionEvent") return;
         let parsed: TransactionEvent;
         try {
           parsed = JSON.parse(sseEvent.data);

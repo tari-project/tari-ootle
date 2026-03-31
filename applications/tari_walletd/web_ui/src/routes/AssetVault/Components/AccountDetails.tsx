@@ -101,9 +101,9 @@ function AccountDetails() {
               </Stack>
             </DataTableCell>
             <DataTableCell>
-              {address && (
+              {address && decodeOotleAddressOrNull(address)?.accountPublicKey && (
                 <CopyAddress
-                  address={decodeOotleAddressOrNull(address)?.accountPublicKey || "<decode error>"}
+                  address={decodeOotleAddressOrNull(address)!.accountPublicKey}
                 />
               )}
             </DataTableCell>

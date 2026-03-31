@@ -50,6 +50,8 @@ pub struct TransactionFinalizedEvent {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TransactionEvent {
     /// The database auto-increment ID for this event, used as the SSE event ID for catch-up/replay.
+    /// Excluded from the JSON payload — it is transmitted via the SSE `id:` field instead.
+    #[serde(skip)]
     pub id: i64,
     pub transaction_id: TransactionId,
     pub event: Arc<tari_engine_types::events::Event>,

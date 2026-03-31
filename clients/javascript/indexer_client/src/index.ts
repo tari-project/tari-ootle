@@ -182,6 +182,10 @@ export class IndexerClient {
           options.onError?.(new Error(`Failed to parse TransactionEvent: ${e}`));
           return;
         }
+        // The event ID is transmitted via the SSE id: field, not in the JSON payload.
+        if (sseEvent.id) {
+          parsed.id = parseInt(sseEvent.id, 10);
+        }
         options.onEvent(parsed);
       },
       onError: options.onError,

@@ -93,7 +93,16 @@ impl TransactionEventStream {
                             continue;
                         }
                         match evt.try_parse_event::<TransactionEvent>() {
-                            Ok(tx_event) => yield Ok(tx_event),
+                            Ok(mut tx_event) => {
+                                // The event ID is transmitted via the SSE `id:` field,
+                                // not in the JSON payload.
+                                if let Some(id_str) = &evt.last_event_id {
+                                    if let Ok(id) = id_str.parse::<i64>() {
+                                        tx_event.id = id;
+                                    }
+                                }
+                                yield Ok(tx_event);
+                            },
                             Err(err) => {
                                 error!(%err, "Failed to parse transaction event");
                                 yield Err(EventWatcherError::ParseError(err));

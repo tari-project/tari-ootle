@@ -67,6 +67,7 @@ diesel::table! {
         code -> Nullable<Binary>,
         status -> Text,
         added_at -> Timestamp,
+        metadata_hash -> Nullable<Binary>,
     }
 }
 

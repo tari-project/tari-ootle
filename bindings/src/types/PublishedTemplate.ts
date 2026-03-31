@@ -13,4 +13,8 @@ export type PublishedTemplate = {
    * Epoch at which the template was published
    */
   at_epoch: bigint;
+  /**
+   * Optional multihash of off-chain CBOR metadata
+   */
+  metadata_hash?: string | null;
 };

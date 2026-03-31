@@ -8,6 +8,7 @@ use std::{
 };
 
 use tari_bor::{BorTag, Deserialize, Serialize, Tagged};
+use tari_ootle_template_metadata::MetadataHash;
 use tari_template_lib::types::{
     BinaryTag,
     Hash32,
@@ -113,6 +114,10 @@ pub struct PublishedTemplate {
     pub binary: TemplateBlob,
     /// Epoch at which the template was published
     pub at_epoch: u64,
+    /// Optional multihash of off-chain CBOR metadata
+    #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    pub metadata_hash: Option<MetadataHash>,
 }
 
 impl PublishedTemplate {

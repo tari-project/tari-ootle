@@ -129,7 +129,7 @@ impl TransactionV1 {
             .iter()
             .chain(self.fee_instructions())
             .filter_map(|instruction| {
-                if let Instruction::PublishTemplate { binary } = instruction {
+                if let Instruction::PublishTemplate { binary, .. } = instruction {
                     let binary_hash = hash_template_code(binary);
                     Some((
                         PublishedTemplateAddress::from_author_and_binary_hash(sealed_pk, &binary_hash),
@@ -198,7 +198,7 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::DropAllProofsInWorkspace => 1,
         Instruction::Assert { .. } => 1,
         Instruction::TakeFromBucket { .. } => 1,
-        Instruction::PublishTemplate { binary } => binary.len() as u64 / BINARY_WEIGHT_DIVISOR,
+        Instruction::PublishTemplate { binary, .. } => binary.len() as u64 / BINARY_WEIGHT_DIVISOR,
         Instruction::AllocateAddress { .. } => 1,
         Instruction::StealthTransfer { statement, .. } => calc_stealth_statement_weight(statement),
         Instruction::PayFeeFromBucket { .. } => 1,

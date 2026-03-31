@@ -15,6 +15,7 @@ use tari_engine_types::{
     transaction_receipt::TransactionReceipt,
 };
 use tari_ootle_common_types::{Epoch, Network, NumPreshards, ShardGroup, StateVersion, shard::Shard};
+use tari_ootle_template_metadata::MetadataHash;
 use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
 use tari_template_abi::TemplateDef;
 use tari_template_lib_types::{
@@ -194,6 +195,11 @@ pub struct TemplateMetadata {
     pub code_size: usize,
     #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
     pub epoch: Epoch,
+    /// Optional multihash of off-chain CBOR metadata
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    pub metadata_hash: Option<MetadataHash>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

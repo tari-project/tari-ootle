@@ -523,11 +523,14 @@ pub async fn handle_publish_template(
         .try_into()
         .map_err(|_| invalid_params("binary", Some("WASM binary too large".to_string())))?;
 
-    let transaction = context
+    let builder = context
         .transaction_builder()
-        .pay_fee_from_component(*fee_account.component_address(), req.max_fee)
-        .publish_template(wasm_binary)
-        .build_unsigned();
+        .pay_fee_from_component(*fee_account.component_address(), req.max_fee);
+    let builder = match req.metadata_hash {
+        Some(hash) => builder.publish_template_with_metadata(wasm_binary, hash),
+        None => builder.publish_template(wasm_binary),
+    };
+    let transaction = builder.build_unsigned();
 
     if req.dry_run {
         let request = TransactionSubmitDryRunRequest {

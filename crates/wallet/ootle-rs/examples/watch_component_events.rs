@@ -27,8 +27,7 @@ use tokio::pin;
 
 /// The component address to monitor for events.
 /// Replace with a real component address from your environment.
-const COMPONENT_ADDRESS: &str =
-    "component_0000000000000000000000000000000000000000000000000000000000000000";
+const COMPONENT_ADDRESS: &str = "component_0000000000000000000000000000000000000000000000000000000000000000";
 
 /// Optional: filter events by topic (e.g. "Transfer", "Mint", "Burn").
 /// Set to None to receive all events from the component.

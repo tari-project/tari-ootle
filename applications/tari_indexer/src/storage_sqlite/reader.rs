@@ -44,7 +44,6 @@ use tari_template_lib_types::{
 };
 
 use crate::{
-    network_state_sync::EventFilter,
     storage_sqlite::{
         models,
         models::{EventRecord, KeyValue, SubstateRecord},
@@ -258,7 +257,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         }
 
         if let Some(topic) = topic_filter {
-            match EventFilter::topic_to_like_pattern(topic) {
+            match topic_to_like_pattern(topic) {
                 Some(pattern) => {
                     query = query.filter(events::topic.like(pattern));
                 },
@@ -330,7 +329,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         query = query.filter(events::id.gt(after_id));
 
         if let Some(topic) = topic_filter {
-            match EventFilter::topic_to_like_pattern(topic) {
+            match topic_to_like_pattern(topic) {
                 Some(pattern) => {
                     query = query.filter(events::topic.like(pattern));
                 },
@@ -727,4 +726,14 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
 
         Ok(utxos)
     }
+}
+
+/// Convert a topic filter with `*` wildcards to a SQL LIKE pattern.
+/// Returns `None` if no wildcards are present.
+fn topic_to_like_pattern(filter: &str) -> Option<String> {
+    if !filter.contains('*') {
+        return None;
+    }
+    let escaped = filter.replace('%', r"\%").replace('_', r"\_");
+    Some(escaped.replace('*', "%"))
 }

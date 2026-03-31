@@ -15,7 +15,11 @@ pub struct EventFilter {
 
 impl EventFilter {
     pub fn matches(&self, event: &Event) -> bool {
-        if self.topic.as_ref().is_some_and(|t| !Self::topic_matches(t, event.topic())) {
+        if self
+            .topic
+            .as_ref()
+            .is_some_and(|t| !Self::topic_matches(t, event.topic()))
+        {
             return false;
         }
 

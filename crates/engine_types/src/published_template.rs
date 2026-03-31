@@ -115,7 +115,7 @@ pub struct PublishedTemplate {
     /// Epoch at which the template was published
     pub at_epoch: u64,
     /// Optional multihash of off-chain CBOR metadata
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     pub metadata_hash: Option<MetadataHash>,
 }

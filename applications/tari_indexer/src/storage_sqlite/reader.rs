@@ -345,7 +345,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                     reason: format!("get_events_after_id: {}", e),
                 })
                 .and_then(|row| {
-                    let id = row.id as i64;
+                    let id = i64::from(row.id);
                     let substate_id = row
                         .substate_id
                         .as_ref()

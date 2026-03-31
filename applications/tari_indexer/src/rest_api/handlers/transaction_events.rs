@@ -183,7 +183,7 @@ async fn run_replay_then_live(
                     filter.topic.as_deref(),
                     filter.substate_id.as_ref(),
                     filter.template_address.as_ref(),
-                    n.min(MAX_REPLAY_EVENTS as u64) as u32,
+                    n.min(u64::from(MAX_REPLAY_EVENTS)) as u32,
                 )?;
                 for (id, transaction_id, event) in &batch {
                     highest_id = *id;

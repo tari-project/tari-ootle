@@ -1,0 +1,16 @@
+name: 'Rust Cache'
+description: 'Cache Rust build artifacts using Swatinem/rust-cache'
+inputs:
+  save-if:
+    description: 'Whether to save the cache after the job'
+    required: false
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - name: caching
+      uses: Swatinem/rust-cache@v2
+      with:
+        prefix-key: v0-rust-ci-build
+        cache-all-crates: true
+        save-if: ${{ inputs.save-if }}

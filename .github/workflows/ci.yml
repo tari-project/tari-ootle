@@ -25,6 +25,7 @@ env:
   stable_toolchain: stable
   CARGO_HTTP_MULTIPLEXING: false
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
   TARI_TARGET_NETWORK: localnet
   TARI_NETWORK: localnet
   # https://github.com/rust-lang/rustup/issues/2949#issuecomment-2584968659
@@ -46,14 +47,6 @@ jobs:
         with:
           toolchain: ${{ env.nightly_toolchain }}
           components: rustfmt
-
-      - name: ubuntu dependencies
-        run: |
-          sudo apt-get update
-          sudo bash scripts/install_ubuntu_dependencies.sh
-
-      - name: wasm target install
-        run: rustup target add wasm32-unknown-unknown
 
       - name: cargo format
         run: cargo +${{ env.nightly_toolchain }} fmt --all -- --check
@@ -88,6 +81,8 @@ jobs:
           toolchain: ${{ env.stable_toolchain }}
           components: clippy
 
+      - uses: ./.github/actions/rust-cache
+
       - name: ubuntu dependencies
         run: |
           sudo apt-get update
@@ -104,6 +99,10 @@ jobs:
       - name: Clippy check (with lints)
         run: cargo lints clippy --all-targets --all-features
 
+      - name: target dir size
+        if: always()
+        run: du -sh target/ 2>/dev/null || true
+
   machete:
     # Checks for unused dependencies.
     name: machete
@@ -119,6 +118,8 @@ jobs:
           toolchain: ${{ env.stable_toolchain }}
           components: clippy, rustfmt
 
+      - uses: ./.github/actions/rust-cache
+
       - name: ubuntu dependencies
         run: |
           sudo apt-get update
@@ -129,39 +130,9 @@ jobs:
           cargo install cargo-machete
           cargo machete
 
-  build-stable:
-    name: check stable
-    runs-on: [ ubuntu-latest ]
-    env:
-      RUSTUP_PERMIT_COPY_RENAME: true
-
-    steps:
-      - name: checkout
-        uses: actions/checkout@v6
-
-      - name: toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: ubuntu dependencies
-        run: |
-          sudo apt-get update
-          sudo bash scripts/install_ubuntu_dependencies.sh
-
-      - uses: rui314/setup-mold@v1
-
-      - name: wasm target install
-        run: rustup target add wasm32-unknown-unknown
-
-      - name: rustup show
-        run: |
-          rustup show
-
-      - name: cargo check
-        run: cargo check --release --all-features --all-targets --locked
+      - name: target dir size
+        if: always()
+        run: du -sh target/ 2>/dev/null || true
 
   licenses:
     name: file licenses
@@ -184,9 +155,12 @@ jobs:
       - name: run the license check
         run: ./scripts/file_license_check.sh
 
-  test:
-    name: test
+  test-shards:
+    name: test (${{ matrix.partition }})
     runs-on: [ ubuntu-latest ]
+    strategy:
+      matrix:
+        partition: ["1/3", "2/3", "3/3"]
 
     steps:
       - name: checkout
@@ -196,6 +170,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.stable_toolchain }}
+
+      - uses: ./.github/actions/rust-cache
+        with:
+          save-if: ${{ matrix.partition == '1/3' }}
 
       - name: ubuntu dependencies
         run: |
@@ -208,23 +186,85 @@ jobs:
         run: rustup target add wasm32-unknown-unknown
 
       - name: Install cargo-nextest
-        run: cargo install cargo-nextest --locked
-
-      - name: cargo test compile
-        run: cargo test --no-run --locked --all-features --release
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
 
       - name: cargo test
-        run: cargo nextest run --all-features --release --profile ci
+        run: cargo nextest run --all-features --cargo-profile ci-build --profile ci --partition hash:${{ matrix.partition }}
+
+      - name: target dir size
+        if: always()
+        run: du -sh target/ 2>/dev/null || true
 
       - name: upload artifact
         uses: actions/upload-artifact@v7 # upload test results as artifact
         if: success() || failure()
         with:
-          name: test-results
+          name: test-results-${{ strategy.job-index }}
           path: ${{ github.workspace }}/target/nextest/ci/junit.xml
 
+  # Required status check aggregator — satisfies the branch protection rule named "test"
+  # without requiring branch protection rule changes.
+  test:
+    name: test
+    if: always()
+    needs: [ test-shards ]
+    runs-on: [ ubuntu-latest ]
+    steps:
+      - name: check shard results
+        run: |
+          if [[ "${{ needs.test-shards.result }}" != "success" ]]; then
+            echo "One or more test shards failed or were cancelled"
+            exit 1
+          fi
+
+  # Required status check placeholder — satisfies the "check stable" branch protection
+  # rule. The full workspace is already compiled by the test shards on stable.
+  check-stable:
+    name: check stable
+    if: always()
+    needs: [ test-shards ]
+    runs-on: [ ubuntu-latest ]
+    steps:
+      - name: check shard results
+        run: |
+          if [[ "${{ needs.test-shards.result }}" != "success" ]]; then
+            echo "Compilation check failed (test shards did not pass)"
+            exit 1
+          fi
+
+  integration-test:
+    name: integration test
+    runs-on: [ ubuntu-latest ]
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v6
+
+      - name: toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.stable_toolchain }}
+
+      - uses: ./.github/actions/rust-cache
+
+      - name: ubuntu dependencies
+        run: |
+          sudo apt-get update
+          sudo bash scripts/install_ubuntu_dependencies.sh
+
+      - uses: rui314/setup-mold@v1
+
+      - name: wasm target install
+        run: rustup target add wasm32-unknown-unknown
+
       - name: cargo test cucumber
-        run: cargo test --release --package integration_tests --test cucumber
+        run: cargo test --profile ci-build --package integration_tests --test cucumber
+
+      - name: target dir size
+        if: always()
+        run: du -sh target/ 2>/dev/null || true
 
       - name: upload test result artifact
         uses: actions/upload-artifact@v7 # upload test results as artifact

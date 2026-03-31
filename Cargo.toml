@@ -275,12 +275,43 @@ utoipa-swagger-ui = { version = "9.0.2" }
 uuid = "1.15.0"
 xxhash-rust = "0.8.15"
 
-# Shutdown when panicking so we can see the error, specifically for the wallet
+# Optimize wasmer/cranelift even in dev/test builds (optional but highly recommended).
+#
+# The Cranelift JIT compiler that wasmer uses to compile WASM templates runs ~10x slower
+# when compiled without optimizations (the default for `cargo test`). Without these
+# overrides, each template test spends most of its time in Cranelift codegen rather than
+# actually testing template logic. With opt-level=2 on just these crates, the full
+# `tari_engine` test suite drops from ~150s to ~5s while keeping the rest of the build
+# in debug mode for fast compilation and good error messages.
+#
+# These lines only affect local dev builds — release/CI profiles already compile
+# everything with optimizations. You can safely remove them if you prefer uniform
+# debug builds, at the cost of much slower template tests.
+[profile.dev.package.wasmer]
+opt-level = 2
+[profile.dev.package.wasmer-compiler]
+opt-level = 2
+[profile.dev.package.wasmer-compiler-cranelift]
+opt-level = 2
+[profile.dev.package.cranelift-codegen]
+opt-level = 2
+[profile.dev.package.cranelift-frontend]
+opt-level = 2
+[profile.dev.package.cranelift-entity]
+opt-level = 2
+
 [profile.release]
+# Shutdown when panicking so we can see the error, specifically for the wallet
 panic = 'abort'
 # By default, Rust will wrap an integer in release mode instead of throwing the overflow error
 # seen in debug mode. Panicking at this time is better than silently using the wrong value.
 overflow-checks = true
+
+# CI profile: faster compilation than release (opt-level=1 vs 3), same safety settings.
+# Cuts compile time roughly in half at the cost of slightly slower test execution.
+[profile.ci-build]
+inherits = "release"
+opt-level = 1
 
 ## Make a copy of this code, uncomment and replace account and my-branch with the name of your fork and the branch you want to temporarily use
 #[patch."https://github.com/tari-project/tari.git"]

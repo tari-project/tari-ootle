@@ -21,6 +21,9 @@ pub struct TransactionEventFilter {
     pub topic: Option<String>,
     pub substate_id: Option<SubstateId>,
     pub template_address: Option<TemplateAddress>,
+    /// Resume the event stream from this event ID (exclusive).
+    /// Events with id > after_id will be replayed from the database before switching to live.
+    pub after_id: Option<i64>,
 }
 
 impl TransactionEventFilter {
@@ -29,7 +32,7 @@ impl TransactionEventFilter {
             topic: self.topic,
             substate_id: self.substate_id,
             template_address: self.template_address,
-            after_id: None,
+            after_id: self.after_id,
         }
     }
 }

@@ -44,6 +44,7 @@ use tari_template_lib_types::{
 };
 
 use crate::{
+    network_state_sync::EventFilter,
     storage_sqlite::{
         models,
         models::{EventRecord, KeyValue, SubstateRecord},
@@ -257,9 +258,9 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         }
 
         if let Some(topic) = topic_filter {
-            match topic.strip_suffix('*') {
-                Some(prefix) => {
-                    query = query.filter(events::topic.like(format!("{}%", prefix)));
+            match EventFilter::topic_to_like_pattern(topic) {
+                Some(pattern) => {
+                    query = query.filter(events::topic.like(pattern));
                 },
                 None => {
                     query = query.filter(events::topic.eq(topic));
@@ -329,9 +330,9 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         query = query.filter(events::id.gt(after_id));
 
         if let Some(topic) = topic_filter {
-            match topic.strip_suffix('*') {
-                Some(prefix) => {
-                    query = query.filter(events::topic.like(format!("{}%", prefix)));
+            match EventFilter::topic_to_like_pattern(topic) {
+                Some(pattern) => {
+                    query = query.filter(events::topic.like(pattern));
                 },
                 None => {
                     query = query.filter(events::topic.eq(topic));

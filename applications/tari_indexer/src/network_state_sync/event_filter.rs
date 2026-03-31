@@ -43,12 +43,45 @@ impl EventFilter {
         })
     }
 
-    /// Match a topic filter against an event topic.
-    /// Supports exact match and prefix wildcard (e.g. "std.vault.*" matches "std.vault.withdraw").
-    fn topic_matches(filter: &str, topic: &str) -> bool {
-        match filter.strip_suffix('*') {
-            Some(prefix) => topic.starts_with(prefix),
-            None => filter == topic,
+    /// Convert a topic filter with `*` wildcards to a SQL LIKE pattern.
+    /// `*` segments become `%`. Returns `None` if no wildcards are present.
+    pub fn topic_to_like_pattern(filter: &str) -> Option<String> {
+        if !filter.contains('*') {
+            return None;
         }
+        // Escape any existing SQL LIKE special chars, then replace * with %
+        let escaped = filter.replace('%', r"\%").replace('_', r"\_");
+        Some(escaped.replace('*', "%"))
+    }
+
+    /// Match a topic filter against an event topic using dot-separated segments.
+    ///
+    /// `*` matches any single segment. Examples:
+    /// - `std.vault.withdraw` matches exactly `std.vault.withdraw`
+    /// - `std.vault.*` matches `std.vault.withdraw`, `std.vault.deposit`, etc.
+    /// - `std.*.withdraw` matches `std.vault.withdraw`, `std.account.withdraw`, etc.
+    /// - `*.*.*` matches any three-segment topic
+    pub fn topic_matches(filter: &str, topic: &str) -> bool {
+        if !filter.contains('*') {
+            return filter == topic;
+        }
+
+        let filter_segments = filter.split('.');
+        let mut topic_segments = topic.split('.');
+
+        for filter_seg in filter_segments {
+            match topic_segments.next() {
+                Some(topic_seg) => {
+                    if filter_seg != "*" && filter_seg != topic_seg {
+                        return false;
+                    }
+                },
+                // Filter has more segments than the topic
+                None => return false,
+            }
+        }
+
+        // Topic must not have extra trailing segments
+        topic_segments.next().is_none()
     }
 }

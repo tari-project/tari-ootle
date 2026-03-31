@@ -88,16 +88,15 @@ fn live_only_stream(
     broadcast_rx: tokio::sync::broadcast::Receiver<TransactionEvent>,
     filter: EventFilter,
 ) -> impl Stream<Item = Result<sse::Event, axum::Error>> {
-    tokio_stream::wrappers::BroadcastStream::new(broadcast_rx)
-        .filter_map(move |res| match res {
-            Ok(tx_event) if filter.matches(&tx_event.event) => Some(encode_transaction_event(&tx_event)),
-            Ok(_) => None,
-            // Lagged: events were dropped from the broadcast buffer, skip and continue
-            Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(_)) => {
-                warn!(target: LOG_TARGET, "Live-only SSE client lagged, some events were dropped");
-                None
-            },
-        })
+    tokio_stream::wrappers::BroadcastStream::new(broadcast_rx).filter_map(move |res| match res {
+        Ok(tx_event) if filter.matches(&tx_event.event) => Some(encode_transaction_event(&tx_event)),
+        Ok(_) => None,
+        // Lagged: events were dropped from the broadcast buffer, skip and continue
+        Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(_)) => {
+            warn!(target: LOG_TARGET, "Live-only SSE client lagged, some events were dropped");
+            None
+        },
+    })
 }
 
 /// Stream that first replays missed events from the DB, then switches to live.

@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, pin::pin, sync::Arc};
+use std::{collections::HashMap, pin::pin};
 
 use futures::StreamExt;
 use log::*;
@@ -457,24 +457,19 @@ impl NetworkWideStateSync {
         tx: &mut SqliteStoreWriteTransaction<'_>,
         receipts: I,
     ) -> Result<(), StorageError> {
-        let receipts: Vec<_> = receipts.into_iter().collect();
+        // Insert into DB first so events get assigned their auto-increment IDs,
+        // then broadcast with IDs attached. This ensures SSE clients can use
+        // the ID for catch-up/replay.
+        let inserted_events = tx.batch_insert_transaction_receipts(receipts, &self.config.event_filters)?;
 
-        // Broadcast filtered events to the transaction event channel
-        for (receipt_addr, receipt) in &receipts {
-            let transaction_id = TransactionId::from_receipt_address(*receipt_addr);
-            for event in &receipt.events {
-                if self.config.event_filters.is_empty() ||
-                    self.config.event_filters.iter().any(|filter| filter.matches(event))
-                {
-                    self.transaction_event_notify.notify(TransactionEvent {
-                        transaction_id,
-                        event: Arc::new(event.clone()),
-                    });
-                }
-            }
+        for inserted in inserted_events {
+            self.transaction_event_notify.notify(TransactionEvent {
+                id: inserted.id,
+                transaction_id: inserted.transaction_id,
+                event: inserted.event,
+            });
         }
 
-        tx.batch_insert_transaction_receipts(receipts, &self.config.event_filters)?;
         Ok(())
     }
 }

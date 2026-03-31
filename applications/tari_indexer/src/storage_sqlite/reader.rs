@@ -257,7 +257,14 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         }
 
         if let Some(topic) = topic_filter {
-            query = query.filter(events::topic.eq(topic));
+            match topic_to_like_pattern(topic) {
+                Some(pattern) => {
+                    query = query.filter(events::topic.like(pattern));
+                },
+                None => {
+                    query = query.filter(events::topic.eq(topic));
+                },
+            }
         }
 
         let event_rows = query
@@ -300,6 +307,85 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                     let topic = row.topic;
                     let payload = deserialize_json(&row.payload)?;
                     Ok((
+                        TransactionId::from(tx_hash),
+                        Event::new(substate_id, template_address, topic, payload),
+                    ))
+                })
+            })
+            .collect()
+    }
+
+    fn get_events_after_id(
+        &mut self,
+        after_id: i64,
+        topic_filter: Option<&str>,
+        substate_id_filter: Option<&SubstateId>,
+        template_address_filter: Option<&TemplateAddress>,
+        limit: u32,
+    ) -> Result<Vec<(i64, TransactionId, Event)>, StorageError> {
+        use crate::storage_sqlite::schema::events;
+
+        let mut query = events::table.into_boxed();
+        query = query.filter(events::id.gt(after_id));
+
+        if let Some(topic) = topic_filter {
+            match topic_to_like_pattern(topic) {
+                Some(pattern) => {
+                    query = query.filter(events::topic.like(pattern));
+                },
+                None => {
+                    query = query.filter(events::topic.eq(topic));
+                },
+            }
+        }
+        if let Some(substate_id) = substate_id_filter {
+            query = query.filter(events::substate_id.eq(substate_id.to_string()));
+        }
+        if let Some(template_address) = template_address_filter {
+            query = query.filter(events::template_address.eq(template_address.to_string()));
+        }
+
+        let event_rows = query
+            .order(events::id.asc())
+            .limit(limit.into())
+            .load_iter::<EventRecord, _>(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("get_events_after_id: {}", e),
+            })?;
+
+        event_rows
+            .map(|res| {
+                res.map_err(|e| StorageError::QueryError {
+                    reason: format!("get_events_after_id: {}", e),
+                })
+                .and_then(|row| {
+                    let id = row.id;
+                    let substate_id = row
+                        .substate_id
+                        .as_ref()
+                        .map(|str| SubstateId::from_str(str))
+                        .transpose()
+                        .map_err(|e| StorageError::DataInconsistency {
+                            details: format!(
+                                "Invalid substate_id {} in events table: {}",
+                                row.substate_id.display(),
+                                e
+                            ),
+                        })?;
+                    let template_address =
+                        Hash32::from_hex(&row.template_address).map_err(|e| StorageError::DataInconsistency {
+                            details: format!(
+                                "Invalid template_address {} in events table: {}",
+                                row.template_address, e
+                            ),
+                        })?;
+                    let tx_hash = Hash32::from_hex(&row.tx_hash).map_err(|e| StorageError::DataInconsistency {
+                        details: format!("Invalid tx_hash {} in events table: {}", row.tx_hash, e),
+                    })?;
+                    let topic = row.topic;
+                    let payload = deserialize_json(&row.payload)?;
+                    Ok((
+                        id,
                         TransactionId::from(tx_hash),
                         Event::new(substate_id, template_address, topic, payload),
                     ))
@@ -640,4 +726,14 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
 
         Ok(utxos)
     }
+}
+
+/// Convert a topic filter with `*` wildcards to a SQL LIKE pattern.
+/// Returns `None` if no wildcards are present.
+fn topic_to_like_pattern(filter: &str) -> Option<String> {
+    if !filter.contains('*') {
+        return None;
+    }
+    let escaped = filter.replace('%', r"\%").replace('_', r"\_");
+    Some(escaped.replace('*', "%"))
 }

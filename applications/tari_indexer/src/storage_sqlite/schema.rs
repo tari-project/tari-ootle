@@ -13,7 +13,7 @@ diesel::table! {
 
 diesel::table! {
     events (id) {
-        id -> Integer,
+        id -> BigInt,
         template_address -> Text,
         tx_hash -> Text,
         topic -> Text,

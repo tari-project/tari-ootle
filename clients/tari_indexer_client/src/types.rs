@@ -261,6 +261,9 @@ pub struct StreamTransactionEventsRequest {
     pub substate_id: Option<SubstateId>,
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     pub template_address: Option<TemplateAddress>,
+    /// Resume the event stream from this event ID (exclusive). Events with id > after_id will be
+    /// replayed from the database before switching to the live stream.
+    pub after_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

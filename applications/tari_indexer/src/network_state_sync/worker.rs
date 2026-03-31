@@ -509,6 +509,7 @@ fn extend_bufs_from_substate_update(
                 {
                     template_catalogue_buf.push((template_addr.as_template_address(), metadata.clone()));
                 }
+                update_buf.push((msg_epoch, update));
                 return Ok(());
             }
             match create.substate.value().value() {

@@ -18,6 +18,7 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
+use tari_ootle_template_metadata::MetadataHash;
 use tari_template_lib_types::{
     Amount,
     FunctionName,
@@ -599,7 +600,18 @@ impl<D> TransactionBuilder<D> {
 
     /// Publishing a WASM template.
     pub fn publish_template(self, binary: TemplateBlob) -> Self {
-        self.add_instruction(Instruction::PublishTemplate { binary })
+        self.add_instruction(Instruction::PublishTemplate {
+            binary,
+            metadata_hash: None,
+        })
+    }
+
+    /// Publishing a WASM template with an off-chain metadata hash.
+    pub fn publish_template_with_metadata(self, binary: TemplateBlob, metadata_hash: MetadataHash) -> Self {
+        self.add_instruction(Instruction::PublishTemplate {
+            binary,
+            metadata_hash: Some(metadata_hash),
+        })
     }
 
     pub fn claim_burn(self, claim: MinotariBurnClaimProof, output_data: ClaimBurnOutputData) -> Self {

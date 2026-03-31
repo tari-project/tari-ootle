@@ -63,6 +63,7 @@ use tari_engine_types::{
     lock::LockFlag,
     published_template::TemplateBlob,
 };
+use tari_ootle_template_metadata::MetadataHash;
 use tari_ootle_transaction::{
     AllocatableAddressType,
     ComponentReference,
@@ -210,7 +211,11 @@ pub trait RuntimeInterface {
 
     fn push_call_frame(&mut self, frame: PushCallFrame) -> Result<(), RuntimeError>;
     fn pop_call_frame(&mut self) -> Result<(), RuntimeError>;
-    fn publish_template(&mut self, template: TemplateBlob) -> Result<(), RuntimeError>;
+    fn publish_template(
+        &mut self,
+        template: TemplateBlob,
+        metadata_hash: Option<MetadataHash>,
+    ) -> Result<(), RuntimeError>;
     fn put_on_workspace(&mut self, id: WorkspaceId, value: IndexedValue) -> Result<(), RuntimeError>;
 
     fn signature_invoke(&mut self, action: SignatureAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError>;

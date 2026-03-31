@@ -102,6 +102,7 @@ pub async fn list_cached_templates(
             author_public_key: t.author_public_key,
             code_size: t.code_size,
             epoch: t.epoch,
+            metadata_hash: t.metadata_hash,
         })
         .collect();
 

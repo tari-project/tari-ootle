@@ -225,7 +225,7 @@ impl Transaction {
 
     pub fn publish_templates_iter(&self) -> impl Iterator<Item = &[u8]> + '_ {
         self.instructions().iter().filter_map(|i| match i {
-            Instruction::PublishTemplate { binary } => Some(binary.as_slice()),
+            Instruction::PublishTemplate { binary, .. } => Some(binary.as_slice()),
             _ => None,
         })
     }

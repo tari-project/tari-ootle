@@ -7390,6 +7390,7 @@ dependencies = [
  "tari_indexer_client",
  "tari_ootle_address",
  "tari_ootle_common_types",
+ "tari_ootle_template_metadata",
  "tari_ootle_transaction",
  "tari_ootle_wallet_crypto",
  "tari_template_builtin",
@@ -10952,6 +10953,7 @@ dependencies = [
  "tari_crypto",
  "tari_engine_types",
  "tari_ootle_common_types",
+ "tari_ootle_template_metadata",
  "tari_ootle_transaction",
  "tari_template_abi",
  "tari_template_builtin",
@@ -10985,6 +10987,7 @@ dependencies = [
  "tari_bor",
  "tari_crypto",
  "tari_hashing 5.3.0-pre.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tari_ootle_template_metadata",
  "tari_template_abi",
  "tari_template_lib",
  "thiserror 2.0.18",
@@ -11113,6 +11116,7 @@ dependencies = [
  "tari_ootle_p2p",
  "tari_ootle_storage",
  "tari_ootle_storage_sqlite",
+ "tari_ootle_template_metadata",
  "tari_ootle_transaction",
  "tari_rpc_framework",
  "tari_shutdown",
@@ -11151,6 +11155,7 @@ dependencies = [
  "tari_consensus_types",
  "tari_engine_types",
  "tari_ootle_common_types",
+ "tari_ootle_template_metadata",
  "tari_ootle_transaction",
  "tari_template_abi",
  "tari_template_lib_types",
@@ -11443,6 +11448,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "tari_ootle_template_build"
+version = "0.1.0"
+dependencies = [
+ "tari_ootle_template_metadata",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "tari_ootle_template_metadata"
+version = "0.1.0"
+dependencies = [
+ "borsh",
+ "cargo_toml 0.22.3",
+ "multihash 0.19.3",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tari_bor",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "tari_ootle_transaction"
 version = "0.28.0"
 dependencies = [
@@ -11461,6 +11490,7 @@ dependencies = [
  "tari_engine_types",
  "tari_hashing 5.3.0-pre.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "tari_ootle_common_types",
+ "tari_ootle_template_metadata",
  "tari_template_lib_types",
  "thiserror 2.0.18",
  "ts-rs",
@@ -11685,6 +11715,7 @@ dependencies = [
  "tari_engine_types",
  "tari_ootle_address",
  "tari_ootle_common_types",
+ "tari_ootle_template_metadata",
  "tari_ootle_transaction",
  "tari_ootle_wallet_sdk",
  "tari_template_abi",

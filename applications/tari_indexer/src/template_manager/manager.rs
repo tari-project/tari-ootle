@@ -86,6 +86,7 @@ impl TemplateManager {
                     template_type: DbTemplateType::Wasm,
                     added_at: now(),
                     epoch: template.metadata.epoch,
+                    metadata_hash: None,
                 };
                 templates_db.insert_template(db_template)?;
             }
@@ -179,6 +180,7 @@ impl TemplateManager {
         code: TemplateCode,
         template_status: TemplateStatus,
         epoch: Epoch,
+        metadata_hash: Option<Vec<u8>>,
     ) -> Result<(), TemplateManagerError> {
         let mut tx = self.global_db.create_transaction()?;
         let mut templates_db = self.global_db.templates(&mut tx);
@@ -194,6 +196,7 @@ impl TemplateManager {
             template_type: DbTemplateType::Wasm,
             url: None,
             epoch,
+            metadata_hash,
         };
 
         templates_db.insert_template(template)?;
@@ -208,6 +211,7 @@ impl TemplateManager {
         code: TemplateCode,
         template_status: TemplateStatus,
         epoch: Epoch,
+        metadata_hash: Option<Vec<u8>>,
     ) -> Result<LoadedTemplate, TemplateManagerError> {
         let loaded_template = load_template_from_code(&code)?;
 
@@ -218,6 +222,7 @@ impl TemplateManager {
             code,
             template_status,
             epoch,
+            metadata_hash,
         )?;
 
         Ok(loaded_template)
@@ -273,12 +278,14 @@ impl TemplateManager {
                 .expect("fetched_templates are all templates")
                 .as_template_address();
 
+            let metadata_hash_bytes = template.metadata_hash.map(|h| h.to_bytes());
             let loaded = self.add_and_load_template(
                 template.author,
                 template_addr,
                 TemplateCode::CompiledWasm(template.binary.into_bytes()),
                 TemplateStatus::Active,
                 Epoch(template.at_epoch),
+                metadata_hash_bytes,
             )?;
             loaded_templates.insert(template_addr, loaded);
         }
@@ -327,6 +334,7 @@ fn convert_builtin_template(name: &str, address: TemplateAddress) -> Template {
             author_public_key: Default::default(),
             code_size: code.len(),
             epoch: Epoch::zero(),
+            metadata_hash: None,
         },
         code: TemplateCode::StaticWasm(code),
     }

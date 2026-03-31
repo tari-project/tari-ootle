@@ -1,7 +1,10 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::ops::{Deref, DerefMut};
+use std::{
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
 use log::{debug, info, warn};
@@ -13,7 +16,7 @@ use tari_ootle_storage::{
     consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof},
 };
 use tari_ootle_storage_sqlite::SqliteTransaction;
-use tari_ootle_transaction::Transaction;
+use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_template_lib_types::TransactionReceiptAddress;
 
 use crate::{
@@ -24,7 +27,7 @@ use crate::{
         reader::SqliteStoreReadTransaction,
         serialization::{serialize_bincode, serialize_hex, serialize_json},
     },
-    store::IndexerStoreWriteTransaction,
+    store::{IndexerStoreWriteTransaction, InsertedEvent},
 };
 
 const LOG_TARGET: &str = "tari::indexer::storage_sqlite::writer";
@@ -238,12 +241,15 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         &mut self,
         receipts: I,
         event_filters: &[EventFilter],
-    ) -> Result<(), StorageError> {
+    ) -> Result<Vec<InsertedEvent>, StorageError> {
         const OPERATION: &str = "batch_insert_transaction_receipts";
         use crate::storage_sqlite::schema::{events, transaction_receipts};
 
+        let mut inserted_events = Vec::new();
+
         for (receipt_addr, receipt) in receipts {
             let receipt_addr_hex = serialize_hex(receipt_addr.as_object_key());
+            let transaction_id = TransactionId::from_receipt_address(receipt_addr);
 
             diesel::insert_into(transaction_receipts::table)
                 .values((
@@ -253,35 +259,40 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                 .execute(self.connection())
                 .map_err(|e| StorageError::general(OPERATION, e))?;
 
-            // Insert events
-            let events = receipt.events.iter()
-                // only keep the events specified by the indexer filter
-                .filter(|event| {
-                    event_filters.is_empty() || event_filters.iter().any(|filter| filter.matches(event))
-                })
-                .map(|event| {
-                    Ok::<_, StorageError>(NewEvent {
-                        template_address: event.template_address().to_string(),
-                        tx_hash: &receipt_addr_hex,
-                        topic: event.topic(),
-                        payload: serialize_json(event.payload())?,
-                        substate_id: event.substate_id().map(|s| s.to_string()),
-                    })
-                });
+            // Insert events and collect assigned IDs
+            let filtered_events: Vec<_> = receipt
+                .events
+                .iter()
+                .filter(|event| event_filters.is_empty() || event_filters.iter().any(|filter| filter.matches(event)))
+                .cloned()
+                .collect();
 
-            for result in events {
-                let event = result?;
+            for event in filtered_events {
+                let new_event = NewEvent {
+                    template_address: event.template_address().to_string(),
+                    tx_hash: &receipt_addr_hex,
+                    topic: event.topic(),
+                    payload: serialize_json(event.payload())?,
+                    substate_id: event.substate_id().map(|s| s.to_string()),
+                };
 
-                diesel::insert_into(events::table)
-                    .values(event)
-                    .execute(self.connection())
+                let id: i64 = diesel::insert_into(events::table)
+                    .values(new_event)
+                    .returning(events::id)
+                    .get_result(self.connection())
                     .map_err(|e| StorageError::QueryError {
                         reason: format!("{OPERATION}: {}", e),
                     })?;
+
+                inserted_events.push(InsertedEvent {
+                    id,
+                    transaction_id,
+                    event: Arc::new(event),
+                });
             }
         }
 
-        Ok(())
+        Ok(inserted_events)
     }
 
     fn insert_or_ignore_transaction(&mut self, transaction: &Transaction) -> Result<(), StorageError> {

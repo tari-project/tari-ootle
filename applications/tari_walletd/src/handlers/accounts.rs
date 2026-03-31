@@ -587,7 +587,20 @@ pub async fn handle_claim_burn(
         });
     }
 
+    let mut events = context.notifier().subscribe();
     let tx_id = context.transaction_service().submit_transaction(transaction).await?;
+
+    let finalized = wait_for_result(&mut events, tx_id).await?;
+
+    if let Some(reject) = finalized.finalize.result.fee_reject() {
+        return Err(anyhow::anyhow!("Claim burn fee transaction rejected: {}", reject));
+    }
+    if let Some(reason) = finalized.finalize.any_reject() {
+        return Err(anyhow::anyhow!(
+            "Claim burn fee transaction succeeded (fees charged) however the transaction failed: {}",
+            reason
+        ));
+    }
 
     if let Some(file_name) = proof_file_name {
         let proof_dir = context.config().get_burn_proof_dir(network);

@@ -55,8 +55,12 @@ impl<TAddr: Send + Sync + 'static> RocksDbStateStore<TAddr> {
         let cx = self.snapshot();
         let head_index = cx.cf(substate::HeadIndex)?;
         let metadata_cf = cx.cf(TemplateMetadataCf)?;
+        // SubstateId is Borsh-encoded; the Template variant has discriminant 6 (u8).
+        // Seeking with a one-byte prefix limits iteration to template substates only,
+        // avoiding a full scan of all UTXO, component, resource, etc. entries.
+        const TEMPLATE_DISCRIMINANT: &[u8] = &[6u8];
         let mut addresses = Vec::new();
-        for result in head_index.iterator(Ordering::Ascending, OPERATION) {
+        for result in head_index.prefix_range_iterator_raw_key(Ordering::Ascending, TEMPLATE_DISCRIMINANT) {
             let (id, data) = result?;
             if data.is_up &&
                 let Some(published) = id.as_template()

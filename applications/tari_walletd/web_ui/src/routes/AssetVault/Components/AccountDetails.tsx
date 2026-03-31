@@ -45,6 +45,7 @@ import Typography from "@mui/material/Typography";
 import useAccountStore, { setAccount } from "@store/accountStore";
 import {
   decodeOotleAddress,
+  decodeOotleAddressOrNull,
   encodeOotleAddress,
   OotleAddress,
   substateIdToString,
@@ -74,6 +75,7 @@ function AccountDetails() {
             <TableCell>Name</TableCell>
             <TableCell>Component</TableCell>
             <TableCell>Address</TableCell>
+            <TableCell>Public Key</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -97,6 +99,13 @@ function AccountDetails() {
                   </IconButton>
                 </Tooltip>
               </Stack>
+            </DataTableCell>
+            <DataTableCell>
+              {address && (
+                <CopyAddress
+                  address={decodeOotleAddressOrNull(address)?.accountPublicKey || "<decode error>"}
+                />
+              )}
             </DataTableCell>
           </TableRow>
         </TableBody>

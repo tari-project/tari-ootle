@@ -6,7 +6,7 @@ use std::{
     sync::Arc,
 };
 
-use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection, dsl::sql, sql_types::BigInt};
+use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
 use log::{debug, info, warn};
 use serde::Serialize;
 use tari_engine_types::transaction_receipt::TransactionReceipt;
@@ -276,18 +276,12 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                     substate_id: event.substate_id().map(|s| s.to_string()),
                 };
 
-                diesel::insert_into(events::table)
+                let id: i64 = diesel::insert_into(events::table)
                     .values(new_event)
-                    .execute(self.connection())
-                    .map_err(|e| StorageError::QueryError {
-                        reason: format!("{OPERATION}: {}", e),
-                    })?;
-
-                // Get the auto-increment ID assigned to the inserted event
-                let id: i64 = diesel::select(sql::<BigInt>("last_insert_rowid()"))
+                    .returning(events::id)
                     .get_result(self.connection())
                     .map_err(|e| StorageError::QueryError {
-                        reason: format!("{OPERATION}: last_insert_rowid: {}", e),
+                        reason: format!("{OPERATION}: {}", e),
                     })?;
 
                 inserted_events.push(InsertedEvent {

@@ -29,7 +29,9 @@ pub mod fee_tables;
 pub mod genesis_resources;
 pub mod identity_management;
 pub mod keypair;
+#[cfg(feature = "p2p")]
 pub mod p2p_config;
+#[cfg(feature = "p2p")]
 pub mod seed_peer;
 pub mod shared_consts;
 pub mod tcp;

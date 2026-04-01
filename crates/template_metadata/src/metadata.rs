@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::MetadataHash;
+use crate::{MetadataHash, MetadataHashWriter};
 
 /// Current schema version for template metadata.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -89,10 +89,13 @@ impl TemplateMetadata {
         serde_json::from_str(json).map_err(TemplateMetadataError::JsonDecode)
     }
 
-    /// Compute the SHA-256 multihash of the CBOR-encoded metadata.
+    /// Compute the domain-separated SHA-256 multihash of the CBOR-encoded metadata.
+    ///
+    /// CBOR is written directly into the hasher — no intermediate buffer allocation.
     pub fn hash(&self) -> Result<MetadataHash, TemplateMetadataError> {
-        let cbor = self.to_cbor()?;
-        Ok(MetadataHash::hash_sha256(&cbor))
+        let mut writer = MetadataHashWriter::new();
+        self.write_cbor_to(&mut writer)?;
+        Ok(writer.finalize())
     }
 }
 

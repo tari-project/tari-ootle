@@ -1,7 +1,10 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::time::{Duration, Instant};
+use std::{
+    sync::atomic::{AtomicUsize, Ordering},
+    time::{Duration, Instant},
+};
 
 use ootle_byte_type::ToByteType;
 use tari_consensus::hotstuff::HotStuffError;
@@ -349,6 +352,97 @@ async fn multi_shard_node_goes_down() {
 
     log::info!("total messages sent: {}", test.network().total_messages_sent());
     test.assert_clean_shutdown_except(&[failure_node]).await;
+}
+
+/// Regression test for stale `pending_stage` after orphaned blocks.
+///
+/// When a validator votes for a block that later ends up on a dead branch (no QC formed),
+/// the transaction in that block must still be correctly re-proposed and finalized by the next leader.
+/// Previously, an eager write of `pending_stage` to the base transaction pool record caused a permanent
+/// "Stage disagreement" because the stale stage was never cleaned up after the block was orphaned.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn single_shard_transaction_finalizes_after_orphaned_block() {
+    setup_logger();
+
+    // Drop the first round of votes to prevent QC formation for the first proposed block.
+    // This creates an orphaned block: validators receive and evaluate the proposal (saving state updates
+    // and setting pending_stage), but the block never gets a QC.
+    // With n=5, each block can receive up to 5 votes (including a newview+vote combo).
+    // Dropping the first 5 vote-bearing messages ensures the first block's QC cannot form.
+    let dropped_vote_count = std::sync::Arc::new(AtomicUsize::new(0));
+    let dropped_vote_count_clone = dropped_vote_count.clone();
+    let num_votes_to_drop = 5;
+
+    let mut test = Test::builder()
+        .with_test_timeout(Duration::from_secs(60))
+        .modify_consensus_constants(|config_mut| {
+            config_mut.missed_proposal_suspend_threshold = 10;
+            config_mut.missed_proposal_evict_threshold = 10;
+            config_mut.pacemaker_block_time = Duration::from_secs(5);
+        })
+        .add_committee(0, vec!["1", "2", "3", "4", "5"])
+        .with_message_filter(Box::new(move |_from, _to, msg| {
+            // Drop Vote and NewView (which carry votes) messages for the first round
+            let is_vote_bearing = matches!(
+                msg,
+                tari_consensus::messages::HotstuffMessage::Vote(_) |
+                    tari_consensus::messages::HotstuffMessage::NewView(_)
+            );
+            if is_vote_bearing {
+                let count = dropped_vote_count_clone.fetch_add(1, Ordering::SeqCst);
+                if count < num_votes_to_drop {
+                    log::info!("🔇 Dropping vote-bearing message {}/{num_votes_to_drop}", count + 1);
+                    return false;
+                }
+            }
+            true
+        }))
+        .start()
+        .await;
+
+    let (tx, _, _) = test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
+    let tx_id = *tx.id();
+
+    test.start_epoch(Epoch(1)).await;
+
+    loop {
+        let (_, _, _, committed_height) = test.on_block_committed().await;
+
+        if test.validators_iter().all(|v| {
+            let c = v.get_transaction_pool_count();
+            log::info!("{} has {} transactions in pool", v.address, c);
+            c == 0
+        }) {
+            break;
+        }
+
+        if committed_height > NodeHeight(20) {
+            panic!(
+                "Transaction not finalized after {committed_height} blocks. This likely indicates a stage \
+                 disagreement caused by stale pending_stage from the orphaned block."
+            );
+        }
+    }
+
+    test.stop();
+
+    test.validators_iter().for_each(|v| {
+        assert!(
+            v.has_committed_substates(&tx_id),
+            "Validator {} did not commit transaction after orphaned block recovery",
+            v.address
+        );
+    });
+
+    // Verify that votes were actually dropped (the orphan condition was triggered)
+    let total_dropped = dropped_vote_count.load(Ordering::SeqCst);
+    assert!(
+        total_dropped >= num_votes_to_drop,
+        "Expected at least {num_votes_to_drop} votes to be dropped, but only {total_dropped} were seen"
+    );
+
+    log::info!("total messages sent: {}", test.network().total_messages_sent());
+    test.assert_clean_shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -8,6 +8,7 @@ use tari_template_lib_types::TemplateAddress;
 
 use crate::{
     RocksDbStateStore,
+    codecs::KeyPrefix,
     column_families::{substate, substate::SubstateCf, template_metadata::TemplateMetadataCf},
 };
 
@@ -55,12 +56,12 @@ impl<TAddr: Send + Sync + 'static> RocksDbStateStore<TAddr> {
         let cx = self.snapshot();
         let head_index = cx.cf(substate::HeadIndex)?;
         let metadata_cf = cx.cf(TemplateMetadataCf)?;
-        // SubstateId is Borsh-encoded; the Template variant has discriminant 6 (u8).
-        // Seeking with a one-byte prefix limits iteration to template substates only,
-        // avoiding a full scan of all UTXO, component, resource, etc. entries.
-        const TEMPLATE_DISCRIMINANT: &[u8] = &[6u8];
+        // HeadIndex keys are encoded as [SubstatesHeadIndex prefix byte] + [SubstateId Borsh bytes].
+        // SubstateId::Template has Borsh discriminant 6, so all template entries start with [37, 6, ...].
+        // Using a two-byte seek prefix avoids scanning all UTXO, component, resource, etc. entries.
+        const TEMPLATE_SEEK_PREFIX: &[u8] = &[KeyPrefix::SubstatesHeadIndex.as_u8(), 6u8];
         let mut addresses = Vec::new();
-        for result in head_index.prefix_range_iterator_raw_key(Ordering::Ascending, TEMPLATE_DISCRIMINANT) {
+        for result in head_index.prefix_range_iterator_raw_key(Ordering::Ascending, TEMPLATE_SEEK_PREFIX) {
             let (id, data) = result?;
             if data.is_up &&
                 let Some(published) = id.as_template()

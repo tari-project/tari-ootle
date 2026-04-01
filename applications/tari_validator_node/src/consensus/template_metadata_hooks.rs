@@ -12,7 +12,11 @@ use log::{error, info, warn};
 use tari_consensus::{hotstuff::HotStuffError, messages::HotstuffMessage, traits::hooks::ConsensusHooks};
 use tari_engine_types::published_template::TemplateMetadata;
 use tari_ootle_common_types::{NodeHeight, services::template_provider::TemplateProvider};
-use tari_ootle_storage::{StateStore, StorageError, consensus_models::ValidBlock};
+use tari_ootle_storage::{
+    StateStore,
+    StorageError,
+    consensus_models::{Block, ValidBlock},
+};
 use tari_ootle_transaction::TransactionId;
 use tari_state_store_rocksdb::{RocksDbStateStore, writer::RocksDbStateStoreWriteTransaction};
 use tari_template_lib::types::TemplateAddress;
@@ -25,9 +29,13 @@ const LOG_TARGET: &str = "tari::validator::consensus::template_metadata_hooks";
 /// Consensus hook that forwards newly committed template addresses to a background worker.
 ///
 /// All methods are non-blocking: `on_local_block_committed` collects all template addresses
-/// from the block into a `Vec` and sends them as a single batch through an unbounded channel
-/// to [`TemplateMetadataWorker`], which performs the expensive WASM loading and RocksDB
+/// from the committed blocks into a `Vec` and sends them as a single batch through an unbounded
+/// channel to [`TemplateMetadataWorker`], which performs the expensive WASM loading and RocksDB
 /// writes off the consensus thread.
+///
+/// Template addresses are extracted from `committed_blocks` (not from `valid_block`), because
+/// only the committed blocks have had their substates written to the state store by the time
+/// this hook fires.
 #[derive(Clone)]
 pub struct TemplateMetadataHooks {
     tx_template_addresses: mpsc::UnboundedSender<Vec<TemplateAddress>>,
@@ -40,11 +48,13 @@ impl TemplateMetadataHooks {
 }
 
 impl ConsensusHooks for TemplateMetadataHooks {
-    fn on_local_block_committed(&mut self, block: &ValidBlock) {
-        let template_addresses: Vec<TemplateAddress> = block
-            .block()
-            .commands()
+    fn on_local_block_committed(&mut self, _block: &ValidBlock) {}
+
+    fn on_blocks_committed(&mut self, committed_blocks: &[Block]) {
+        // Extract templates from committed blocks — their substates are now in the state store.
+        let template_addresses: Vec<TemplateAddress> = committed_blocks
             .iter()
+            .flat_map(|b| b.commands())
             .filter_map(|c| c.committing())
             .flat_map(|a| a.evidence.all_outputs_iter())
             .filter(|(_, id, _)| id.is_template())
@@ -254,6 +264,11 @@ impl<A: ConsensusHooks, B: ConsensusHooks> ConsensusHooks for CompositeHooks<A, 
     fn on_local_block_committed(&mut self, block: &ValidBlock) {
         self.first.on_local_block_committed(block);
         self.second.on_local_block_committed(block);
+    }
+
+    fn on_blocks_committed(&mut self, committed_blocks: &[Block]) {
+        self.first.on_blocks_committed(committed_blocks);
+        self.second.on_blocks_committed(committed_blocks);
     }
 
     fn on_block_validation_failed<E: ToString>(&mut self, err: &E) {

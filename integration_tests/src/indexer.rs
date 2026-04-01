@@ -33,12 +33,20 @@ use tari_indexer::{
 use tari_indexer_client::{
     graphql_client::IndexerGraphQLClient,
     rest_api_client::IndexerRestApiClient,
-    types::{GetNonFungiblesRequest, GetSubstateRequest, GetSubstateResponse, NonFungibleSubstate},
+    types::{
+        GetNonFungiblesRequest,
+        GetSubstateRequest,
+        GetSubstateResponse,
+        ListTemplateCatalogueRequest,
+        ListTemplateCatalogueResponse,
+        NonFungibleSubstate,
+        TemplateCatalogueItem,
+    },
 };
 use tari_ootle_app_utilities::{epoch_oracle_config::EpochOracleConfig, p2p_config::PeerSeedsConfig};
 use tari_ootle_common_types::Network;
 use tari_shutdown::Shutdown;
-use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+use tari_template_lib_types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
 use tokio::task;
 use tonic::codegen::tokio_stream;
 
@@ -109,6 +117,28 @@ impl IndexerProcess {
     pub fn get_indexer_client(&self) -> IndexerRestApiClient {
         let endpoint: Url = Url::parse(&format!("http://localhost:{}", self.api_port)).unwrap();
         IndexerRestApiClient::connect(endpoint).unwrap()
+    }
+
+    pub async fn list_template_catalogue(
+        &self,
+        name_filter: Option<String>,
+        limit: Option<u64>,
+        offset: Option<u64>,
+    ) -> ListTemplateCatalogueResponse {
+        let client = self.get_indexer_client();
+        client
+            .list_template_catalogue(ListTemplateCatalogueRequest {
+                name_filter,
+                limit,
+                offset,
+            })
+            .await
+            .unwrap()
+    }
+
+    pub async fn get_template_catalogue_entry(&self, template_address: TemplateAddress) -> TemplateCatalogueItem {
+        let client = self.get_indexer_client();
+        client.get_template_catalogue_entry(template_address).await.unwrap()
     }
 
     pub async fn get_graphql_indexer_client(&self) -> IndexerGraphQLClient {

@@ -212,6 +212,158 @@ async fn assert_indexer_non_fungible_list(
     );
 }
 
+#[then(expr = "the indexer {word} has at least {int} template(s) in the catalogue")]
+async fn assert_indexer_catalogue_count(world: &mut TariWorld, indexer_name: String, min_count: usize) {
+    let indexer = world.get_indexer(&indexer_name);
+    assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
+
+    let mut remaining = 30;
+    loop {
+        let resp = indexer.list_template_catalogue(None, Some(100), Some(0)).await;
+        if resp.entries.len() >= min_count {
+            return;
+        }
+        if remaining == 0 {
+            panic!(
+                "Indexer {} catalogue has {} entries, expected at least {}",
+                indexer_name,
+                resp.entries.len(),
+                min_count
+            );
+        }
+        remaining -= 1;
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+}
+
+#[then(expr = "the indexer {word} catalogue contains template {word}")]
+async fn assert_indexer_catalogue_contains_template(
+    world: &mut TariWorld,
+    indexer_name: String,
+    template_name: String,
+) {
+    let template = world
+        .templates
+        .get(&template_name)
+        .unwrap_or_else(|| panic!("Template {} not registered in world", template_name));
+    let template_address = template.address;
+
+    let indexer = world.get_indexer(&indexer_name);
+    assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
+
+    let mut remaining = 30;
+    loop {
+        let client = indexer.get_indexer_client();
+        match client.get_template_catalogue_entry(template_address).await {
+            Ok(entry) => {
+                assert_eq!(
+                    entry.template_address, template_address,
+                    "Template address mismatch in catalogue entry"
+                );
+                assert!(
+                    !entry.template_name.is_empty(),
+                    "template_name should not be empty for {} (address: {})",
+                    template_name,
+                    template_address
+                );
+                return;
+            },
+            Err(_) => {
+                if remaining == 0 {
+                    panic!(
+                        "Indexer {} catalogue does not contain template {} (address: {})",
+                        indexer_name, template_name, template_address
+                    );
+                }
+                remaining -= 1;
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            },
+        }
+    }
+}
+
+#[then(expr = "the indexer {word} catalogue name filter {word} returns {int} result(s)")]
+async fn assert_indexer_catalogue_name_filter(
+    world: &mut TariWorld,
+    indexer_name: String,
+    name_filter: String,
+    expected_count: usize,
+) {
+    let indexer = world.get_indexer(&indexer_name);
+    assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
+    let resp = indexer
+        .list_template_catalogue(Some(name_filter.clone()), Some(100), Some(0))
+        .await;
+    assert_eq!(
+        resp.entries.len(),
+        expected_count,
+        "Catalogue name filter '{}' returned {} entries, expected {}",
+        name_filter,
+        resp.entries.len(),
+        expected_count
+    );
+}
+
+#[then(expr = "the indexer {word} catalogue with limit {int} offset {int} returns {int} entries")]
+async fn assert_indexer_catalogue_page(
+    world: &mut TariWorld,
+    indexer_name: String,
+    limit: u64,
+    offset: u64,
+    expected_count: usize,
+) {
+    let indexer = world.get_indexer(&indexer_name);
+    assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
+    let resp = indexer.list_template_catalogue(None, Some(limit), Some(offset)).await;
+    assert_eq!(
+        resp.entries.len(),
+        expected_count,
+        "Catalogue with limit={} offset={} returned {} entries, expected {}",
+        limit,
+        offset,
+        resp.entries.len(),
+        expected_count
+    );
+}
+
+#[then(expr = "the indexer {word} catalogue with limit {int} offset {int} returns at least {int} entries")]
+async fn assert_indexer_catalogue_page_min(
+    world: &mut TariWorld,
+    indexer_name: String,
+    limit: u64,
+    offset: u64,
+    min_count: usize,
+) {
+    let indexer = world.get_indexer(&indexer_name);
+    assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
+    let resp = indexer.list_template_catalogue(None, Some(limit), Some(offset)).await;
+    assert!(
+        resp.entries.len() >= min_count,
+        "Catalogue with limit={} offset={} returned {} entries, expected at least {}",
+        limit,
+        offset,
+        resp.entries.len(),
+        min_count
+    );
+}
+
+#[then(expr = "the indexer {word} catalogue entry for address {string} is not found")]
+async fn assert_catalogue_entry_not_found(world: &mut TariWorld, indexer_name: String, address_str: String) {
+    use tari_engine_types::published_template::PublishedTemplateAddress;
+    let address = PublishedTemplateAddress::from_str(&address_str)
+        .unwrap_or_else(|_| panic!("Invalid template address: {}", address_str))
+        .as_template_address();
+    let indexer = world.get_indexer(&indexer_name);
+    assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
+    let client = indexer.get_indexer_client();
+    let result = client.get_template_catalogue_entry(address).await;
+    assert!(
+        result.is_err(),
+        "Expected 404 for address {} but got a result",
+        address_str
+    );
+}
+
 #[then(expr = "I wait for the indexer {word} to sync with the network")]
 async fn i_wait_for_the_indexer_to_sync_with_the_network(world: &mut TariWorld, indexer_name: String) {
     let vn = world

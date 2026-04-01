@@ -2,13 +2,16 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_common_types::NodeHeight;
-use tari_ootle_storage::consensus_models::ValidBlock;
+use tari_ootle_storage::consensus_models::{Block, ValidBlock};
 use tari_ootle_transaction::TransactionId;
 
 use crate::{hotstuff::HotStuffError, messages::HotstuffMessage};
 
 pub trait ConsensusHooks {
     fn on_local_block_committed(&mut self, block: &ValidBlock);
+
+    /// Called with the ancestor blocks whose substates have just been written to the state store.
+    fn on_blocks_committed(&mut self, _committed_blocks: &[Block]) {}
 
     fn on_block_validation_failed<E: ToString>(&mut self, err: &E);
     fn on_message_received(&mut self, message: &HotstuffMessage);
@@ -41,6 +44,12 @@ impl<T: ConsensusHooks> ConsensusHooks for OptionalHooks<T> {
     fn on_local_block_committed(&mut self, block: &ValidBlock) {
         if let Some(inner) = self.inner.as_mut() {
             inner.on_local_block_committed(block);
+        }
+    }
+
+    fn on_blocks_committed(&mut self, committed_blocks: &[Block]) {
+        if let Some(inner) = self.inner.as_mut() {
+            inner.on_blocks_committed(committed_blocks);
         }
     }
 

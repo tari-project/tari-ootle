@@ -90,6 +90,7 @@ use crate::{
         AccountsListResponse,
         AccountsRenameRequest,
         AccountsRenameResponse,
+        AuthGetMethodRequest,
         AuthGetMethodResponse,
         AuthListSessionsRequest,
         AuthListSessionsResponse,
@@ -541,7 +542,7 @@ impl WalletDaemonClient {
 
     /// Requests the current required authentication method to use when authenticating with the wallet daemon.
     pub async fn get_auth_method(&mut self) -> Result<AuthGetMethodResponse, WalletDaemonClientError> {
-        self.send_request("auth.method", &()).await
+        self.send_request("auth.method", &AuthGetMethodRequest {}).await
     }
 
     /// Requests a JWT authentication token with the specified permissions.

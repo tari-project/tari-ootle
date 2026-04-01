@@ -14,5 +14,5 @@ mod hash;
 mod metadata;
 
 pub use cargo_toml::{CargoTomlError, from_cargo_toml, from_cargo_toml_str};
-pub use hash::{MetadataHash, MetadataHashError};
+pub use hash::{MetadataHash, MetadataHashError, MetadataHashWriter};
 pub use metadata::{SCHEMA_VERSION, TemplateMetadata, TemplateMetadataError};

@@ -7373,7 +7373,7 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
 name = "ootle-rs"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -11296,7 +11296,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_address"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "bech32",
  "bincode 2.0.1",
@@ -11527,7 +11527,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_crypto"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "argon2 0.5.3",
  "blake2",
@@ -11556,7 +11556,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_sdk"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "digest 0.10.7",
@@ -11705,7 +11705,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_walletd_client"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "hex",
  "ootle_serde",

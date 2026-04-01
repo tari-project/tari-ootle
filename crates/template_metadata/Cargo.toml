@@ -8,13 +8,14 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
+tari_bor = { workspace = true, features = ["std"] }
+
 borsh = { workspace = true, optional = true }
 cargo_toml = "0.22"
 multihash = { version = "0.19", default-features = false, features = ["alloc"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true }
-tari_bor = { workspace = true, features = ["std"] }
 thiserror = { workspace = true }
 
 [features]

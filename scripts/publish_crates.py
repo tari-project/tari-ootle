@@ -31,6 +31,7 @@ CRATES = [
     ("ootle_byte_type", "crates/ootle_byte_type"),
     ("tari_template_macros", "crates/template_macros"),
     ("tari_template_lib", "crates/template_lib"),
+    ("tari_ootle_template_metadata", "crates/template_metadata"),
     ("tari_engine_types", "crates/engine_types"),
     ("tari_ootle_common_types", "crates/common_types"),
     ("tari_ootle_wallet_crypto", "crates/wallet/crypto"),

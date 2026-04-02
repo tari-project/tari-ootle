@@ -55,7 +55,6 @@ pub enum KeyPrefix {
     StateTreeStaleTreeNodesIndex = 41,
     StateTreeShardVersion = 42,
     ValidatorNodeEpochStats = 43,
-    TemplateMetadata = 44,
 }
 
 impl KeyPrefix {

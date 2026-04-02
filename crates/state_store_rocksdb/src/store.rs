@@ -52,7 +52,6 @@ pub fn all_column_families_iter() -> impl Iterator<Item = &'static str> {
         cf_names::SUBSTATES,
         cf_names::DIAGNOSTICS,
         cf_names::STATE_TREE,
-        cf_names::TEMPLATE_METADATA,
     ]
     .into_iter()
 }

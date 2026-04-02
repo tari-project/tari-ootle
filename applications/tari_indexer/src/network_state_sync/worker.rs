@@ -557,9 +557,6 @@ fn extend_bufs_from_substate_update(
                 },
                 None => {
                     let id = create.substate.substate_id();
-                    if id.is_template() {
-                        warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received template {id} update with no value");
-                    }
                     if id.is_transaction_receipt() {
                         warn!(target: LOG_TARGET, "⚠️ Received tx receipt {id} update with no value, it may have been pruned and so will not be indexed");
                     }

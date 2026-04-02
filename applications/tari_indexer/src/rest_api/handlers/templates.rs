@@ -139,6 +139,9 @@ pub async fn list_template_catalogue(
         ));
     }
     let offset = req.offset.unwrap_or(0);
+    if offset > i64::MAX as u64 {
+        return Err(ErrorResponse::bad_request("Offset is too large".to_string()));
+    }
 
     let entries = context
         .read_only_store()

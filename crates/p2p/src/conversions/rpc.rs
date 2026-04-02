@@ -5,7 +5,7 @@ use std::convert::{TryFrom, TryInto};
 
 use anyhow::{Context, anyhow};
 use tari_engine_types::{
-    published_template::TemplateMetadata,
+    published_template::PublishedTemplateMetadata,
     substate::{SubstateId, SubstateValue},
 };
 use tari_jellyfish::TreeHash;
@@ -26,7 +26,7 @@ use crate::{
     proto,
 };
 
-fn decode_template_metadata(bytes: &[u8]) -> Result<TemplateMetadata, anyhow::Error> {
+fn decode_template_metadata(bytes: &[u8]) -> Result<PublishedTemplateMetadata, anyhow::Error> {
     decode_from_slice(bytes).context("TemplateMetadata")
 }
 
@@ -78,8 +78,8 @@ impl TryFrom<proto::rpc::SubstateUpdate> for SubstateUpdateProof {
     fn try_from(value: proto::rpc::SubstateUpdate) -> Result<Self, Self::Error> {
         let update = value.update.ok_or_else(|| anyhow!("update not provided"))?;
         match update {
-            proto::rpc::substate_update::Update::Create(substate_proof) => Ok(Self::Create(substate_proof.try_into()?)),
-            proto::rpc::substate_update::Update::Destroy(proof) => Ok(Self::Destroy(proof.try_into()?)),
+            proto::rpc::substate_update::Update::Create(create) => Ok(Self::Create(Box::new(create.try_into()?))),
+            proto::rpc::substate_update::Update::Destroy(destroy) => Ok(Self::Destroy(destroy.try_into()?)),
         }
     }
 }
@@ -87,8 +87,8 @@ impl TryFrom<proto::rpc::SubstateUpdate> for SubstateUpdateProof {
 impl From<SubstateUpdateProof> for proto::rpc::SubstateUpdate {
     fn from(value: SubstateUpdateProof) -> Self {
         let update = match value {
-            SubstateUpdateProof::Create(proof) => proto::rpc::substate_update::Update::Create(proof.into()),
-            SubstateUpdateProof::Destroy(proof) => proto::rpc::substate_update::Update::Destroy(proof.into()),
+            SubstateUpdateProof::Create(create) => proto::rpc::substate_update::Update::Create((*create).into()),
+            SubstateUpdateProof::Destroy(destroy) => proto::rpc::substate_update::Update::Destroy(destroy.into()),
         };
 
         Self { update: Some(update) }

@@ -130,3 +130,71 @@ impl ConsensusHooks for NoopHooks {
 
     fn on_transaction_batch_finalized(&mut self, _num_committed: usize, _num_aborted: usize) {}
 }
+
+/// Composes two [`ConsensusHooks`] implementations into one, calling both in sequence.
+///
+/// Used to chain `PrometheusConsensusMetrics` (or `NoopHooks`) with `TemplateMetadataHooks`
+/// without modifying the shared `crates/consensus` crate.
+#[derive(Debug, Clone)]
+pub struct CompositeHook<A, B> {
+    first: A,
+    second: B,
+}
+
+impl<A: ConsensusHooks, B: ConsensusHooks> CompositeHook<A, B> {
+    pub fn new(first: A, second: B) -> Self {
+        Self { first, second }
+    }
+}
+
+impl<A: ConsensusHooks, B: ConsensusHooks> ConsensusHooks for CompositeHook<A, B> {
+    fn on_local_block_committed(&mut self, block: &ValidBlock) {
+        self.first.on_local_block_committed(block);
+        self.second.on_local_block_committed(block);
+    }
+
+    fn on_blocks_committed(&mut self, committed_blocks: &[Block]) {
+        self.first.on_blocks_committed(committed_blocks);
+        self.second.on_blocks_committed(committed_blocks);
+    }
+
+    fn on_block_validation_failed<E: ToString>(&mut self, err: &E) {
+        self.first.on_block_validation_failed(err);
+        self.second.on_block_validation_failed(err);
+    }
+
+    fn on_message_received(&mut self, message: &HotstuffMessage) {
+        self.first.on_message_received(message);
+        self.second.on_message_received(message);
+    }
+
+    fn on_error(&mut self, err: &HotStuffError) {
+        self.first.on_error(err);
+        self.second.on_error(err);
+    }
+
+    fn on_pacemaker_height_changed(&mut self, height: NodeHeight) {
+        self.first.on_pacemaker_height_changed(height);
+        self.second.on_pacemaker_height_changed(height);
+    }
+
+    fn on_leader_timeout(&mut self, new_height: NodeHeight) {
+        self.first.on_leader_timeout(new_height);
+        self.second.on_leader_timeout(new_height);
+    }
+
+    fn on_needs_sync(&mut self, local_height: NodeHeight, remote_qc_height: NodeHeight) {
+        self.first.on_needs_sync(local_height, remote_qc_height);
+        self.second.on_needs_sync(local_height, remote_qc_height);
+    }
+
+    fn on_transaction_ready(&mut self, tx_id: &TransactionId) {
+        self.first.on_transaction_ready(tx_id);
+        self.second.on_transaction_ready(tx_id);
+    }
+
+    fn on_transaction_batch_finalized(&mut self, num_committed: usize, num_aborted: usize) {
+        self.first.on_transaction_batch_finalized(num_committed, num_aborted);
+        self.second.on_transaction_batch_finalized(num_committed, num_aborted);
+    }
+}

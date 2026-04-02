@@ -2605,16 +2605,14 @@ where
         self.invoke_modules_on_runtime_call("finalize")?;
         // If the fee module is present, this will add substate storage fees
         self.invoke_modules_on_before_finalize()?;
-        let finalized = self.tracker.finalize(None)?;
-        Ok(finalized)
+        self.tracker.finalize(None)
     }
 
     fn finalize_failure(&mut self, reason: RejectReason) -> Result<FinalizeResult, RuntimeError> {
         self.invoke_modules_on_runtime_call("finalize_failure")?;
         // If the fee module is present, this will add substate storage fees
         self.invoke_modules_on_before_finalize()?;
-        let finalized = self.tracker.finalize(Some(reason))?;
-        Ok(finalized)
+        self.tracker.finalize(Some(reason))
     }
 
     fn validate_finalized(&self) -> Result<(), RuntimeError> {
@@ -2834,6 +2832,7 @@ where
         &mut self,
         template: TemplateBlob,
         metadata_hash: Option<MetadataHash>,
+        template_def: TemplateDef,
     ) -> Result<(), RuntimeError> {
         self.invoke_modules_on_runtime_call("publish_template")?;
         self.tracker.write_with(|state_mut| {
@@ -2842,13 +2841,24 @@ where
             let template_address =
                 PublishedTemplateAddress::from_author_and_binary_hash(&self.seal_signer_public_key, &code_hash);
             let epoch = state_mut.get_current_epoch()?;
+            let template_name = template_def
+                .template_name()
+                .try_into()
+                .map_err(|_| RuntimeError::InvalidArgument {
+                    argument: "template_name",
+                    reason: format!(
+                        "Template name exceeds maximum length of {} bytes",
+                        limits::ENGINE_LIMITS.max_template_name_length
+                    ),
+                })?;
             state_mut.new_substate(
                 template_address,
                 SubstateValue::Template(PublishedTemplate {
+                    template_name,
                     binary: template,
                     author: self.seal_signer_public_key,
                     at_epoch: epoch.as_u64(),
-                    metadata_hash,
+                    metadata_hash: metadata_hash.clone(),
                 }),
             )?;
             // Mark template substate as owned by current call stack

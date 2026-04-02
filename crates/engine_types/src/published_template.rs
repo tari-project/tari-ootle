@@ -14,6 +14,7 @@ use tari_template_lib::types::{
     Hash32,
     KeyParseError,
     MaxBytes,
+    MaxString,
     ObjectKey,
     TemplateAddress,
     address_prefixes,
@@ -28,16 +29,18 @@ use crate::{
 /// Lightweight template metadata that can be exchanged without transmitting the full WASM binary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct TemplateMetadata {
+pub struct PublishedTemplateMetadata {
     /// Human-readable template name extracted from the WASM ABI.
     pub template_name: String,
     /// Author's public key.
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub author_public_key: RistrettoPublicKeyBytes,
     /// SHA-256 hash of the WASM binary.
     pub binary_hash: Hash32,
     /// Epoch at which the template was published.
     pub at_epoch: u64,
+    /// The author-provided off-chain metadata hash
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    pub metadata_hash: Option<MetadataHash>,
 }
 
 const TAG: u64 = BinaryTag::TemplateAddress.as_u64();
@@ -116,11 +119,23 @@ impl FromStr for PublishedTemplateAddress {
     }
 }
 
+impl AsRef<[u8]> for PublishedTemplateAddress {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
 pub type TemplateBlob = MaxBytes<{ limits::ENGINE_LIMITS.max_template_binary_size_bytes }>;
+
+pub type TemplateName = MaxString<{ limits::ENGINE_LIMITS.max_template_name_length }>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PublishedTemplate {
+    /// Human-readable template name extracted from the WASM ABI.
+    #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub template_name: TemplateName,
     /// Author's public key
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub author: RistrettoPublicKeyBytes,
@@ -138,5 +153,16 @@ pub struct PublishedTemplate {
 impl PublishedTemplate {
     pub fn to_binary_hash(&self) -> Hash32 {
         hash_template_code(&self.binary)
+    }
+
+    pub fn into_template_metadata(self) -> PublishedTemplateMetadata {
+        let binary_hash = self.to_binary_hash();
+        PublishedTemplateMetadata {
+            template_name: self.template_name.into_string(),
+            author_public_key: self.author,
+            binary_hash,
+            at_epoch: self.at_epoch,
+            metadata_hash: self.metadata_hash,
+        }
     }
 }

@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::published_template::TemplateMetadata;
+use tari_engine_types::published_template::PublishedTemplateMetadata;
 use tari_indexer_client::types::TemplateCatalogueItem;
 use tari_ootle_storage::time::PrimitiveDateTime;
 use tari_template_lib_types::{Hash32, TemplateAddress, crypto::RistrettoPublicKeyBytes};
@@ -79,8 +79,8 @@ impl From<TemplateCatalogueEntry> for TemplateCatalogueItem {
     }
 }
 
-impl From<(TemplateAddress, &TemplateMetadata)> for NewTemplateCatalogueRow {
-    fn from((address, meta): (TemplateAddress, &TemplateMetadata)) -> Self {
+impl From<(TemplateAddress, &PublishedTemplateMetadata)> for NewTemplateCatalogueRow {
+    fn from((address, meta): (TemplateAddress, &PublishedTemplateMetadata)) -> Self {
         Self {
             template_address: hex::encode(address.as_slice()),
             template_name: meta.template_name.clone(),

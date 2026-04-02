@@ -13,10 +13,10 @@ use crate::consensus::metrics::PrometheusConsensusMetrics;
 use crate::{
     consensus::{
         ConsensusTransactionValidator,
-        TarBlockTransactionExecutor,
+        TariBlockTransactionExecutor,
         leader_selection::RoundRobinLeaderStrategy,
         signer_service::TariSignatureService,
-        template_metadata_hooks::{CompositeHooks, TemplateMetadataHooks},
+        // template_metadata_hooks::TemplateMetadataHooks,
     },
     p2p::{
         NopLogger,
@@ -34,10 +34,11 @@ pub struct TariConsensusSpec;
 impl ConsensusSpec for TariConsensusSpec {
     type Addr = PeerAddress;
     type EpochManager = EpochManagerHandle<Self::Addr>;
+    // Template metadata is now persisted from execution artifacts during block commit/propose
     #[cfg(not(feature = "metrics"))]
-    type Hooks = CompositeHooks<tari_consensus::traits::hooks::NoopHooks, TemplateMetadataHooks>;
+    type Hooks = tari_consensus::traits::hooks::NoopHooks;
     #[cfg(feature = "metrics")]
-    type Hooks = CompositeHooks<PrometheusConsensusMetrics, TemplateMetadataHooks>;
+    type Hooks = PrometheusConsensusMetrics;
     type InboundMessaging = ConsensusInboundMessaging<NopLogger>;
     type LeaderStrategy = RoundRobinLeaderStrategy;
     type OutboundMessaging = ConsensusOutboundMessaging<NopLogger>;
@@ -45,5 +46,5 @@ impl ConsensusSpec for TariConsensusSpec {
     type StateStore = ValidatorNodeStateStore;
     type SyncManager = RpcStateSyncClientProtocol<Self>;
     type TransactionExecutor =
-        TarBlockTransactionExecutor<ValidatorTransactionProcessor, ConsensusTransactionValidator>;
+        TariBlockTransactionExecutor<ValidatorTransactionProcessor, ConsensusTransactionValidator>;
 }

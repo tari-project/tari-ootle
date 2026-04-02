@@ -25,29 +25,22 @@ mod rpc_impl;
 mod state_sync_task;
 
 pub use rpc_impl::ValidatorNodeRpcServiceImpl;
-use tari_engine::template::LoadedTemplate;
 use tari_epoch_manager::service::EpochManagerHandle;
-use tari_ootle_common_types::services::template_provider::TemplateMetadataProvider;
 use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::StateStore;
 use tari_validator_node_rpc::rpc_service::ValidatorNodeRpcServer;
 
 use crate::{consensus::ConsensusHandle, p2p::services::mempool::MempoolHandle};
 
-pub fn create_tari_validator_node_rpc_service<
-    TStateStore: StateStore + Send + Sync + Clone + 'static,
-    TTemplateProvider: TemplateMetadataProvider<Template = LoadedTemplate> + Send + Sync + 'static,
->(
+pub fn create_tari_validator_node_rpc_service<TStateStore: StateStore + Send + Sync + Clone + 'static>(
     epoch_manager: EpochManagerHandle<PeerAddress>,
     shard_store_store: TStateStore,
-    template_provider: TTemplateProvider,
     mempool: MempoolHandle,
     consensus: ConsensusHandle,
-) -> ValidatorNodeRpcServer<ValidatorNodeRpcServiceImpl<TStateStore, TTemplateProvider>> {
+) -> ValidatorNodeRpcServer<ValidatorNodeRpcServiceImpl<TStateStore>> {
     ValidatorNodeRpcServer::new(ValidatorNodeRpcServiceImpl::new(
         epoch_manager,
         shard_store_store,
-        template_provider,
         mempool,
         consensus,
     ))

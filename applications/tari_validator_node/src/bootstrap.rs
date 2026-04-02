@@ -36,7 +36,6 @@ use tari_consensus::consensus_constants::ConsensusConstants;
 #[cfg(not(feature = "metrics"))]
 use tari_consensus::traits::hooks::NoopHooks;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_engine::template::LoadedTemplate;
 use tari_epoch_manager::{
     EpochManagerReader,
     service::{EpochManagerConfig, EpochManagerHandle},
@@ -64,10 +63,7 @@ use tari_ootle_app_utilities::{
     seed_peer::SeedPeer,
     transaction_executor::TariTransactionProcessor,
 };
-use tari_ootle_common_types::{
-    Network,
-    services::template_provider::{TemplateMetadataProvider, TemplateProvider},
-};
+use tari_ootle_common_types::{Network, services::template_provider::TemplateProvider};
 use tari_ootle_p2p::{PeerAddress, TariMessagingSpec};
 use tari_ootle_storage::{StateStore, global::GlobalDb};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
@@ -88,7 +84,7 @@ use crate::{
     ValidatorNodeEpochManagerSpec,
     ValidatorNodeStateStore,
     base_layer::verify_correct_network,
-    consensus::{self, ConsensusHandle, TarBlockTransactionExecutor, ValidationContext},
+    consensus::{self, ConsensusHandle, TariBlockTransactionExecutor, ValidationContext},
     file_l1_submitter::FileLayerOneSubmitter,
     migrations,
     p2p::{
@@ -304,7 +300,7 @@ pub async fn spawn_services(
         fee_table.clone(),
         Arc::new(TariClaimBurnProofVerifier::new(config.network, global_db.clone())),
     );
-    let transaction_executor = TarBlockTransactionExecutor::new(
+    let transaction_executor = TariBlockTransactionExecutor::new(
         transaction_processor,
         create_consensus_transaction_validator(config.network, template_provider.clone()).boxed(),
     );
@@ -315,19 +311,6 @@ pub async fn spawn_services(
     let metrics = PrometheusConsensusMetrics::register(tari_metrics_registry);
     #[cfg(not(feature = "metrics"))]
     let metrics = NoopHooks;
-
-    let (tx_template_addresses, rx_template_addresses) = tokio::sync::mpsc::unbounded_channel();
-    let template_metadata_hooks = consensus::template_metadata_hooks::TemplateMetadataHooks::new(tx_template_addresses);
-    // The worker backfills metadata for pre-existing templates, then processes newly committed
-    // template addresses sent by the hook. Runs on the blocking thread pool so that synchronous
-    // WASM loading and RocksDB I/O do not stall the async runtime.
-    let template_metadata_worker = consensus::template_metadata_hooks::TemplateMetadataWorker::new(
-        template_provider.clone(),
-        state_store.clone(),
-        rx_template_addresses,
-    );
-    tokio::task::spawn_blocking(move || template_metadata_worker.run());
-    let hooks = consensus::template_metadata_hooks::CompositeHooks::new(metrics, template_metadata_hooks);
 
     let sidechain_id = config
         .validator_node
@@ -348,7 +331,7 @@ pub async fn spawn_services(
         inbound_messaging,
         outbound_messaging.clone(),
         validator_node_client_factory.clone(),
-        hooks,
+        metrics,
         shutdown.clone(),
         transaction_executor,
         tx_hotstuff_events,
@@ -374,7 +357,6 @@ pub async fn spawn_services(
         &mut networking,
         epoch_manager.clone(),
         state_store.clone(),
-        template_provider.clone(),
         mempool.clone(),
         consensus_handle.clone(),
     )
@@ -441,15 +423,11 @@ impl<TStore> Services<TStore> {
     }
 }
 
-async fn spawn_p2p_rpc<
-    TStateStore: StateStore + Clone + Send + Sync + 'static,
-    TTemplateProvider: TemplateMetadataProvider<Template = LoadedTemplate> + Send + Sync + 'static,
->(
+async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
     config: &ApplicationConfig,
     networking: &mut NetworkingHandle<TariMessagingSpec>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     shard_store_store: TStateStore,
-    template_provider: TTemplateProvider,
     mempool: MempoolHandle,
     consensus: ConsensusHandle,
 ) -> anyhow::Result<()> {
@@ -460,7 +438,6 @@ async fn spawn_p2p_rpc<
         .add_service(create_tari_validator_node_rpc_service(
             epoch_manager,
             shard_store_store,
-            template_provider,
             mempool,
             consensus,
         ));

@@ -7,7 +7,7 @@ use tari_engine::{
     template::{LoadedTemplate, TemplateLoaderError},
     wasm::WasmModule,
 };
-use tari_engine_types::published_template::{PublishedTemplate, TemplateMetadata};
+use tari_engine_types::published_template::PublishedTemplate;
 use tari_ootle_common_types::{
     Epoch,
     services::template_provider::{TemplateMetadataProvider, TemplateProvider, TemplateProviderMetadata},
@@ -126,29 +126,9 @@ impl<TStore: TemplateProvider<Template = PublishedTemplate>> TemplateMetadataPro
             author: t.author,
             binary_hash: t.to_binary_hash(),
             epoch: Epoch(t.at_epoch),
+            metadata_hash: t.metadata_hash,
         }))
     }
-}
-
-pub fn build_template_metadata<TProvider>(
-    provider: &TProvider,
-    address: &TemplateAddress,
-) -> Result<Option<TemplateMetadata>, TProvider::Error>
-where
-    TProvider: TemplateMetadataProvider<Template = LoadedTemplate>,
-{
-    let Some(meta) = provider.get_template_metadata(address)? else {
-        return Ok(None);
-    };
-    let Some(loaded) = provider.get_template(address)? else {
-        return Ok(None);
-    };
-    Ok(Some(TemplateMetadata {
-        template_name: loaded.template_name().to_string(),
-        author_public_key: meta.author,
-        binary_hash: meta.binary_hash,
-        at_epoch: meta.epoch.0,
-    }))
 }
 
 #[derive(Debug, thiserror::Error)]

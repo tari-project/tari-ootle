@@ -951,12 +951,9 @@ where TConsensusSpec: ConsensusSpec
             pledged.id(), pledged.local_pledges.len(), pledged.foreign_pledges.len(),
         );
 
-        let executed = self
-            .transaction_manager
+        self.transaction_manager
             .execute(execution_epoch, pledged)
-            .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
-
-        Ok(executed)
+            .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))
     }
 }
 

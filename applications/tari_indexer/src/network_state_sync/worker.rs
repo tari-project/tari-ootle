@@ -6,7 +6,7 @@ use std::{collections::HashMap, pin::pin};
 use futures::StreamExt;
 use log::*;
 use tari_engine_types::{
-    published_template::TemplateMetadata,
+    published_template::PublishedTemplateMetadata,
     substate::{SubstateId, SubstateValue},
     transaction_receipt::TransactionReceipt,
 };
@@ -296,7 +296,7 @@ impl NetworkWideStateSync {
         let mut utxos_buf = Vec::new();
         let mut transactions_buf = Vec::new();
         let mut validator_fee_pools_buf = Vec::new();
-        let mut template_catalogue_buf: Vec<(TemplateAddress, TemplateMetadata)> = Vec::new();
+        let mut template_catalogue_buf: Vec<(TemplateAddress, PublishedTemplateMetadata)> = Vec::new();
 
         let mut has_synced_global_shard = false;
 
@@ -353,7 +353,7 @@ impl NetworkWideStateSync {
         utxos_buf: &mut Vec<UtxoUpdateRecord>,
         transactions_buf: &mut Vec<(TransactionReceiptAddress, TransactionReceipt)>,
         validator_fee_pools_buf: &mut Vec<SubstateData>,
-        template_catalogue_buf: &mut Vec<(TemplateAddress, TemplateMetadata)>,
+        template_catalogue_buf: &mut Vec<(TemplateAddress, PublishedTemplateMetadata)>,
         shard_group: ShardGroup,
         session: &mut ValidatorRpcSession,
     ) -> Result<(), NetworkStateSyncError> {
@@ -498,7 +498,7 @@ fn extend_bufs_from_substate_update(
     utxos_buf: &mut Vec<UtxoUpdateRecord>,
     transactions_buf: &mut Vec<(TransactionReceiptAddress, TransactionReceipt)>,
     validator_fee_pools_buf: &mut Vec<SubstateData>,
-    template_catalogue_buf: &mut Vec<(TemplateAddress, TemplateMetadata)>,
+    template_catalogue_buf: &mut Vec<(TemplateAddress, PublishedTemplateMetadata)>,
     xtr_claimed_mut: &mut Amount,
 ) -> Result<(), NetworkStateSyncError> {
     match &update {
@@ -557,8 +557,11 @@ fn extend_bufs_from_substate_update(
                 },
                 None => {
                     let id = create.substate.substate_id();
-                    if id.is_template() || id.is_transaction_receipt() {
-                        warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received substate {id} update with no value");
+                    if id.is_template() {
+                        warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received template {id} update with no value");
+                    }
+                    if id.is_transaction_receipt() {
+                        warn!(target: LOG_TARGET, "⚠️ Received tx receipt {id} update with no value, it may have been pruned and so will not be indexed");
                     }
                     if let Some(addr) = id.as_utxo_address() {
                         debug!(target: LOG_TARGET, "🌍️ Received UTXO substate {addr} creation with no value. Ignoring as this means it is spent later.");

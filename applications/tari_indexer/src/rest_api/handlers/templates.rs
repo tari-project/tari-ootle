@@ -175,5 +175,5 @@ pub async fn get_template_catalogue_entry(
         .map_err(ErrorResponse::anyhow)?
         .ok_or_else(|| ErrorResponse::not_found(format!("Template {} not found in the catalogue", template_address)))?;
 
-    Ok(context.apply_cache_control(Json(TemplateCatalogueItem::from(entry)), 120))
+    Ok(context.apply_cache_control(Json(TemplateCatalogueItem::from(entry)), 120 * 60))
 }

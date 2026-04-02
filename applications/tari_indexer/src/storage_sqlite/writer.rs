@@ -9,7 +9,7 @@ use std::{
 use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
 use log::{debug, info, warn};
 use serde::Serialize;
-use tari_engine_types::{published_template::TemplateMetadata, transaction_receipt::TransactionReceipt};
+use tari_engine_types::{published_template::PublishedTemplateMetadata, transaction_receipt::TransactionReceipt};
 use tari_ootle_common_types::{Epoch, StateVersion, shard::Shard, substate_type::SubstateType};
 use tari_ootle_storage::{
     StorageError,
@@ -344,7 +344,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
     fn upsert_template_catalogue(
         &mut self,
         template_address: &TemplateAddress,
-        metadata: &TemplateMetadata,
+        metadata: &PublishedTemplateMetadata,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "upsert_template_catalogue";
         use crate::storage_sqlite::schema::template_catalogue;

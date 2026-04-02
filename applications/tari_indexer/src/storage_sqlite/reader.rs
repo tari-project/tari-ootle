@@ -4,6 +4,7 @@
 use std::{collections::HashMap, fmt::Write, str::FromStr};
 
 use diesel::{
+    EscapeExpressionMethods,
     ExpressionMethods,
     NullableExpressionMethods,
     OptionalExtension,
@@ -742,7 +743,12 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             .into_boxed();
 
         if let Some(name) = name_filter {
-            query = query.filter(template_catalogue::template_name.like(format!("%{name}%")));
+            let escaped = name.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+            query = query.filter(
+                template_catalogue::template_name
+                    .like(format!("%{escaped}%"))
+                    .escape('\\'),
+            );
         }
 
         if let Some(epoch) = since_epoch {

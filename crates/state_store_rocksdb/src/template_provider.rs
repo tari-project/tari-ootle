@@ -3,14 +3,10 @@
 
 use tari_engine_types::published_template::{PublishedTemplate, PublishedTemplateAddress};
 use tari_ootle_common_types::{SubstateAddress, services::template_provider::TemplateProvider};
-use tari_ootle_storage::{Ordering, StorageError};
+use tari_ootle_storage::StorageError;
 use tari_template_lib_types::TemplateAddress;
 
-use crate::{
-    RocksDbStateStore,
-    codecs::KeyPrefix,
-    column_families::{substate, substate::SubstateCf, template_metadata::TemplateMetadataCf},
-};
+use crate::{RocksDbStateStore, column_families::substate::SubstateCf};
 
 impl<TAddr: Send + Sync + 'static> TemplateProvider for RocksDbStateStore<TAddr> {
     type Error = StorageError;
@@ -41,38 +37,6 @@ impl<TAddr: Send + Sync + 'static> TemplateProvider for RocksDbStateStore<TAddr>
         let address = template_address_to_substate_address(*id);
         let exists = cf.exists(&address, OPERATION)?;
         Ok(exists)
-    }
-}
-
-impl<TAddr: Send + Sync + 'static> RocksDbStateStore<TAddr> {
-    /// Scans the substate head index and returns the addresses of all currently *up* (live)
-    /// template substates that are **missing** from `TemplateMetadataCf`.
-    ///
-    /// Called once at validator-node startup to backfill metadata for templates that were
-    /// published before this code was deployed. On subsequent restarts, templates that already
-    /// have metadata entries are skipped, keeping the operation near-instant.
-    pub fn scan_template_addresses_missing_metadata(&self) -> Result<Vec<TemplateAddress>, StorageError> {
-        const OPERATION: &str = "scan_template_addresses_missing_metadata";
-        let cx = self.snapshot();
-        let head_index = cx.cf(substate::HeadIndex)?;
-        let metadata_cf = cx.cf(TemplateMetadataCf)?;
-        // HeadIndex keys are encoded as [SubstatesHeadIndex prefix byte] + [SubstateId Borsh bytes].
-        // SubstateId::Template has Borsh discriminant 6, so all template entries start with [37, 6, ...].
-        // Using a two-byte seek prefix avoids scanning all UTXO, component, resource, etc. entries.
-        const TEMPLATE_SEEK_PREFIX: &[u8] = &[KeyPrefix::SubstatesHeadIndex.as_u8(), 6u8];
-        let mut addresses = Vec::new();
-        for result in head_index.prefix_range_iterator_raw_key(Ordering::Ascending, TEMPLATE_SEEK_PREFIX) {
-            let (id, data) = result?;
-            if data.is_up &&
-                let Some(published) = id.as_template()
-            {
-                let addr = published.as_template_address();
-                if !metadata_cf.exists(&addr, OPERATION)? {
-                    addresses.push(addr);
-                }
-            }
-        }
-        Ok(addresses)
     }
 }
 

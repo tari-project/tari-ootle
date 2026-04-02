@@ -11,7 +11,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use tari_engine_types::{
     Utxo,
     events::Event,
-    published_template::TemplateMetadata,
+    published_template::PublishedTemplateMetadata,
     substate::{Substate, SubstateId},
     transaction_receipt::TransactionReceipt,
 };
@@ -226,7 +226,7 @@ pub trait IndexerStoreWriteTransaction {
     fn upsert_template_catalogue(
         &mut self,
         template_address: &TemplateAddress,
-        metadata: &TemplateMetadata,
+        metadata: &PublishedTemplateMetadata,
     ) -> Result<(), StorageError>;
 }
 

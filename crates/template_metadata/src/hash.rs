@@ -39,8 +39,7 @@ impl MetadataHash {
         match self.0.code() {
             SHA2_256_CODE => {
                 let mut writer = MetadataHashWriter::new();
-                io::Write::write_all(&mut writer, pre_image)
-                    .map_err(|e| MetadataHashError::InvalidMultihash { details: e.to_string() })?;
+                io::Write::write_all(&mut writer, pre_image).expect("MetadataHashWriter is infallible");
                 let expected = writer.finalize();
                 Ok(self == &expected)
             },

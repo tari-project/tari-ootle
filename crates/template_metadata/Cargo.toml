@@ -13,7 +13,7 @@ tari_bor = { workspace = true, features = ["std"] }
 borsh = { workspace = true, optional = true }
 cargo_toml = "0.22"
 hex = { workspace = true }
-multihash = { version = "0.19", default-features = false, features = ["alloc"] }
+multihash = { version = "0.19" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true }

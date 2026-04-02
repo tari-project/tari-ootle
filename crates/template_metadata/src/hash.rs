@@ -35,11 +35,11 @@ impl MetadataHash {
 
     /// Verify that this hash matches the given data by re-hashing with domain-separated SHA-256.
     /// Returns an error if the hash function is unsupported.
-    pub fn verify(&self, data: &[u8]) -> Result<bool, MetadataHashError> {
+    pub fn verify(&self, pre_image: &[u8]) -> Result<bool, MetadataHashError> {
         match self.0.code() {
             SHA2_256_CODE => {
                 let mut writer = MetadataHashWriter::new();
-                io::Write::write_all(&mut writer, data).expect("infallible");
+                io::Write::write_all(&mut writer, pre_image).expect("MetadataHashWriter is infallible");
                 let expected = writer.finalize();
                 Ok(self == &expected)
             },
@@ -54,13 +54,15 @@ impl MetadataHash {
 
     /// Return the multihash bytes as a hex string.
     pub fn to_hex(&self) -> String {
-        hex_encode(&self.0.to_bytes())
+        hex::encode(self.0.to_bytes())
     }
 
     /// Parse a MetadataHash from a hex string.
     pub fn from_hex(hex: &str) -> Result<Self, MetadataHashError> {
-        let bytes = hex_decode(hex).map_err(|_| MetadataHashError::InvalidHex)?;
-        Self::from_bytes(&bytes).ok_or(MetadataHashError::InvalidMultihash)
+        let bytes = hex::decode(hex).map_err(|_| MetadataHashError::InvalidHex)?;
+        Self::from_bytes(&bytes).ok_or(MetadataHashError::InvalidMultihash {
+            details: "Invalid Multihash bytes from hex".to_string(),
+        })
     }
 
     /// Return the inner `Multihash`.
@@ -107,9 +109,10 @@ impl<'de> Deserialize<'de> for MetadataHash {
 
 #[cfg(feature = "borsh")]
 impl borsh::BorshSerialize for MetadataHash {
-    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        let bytes = self.0.to_bytes();
-        borsh::BorshSerialize::serialize(&bytes, writer)
+    fn serialize<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        // Multihash write already represents the hash canonically
+        self.0.write(writer).map_err(io::Error::other)?;
+        Ok(())
     }
 }
 
@@ -161,26 +164,8 @@ pub enum MetadataHashError {
     UnsupportedHashFunction(u64),
     #[error("Invalid hex string")]
     InvalidHex,
-    #[error("Invalid multihash encoding")]
-    InvalidMultihash,
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        s.push_str(&format!("{:02x}", b));
-    }
-    s
-}
-
-fn hex_decode(hex: &str) -> Result<Vec<u8>, ()> {
-    if !hex.len().is_multiple_of(2) {
-        return Err(());
-    }
-    (0..hex.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|_| ()))
-        .collect()
+    #[error("Invalid multihash encoding: {details}")]
+    InvalidMultihash { details: String },
 }
 
 #[cfg(test)]

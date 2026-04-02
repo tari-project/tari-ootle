@@ -36,6 +36,7 @@ use tari_consensus::consensus_constants::ConsensusConstants;
 #[cfg(not(feature = "metrics"))]
 use tari_consensus::traits::hooks::NoopHooks;
 use tari_crypto::tari_utilities::ByteArray;
+use tari_engine::template::LoadedTemplate;
 use tari_epoch_manager::{
     EpochManagerReader,
     service::{EpochManagerConfig, EpochManagerHandle},
@@ -63,7 +64,10 @@ use tari_ootle_app_utilities::{
     seed_peer::SeedPeer,
     transaction_executor::TariTransactionProcessor,
 };
-use tari_ootle_common_types::{Network, services::template_provider::TemplateProvider};
+use tari_ootle_common_types::{
+    Network,
+    services::template_provider::{TemplateMetadataProvider, TemplateProvider},
+};
 use tari_ootle_p2p::{PeerAddress, TariMessagingSpec};
 use tari_ootle_storage::{StateStore, global::GlobalDb};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
@@ -370,6 +374,7 @@ pub async fn spawn_services(
         &mut networking,
         epoch_manager.clone(),
         state_store.clone(),
+        template_provider.clone(),
         mempool.clone(),
         consensus_handle.clone(),
     )
@@ -436,11 +441,15 @@ impl<TStore> Services<TStore> {
     }
 }
 
-async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
+async fn spawn_p2p_rpc<
+    TStateStore: StateStore + Clone + Send + Sync + 'static,
+    TTemplateProvider: TemplateMetadataProvider<Template = LoadedTemplate> + Send + Sync + 'static,
+>(
     config: &ApplicationConfig,
     networking: &mut NetworkingHandle<TariMessagingSpec>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     shard_store_store: TStateStore,
+    template_provider: TTemplateProvider,
     mempool: MempoolHandle,
     consensus: ConsensusHandle,
 ) -> anyhow::Result<()> {
@@ -451,6 +460,7 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
         .add_service(create_tari_validator_node_rpc_service(
             epoch_manager,
             shard_store_store,
+            template_provider,
             mempool,
             consensus,
         ));

@@ -29,6 +29,7 @@ use log::*;
 use tari_bor::encode;
 use tari_consensus::hotstuff::ConsensusCurrentState;
 use tari_consensus_types::BlockId;
+use tari_engine::template::LoadedTemplate;
 use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
 use tari_ootle_common_types::{
@@ -38,6 +39,7 @@ use tari_ootle_common_types::{
     SubstateRequirement,
     displayable::Displayable,
     optional::Optional,
+    services::template_provider::TemplateMetadataProvider,
     shard::Shard,
 };
 use tari_ootle_p2p::{
@@ -79,23 +81,28 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::p2p::rpc";
 
-pub struct ValidatorNodeRpcServiceImpl<TStateStore> {
+pub struct ValidatorNodeRpcServiceImpl<TStateStore, TTemplateProvider> {
     epoch_manager: EpochManagerHandle<PeerAddress>,
     state_store: TStateStore,
+    template_provider: TTemplateProvider,
     mempool: MempoolHandle,
     consensus: ConsensusHandle,
 }
 
-impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
+impl<TStateStore: StateStore, TTemplateProvider: TemplateMetadataProvider<Template = LoadedTemplate>>
+    ValidatorNodeRpcServiceImpl<TStateStore, TTemplateProvider>
+{
     pub fn new(
         epoch_manager: EpochManagerHandle<PeerAddress>,
         state_store: TStateStore,
+        template_provider: TTemplateProvider,
         mempool: MempoolHandle,
         consensus: ConsensusHandle,
     ) -> Self {
         Self {
             epoch_manager,
             state_store,
+            template_provider,
             mempool,
             consensus,
         }
@@ -113,8 +120,10 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
 }
 
 #[tari_rpc_framework::async_trait]
-impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcService
-    for ValidatorNodeRpcServiceImpl<TStateStore>
+impl<
+    TStateStore: StateStore + Clone + Send + Sync + 'static,
+    TTemplateProvider: TemplateMetadataProvider<Template = LoadedTemplate> + Send + Sync + 'static,
+> ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl<TStateStore, TTemplateProvider>
 {
     async fn submit_transaction(
         &self,
@@ -441,6 +450,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         task::spawn(
             StateSyncTask::new(
                 self.state_store.clone(),
+                self.template_provider.clone(),
                 sender,
                 shard,
                 req.start_state_version,

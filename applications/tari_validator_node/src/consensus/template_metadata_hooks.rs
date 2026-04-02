@@ -11,7 +11,7 @@
 use log::{error, info, warn};
 use tari_consensus::{hotstuff::HotStuffError, messages::HotstuffMessage, traits::hooks::ConsensusHooks};
 use tari_engine_types::published_template::TemplateMetadata;
-use tari_ootle_common_types::{NodeHeight, services::template_provider::TemplateProvider};
+use tari_ootle_common_types::NodeHeight;
 use tari_ootle_storage::{
     StateStore,
     StorageError,
@@ -22,7 +22,7 @@ use tari_state_store_rocksdb::{RocksDbStateStore, writer::RocksDbStateStoreWrite
 use tari_template_lib::types::TemplateAddress;
 use tokio::sync::mpsc;
 
-use crate::state_store_template_provider::StateStoreTemplateProvider;
+use crate::state_store_template_provider::{StateStoreTemplateProvider, build_template_metadata};
 
 const LOG_TARGET: &str = "tari::validator::consensus::template_metadata_hooks";
 
@@ -194,53 +194,23 @@ impl TemplateMetadataWorker {
     /// Returns `None` and logs an error/warning if either the state store or the template
     /// provider cannot supply the required data.
     fn prepare_metadata(&mut self, address: &TemplateAddress) -> Option<TemplateMetadata> {
-        // One store read for all on-chain fields (author, binary, epoch).
-        // PublishedTemplate carries the raw WASM binary but we only hash it; we do not parse it.
-        let published = match self.store.get_template(address) {
-            Ok(Some(t)) => t,
+        match build_template_metadata(&self.template_provider, address) {
+            Ok(Some(m)) => Some(m),
             Ok(None) => {
                 warn!(
                     target: LOG_TARGET,
-                    "Template {} not found in state store when trying to write metadata", address
+                    "Template {} not found when trying to write metadata", address
                 );
-                return None;
+                None
             },
             Err(e) => {
                 error!(
                     target: LOG_TARGET,
-                    "Failed to load template {} for metadata extraction: {}", address, e
+                    "Failed to prepare metadata for template {}: {}", address, e
                 );
-                return None;
+                None
             },
-        };
-
-        // Template name comes from the parsed WASM module.
-        // StateStoreTemplateProvider caches the parsed module in an LRU cache, so on cache hit
-        // this path does not read from RocksDB again or re-parse WASM.
-        let loaded = match self.template_provider.get_template(address) {
-            Ok(Some(t)) => t,
-            Ok(None) => {
-                warn!(
-                    target: LOG_TARGET,
-                    "Parsed template {} not available when writing metadata", address
-                );
-                return None;
-            },
-            Err(e) => {
-                error!(
-                    target: LOG_TARGET,
-                    "Failed to get parsed template {} for name extraction: {}", address, e
-                );
-                return None;
-            },
-        };
-
-        Some(TemplateMetadata {
-            template_name: loaded.template_name().to_string(),
-            author_public_key: published.author,
-            binary_hash: published.to_binary_hash(),
-            at_epoch: published.at_epoch,
-        })
+        }
     }
 }
 

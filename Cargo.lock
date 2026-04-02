@@ -11458,10 +11458,11 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_template_metadata"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "borsh",
  "cargo_toml 0.22.3",
+ "hex",
  "multihash 0.19.3",
  "serde",
  "serde_json",

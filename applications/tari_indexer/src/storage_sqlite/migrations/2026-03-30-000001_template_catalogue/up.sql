@@ -22,3 +22,5 @@ CREATE TABLE template_catalogue
 
 CREATE INDEX template_catalogue_template_name_idx ON template_catalogue (template_name);
 CREATE INDEX template_catalogue_author_public_key_idx ON template_catalogue (author_public_key);
+-- Used by the sync cursor filter (since_epoch) and ordering
+CREATE INDEX template_catalogue_at_epoch_idx ON template_catalogue (at_epoch);

@@ -119,6 +119,7 @@ pub async fn list_cached_templates(
     description = "List templates discovered on the network via the template catalogue",
     params(
         ("name_filter" = Option<String>, Query, description = "Substring filter on template name"),
+        ("since_epoch" = Option<u64>, Query, description = "Only return templates published at or after this epoch. Use for incremental sync: pass the highest at_epoch from the previous response + 1"),
         ("limit" = Option<u64>, Query, description = "Maximum entries to return (default: 20, max: 100)"),
         ("offset" = Option<u64>, Query, description = "Number of entries to skip for pagination"),
     ),
@@ -145,7 +146,7 @@ pub async fn list_template_catalogue(
 
     let entries = context
         .read_only_store()
-        .list_template_catalogue(req.name_filter.as_deref(), limit, offset)
+        .list_template_catalogue(req.name_filter.as_deref(), req.since_epoch, limit, offset)
         .map_err(ErrorResponse::anyhow)?
         .into_iter()
         .map(TemplateCatalogueItem::from)

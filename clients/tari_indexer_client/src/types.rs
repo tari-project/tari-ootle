@@ -208,6 +208,8 @@ pub struct TemplateMetadata {
 pub struct ListTemplateCatalogueRequest {
     /// Optional substring filter on template name.
     pub name_filter: Option<String>,
+    /// Only return templates published at or after this epoch. Use for incremental sync.
+    pub since_epoch: Option<u64>,
     /// Maximum number of entries to return (default: 20, max: 100).
     pub limit: Option<u64>,
     /// Number of entries to skip for pagination.

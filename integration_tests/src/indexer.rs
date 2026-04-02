@@ -129,6 +129,7 @@ impl IndexerProcess {
         client
             .list_template_catalogue(ListTemplateCatalogueRequest {
                 name_filter,
+                since_epoch: None,
                 limit,
                 offset,
             })

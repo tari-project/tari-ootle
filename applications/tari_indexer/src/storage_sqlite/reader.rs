@@ -730,6 +730,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
     fn list_template_catalogue(
         &mut self,
         name_filter: Option<&str>,
+        since_epoch: Option<u64>,
         limit: u64,
         offset: u64,
     ) -> Result<Vec<TemplateCatalogueEntry>, StorageError> {
@@ -742,6 +743,10 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
 
         if let Some(name) = name_filter {
             query = query.filter(template_catalogue::template_name.like(format!("%{name}%")));
+        }
+
+        if let Some(epoch) = since_epoch {
+            query = query.filter(template_catalogue::at_epoch.ge(epoch as i64));
         }
 
         let rows = query

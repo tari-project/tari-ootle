@@ -70,6 +70,7 @@ use tari_ootle_transaction::{
     ResourceAddressRef,
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
 };
+use tari_template_abi::TemplateDef;
 use tari_template_lib::{
     args::{
         AddressAllocationInvokeArg,
@@ -215,6 +216,7 @@ pub trait RuntimeInterface {
         &mut self,
         template: TemplateBlob,
         metadata_hash: Option<MetadataHash>,
+        template_def: TemplateDef,
     ) -> Result<(), RuntimeError>;
     fn put_on_workspace(&mut self, id: WorkspaceId, value: IndexedValue) -> Result<(), RuntimeError>;
 

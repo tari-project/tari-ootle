@@ -2,8 +2,6 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use tari_consensus::traits::ConsensusSpec;
-#[cfg(not(feature = "metrics"))]
-use tari_consensus::traits::hooks::NoopHooks;
 use tari_engine::state_store::memory::ReadOnlyMemoryStateStore;
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_ootle_app_utilities::transaction_executor::TariTransactionProcessor;
@@ -15,9 +13,10 @@ use crate::consensus::metrics::PrometheusConsensusMetrics;
 use crate::{
     consensus::{
         ConsensusTransactionValidator,
-        TarBlockTransactionExecutor,
+        TariBlockTransactionExecutor,
         leader_selection::RoundRobinLeaderStrategy,
         signer_service::TariSignatureService,
+        // template_metadata_hooks::TemplateMetadataHooks,
     },
     p2p::{
         NopLogger,
@@ -35,8 +34,9 @@ pub struct TariConsensusSpec;
 impl ConsensusSpec for TariConsensusSpec {
     type Addr = PeerAddress;
     type EpochManager = EpochManagerHandle<Self::Addr>;
+    // Template metadata is now persisted from execution artifacts during block commit/propose
     #[cfg(not(feature = "metrics"))]
-    type Hooks = NoopHooks;
+    type Hooks = tari_consensus::traits::hooks::NoopHooks;
     #[cfg(feature = "metrics")]
     type Hooks = PrometheusConsensusMetrics;
     type InboundMessaging = ConsensusInboundMessaging<NopLogger>;
@@ -46,5 +46,5 @@ impl ConsensusSpec for TariConsensusSpec {
     type StateStore = ValidatorNodeStateStore;
     type SyncManager = RpcStateSyncClientProtocol<Self>;
     type TransactionExecutor =
-        TarBlockTransactionExecutor<ValidatorTransactionProcessor, ConsensusTransactionValidator>;
+        TariBlockTransactionExecutor<ValidatorTransactionProcessor, ConsensusTransactionValidator>;
 }

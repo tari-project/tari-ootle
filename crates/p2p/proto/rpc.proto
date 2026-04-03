@@ -136,6 +136,10 @@ message SubstateData {
     bytes value = 3;
     bytes hash = 4;
   }
+  // Optional CBOR-encoded TemplateMetadata. Populated when value_filters includes TEMPLATE_METADATA (0x0200)
+  // and the substate is a template. When set, substate_value_or_hash carries the state hash rather than the
+  // full WASM binary, saving bandwidth.
+  bytes template_metadata = 5;
 }
 
 message SubstateUpdate {
@@ -231,12 +235,14 @@ message SyncStateRequest {
   //  NonFungible = 0x0010;
   //  // Includes transaction receipts
   //  TransactionReceipt = 0x0020;
-  //  // Includes published template metadata
+  //  // Includes full published template substates (WASM binary)
   //  Template = 0x0040;
   //  // Includes validator fee pool substates
   //  ValidatorFeePool = 0x0080;
   //  // Includes UTXOs
   //  Utxo = 0x0100;
+  //  // Includes template metadata only (name, author, hash, epoch) - no WASM binary
+  //  TemplateMetadata = 0x0200;
   //}
   uint32 value_filters = 4;
 }

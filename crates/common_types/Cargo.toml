@@ -15,6 +15,7 @@ tari_engine_types = { workspace = true }
 tari_hashing = { workspace = true }
 ootle_serde = { workspace = true }
 ootle_byte_type = { workspace = true, features = ["crypto"] }
+tari_ootle_template_metadata = { workspace = true }
 
 borsh = { workspace = true }
 blake2 = { workspace = true }

@@ -61,6 +61,12 @@ impl WasmModule {
         Self { code: code.into() }
     }
 
+    pub fn validate_code(code: &[u8]) -> Result<TemplateDef, TemplateLoaderError> {
+        // TODO: evaluate if there are acceptable cheaper ways to fully validate
+        let loaded = Self::load_template_from_code(code)?;
+        Ok(loaded.into_template_def())
+    }
+
     pub fn load_template_from_code(code: &[u8]) -> Result<LoadedTemplate, TemplateLoaderError> {
         let engine = Self::create_engine();
         let module = wasmer::Module::new(&engine, code)?;

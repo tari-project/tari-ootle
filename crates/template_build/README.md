@@ -12,7 +12,7 @@ Add to your template's `Cargo.toml`:
 
 ```toml
 [build-dependencies]
-tari_ootle_template_build = "0.2"
+tari_ootle_template_build = "0.4"
 ```
 
 Create a `build.rs`:
@@ -54,6 +54,7 @@ fn main() {
 | `.documentation(...)` | Override documentation URL |
 | `.homepage(...)` | Override homepage URL |
 | `.license(...)` | Override license |
+| `.logo_url(...)` | Override logo URL |
 | `.extra(map)` | Replace entire extra metadata map |
 | `.extra_entry(k, v)` | Add a single extra key-value pair |
 | `.enable_json_output()` | Also write `template_metadata.json` |
@@ -84,6 +85,7 @@ tags = ["token", "fungible", "defi"]
 category = "token"
 documentation = "https://docs.example.com/fungible-token"
 homepage = "https://example.com"
+logo_url = "https://example.com/logo.png"
 
 [package.metadata.tari-template.extra]
 audit = "https://example.com/audit-report"

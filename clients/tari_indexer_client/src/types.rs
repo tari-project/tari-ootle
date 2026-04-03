@@ -235,6 +235,10 @@ pub struct TemplateCatalogueItem {
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub binary_hash: Hash32,
     pub at_epoch: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    pub metadata_hash: Option<MetadataHash>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

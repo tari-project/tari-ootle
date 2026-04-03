@@ -258,6 +258,9 @@ where
             );
             let transaction_id = transaction.id;
             if transaction_api.submit_transaction(transaction_id).await? {
+                // Only NewAccountData is persisted in the DB, so only that context is recoverable on
+                // resubmit. Other context variants (e.g. ClaimBurn) are in-memory only — if the daemon
+                // restarts, that context is lost and the caller must retry.
                 notify.notify(TransactionSubmittedEvent {
                     transaction_id,
                     context: transaction.new_account_info.map(TransactionContext::NewAccount),

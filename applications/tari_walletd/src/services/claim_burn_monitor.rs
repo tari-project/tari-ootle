@@ -12,6 +12,14 @@ use tokio::sync::broadcast;
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::claim_burn_monitor";
 
+/// Monitors wallet events to move burn proof files to the "claimed" directory
+/// only after the claim burn transaction is finalized and accepted.
+///
+/// NOTE: Pending claim context is held in-memory and is not persisted to the database.
+/// If the daemon restarts while a claim burn transaction is pending, the context is lost
+/// and the proof file will remain in the unclaimed directory. This is by design — the user
+/// can simply retry the claim. This is strictly better than the previous behavior where the
+/// file was moved immediately on submission, making it unrecoverable if the transaction failed.
 pub struct ClaimBurnMonitor {
     notify_subscription: broadcast::Receiver<WalletEvent>,
     burn_proof_dir: PathBuf,
@@ -39,8 +47,22 @@ impl ClaimBurnMonitor {
                     break Ok(());
                 }
 
-                Ok(event) = self.notify_subscription.recv() => {
-                    self.on_event(event);
+                result = self.notify_subscription.recv() => {
+                    match result {
+                        Ok(event) => self.on_event(event),
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            warn!(
+                                target: LOG_TARGET,
+                                "Claim burn monitor lagged behind by {} events. \
+                                 Some claim burn proofs may not be moved automatically.",
+                                n
+                            );
+                        },
+                        Err(broadcast::error::RecvError::Closed) => {
+                            info!(target: LOG_TARGET, "🔥 Event channel closed, shutting down");
+                            break Ok(());
+                        },
+                    }
                 },
             }
         }

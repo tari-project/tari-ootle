@@ -26,7 +26,7 @@ use tari_ootle_wallet_sdk::{
         stealth_transfer::{StealthTransferParams, TransferOutput},
         substate::ValidatorScanResult,
     },
-    models::{KeyBranch, NewAccountData, StealthUtxoSpendKeyId, TransactionSubmittedEvent},
+    models::{KeyBranch, NewAccountData, StealthUtxoSpendKeyId, TransactionContext, TransactionSubmittedEvent},
 };
 use tari_ootle_walletd_client::{
     ComponentAddressOrName,
@@ -596,12 +596,11 @@ pub async fn handle_claim_burn(
         });
     }
 
-    let tx_id = context.transaction_service().submit_transaction(transaction).await?;
-
-    if let Some(file_name) = proof_file_name {
-        let proof_dir = context.config().get_burn_proof_dir(network);
-        super::burn_proofs::mark_as_claimed(&proof_dir, &file_name);
-    }
+    let tx_context = proof_file_name.map(|file_name| TransactionContext::ClaimBurn { file_name });
+    let tx_id = context
+        .transaction_service()
+        .submit_transaction_with_opts(transaction, tx_context, None)
+        .await?;
 
     Ok(ClaimBurnResponse {
         transaction_id: tx_id,
@@ -725,8 +724,10 @@ pub async fn handle_create_free_test_coins(
         .transaction_service()
         .submit_transaction_with_opts(
             transaction,
-            account.is_confirmed_on_chain().then(|| NewAccountData {
-                address: *account.component_address(),
+            account.is_confirmed_on_chain().then(|| {
+                TransactionContext::NewAccount(NewAccountData {
+                    address: *account.component_address(),
+                })
             }),
             None,
         )
@@ -993,7 +994,7 @@ pub async fn handle_confidential_transfer(
 
         notifier.notify(TransactionSubmittedEvent {
             transaction_id: tx_id,
-            new_account: None,
+            context: None,
         });
 
         Ok(ConfidentialTransferResponse { transaction_id: tx_id })
@@ -1123,7 +1124,7 @@ pub async fn handle_stealth_transfer(
 
         notifier.notify(TransactionSubmittedEvent {
             transaction_id: tx_id,
-            new_account: None,
+            context: None,
         });
 
         Ok(StealthTransferResponse { transaction_id: tx_id })

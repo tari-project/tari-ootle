@@ -7,7 +7,7 @@ use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_transaction::TransactionId;
 use tari_template_lib::types::{ComponentAddress, UtxoAddress};
 
-use crate::models::{Account, NewAccountData, TransactionStatus};
+use crate::models::{Account, TransactionContext, TransactionStatus};
 
 #[derive(Debug, Clone)]
 pub enum WalletEvent {
@@ -98,8 +98,7 @@ impl Display for WalletEvent {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct TransactionSubmittedEvent {
     pub transaction_id: TransactionId,
-    /// Set to Some if this transaction results in a new account
-    pub new_account: Option<NewAccountData>,
+    pub context: Option<TransactionContext>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

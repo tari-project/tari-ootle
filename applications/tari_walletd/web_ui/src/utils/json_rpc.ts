@@ -46,6 +46,8 @@ import type {
   AuthListSessionsResponse,
   AuthRevokeTokenRequest,
   AuthRevokeTokenResponse,
+  BurnProofsGetRequest,
+  BurnProofsGetResponse,
   BurnProofsListRequest,
   BurnProofsListResponse,
   ClaimBurnRequest,
@@ -218,6 +220,8 @@ export const transactionsSubmitManifest = (
 // burn proofs
 export const burnProofsList = (request: BurnProofsListRequest): Promise<BurnProofsListResponse> =>
   client().then((c) => c.burnProofsList(request));
+export const burnProofsGet = (request: BurnProofsGetRequest): Promise<BurnProofsGetResponse> =>
+  client().then((c) => c.burnProofsGet(request));
 
 // accounts
 export const accountsClaimBurn = (request: ClaimBurnRequest): Promise<ClaimBurnResponse> =>

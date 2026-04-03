@@ -1670,7 +1670,11 @@ impl WalletEventStoreWriter for WriteTransaction<'_> {
 
         let (maybe_account, payload) = match event {
             WalletEvent::TransactionSubmitted(payload) => (
-                payload.new_account.as_ref().map(|a| a.address),
+                payload
+                    .context
+                    .as_ref()
+                    .and_then(|c| c.new_account_data())
+                    .map(|a| a.address),
                 serialize_json(payload)?,
             ),
             WalletEvent::TransactionFinalized(payload) => (None, serialize_json(payload)?),

@@ -11,7 +11,7 @@ use tari_ootle_wallet_sdk::{
     WalletSdk,
     WalletSdkSpec,
     models::{
-        NewAccountData,
+        TransactionContext,
         TransactionFinalizedEvent,
         TransactionInvalidEvent,
         TransactionStatus,
@@ -115,15 +115,12 @@ where
         match request {
             TransactionServiceRequest::SubmitTransaction {
                 transaction,
-                new_account_info,
+                context,
                 lock_id,
                 reply,
             } => {
                 reply
-                    .send(
-                        self.handle_submit_transaction(transaction, new_account_info, lock_id)
-                            .await,
-                    )
+                    .send(self.handle_submit_transaction(transaction, context, lock_id).await)
                     .map_err(|_| TransactionServiceError::ServiceShutdown)?;
             },
             TransactionServiceRequest::SubmitDryRunTransaction { transaction, reply } => {
@@ -163,11 +160,12 @@ where
     async fn handle_submit_transaction(
         &self,
         transaction: Transaction,
-        new_account_info: Option<NewAccountData>,
+        context: Option<TransactionContext>,
         lock_id: Option<WalletLockId>,
     ) -> Result<TransactionId, TransactionServiceError> {
         let transaction_api = self.wallet_sdk.transaction_api();
-        let transaction_id = transaction_api.insert_new_transaction(transaction, new_account_info.clone(), false)?;
+        let new_account_info = context.as_ref().and_then(|c| c.new_account_data()).cloned();
+        let transaction_id = transaction_api.insert_new_transaction(transaction, new_account_info, false)?;
 
         if let Some(lock_id) = lock_id {
             transaction_api.locks_set_transaction_id(lock_id, transaction_id)?;
@@ -176,7 +174,7 @@ where
         if transaction_api.submit_transaction(transaction_id).await? {
             self.notify.notify(TransactionSubmittedEvent {
                 transaction_id,
-                new_account: new_account_info,
+                context,
             });
             Ok(transaction_id)
         } else {
@@ -260,9 +258,12 @@ where
             );
             let transaction_id = transaction.id;
             if transaction_api.submit_transaction(transaction_id).await? {
+                // Only NewAccountData is persisted in the DB, so only that context is recoverable on
+                // resubmit. Other context variants (e.g. ClaimBurn) are in-memory only — if the daemon
+                // restarts, that context is lost and the caller must retry.
                 notify.notify(TransactionSubmittedEvent {
                     transaction_id,
-                    new_account: transaction.new_account_info,
+                    context: transaction.new_account_info.map(TransactionContext::NewAccount),
                 });
             } else {
                 notify.notify(TransactionInvalidEvent {

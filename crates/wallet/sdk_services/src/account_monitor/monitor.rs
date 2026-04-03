@@ -252,7 +252,7 @@ where
         }
         match event {
             WalletEvent::TransactionSubmitted(event) => {
-                if let Some(account) = event.new_account {
+                if let Some(account) = event.context.and_then(|c| c.new_account_data().cloned()) {
                     self.pending_accounts.insert(event.transaction_id, account);
                 }
             },

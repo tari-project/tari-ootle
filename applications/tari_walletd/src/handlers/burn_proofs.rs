@@ -133,36 +133,3 @@ pub async fn handle_get(
 
     Ok(BurnProofsGetResponse { proof })
 }
-
-/// Moves a burn proof file into the `claimed` subdirectory of the burn proof directory.
-/// This is called after a claim transaction has been successfully submitted.
-pub fn mark_as_claimed(burn_proof_dir: &Path, file_name: &str) {
-    let claimed_dir = burn_proof_dir.join("claimed");
-    if let Err(e) = fs::create_dir_all(&claimed_dir) {
-        warn!(
-            target: LOG_TARGET,
-            "Failed to create claimed directory {}: {}",
-            claimed_dir.display(),
-            e
-        );
-        return;
-    }
-
-    let src = burn_proof_dir.join(file_name);
-    let dst = claimed_dir.join(file_name);
-    if let Err(e) = fs::rename(&src, &dst) {
-        warn!(
-            target: LOG_TARGET,
-            "Failed to move claimed burn proof {} -> {}: {}",
-            src.display(),
-            dst.display(),
-            e
-        );
-    } else {
-        info!(
-            target: LOG_TARGET,
-            "Burn proof {} marked as claimed",
-            file_name
-        );
-    }
-}

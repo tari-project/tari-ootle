@@ -78,6 +78,7 @@ println!("Hash: {hash}");
 | `category` | `[package.metadata.tari-template] category` |
 | `documentation` | `[package.metadata.tari-template] documentation` |
 | `homepage` | `[package.metadata.tari-template] homepage` |
+| `logo_url` | `[package.metadata.tari-template] logo_url` |
 | `extra` | `[package.metadata.tari-template] extra` |
 
 ## Features

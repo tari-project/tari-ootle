@@ -6,6 +6,7 @@ pub use webauthn_session_store::*;
 
 pub mod wasm_optimizer;
 
+mod claim_burn_monitor;
 mod webauthn;
 pub use webauthn::*;
 
@@ -14,6 +15,8 @@ mod template_monitor;
 mod webauthn_session_store;
 
 // -------------------------------- Spawn -------------------------------- //
+use std::path::PathBuf;
+
 use anyhow::anyhow;
 use futures::{FutureExt, future, future::BoxFuture};
 use tari_ootle_wallet_sdk::{WalletSdk, models::WalletEvent};
@@ -26,12 +29,16 @@ use tari_ootle_wallet_sdk_services::{
 use tari_shutdown::ShutdownSignal;
 use tokio::task::JoinHandle;
 
-use crate::{OotleWalletDaemonSpec, services::template_monitor::TemplateMonitor};
+use crate::{
+    OotleWalletDaemonSpec,
+    services::{claim_burn_monitor::ClaimBurnMonitor, template_monitor::TemplateMonitor},
+};
 
 pub fn spawn_services(
     shutdown_signal: ShutdownSignal,
     notify: Notify<WalletEvent>,
     wallet_sdk: WalletSdk<OotleWalletDaemonSpec>,
+    burn_proof_dir: PathBuf,
 ) -> Services {
     let (transaction_service, transaction_service_handle) =
         TransactionService::new(notify.clone(), wallet_sdk.clone(), shutdown_signal.clone());
@@ -39,6 +46,9 @@ pub fn spawn_services(
 
     let template_monitor = TemplateMonitor::new(notify.clone(), wallet_sdk.clone(), shutdown_signal.clone());
     let template_monitor_join_handle = tokio::spawn(template_monitor.run());
+
+    let claim_burn_monitor = ClaimBurnMonitor::new(notify.clone(), burn_proof_dir, shutdown_signal.clone());
+    let claim_burn_monitor_join_handle = tokio::spawn(claim_burn_monitor.run());
 
     let utxo_scanner = StealthUtxoScannerWorker::new(wallet_sdk.clone(), notify.clone());
     let (utxo_scanner_join_handle, utxo_scanner_handle) = utxo_scanner.spawn();
@@ -60,6 +70,7 @@ pub fn spawn_services(
             transaction_service_join_handle,
             account_monitor_join_handle,
             template_monitor_join_handle,
+            claim_burn_monitor_join_handle,
             utxo_scanner_join_handle,
             utxo_recovery_join_handle,
         ])

@@ -8,6 +8,7 @@ diesel::table! {
         author_public_key -> Text,
         binary_hash -> Text,
         at_epoch -> BigInt,
+        metadata_hash -> Nullable<Text>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }

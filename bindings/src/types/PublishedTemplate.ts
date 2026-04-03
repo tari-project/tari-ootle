@@ -2,6 +2,10 @@
 
 export type PublishedTemplate = {
   /**
+   * Human-readable template name extracted from the WASM ABI.
+   */
+  template_name: string;
+  /**
    * Author's public key
    */
   author: string;
@@ -16,5 +20,5 @@ export type PublishedTemplate = {
   /**
    * Optional multihash of off-chain CBOR metadata
    */
-  metadata_hash?: string | null;
+  metadata_hash: string | null;
 };

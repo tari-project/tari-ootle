@@ -240,13 +240,11 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                     )
                 })
             .collect();
-        let executed = self.executor.execute(
+        self.executor.execute(
             pledged_transaction.transaction.transaction(),
             execution_epoch,
             &resolved_inputs,
-        )?;
-
-        Ok(executed)
+        )
     }
 
     pub fn execute_or_fetch(
@@ -265,6 +263,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 transaction.id(),
                 execution
             );
+            // Artifacts are stored alongside the execution
             return Ok(execution);
         }
         info!(
@@ -272,10 +271,8 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             "👨‍🔧 PREPARE: Executing transaction {}",
             transaction.id(),
         );
-        let execution = self
-            .executor
-            .execute(transaction.transaction(), execution_epoch, resolved_inputs)?;
-        Ok(execution)
+        self.executor
+            .execute(transaction.transaction(), execution_epoch, resolved_inputs)
     }
 
     pub fn fetch_execution(

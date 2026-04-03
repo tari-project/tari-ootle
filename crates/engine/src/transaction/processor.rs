@@ -125,7 +125,7 @@ where
         }
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub fn execute<E: Executable + WeightedExecutable>(self, executable: E) -> Result<ExecuteResult, TransactionError> {
         let id = executable.to_id();
         let timer = Instant::now();
@@ -564,6 +564,7 @@ where
     }
 
     /// Load, validate template binary and adds it to TemplateProvider.
+    /// Adds a template artifact if successful
     fn publish_template(
         runtime: &mut Runtime,
         binary: TemplateBlob,
@@ -579,9 +580,11 @@ where
         }
 
         // validate binary
-        WasmModule::load_template_from_code(&binary)?;
+        let template_def = WasmModule::validate_code(&binary)?;
         // creating new substate
-        runtime.interface_mut().publish_template(binary, metadata_hash)?;
+        runtime
+            .interface_mut()
+            .publish_template(binary, metadata_hash, template_def)?;
 
         Ok(InstructionResult::empty())
     }

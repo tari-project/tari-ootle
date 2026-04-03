@@ -1,6 +1,19 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    template_catalogue (id) {
+        id -> Integer,
+        template_address -> Text,
+        template_name -> Text,
+        author_public_key -> Text,
+        binary_hash -> Text,
+        at_epoch -> BigInt,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     epoch_checkpoints (id) {
         id -> Integer,
         epoch -> BigInt,
@@ -104,6 +117,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     key_values,
     substate_transitions,
     substates,
+    template_catalogue,
     transaction_receipts,
     transactions,
     utxos,

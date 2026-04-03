@@ -126,6 +126,7 @@ impl<TStore: TemplateProvider<Template = PublishedTemplate>> TemplateMetadataPro
             author: t.author,
             binary_hash: t.to_binary_hash(),
             epoch: Epoch(t.at_epoch),
+            metadata_hash: t.metadata_hash,
         }))
     }
 }

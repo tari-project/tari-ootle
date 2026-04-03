@@ -4,7 +4,10 @@
 use std::convert::{TryFrom, TryInto};
 
 use anyhow::{Context, anyhow};
-use tari_engine_types::substate::{SubstateId, SubstateValue};
+use tari_engine_types::{
+    published_template::PublishedTemplateMetadata,
+    substate::{SubstateId, SubstateValue},
+};
 use tari_jellyfish::TreeHash;
 use tari_ootle_common_types::shard::Shard;
 use tari_ootle_storage::consensus_models::{
@@ -22,6 +25,10 @@ use crate::{
     encoding::{decode_from_slice, encode_to_vec},
     proto,
 };
+
+fn decode_template_metadata(bytes: &[u8]) -> Result<PublishedTemplateMetadata, anyhow::Error> {
+    decode_from_slice(bytes).context("TemplateMetadata")
+}
 
 impl TryFrom<proto::rpc::SubstateCreate> for SubstateCreate {
     type Error = anyhow::Error;
@@ -71,8 +78,8 @@ impl TryFrom<proto::rpc::SubstateUpdate> for SubstateUpdateProof {
     fn try_from(value: proto::rpc::SubstateUpdate) -> Result<Self, Self::Error> {
         let update = value.update.ok_or_else(|| anyhow!("update not provided"))?;
         match update {
-            proto::rpc::substate_update::Update::Create(substate_proof) => Ok(Self::Create(substate_proof.try_into()?)),
-            proto::rpc::substate_update::Update::Destroy(proof) => Ok(Self::Destroy(proof.try_into()?)),
+            proto::rpc::substate_update::Update::Create(create) => Ok(Self::Create(Box::new(create.try_into()?))),
+            proto::rpc::substate_update::Update::Destroy(destroy) => Ok(Self::Destroy(destroy.try_into()?)),
         }
     }
 }
@@ -80,8 +87,8 @@ impl TryFrom<proto::rpc::SubstateUpdate> for SubstateUpdateProof {
 impl From<SubstateUpdateProof> for proto::rpc::SubstateUpdate {
     fn from(value: SubstateUpdateProof) -> Self {
         let update = match value {
-            SubstateUpdateProof::Create(proof) => proto::rpc::substate_update::Update::Create(proof.into()),
-            SubstateUpdateProof::Destroy(proof) => proto::rpc::substate_update::Update::Destroy(proof.into()),
+            SubstateUpdateProof::Create(create) => proto::rpc::substate_update::Update::Create((*create).into()),
+            SubstateUpdateProof::Destroy(destroy) => proto::rpc::substate_update::Update::Destroy(destroy.into()),
         };
 
         Self { update: Some(update) }
@@ -92,6 +99,12 @@ impl TryFrom<proto::rpc::SubstateData> for SubstateData {
     type Error = anyhow::Error;
 
     fn try_from(value: proto::rpc::SubstateData) -> Result<Self, Self::Error> {
+        let template_metadata = if value.template_metadata.is_empty() {
+            None
+        } else {
+            Some(decode_template_metadata(&value.template_metadata)?)
+        };
+
         Ok(Self {
             substate_id: SubstateId::from_bytes(&value.substate_id)?,
             version: value.version,
@@ -99,6 +112,7 @@ impl TryFrom<proto::rpc::SubstateData> for SubstateData {
                 .substate_value_or_hash
                 .ok_or_else(|| anyhow!("substate_value_or_hash not provided"))?
                 .try_into()?,
+            template_metadata,
         })
     }
 }
@@ -109,6 +123,10 @@ impl From<SubstateData> for proto::rpc::SubstateData {
             substate_id: value.substate_id.to_bytes(),
             version: value.version,
             substate_value_or_hash: Some(value.value().into()),
+            template_metadata: value
+                .template_metadata
+                .map(|m| encode_to_vec(&m).unwrap_or_default())
+                .unwrap_or_default(),
         }
     }
 }

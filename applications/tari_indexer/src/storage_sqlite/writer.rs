@@ -9,7 +9,7 @@ use std::{
 use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
 use log::{debug, info, warn};
 use serde::Serialize;
-use tari_engine_types::transaction_receipt::TransactionReceipt;
+use tari_engine_types::{published_template::PublishedTemplateMetadata, transaction_receipt::TransactionReceipt};
 use tari_ootle_common_types::{Epoch, StateVersion, shard::Shard, substate_type::SubstateType};
 use tari_ootle_storage::{
     StorageError,
@@ -17,13 +17,21 @@ use tari_ootle_storage::{
 };
 use tari_ootle_storage_sqlite::SqliteTransaction;
 use tari_ootle_transaction::{Transaction, TransactionId};
-use tari_template_lib_types::TransactionReceiptAddress;
+use tari_template_lib_types::{TemplateAddress, TransactionReceiptAddress};
 
 use crate::{
     diesel::ExpressionMethods,
     network_state_sync::EventFilter,
     storage_sqlite::{
-        models::{NewEvent, NewSubstate, SubstateRecord, UtxoRecordInsert, UtxoRecordUpdate, UtxoUpdateRecord},
+        models::{
+            NewEvent,
+            NewSubstate,
+            NewTemplateCatalogueRow,
+            SubstateRecord,
+            UtxoRecordInsert,
+            UtxoRecordUpdate,
+            UtxoUpdateRecord,
+        },
         reader::SqliteStoreReadTransaction,
         serialization::{serialize_bincode, serialize_hex, serialize_json},
     },
@@ -327,6 +335,27 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             ))
             .on_conflict((epoch_checkpoints::epoch, epoch_checkpoints::shard_group))
             .do_nothing()
+            .execute(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+
+        Ok(())
+    }
+
+    fn upsert_template_catalogue(
+        &mut self,
+        template_address: &TemplateAddress,
+        metadata: &PublishedTemplateMetadata,
+    ) -> Result<(), StorageError> {
+        const OPERATION: &str = "upsert_template_catalogue";
+        use crate::storage_sqlite::schema::template_catalogue;
+
+        let row = NewTemplateCatalogueRow::from((*template_address, metadata));
+
+        diesel::insert_into(template_catalogue::table)
+            .values(&row)
+            .on_conflict(template_catalogue::template_address)
+            .do_update()
+            .set(&row)
             .execute(self.connection())
             .map_err(|e| StorageError::general(OPERATION, e))?;
 

@@ -202,6 +202,41 @@ pub struct TemplateMetadata {
     pub metadata_hash: Option<MetadataHash>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListTemplateCatalogueRequest {
+    /// Optional substring filter on template name.
+    pub name_filter: Option<String>,
+    /// Only return templates published at or after this epoch. Use for incremental sync.
+    pub since_epoch: Option<u64>,
+    /// Maximum number of entries to return (default: 20, max: 100).
+    pub limit: Option<u64>,
+    /// Number of entries to skip for pagination.
+    pub offset: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListTemplateCatalogueResponse {
+    pub entries: Vec<TemplateCatalogueItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct TemplateCatalogueItem {
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub template_address: TemplateAddress,
+    pub template_name: String,
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub author_public_key: RistrettoPublicKeyBytes,
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub binary_hash: Hash32,
+    pub at_epoch: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",

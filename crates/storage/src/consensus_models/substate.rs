@@ -5,7 +5,10 @@ use std::{collections::HashSet, fmt, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::LeafBlock;
-use tari_engine_types::substate::{Substate, SubstateId, SubstateValue, hash_substate};
+use tari_engine_types::{
+    published_template::PublishedTemplateMetadata,
+    substate::{Substate, SubstateId, SubstateValue, hash_substate},
+};
 use tari_ootle_common_types::{
     Epoch,
     SubstateAddress,
@@ -358,6 +361,8 @@ pub struct SubstateData {
     pub substate_id: SubstateId,
     pub version: u32,
     pub value: SubstateValueOrHash,
+    #[serde(default)]
+    pub template_metadata: Option<PublishedTemplateMetadata>,
 }
 
 impl SubstateData {
@@ -387,13 +392,14 @@ impl From<SubstateRecord> for SubstateData {
                 .unwrap_or_else(|| value.state_hash.into()),
             substate_id: value.substate_id,
             version: value.version,
+            template_metadata: None,
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SubstateUpdateProof {
-    Create(SubstateCreate),
+    Create(Box<SubstateCreate>),
     Destroy(SubstateDestroy),
 }
 
@@ -449,7 +455,7 @@ impl SubstateUpdateProof {
 
 impl From<SubstateCreate> for SubstateUpdateProof {
     fn from(value: SubstateCreate) -> Self {
-        Self::Create(value)
+        Self::Create(Box::new(value))
     }
 }
 

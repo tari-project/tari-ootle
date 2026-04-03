@@ -318,15 +318,13 @@ impl<TStore: StateReader> StateTracker<TStore> {
             Substate::new(0, transaction_receipt),
         );
 
-        let finalized = FinalizeResult::new(
+        Ok(FinalizeResult::new(
             state.transaction_hash(),
             state.take_logs(),
             state.take_events(),
             TransactionResult::Accept(diff),
             fee_receipt,
-        );
-
-        Ok(finalized)
+        ))
     }
 
     fn take_fee_checkpoint(&mut self) -> Option<WorkingState<TStore>> {

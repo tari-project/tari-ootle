@@ -78,6 +78,7 @@ pub fn create_execution_result_for_transaction(
                     diff.up(
                         output.versioned_substate_id().substate_id().clone(),
                         Substate::new(output.versioned_substate_id().version(), PublishedTemplate {
+                            template_name: "test".try_into().expect("valid name"),
                             author: *transaction.seal_signature().public_key(),
                             binary: binary.to_vec().try_into().expect("Template binary too large"),
                             at_epoch: 0,

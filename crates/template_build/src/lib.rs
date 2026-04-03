@@ -51,6 +51,7 @@ pub struct TemplateMetadataBuilder {
     documentation: Option<String>,
     homepage: Option<String>,
     license: Option<String>,
+    logo_url: Option<String>,
     extra: Option<BTreeMap<String, String>>,
 }
 
@@ -72,6 +73,7 @@ impl TemplateMetadataBuilder {
             documentation: None,
             homepage: None,
             license: None,
+            logo_url: None,
             extra: None,
         }
     }
@@ -124,6 +126,12 @@ impl TemplateMetadataBuilder {
         self
     }
 
+    /// Override the logo URL from Cargo.toml.
+    pub fn logo_url(mut self, logo_url: impl Into<String>) -> Self {
+        self.logo_url = Some(logo_url.into());
+        self
+    }
+
     /// Override the extra metadata map from Cargo.toml.
     pub fn extra(mut self, extra: BTreeMap<String, String>) -> Self {
         self.extra = Some(extra);
@@ -160,6 +168,9 @@ impl TemplateMetadataBuilder {
         }
         if let Some(ref license) = self.license {
             metadata.license = Some(license.clone());
+        }
+        if let Some(ref logo_url) = self.logo_url {
+            metadata.logo_url = Some(logo_url.clone());
         }
         if let Some(ref extra) = self.extra {
             metadata.extra = extra.clone();

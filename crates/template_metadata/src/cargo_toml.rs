@@ -68,6 +68,11 @@ fn from_manifest(manifest: &Manifest) -> Result<TemplateMetadata, CargoTomlError
         .and_then(|v| v.as_str())
         .map(String::from);
 
+    let logo_url = tari_template
+        .and_then(|t| t.get("logo_url"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
     let extra = tari_template
         .and_then(|t| t.get("extra"))
         .and_then(|v| v.as_table())
@@ -89,6 +94,7 @@ fn from_manifest(manifest: &Manifest) -> Result<TemplateMetadata, CargoTomlError
         documentation,
         homepage,
         license,
+        logo_url,
         extra,
     })
 }

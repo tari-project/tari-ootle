@@ -34,6 +34,8 @@ pub struct TemplateMetadata {
     pub homepage: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logo_url: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, String>,
 }
@@ -52,6 +54,7 @@ impl TemplateMetadata {
             documentation: None,
             homepage: None,
             license: None,
+            logo_url: None,
             extra: BTreeMap::new(),
         }
     }
@@ -130,6 +133,7 @@ mod tests {
             documentation: None,
             homepage: None,
             license: Some("BSD-3-Clause".to_string()),
+            logo_url: None,
             extra: BTreeMap::new(),
         };
 
@@ -194,6 +198,7 @@ mod tests {
             documentation: None,
             homepage: None,
             license: None,
+            logo_url: None,
             extra: BTreeMap::new(),
         };
 

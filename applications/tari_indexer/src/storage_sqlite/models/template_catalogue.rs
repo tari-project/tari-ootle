@@ -4,6 +4,7 @@
 use tari_engine_types::published_template::PublishedTemplateMetadata;
 use tari_indexer_client::types::TemplateCatalogueItem;
 use tari_ootle_storage::time::PrimitiveDateTime;
+use tari_ootle_template_metadata::MetadataHash;
 use tari_template_lib_types::{Hash32, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 use crate::storage_sqlite::schema::template_catalogue;
@@ -18,6 +19,7 @@ pub(crate) struct TemplateCatalogueRow {
     pub author_public_key: String,
     pub binary_hash: String,
     pub at_epoch: i64,
+    pub metadata_hash: Option<String>,
     #[allow(dead_code)]
     pub created_at: PrimitiveDateTime,
     #[allow(dead_code)]
@@ -33,6 +35,7 @@ pub(crate) struct NewTemplateCatalogueRow {
     pub author_public_key: String,
     pub binary_hash: String,
     pub at_epoch: i64,
+    pub metadata_hash: Option<String>,
 }
 
 /// Public type exposed through the store trait and REST API.
@@ -44,6 +47,7 @@ pub struct TemplateCatalogueEntry {
     pub author_public_key: RistrettoPublicKeyBytes,
     pub binary_hash: Hash32,
     pub at_epoch: u64,
+    pub metadata_hash: Option<MetadataHash>,
 }
 
 impl TryFrom<TemplateCatalogueRow> for TemplateCatalogueEntry {
@@ -63,6 +67,11 @@ impl TryFrom<TemplateCatalogueRow> for TemplateCatalogueEntry {
             binary_hash: Hash32::from_hex(&row.binary_hash)
                 .map_err(|e| anyhow::anyhow!("Invalid binary_hash hex: {e}"))?,
             at_epoch: row.at_epoch as u64,
+            metadata_hash: row
+                .metadata_hash
+                .map(|h| MetadataHash::from_hex(&h))
+                .transpose()
+                .map_err(|e| anyhow::anyhow!("Invalid metadata_hash hex: {e}"))?,
         })
     }
 }
@@ -75,6 +84,7 @@ impl From<TemplateCatalogueEntry> for TemplateCatalogueItem {
             author_public_key: e.author_public_key,
             binary_hash: e.binary_hash,
             at_epoch: e.at_epoch,
+            metadata_hash: e.metadata_hash,
         }
     }
 }
@@ -87,6 +97,7 @@ impl From<(TemplateAddress, &PublishedTemplateMetadata)> for NewTemplateCatalogu
             author_public_key: hex::encode(meta.author_public_key.as_bytes()),
             binary_hash: hex::encode(meta.binary_hash.as_slice()),
             at_epoch: meta.at_epoch as i64,
+            metadata_hash: meta.metadata_hash.as_ref().map(|h| h.to_hex()),
         }
     }
 }

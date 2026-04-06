@@ -11654,6 +11654,7 @@ dependencies = [
  "axum 0.8.8",
  "axum-extra",
  "axum-jrpc",
+ "blake2",
  "clap 3.2.25",
  "config",
  "dirs-next 2.0.0",
@@ -11708,7 +11709,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_walletd_client"
-version = "0.28.4"
+version = "0.28.5"
 dependencies = [
  "hex",
  "ootle_serde",

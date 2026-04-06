@@ -37,7 +37,7 @@ use tari_ootle_common_types::{
     shard::Shard,
     substate_type::SubstateType,
 };
-use tari_ootle_template_metadata::MetadataHash;
+use tari_ootle_template_metadata::{MetadataHash, TemplateMetadata};
 use tari_ootle_transaction::{Instruction, Transaction, TransactionId, UnsignedTransaction};
 use tari_ootle_wallet_sdk::{
     apis::{
@@ -73,7 +73,7 @@ use tari_template_lib_types::{
     ValidatorFeePoolAddress,
     VaultId,
     confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
-    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
     stealth::{SpendCondition, StealthTransferStatement},
 };
 use time::PrimitiveDateTime;
@@ -1331,4 +1331,35 @@ pub struct StealthUtxosDecryptValueRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct StealthUtxosDecryptValueResponse {
     pub values: HashMap<UtxoId, Option<u64>>,
+}
+
+// -------------------------------- Templates -------------------------------- //
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SignTemplateMetadataRequest {
+    pub key_id: KeyId,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub template_address: TemplateAddress,
+    /// The template metadata to sign. Provided as an inline JSON object.
+    #[cfg_attr(feature = "ts", ts(type = "Record<string, unknown>"))]
+    pub metadata: TemplateMetadata,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SignTemplateMetadataResponse {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub public_nonce: RistrettoPublicKeyBytes,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub signature: Scalar32Bytes,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub public_key: RistrettoPublicKeyBytes,
+    /// Hex-encoded canonical CBOR of the metadata (the signed payload).
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "ootle_serde::hex")]
+    pub metadata_cbor: Vec<u8>,
+    /// The metadata hash derived from the CBOR encoding.
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub metadata_hash: MetadataHash,
 }

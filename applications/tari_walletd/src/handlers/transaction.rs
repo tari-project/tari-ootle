@@ -581,8 +581,7 @@ fn resolve_metadata_hash(
     match input {
         PublishTemplateMetadata::Hash(hash) => Ok(hash),
         PublishTemplateMetadata::Json(bytes) => {
-            let json_str =
-                std::str::from_utf8(&bytes).map_err(|e| anyhow!("metadata JSON is not valid UTF-8: {e}"))?;
+            let json_str = std::str::from_utf8(&bytes).map_err(|e| anyhow!("metadata JSON is not valid UTF-8: {e}"))?;
             let meta = TemplateMetadata::from_json(json_str).map_err(|e| anyhow!(e))?;
             meta.hash().map_err(|e| anyhow!(e))
         },

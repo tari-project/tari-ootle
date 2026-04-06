@@ -47,7 +47,7 @@ pub async fn publish_template(
             max_fee: 1_000_000,
             detect_inputs: true,
             dry_run: false,
-            metadata_hash: None,
+            metadata: None,
         })
         .await?;
 

@@ -12,6 +12,7 @@ In this guide, you will:
 - Understand the privacy properties of stealth transfers: what is hidden and what is not.
 - Learn the structure of a stealth transfer: inputs, outputs, revealed vs confidential funds.
 - Understand how stealth addresses protect receiver identity.
+- Learn about spend conditions: `Signed` (public key) vs `AccessRule` (multisig, component-scoped, etc.).
 - Learn about encrypted data and memos attached to outputs.
 - See how to execute stealth transfers programmatically in WASM templates.
 - Walk through a complete stealth transfer example using `ootle-rs`.
@@ -223,6 +224,94 @@ This means:
 - The recipient scans new outputs by trying to derive the stealth key using their private key. If it matches the
   output's spend condition, the output belongs to them.
 - The sender cannot spend the output after sending it (they don't know **k**).
+
+---
+
+## Spend Conditions
+
+Every stealth UTXO has a **spend condition** that determines what authorization is required to spend it.
+When a stealth input is consumed in a transfer, the engine validates the spend condition before allowing the spend.
+
+There are two variants:
+
+### `Signed` — Public Key Authorization
+
+The default and most common spend condition. The UTXO can only be spent by proving ownership of a specific
+public key via a transaction signature:
+
+```rust
+SpendCondition::Signed(public_key)
+```
+
+This is typically the **one-time stealth public key** derived during the stealth address exchange (see above).
+Only the recipient — who can derive the corresponding private key — can produce a valid signature.
+
+At validation time, the engine checks that the transaction's authorization scope contains a proof (badge) matching
+`NonFungibleAddress::from_public_key(pk)`. If the signature is missing, the transaction fails with
+`RequiredSignatureMissingForStealthUtxo`.
+
+### `AccessRule` — Rule-Based Authorization
+
+Instead of requiring a specific signature, the UTXO can be gated by an **access rule**. This enables
+advanced spending policies such as multisig, component-scoped access, or resource-gated spending:
+
+```rust
+SpendCondition::AccessRule(rule)
+```
+
+Access rules support the same constructs used elsewhere in Ootle:
+
+| Rule | Description |
+|---|---|
+| `allow_all` | Anyone can spend the UTXO (no authorization required) |
+| `deny_all` | The UTXO can never be spent |
+| `public_key(pk)` | Equivalent to `Signed(pk)` but expressed as an access rule |
+| `resource(addr)` | Requires a proof of a specific resource token |
+| `non_fungible(nf)` | Requires a proof of a specific non-fungible token |
+| `component(addr)` | Only spendable within a call to a specific component |
+| `template(addr)` | Only spendable within a call to a specific template |
+| `any_of(...)` | Any one of the listed rules must be satisfied |
+| `all_of(...)` | All of the listed rules must be satisfied |
+| `m_of_n(m, ...)` | At least **m** of **n** listed requirements must be satisfied |
+
+For example, a 2-of-3 multisig spend condition:
+
+```rust
+use tari_template_lib::rule;
+
+let spend_condition = SpendCondition::AccessRule(
+    rule!(m_of_n(2, public_key(pk1), public_key(pk2), public_key(pk3)))
+);
+```
+
+Or a UTXO that can only be spent by a specific component:
+
+```rust
+let spend_condition = SpendCondition::AccessRule(
+    rule!(component(my_component_address))
+);
+```
+
+<Aside type="note">
+When using `AccessRule` spend conditions, the UTXO owner is no longer hidden behind a one-time stealth key.
+The access rule itself is stored on-chain and may reveal information about who can spend the output.
+Consider the privacy trade-off when choosing between `Signed` and `AccessRule`.
+</Aside>
+
+### Setting the Spend Condition with `ootle-rs`
+
+By default, stealth outputs use `Signed` with the one-time stealth public key derived for the recipient.
+To use an access rule instead, set `pay_to` on the output:
+
+```rust
+use ootle_rs::{crypto::pay_to::PayTo, stealth::Output};
+use tari_template_lib::rule;
+
+let output = Output::new(recipient, tari_token, amount)
+    .with_pay_to(PayTo::AccessRule(
+        rule!(m_of_n(2, public_key(pk1), public_key(pk2), public_key(pk3)))
+    ));
+```
 
 ---
 

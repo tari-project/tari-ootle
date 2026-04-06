@@ -239,7 +239,7 @@ There are two variants:
 The default and most common spend condition. The UTXO can only be spent by proving ownership of a specific
 public key via a transaction signature:
 
-```
+```rust
 SpendCondition::Signed(public_key)
 ```
 
@@ -255,7 +255,7 @@ At validation time, the engine checks that the transaction's authorization scope
 Instead of requiring a specific signature, the UTXO can be gated by an **access rule**. This enables
 advanced spending policies such as multisig, component-scoped access, or resource-gated spending:
 
-```
+```rust
 SpendCondition::AccessRule(rule)
 ```
 
@@ -263,21 +263,21 @@ Access rules support the same constructs used elsewhere in Ootle:
 
 | Rule | Description |
 |---|---|
-| `AllowAll` | Anyone can spend the UTXO (no authorization required) |
-| `DenyAll` | The UTXO can never be spent |
-| `Require(public_key(pk))` | Equivalent to `Signed(pk)` but expressed as an access rule |
-| `Require(resource(addr))` | Requires a proof of a specific resource token |
-| `Require(non_fungible(nf))` | Requires a proof of a specific non-fungible token |
-| `Require(component(addr))` | Only spendable within a call to a specific component |
-| `Require(template(addr))` | Only spendable within a call to a specific template |
-| `AnyOf(...)` | Any one of the listed rules must be satisfied |
-| `AllOf(...)` | All of the listed rules must be satisfied |
-| `MOfN(m, ...)` | At least **m** of **n** listed requirements must be satisfied |
+| `allow_all` | Anyone can spend the UTXO (no authorization required) |
+| `deny_all` | The UTXO can never be spent |
+| `public_key(pk)` | Equivalent to `Signed(pk)` but expressed as an access rule |
+| `resource(addr)` | Requires a proof of a specific resource token |
+| `non_fungible(nf)` | Requires a proof of a specific non-fungible token |
+| `component(addr)` | Only spendable within a call to a specific component |
+| `template(addr)` | Only spendable within a call to a specific template |
+| `any_of(...)` | Any one of the listed rules must be satisfied |
+| `all_of(...)` | All of the listed rules must be satisfied |
+| `m_of_n(m, ...)` | At least **m** of **n** listed requirements must be satisfied |
 
 For example, a 2-of-3 multisig spend condition:
 
 ```rust
-use tari_template_lib_types::rule;
+use tari_template_lib::rule;
 
 let spend_condition = SpendCondition::AccessRule(
     rule!(m_of_n(2, public_key(pk1), public_key(pk2), public_key(pk3)))
@@ -304,9 +304,8 @@ By default, stealth outputs use `Signed` with the one-time stealth public key de
 To use an access rule instead, set `pay_to` on the output:
 
 ```rust
-use ootle_rs::stealth::Output;
-use tari_ootle_wallet_crypto::pay_to::PayTo;
-use tari_template_lib_types::rule;
+use ootle_rs::{crypto::pay_to::PayTo, stealth::Output};
+use tari_template_lib::rule;
 
 let output = Output::new(recipient, tari_token, amount)
     .with_pay_to(PayTo::AccessRule(

@@ -283,6 +283,16 @@ function PublishTemplateDialog(props: DialogProps) {
     setFormState((prev) => ({ ...prev, metadata: null, metadataFileName: null }));
   };
 
+  const buildMetadataPayload = () => {
+    if (!formState.metadata) return null;
+    if (formState.metadataFileName?.endsWith(".cbor")) {
+      return { type: "RawCbor" as const, data: base64FromArrayBuffer(formState.metadata) };
+    }
+    // JSON file: parse and send as Literal
+    const text = new TextDecoder().decode(formState.metadata);
+    return { type: "Literal" as const, data: JSON.parse(text) };
+  };
+
   const handleEstimateFee = async () => {
     if (!formState.binary || !formState.account) return;
 
@@ -294,12 +304,7 @@ function PublishTemplateDialog(props: DialogProps) {
         max_fee: 1_000_000,
         detect_inputs: true,
         dry_run: true,
-        metadata: formState.metadata
-          ? {
-              type: formState.metadataFileName?.endsWith(".cbor") ? ("Cbor" as const) : ("Json" as const),
-              data: base64FromArrayBuffer(formState.metadata),
-            }
-          : null,
+        metadata: buildMetadataPayload(),
       });
       const fee = resp.dry_run_fee!;
       setEstimatedFee(fee);
@@ -324,12 +329,7 @@ function PublishTemplateDialog(props: DialogProps) {
         max_fee: maxFeeNum,
         detect_inputs: true,
         dry_run: false,
-        metadata: formState.metadata
-          ? {
-              type: formState.metadataFileName?.endsWith(".cbor") ? ("Cbor" as const) : ("Json" as const),
-              data: base64FromArrayBuffer(formState.metadata),
-            }
-          : null,
+        metadata: buildMetadataPayload(),
       });
       setFormState(INITIAL_VALUES);
       setEstimatedFee(null);

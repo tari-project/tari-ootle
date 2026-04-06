@@ -16,6 +16,7 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// `[package.metadata.tari-template]` sections. The CBOR encoding of this struct is
 /// hashed to produce a [`MetadataHash`] that is stored on-chain alongside the template binary.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "TemplateMetadata/"))]
 pub struct TemplateMetadata {
     pub schema_version: u32,
     pub name: String,

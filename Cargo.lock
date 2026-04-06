@@ -11471,6 +11471,7 @@ dependencies = [
  "tari_bor",
  "tempfile",
  "thiserror 2.0.18",
+ "ts-rs",
 ]
 
 [[package]]

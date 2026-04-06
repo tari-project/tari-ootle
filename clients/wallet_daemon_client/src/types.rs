@@ -193,20 +193,16 @@ pub struct PublishTemplateRequest {
     pub metadata: Option<PublishTemplateMetadata>,
 }
 
-/// Template metadata input for publishing. Either provide the raw metadata for server-side hashing,
+/// Template metadata input for publishing. Either provide the metadata for server-side hashing,
 /// or a pre-computed hash.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", content = "data")]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub enum PublishTemplateMetadata {
-    /// Raw JSON metadata (base64-encoded). The server decodes and computes the hash.
-    Json(
-        #[cfg_attr(feature = "ts", ts(type = "string"))]
-        #[serde(with = "ootle_serde::base64")]
-        Vec<u8>,
-    ),
-    /// Raw CBOR metadata (base64-encoded). The server decodes and computes the hash.
-    Cbor(
+    /// Inline template metadata object. The server CBOR-encodes it and computes the hash.
+    Literal(TemplateMetadata),
+    /// Pre-encoded CBOR metadata (base64-encoded). The server decodes and computes the hash.
+    RawCbor(
         #[cfg_attr(feature = "ts", ts(type = "string"))]
         #[serde(with = "ootle_serde::base64")]
         Vec<u8>,
@@ -1342,7 +1338,6 @@ pub struct SignTemplateMetadataRequest {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub template_address: TemplateAddress,
     /// The template metadata to sign. Provided as an inline JSON object.
-    #[cfg_attr(feature = "ts", ts(type = "Record<string, unknown>"))]
     pub metadata: TemplateMetadata,
 }
 

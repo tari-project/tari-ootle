@@ -187,10 +187,32 @@ pub struct PublishTemplateRequest {
     /// contain the required inputs.
     pub detect_inputs: bool,
     pub dry_run: bool,
-    /// Optional multihash of off-chain CBOR metadata
+    /// Optional template metadata. Can be provided as raw JSON/CBOR (base64-encoded) for server-side
+    /// hashing, or as a pre-computed hash.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
-    pub metadata_hash: Option<MetadataHash>,
+    pub metadata: Option<PublishTemplateMetadata>,
+}
+
+/// Template metadata input for publishing. Either provide the raw metadata for server-side hashing,
+/// or a pre-computed hash.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "type", content = "data")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub enum PublishTemplateMetadata {
+    /// Raw JSON metadata (base64-encoded). The server decodes and computes the hash.
+    Json(
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        #[serde(with = "ootle_serde::base64")]
+        Vec<u8>,
+    ),
+    /// Raw CBOR metadata (base64-encoded). The server decodes and computes the hash.
+    Cbor(
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        #[serde(with = "ootle_serde::base64")]
+        Vec<u8>,
+    ),
+    /// Pre-computed metadata hash (hex-encoded multihash).
+    Hash(#[cfg_attr(feature = "ts", ts(type = "string"))] MetadataHash),
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

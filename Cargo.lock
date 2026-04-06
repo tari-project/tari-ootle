@@ -11681,6 +11681,7 @@ dependencies = [
  "tari_engine_types",
  "tari_ootle_app_utilities",
  "tari_ootle_common_types",
+ "tari_ootle_template_metadata",
  "tari_ootle_transaction",
  "tari_ootle_wallet_crypto",
  "tari_ootle_wallet_sdk",

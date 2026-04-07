@@ -8,5 +8,5 @@ export type TemplateCatalogueItem = {
   author_public_key: RistrettoPublicKeyBytes;
   binary_hash: Hash32;
   at_epoch: bigint;
-  metadata_hash: string | null;
+  metadata_hash?: string | null;
 };

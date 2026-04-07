@@ -37,7 +37,7 @@ use tari_ootle_common_types::{
     shard::Shard,
     substate_type::SubstateType,
 };
-use tari_ootle_template_metadata::MetadataHash;
+use tari_ootle_template_metadata::{MetadataHash, TemplateMetadata};
 use tari_ootle_transaction::{Instruction, Transaction, TransactionId, UnsignedTransaction};
 use tari_ootle_wallet_sdk::{
     apis::{
@@ -73,7 +73,7 @@ use tari_template_lib_types::{
     ValidatorFeePoolAddress,
     VaultId,
     confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
-    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
     stealth::{SpendCondition, StealthTransferStatement},
 };
 use time::PrimitiveDateTime;
@@ -187,10 +187,28 @@ pub struct PublishTemplateRequest {
     /// contain the required inputs.
     pub detect_inputs: bool,
     pub dry_run: bool,
-    /// Optional multihash of off-chain CBOR metadata
+    /// Optional template metadata. Can be provided as raw JSON/CBOR (base64-encoded) for server-side
+    /// hashing, or as a pre-computed hash.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
-    pub metadata_hash: Option<MetadataHash>,
+    pub metadata: Option<PublishTemplateMetadata>,
+}
+
+/// Template metadata input for publishing. Either provide the metadata for server-side hashing,
+/// or a pre-computed hash.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "type", content = "data")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub enum PublishTemplateMetadata {
+    /// Inline template metadata object. The server CBOR-encodes it and computes the hash.
+    Literal(TemplateMetadata),
+    /// Pre-encoded CBOR metadata (base64-encoded). The server decodes and computes the hash.
+    RawCbor(
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        #[serde(with = "ootle_serde::base64")]
+        Vec<u8>,
+    ),
+    /// Pre-computed metadata hash (hex-encoded multihash).
+    Hash(#[cfg_attr(feature = "ts", ts(type = "string"))] MetadataHash),
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1309,4 +1327,34 @@ pub struct StealthUtxosDecryptValueRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct StealthUtxosDecryptValueResponse {
     pub values: HashMap<UtxoId, Option<u64>>,
+}
+
+// -------------------------------- Templates -------------------------------- //
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SignTemplateMetadataRequest {
+    pub key_id: KeyId,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub template_address: TemplateAddress,
+    /// The template metadata to sign. Provided as an inline JSON object.
+    pub metadata: TemplateMetadata,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SignTemplateMetadataResponse {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub public_nonce: RistrettoPublicKeyBytes,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub signature: Scalar32Bytes,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub public_key: RistrettoPublicKeyBytes,
+    /// Hex-encoded canonical CBOR of the metadata (the signed payload).
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "ootle_serde::hex")]
+    pub metadata_cbor: Vec<u8>,
+    /// The metadata hash derived from the CBOR encoding.
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub metadata_hash: MetadataHash,
 }

@@ -18,11 +18,13 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
+ts-rs = { workspace = true, optional = true }
 
 [features]
 default = []
 borsh = ["dep:borsh"]
 json = ["dep:serde_json"]
+ts = ["ts-rs"]
 
 [dev-dependencies]
 serde_json = { workspace = true }

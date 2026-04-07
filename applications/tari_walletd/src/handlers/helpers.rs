@@ -206,7 +206,7 @@ pub(super) fn general_error<T: Display>(details: T) -> anyhow::Error {
 
 /// Converts a `CompleteClaimBurnProof` (the L1 burn proof file format) into the
 /// `ClaimBurnProofContents` used by the wallet daemon for claim transactions.
-pub(super) fn complete_burn_proof_to_contents(proof: CompleteClaimBurnProof) -> anyhow::Result<ClaimBurnProofContents> {
+pub(crate) fn complete_burn_proof_to_contents(proof: CompleteClaimBurnProof) -> anyhow::Result<ClaimBurnProofContents> {
     let encrypted_data = EncryptedData::try_from(proof.encrypted_data).map_err(|len| {
         anyhow!(
             "Invalid encrypted data length: {}. Expected max length: {}",

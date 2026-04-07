@@ -17,7 +17,8 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::{SubstateRequirement, optional::Optional};
-use tari_ootle_transaction::args;
+use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceHandle;
 use tari_ootle_wallet_crypto::{OutputWitness, StealthInputWitness, StealthOutputWitness, memo::Memo};
 use tari_ootle_wallet_sdk::{
     apis::{
@@ -26,7 +27,7 @@ use tari_ootle_wallet_sdk::{
         stealth_transfer::{StealthTransferParams, TransferOutput},
         substate::ValidatorScanResult,
     },
-    models::{KeyBranch, NewAccountData, StealthUtxoSpendKeyId, TransactionContext, TransactionSubmittedEvent},
+    models::{AccountWithAddress, KeyBranch, NewAccountData, StealthUtxoSpendKeyId, TransactionContext, TransactionSubmittedEvent},
 };
 use tari_ootle_walletd_client::{
     ComponentAddressOrName,
@@ -410,7 +411,6 @@ pub async fn handle_get_default(
     })
 }
 
-#[allow(clippy::too_many_lines)]
 pub async fn handle_claim_burn(
     context: &HandlerContext,
     token: Option<&Bearer>,
@@ -436,16 +436,43 @@ pub async fn handle_claim_burn(
     };
 
     let proof_dir = context.config().get_burn_proof_dir(network);
-    let ClaimBurnProofContents {
-        encrypted_data: claimed_encrypted_data,
-        claim_proof,
-    } = resolve_claim_proof(&proof_dir, claim_proof).await.map_err(|e| {
+    let proof_contents = resolve_claim_proof(&proof_dir, claim_proof).await.map_err(|e| {
         error!(target: LOG_TARGET, "Error resolving claim proof: {}", e);
         invalid_request(format!("Could not resolve claim proof. {e} Is the file name correct?"))
     })?;
 
     let accounts_api = sdk.accounts_api();
     let account = get_account(&account, &accounts_api)?;
+
+    execute_claim_burn(
+        sdk,
+        context.transaction_service(),
+        &account,
+        proof_contents,
+        max_fee,
+        is_dry_run,
+        proof_file_name,
+    )
+    .await
+}
+
+/// Core claim burn logic: decrypts the burn proof, builds and signs the claim transaction,
+/// and submits it (or performs a dry run). Shared between the interactive RPC handler
+/// and the automatic background [`AutoClaimBurnService`].
+#[allow(clippy::too_many_lines)]
+pub(crate) async fn execute_claim_burn(
+    sdk: &crate::WalletSdk,
+    transaction_service: &TransactionServiceHandle,
+    account: &AccountWithAddress,
+    proof_contents: ClaimBurnProofContents,
+    max_fee: u64,
+    is_dry_run: bool,
+    proof_file_name: Option<String>,
+) -> Result<ClaimBurnResponse, anyhow::Error> {
+    let ClaimBurnProofContents {
+        encrypted_data: claimed_encrypted_data,
+        claim_proof,
+    } = proof_contents;
 
     let account_owner_key_id = account
         .owner_key_id()
@@ -566,8 +593,7 @@ pub async fn handle_claim_burn(
         encrypted_data: claimed_encrypted_data,
     };
 
-    let transaction = context
-        .transaction_builder()
+    let transaction = Transaction::builder(network.as_byte())
         .with_fee_instructions_builder(|fee_builder| {
             fee_builder
                 // Mint the UTXO
@@ -586,10 +612,7 @@ pub async fn handle_claim_burn(
 
     if is_dry_run {
         let transaction_id = transaction.calculate_id();
-        let result = context
-            .transaction_service()
-            .submit_dry_run_transaction(transaction)
-            .await?;
+        let result = transaction_service.submit_dry_run_transaction(transaction).await?;
         return Ok(ClaimBurnResponse {
             transaction_id,
             dry_run_result: Some(result),
@@ -597,8 +620,7 @@ pub async fn handle_claim_burn(
     }
 
     let tx_context = proof_file_name.map(|file_name| TransactionContext::ClaimBurn { file_name });
-    let tx_id = context
-        .transaction_service()
+    let tx_id = transaction_service
         .submit_transaction_with_opts(transaction, tx_context, None)
         .await?;
 

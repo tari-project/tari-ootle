@@ -11670,6 +11670,7 @@ dependencies = [
  "log",
  "log4rs",
  "mime_guess",
+ "notify",
  "ootle_byte_type",
  "rand 0.8.5",
  "reqwest 0.13.2",

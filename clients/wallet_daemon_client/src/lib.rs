@@ -122,6 +122,8 @@ use crate::{
         SettingsGetResponse,
         SettingsSetRequest,
         SettingsSetResponse,
+        SignTemplateMetadataRequest,
+        SignTemplateMetadataResponse,
         StealthTransferRequest,
         StealthTransferResponse,
         StealthUtxosDecryptValueRequest,
@@ -599,6 +601,14 @@ impl WalletDaemonClient {
     ) -> Result<PublishTemplateResponse, WalletDaemonClientError> {
         self.send_request("transactions.publish_template", request.borrow())
             .await
+    }
+
+    /// Signs template metadata with the specified key, returning the signature and CBOR-encoded metadata.
+    pub async fn sign_template_metadata<T: Borrow<SignTemplateMetadataRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<SignTemplateMetadataResponse, WalletDaemonClientError> {
+        self.send_request("templates.sign_metadata", request.borrow()).await
     }
 
     /// Lists stealth UTXOs for an account, with optional resource filtering.

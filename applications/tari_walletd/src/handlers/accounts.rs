@@ -18,7 +18,6 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{SubstateRequirement, optional::Optional};
 use tari_ootle_transaction::{Transaction, args};
-use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceHandle;
 use tari_ootle_wallet_crypto::{OutputWitness, StealthInputWitness, StealthOutputWitness, memo::Memo};
 use tari_ootle_wallet_sdk::{
     apis::{
@@ -27,8 +26,16 @@ use tari_ootle_wallet_sdk::{
         stealth_transfer::{StealthTransferParams, TransferOutput},
         substate::ValidatorScanResult,
     },
-    models::{AccountWithAddress, KeyBranch, NewAccountData, StealthUtxoSpendKeyId, TransactionContext, TransactionSubmittedEvent},
+    models::{
+        AccountWithAddress,
+        KeyBranch,
+        NewAccountData,
+        StealthUtxoSpendKeyId,
+        TransactionContext,
+        TransactionSubmittedEvent,
+    },
 };
+use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceHandle;
 use tari_ootle_walletd_client::{
     ComponentAddressOrName,
     permissions::JrpcPermission,

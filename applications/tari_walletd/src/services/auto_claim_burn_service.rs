@@ -54,9 +54,12 @@ pub struct AutoClaimBurnService {
     sdk: WalletSdk,
     transaction_service: TransactionServiceHandle,
     burn_proof_dir: PathBuf,
-    /// Maps file name → epoch at which the file was detected.
-    /// The claim is submitted once the indexer's current epoch is strictly greater than this.
-    pending_claims: HashMap<String, Epoch>,
+    /// Maps file name → epoch at which the file was detected, or `None` if the epoch has not yet
+    /// been determined (e.g. the indexer was unreachable when the file was first seen).
+    /// `None` entries are resolved to `Some(current_epoch)` on the next successful interval check,
+    /// after which the claim is submitted once the indexer reports a strictly later epoch.
+    /// Startup-scan files use `Some(Epoch(0))` so they are eligible immediately.
+    pending_claims: HashMap<String, Option<Epoch>>,
     shutdown_signal: ShutdownSignal,
 }
 
@@ -126,7 +129,7 @@ impl AutoClaimBurnService {
     }
 
     /// Scans `burn_proof_dir` for any `.json` files present at startup and queues them with
-    /// `Epoch(0)` so they are submitted on the very next epoch check.
+    /// `Some(Epoch(0))` so they are submitted on the very next epoch check.
     fn scan_proof_dir(&mut self) {
         let entries = match fs::read_dir(&self.burn_proof_dir) {
             Ok(e) => e,
@@ -144,7 +147,9 @@ impl AutoClaimBurnService {
                 let Some(file_name) = path.file_name().and_then(|n| n.to_str())
             {
                 info!(target: LOG_TARGET, "Found existing unclaimed burn proof: {}", file_name);
-                self.pending_claims.insert(file_name.to_string(), Epoch(0));
+                // Epoch(0) makes startup files immediately eligible — the daemon restart itself
+                // implies the required epoch boundary has been crossed.
+                self.pending_claims.insert(file_name.to_string(), Some(Epoch(0)));
             }
         }
 
@@ -196,10 +201,10 @@ impl AutoClaimBurnService {
                 continue;
             }
 
-            // Reserve the slot with Epoch(0) *before* the await point so that a second OS event
-            // for the same file (notify sometimes fires Create + Access(Close(Write)) both) cannot
+            // Reserve the slot with None *before* the await point so that a second OS event for
+            // the same file (notify sometimes fires Create + Access(Close(Write)) both) cannot
             // pass the `contains_key` check while we are suspended in `query_current_epoch`.
-            self.pending_claims.insert(file_name.to_string(), Epoch(0));
+            self.pending_claims.insert(file_name.to_string(), None);
 
             let detected_epoch = match self.query_current_epoch().await {
                 Ok(epoch) => epoch,
@@ -207,11 +212,13 @@ impl AutoClaimBurnService {
                     warn!(
                         target: LOG_TARGET,
                         "Could not query epoch for newly detected file '{}' ({}). \
-                         Using Epoch(0) — will attempt claim on next interval check.",
+                         Epoch will be resolved on the next interval check.",
                         file_name,
                         e
                     );
-                    Epoch(0)
+                    // Leave the entry as None; check_and_submit_pending will resolve it
+                    // once the indexer is reachable, then wait one full epoch before submitting.
+                    continue;
                 },
             };
 
@@ -222,7 +229,7 @@ impl AutoClaimBurnService {
                 detected_epoch,
                 detected_epoch.0.saturating_add(1),
             );
-            self.pending_claims.insert(file_name.to_string(), detected_epoch);
+            self.pending_claims.insert(file_name.to_string(), Some(detected_epoch));
         }
     }
 
@@ -245,10 +252,24 @@ impl AutoClaimBurnService {
             },
         };
 
+        // Resolve any entries where epoch detection previously failed (e.g. indexer was down).
+        // They are stamped with the current epoch now and will be submitted one epoch later.
+        for epoch_slot in self.pending_claims.values_mut() {
+            if epoch_slot.is_none() {
+                info!(
+                    target: LOG_TARGET,
+                    "Resolved pending epoch detection to epoch {}. Will claim in epoch {}.",
+                    current_epoch,
+                    current_epoch.0.saturating_add(1),
+                );
+                *epoch_slot = Some(current_epoch);
+            }
+        }
+
         let ready: Vec<String> = self
             .pending_claims
             .iter()
-            .filter(|&(_, &detected_epoch)| current_epoch > detected_epoch)
+            .filter(|&(_, detected_epoch)| detected_epoch.is_some_and(|e| current_epoch > e))
             .map(|(name, _)| name.clone())
             .collect();
 

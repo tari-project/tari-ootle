@@ -261,15 +261,25 @@ function PublishTemplateDialog(props: DialogProps) {
     const files = e.target.files;
     if (files && files.length > 0) {
       const file = files[0];
-      if (!file.name.endsWith(".json") && !file.name.endsWith(".cbor")) {
+      const nameLower = file.name.toLowerCase();
+      if (!nameLower.endsWith(".json") && !nameLower.endsWith(".cbor")) {
         setFileError("Metadata must be a .json or .cbor file");
         return;
       }
       const reader = new FileReader();
       reader.onload = () => {
+        const result = reader.result as ArrayBuffer;
+        if (nameLower.endsWith(".json")) {
+          try {
+            JSON.parse(new TextDecoder().decode(result));
+          } catch {
+            setFileError("Invalid JSON in metadata file");
+            return;
+          }
+        }
         setFormState((prev) => ({
           ...prev,
-          metadata: reader.result as ArrayBuffer,
+          metadata: result,
           metadataFileName: file.name,
         }));
       };

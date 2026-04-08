@@ -36,7 +36,7 @@ import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
 import type { ListNftsResponse, NonFungibleToken } from "@tari-project/ootle-ts-bindings";
 import { nftIdToString } from "@utils/helpers";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { IoApps, IoList } from "react-icons/io5";
 import ClaimNftsButton from "./components/ClaimNftsButton";
 import { NftCard, NftRow } from "./components/NftParts";
@@ -98,6 +98,22 @@ export default function NFTList(props: NftListProps) {
     },
     [lockedResourceAddress, selectedMap, nftKey],
   );
+
+  // Prune selections that are no longer in the displayed NFT list
+  useEffect(() => {
+    if (selectedMap.size === 0) return;
+    const currentKeys = new Set(displayedNfts.map((nft) => nftKey(nft)));
+    const staleKeys = Array.from(selectedMap.keys()).filter((key) => !currentKeys.has(key));
+    if (staleKeys.length > 0) {
+      setSelectedMap((prev) => {
+        const next = new Map(prev);
+        for (const key of staleKeys) {
+          next.delete(key);
+        }
+        return next;
+      });
+    }
+  }, [displayedNfts, selectedMap, nftKey]);
 
   const selectedNfts = useMemo(() => Array.from(selectedMap.values()), [selectedMap]);
 

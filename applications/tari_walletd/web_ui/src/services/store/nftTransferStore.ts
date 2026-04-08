@@ -80,7 +80,11 @@ interface NftTransferState {
     preSelectedResourceAddress?: ResourceAddress,
     accountAddress?: string,
   ) => void;
-  resetState: (preSelectedNftId?: NonFungibleId, preSelectedResourceAddress?: ResourceAddress, accountAddress?: string) => void;
+  resetState: (
+    preSelectedNftId?: NonFungibleId,
+    preSelectedResourceAddress?: ResourceAddress,
+    accountAddress?: string,
+  ) => void;
   isFormValid: () => boolean;
 }
 
@@ -98,7 +102,7 @@ const createInitialFormState = (
 
 const createInitialValidity = (preSelectedNftId?: NonFungibleId): Validity => ({
   payerAccount: true,
-  nfts: preSelectedNftId ? true : false,
+  nfts: !!preSelectedNftId,
   targetAccountPublicKey: false,
 });
 

@@ -292,9 +292,10 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
 
   const handleClose = () => {
     resetState(preSelectedNftId, preSelectedResourceAddress);
-    props.handleClose?.();
     if (transferResult?.success) {
       props.onSendComplete?.();
+    } else {
+      props.handleClose?.();
     }
   };
 

@@ -1318,7 +1318,7 @@ pub struct UtxoInfo {
 pub struct StealthUtxosDecryptValueRequest {
     pub resource_address: ResourceAddress,
     pub ids: Vec<UtxoId>,
-    pub view_key_id: u64,
+    pub view_key_id: KeyId,
     pub minimum_expected_value: Option<u64>,
     pub maximum_expected_value: u64,
 }

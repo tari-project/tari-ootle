@@ -24,7 +24,7 @@ use tari_ootle_wallet_sdk::{
         stealth_transfer::{TransferFeeParams, TransferOutput},
     },
     crypto::{memo::Memo, pay_to::PayTo},
-    models::{AccountWithAddress, KeyBranch},
+    models::{AccountWithAddress, KeyBranch, KeyId},
 };
 use tari_ootle_walletd_client::{
     WalletDaemonClient,
@@ -627,7 +627,10 @@ impl TrafficSim {
                 .stealth_utxos_decrypt_value(StealthUtxosDecryptValueRequest {
                     resource_address,
                     ids: vec![specific_id],
-                    view_key_id: 0,
+                    view_key_id: KeyId::Derived {
+                        key_branch: KeyBranch::ElgamalEncryptionViewKey,
+                        index: 0,
+                    },
                     minimum_expected_value: Some(min_value),
                     maximum_expected_value: max_value,
                 })
@@ -680,7 +683,10 @@ impl TrafficSim {
                 .stealth_utxos_decrypt_value(StealthUtxosDecryptValueRequest {
                     resource_address,
                     ids: ids.to_vec(),
-                    view_key_id: 0,
+                    view_key_id: KeyId::Derived {
+                        key_branch: KeyBranch::ElgamalEncryptionViewKey,
+                        index: 0,
+                    },
                     minimum_expected_value: Some(min_value),
                     maximum_expected_value: max_value,
                 })

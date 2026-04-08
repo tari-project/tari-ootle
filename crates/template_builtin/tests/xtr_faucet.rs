@@ -38,16 +38,14 @@ fn different_signers_can_each_claim_once() {
 fn second_claim_by_same_signer_is_rejected() {
     let mut test = TemplateTest::new_builtin_only();
     // First claim: succeeds and commits state (including the claim-receipt burned NFT)
-    let (account, owner_proof, secret_key) = test.create_funded_account();
+    let (account, _owner_proof, secret_key) = test.create_funded_account();
 
     // Second claim: same signing key → same claim-receipt NFT ID → DuplicateNonFungibleId
     let reject_reason = test.execute_expect_failure(
         Transaction::builder_localnet()
-            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![])
-            .put_last_instruction_output_on_workspace("bucket")
-            .call_method(account, "deposit", args![Workspace("bucket")])
+            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![account])
             .build_and_seal(&secret_key),
-        vec![owner_proof],
+        vec![],
     );
     assert_reject_reason(&reject_reason, "Duplicate NFT token id");
 }

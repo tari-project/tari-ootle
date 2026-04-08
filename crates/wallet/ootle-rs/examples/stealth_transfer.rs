@@ -35,7 +35,7 @@ async fn main() {
     let indexer_api_url = default_indexer_url(NETWORK);
     // This is the address that we will transfer to (Feel free to change this another address!)
     let recipient = address!(
-        "otl_loc_1xfack4y62u3jr57q9j6kwuc5g78v9ckcasdzp6l9l9xknp2nrq0k9pvjkgutzsydtdw6ev64crqz9r8m2m7u3ms6z6dsu9p6shpkvvcnxtx79"
+        "otl_loc_1d3jdxcdxvxgqh6pxj4ux50uumwhzdaajzmpapya75yq6xztsqdu6efgxnlngf72rky6vwannpwp9ctj8hmwpus2sgq7000krlxz8csg9w6ntm"
     );
 
     let sender_secret = PrivateKeyProvider::random(NETWORK);
@@ -70,7 +70,7 @@ async fn main() {
     let tari_token = TARI_TOKEN; // resource_address!("resource_0123456789abcdef...");
 
     const INPUT_AMOUNT: u64 = 10 * TARI + 1000 - 500;
-    // This builder creates a stealth transfer statement (spend proof). This is added to the transaction later.
+    // // This builder creates a stealth transfer statement (spend proof). This is added to the transaction later.
     let (faucet_transfer, required_signers) = StealthTransfer::new(tari_token, &provider)
         // Tell the transfer to expect 10 TARI (+1000 to cover fees) as revealed funds from a bucket (the faucet looks at this value and automatically provides the bucket).
         .spend_revealed_input(10 * TARI + 1000)
@@ -91,7 +91,9 @@ async fn main() {
 
     // First let's transfer some faucet TARI to our account to have funds for fees and transfers.
     let unsigned_tx = IFaucet::new(&provider)
-        .take_faucet_funds_stealth(faucet_transfer, true)
+        .take_faucet_funds()
+        .into_stealth_transfer(faucet_transfer)
+        .and_pay_fee_from_revealed_output()
         .prepare()
         .await
         .expect("Failed to prepare faucet transaction");

@@ -4,7 +4,10 @@
 use tari_engine::runtime::{LockError, LockState};
 use tari_engine_types::lock::LockFlag;
 use tari_ootle_transaction::{Transaction, args};
-use tari_template_lib::types::{ComponentAddress, constants::XTR_FAUCET_COMPONENT_ADDRESS};
+use tari_template_lib::{
+    prelude::TARI_TOKEN,
+    types::{ComponentAddress, constants::TARI},
+};
 use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
@@ -13,14 +16,14 @@ const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 fn it_prevents_reentrant_withdraw() {
     let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/reentrancy"]);
     let template_addr = test.get_template_address("Reentrancy");
-    let (account, _, _) = test.create_empty_account();
+    let (account, _, account_secret) = test.create_funded_account();
 
     let result = test.execute_expect_success(
         Transaction::builder_localnet()
-            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![])
+            .call_method(account, "withdraw", args![TARI_TOKEN, 1000 * TARI])
             .put_last_instruction_output_on_workspace("bucket")
             .call_function(template_addr, "with_bucket", args![Workspace("bucket")])
-            .build_and_seal(test.secret_key()),
+            .build_and_seal(&account_secret),
         vec![],
     );
 
@@ -30,10 +33,8 @@ fn it_prevents_reentrant_withdraw() {
 
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
-            .call_method(reentrancy, "get_balance", args![])
             .call_method(reentrancy, "reentrant_withdraw", args![1000])
             .put_last_instruction_output_on_workspace("bucket")
-            .call_method(reentrancy, "get_balance", args![])
             .call_method(account, "deposit", args![Workspace("bucket")])
             .build_and_seal(test.secret_key()),
         vec![],

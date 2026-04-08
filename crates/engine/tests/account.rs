@@ -6,12 +6,7 @@ use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine::runtime::{ActionIdent, RuntimeError};
 use tari_ootle_transaction::{Transaction, args};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::types::{
-    Amount,
-    access_rules::ComponentAccessRules,
-    constants::{TARI_TOKEN, XTR_FAUCET_COMPONENT_ADDRESS},
-    rule,
-};
+use tari_template_lib::types::{Amount, access_rules::ComponentAccessRules, constants::TARI_TOKEN, rule};
 use tari_template_test_tooling::{
     TemplateTest,
     support::assert_error::{assert_access_denied_for_action, assert_reject_reason},
@@ -25,18 +20,8 @@ fn basic_faucet_transfer() {
     let mut template_test = TemplateTest::new(CRATE_PATH, Vec::<&str>::new());
 
     // Create sender and receiver accounts
-    let (sender_address, sender_proof, _) = template_test.create_empty_account();
+    let (sender_address, sender_proof, _) = template_test.create_funded_account();
     let (receiver_address, _, _) = template_test.create_empty_account();
-
-    let _result = template_test
-        .build_and_execute(
-            Transaction::builder_localnet()
-                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![])
-                .put_last_instruction_output_on_workspace("free_coins")
-                .call_method(sender_address, "deposit", args![Workspace("free_coins")]),
-            vec![template_test.owner_proof()],
-        )
-        .unwrap_success();
 
     let result = template_test
         .build_and_execute(
@@ -67,23 +52,6 @@ fn withdraw_from_account_prevented() {
 
     // Create sender and receiver accounts
     let (source_account, _, _) = test.create_funded_account();
-
-    let _result = test
-        .execute_and_commit_manifest(
-            r#"
-                let source_account = var!["source_account"];
-                let faucet_component = var!["faucet_component"];
-                
-                let free_coins = faucet_component.take();
-                source_account.deposit(free_coins);
-            "#,
-            [
-                ("source_account", source_account.into()),
-                ("faucet_component", XTR_FAUCET_COMPONENT_ADDRESS.into()),
-            ],
-            vec![],
-        )
-        .unwrap();
 
     let (dest_address, non_owning_token, non_owning_key) = test.create_empty_account();
 
@@ -189,10 +157,10 @@ fn create_account_is_idempotent_with_deposit() {
 
     let result = test.execute_expect_success(
         Transaction::builder_localnet()
-            .call_method(xtr_faucet_component(), "take", args![])
-            .put_last_instruction_output_on_workspace("bucket")
             // Create component with the same ID
-            .create_account_with_bucket(source_account_pk.to_byte_type(), "bucket")
+            .create_account(source_account_pk.to_byte_type())
+            .put_last_instruction_output_on_workspace("account")
+            .call_method(xtr_faucet_component(), "take", args![Workspace("account")])
             // Signed by source account so that it can pay the fees for the new account creation
             .build_and_seal(&source_account_sk),
         vec![source_account_proof],
@@ -261,16 +229,15 @@ fn custom_access_rules() {
 
     test.execute_expect_success(
         Transaction::builder_localnet()
-            .call_method(xtr_faucet_component(), "take", args![])
-            .put_last_instruction_output_on_workspace("bucket")
             // Create component with the same ID
-            .create_account_custom(
+            .create_account_custom::<&str>(
                 public_key.to_byte_type(),
                 None,
                 Some(access_rules),
-                Some("bucket"),
+                None
             )
-            // Signed by source account so that it can pay the fees for the new account creation
+            .put_last_instruction_output_on_workspace("account")
+            .call_method(xtr_faucet_component(), "take", args![Workspace("account")])
             .build_and_seal(&secret_key),
         vec![owner_proof],
     );
@@ -298,20 +265,21 @@ fn custom_access_rules() {
 fn take_from_bucket() {
     let mut test = TemplateTest::new(CRATE_PATH, Vec::<&str>::new());
 
-    let (alice, _proof, _alice_sk) = test.create_empty_account();
+    let (alice, _proof, alice_sk) = test.create_funded_account();
     let (bob, _proof, _bob_sk) = test.create_empty_account();
 
     test.execute_expect_success(
         Transaction::builder_localnet()
-            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![])
-            .put_last_instruction_output_on_workspace("free_coins")
-            .take_from_bucket("free_coins", 100u64, "foo_bucket")
+            .call_method(alice, "withdraw_all", args![TARI_TOKEN])
+            .put_last_instruction_output_on_workspace("coins")
+            .take_from_bucket("coins", 100u64, "foo_bucket")
             // Take all remaining coins — tests that an empty bucket does not cause a dangling bucket error
-            .take_from_bucket("free_coins", 999_999_900u64, "bar_bucket")
+            .take_from_bucket("coins", 999_999_900u64, "bar_bucket")
             .call_method(alice, "deposit", args![Workspace("foo_bucket")])
             .call_method(bob, "deposit", args![Workspace("bar_bucket")])
-            .build_and_seal(test.secret_key()),
-        vec![test.owner_proof()],
+            .add_signer(&test.to_public_key_bytes(), &alice_sk)
+            .seal(test.secret_key()),
+        vec![],
     );
 
     let alice_acc = test.read_only_state_store().get_account(alice).unwrap();

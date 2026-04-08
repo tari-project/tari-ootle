@@ -18,7 +18,7 @@ use ootle_rs::{
     TransactionRequest,
     builtin_templates::{
         UnsignedTransactionBuilder,
-        component::{IComponent, OotleInvoke},
+        component::{IComponent, TransactionBuildable},
         faucet::IFaucet,
     },
     default_indexer_url,

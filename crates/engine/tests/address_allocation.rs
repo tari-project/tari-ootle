@@ -188,13 +188,11 @@ fn it_allows_calls_to_component_using_a_component_on_the_workspace() {
 
     test.execute_expect_success(
         Transaction::builder_localnet()
-            .call_method(xtr_faucet_component(), "take", args![])
-            .put_last_instruction_output_on_workspace("bucket")
             .create_account(test.to_public_key_bytes())
             // Put the created account address on the workspace, and
             .put_last_instruction_output_on_workspace("account")
-            // use it to call deposit
-            .call_method("account", "deposit", args![Workspace("bucket")])
+            // use it to call "take"
+            .call_method(xtr_faucet_component(), "take", args![Workspace("account")])
             .build_and_seal(test.secret_key()),
         vec![],
     );

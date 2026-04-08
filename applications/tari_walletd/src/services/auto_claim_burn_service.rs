@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf};
 
 use anyhow::Context;
 use log::*;
@@ -86,7 +86,7 @@ impl AutoClaimBurnService {
             self.burn_proof_dir.display()
         );
 
-        if let Err(e) = fs::create_dir_all(&self.burn_proof_dir) {
+        if let Err(e) = tokio::fs::create_dir_all(&self.burn_proof_dir).await {
             warn!(target: LOG_TARGET, "Failed to create burn proof directory: {}", e);
         }
 
@@ -104,7 +104,7 @@ impl AutoClaimBurnService {
         // Recover any files that were present before this service started (e.g. placed while the
         // daemon was offline). Using Epoch(0) makes them immediately eligible — the daemon restart
         // itself implies the required epoch boundary has been crossed.
-        self.scan_proof_dir();
+        self.scan_proof_dir().await;
 
         let mut epoch_check_interval = interval(EPOCH_CHECK_INTERVAL);
         epoch_check_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -130,8 +130,8 @@ impl AutoClaimBurnService {
 
     /// Scans `burn_proof_dir` for any `.json` files present at startup and queues them with
     /// `Some(Epoch(0))` so they are submitted on the very next epoch check.
-    fn scan_proof_dir(&mut self) {
-        let entries = match fs::read_dir(&self.burn_proof_dir) {
+    async fn scan_proof_dir(&mut self) {
+        let mut read_dir = match tokio::fs::read_dir(&self.burn_proof_dir).await {
             Ok(e) => e,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
             Err(e) => {
@@ -140,16 +140,27 @@ impl AutoClaimBurnService {
             },
         };
 
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() &&
-                path.extension().is_some_and(|ext| ext == "json") &&
-                let Some(file_name) = path.file_name().and_then(|n| n.to_str())
-            {
-                info!(target: LOG_TARGET, "Found existing unclaimed burn proof: {}", file_name);
-                // Epoch(0) makes startup files immediately eligible — the daemon restart itself
-                // implies the required epoch boundary has been crossed.
-                self.pending_claims.insert(file_name.to_string(), Some(Epoch(0)));
+        loop {
+            match read_dir.next_entry().await {
+                Ok(Some(entry)) => {
+                    let is_file = entry.file_type().await.map(|ft| ft.is_file()).unwrap_or(false);
+                    if !is_file {
+                        continue;
+                    }
+                    let path = entry.path();
+                    if path.extension().is_some_and(|ext| ext == "json") &&
+                        let Some(file_name) = path.file_name().and_then(|n| n.to_str())
+                    {
+                        info!(target: LOG_TARGET, "Found existing unclaimed burn proof: {}", file_name);
+                        // Epoch(0) makes startup files immediately eligible — the daemon restart itself
+                        // implies the required epoch boundary has been crossed.
+                        self.pending_claims.insert(file_name.to_string(), Some(Epoch(0)));
+                    }
+                },
+                Ok(None) => break,
+                Err(e) => {
+                    warn!(target: LOG_TARGET, "Failed to read directory entry: {}", e);
+                },
             }
         }
 
@@ -309,10 +320,11 @@ impl AutoClaimBurnService {
     async fn try_submit_claim(&self, file_name: &str) -> Result<tari_ootle_transaction::TransactionId, ClaimError> {
         // Read and parse the proof file.
         let path = self.burn_proof_dir.join(file_name);
-        let file = fs::File::open(&path)
-            .with_context(|| format!("Failed to open burn proof file: {}", path.display()))
+        let bytes = tokio::fs::read(&path)
+            .await
+            .with_context(|| format!("Failed to read burn proof file: {}", path.display()))
             .map_err(ClaimError::Permanent)?;
-        let complete_proof: CompleteClaimBurnProof = serde_json::from_reader(&file)
+        let complete_proof: CompleteClaimBurnProof = serde_json::from_slice(&bytes)
             .with_context(|| format!("Failed to parse burn proof file: {}", path.display()))
             .map_err(ClaimError::Permanent)?;
 

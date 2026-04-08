@@ -528,6 +528,46 @@ function EditableKeyCell({ varKey, onRename }: { varKey: string; onRename: (oldK
   );
 }
 
+function EditableValueCell({ varKey, value, onUpdate }: { varKey: string; value: string; onUpdate: (key: string, value: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+
+  const commit = () => {
+    setEditing(false);
+    if (draft !== value) {
+      onUpdate(varKey, draft);
+    }
+  };
+
+  if (editing) {
+    return (
+      <TextField
+        size="small"
+        variant="standard"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") {
+            setDraft(value);
+            setEditing(false);
+          }
+        }}
+        autoFocus
+        fullWidth
+        sx={{ minWidth: 120 }}
+      />
+    );
+  }
+
+  return (
+    <Box onClick={() => { setDraft(value); setEditing(true); }} sx={{ cursor: "pointer", "&:hover": { textDecoration: "underline" } }}>
+      {value}
+    </Box>
+  );
+}
+
 function VariableEditor({
   variables,
   onAdd,
@@ -581,7 +621,9 @@ function VariableEditor({
                 <DataTableCell>
                   <EditableKeyCell varKey={k} onRename={onRename} />
                 </DataTableCell>
-                <DataTableCell>{v}</DataTableCell>
+                <DataTableCell>
+                  <EditableValueCell varKey={k} value={v} onUpdate={onAdd} />
+                </DataTableCell>
                 <DataTableCell>
                   <IconButton size="small" onClick={() => onRemove(k)} title="Remove variable">
                     &times;

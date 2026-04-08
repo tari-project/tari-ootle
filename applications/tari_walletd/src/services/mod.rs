@@ -6,6 +6,7 @@ pub use webauthn_session_store::*;
 
 pub mod wasm_optimizer;
 
+mod auto_claim_burn_service;
 mod claim_burn_monitor;
 mod webauthn;
 pub use webauthn::*;
@@ -31,7 +32,11 @@ use tokio::task::JoinHandle;
 
 use crate::{
     OotleWalletDaemonSpec,
-    services::{claim_burn_monitor::ClaimBurnMonitor, template_monitor::TemplateMonitor},
+    services::{
+        auto_claim_burn_service::AutoClaimBurnService,
+        claim_burn_monitor::ClaimBurnMonitor,
+        template_monitor::TemplateMonitor,
+    },
 };
 
 pub fn spawn_services(
@@ -39,6 +44,7 @@ pub fn spawn_services(
     notify: Notify<WalletEvent>,
     wallet_sdk: WalletSdk<OotleWalletDaemonSpec>,
     burn_proof_dir: PathBuf,
+    auto_claim_burns: bool,
 ) -> Services {
     let (transaction_service, transaction_service_handle) =
         TransactionService::new(notify.clone(), wallet_sdk.clone(), shutdown_signal.clone());
@@ -47,7 +53,7 @@ pub fn spawn_services(
     let template_monitor = TemplateMonitor::new(notify.clone(), wallet_sdk.clone(), shutdown_signal.clone());
     let template_monitor_join_handle = tokio::spawn(template_monitor.run());
 
-    let claim_burn_monitor = ClaimBurnMonitor::new(notify.clone(), burn_proof_dir, shutdown_signal.clone());
+    let claim_burn_monitor = ClaimBurnMonitor::new(notify.clone(), burn_proof_dir.clone(), shutdown_signal.clone());
     let claim_burn_monitor_join_handle = tokio::spawn(claim_burn_monitor.run());
 
     let utxo_scanner = StealthUtxoScannerWorker::new(wallet_sdk.clone(), notify.clone());
@@ -60,21 +66,32 @@ pub fn spawn_services(
     };
 
     let (account_monitor, account_monitor_handle) =
-        AccountMonitor::new(notify, wallet_sdk, utxo_scanner_handle, shutdown_signal);
+        AccountMonitor::new(notify, wallet_sdk.clone(), utxo_scanner_handle, shutdown_signal.clone());
     let account_monitor_join_handle = tokio::spawn(account_monitor.run());
+
+    let mut join_handles = vec![
+        transaction_service_join_handle,
+        account_monitor_join_handle,
+        template_monitor_join_handle,
+        claim_burn_monitor_join_handle,
+        utxo_scanner_join_handle,
+        utxo_recovery_join_handle,
+    ];
+
+    if auto_claim_burns {
+        let auto_claim_service = AutoClaimBurnService::new(
+            wallet_sdk,
+            transaction_service_handle.clone(),
+            burn_proof_dir,
+            shutdown_signal,
+        );
+        join_handles.push(tokio::spawn(auto_claim_service.run()));
+    }
 
     Services {
         account_monitor_handle,
         transaction_service_handle,
-        services_fut: try_select_any([
-            transaction_service_join_handle,
-            account_monitor_join_handle,
-            template_monitor_join_handle,
-            claim_burn_monitor_join_handle,
-            utxo_scanner_join_handle,
-            utxo_recovery_join_handle,
-        ])
-        .boxed(),
+        services_fut: try_select_any(join_handles).boxed(),
     }
 }
 

@@ -1,7 +1,7 @@
 //  Copyright 2022 The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
-use std::time::Duration;
+use std::{fs, time::Duration};
 
 use cucumber::{gherkin::Step, then, when};
 use integration_tests::{
@@ -531,4 +531,36 @@ async fn when_i_set_the_default_account(world: &mut TariWorld, step: &Step, wall
         .accounts_set_default(ComponentAddressOrName::Name(account_name))
         .await
         .unwrap();
+}
+
+/// Writes a confirmed burn proof as a JSON file into the wallet daemon's `burn_proof_dir`.
+/// The auto-claim service watches that directory and will submit the claim transaction
+/// automatically, so the test does not need to call the RPC claim endpoint manually.
+#[when(expr = "I drop burn proof {word} as a file for wallet daemon {word}")]
+async fn when_i_drop_burn_proof_as_file(
+    world: &mut TariWorld,
+    step: &Step,
+    proof_name: String,
+    wallet_daemon_name: String,
+) {
+    cucumber_log!("==== Step: {}", step.value);
+    let complete_proof = world
+        .claim_proofs
+        .get(&proof_name)
+        .unwrap_or_else(|| panic!("Burn proof {} not found", proof_name))
+        .complete_proof()
+        .unwrap_or_else(|| panic!("Burn proof {} is not confirmed yet", proof_name))
+        .clone();
+
+    let walletd = world.get_wallet_daemon(&wallet_daemon_name);
+    let dir = walletd.burn_proof_dir.clone();
+    fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("Failed to create burn_proof_dir {}: {}", dir.display(), e));
+
+    let file_path = dir.join(format!("{}.json", proof_name));
+    let file = fs::File::create(&file_path)
+        .unwrap_or_else(|e| panic!("Failed to create proof file {}: {}", file_path.display(), e));
+    serde_json::to_writer_pretty(file, &complete_proof)
+        .unwrap_or_else(|e| panic!("Failed to write proof file {}: {}", file_path.display(), e));
+
+    cucumber_log!("Dropped burn proof {} as file {}", proof_name, file_path.display());
 }

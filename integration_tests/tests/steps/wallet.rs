@@ -10,8 +10,17 @@ use minotari_app_grpc::{
     tari_rpc,
     tari_rpc::{GetBalanceRequest, SubmitValidatorEvictionProofRequest, ValidateRequest},
 };
+use tari_common_types::{
+    burn_proof::EncodedMerkleProof as SidechainEncodedMerkleProof,
+    types::{CompressedCommitment, CompressedPublicKey},
+};
+use tari_crypto::{
+    ristretto::{CompressedRistrettoSchnorr, RistrettoSecretKey, pedersen::CompressedPedersenCommitment},
+    tari_utilities::ByteArray,
+};
 use tari_engine_types::confidential::{AbridgedTransactionKernel, EncodedMerkleProof, MinotariBurnClaimProof};
 use tari_ootle_walletd_client::types::{ClaimBurnProof, ClaimBurnProofContents};
+use tari_sidechain::{AbridgedTransactionKernel as SidechainKernel, BurnClaimProof, CompleteClaimBurnProof};
 use tari_template_lib_types::{
     EncryptedData,
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
@@ -201,6 +210,49 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
         .merkle_proof
         .ok_or_else(|| anyhow!("No merkle proof in claim proof"))?;
 
+    // Build the on-disk file format (CompleteClaimBurnProof) for auto-claim integration tests.
+    // This is done before building ClaimBurnProofContents to avoid moving the local variables.
+    let complete_proof = CompleteClaimBurnProof {
+        claim_proof: BurnClaimProof {
+            burn_public_key: CompressedPublicKey::from_canonical_bytes(reciprocal_claim_public_key.as_bytes())
+                .map_err(|e| anyhow!("burn_public_key parse error for complete proof: {e}"))?,
+            commitment: CompressedPedersenCommitment::from_canonical_bytes(commitment.as_bytes())
+                .map_err(|e| anyhow!("commitment parse error for complete proof: {e}"))?,
+            ownership_proof: CompressedRistrettoSchnorr::new(
+                CompressedPublicKey::from_canonical_bytes(ownership_proof.public_nonce().as_bytes())
+                    .map_err(|e| anyhow!("ownership nonce parse error for complete proof: {e}"))?,
+                RistrettoSecretKey::from_canonical_bytes(ownership_proof.signature().as_bytes())
+                    .map_err(|e| anyhow!("ownership sig parse error for complete proof: {e}"))?,
+            ),
+            encoded_merkle_proof: SidechainEncodedMerkleProof {
+                block_hash: merkle_proof
+                    .block_hash
+                    .as_slice()
+                    .try_into()
+                    .map_err(|e| anyhow!("block_hash parse error for complete proof: {e}"))?,
+                encoded_merkle_proof: merkle_proof.encoded_proof.clone(),
+                leaf_index: merkle_proof.leaf_index,
+            },
+            kernel: SidechainKernel {
+                version: kernel.version,
+                fee: kernel.fee,
+                lock_height: kernel.lock_height,
+                excess: CompressedCommitment::from_canonical_bytes(kernel.excess.as_bytes())
+                    .map_err(|e| anyhow!("kernel excess parse error for complete proof: {e}"))?,
+                excess_sig: CompressedRistrettoSchnorr::new(
+                    CompressedPublicKey::from_canonical_bytes(kernel.excess_sig.public_nonce().as_bytes())
+                        .map_err(|e| anyhow!("kernel excess_sig nonce parse error for complete proof: {e}"))?,
+                    RistrettoSecretKey::from_canonical_bytes(kernel.excess_sig.signature().as_bytes())
+                        .map_err(|e| anyhow!("kernel excess_sig parse error for complete proof: {e}"))?,
+                ),
+            },
+            value: proof_resp.value,
+            sender_offset_public_key: CompressedPublicKey::from_canonical_bytes(sender_offset_public_key.as_bytes())
+                .map_err(|e| anyhow!("sender_offset_public_key parse error for complete proof: {e}"))?,
+        },
+        encrypted_data: proof_resp.encrypted_data.clone(),
+    };
+
     let proof = ClaimBurnProofContents {
         claim_proof: MinotariBurnClaimProof {
             burn_public_key: reciprocal_claim_public_key,
@@ -228,6 +280,7 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
 
     world.claim_proofs.insert(proof_name, CucumberClaimProof::Confirmed {
         proof: ClaimBurnProof::Contents(Box::new(proof)),
+        complete_proof: Box::new(complete_proof),
     });
 
     Ok(())

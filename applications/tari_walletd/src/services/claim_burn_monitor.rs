@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf};
 
 use log::*;
 use tari_ootle_transaction::TransactionId;
@@ -49,7 +49,7 @@ impl ClaimBurnMonitor {
 
                 result = self.notify_subscription.recv() => {
                     match result {
-                        Ok(event) => self.on_event(event),
+                        Ok(event) => self.on_event(event).await,
                         Err(broadcast::error::RecvError::Lagged(n)) => {
                             warn!(
                                 target: LOG_TARGET,
@@ -68,7 +68,7 @@ impl ClaimBurnMonitor {
         }
     }
 
-    fn on_event(&mut self, event: WalletEvent) {
+    async fn on_event(&mut self, event: WalletEvent) {
         match event {
             WalletEvent::TransactionSubmitted(event) => {
                 if let Some(TransactionContext::ClaimBurn { file_name }) = event.context {
@@ -90,7 +90,7 @@ impl ClaimBurnMonitor {
                             event.transaction_id,
                             file_name,
                         );
-                        self.mark_as_claimed(&file_name);
+                        self.mark_as_claimed(&file_name).await;
                     } else {
                         warn!(
                             target: LOG_TARGET,
@@ -116,9 +116,9 @@ impl ClaimBurnMonitor {
         }
     }
 
-    fn mark_as_claimed(&self, file_name: &str) {
+    async fn mark_as_claimed(&self, file_name: &str) {
         let claimed_dir = self.burn_proof_dir.join("claimed");
-        if let Err(e) = fs::create_dir_all(&claimed_dir) {
+        if let Err(e) = tokio::fs::create_dir_all(&claimed_dir).await {
             warn!(
                 target: LOG_TARGET,
                 "Failed to create claimed directory {}: {}",
@@ -130,7 +130,7 @@ impl ClaimBurnMonitor {
 
         let src = self.burn_proof_dir.join(file_name);
         let dst = claimed_dir.join(file_name);
-        if let Err(e) = fs::rename(&src, &dst) {
+        if let Err(e) = tokio::fs::rename(&src, &dst).await {
             warn!(
                 target: LOG_TARGET,
                 "Failed to move claimed burn proof {} -> {}: {}",

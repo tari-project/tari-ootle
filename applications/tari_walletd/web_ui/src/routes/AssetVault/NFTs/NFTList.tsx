@@ -23,7 +23,6 @@
 import type { ApiError } from "@api/helpers/types";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import Button from "@mui/material/Button";
-import Checkbox from "@mui/material/Checkbox";
 import Grid from "@mui/material/Grid";
 import IconButton from "@mui/material/IconButton";
 import Stack from "@mui/material/Stack";
@@ -35,8 +34,9 @@ import TableHead from "@mui/material/TableHead";
 import TablePagination from "@mui/material/TablePagination";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
-import type { ListNftsResponse, NonFungibleId, NonFungibleToken } from "@tari-project/ootle-ts-bindings";
-import React, { useCallback, useState } from "react";
+import type { ListNftsResponse, NonFungibleToken } from "@tari-project/ootle-ts-bindings";
+import { nftIdToString } from "@utils/helpers";
+import React, { useCallback, useMemo, useState } from "react";
 import { IoApps, IoList } from "react-icons/io5";
 import ClaimNftsButton from "./components/ClaimNftsButton";
 import { NftCard, NftRow } from "./components/NftParts";
@@ -53,10 +53,6 @@ export interface NftListProps {
   onPageChange: (event: unknown, newPage: number) => void;
   onRowsPerPageChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   onManualRefresh?: () => void;
-}
-
-function nftIdKey(nftId: NonFungibleId): string {
-  return JSON.stringify(nftId);
 }
 
 export default function NFTList(props: NftListProps) {
@@ -81,7 +77,7 @@ export default function NFTList(props: NftListProps) {
 
   const toggleSelect = useCallback((nft: NonFungibleToken) => {
     setSelectedMap((prev) => {
-      const key = nftIdKey(nft.nft_id);
+      const key = nftIdToString(nft.nft_id);
       const next = new Map(prev);
       next.has(key) ? next.delete(key) : next.set(key, nft);
       return next;
@@ -90,12 +86,16 @@ export default function NFTList(props: NftListProps) {
 
   const isSelectDisabled = useCallback(
     (nft: NonFungibleToken) => {
-      return lockedResourceAddress !== null && !selectedMap.has(nftIdKey(nft.nft_id)) && nft.resource_address !== lockedResourceAddress;
+      return (
+        lockedResourceAddress !== null &&
+        !selectedMap.has(nftIdToString(nft.nft_id)) &&
+        nft.resource_address !== lockedResourceAddress
+      );
     },
     [lockedResourceAddress, selectedMap],
   );
 
-  const selectedNfts = Array.from(selectedMap.values());
+  const selectedNfts = useMemo(() => Array.from(selectedMap.values()), [selectedMap]);
 
   const EmptyPlaceHolder = () => (
     <Stack alignItems="center" justifyContent="center" sx={{ py: 8 }}>
@@ -127,11 +127,11 @@ export default function NFTList(props: NftListProps) {
   const DisplayNFTs = () => {
     return viewMode === "grid" ? (
       <Grid container spacing={3}>
-        {displayedNfts.map((nft: NonFungibleToken) => (
+        {displayedNfts.map((nft: NonFungibleToken, i) => (
           <NftCard
-            key={nftIdKey(nft.nft_id)}
+            key={i}
             nft={nft}
-            selected={selectedMap.has(nftIdKey(nft.nft_id))}
+            selected={selectedMap.has(nftIdToString(nft.nft_id))}
             selectDisabled={isSelectDisabled(nft)}
             onToggleSelect={() => toggleSelect(nft)}
           />
@@ -150,11 +150,11 @@ export default function NFTList(props: NftListProps) {
             </TableRow>
           </TableHead>
           <TableBody>
-            {displayedNfts.map((nft: NonFungibleToken) => (
+            {displayedNfts.map((nft: NonFungibleToken, i) => (
               <NftRow
-                key={nftIdKey(nft.nft_id)}
+                key={i}
                 nft={nft}
-                selected={selectedMap.has(nftIdKey(nft.nft_id))}
+                selected={selectedMap.has(nftIdToString(nft.nft_id))}
                 selectDisabled={isSelectDisabled(nft)}
                 onToggleSelect={() => toggleSelect(nft)}
               />

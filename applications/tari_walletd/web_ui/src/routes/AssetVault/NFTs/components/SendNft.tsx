@@ -289,11 +289,10 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   };
 
   const handleClose = () => {
-    const wasSuccessful = transferResult?.success;
     resetState(preSelectedNftId, preSelectedResourceAddress);
     setCurrentStep("form");
     props.handleClose?.();
-    if (wasSuccessful) {
+    if (transferResult?.success) {
       props.onSendComplete?.();
     }
   };

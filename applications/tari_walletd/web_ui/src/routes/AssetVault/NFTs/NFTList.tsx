@@ -100,23 +100,6 @@ export default function NFTList(props: NftListProps) {
     [lockedResourceAddress, selectedMap],
   );
 
-  const selectablePageNfts = displayedNfts.filter((nft) => !isSelectDisabled(nft));
-  const isAllPageSelected =
-    selectablePageNfts.length > 0 && selectablePageNfts.every((nft) => selectedMap.has(nftIdKey(nft.nft_id)));
-
-  const toggleSelectAll = useCallback(() => {
-    setSelectedMap((prev) => {
-      const next = new Map(prev);
-      const selectable = displayedNfts.filter(
-        (nft) => lockedResourceAddress === null || nft.resource_address === lockedResourceAddress,
-      );
-      const allSelected = selectable.every((nft) => next.has(nftIdKey(nft.nft_id)));
-      selectable.forEach((nft) => (allSelected ? next.delete(nftIdKey(nft.nft_id)) : next.set(nftIdKey(nft.nft_id), nft)));
-      syncLockedAddress(next, selectable[0]?.resource_address ?? null);
-      return next;
-    });
-  }, [displayedNfts, lockedResourceAddress, syncLockedAddress]);
-
   const selectedNfts = Array.from(selectedMap.values());
 
   const EmptyPlaceHolder = () => (
@@ -164,9 +147,7 @@ export default function NFTList(props: NftListProps) {
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell padding="checkbox">
-                <Checkbox checked={isAllPageSelected} onChange={toggleSelectAll} />
-              </TableCell>
+              <TableCell padding="checkbox" aria-hidden />
               <TableCell>NFT</TableCell>
               <TableCell>Original Owner</TableCell>
               <TableCell>Status</TableCell>
@@ -221,7 +202,7 @@ export default function NFTList(props: NftListProps) {
           </Stack>
 
           <Stack direction="row" spacing={2} alignItems="center">
-            {selectedNfts.length && (
+            {selectedNfts.length > 0 && (
               <Button variant="contained" onClick={() => setSendDialogOpen(true)}>
                 Send Selected ({selectedNfts.length})
               </Button>

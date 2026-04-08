@@ -323,10 +323,10 @@ impl AutoClaimBurnService {
         let bytes = tokio::fs::read(&path)
             .await
             .with_context(|| format!("Failed to read burn proof file: {}", path.display()))
-            .map_err(ClaimError::Permanent)?;
+            .map_err(ClaimError::Transient)?;
         let complete_proof: CompleteClaimBurnProof = serde_json::from_slice(&bytes)
             .with_context(|| format!("Failed to parse burn proof file: {}", path.display()))
-            .map_err(ClaimError::Permanent)?;
+            .map_err(ClaimError::Transient)?;
 
         let proof_contents = complete_burn_proof_to_contents(complete_proof).map_err(ClaimError::Permanent)?;
 

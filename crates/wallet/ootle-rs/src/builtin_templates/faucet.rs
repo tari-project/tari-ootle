@@ -97,6 +97,7 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
         if !amount.is_positive() {
             panic!("Transfer amount must be positive");
         }
+        let bucket_name = self.next_workspace_name();
 
         let Some(account_name) = self.account_workspace_name.as_ref() else {
             // TODO: make this panic impossible
@@ -113,7 +114,6 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
                 required: true,
             });
         }
-        let bucket_name = self.next_workspace_name();
 
         self.builder = self.builder.with_fee_instructions_builder(|builder| {
             builder
@@ -124,7 +124,7 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
         self
     }
 
-    pub fn and_pay_fee_from_revealed_output<A: Into<Amount>>(mut self) -> Self {
+    pub fn and_pay_fee_from_revealed_output(mut self) -> Self {
         let bucket_name = self.next_workspace_name();
         self.builder = self.builder.with_fee_instructions_builder(|builder| {
             builder
@@ -155,7 +155,7 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
                 // Create the recipient account if it doesn't exist
                 .create_account(recipient_account_pk)
                 .put_last_instruction_output_on_workspace(&account_name)
-                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Workspace(account_name)])
+                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Workspace(&account_name)])
                 .add_input(XTR_FAUCET_VAULT_ADDRESS)
                 .add_input(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS)
         });

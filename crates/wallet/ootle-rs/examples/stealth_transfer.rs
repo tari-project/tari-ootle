@@ -2,7 +2,6 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use ootle_rs::{
-    Network,
     ToAccountAddress,
     TransactionRequest,
     address,
@@ -30,15 +29,12 @@ async fn main() {
     //     .filter_level(tracing::log::LevelFilter::Debug)
     //     .init();
 
-    const NETWORK: Network = Network::LocalNet;
-
-    let indexer_api_url = default_indexer_url(NETWORK);
     // This is the address that we will transfer to (Feel free to change this another address!)
-    let recipient = address!(
-        "otl_loc_1d3jdxcdxvxgqh6pxj4ux50uumwhzdaajzmpapya75yq6xztsqdu6efgxnlngf72rky6vwannpwp9ctj8hmwpus2sgq7000krlxz8csg9w6ntm"
-    );
+    let recipient = address!( "otl_loc_1c370ayp9849gzmj9gwelyyd086ntrt84w5nkclu32tzyr2pvcfpre43z8z2xvupm6wltw9k5e8tzay3qqf9nfj9v5xuxwcpcxmg22vqlvz86l" );
 
-    let sender_secret = PrivateKeyProvider::random(NETWORK);
+    let indexer_api_url = default_indexer_url(recipient.network());
+
+    let sender_secret = PrivateKeyProvider::random(recipient.network());
     let sender_address = sender_secret.address().clone();
     println!("Sender address: {sender_address}");
     // Don't print secrets in production code!

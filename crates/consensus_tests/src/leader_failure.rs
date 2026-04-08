@@ -299,6 +299,7 @@ async fn multi_shard_node_goes_down() {
         .await;
 
     let failure_node = TestAddress::new("4");
+    let failure_group_nodes: Vec<TestAddress> = vec!["1", "2", "3", "5"].into_iter().map(TestAddress::new).collect();
 
     let mut tx_ids = Vec::with_capacity(10);
     for _ in 0..10 {
@@ -313,10 +314,19 @@ async fn multi_shard_node_goes_down() {
 
     test.start_epoch(Epoch(1)).await;
 
+    // Track committed height only for the shard group with the offline node, since the other shard group races ahead
+    // with empty blocks and would trigger the height limit prematurely.
+    let mut failure_group_height = NodeHeight(0);
+    let mut sent_extra_tx = false;
     loop {
-        let (_, _, _, committed_height) = test.on_block_committed().await;
+        let (address, _, _, committed_height) = test.on_block_committed().await;
 
-        if committed_height == NodeHeight(1) {
+        if failure_group_nodes.contains(&address) {
+            failure_group_height = committed_height;
+        }
+
+        if committed_height == NodeHeight(1) && !sent_extra_tx {
+            sent_extra_tx = true;
             // This allows a few more leader failures to occur
             test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
             test.wait_for_pool_count(TestVnDestination::All, 1).await;
@@ -330,8 +340,11 @@ async fn multi_shard_node_goes_down() {
             break;
         }
 
-        if committed_height > NodeHeight(50) {
-            panic!("Not all transaction committed after {} blocks", committed_height);
+        if failure_group_height > NodeHeight(50) {
+            panic!(
+                "Not all transaction committed after {} blocks in failure shard group",
+                failure_group_height
+            );
         }
     }
 

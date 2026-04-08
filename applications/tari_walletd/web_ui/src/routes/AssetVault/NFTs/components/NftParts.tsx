@@ -50,20 +50,22 @@ const ERR_IMG =
 interface NftItemProps {
   nft: NonFungibleToken;
   selected?: boolean;
+  selectDisabled?: boolean;
   onToggleSelect?: () => void;
 }
 
-function NftCard({ nft, selected, onToggleSelect }: NftItemProps) {
+function NftCard({ nft, selected, selectDisabled, onToggleSelect }: NftItemProps) {
   const mutableData = convertCborValue(nft.mutable_data);
   const data = convertCborValue(nft.data) as Record<string, any> | undefined;
   const imageUrl = mutableData?.image_url;
 
   return (
     <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
-      <Card sx={{ position: "relative" }}>
+      <Card sx={{ position: "relative", opacity: selectDisabled ? 0.5 : 1 }}>
         {onToggleSelect && (
           <Checkbox
             checked={!!selected}
+            disabled={selectDisabled}
             onChange={onToggleSelect}
             sx={{
               position: "absolute",
@@ -130,7 +132,7 @@ function NftData({ data }: { data: Record<string, any> }) {
   );
 }
 
-function NftRow({ nft, selected, onToggleSelect }: NftItemProps) {
+function NftRow({ nft, selected, selectDisabled, onToggleSelect }: NftItemProps) {
   const mutableData = convertCborValue(nft.mutable_data);
   const data = convertCborValue(nft.data);
   const imageUrl = mutableData?.image_url;
@@ -151,7 +153,7 @@ function NftRow({ nft, selected, onToggleSelect }: NftItemProps) {
     <TableRow>
       {onToggleSelect && (
         <TableCell padding="checkbox">
-          <Checkbox checked={!!selected} onChange={onToggleSelect} />
+          <Checkbox checked={!!selected} disabled={selectDisabled} onChange={onToggleSelect} />
         </TableCell>
       )}
       <DataTableCell>

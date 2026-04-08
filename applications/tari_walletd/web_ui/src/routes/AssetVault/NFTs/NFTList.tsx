@@ -75,35 +75,47 @@ export default function NFTList(props: NftListProps) {
 
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [selectedMap, setSelectedMap] = useState<Map<string, NonFungibleToken>>(new Map());
+  const [lockedResourceAddress, setLockedResourceAddress] = useState<string | null>(null);
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const displayedNfts = nftsListData?.nfts || [];
+
+  const syncLockedAddress = useCallback((map: Map<string, NonFungibleToken>, fallback: string | null = null) => {
+    setLockedResourceAddress(map.size > 0 ? (lockedResourceAddress ?? fallback) : null);
+  }, [lockedResourceAddress]);
 
   const toggleSelect = useCallback((nft: NonFungibleToken) => {
     setSelectedMap((prev) => {
       const key = nftIdKey(nft.nft_id);
       const next = new Map(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.set(key, nft);
-      }
+      next.has(key) ? next.delete(key) : next.set(key, nft);
+      syncLockedAddress(next, nft.resource_address);
       return next;
     });
-  }, []);
+  }, [syncLockedAddress]);
 
-  const isAllPageSelected = displayedNfts.length > 0 && displayedNfts.every((nft) => selectedMap.has(nftIdKey(nft.nft_id)));
+  const isSelectDisabled = useCallback(
+    (nft: NonFungibleToken) => {
+      return lockedResourceAddress !== null && !selectedMap.has(nftIdKey(nft.nft_id)) && nft.resource_address !== lockedResourceAddress;
+    },
+    [lockedResourceAddress, selectedMap],
+  );
+
+  const selectablePageNfts = displayedNfts.filter((nft) => !isSelectDisabled(nft));
+  const isAllPageSelected =
+    selectablePageNfts.length > 0 && selectablePageNfts.every((nft) => selectedMap.has(nftIdKey(nft.nft_id)));
 
   const toggleSelectAll = useCallback(() => {
     setSelectedMap((prev) => {
       const next = new Map(prev);
-      if (displayedNfts.every((nft) => next.has(nftIdKey(nft.nft_id)))) {
-        displayedNfts.forEach((nft) => next.delete(nftIdKey(nft.nft_id)));
-      } else {
-        displayedNfts.forEach((nft) => next.set(nftIdKey(nft.nft_id), nft));
-      }
+      const selectable = displayedNfts.filter(
+        (nft) => lockedResourceAddress === null || nft.resource_address === lockedResourceAddress,
+      );
+      const allSelected = selectable.every((nft) => next.has(nftIdKey(nft.nft_id)));
+      selectable.forEach((nft) => (allSelected ? next.delete(nftIdKey(nft.nft_id)) : next.set(nftIdKey(nft.nft_id), nft)));
+      syncLockedAddress(next, selectable[0]?.resource_address ?? null);
       return next;
     });
-  }, [displayedNfts]);
+  }, [displayedNfts, lockedResourceAddress, syncLockedAddress]);
 
   const selectedNfts = Array.from(selectedMap.values());
 
@@ -142,6 +154,7 @@ export default function NFTList(props: NftListProps) {
             key={`${nft.nft_id}-${index}`}
             nft={nft}
             selected={selectedMap.has(nftIdKey(nft.nft_id))}
+            selectDisabled={isSelectDisabled(nft)}
             onToggleSelect={() => toggleSelect(nft)}
           />
         ))}
@@ -166,6 +179,7 @@ export default function NFTList(props: NftListProps) {
                 key={`${nft.nft_id}-${index}`}
                 nft={nft}
                 selected={selectedMap.has(nftIdKey(nft.nft_id))}
+                selectDisabled={isSelectDisabled(nft)}
                 onToggleSelect={() => toggleSelect(nft)}
               />
             ))}
@@ -207,7 +221,7 @@ export default function NFTList(props: NftListProps) {
           </Stack>
 
           <Stack direction="row" spacing={2} alignItems="center">
-            {selectedNfts.length >= 2 && (
+            {selectedNfts.length && (
               <Button variant="contained" onClick={() => setSendDialogOpen(true)}>
                 Send Selected ({selectedNfts.length})
               </Button>
@@ -243,6 +257,7 @@ export default function NFTList(props: NftListProps) {
         onSendComplete={() => {
           setSendDialogOpen(false);
           setSelectedMap(new Map());
+          setLockedResourceAddress(null);
         }}
         preSelectedNfts={selectedNfts}
       />

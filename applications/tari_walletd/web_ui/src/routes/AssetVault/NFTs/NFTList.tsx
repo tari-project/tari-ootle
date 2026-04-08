@@ -75,23 +75,18 @@ export default function NFTList(props: NftListProps) {
 
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [selectedMap, setSelectedMap] = useState<Map<string, NonFungibleToken>>(new Map());
-  const [lockedResourceAddress, setLockedResourceAddress] = useState<string | null>(null);
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const displayedNfts = nftsListData?.nfts || [];
-
-  const syncLockedAddress = useCallback((map: Map<string, NonFungibleToken>, fallback: string | null = null) => {
-    setLockedResourceAddress(map.size > 0 ? (lockedResourceAddress ?? fallback) : null);
-  }, [lockedResourceAddress]);
+  const lockedResourceAddress = selectedMap.size ? Array.from(selectedMap.values())[0].resource_address : null;
 
   const toggleSelect = useCallback((nft: NonFungibleToken) => {
     setSelectedMap((prev) => {
       const key = nftIdKey(nft.nft_id);
       const next = new Map(prev);
       next.has(key) ? next.delete(key) : next.set(key, nft);
-      syncLockedAddress(next, nft.resource_address);
       return next;
     });
-  }, [syncLockedAddress]);
+  }, []);
 
   const isSelectDisabled = useCallback(
     (nft: NonFungibleToken) => {
@@ -132,9 +127,9 @@ export default function NFTList(props: NftListProps) {
   const DisplayNFTs = () => {
     return viewMode === "grid" ? (
       <Grid container spacing={3}>
-        {displayedNfts.map((nft: NonFungibleToken, index: number) => (
+        {displayedNfts.map((nft: NonFungibleToken) => (
           <NftCard
-            key={`${nft.nft_id}-${index}`}
+            key={nftIdKey(nft.nft_id)}
             nft={nft}
             selected={selectedMap.has(nftIdKey(nft.nft_id))}
             selectDisabled={isSelectDisabled(nft)}
@@ -155,9 +150,9 @@ export default function NFTList(props: NftListProps) {
             </TableRow>
           </TableHead>
           <TableBody>
-            {displayedNfts.map((nft: NonFungibleToken, index: number) => (
+            {displayedNfts.map((nft: NonFungibleToken) => (
               <NftRow
-                key={`${nft.nft_id}-${index}`}
+                key={nftIdKey(nft.nft_id)}
                 nft={nft}
                 selected={selectedMap.has(nftIdKey(nft.nft_id))}
                 selectDisabled={isSelectDisabled(nft)}
@@ -238,7 +233,6 @@ export default function NFTList(props: NftListProps) {
         onSendComplete={() => {
           setSendDialogOpen(false);
           setSelectedMap(new Map());
-          setLockedResourceAddress(null);
         }}
         preSelectedNfts={selectedNfts}
       />

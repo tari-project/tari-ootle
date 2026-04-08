@@ -33,7 +33,7 @@ import type { Account, NonFungibleId, NonFungibleToken } from "@tari-project/oot
 import { validateOotleAddress } from "@tari-project/ootle-ts-bindings/dist/helpers/ootleAddress";
 import { convertCborValue } from "@utils/cbor";
 import { displayNftId, substateIdToString } from "@utils/helpers";
-import { FormEvent, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { Form } from "react-router";
 
 interface FormStepProps {
@@ -85,6 +85,7 @@ export default function FormStep({
 }: FormStepProps) {
   const hasBatchSelection = preSelectedNfts?.length;
   const { transferFormState, disabled, updateFormValue } = useNftTransferStore();
+  const selectedNftIds = useMemo(() => new Set(transferFormState.nfts.map(nftIdToString)), [transferFormState.nfts]);
   const [submitted, setSubmitted] = useState(false);
 
   const setFormValue = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -196,13 +197,13 @@ export default function FormStep({
               onChange={onNftsChange}
               renderValue={(selected) => selected.map((item) => displayNftId(JSON.parse(item))).join(", ")}
             >
-              {availableNfts.map((nft, index) => {
+              {availableNfts.map((nft) => {
                 const mutableData = convertCborValue(nft.mutable_data);
                 const imageUrl = mutableData?.image_url;
                 return (
-                  <MenuItem key={index} value={JSON.stringify(nft.nft_id)}>
+                  <MenuItem key={nftIdToString(nft.nft_id)} value={JSON.stringify(nft.nft_id)}>
                     <Checkbox
-                      checked={transferFormState.nfts.some((id) => nftIdToString(id) == nftIdToString(nft.nft_id))}
+                      checked={selectedNftIds.has(nftIdToString(nft.nft_id))}
                     />
                     <Avatar
                       src={imageUrl}

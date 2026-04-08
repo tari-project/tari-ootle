@@ -121,7 +121,6 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     setValidity,
     setTransferResult,
     setAutoCloseTimeoutId,
-    initializeFormState,
     resetState,
   } = useNftTransferStore();
 
@@ -290,7 +289,6 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
 
   const handleClose = () => {
     resetState(preSelectedNftId, preSelectedResourceAddress);
-    setCurrentStep("form");
     props.handleClose?.();
     if (transferResult?.success) {
       props.onSendComplete?.();
@@ -359,8 +357,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   useEffect(() => {
     if (props.open && account) {
       // When dialog opens, always reset to ensure clean state
-      resetState(preSelectedNftId, preSelectedResourceAddress);
-      initializeFormState(preSelectedNftId, preSelectedResourceAddress, substateIdToString(account.component_address));
+      resetState(preSelectedNftId, preSelectedResourceAddress, substateIdToString(account.component_address));
 
       // If batch-selected NFTs are provided, pre-fill the form
       if (hasBatchSelection) {
@@ -371,7 +368,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
         setValidity({ nfts: true });
       }
     }
-  }, [props.open, preSelectedNftId, preSelectedResourceAddress, account?.component_address, hasBatchSelection]);
+  }, [props.open, preSelectedNftId, preSelectedResourceAddress, account?.component_address, hasBatchSelection, preSelectedNfts]);
 
   return (
     <Dialog open={props.open} onClose={handleClose} maxWidth="sm" fullWidth>

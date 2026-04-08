@@ -80,7 +80,7 @@ interface NftTransferState {
     preSelectedResourceAddress?: ResourceAddress,
     accountAddress?: string,
   ) => void;
-  resetState: (preSelectedNftId?: NonFungibleId, preSelectedResourceAddress?: ResourceAddress) => void;
+  resetState: (preSelectedNftId?: NonFungibleId, preSelectedResourceAddress?: ResourceAddress, accountAddress?: string) => void;
   isFormValid: () => boolean;
 }
 
@@ -146,7 +146,7 @@ export const useNftTransferStore = create<NftTransferState>((set, get) => ({
     });
   },
 
-  resetState: (preSelectedNftId, preSelectedResourceAddress) => {
+  resetState: (preSelectedNftId, preSelectedResourceAddress, accountAddress) => {
     const { autoCloseTimeoutId } = get();
 
     // Clear any active timeout
@@ -157,7 +157,7 @@ export const useNftTransferStore = create<NftTransferState>((set, get) => ({
     set({
       currentStep: "form",
       disabled: false,
-      transferFormState: createInitialFormState(preSelectedNftId, preSelectedResourceAddress),
+      transferFormState: createInitialFormState(preSelectedNftId, preSelectedResourceAddress, accountAddress),
       validity: createInitialValidity(preSelectedNftId),
       estimatedFee: null,
       isEstimatingFee: false,

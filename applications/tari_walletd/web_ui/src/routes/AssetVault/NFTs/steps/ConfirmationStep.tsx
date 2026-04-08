@@ -106,8 +106,8 @@ export default function ConfirmationStep({
                 <Typography variant="subtitle2" color="text.secondary">
                   You are about to send {transferFormState.nfts.length} NFT(s):
                 </Typography>
-                {transferFormState.nfts.map((nftId, index) => (
-                  <Typography key={index} variant="body2">
+                {transferFormState.nfts.map((nftId) => (
+                  <Typography key={nftIdToString(nftId)} variant="body2">
                     • {displayNftId(nftId)}
                   </Typography>
                 ))}

@@ -23,7 +23,6 @@
 import PopupTitle from "@/components/PopupTitle";
 import { useAccountsList } from "@api/hooks/useAccounts";
 import { useNFTsList, useNftsTransfer } from "@api/hooks/useNfts";
-import queryClient from "@api/queryClient";
 import Button from "@mui/material/Button";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
@@ -266,14 +265,6 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
         setTransferResult({
           success: true,
           message: "Your NFT has been successfully transferred!",
-        });
-
-        // Refresh NFT list
-        queryClient.invalidateQueries({
-          predicate: (query) => {
-            const key = query.queryKey[0];
-            return typeof key === "string" && (key === "nfts" || key === "list_nfts" || key === "nfts_list");
-          },
         });
 
         // Auto-close after 10 seconds

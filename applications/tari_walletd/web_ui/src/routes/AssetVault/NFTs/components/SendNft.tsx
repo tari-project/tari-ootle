@@ -23,6 +23,7 @@
 import PopupTitle from "@/components/PopupTitle";
 import { useAccountsList } from "@api/hooks/useAccounts";
 import { useNFTsList, useNftsTransfer } from "@api/hooks/useNfts";
+import queryClient from "@api/queryClient";
 import Button from "@mui/material/Button";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
@@ -73,6 +74,7 @@ export interface TransferNftDialogProps {
   handleClose: () => void;
   preSelectedNftId?: NonFungibleId;
   preSelectedResourceAddress?: ResourceAddress;
+  preSelectedNfts?: NonFungibleToken[];
 }
 
 function getAccountSelector(account: Account): ComponentAddressOrName {
@@ -106,12 +108,14 @@ function getNftIdTypeAsName(nftId: NonFungibleId): string {
 }
 
 export function TransferNftDialog(props: TransferNftDialogProps) {
-  const { preSelectedNftId, preSelectedResourceAddress } = props;
+  const { preSelectedNftId, preSelectedResourceAddress, preSelectedNfts } = props;
   const { account, setPopup } = useAccountStore();
+  const hasBatchSelection = preSelectedNfts && preSelectedNfts.length > 0;
 
   const {
     currentStep,
     transferFormState,
+    transferResult,
     setCurrentStep,
     setDisabled,
     setTransferFormState,
@@ -225,7 +229,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     }
 
     // Check if NFTs are selected (if not pre-selected)
-    if (!preSelectedNftId && transferFormState.nfts.length === 0) {
+    if (!preSelectedNftId && !hasBatchSelection && transferFormState.nfts.length === 0) {
       setPopup({ title: "Missing NFTs", error: true, message: "Please select at least one NFT to transfer" });
       return;
     }
@@ -264,6 +268,14 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
           message: "Your NFT has been successfully transferred!",
         });
 
+        // Refresh NFT list
+        queryClient.invalidateQueries({
+          predicate: (query) => {
+            const key = query.queryKey[0];
+            return typeof key === "string" && (key === "nfts" || key === "list_nfts" || key === "nfts_list");
+          },
+        });
+
         // Auto-close after 10 seconds
         const timeoutId = setTimeout(() => {
           handleAutoCloseAfterSuccess();
@@ -286,9 +298,13 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   };
 
   const handleClose = () => {
+    const wasSuccessful = transferResult?.success;
     resetState(preSelectedNftId, preSelectedResourceAddress);
     setCurrentStep("form");
     props.handleClose?.();
+    if (wasSuccessful) {
+      props.onSendComplete?.();
+    }
   };
 
   const handleAutoCloseAfterSuccess = () => {
@@ -337,6 +353,13 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     }
   };
 
+  const filteredNfts = useMemo(() => {
+    if (preSelectedResourceAddress && !preSelectedNftId) {
+      return availableNfts.filter((nft) => nft.resource_address === preSelectedResourceAddress);
+    }
+    return availableNfts;
+  }, [availableNfts, preSelectedResourceAddress, preSelectedNftId]);
+
   useEffect(() => {
     if (loadedNfts !== undefined) {
       setAvailableNfts(loadedNfts);
@@ -348,12 +371,24 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       // When dialog opens, always reset to ensure clean state
       resetState(preSelectedNftId, preSelectedResourceAddress);
       initializeFormState(preSelectedNftId, preSelectedResourceAddress, substateIdToString(account.component_address));
+
+      // If batch-selected NFTs are provided, pre-fill the form
+      if (hasBatchSelection) {
+        setTransferFormState({
+          nfts: preSelectedNfts.map((nft) => nft.nft_id),
+          resourceAddress: preSelectedNfts[0].resource_address,
+        });
+        setValidity({ nfts: true });
+      }
     }
-  }, [props.open, preSelectedNftId, preSelectedResourceAddress, account?.component_address]);
+  }, [props.open, preSelectedNftId, preSelectedResourceAddress, account?.component_address, hasBatchSelection]);
 
   return (
     <Dialog open={props.open} onClose={handleClose} maxWidth="sm" fullWidth>
-      <PopupTitle onClose={handleClose} title="Transfer NFT" />
+      <PopupTitle
+        onClose={handleClose}
+        title={preSelectedNftId ? "Transfer NFT" : `Transfer NFTs${hasBatchSelection ? ` (${preSelectedNfts.length})` : ""}`}
+      />
       <DialogContent>
         {!account ? (
           <div style={{ padding: "20px", textAlign: "center" }}>
@@ -365,8 +400,9 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
               <FormStep
                 account={account}
                 accounts={accounts}
-                availableNfts={availableNfts}
+                availableNfts={filteredNfts}
                 preSelectedNftId={preSelectedNftId}
+                preSelectedNfts={preSelectedNfts}
                 isEstimatingFee={isEstimatingFee}
                 onSubmit={handleFormSubmit}
                 onCancel={handleClose}
@@ -379,7 +415,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
               <ConfirmationStep
                 accounts={accounts}
                 preSelectedNftId={preSelectedNftId}
-                availableNfts={availableNfts}
+                availableNfts={filteredNfts}
                 onBack={() => setCurrentStep("form")}
                 onConfirm={onTransfer}
               />

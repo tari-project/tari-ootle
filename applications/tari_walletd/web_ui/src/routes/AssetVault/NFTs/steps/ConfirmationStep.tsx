@@ -102,7 +102,16 @@ export default function ConfirmationStep({
                 </Avatar>
               </Stack>
             ) : (
-              <Typography>{preSelectedNftId ? displayNftId(preSelectedNftId) : "Multiple NFTs"}</Typography>
+              <Stack spacing={1}>
+                <Typography variant="subtitle2" color="text.secondary">
+                  You are about to send {transferFormState.nfts.length} NFT(s):
+                </Typography>
+                {transferFormState.nfts.map((nftId, index) => (
+                  <Typography key={index} variant="body2">
+                    • {displayNftId(nftId)}
+                  </Typography>
+                ))}
+              </Stack>
             )}
           </Stack>
           <Stack spacing={2} direction={"column"}>

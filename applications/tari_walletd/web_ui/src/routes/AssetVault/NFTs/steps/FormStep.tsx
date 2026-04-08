@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Alert, Divider, InputLabel, Stack } from "@mui/material";
+import { Alert, Avatar, Divider, InputLabel, Stack } from "@mui/material";
 import Button from "@mui/material/Button";
 import Checkbox from "@mui/material/Checkbox";
 import ListItemText from "@mui/material/ListItemText";
@@ -31,8 +31,9 @@ import TextField from "@mui/material/TextField";
 import { useNftTransferStore } from "@store/nftTransferStore";
 import type { Account, NonFungibleId, NonFungibleToken } from "@tari-project/ootle-ts-bindings";
 import { validateOotleAddress } from "@tari-project/ootle-ts-bindings/dist/helpers/ootleAddress";
+import { convertCborValue } from "@utils/cbor";
 import { displayNftId, substateIdToString } from "@utils/helpers";
-import { FormEvent } from "react";
+import { FormEvent, useState } from "react";
 import { Form } from "react-router";
 
 interface FormStepProps {
@@ -40,6 +41,7 @@ interface FormStepProps {
   accounts: Array<{ account: Account }> | undefined;
   availableNfts: NonFungibleToken[];
   preSelectedNftId?: NonFungibleId;
+  preSelectedNfts?: NonFungibleToken[];
   isEstimatingFee: boolean;
   onSubmit: (e: FormEvent) => void;
   onCancel: () => void;
@@ -75,12 +77,15 @@ export default function FormStep({
   accounts,
   availableNfts,
   preSelectedNftId,
+  preSelectedNfts,
   onSubmit,
   onCancel,
   onNftsChange,
   onPayerAccountChange,
 }: FormStepProps) {
+  const hasBatchSelection = preSelectedNfts?.length;
   const { transferFormState, disabled, updateFormValue } = useNftTransferStore();
+  const [submitted, setSubmitted] = useState(false);
 
   const setFormValue = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -104,10 +109,19 @@ export default function FormStep({
 
   const formErrors = getFormErrors();
 
+  const handleSubmit = (e: FormEvent) => {
+    setSubmitted(true);
+    if (formErrors.length) {
+      e.preventDefault();
+      return;
+    }
+    onSubmit(e);
+  };
+
   return (
-    <Form onSubmit={onSubmit}>
+    <Form onSubmit={handleSubmit}>
       <Stack direction="column" spacing={2} sx={{ py: 2 }}>
-        {formErrors.length > 0 && (
+        {submitted && formErrors.length > 0 && (
           <Alert severity="error" sx={{ mb: 2 }}>
             <strong>Please fix the following errors:</strong>
             <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
@@ -158,7 +172,17 @@ export default function FormStep({
           }
         />
 
-        {!preSelectedNftId ? (
+        {hasBatchSelection ? (
+          <TextField
+            label={`Selected NFTs (${preSelectedNfts.length})`}
+            value={preSelectedNfts.map((nft) => displayNftId(nft.nft_id)).join(", ")}
+            disabled
+            variant="outlined"
+            style={{ flexGrow: 1 }}
+            multiline
+            maxRows={4}
+          />
+        ) : !preSelectedNftId ? (
           <>
             <InputLabel id="nft-select-label">Select NFT(s)</InputLabel>
             <Select
@@ -170,16 +194,27 @@ export default function FormStep({
               required
               disabled={disabled}
               onChange={onNftsChange}
-              renderValue={(selected) => selected.map((item) => item).join(", ")}
+              renderValue={(selected) => selected.map((item) => displayNftId(JSON.parse(item))).join(", ")}
             >
-              {availableNfts.map((nft, index) => (
-                <MenuItem key={index} value={JSON.stringify(nft.nft_id)}>
-                  <Checkbox
-                    checked={transferFormState.nfts.some((id) => nftIdToString(id) == nftIdToString(nft.nft_id))}
-                  />
-                  <ListItemText primary={displayNftId(nft.nft_id)} />
-                </MenuItem>
-              ))}
+              {availableNfts.map((nft, index) => {
+                const mutableData = convertCborValue(nft.mutable_data);
+                const imageUrl = mutableData?.image_url;
+                return (
+                  <MenuItem key={index} value={JSON.stringify(nft.nft_id)}>
+                    <Checkbox
+                      checked={transferFormState.nfts.some((id) => nftIdToString(id) == nftIdToString(nft.nft_id))}
+                    />
+                    <Avatar
+                      src={imageUrl}
+                      variant="rounded"
+                      sx={{ width: 32, height: 32, mr: 1, backgroundColor: "grey.200" }}
+                    >
+                      NFT
+                    </Avatar>
+                    <ListItemText primary={displayNftId(nft.nft_id)} />
+                  </MenuItem>
+                );
+              })}
             </Select>
           </>
         ) : (

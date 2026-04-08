@@ -24,7 +24,20 @@ import CopyAddress from "@components/CopyAddress";
 import { NftCard as Card, DataTableCell } from "@components/StyledComponents";
 import CancelRoundedIcon from "@mui/icons-material/CancelRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
-import { Avatar, Box, CardContent, CardMedia, Chip, Divider, Grid, Stack, TableRow, Typography } from "@mui/material";
+import {
+  Avatar,
+  Box,
+  CardContent,
+  CardMedia,
+  Checkbox,
+  Chip,
+  Divider,
+  Grid,
+  Stack,
+  TableCell,
+  TableRow,
+  Typography,
+} from "@mui/material";
 import type { NonFungibleToken } from "@tari-project/ootle-ts-bindings";
 import { convertCborValue } from "@utils/cbor";
 import { displayNftId, shortenSubstateId } from "@utils/helpers";
@@ -34,14 +47,32 @@ import SendNft from "./SendNft";
 const ERR_IMG =
   "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgdmlld0JveD0iMCAwIDMwMCAyMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIzMDAiIGhlaWdodD0iMjAwIiBmaWxsPSIjRjVGNUY1Ii8+CjxwYXRoIGQ9Ik0xMjUgNzVIMTc1VjEyNUgxMjVWNzVaIiBmaWxsPSIjRERERUREIi8+CjxwYXRoIGQ9Ik0xNDAgOTBIMTYwVjExMEgxNDBWOTBaIiBmaWxsPSIjQkJCQkJCIi8+Cjx0ZXh0IHg9IjE1MCIgeT0iMTQwIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5OTk5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiPk5GVDwvdGV4dD4KPC9zdmc+";
 
-function NftCard({ nft }: { nft: NonFungibleToken }) {
+interface NftItemProps {
+  nft: NonFungibleToken;
+  selected?: boolean;
+  onToggleSelect?: () => void;
+}
+
+function NftCard({ nft, selected, onToggleSelect }: NftItemProps) {
   const mutableData = convertCborValue(nft.mutable_data);
   const data = convertCborValue(nft.data) as Record<string, any> | undefined;
   const imageUrl = mutableData?.image_url;
 
   return (
     <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
-      <Card>
+      <Card sx={{ position: "relative" }}>
+        {onToggleSelect && (
+          <Checkbox
+            checked={!!selected}
+            onChange={onToggleSelect}
+            sx={{
+              position: "absolute",
+              top: 4,
+              left: 4,
+              zIndex: 1,
+            }}
+          />
+        )}
         <CardMedia
           component="img"
           height="200"
@@ -99,7 +130,7 @@ function NftData({ data }: { data: Record<string, any> }) {
   );
 }
 
-function NftRow({ nft }: { nft: NonFungibleToken }) {
+function NftRow({ nft, selected, onToggleSelect }: NftItemProps) {
   const mutableData = convertCborValue(nft.mutable_data);
   const data = convertCborValue(nft.data);
   const imageUrl = mutableData?.image_url;
@@ -118,6 +149,11 @@ function NftRow({ nft }: { nft: NonFungibleToken }) {
 
   return (
     <TableRow>
+      {onToggleSelect && (
+        <TableCell padding="checkbox">
+          <Checkbox checked={!!selected} onChange={onToggleSelect} />
+        </TableCell>
+      )}
       <DataTableCell>
         <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
           <Avatar

@@ -327,6 +327,24 @@ export const parseTimestamp = (rawTimestamp: string | null | undefined): Date | 
   return normalizeTimestamp(rawTimestamp);
 };
 
+export function nftIdToString(nftId: NonFungibleId) {
+  if ("U256" in nftId) {
+    return `U256:${toHexString(nftId.U256)}`;
+  }
+  if ("Uint64" in nftId) {
+    return `Uint64:${nftId.Uint64}`;
+  }
+  if ("Uint32" in nftId) {
+    return `Uint32:${nftId.Uint32}`;
+  }
+  if ("String" in nftId) {
+    return `String:${nftId.String}`;
+  }
+
+  console.warn("Unknown nft id ", nftId);
+  return JSON.stringify(nftId);
+}
+
 export function displayNftId(nftId: NonFungibleId): string {
   if ("U256" in nftId) {
     return `NFT #${shortenString(toHexString(nftId.U256))}`;

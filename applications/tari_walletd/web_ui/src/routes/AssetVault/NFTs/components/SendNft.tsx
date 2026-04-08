@@ -32,8 +32,10 @@ import { useNftTransferStore } from "@store/nftTransferStore";
 import {
   Account,
   ComponentAddressOrName,
+  getRejectReasonFromTransactionResult,
   NonFungibleId,
   NonFungibleToken,
+  rejectReasonToString,
   ResourceAddress,
 } from "@tari-project/ootle-ts-bindings";
 import { substateIdToString } from "@utils/helpers";
@@ -206,7 +208,8 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
         return result.fee;
       } else {
         console.error("Fee estimation rejected:", result);
-        throw new Error("Could not estimate transfer fee");
+        const reason = result ? getRejectReasonFromTransactionResult(result.result.result) : undefined;
+        throw new Error(reason ? rejectReasonToString(reason) : "Transaction was rejected");
       }
     } catch (e: any) {
       console.error("Fee estimation error:", e);
@@ -241,7 +244,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
         setPopup({
           title: "Fee estimation failed",
           error: true,
-          message: "Unable to estimate transaction fee. Please try again or check if you have sufficient funds.",
+          message: error instanceof Error ? error.message : String(error),
         });
         return;
       }

@@ -75,24 +75,28 @@ export default function NFTList(props: NftListProps) {
   const displayedNfts = nftsListData?.nfts || [];
   const lockedResourceAddress = selectedMap.size ? Array.from(selectedMap.values())[0].resource_address : null;
 
+  const nftKey = useCallback((nft: NonFungibleToken) => {
+    return `${nft.resource_address}:${nftIdToString(nft.nft_id)}`;
+  }, []);
+
   const toggleSelect = useCallback((nft: NonFungibleToken) => {
     setSelectedMap((prev) => {
-      const key = nftIdToString(nft.nft_id);
+      const key = nftKey(nft);
       const next = new Map(prev);
       next.has(key) ? next.delete(key) : next.set(key, nft);
       return next;
     });
-  }, []);
+  }, [nftKey]);
 
   const isSelectDisabled = useCallback(
     (nft: NonFungibleToken) => {
       return (
         lockedResourceAddress !== null &&
-        !selectedMap.has(nftIdToString(nft.nft_id)) &&
+        !selectedMap.has(nftKey(nft)) &&
         nft.resource_address !== lockedResourceAddress
       );
     },
-    [lockedResourceAddress, selectedMap],
+    [lockedResourceAddress, selectedMap, nftKey],
   );
 
   const selectedNfts = useMemo(() => Array.from(selectedMap.values()), [selectedMap]);
@@ -131,7 +135,7 @@ export default function NFTList(props: NftListProps) {
           <NftCard
             key={i}
             nft={nft}
-            selected={selectedMap.has(nftIdToString(nft.nft_id))}
+            selected={selectedMap.has(nftKey(nft))}
             selectDisabled={isSelectDisabled(nft)}
             onToggleSelect={() => toggleSelect(nft)}
           />
@@ -154,7 +158,7 @@ export default function NFTList(props: NftListProps) {
               <NftRow
                 key={i}
                 nft={nft}
-                selected={selectedMap.has(nftIdToString(nft.nft_id))}
+                selected={selectedMap.has(nftKey(nft))}
                 selectDisabled={isSelectDisabled(nft)}
                 onToggleSelect={() => toggleSelect(nft)}
               />
@@ -235,6 +239,7 @@ export default function NFTList(props: NftListProps) {
           setSelectedMap(new Map());
         }}
         preSelectedNfts={selectedNfts}
+        preSelectedResourceAddress={lockedResourceAddress ?? undefined}
       />
     </FetchStatusCheck>
   );

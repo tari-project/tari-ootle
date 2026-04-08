@@ -38,6 +38,7 @@ axum-extra = { workspace = true, features = ["typed-header", "cookie"] }
 axum-jrpc = { workspace = true, features = ["anyhow_error"] }
 clap = { workspace = true, features = ["derive", "env"] }
 dirs-next = "2.0.0"
+notify = "8.2.0"
 config = { workspace = true }
 either = { workspace = true }
 hex = { workspace = true }

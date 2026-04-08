@@ -64,6 +64,7 @@ pub struct TariWalletDaemonProcess {
     pub json_rpc_port: u16,
     pub indexer_api_port: u16,
     pub temp_path_dir: PathBuf,
+    pub burn_proof_dir: PathBuf,
     pub shutdown: Shutdown,
 }
 
@@ -84,6 +85,8 @@ pub async fn spawn_wallet_daemon(world: &mut TariWorld, wallet_daemon_name: Stri
         ootle_wallet_daemon: WalletDaemonConfig::default(),
     };
 
+    let burn_proof_dir = base_dir.join("burn_proofs");
+
     config.common.base_path.clone_from(&base_dir);
     config.ootle_wallet_daemon.json_rpc_address = json_rpc_address;
     config.ootle_wallet_daemon.signaling_server_address = Some(signaling_server_addr);
@@ -91,6 +94,7 @@ pub async fn spawn_wallet_daemon(world: &mut TariWorld, wallet_daemon_name: Stri
     config.ootle_wallet_daemon.network = Network::LocalNet;
     config.ootle_wallet_daemon.authentication = WalletDaemonAuth::None;
     config.ootle_wallet_daemon.override_keyring_password = Some("secret".into());
+    config.ootle_wallet_daemon.burn_proof_dir = Some(burn_proof_dir.clone());
     // Avoid using keyring in cucumber tests
 
     let handle = task::spawn(run_tari_ootle_walletd(config, None, shutdown_signal));
@@ -105,6 +109,7 @@ pub async fn spawn_wallet_daemon(world: &mut TariWorld, wallet_daemon_name: Stri
         json_rpc_port,
         indexer_api_port,
         temp_path_dir: base_dir,
+        burn_proof_dir,
         shutdown,
     };
 

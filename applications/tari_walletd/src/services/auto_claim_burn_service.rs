@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, time::Instant};
 
 use anyhow::Context;
 use log::*;
@@ -20,7 +20,8 @@ use tari_shutdown::ShutdownSignal;
 use tari_sidechain::CompleteClaimBurnProof;
 use tokio::{
     sync::mpsc,
-    time::{Duration, MissedTickBehavior, interval},
+    time,
+    time::{Duration, MissedTickBehavior},
 };
 
 use crate::{
@@ -31,6 +32,10 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::auto_claim_burn";
 const EPOCH_CHECK_INTERVAL: Duration = Duration::from_secs(30);
+/// Maximum retries for network/submission errors (indexer unreachable, tx service down).
+const MAX_RETRIES_NETWORK: u32 = 10;
+/// Maximum retries for file read/parse errors (file still being written on macOS).
+const MAX_RETRIES_FILE_READ: u32 = 1;
 
 /// Watches the burn proof directory for new JSON files and automatically submits claim burn
 /// transactions on behalf of the wallet, deferring each claim until the next epoch as required
@@ -54,12 +59,9 @@ pub struct AutoClaimBurnService {
     sdk: WalletSdk,
     transaction_service: TransactionServiceHandle,
     burn_proof_dir: PathBuf,
-    /// Maps file name → epoch at which the file was detected, or `None` if the epoch has not yet
-    /// been determined (e.g. the indexer was unreachable when the file was first seen).
-    /// `None` entries are resolved to `Some(current_epoch)` on the next successful interval check,
-    /// after which the claim is submitted once the indexer reports a strictly later epoch.
-    /// Startup-scan files use `Some(Epoch(0))` so they are eligible immediately.
-    pending_claims: HashMap<String, Option<Epoch>>,
+    /// Maps file name → pending claim state including the epoch at which the file was detected
+    /// and a transient-error retry counter.
+    pending_claims: HashMap<String, PendingClaim>,
     shutdown_signal: ShutdownSignal,
 }
 
@@ -106,10 +108,10 @@ impl AutoClaimBurnService {
         // itself implies the required epoch boundary has been crossed.
         self.scan_proof_dir().await;
 
-        let mut epoch_check_interval = interval(EPOCH_CHECK_INTERVAL);
+        // First tick after EPOCH_CHECK_INTERVAL
+        let mut epoch_check_interval =
+            time::interval_at((Instant::now() + EPOCH_CHECK_INTERVAL).into(), EPOCH_CHECK_INTERVAL);
         epoch_check_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        // Consume the immediate first tick so the first real check happens after EPOCH_CHECK_INTERVAL.
-        epoch_check_interval.tick().await;
 
         loop {
             tokio::select! {
@@ -154,7 +156,8 @@ impl AutoClaimBurnService {
                         info!(target: LOG_TARGET, "Found existing unclaimed burn proof: {}", file_name);
                         // Epoch(0) makes startup files immediately eligible — the daemon restart itself
                         // implies the required epoch boundary has been crossed.
-                        self.pending_claims.insert(file_name.to_string(), Some(Epoch(0)));
+                        self.pending_claims
+                            .insert(file_name.to_string(), PendingClaim::with_epoch(Epoch(0)));
                     }
                 },
                 Ok(None) => break,
@@ -212,13 +215,18 @@ impl AutoClaimBurnService {
                 continue;
             }
 
-            // Reserve the slot with None *before* the await point so that a second OS event for
-            // the same file (notify sometimes fires Create + Access(Close(Write)) both) cannot
-            // pass the `contains_key` check while we are suspended in `query_current_epoch`.
-            self.pending_claims.insert(file_name.to_string(), None);
-
-            let detected_epoch = match self.query_current_epoch().await {
-                Ok(epoch) => epoch,
+            match self.query_current_epoch().await {
+                Ok(epoch) => {
+                    info!(
+                        target: LOG_TARGET,
+                        "New burn proof detected: '{}' at epoch {}. Will claim in epoch {}.",
+                        file_name,
+                        epoch,
+                        epoch.as_u64().saturating_add(1),
+                    );
+                    self.pending_claims
+                        .insert(file_name.to_string(), PendingClaim::with_epoch(epoch));
+                },
                 Err(e) => {
                     warn!(
                         target: LOG_TARGET,
@@ -227,20 +235,13 @@ impl AutoClaimBurnService {
                         file_name,
                         e
                     );
-                    // Leave the entry as None; check_and_submit_pending will resolve it
+
+                    // Leave the epoch as None; check_and_submit_pending will resolve it
                     // once the indexer is reachable, then wait one full epoch before submitting.
+                    self.pending_claims.insert(file_name.to_string(), PendingClaim::new());
                     continue;
                 },
-            };
-
-            info!(
-                target: LOG_TARGET,
-                "New burn proof detected: '{}' at epoch {}. Will claim in epoch {}.",
-                file_name,
-                detected_epoch,
-                detected_epoch.0.saturating_add(1),
-            );
-            self.pending_claims.insert(file_name.to_string(), Some(detected_epoch));
+            }
         }
     }
 
@@ -265,22 +266,22 @@ impl AutoClaimBurnService {
 
         // Resolve any entries where epoch detection previously failed (e.g. indexer was down).
         // They are stamped with the current epoch now and will be submitted one epoch later.
-        for epoch_slot in self.pending_claims.values_mut() {
-            if epoch_slot.is_none() {
+        for pending in self.pending_claims.values_mut() {
+            if pending.detected_epoch.is_none() {
                 info!(
                     target: LOG_TARGET,
                     "Resolved pending epoch detection to epoch {}. Will claim in epoch {}.",
                     current_epoch,
                     current_epoch.0.saturating_add(1),
                 );
-                *epoch_slot = Some(current_epoch);
+                pending.detected_epoch = Some(current_epoch);
             }
         }
 
         let ready: Vec<String> = self
             .pending_claims
             .iter()
-            .filter(|&(_, detected_epoch)| detected_epoch.is_some_and(|e| current_epoch > e))
+            .filter(|&(_, pending)| pending.detected_epoch.is_some_and(|e| current_epoch > e))
             .map(|(name, _)| name.clone())
             .collect();
 
@@ -305,13 +306,29 @@ impl AutoClaimBurnService {
                     );
                     self.pending_claims.remove(&file_name);
                 },
-                Err(ClaimError::Transient(e)) => {
-                    warn!(
-                        target: LOG_TARGET,
-                        "Transient error auto-claiming '{}', will retry next interval: {}",
-                        file_name,
-                        e
-                    );
+                Err(ClaimError::Transient { error: e, max_retries }) => {
+                    let pending = self.pending_claims.get_mut(&file_name).expect("just iterated");
+                    pending.retries += 1;
+                    if pending.retries >= max_retries {
+                        error!(
+                            target: LOG_TARGET,
+                            "Giving up on '{}' after {} retries: {}. \
+                             The file remains in the burn proof directory for manual retry.",
+                            file_name,
+                            pending.retries,
+                            e,
+                        );
+                        self.pending_claims.remove(&file_name);
+                    } else {
+                        warn!(
+                            target: LOG_TARGET,
+                            "Transient error auto-claiming '{}' (attempt {}/{}), will retry next interval: {}",
+                            file_name,
+                            pending.retries,
+                            max_retries,
+                            e,
+                        );
+                    }
                 },
             }
         }
@@ -320,13 +337,13 @@ impl AutoClaimBurnService {
     async fn try_submit_claim(&self, file_name: &str) -> Result<tari_ootle_transaction::TransactionId, ClaimError> {
         // Read and parse the proof file.
         let path = self.burn_proof_dir.join(file_name);
-        let bytes = tokio::fs::read(&path)
+        let file = tokio::fs::File::open(&path)
             .await
-            .with_context(|| format!("Failed to read burn proof file: {}", path.display()))
-            .map_err(ClaimError::Transient)?;
-        let complete_proof: CompleteClaimBurnProof = serde_json::from_slice(&bytes)
+            .with_context(|| format!("Failed to open burn proof file: {}", path.display()))
+            .map_err(|e| ClaimError::transient(e, MAX_RETRIES_FILE_READ))?;
+        let complete_proof: CompleteClaimBurnProof = serde_json::from_reader(file.into_std().await)
             .with_context(|| format!("Failed to parse burn proof file: {}", path.display()))
-            .map_err(ClaimError::Transient)?;
+            .map_err(|e| ClaimError::transient(e, MAX_RETRIES_FILE_READ))?;
 
         let proof_contents = complete_burn_proof_to_contents(complete_proof).map_err(ClaimError::Permanent)?;
 
@@ -336,7 +353,7 @@ impl AutoClaimBurnService {
         let account = accounts_api
             .get_account_by_public_key(&proof_contents.claim_proof.burn_public_key)
             .optional()
-            .map_err(|e| ClaimError::Transient(e.into()))?
+            .map_err(|e| ClaimError::transient(e.into(), MAX_RETRIES_NETWORK))?
             .ok_or_else(|| {
                 ClaimError::Permanent(anyhow::anyhow!(
                     "No account found for burn_public_key '{}'. The burn was not destined for any account in this \
@@ -373,12 +390,43 @@ impl AutoClaimBurnService {
     }
 }
 
+struct PendingClaim {
+    /// The epoch when the file was detected, or `None` if the indexer was unreachable at that time.
+    /// `None` entries are resolved to `Some(current_epoch)` on the next successful interval check.
+    detected_epoch: Option<Epoch>,
+    /// Number of transient errors encountered so far. The per-error `max_retries` limit determines
+    /// when the claim is dropped from the queue (the file remains on disk for manual retry).
+    retries: u32,
+}
+
+impl PendingClaim {
+    fn new() -> Self {
+        Self {
+            detected_epoch: None,
+            retries: 0,
+        }
+    }
+
+    fn with_epoch(epoch: Epoch) -> Self {
+        Self {
+            detected_epoch: Some(epoch),
+            retries: 0,
+        }
+    }
+}
+
 /// Categorises errors to determine retry behaviour for auto-claims.
 enum ClaimError {
-    /// A permanent error (corrupt file, account not in this wallet). Remove from queue; the
+    /// A permanent error (account not in this wallet, invalid proof data). Remove from queue; the
     /// proof file remains in `burn_proof_dir` for the user to inspect and retry manually.
     Permanent(anyhow::Error),
-    /// A transient error (network unavailable, indexer unreachable). Leave in queue and retry
-    /// on the next epoch check interval.
-    Transient(anyhow::Error),
+    /// A transient error (network unavailable, indexer unreachable, file still being written).
+    /// Leave in queue and retry on the next epoch check interval, up to `max_retries` times.
+    Transient { error: anyhow::Error, max_retries: u32 },
+}
+
+impl ClaimError {
+    fn transient(error: anyhow::Error, max_retries: u32) -> Self {
+        Self::Transient { error, max_retries }
+    }
 }

@@ -119,7 +119,7 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
             builder
                 .call_method(account_name, "withdraw", args![TARI_TOKEN, amount])
                 .put_last_instruction_output_on_workspace(&bucket_name)
-                .stealth_transfer(TARI_TOKEN, transfer)
+                .stealth_transfer_with_input_bucket(TARI_TOKEN, transfer, bucket_name)
         });
         self
     }

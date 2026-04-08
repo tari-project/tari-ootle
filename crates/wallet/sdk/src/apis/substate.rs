@@ -108,11 +108,32 @@ where
                 Some(parent) => {
                     debug!(
                         target: LOG_TARGET,
-                        "Parent substate {} found in store, loading dependent substates",
+                        "Parent substate {} found in local store, loading dependent substates",
                         parent.substate_id
                     );
                     self.store
                         .with_read_tx(|tx| get_dependent_substates(tx, parent, &mut substate_ids))?;
+
+                    // get_dependent_substates silently skips referenced substates that don't
+                    // have their own entry in the wallet store. For components, fetch the
+                    // current state from the network and add any that were missed.
+                    if parent_id.is_component() {
+                        let result = self.fetch_substate_from_network(parent_id, None).await?;
+                        if let SubstateValue::Component(data) = &result.substate {
+                            let value = IndexedWellKnownTypes::from_value(&data.body.state)?;
+                            for addr in value.referenced_substates() {
+                                if !substate_ids.contains(&addr) {
+                                    if unversioned {
+                                        substate_ids.insert(addr.into());
+                                    } else {
+                                        let ValidatorScanResult { id: versioned, .. } =
+                                            self.fetch_substate_from_network(&addr, None).await?;
+                                        substate_ids.insert(versioned.into());
+                                    }
+                                }
+                            }
+                        }
+                    }
                 },
                 None => {
                     debug!(
@@ -254,7 +275,6 @@ where
             version_hint.display()
         );
 
-        // TODO: cache?
         let resp = self
             .network_interface
             .query_substate(address, version_hint, false)

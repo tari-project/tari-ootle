@@ -208,12 +208,12 @@ pub struct TemplateMeta {
 pub struct ListTemplateCatalogueRequest {
     /// Optional substring filter on template name.
     pub name_filter: Option<String>,
-    /// Only return templates published at or after this epoch. Use for incremental sync.
-    pub since_epoch: Option<u64>,
     /// Maximum number of entries to return (default: 20, max: 100).
     pub limit: Option<u64>,
-    /// Number of entries to skip for pagination.
-    pub offset: Option<u64>,
+    /// Cursor: return entries inserted after the row with this template address.
+    /// When omitted, returns from the beginning.
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub after: Option<TemplateAddress>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

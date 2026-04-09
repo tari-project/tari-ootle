@@ -189,9 +189,8 @@ pub trait IndexerStoreReadTransaction {
     fn list_template_catalogue(
         &mut self,
         name_filter: Option<&str>,
-        since_epoch: Option<u64>,
+        after: Option<&TemplateAddress>,
         limit: u64,
-        offset: u64,
     ) -> Result<Vec<TemplateCatalogueEntry>, StorageError>;
 
     fn get_template_catalogue_entry(
@@ -334,12 +333,11 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
     pub fn list_template_catalogue(
         &self,
         name_filter: Option<&str>,
-        since_epoch: Option<u64>,
+        after: Option<&TemplateAddress>,
         limit: u64,
-        offset: u64,
     ) -> Result<Vec<crate::storage_sqlite::models::TemplateCatalogueEntry>, StorageError> {
         self.inner
-            .with_read_tx(|tx| tx.list_template_catalogue(name_filter, since_epoch, limit, offset))
+            .with_read_tx(|tx| tx.list_template_catalogue(name_filter, after, limit))
     }
 
     pub fn get_template_catalogue_entry(

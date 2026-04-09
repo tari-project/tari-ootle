@@ -219,7 +219,7 @@ async fn assert_indexer_catalogue_count(world: &mut TariWorld, indexer_name: Str
 
     let mut remaining = 30;
     loop {
-        let resp = indexer.list_template_catalogue(None, Some(100), Some(0)).await;
+        let resp = indexer.list_template_catalogue(None, Some(100), None).await;
         if resp.entries.len() >= min_count {
             return;
         }
@@ -292,7 +292,7 @@ async fn assert_indexer_catalogue_name_filter(
     let indexer = world.get_indexer(&indexer_name);
     assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
     let resp = indexer
-        .list_template_catalogue(Some(name_filter.clone()), Some(100), Some(0))
+        .list_template_catalogue(Some(name_filter.clone()), Some(100), None)
         .await;
     assert_eq!(
         resp.entries.len(),
@@ -304,44 +304,30 @@ async fn assert_indexer_catalogue_name_filter(
     );
 }
 
-#[then(expr = "the indexer {word} catalogue with limit {int} offset {int} returns {int} entries")]
-async fn assert_indexer_catalogue_page(
-    world: &mut TariWorld,
-    indexer_name: String,
-    limit: u64,
-    offset: u64,
-    expected_count: usize,
-) {
+#[then(expr = "the indexer {word} catalogue with limit {int} returns {int} entries")]
+async fn assert_indexer_catalogue_page(world: &mut TariWorld, indexer_name: String, limit: u64, expected_count: usize) {
     let indexer = world.get_indexer(&indexer_name);
     assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
-    let resp = indexer.list_template_catalogue(None, Some(limit), Some(offset)).await;
+    let resp = indexer.list_template_catalogue(None, Some(limit), None).await;
     assert_eq!(
         resp.entries.len(),
         expected_count,
-        "Catalogue with limit={} offset={} returned {} entries, expected {}",
+        "Catalogue with limit={} returned {} entries, expected {}",
         limit,
-        offset,
         resp.entries.len(),
         expected_count
     );
 }
 
-#[then(expr = "the indexer {word} catalogue with limit {int} offset {int} returns at least {int} entries")]
-async fn assert_indexer_catalogue_page_min(
-    world: &mut TariWorld,
-    indexer_name: String,
-    limit: u64,
-    offset: u64,
-    min_count: usize,
-) {
+#[then(expr = "the indexer {word} catalogue with limit {int} returns at least {int} entries")]
+async fn assert_indexer_catalogue_page_min(world: &mut TariWorld, indexer_name: String, limit: u64, min_count: usize) {
     let indexer = world.get_indexer(&indexer_name);
     assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
-    let resp = indexer.list_template_catalogue(None, Some(limit), Some(offset)).await;
+    let resp = indexer.list_template_catalogue(None, Some(limit), None).await;
     assert!(
         resp.entries.len() >= min_count,
-        "Catalogue with limit={} offset={} returned {} entries, expected at least {}",
+        "Catalogue with limit={} returned {} entries, expected at least {}",
         limit,
-        offset,
         resp.entries.len(),
         min_count
     );

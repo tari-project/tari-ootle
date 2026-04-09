@@ -6,15 +6,12 @@ export type ListTemplateCatalogueRequest = {
    */
   name_filter: string | null;
   /**
-   * Only return templates published at or after this epoch. Use for incremental sync.
-   */
-  since_epoch: bigint | null;
-  /**
    * Maximum number of entries to return (default: 20, max: 100).
    */
   limit: bigint | null;
   /**
-   * Number of entries to skip for pagination.
+   * Cursor: return entries inserted after the row with this template address.
+   * When omitted, returns from the beginning.
    */
-  offset: bigint | null;
+  after: string | null;
 };

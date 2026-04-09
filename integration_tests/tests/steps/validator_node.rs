@@ -17,7 +17,6 @@ use integration_tests::{
     validator_node::{ValidatorNodeProcess, spawn_validator_node},
 };
 use libp2p::Multiaddr;
-use log::warn;
 use minotari_app_grpc::tari_rpc::{RegisterValidatorNodeRequest, Signature};
 use notify::Watcher;
 use tari_base_node_client::{BaseNodeClient, grpc::GrpcBaseNodeClient};
@@ -649,12 +648,13 @@ async fn then_i_wait_for_validator_node_to_be_evicted(
             .expect("unexpected channel close")
             .unwrap_or_else(|err| panic!("Error when watching files {err}"));
 
-        if let notify::Event {
-            kind: notify::EventKind::Access(notify::event::AccessKind::Close(notify::event::AccessMode::Write)),
-            paths,
-            ..
-        } = event &&
-            let Some(json_file) = paths
+        let dominated = matches!(
+            event.kind,
+            notify::EventKind::Create(_) | notify::EventKind::Modify(_) | notify::EventKind::Access(_)
+        );
+        if dominated &&
+            let Some(json_file) = event
+                .paths
                 .into_iter()
                 .find(|p| p.extension().is_some_and(|ext| ext == "json") && p.is_file())
         {
@@ -715,11 +715,9 @@ async fn validator_not_member_of_network(world: &mut TariWorld, step: &Step, val
     let tip = client.get_tip_info().await.unwrap();
     let mut vns = client.get_validator_nodes(tip.height_of_longest_chain).await.unwrap();
     let has_vn = vns.any(|v| v.unwrap().public_key == vn.public_key).await;
-    if has_vn {
-        // TODO: investigate why this is flaky
-        warn!(
-            "Validator {} is a member of the network but expected it not to be",
-            validator
-        );
-    }
+    assert!(
+        !has_vn,
+        "Validator {} is a member of the network but expected it not to be",
+        validator
+    );
 }

@@ -106,7 +106,10 @@ export default function ListColumnFamilies() {
             sortingOrder={["desc", "asc", null]}
             disableMultipleRowSelection
             onRowSelectionModelChange={(selections) => {
-              onSelectedRowChange(selections[0]);
+              const first = selections.ids.values().next().value;
+              if (first !== undefined) {
+                onSelectedRowChange(first);
+              }
             }}
             checkboxSelection
           />

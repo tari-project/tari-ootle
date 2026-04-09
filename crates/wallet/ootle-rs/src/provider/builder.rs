@@ -11,6 +11,16 @@ use crate::{
     wallet::{NetworkWallet, NoWallet},
 };
 
+/// Builder for constructing a [`Provider`](super::Provider) connected to an Ootle indexer.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let provider = ProviderBuilder::new()
+///     .wallet(wallet)
+///     .connect("http://127.0.0.1:12500")
+///     .await?;
+/// ```
 #[derive(Debug)]
 pub struct ProviderBuilder<Wallet = NoWallet> {
     wallet: Wallet,

@@ -43,7 +43,8 @@ pub mod _macro_exports {
 /// - `{Name}::for_component(addr, &provider)` → component interface
 /// - `{Name}::for_template(addr, &provider)` → template interface
 ///
-/// Each generated method returns a [`ComponentInvokeBuilder`] that you chain with
+/// Each generated method returns a
+/// [`ComponentInvokeBuilder`](crate::builtin_templates::component::ComponentInvokeBuilder) that you chain with
 /// `.pay_fee()`, `.want_vault_for()`, `.prepare()`, etc.
 ///
 /// # Syntax

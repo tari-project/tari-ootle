@@ -25,6 +25,22 @@ use crate::{
 pub type WalletResult<T> = Result<T, WalletError>;
 type AddressHashMap<T> = HashMap<Address, T>;
 
+/// A wallet that manages multiple key providers and handles transaction signing.
+///
+/// `OotleWallet` can hold several key providers (each associated with an [`Address`]),
+/// with one designated as the default signer. It supports both standard account-key
+/// signing and stealth-key signing for confidential transactions.
+///
+/// Create a wallet from any type implementing [`WalletKeyProvider`]:
+///
+/// ```rust,ignore
+/// let signer = PrivateKeyProvider::random(Network::LocalNet);
+/// let mut wallet = OotleWallet::from(signer);
+///
+/// // Optionally register additional signers
+/// let second_signer = PrivateKeyProvider::random(Network::LocalNet);
+/// wallet.register_key_provider(second_signer);
+/// ```
 #[derive(Clone)]
 pub struct OotleWallet {
     default: Address,
@@ -65,8 +81,7 @@ impl OotleWallet {
     }
 
     /// Set the given signer as default.
-    /// This signer will be used to sign [`TransactionRequest`].
-    /// [`TransactionRequest`]: crate::types::TransactionRequest
+    /// This signer will be used to sign `TransactionRequest`s.
     pub fn set_default_signer(&mut self, address: &Address) -> WalletResult<()> {
         if self.key_providers.contains_key(address) {
             self.default = address.clone();

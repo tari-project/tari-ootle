@@ -53,7 +53,7 @@ export default function ListColumnFamilies() {
     },
   ];
 
-  const onSelectedRowChange = (selection: string | number) => {
+  const onSelectedRowChange = (selection: string | number | null) => {
     setSelectedCf(selection);
   };
 
@@ -107,9 +107,7 @@ export default function ListColumnFamilies() {
             disableMultipleRowSelection
             onRowSelectionModelChange={(selections) => {
               const first = selections.ids.values().next().value;
-              if (first !== undefined) {
-                onSelectedRowChange(first);
-              }
+              onSelectedRowChange(first ?? null);
             }}
             checkboxSelection
           />

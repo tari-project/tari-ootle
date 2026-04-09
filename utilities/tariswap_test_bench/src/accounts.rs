@@ -29,19 +29,15 @@ impl Runner {
             .key_manager_api()
             .get_public_key(KeyId::derived(KeyBranch::Account, 0))?;
         let owner_public_key = owner_key.public_key.to_byte_type();
-        let account_address = self
-            .sdk
-            .accounts_api()
-            .derive_account_address_from_public_key(&owner_public_key);
 
         let transaction = self
             .new_transaction_builder()
             .with_fee_instructions_builder(|builder| {
                 builder
-                    .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![])
-                    .put_last_instruction_output_on_workspace("coins")
-                    .create_account_with_bucket(owner_public_key, "coins")
-                    .pay_fee_from_component(account_address, 1000u64)
+                    .create_account(owner_public_key)
+                    .put_last_instruction_output_on_workspace("account")
+                    .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Workspace("account")])
+                    .pay_fee_from_component("account", 1000u64)
             })
             .with_inputs([
                 SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
@@ -107,19 +103,15 @@ impl Runner {
         let mut pending = Vec::with_capacity(num_accounts);
         for (owner_key, account_key) in &owners {
             let owner_public_key = owner_key.public_key.to_byte_type();
-            let account_address = self
-                .sdk
-                .accounts_api()
-                .derive_account_address_from_public_key(&owner_public_key);
 
             let transaction = self
                 .new_transaction_builder()
                 .with_fee_instructions_builder(|builder| {
                     builder
-                        .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![])
-                        .put_last_instruction_output_on_workspace("coins")
-                        .create_account_with_bucket(owner_public_key, "coins")
-                        .pay_fee_from_component(account_address, 1000u64)
+                        .create_account(owner_public_key)
+                        .put_last_instruction_output_on_workspace("account")
+                        .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Workspace("account")])
+                        .pay_fee_from_component("account", 1000u64)
                 })
                 .with_inputs([
                     SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),

@@ -33,19 +33,18 @@ use crate::{
 
 /// Utility for managing components inside templates
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
-pub struct ComponentManager {
-    address: ComponentAddress,
-}
+#[serde(transparent)]
+pub struct ComponentManager(ComponentAddress);
 
 impl ComponentManager {
     /// Returns a new `ComponentManager` for the component specified by `address`
     pub(crate) fn new(address: ComponentAddress) -> Self {
-        Self { address }
+        Self(address)
     }
 
     /// Returns the address of the component that is being managed
     pub fn get(address: ComponentAddress) -> Self {
-        Self { address }
+        Self(address)
     }
 
     /// Returns the address of the component that is being called in the current instruction.
@@ -59,7 +58,7 @@ impl ComponentManager {
     /// context.
     pub fn call<T: Into<String>, R: DeserializeOwned, B: Into<Bytes>>(&self, method: T, args: Vec<B>) -> R {
         self.call_internal(CallMethodArg {
-            component_address: self.address,
+            component_address: self.0,
             method: method.into(),
             args: args.into_iter().map(Into::into).collect(),
         })
@@ -83,7 +82,7 @@ impl ComponentManager {
     /// Get the component state
     pub fn get_state<T: DeserializeOwned>(&self) -> T {
         let result = call_engine::<_, InvokeResult>(EngineOp::ComponentInvoke, &ComponentInvokeArg {
-            component_ref: ComponentRef::Ref(self.address),
+            component_ref: ComponentRef::Ref(self.0),
             action: ComponentAction::GetState,
             args: invoke_args![],
         });
@@ -95,7 +94,7 @@ impl ComponentManager {
     pub fn set_state<T: Serialize>(&self, state: T) {
         let state = to_value(&state).expect("Failed to encode component state");
         let _result = call_engine::<_, InvokeResult>(EngineOp::ComponentInvoke, &ComponentInvokeArg {
-            component_ref: ComponentRef::Ref(self.address),
+            component_ref: ComponentRef::Ref(self.0),
             action: ComponentAction::SetState,
             args: invoke_args![state],
         });
@@ -105,7 +104,7 @@ impl ComponentManager {
     /// It will panic if the caller doesn't have permissions for updating access rules
     pub fn set_access_rules(&self, access_rules: ComponentAccessRules) {
         call_engine::<_, InvokeResult>(EngineOp::ComponentInvoke, &ComponentInvokeArg {
-            component_ref: ComponentRef::Ref(self.address),
+            component_ref: ComponentRef::Ref(self.0),
             action: ComponentAction::SetAccessRules,
             args: invoke_args![access_rules],
         });
@@ -114,7 +113,7 @@ impl ComponentManager {
     /// Returns the template address of the component that is being managed
     pub fn get_template_address(&self) -> TemplateAddress {
         let result = call_engine::<_, InvokeResult>(EngineOp::ComponentInvoke, &ComponentInvokeArg {
-            component_ref: ComponentRef::Ref(self.address),
+            component_ref: ComponentRef::Ref(self.0),
             action: ComponentAction::GetTemplateAddress,
             args: invoke_args![],
         });
@@ -124,7 +123,7 @@ impl ComponentManager {
 
     pub fn get_owner_proof(&self) -> Proof {
         let result = call_engine::<_, InvokeResult>(EngineOp::ComponentInvoke, &ComponentInvokeArg {
-            component_ref: ComponentRef::Ref(self.address),
+            component_ref: ComponentRef::Ref(self.0),
             action: ComponentAction::GetOwnerProof,
             args: invoke_args![],
         });
@@ -133,6 +132,6 @@ impl ComponentManager {
     }
 
     pub fn component_address(&self) -> ComponentAddress {
-        self.address
+        self.0
     }
 }

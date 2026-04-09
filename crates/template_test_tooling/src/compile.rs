@@ -91,6 +91,6 @@ where
         .join(wasm_name)
         .with_extension("wasm");
 
-    let code = fs::read(path)?;
+    let code = fs::read(path).map_err(|e| io::Error::other(format!("Failed to read wasm file: {}", e)))?;
     Ok(WasmModule::from_code(code))
 }

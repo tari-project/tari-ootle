@@ -19,6 +19,7 @@ use tari_template_lib::types::{
     TemplateAddress,
     address_prefixes,
     crypto::RistrettoPublicKeyBytes,
+    newtype_struct_serde_impl,
 };
 
 use crate::{
@@ -45,20 +46,7 @@ pub struct PublishedTemplateMetadata {
 
 const TAG: u64 = BinaryTag::TemplateAddress.as_u64();
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    borsh::BorshSerialize,
-    borsh::BorshDeserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, borsh::BorshSerialize, borsh::BorshDeserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PublishedTemplateAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
@@ -124,6 +112,8 @@ impl AsRef<[u8]> for PublishedTemplateAddress {
         self.0.as_ref()
     }
 }
+
+newtype_struct_serde_impl!(PublishedTemplateAddress, BorTag<ObjectKey, TAG>);
 
 pub type TemplateBlob = MaxBytes<{ limits::ENGINE_LIMITS.max_template_binary_size_bytes }>;
 

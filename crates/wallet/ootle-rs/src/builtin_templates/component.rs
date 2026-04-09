@@ -37,7 +37,7 @@ pub struct ComponentInterface {
 
 /// Trait for extracting the inner builder and want list from any ootle builder.
 ///
-/// This enables [`OotleInvoke::chain`] to merge instructions from one builder into another,
+/// This enables [`TransactionBuildable::chain`] to merge instructions from one builder into another,
 /// allowing cross-template transaction composition.
 pub trait IntoBuildParts {
     fn into_build_parts(self) -> (TransactionBuilder, HashSet<WantInput>);
@@ -45,7 +45,7 @@ pub trait IntoBuildParts {
 
 /// Shared builder operations available on both macro-generated template structs and
 /// [`ComponentInvokeBuilder`]. All methods return `Self` for fluent chaining.
-pub trait OotleInvoke: Sized {
+pub trait TransactionBuildable: Sized {
     /// Pay fees from the default signer's account.
     fn pay_fee<A: Into<Amount>>(self, amount: A) -> Self;
 
@@ -80,7 +80,7 @@ pub trait OotleInvoke: Sized {
     ///
     /// Note: workspace references do NOT cross `chain` boundaries. If you need to
     /// reference a workspace item from the outer builder inside the chained builder,
-    /// use [`OotleInvoke::then`] instead.
+    /// use [`TransactionBuildable::then`] instead.
     fn chain<B: IntoBuildParts>(self, other: B) -> Self;
 }
 
@@ -119,7 +119,7 @@ impl<'a, P: Provider> IntoBuildParts for ComponentInvokeBuilder<'a, P> {
     }
 }
 
-impl<'a, P: Provider> OotleInvoke for ComponentInvokeBuilder<'a, P> {
+impl<'a, P: Provider> TransactionBuildable for ComponentInvokeBuilder<'a, P> {
     fn pay_fee<A: Into<Amount>>(mut self, amount: A) -> Self {
         let component_addr = self.provider.default_signer_address().to_account_address();
         self.want_list.insert(WantInput::VaultForResource {

@@ -7,6 +7,8 @@ use tari_ootle_common_types::SubstateRequirement;
 use tari_ootle_transaction::{TransactionBuilder, UnsignedTransaction, args};
 use tari_template_lib_types::{
     Amount,
+    ComponentAddress,
+    ResourceAddress,
     UtxoAddress,
     constants::{
         TARI_TOKEN,
@@ -20,7 +22,11 @@ use tari_template_lib_types::{
 use crate::{
     Address,
     ToAccountAddress,
-    builtin_templates::UnsignedTransactionBuilder,
+    builtin_templates::{
+        UnsignedTransactionBuilder,
+        component::{IntoBuildParts, TransactionBuildable},
+    },
+    macros::_macro_exports::SubstateId,
     provider::{Provider, ProviderError, WantInput},
 };
 
@@ -86,24 +92,20 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
         format!("__AccountInvokeBuilder_{}", self.builder.next_workspace_id())
     }
 
-    pub fn take_faucet_funds_stealth(
-        mut self,
-        transfer: StealthTransferStatement,
-        pay_revealed_amount_as_fees: bool,
-    ) -> Self {
+    pub fn into_stealth_transfer(mut self, transfer: StealthTransferStatement) -> Self {
         let amount = transfer.inputs_statement.revealed_amount;
         if !amount.is_positive() {
             panic!("Transfer amount must be positive");
         }
+        let bucket_name = self.next_workspace_name();
 
-        let has_revealed_output = transfer.outputs_statement.revealed_output_amount.is_positive();
-        let workspace_names = has_revealed_output.then(|| {
-            (
-                (!pay_revealed_amount_as_fees).then(|| self.next_workspace_name()),
-                self.next_workspace_name(),
-            )
-        });
-        let recipient_account_pk = *self.default_signer_address().account_public_key();
+        let Some(account_name) = self.account_workspace_name.as_ref() else {
+            // TODO: make this panic impossible
+            panic!(
+                "Call take_faucet_funds() before converting to a stealth transfer to ensure the builder has the \
+                 necessary workspace for revealed outputs and fee payment"
+            );
+        };
 
         // Request all UTXO inputs
         for input in &transfer.inputs_statement.inputs {
@@ -115,34 +117,25 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
 
         self.builder = self.builder.with_fee_instructions_builder(|builder| {
             builder
-                .add_input(XTR_FAUCET_VAULT_ADDRESS)
-                .add_input(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS)
-                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take_confidential", args![transfer])
-                .then(|builder| {
-                    if let Some((account_ws_name, bucket_name)) = &workspace_names {
-                        if let Some(account_ws_name) = account_ws_name {
-                            builder
-                                .put_last_instruction_output_on_workspace(bucket_name)
-                                // Create the recipient account if it doesn't exist
-                                .create_account_with_bucket(recipient_account_pk, bucket_name)
-                                .put_last_instruction_output_on_workspace(account_ws_name)
-                        } else {
-                            builder
-                                .put_last_instruction_output_on_workspace(bucket_name)
-                                .pay_fee_from_bucket(bucket_name)
-                        }
-                    } else {
-                        builder
-                    }
-                })
+                .call_method(account_name, "withdraw", args![TARI_TOKEN, amount])
+                .put_last_instruction_output_on_workspace(&bucket_name)
+                .stealth_transfer_with_input_bucket(TARI_TOKEN, transfer, bucket_name)
         });
-        self.account_workspace_name = workspace_names.and_then(|(account_ws_name, _)| account_ws_name);
+        self
+    }
+
+    pub fn and_pay_fee_from_revealed_output(mut self) -> Self {
+        let bucket_name = self.next_workspace_name();
+        self.builder = self.builder.with_fee_instructions_builder(|builder| {
+            builder
+                .put_last_instruction_output_on_workspace(&bucket_name)
+                .pay_fee_from_bucket(bucket_name)
+        });
         self
     }
 
     /// Takes the fixed faucet amount (1,000 TARI) and deposits them into the default signer's account.
     pub fn take_faucet_funds(mut self) -> Self {
-        let bucket_name = self.next_workspace_name();
         let recipient_account_pk = *self.default_signer_address().account_public_key();
         let recipient_account_addr = self.default_signer_address().to_account_address();
         self.want_list.insert(WantInput::VaultForResource {
@@ -159,15 +152,75 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
         let account_name = self.next_workspace_name();
         self.builder = self.builder.with_fee_instructions_builder(|builder| {
             builder
-                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![])
+                // Create the recipient account if it doesn't exist
+                .create_account(recipient_account_pk)
+                .put_last_instruction_output_on_workspace(&account_name)
+                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Workspace(&account_name)])
                 .add_input(XTR_FAUCET_VAULT_ADDRESS)
                 .add_input(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS)
-                .put_last_instruction_output_on_workspace(&bucket_name)
-                // Create the recipient account if it doesn't exist
-                .create_account_with_bucket(recipient_account_pk, &bucket_name)
-                .put_last_instruction_output_on_workspace(&account_name)
         });
         self.account_workspace_name = Some(account_name);
+        self
+    }
+}
+
+impl<P: Provider> TransactionBuildable for FaucetInvokeBuilder<'_, P> {
+    fn pay_fee<A: Into<Amount>>(mut self, amount: A) -> Self {
+        let component_addr = self.provider.default_signer_address().to_account_address();
+        self.want_list.insert(WantInput::VaultForResource {
+            component_address: component_addr,
+            resource_address: TARI_TOKEN,
+            required: true,
+        });
+        self.builder = self.builder.pay_fee_from_component(component_addr, amount);
+        self
+    }
+
+    fn want_vault_for(
+        mut self,
+        component_address: ComponentAddress,
+        resource_address: ResourceAddress,
+        required: bool,
+    ) -> Self {
+        self.want_list.insert(WantInput::VaultForResource {
+            component_address,
+            resource_address,
+            required,
+        });
+        self
+    }
+
+    fn want_substate(mut self, substate_id: SubstateId, required: bool) -> Self {
+        self.want_list
+            .insert(WantInput::SpecificSubstate { substate_id, required });
+        self
+    }
+
+    fn want_all_vaults(mut self, component_address: ComponentAddress) -> Self {
+        self.want_list
+            .insert(WantInput::AllComponentVaults { component_address });
+        self
+    }
+
+    fn put_last_instruction_output_on_workspace<T: Into<String>>(mut self, label: T) -> Self {
+        self.builder = self.builder.put_last_instruction_output_on_workspace(label);
+        self
+    }
+
+    fn add_input<S: Into<SubstateRequirement>>(mut self, substate_id: S) -> Self {
+        self.builder = self.builder.add_input(substate_id);
+        self
+    }
+
+    fn then<F: FnOnce(TransactionBuilder) -> TransactionBuilder>(mut self, f: F) -> Self {
+        self.builder = f(self.builder);
+        self
+    }
+
+    fn chain<B: IntoBuildParts>(mut self, other: B) -> Self {
+        let (other_builder, other_wants) = other.into_build_parts();
+        self.builder = self.builder.merge(other_builder);
+        self.want_list.extend(other_wants);
         self
     }
 }

@@ -16,40 +16,32 @@ mod template {
     impl XtrFaucet {
         /// Mints a claim-receipt NFT keyed to the caller's public key, then immediately burns it.
         /// The burned substate key persists on-chain, so a second attempt panics with DuplicateNonFungibleId.
-        fn record_claim(&self) {
-            let pk = CallerContext::transaction_signer_public_key();
-            let receipt = ResourceManager::get(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS)
-                .mint_non_fungible(NonFungibleId::from_public_key(pk), &(), &());
+        fn record_claim(&self, address: ComponentAddress) {
+            let receipt = ResourceManager::get(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS).mint_non_fungible(
+                NonFungibleId::from_u256(address.as_object_key().into_array()),
+                &(),
+                &(),
+            );
             receipt.burn();
         }
 
-        /// Gives exactly 1,000 TARI to the caller. Can only be called once per signing public key.
-        pub fn take(&self) -> Bucket {
-            self.record_claim();
+        /// Gives exactly 1,000 TARI to the caller. Can only be called once per component.
+        pub fn take(&self, component: ComponentManager) {
+            self.record_claim(component.component_address());
             emit_event("take", metadata!["amount" => FAUCET_AMOUNT.to_string()]);
-            self.vault.withdraw(FAUCET_AMOUNT)
+            let bucket = self.vault.withdraw(FAUCET_AMOUNT);
+            component.invoke("deposit", args!(bucket));
         }
 
-        pub fn take_confidential(&self, transfer: StealthTransferStatement) -> Option<Bucket> {
-            let amount = transfer.inputs_statement.revealed_amount;
-            assert!(
-                amount <= FAUCET_AMOUNT,
-                "Requested amount {} exceeds faucet max of {}",
-                amount,
-                FAUCET_AMOUNT
-            );
-
-            self.record_claim();
-            emit_event("take", metadata![
-                "amount" => amount.to_string(),
-                "confidential" => "true".to_string()
-            ]);
-
-            // The faucet adds the revealed amount to the transfer
-            let revealed_bucket = self.vault.withdraw(amount);
-            self.vault
-                .get_resource_manager()
-                .stealth_transfer_with_opt_input_bucket(transfer, Some(revealed_bucket))
+        /// Gives exactly 1,000 TARI to the caller using a proof to authorize the deposit. Can only be called once per
+        /// component.
+        pub fn take_with_proof(&self, proof: Proof, component: ComponentManager) {
+            self.record_claim(component.component_address());
+            emit_event("take", metadata!["amount" => FAUCET_AMOUNT.to_string()]);
+            let bucket = self.vault.withdraw(FAUCET_AMOUNT);
+            proof.authorize_with(|| {
+                component.invoke("deposit", args!(bucket));
+            })
         }
     }
 }

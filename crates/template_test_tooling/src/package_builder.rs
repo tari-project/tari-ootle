@@ -111,9 +111,10 @@ impl PackageBuilder {
         K: AsRef<OsStr>,
         V: AsRef<OsStr>,
     {
-        let wasm = compile_template_with_envs(path, features, envs).unwrap();
+        let wasm = compile_template_with_envs(path.as_ref(), features, envs)
+            .unwrap_or_else(|e| panic!("Failed to compile template {}: {}", path.as_ref().display(), e));
         let template_addr = hash_template_code(wasm.code());
-        let wasm = wasm.load_template().unwrap();
+        let wasm = wasm.load_template().expect("failed to load template");
         self.add_loaded_template(template_addr, wasm);
         template_addr
     }

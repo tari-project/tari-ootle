@@ -730,10 +730,9 @@ pub async fn handle_create_free_test_coins(
         .transaction_builder()
         .with_fee_instructions_builder(|fee_builder| {
             fee_builder
-                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![])
-                .put_last_instruction_output_on_workspace("faucet_funds")
-                .create_account_with_bucket(*account.address.account_public_key(), "faucet_funds")
+                .create_account(*account.address.account_public_key())
                 .put_last_instruction_output_on_workspace("new_account")
+                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Workspace("new_account")])
                 .call_method("new_account", "pay_fee", args![max_fee])
         })
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))

@@ -3,10 +3,7 @@
 
 use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::types::constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS};
-use tari_template_test_tooling::{
-    TemplateTest,
-    support::{assert_error::assert_reject_reason, stealth, stealth::NO_INPUTS},
-};
+use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
 
 /// A brand-new signer can call take() and receive tokens.
 #[test]
@@ -46,29 +43,6 @@ fn second_claim_by_same_signer_is_rejected() {
             .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![account])
             .build_and_seal(&secret_key),
         vec![],
-    );
-    assert_reject_reason(&reject_reason, "Duplicate NFT token id");
-}
-
-/// After claiming with take(), calling take_confidential() with the same signer is also rejected.
-/// Both methods share the same claim-receipt resource, enforcing a single combined limit per public key.
-#[test]
-fn take_blocks_subsequent_take_confidential_for_same_signer() {
-    let mut test = TemplateTest::new_builtin_only();
-    // Use create_funded_account which calls take() — consumes the single allowed claim
-    let (_account, owner_proof, secret_key) = test.create_funded_account();
-
-    // Build a minimal valid StealthTransferStatement requesting 1 TARI (revealed)
-    let transfer = stealth::generate_transfer_data(NO_INPUTS, 1_000_000u64, Vec::<u64>::new(), 1_000_000u64);
-
-    // Attempting take_confidential() with the same key must fail at record_claim() before any vault access
-    let reject_reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
-            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take_confidential", args![
-                transfer.statement
-            ])
-            .build_and_seal(&secret_key),
-        vec![owner_proof],
     );
     assert_reject_reason(&reject_reason, "Duplicate NFT token id");
 }

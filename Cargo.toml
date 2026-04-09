@@ -111,7 +111,7 @@ tari_rpc_framework = { path = "networking/rpc_framework" }
 tari_rpc_macros = { path = "networking/rpc_macros" }
 tari_swarm = { path = "networking/swarm" }
 tari_validator_node_client = { path = "clients/validator_node_client" }
-tari_ootle_walletd_client = { path = "clients/wallet_daemon_client", version = "0.28" }
+tari_ootle_walletd_client = { path = "clients/wallet_daemon_client", version = "0.29" }
 transaction_generator = { path = "utilities/transaction_generator" }
 
 # Dependency crates on crates.io (update versions here as well when updating the workspace version)

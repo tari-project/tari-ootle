@@ -18,8 +18,20 @@ use crate::{
     provider::{Provider, ProviderError, WantInput},
 };
 
+/// Alias for [`AccountInvokeBuilder`].
 pub type IAccount<'a, P> = AccountInvokeBuilder<'a, P>;
 
+/// Builder for constructing transactions against the built-in Account template.
+///
+/// Supports public transfers, fee payment, and template publishing.
+///
+/// ```rust,ignore
+/// let tx = IAccount::new(&provider)
+///     .pay_fee(1000u64)
+///     .public_transfer(&recipient, TARI_TOKEN, 1_000_000u64)
+///     .prepare()
+///     .await?;
+/// ```
 pub struct AccountInvokeBuilder<'a, P> {
     builder: TransactionBuilder,
     provider: &'a P,

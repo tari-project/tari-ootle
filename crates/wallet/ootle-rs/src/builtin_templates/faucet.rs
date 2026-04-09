@@ -30,8 +30,18 @@ use crate::{
     provider::{Provider, ProviderError, WantInput},
 };
 
+/// Alias for [`FaucetInvokeBuilder`].
 pub type IFaucet<'a, P> = FaucetInvokeBuilder<'a, P>;
 
+/// Builder for claiming free tokens from the testnet faucet.
+///
+/// ```rust,ignore
+/// let tx = IFaucet::new(&provider)
+///     .pay_fee(1000u64)
+///     .take_free_coins(500_000_000u64)
+///     .prepare()
+///     .await?;
+/// ```
 pub struct FaucetInvokeBuilder<'a, P> {
     builder: TransactionBuilder,
     provider: &'a P,

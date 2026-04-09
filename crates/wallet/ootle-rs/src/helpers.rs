@@ -3,6 +3,10 @@
 
 use tari_ootle_common_types::Network;
 
+/// Returns the default indexer URL for the given network.
+///
+/// Currently configured for `LocalNet` (`http://localhost:12500`) and
+/// `Esmeralda` (`https://ootle-indexer-a.tari.com/`). Other networks are not yet configured.
 pub fn default_indexer_url(network: Network) -> &'static str {
     match network {
         Network::MainNet => unimplemented!("MainNet indexer URL is not set"),

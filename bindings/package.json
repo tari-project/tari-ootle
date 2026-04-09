@@ -21,7 +21,7 @@
     "build-dev": "tsc",
     "build-full": "pnpm run gen && pnpm run build",
     "build": "pnpm run fmt && tsc --project tsconfig.prod.json && echo '✅ Build complete!'",
-    "gen": "sh build.sh'",
+    "gen": "sh build.sh",
     "fmt": "pnpm npx prettier --write \"./**/*.{ts,tsx,css,json}\" --log-level=warn",
     "test": "vitest run"
   },

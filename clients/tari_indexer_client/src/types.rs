@@ -178,13 +178,13 @@ pub struct ListTemplatesRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ListTemplatesResponse {
-    pub templates: Vec<TemplateMetadata>,
+    pub templates: Vec<TemplateMeta>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct TemplateMetadata {
+pub struct TemplateMeta {
     pub name: String,
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub address: TemplateAddress,

@@ -138,6 +138,7 @@ export * from "./types/SubstateType";
 export * from "./types/SubstateValue";
 export * from "./types/TemplateDef";
 export * from "./types/TemplateDefV1";
+export * from "./types/TemplateMetadata";
 export * from "./types/TimeoutCertificate";
 export * from "./types/Transaction";
 export * from "./types/TransactionAtom";

@@ -3,7 +3,7 @@ import type { Epoch } from "../Epoch";
 import type { Hash32 } from "../Hash32";
 import type { RistrettoPublicKeyBytes } from "../RistrettoPublicKeyBytes";
 
-export type TemplateMetadata = {
+export type TemplateMeta = {
   name: string;
   address: Hash32;
   binary_sha: Hash32;

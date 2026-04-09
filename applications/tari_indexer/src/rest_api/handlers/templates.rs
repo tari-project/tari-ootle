@@ -14,7 +14,7 @@ use tari_indexer_client::types::{
     ListTemplatesRequest,
     ListTemplatesResponse,
     TemplateCatalogueItem,
-    TemplateMetadata,
+    TemplateMeta,
 };
 use tari_ootle_common_types::optional::Optional;
 use tari_ootle_storage::global::TemplateStatus;
@@ -98,7 +98,7 @@ pub async fn list_cached_templates(
 
     let templates = templates
         .into_iter()
-        .map(|t| TemplateMetadata {
+        .map(|t| TemplateMeta {
             name: t.name,
             address: t.address,
             binary_sha: t.binary_sha,

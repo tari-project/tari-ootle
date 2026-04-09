@@ -109,30 +109,50 @@ async fn indexer_scans_network_events(
     let account = world.wallet_accounts.get(&account_name).unwrap_or_else(|| {
         panic!("No wallet account found with name {}", account_name);
     });
+    let account_addr = account.component_address().to_string();
+    let expected_topics = topics_str.split(',').map(|s| s.to_string()).collect::<Vec<_>>();
+
     let mut graphql_client = indexer.get_graphql_indexer_client().await;
     let query = r#"{ getEvents { substateId, templateAddress, txHash, topic, payload } }"#.to_string();
-    let res = graphql_client
-        .send_request::<HashMap<String, Vec<tari_indexer::graphql::model::events::Event>>>(&query, None, None)
-        .await
-        .expect("Failed to obtain getEvents query result");
 
-    let events = res.get("getEvents").unwrap();
-    let topics_for_component = events
-        .iter()
-        .filter(|e| e.substate_id == Some(account.component_address().to_string()))
-        .map(|e| e.topic.as_str())
-        .collect::<HashSet<_>>();
+    let mut remaining_attempts = 10;
+    loop {
+        let res = graphql_client
+            .send_request::<HashMap<String, Vec<tari_indexer::graphql::model::events::Event>>>(&query, None, None)
+            .await
+            .expect("Failed to obtain getEvents query result");
 
-    let expected_topics = topics_str.split(',');
-    for (ind, topic) in expected_topics.enumerate() {
-        assert!(
-            topics_for_component.contains(topic),
-            "Unexpected topic at index {}. Events emitted were {}. Expected topic {} (ALL {:?})",
-            ind,
-            topics_for_component.display(),
-            topic,
-            events
+        let events = res.get("getEvents").unwrap();
+        let topics_for_component = events
+            .iter()
+            .filter(|e| e.substate_id == Some(account_addr.clone()))
+            .map(|e| e.topic.as_str())
+            .collect::<HashSet<_>>();
+
+        let is_all_topics_found = expected_topics.iter().all(|t| topics_for_component.contains(t.as_str()));
+
+        if is_all_topics_found {
+            return;
+        }
+
+        remaining_attempts -= 1;
+        if remaining_attempts == 0 {
+            panic!(
+                "Timed out waiting for events. Events emitted for {} were {}. Expected topics: {:?} (ALL events: {:?})",
+                account_addr,
+                topics_for_component.display(),
+                expected_topics,
+                events
+            );
+        }
+
+        eprintln!(
+            "Waiting for events for {} ({} attempts remaining, found: {})",
+            account_addr,
+            remaining_attempts,
+            topics_for_component.display()
         );
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 }
 

@@ -31,6 +31,7 @@ use tari_indexer::{
     run_indexer,
 };
 use tari_indexer_client::{
+    error::IndexerRestClientError,
     graphql_client::IndexerGraphQLClient,
     rest_api_client::IndexerRestApiClient,
     types::{
@@ -88,6 +89,22 @@ impl IndexerProcess {
             })
             .await
             .unwrap()
+    }
+
+    pub async fn try_get_substate(
+        &self,
+        world: &TariWorld,
+        output_ref: &str,
+        version: u32,
+    ) -> Result<GetSubstateResponse, IndexerRestClientError> {
+        let address = get_address_from_output(world, output_ref.to_string());
+        let client = self.get_indexer_client();
+        client
+            .get_substate(address, GetSubstateRequest {
+                version: Some(version),
+                local_search_only: true,
+            })
+            .await
     }
 
     pub async fn get_non_fungibles(

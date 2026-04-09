@@ -119,9 +119,8 @@ pub async fn list_cached_templates(
     description = "List templates discovered on the network via the template catalogue",
     params(
         ("name_filter" = Option<String>, Query, description = "Substring filter on template name"),
-        ("since_epoch" = Option<u64>, Query, description = "Only return templates published at or after this epoch. Use for incremental sync: pass the highest at_epoch from the previous response + 1"),
         ("limit" = Option<u64>, Query, description = "Maximum entries to return (default: 20, max: 100)"),
-        ("offset" = Option<u64>, Query, description = "Number of entries to skip for pagination"),
+        ("after" = Option<String>, Query, description = "Cursor: return entries inserted after the row with this template address. Omit to start from the beginning"),
     ),
     responses(
         (status = 200, description = "Template catalogue entries", body = ListTemplateCatalogueResponse),
@@ -139,14 +138,10 @@ pub async fn list_template_catalogue(
             "Limit must be between 1 and 100".to_string(),
         ));
     }
-    let offset = req.offset.unwrap_or(0);
-    if offset > i64::MAX as u64 {
-        return Err(ErrorResponse::bad_request("Offset is too large".to_string()));
-    }
 
     let entries = context
         .read_only_store()
-        .list_template_catalogue(req.name_filter.as_deref(), req.since_epoch, limit, offset)
+        .list_template_catalogue(req.name_filter.as_deref(), req.after.as_ref(), limit)
         .map_err(ErrorResponse::anyhow)?
         .into_iter()
         .map(TemplateCatalogueItem::from)

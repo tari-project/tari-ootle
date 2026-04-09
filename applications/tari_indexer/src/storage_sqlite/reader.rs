@@ -732,9 +732,8 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
     fn list_template_catalogue(
         &mut self,
         name_filter: Option<&str>,
-        since_epoch: Option<u64>,
+        after: Option<&TemplateAddress>,
         limit: u64,
-        offset: u64,
     ) -> Result<Vec<TemplateCatalogueEntry>, StorageError> {
         const OPERATION: &str = "list_template_catalogue";
         use crate::storage_sqlite::schema::template_catalogue;
@@ -752,13 +751,25 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             );
         }
 
-        if let Some(epoch) = since_epoch {
-            query = query.filter(template_catalogue::at_epoch.ge(epoch as i64));
+        if let Some(after_address) = after {
+            let after_hex = hex::encode(after_address.as_slice());
+            let cursor_id = template_catalogue::table
+                .select(template_catalogue::id)
+                .filter(template_catalogue::template_address.eq(&after_hex))
+                .first::<i32>(self.connection())
+                .optional()
+                .map_err(|e| StorageError::QueryError {
+                    reason: format!("{OPERATION}: cursor lookup: {e}"),
+                })?
+                .ok_or_else(|| StorageError::QueryError {
+                    reason: format!("{OPERATION}: cursor template address {after_address} not found"),
+                })?;
+
+            query = query.filter(template_catalogue::id.gt(cursor_id));
         }
 
         let rows = query
             .limit(limit as i64)
-            .offset(offset as i64)
             .load::<TemplateCatalogueRow>(self.connection())
             .map_err(|e| StorageError::QueryError {
                 reason: format!("{OPERATION}: {e}"),

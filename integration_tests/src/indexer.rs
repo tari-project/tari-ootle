@@ -123,15 +123,14 @@ impl IndexerProcess {
         &self,
         name_filter: Option<String>,
         limit: Option<u64>,
-        offset: Option<u64>,
+        after: Option<TemplateAddress>,
     ) -> ListTemplateCatalogueResponse {
         let client = self.get_indexer_client();
         client
             .list_template_catalogue(ListTemplateCatalogueRequest {
                 name_filter,
-                since_epoch: None,
                 limit,
-                offset,
+                after,
             })
             .await
             .unwrap()

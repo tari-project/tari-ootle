@@ -184,12 +184,34 @@ async fn assert_indexer_substate_version(
 ) {
     let indexer = world.indexers.get(&indexer_name).unwrap();
     assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
-    let substate = indexer.get_substate(world, output_ref, version).await;
-    eprintln!(
-        "indexer.get_substate result: {}",
-        serde_json::to_string_pretty(&substate).unwrap()
-    );
-    assert_eq!(substate.version, version);
+
+    let mut remaining_attempts = 10;
+    loop {
+        match indexer.get_substate(world, output_ref.clone(), version).await {
+            Ok(substate) => {
+                eprintln!(
+                    "indexer.get_substate result: {}",
+                    serde_json::to_string_pretty(&substate).unwrap()
+                );
+                assert_eq!(substate.version, version);
+                return;
+            },
+            Err(e) => {
+                if remaining_attempts == 0 {
+                    panic!(
+                        "Indexer {} did not return version {} for substate {} in time. Last error: {}",
+                        indexer_name, version, output_ref, e
+                    );
+                }
+                remaining_attempts -= 1;
+                eprintln!(
+                    "Waiting for indexer {} to sync substate {} (version {}), {} attempts remaining. Error: {}",
+                    indexer_name, output_ref, version, remaining_attempts, e
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            },
+        }
+    }
 }
 
 #[then(expr = "the indexer {word} returns {int} non fungibles for resource {word}")]

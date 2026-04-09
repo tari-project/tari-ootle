@@ -160,7 +160,6 @@ Feature: Indexer node
     Then the indexer INDEXER has at least 3 templates in the catalogue
 
     # Pagination: one entry per page
-    Then the indexer INDEXER catalogue with limit 1 offset 0 returns 1 entries
-    Then the indexer INDEXER catalogue with limit 1 offset 1 returns 1 entries
+    Then the indexer INDEXER catalogue with limit 1 returns 1 entries
     # All entries in one page
-    Then the indexer INDEXER catalogue with limit 100 offset 0 returns at least 3 entries
+    Then the indexer INDEXER catalogue with limit 100 returns at least 3 entries

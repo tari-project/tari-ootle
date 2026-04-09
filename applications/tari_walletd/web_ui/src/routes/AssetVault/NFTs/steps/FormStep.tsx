@@ -20,7 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Alert, Avatar, Divider, InputLabel, Stack } from "@mui/material";
+import { useAddressBookList } from "@api/hooks/useAddressBook";
+import { Alert, Autocomplete, Avatar, Divider, InputLabel, Stack } from "@mui/material";
 import Button from "@mui/material/Button";
 import Checkbox from "@mui/material/Checkbox";
 import ListItemText from "@mui/material/ListItemText";
@@ -83,6 +84,12 @@ export default function FormStep({
   onNftsChange,
   onPayerAccountChange,
 }: FormStepProps) {
+  const { data: addressBookData } = useAddressBookList();
+  const addressBookOptions = (addressBookData?.entries ?? []).map((e) => ({
+    label: `${e.name} (${e.address.slice(0, 16)}...)`,
+    value: e.address,
+  }));
+
   const hasBatchSelection = preSelectedNfts?.length;
   const { transferFormState, disabled, updateFormValue } = useNftTransferStore();
   const selectedNftIds = useMemo(() => new Set(transferFormState.nfts.map(nftIdToString)), [transferFormState.nfts]);
@@ -157,20 +164,41 @@ export default function FormStep({
           </>
         )}
 
-        <TextField
-          name="targetAccountAddress"
-          label="To Account address"
-          value={transferFormState.targetAccountAddress}
-          required
-          onChange={setFormValue}
-          style={{ flexGrow: 1 }}
+        <Autocomplete
+          freeSolo
+          options={addressBookOptions}
+          inputValue={transferFormState.targetAccountAddress}
+          onInputChange={(_e, newValue, reason) => {
+            if (reason === "input" || reason === "clear") {
+              const syntheticEvent = {
+                target: { name: "targetAccountAddress", value: newValue, validity: { valid: true } },
+              } as unknown as React.ChangeEvent<HTMLInputElement>;
+              setFormValue(syntheticEvent);
+            }
+          }}
+          onChange={(_e, option) => {
+            if (option && typeof option !== "string") {
+              const syntheticEvent = {
+                target: { name: "targetAccountAddress", value: option.value, validity: { valid: true } },
+              } as unknown as React.ChangeEvent<HTMLInputElement>;
+              setFormValue(syntheticEvent);
+            }
+          }}
           disabled={disabled}
-          error={transferFormState.targetAccountAddress !== "" && !isAddressValid}
-          helperText={
-            transferFormState.targetAccountAddress !== "" && !isAddressValid
-              ? "Invalid address format. Expected format: otl_loc_..."
-              : "Enter the recipient's address (e.g., otl_loc_1enpsfkx...)"
-          }
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              name="targetAccountAddress"
+              label="To Account address"
+              required
+              error={transferFormState.targetAccountAddress !== "" && !isAddressValid}
+              helperText={
+                transferFormState.targetAccountAddress !== "" && !isAddressValid
+                  ? "Invalid address format. Expected format: otl_loc_..."
+                  : "Enter the recipient's address or select from address book"
+              }
+            />
+          )}
         />
 
         {hasBatchSelection ? (

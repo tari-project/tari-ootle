@@ -263,6 +263,17 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    address_book (id) {
+        id -> Integer,
+        name -> Text,
+        address -> Text,
+        memo -> Nullable<Text>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
 diesel::joinable!(confidential_outputs -> accounts (account_id));
 diesel::joinable!(confidential_outputs -> vaults (vault_id));
 diesel::joinable!(non_fungible_tokens -> vaults (vault_id));
@@ -278,6 +289,7 @@ diesel::joinable!(webauthn_registration_passkeys -> webauthn_registrations (regi
 
 diesel::allow_tables_to_appear_in_same_query!(
     accounts,
+    address_book,
     authored_templates,
     confidential_outputs,
     config,

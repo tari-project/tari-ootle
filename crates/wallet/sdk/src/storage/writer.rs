@@ -25,6 +25,7 @@ use webauthn_rs::prelude::Passkey;
 use crate::{
     models::{
         AccountUpdate,
+        AddressBookEntry,
         AuthoredTemplateModel,
         ConfidentialOutputModel,
         ImportedKeyId,
@@ -225,6 +226,22 @@ pub trait WalletStoreWriter: CommittableStore {
         tag: UtxoTag,
         public_nonce: RistrettoPublicKeyBytes,
     ) -> Result<(), WalletStorageError>;
+
+    // Address book
+    fn address_book_insert(
+        &mut self,
+        name: &str,
+        address: &str,
+        memo: Option<&str>,
+    ) -> Result<AddressBookEntry, WalletStorageError>;
+    fn address_book_update(
+        &mut self,
+        name: &str,
+        new_name: Option<&str>,
+        address: Option<&str>,
+        memo: Option<&str>,
+    ) -> Result<AddressBookEntry, WalletStorageError>;
+    fn address_book_delete(&mut self, name: &str) -> Result<(), WalletStorageError>;
 }
 
 pub trait WalletEventStoreWriter {

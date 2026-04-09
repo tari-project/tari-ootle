@@ -39,6 +39,7 @@ use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_ootle_wallet_sdk::{
     models::{
         AccountUpdate,
+        AddressBookEntry,
         AuthoredTemplateModel,
         ConfidentialOutputModel,
         ImportedKeyId,
@@ -1656,6 +1657,125 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                     "resource_address={}, tag={}, public_nonce={}",
                     resource_address, tag, public_nonce
                 ),
+            });
+        }
+
+        Ok(())
+    }
+
+    // Address book
+
+    fn address_book_insert(
+        &mut self,
+        name: &str,
+        address: &str,
+        memo: Option<&str>,
+    ) -> Result<AddressBookEntry, WalletStorageError> {
+        use crate::schema::address_book;
+
+        diesel::insert_into(address_book::table)
+            .values((
+                address_book::name.eq(name),
+                address_book::address.eq(address),
+                address_book::memo.eq(memo),
+            ))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general("address_book_insert", e))?;
+
+        let row = address_book::table
+            .filter(address_book::name.eq(name))
+            .first::<models::AddressBookEntry>(self.connection())
+            .map_err(|e| WalletStorageError::general("address_book_insert", e))?;
+
+        Ok(AddressBookEntry {
+            id: row.id,
+            name: row.name,
+            address: row.address,
+            memo: row.memo,
+        })
+    }
+
+    fn address_book_update(
+        &mut self,
+        name: &str,
+        new_name: Option<&str>,
+        address: Option<&str>,
+        memo: Option<&str>,
+    ) -> Result<AddressBookEntry, WalletStorageError> {
+        use crate::schema::address_book;
+
+        // Verify entry exists
+        let exists = address_book::table
+            .filter(address_book::name.eq(name))
+            .first::<models::AddressBookEntry>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general("address_book_update", e))?;
+
+        if exists.is_none() {
+            return Err(WalletStorageError::NotFound {
+                operation: "address_book_update",
+                entity: "address_book_entry".to_string(),
+                key: name.to_string(),
+            });
+        }
+
+        if let Some(new_name) = new_name {
+            diesel::update(address_book::table.filter(address_book::name.eq(name)))
+                .set((
+                    address_book::name.eq(new_name),
+                    address_book::updated_at.eq(diesel::dsl::now),
+                ))
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general("address_book_update", e))?;
+        }
+
+        let lookup_name = new_name.unwrap_or(name);
+
+        if let Some(address) = address {
+            diesel::update(address_book::table.filter(address_book::name.eq(lookup_name)))
+                .set((
+                    address_book::address.eq(address),
+                    address_book::updated_at.eq(diesel::dsl::now),
+                ))
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general("address_book_update", e))?;
+        }
+
+        if let Some(memo) = memo {
+            diesel::update(address_book::table.filter(address_book::name.eq(lookup_name)))
+                .set((
+                    address_book::memo.eq(memo),
+                    address_book::updated_at.eq(diesel::dsl::now),
+                ))
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general("address_book_update", e))?;
+        }
+
+        let row = address_book::table
+            .filter(address_book::name.eq(lookup_name))
+            .first::<models::AddressBookEntry>(self.connection())
+            .map_err(|e| WalletStorageError::general("address_book_update", e))?;
+
+        Ok(AddressBookEntry {
+            id: row.id,
+            name: row.name,
+            address: row.address,
+            memo: row.memo,
+        })
+    }
+
+    fn address_book_delete(&mut self, name: &str) -> Result<(), WalletStorageError> {
+        use crate::schema::address_book;
+
+        let num_affected = diesel::delete(address_book::table.filter(address_book::name.eq(name)))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general("address_book_delete", e))?;
+
+        if num_affected == 0 {
+            return Err(WalletStorageError::NotFound {
+                operation: "address_book_delete",
+                entity: "address_book_entry".to_string(),
+                key: name.to_string(),
             });
         }
 

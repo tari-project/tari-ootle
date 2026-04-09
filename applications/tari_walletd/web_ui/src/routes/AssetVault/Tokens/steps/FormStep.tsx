@@ -21,7 +21,8 @@
 //  USE OF THIS SOFTWARE, SUCH DAMAGE.
 
 import CopyAddress from "@components/CopyAddress";
-import { Divider, InputAdornment, InputLabel, Stack, Typography } from "@mui/material";
+import { useAddressBookList } from "@api/hooks/useAddressBook";
+import { Autocomplete, Divider, InputAdornment, InputLabel, Stack, Typography } from "@mui/material";
 import Button from "@mui/material/Button";
 import CheckBox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
@@ -89,6 +90,12 @@ export default function FormStep({
   onCheckboxFormValueChange,
   onUseBadgeChange,
 }: FormStepProps) {
+  const { data: addressBookData } = useAddressBookList();
+  const addressBookOptions = (addressBookData?.entries ?? []).map((e) => ({
+    label: `${e.name} (${e.address.slice(0, 16)}...)`,
+    value: e.address,
+  }));
+
   const isConfidential = resource_type === "Confidential";
   const isStealth = resource_type === "Stealth";
 
@@ -168,14 +175,36 @@ export default function FormStep({
         )}
         <Stack direction="column" spacing={0.5}>
           <DisplayFormError forType="address" formError={formError} />
-          <TextField
-            name="address"
-            label="To Address"
-            value={transferFormState.address}
-            required
-            onChange={onFormValueChange}
-            style={{ flexGrow: 1 }}
+          <Autocomplete
+            freeSolo
+            options={addressBookOptions}
+            inputValue={transferFormState.address}
+            onInputChange={(_e, newValue, reason) => {
+              if (reason === "input" || reason === "clear") {
+                const syntheticEvent = {
+                  target: { name: "address", value: newValue },
+                } as React.ChangeEvent<HTMLInputElement>;
+                onFormValueChange(syntheticEvent);
+              }
+            }}
+            onChange={(_e, option) => {
+              if (option && typeof option !== "string") {
+                const syntheticEvent = {
+                  target: { name: "address", value: option.value },
+                } as React.ChangeEvent<HTMLInputElement>;
+                onFormValueChange(syntheticEvent);
+              }
+            }}
             disabled={disabled}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                name="address"
+                label="To Address"
+                required
+                placeholder="otl_loc_... or select from address book"
+              />
+            )}
           />
         </Stack>
 

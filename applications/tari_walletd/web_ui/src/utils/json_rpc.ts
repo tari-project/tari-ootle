@@ -114,6 +114,15 @@ import type {
   WebauthnStartRegisterResponse,
   WebRtcStartRequest,
   WebRtcStartResponse,
+  AddressBookAddRequest,
+  AddressBookAddResponse,
+  AddressBookListResponse,
+  AddressBookGetRequest,
+  AddressBookGetResponse,
+  AddressBookUpdateRequest,
+  AddressBookUpdateResponse,
+  AddressBookDeleteRequest,
+  AddressBookDeleteResponse,
 } from "@tari-project/ootle-ts-bindings";
 import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
 import { jwtDecode } from "jwt-decode";
@@ -301,3 +310,19 @@ export const walletGetInfo = (): Promise<WalletGetInfoResponse> => client().then
 // utxos
 export const stealthUtxosList = (request: StealthUtxosListRequest): Promise<StealthUtxosListResponse> =>
   client().then((c) => c.stealthUtxosList(request));
+
+// address book
+export const addressBookAdd = (request: AddressBookAddRequest): Promise<AddressBookAddResponse> =>
+  client().then((c) => c.addressBookAdd(request));
+
+export const addressBookList = (): Promise<AddressBookListResponse> =>
+  client().then((c) => c.addressBookList());
+
+export const addressBookGet = (request: AddressBookGetRequest): Promise<AddressBookGetResponse> =>
+  client().then((c) => c.addressBookGet(request));
+
+export const addressBookUpdate = (request: AddressBookUpdateRequest): Promise<AddressBookUpdateResponse> =>
+  client().then((c) => c.addressBookUpdate(request));
+
+export const addressBookDelete = (request: AddressBookDeleteRequest): Promise<AddressBookDeleteResponse> =>
+  client().then((c) => c.addressBookDelete(request));

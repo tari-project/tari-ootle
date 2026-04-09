@@ -90,6 +90,16 @@ use crate::{
         AccountsListResponse,
         AccountsRenameRequest,
         AccountsRenameResponse,
+        AddressBookAddRequest,
+        AddressBookAddResponse,
+        AddressBookDeleteRequest,
+        AddressBookDeleteResponse,
+        AddressBookGetRequest,
+        AddressBookGetResponse,
+        AddressBookListRequest,
+        AddressBookListResponse,
+        AddressBookUpdateRequest,
+        AddressBookUpdateResponse,
         AuthGetMethodRequest,
         AuthGetMethodResponse,
         AuthListSessionsRequest,
@@ -704,6 +714,45 @@ impl WalletDaemonClient {
         req: T,
     ) -> Result<WebauthnStartAuthResponse, WalletDaemonClientError> {
         self.send_request("webauthn.auth_start", req.borrow()).await
+    }
+
+    // Address book
+
+    /// Adds a new entry to the address book.
+    pub async fn address_book_add<T: Borrow<AddressBookAddRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AddressBookAddResponse, WalletDaemonClientError> {
+        self.send_request("address_book.add", req.borrow()).await
+    }
+
+    /// Lists all address book entries.
+    pub async fn address_book_list(&mut self) -> Result<AddressBookListResponse, WalletDaemonClientError> {
+        self.send_request("address_book.list", &AddressBookListRequest {}).await
+    }
+
+    /// Gets a specific address book entry by name.
+    pub async fn address_book_get<T: Borrow<AddressBookGetRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AddressBookGetResponse, WalletDaemonClientError> {
+        self.send_request("address_book.get", req.borrow()).await
+    }
+
+    /// Updates an existing address book entry.
+    pub async fn address_book_update<T: Borrow<AddressBookUpdateRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AddressBookUpdateResponse, WalletDaemonClientError> {
+        self.send_request("address_book.update", req.borrow()).await
+    }
+
+    /// Deletes an address book entry by name.
+    pub async fn address_book_delete<T: Borrow<AddressBookDeleteRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AddressBookDeleteResponse, WalletDaemonClientError> {
+        self.send_request("address_book.delete", req.borrow()).await
     }
 
     fn next_request_id(&mut self) -> i64 {

@@ -27,6 +27,7 @@ use super::handlers::{HandlerContext, HandlerWithCookie, auth, stealth_utxos, su
 use crate::handlers::{
     Handler,
     accounts,
+    address_book,
     auth::jwt::JwtApiError,
     burn_proofs,
     confidential,
@@ -218,6 +219,14 @@ async fn handler(
         Some(("burn_proofs", method)) => match method {
             "list" => call_handler(context, value, token, burn_proofs::handle_list).await,
             "get" => call_handler(context, value, token, burn_proofs::handle_get).await,
+            _ => value.method_not_found(&value.method).into_response(),
+        },
+        Some(("address_book", method)) => match method {
+            "add" => call_handler(context, value, token, address_book::handle_add).await,
+            "list" => call_handler(context, value, token, address_book::handle_list).await,
+            "get" => call_handler(context, value, token, address_book::handle_get).await,
+            "update" => call_handler(context, value, token, address_book::handle_update).await,
+            "delete" => call_handler(context, value, token, address_book::handle_delete).await,
             _ => value.method_not_found(&value.method).into_response(),
         },
         Some(("wallet", "get_info")) => call_handler(context, value, token, wallet::handle_get_info).await,

@@ -2,6 +2,17 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 export * from "./types/wallet-types/AccountsListResponse";
+export * from "./types/wallet-types/AddressBookEntry";
+export * from "./types/wallet-types/AddressBookAddRequest";
+export * from "./types/wallet-types/AddressBookAddResponse";
+export * from "./types/wallet-types/AddressBookListRequest";
+export * from "./types/wallet-types/AddressBookListResponse";
+export * from "./types/wallet-types/AddressBookGetRequest";
+export * from "./types/wallet-types/AddressBookGetResponse";
+export * from "./types/wallet-types/AddressBookUpdateRequest";
+export * from "./types/wallet-types/AddressBookUpdateResponse";
+export * from "./types/wallet-types/AddressBookDeleteRequest";
+export * from "./types/wallet-types/AddressBookDeleteResponse";
 export * from "./types/wallet-types/PublishTemplateMetadata";
 export * from "./types/wallet-types/SignTemplateMetadataResponse";
 export * from "./types/wallet-types/WalletGetInfoRequest";

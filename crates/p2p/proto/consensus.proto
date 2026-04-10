@@ -153,6 +153,7 @@ enum AbortReason {
   FOREIGN_PLEDGE_INPUT_CONFLICT = 6;
   INSUFFICIENT_FEES_PAID = 7;
   FEE_PAYMENT_IN_MAIN_INTENT = 8;
+  EPOCH_EXPIRED = 9;
 }
 
 message Evidence {

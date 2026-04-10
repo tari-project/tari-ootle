@@ -24,7 +24,7 @@ use std::{path::PathBuf, str::FromStr, sync::Arc};
 
 use minotari_node::{BaseNodeConfig, GrpcMethod, run_base_node};
 use rand::rngs::OsRng;
-use tari_base_node_client::grpc::GrpcBaseNodeClient;
+use tari_base_node_client::{BaseNodeClient, grpc::GrpcBaseNodeClient};
 use tari_common::{configuration::CommonConfig, exit_codes::ExitError};
 use tari_common_sqlite::connection::DbConnectionUrl;
 use tari_comms::{NodeIdentity, multiaddr::Multiaddr, peer_manager::PeerFeatures};
@@ -57,6 +57,7 @@ impl BaseNodeProcess {
     }
 }
 
+#[expect(clippy::too_many_lines)]
 pub async fn spawn_base_node(world: &mut TariWorld, bn_name: String) {
     // each spawned base node will use different ports
     let (port, grpc_port) = get_os_assigned_ports();
@@ -153,8 +154,31 @@ pub async fn spawn_base_node(world: &mut TariWorld, bn_name: String) {
         }
     });
 
-    // Wait for node to start up
+    // Wait for node to start up (TCP port open)
     let handle = wait_listener_on_local_port(handle, grpc_port).await;
+
+    // Wait for gRPC service to be fully ready (not just the readiness server)
+    let mut grpc_client = get_base_node_client(grpc_port);
+    let mut grpc_remaining = 30;
+    loop {
+        match grpc_client.get_tip_info().await {
+            Ok(_) => break,
+            Err(e) => {
+                if handle.is_finished() {
+                    panic!("Base node {} exited while waiting for gRPC readiness", bn_name);
+                }
+                grpc_remaining -= 1;
+                if grpc_remaining == 0 {
+                    panic!(
+                        "Base node {} gRPC service did not become ready within 30s: {}",
+                        bn_name, e
+                    );
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            },
+        }
+    }
+
     // make the new base node able to be referenced by other processes
     let node_process = BaseNodeProcess {
         name: bn_name.clone(),

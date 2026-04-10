@@ -1,13 +1,13 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{pin::Pin, sync::Arc};
+use std::{net::SocketAddr, pin::Pin, sync::Arc};
 
 use axum::{
     Extension,
-    extract::Query,
-    http::HeaderMap,
-    response::{Sse, sse},
+    extract::{ConnectInfo, Query},
+    http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Response, Sse, sse},
 };
 use futures::Stream;
 use log::*;
@@ -41,10 +41,24 @@ const REPLAY_PAGE_SIZE: u32 = 500;
     )
 )]
 pub async fn sse_transaction_events(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Extension(context): Extension<HandlerContext>,
     headers: HeaderMap,
     Query(req): Query<StreamTransactionEventsRequest>,
-) -> HandlerResult<Sse<impl Stream<Item = Result<sse::Event, axum::Error>>>> {
+) -> Response {
+    // Check connection limit
+    let _guard = match context.sse_connection_limiter.try_acquire(addr.ip()) {
+        Ok(guard) => guard,
+        Err(()) => {
+            warn!(target: LOG_TARGET, "SSE connection limit exceeded for IP: {}", addr.ip());
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                "Too many concurrent SSE connections from this IP",
+            )
+                .into_response();
+        },
+    };
+
     // Resolve after_id: prefer Last-Event-ID header (SSE spec), fall back to query param
     let after_id = headers
         .get("Last-Event-ID")
@@ -74,12 +88,12 @@ pub async fn sse_transaction_events(
     let event_stream: SseStream = match after_id {
         Some(after_id) => {
             let store = context.read_only_store().clone();
-            Box::pin(replay_then_live_stream(store, broadcast_rx, filter, after_id))
+            Box::pin(replay_then_live_stream(store, broadcast_rx, filter, after_id, _guard))
         },
-        None => Box::pin(live_only_stream(broadcast_rx, filter)),
+        None => Box::pin(live_only_stream(broadcast_rx, filter, _guard)),
     };
 
-    Ok(Sse::new(event_stream).keep_alive(sse::KeepAlive::new()))
+    Sse::new(event_stream).keep_alive(sse::KeepAlive::new()).into_response()
 }
 
 /// Stream that only forwards live broadcast events (no replay).
@@ -87,15 +101,19 @@ pub async fn sse_transaction_events(
 fn live_only_stream(
     broadcast_rx: tokio::sync::broadcast::Receiver<TransactionEvent>,
     filter: EventFilter,
+    _guard: crate::rest_api::rate_limit::SseConnectionGuard,
 ) -> impl Stream<Item = Result<sse::Event, axum::Error>> {
-    tokio_stream::wrappers::BroadcastStream::new(broadcast_rx).filter_map(move |res| match res {
-        Ok(tx_event) if filter.matches(&tx_event.event) => Some(encode_transaction_event(&tx_event)),
-        Ok(_) => None,
-        // Lagged: events were dropped from the broadcast buffer, skip and continue
-        Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(_)) => {
-            warn!(target: LOG_TARGET, "Live-only SSE client lagged, some events were dropped");
-            None
-        },
+    tokio_stream::wrappers::BroadcastStream::new(broadcast_rx).filter_map(move |res| {
+        let _ = &_guard; // Keep guard alive
+        match res {
+            Ok(tx_event) if filter.matches(&tx_event.event) => Some(encode_transaction_event(&tx_event)),
+            Ok(_) => None,
+            // Lagged: events were dropped from the broadcast buffer, skip and continue
+            Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(_)) => {
+                warn!(target: LOG_TARGET, "Live-only SSE client lagged, some events were dropped");
+                None
+            },
+        }
     })
 }
 
@@ -106,15 +124,17 @@ fn replay_then_live_stream(
     broadcast_rx: tokio::sync::broadcast::Receiver<TransactionEvent>,
     filter: EventFilter,
     after_id: i64,
+    _guard: crate::rest_api::rate_limit::SseConnectionGuard,
 ) -> impl Stream<Item = Result<sse::Event, axum::Error>> {
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<sse::Event, axum::Error>>(256);
 
     tokio::spawn(async move {
+        let _guard = _guard; // Move guard into task
         let result = run_replay_then_live(store, broadcast_rx, filter, after_id, &tx).await;
         if let Err(e) = result {
             warn!(target: LOG_TARGET, "SSE replay-then-live stream error: {}", e);
         }
-        // tx is dropped here, which closes the stream
+        // tx and _guard are dropped here, which closes the stream and releases the connection
     });
 
     tokio_stream::wrappers::ReceiverStream::new(rx)

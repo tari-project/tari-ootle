@@ -23,7 +23,7 @@ use crate::{
     bootstrap::Services,
     dry_run::processor::DryRunTransactionProcessor,
     notify::Subscriber,
-    rest_api::cache::HttpCacheConfig,
+    rest_api::{cache::HttpCacheConfig, rate_limit::{IpRateLimiter, SseConnectionLimiter}},
     storage_sqlite::SqliteIndexerStore,
     store::ReadOnlyStore,
     substate_manager::SubstateManager,
@@ -34,10 +34,18 @@ use crate::{
 #[derive(Clone)]
 pub struct HandlerContext {
     inner: Arc<InnerContext>,
+    pub submit_transaction_limiter: IpRateLimiter,
+    pub dry_run_limiter: IpRateLimiter,
+    pub fetch_substates_limiter: IpRateLimiter,
+    pub fetch_utxos_limiter: IpRateLimiter,
+    pub get_non_fungibles_limiter: IpRateLimiter,
+    pub list_recent_transactions_limiter: IpRateLimiter,
+    pub sse_connection_limiter: SseConnectionLimiter,
 }
 
 impl HandlerContext {
     pub fn from_services(services: &Services) -> Self {
+        let rate_limits = &services.config.indexer.rate_limits;
         Self {
             inner: Arc::new(InnerContext {
                 cache_control_enabled: true,
@@ -54,6 +62,13 @@ impl HandlerContext {
                 subscriber: services.event_notifier.to_subscriber(),
                 transaction_event_subscriber: services.transaction_event_notifier.to_subscriber(),
             }),
+            submit_transaction_limiter: IpRateLimiter::new(rate_limits.submit_transaction),
+            dry_run_limiter: IpRateLimiter::new(rate_limits.dry_run_transaction),
+            fetch_substates_limiter: IpRateLimiter::new(rate_limits.fetch_substates),
+            fetch_utxos_limiter: IpRateLimiter::new(rate_limits.fetch_utxos),
+            get_non_fungibles_limiter: IpRateLimiter::new(rate_limits.get_non_fungibles),
+            list_recent_transactions_limiter: IpRateLimiter::new(rate_limits.list_recent_transactions),
+            sse_connection_limiter: SseConnectionLimiter::new(rate_limits.max_sse_connections_per_ip),
         }
     }
 

@@ -1,0 +1,35 @@
+# Example configuration for Tari Indexer Rate Limiting
+# Add these settings to your indexer configuration file
+
+[indexer.rate_limits]
+# Rate limit for POST /transactions (requests per minute per IP)
+# Default: 20
+submit_transaction = 20
+
+# Rate limit for POST /transactions/dry-run (requests per minute per IP)
+# Default: 10
+# Note: This endpoint also has a legacy global rate limit of 10 req/5sec
+dry_run_transaction = 10
+
+# Rate limit for POST /substates/fetch (requests per minute per IP)
+# Default: 30
+fetch_substates = 30
+
+# Rate limit for POST /utxos/fetch (requests per minute per IP)
+# Default: 15
+fetch_utxos = 15
+
+# Rate limit for GET /non-fungibles (requests per minute per IP)
+# Default: 30
+get_non_fungibles = 30
+
+# Rate limit for GET /transactions/recent (requests per minute per IP)
+# Default: 30
+list_recent_transactions = 30
+
+# Maximum concurrent SSE connections per IP address
+# Default: 3
+# Applies to:
+#   - GET /events
+#   - GET /transactions/events/stream
+max_sse_connections_per_ip = 3

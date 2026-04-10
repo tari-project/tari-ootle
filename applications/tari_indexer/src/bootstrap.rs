@@ -252,6 +252,7 @@ pub async fn spawn_services(
     // changed by comms during initialization when using tor.
     save_identities(config, &keypair)?;
     Ok(Services {
+        config: config.clone(),
         network: config.network,
         keypair,
         networking,
@@ -269,6 +270,7 @@ pub async fn spawn_services(
 }
 
 pub struct Services {
+    pub config: ApplicationConfig,
     pub network: Network,
     pub keypair: RistrettoKeypair,
     pub networking: NetworkingHandle<TariMessagingSpec>,

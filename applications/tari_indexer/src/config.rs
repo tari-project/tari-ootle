@@ -121,6 +121,42 @@ pub struct IndexerConfig {
     pub burnt_utxo_sidechain_id: Option<RistrettoPublicKey>,
     /// The event filtering configuration
     pub event_filters: Vec<EventFilter>,
+    /// Rate limiting configuration
+    #[serde(default)]
+    pub rate_limits: RateLimitConfig,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct RateLimitConfig {
+    /// Rate limit for POST /transactions (requests per minute per IP)
+    pub submit_transaction: u32,
+    /// Rate limit for POST /transactions/dry-run (requests per minute per IP)
+    pub dry_run_transaction: u32,
+    /// Rate limit for POST /substates/fetch (requests per minute per IP)
+    pub fetch_substates: u32,
+    /// Rate limit for POST /utxos/fetch (requests per minute per IP)
+    pub fetch_utxos: u32,
+    /// Rate limit for GET /non-fungibles (requests per minute per IP)
+    pub get_non_fungibles: u32,
+    /// Rate limit for GET /transactions/recent (requests per minute per IP)
+    pub list_recent_transactions: u32,
+    /// Maximum concurrent SSE connections per IP
+    pub max_sse_connections_per_ip: usize,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            submit_transaction: 20,
+            dry_run_transaction: 10,
+            fetch_substates: 30,
+            fetch_utxos: 15,
+            get_non_fungibles: 30,
+            list_recent_transactions: 30,
+            max_sse_connections_per_ip: 3,
+        }
+    }
 }
 
 impl Default for IndexerConfig {
@@ -141,6 +177,7 @@ impl Default for IndexerConfig {
             templates_sidechain_id: None,
             burnt_utxo_sidechain_id: None,
             event_filters: vec![],
+            rate_limits: RateLimitConfig::default(),
         }
     }
 }

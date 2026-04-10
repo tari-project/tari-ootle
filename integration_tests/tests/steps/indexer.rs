@@ -126,12 +126,11 @@ async fn indexer_scans_network_events(
             .expect("Failed to obtain getEvents query result");
 
         let events = res.get("getEvents").unwrap();
-        let topics_for_component = events
-            .iter()
-            .map(|e| e.topic.as_str())
-            .collect::<HashSet<_>>();
+        let topics_for_component = events.iter().map(|e| e.topic.as_str()).collect::<HashSet<_>>();
 
-        let is_all_topics_found = expected_topics.iter().all(|t| topics_for_component.contains(t.as_str()));
+        let is_all_topics_found = expected_topics
+            .iter()
+            .all(|t| topics_for_component.contains(t.as_str()));
 
         if is_all_topics_found {
             return;

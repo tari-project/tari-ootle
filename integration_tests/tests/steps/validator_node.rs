@@ -648,11 +648,20 @@ async fn then_i_wait_for_validator_node_to_be_evicted(
             .expect("unexpected channel close")
             .unwrap_or_else(|err| panic!("Error when watching files {err}"));
 
-        let dominated = matches!(
+        // The `notify` crate emits different event kinds depending on the
+        // host OS: Linux fires `Access(Close(Write))` once a written file is
+        // closed, macOS fires `Create` + `Modify(Data)`, and Windows fires
+        // `Create` + `Modify(Any)`. The previous implementation only matched
+        // the Linux-specific close-write event, which made this step silently
+        // hang on macOS and Windows runners. Accept Create or Modify so the
+        // cross-platform happy path is covered. We deliberately do NOT match
+        // `Access(_)` because that also fires for metadata reads (e.g. the
+        // watcher's own stat calls), producing spurious loop iterations.
+        let is_file_write_event = matches!(
             event.kind,
-            notify::EventKind::Create(_) | notify::EventKind::Modify(_) | notify::EventKind::Access(_)
+            notify::EventKind::Create(_) | notify::EventKind::Modify(_)
         );
-        if dominated &&
+        if is_file_write_event &&
             let Some(json_file) = event
                 .paths
                 .into_iter()

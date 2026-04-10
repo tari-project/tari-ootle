@@ -81,11 +81,23 @@ export default function AddressBookPage() {
 
     try {
       if (editingEntry) {
+        // Only send fields that actually changed. For `memo` specifically,
+        // we must distinguish "unchanged" (send undefined, backend skips)
+        // from "cleared" (send empty string, backend overwrites to ""):
+        // the previous `form.memo.trim() || undefined` collapsed both to
+        // undefined, so clearing a memo silently did nothing. The same
+        // treatment applies to `new_name` and `address` for symmetry —
+        // trimmed comparisons prevent whitespace-only "changes" from
+        // triggering pointless UPDATEs.
+        const trimmedName = form.name.trim();
+        const trimmedAddress = form.address.trim();
+        const trimmedMemo = form.memo.trim();
+        const currentMemo = editingEntry.memo ?? "";
         await updateMutation.mutateAsync({
           name: editingEntry.name,
-          new_name: form.name !== editingEntry.name ? form.name.trim() : undefined,
-          address: form.address !== editingEntry.address ? form.address.trim() : undefined,
-          memo: form.memo.trim() || undefined,
+          new_name: trimmedName !== editingEntry.name ? trimmedName : undefined,
+          address: trimmedAddress !== editingEntry.address ? trimmedAddress : undefined,
+          memo: trimmedMemo !== currentMemo ? trimmedMemo : undefined,
         });
       } else {
         await addMutation.mutateAsync({
@@ -96,8 +108,14 @@ export default function AddressBookPage() {
       }
       setDialogOpen(false);
     } catch (e: any) {
+      // The backend returns `WalletStorageError::DuplicateName { name }` for
+      // unique-constraint violations on the address book name column. The
+      // JSON-RPC layer serializes this as an error string containing
+      // "DuplicateName"; we match on that exact token rather than the
+      // sqlite-level "UNIQUE constraint failed" phrasing so the UI stays
+      // decoupled from the underlying driver error text.
       const msg = e?.cause?.message || e?.message || "Failed to save entry";
-      if (msg.toLowerCase().includes("unique") || msg.toLowerCase().includes("duplicate")) {
+      if (msg.includes("DuplicateName")) {
         setFormError("An entry with this name already exists");
       } else {
         setFormError(msg);

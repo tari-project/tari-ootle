@@ -1,7 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use diesel::{Identifiable, Queryable};
+use diesel::{AsChangeset, Identifiable, Queryable, dsl};
 use time::PrimitiveDateTime;
 
 use crate::schema::address_book;
@@ -15,4 +15,27 @@ pub struct AddressBookEntry {
     pub memo: Option<String>,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
+}
+
+/// Diesel changeset used by `address_book_update` so the three mutable columns
+/// (`name`, `address`, `memo`) are written in a single UPDATE statement. Each
+/// field is wrapped in `Option` so callers can pass `None` to leave the column
+/// untouched without issuing a separate query per field.
+///
+/// `memo` is double-`Option` deliberately: the outer `Option` controls whether
+/// the field is part of the UPDATE at all, and the inner `Option<&str>`
+/// matches the nullable column so it can be set to `NULL` to clear a
+/// previously-stored memo.
+///
+/// `updated_at` is `dsl::now` (a zero-sized type, not `Option`) so every
+/// UPDATE bumps the timestamp — matching the `StealthOutputUpdate` pattern in
+/// `stealth_output.rs`. `dsl::now` cannot be wrapped in `Option` because it
+/// is a SQL expression, not a value.
+#[derive(Debug, AsChangeset)]
+#[diesel(table_name = address_book)]
+pub struct AddressBookEntryChangeset<'a> {
+    pub name: Option<&'a str>,
+    pub address: Option<&'a str>,
+    pub memo: Option<Option<&'a str>>,
+    pub updated_at: dsl::now,
 }

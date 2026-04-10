@@ -18,7 +18,10 @@ Feature: Account transfers
     # Create a new Faucet component
     When I call function "mint" on template "faucet" using account ACCOUNT to pay fees via wallet daemon WALLET_D with args "amount_10000" named "FAUCET"
 
-    # Burn some tari in the base layer to have funds for fees in the sender account
+    # Burn some tari in the base layer so the wallet daemon's default account (ACC)
+    # has claimable funds. The burn proof is owned by ACC, so ACC is the only account
+    # the claim step can spend it into — see PR #1992. This step is not funding the
+    # sender account; the sender account is funded from FAUCET a few lines below.
     When I burn 10T on wallet MINOTARI_WALLET to proof BURN_PROOF for wallet daemon WALLET_D
     When miner MINER mines 13 new blocks
     Then VN has scanned to at least height 40
@@ -26,8 +29,6 @@ Feature: Account transfers
 
     When I wait for proof BURN_PROOF to confirm on wallet MINOTARI_WALLET
     When I claim burn BURN_PROOF and spend it into account ACC using wallet daemon WALLET_D
-
-    # Wait for the wallet daemon account monitor to update the sender account information
 
     # Fund the sender account with faucet tokens
     When I print the cucumber world
@@ -40,8 +41,6 @@ Feature: Account transfers
   let faucet_bucket = faucet.take_free_coins();
   acc.deposit(faucet_bucket);
   """
-
-    # Wait for the wallet daemon account monitor to update the sender account information
 
     When I check the balance of ACCOUNT on wallet daemon WALLET_D the amount is at least 10000
     # Do the transfer from ACCOUNT to the second account (which does not exist yet in the network)
@@ -73,7 +72,10 @@ Feature: Account transfers
     # Create a new Faucet component
     When I call function "mint" on template "faucet" using account ACCOUNT_1 to pay fees via wallet daemon WALLET_D with args "amount_10000" named "FAUCET"
 
-    # Burn some tari in the base layer to have funds for fees in the sender account
+    # Burn some tari in the base layer so the wallet daemon's default account (ACC)
+    # has claimable funds. The burn proof is owned by ACC, so ACC is the only account
+    # the claim step can spend it into — see PR #1992. This step is not funding the
+    # sender account; the sender account is funded from FAUCET a few lines below.
     When I burn 10T on wallet MINOTARI_WALLET to proof BURN_PROOF for wallet daemon WALLET_D
     When miner MINER mines 13 new blocks
     Then VN has scanned to at least height 40

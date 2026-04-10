@@ -57,6 +57,7 @@ impl BaseNodeProcess {
     }
 }
 
+#[expect(clippy::too_many_lines)]
 pub async fn spawn_base_node(world: &mut TariWorld, bn_name: String) {
     // each spawned base node will use different ports
     let (port, grpc_port) = get_os_assigned_ports();

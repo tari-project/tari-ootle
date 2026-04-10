@@ -11682,6 +11682,7 @@ dependencies = [
  "tari_crypto",
  "tari_engine",
  "tari_engine_types",
+ "tari_ootle_address",
  "tari_ootle_app_utilities",
  "tari_ootle_common_types",
  "tari_ootle_template_metadata",

@@ -1,8 +1,8 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use chrono::NaiveDateTime;
-use diesel::prelude::*;
+use diesel::{Identifiable, Queryable};
+use time::PrimitiveDateTime;
 
 use crate::schema::address_book;
 
@@ -13,6 +13,6 @@ pub struct AddressBookEntry {
     pub name: String,
     pub address: String,
     pub memo: Option<String>,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
 }

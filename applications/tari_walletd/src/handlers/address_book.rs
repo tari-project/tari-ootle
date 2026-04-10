@@ -1,8 +1,11 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::str::FromStr;
+
 use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
+use tari_ootle_address::OotleAddress;
 use tari_ootle_walletd_client::{
     permissions::JrpcPermission,
     types::{
@@ -22,9 +25,8 @@ use tari_ootle_walletd_client::{
 use crate::handlers::HandlerContext;
 
 fn validate_address(address: &str) -> Result<(), anyhow::Error> {
-    if !address.starts_with("otl_loc_") {
-        return Err(anyhow!("Invalid address format: must be a valid Ootle address (otl_loc_...)"));
-    }
+    OotleAddress::from_str(address)
+        .map_err(|e| anyhow!("Invalid Ootle address '{address}': {e}"))?;
     Ok(())
 }
 

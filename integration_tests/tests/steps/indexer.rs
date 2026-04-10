@@ -113,7 +113,10 @@ async fn indexer_scans_network_events(
     let expected_topics = topics_str.split(',').map(|s| s.to_string()).collect::<Vec<_>>();
 
     let mut graphql_client = indexer.get_graphql_indexer_client().await;
-    let query = r#"{ getEvents { substateId, templateAddress, txHash, topic, payload } }"#.to_string();
+    let query = format!(
+        r#"{{ getEvents(substateId: "{}") {{ substateId, templateAddress, txHash, topic, payload }} }}"#,
+        account_addr
+    );
 
     let mut remaining_attempts = 10;
     loop {
@@ -125,7 +128,6 @@ async fn indexer_scans_network_events(
         let events = res.get("getEvents").unwrap();
         let topics_for_component = events
             .iter()
-            .filter(|e| e.substate_id == Some(account_addr.clone()))
             .map(|e| e.topic.as_str())
             .collect::<HashSet<_>>();
 

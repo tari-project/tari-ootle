@@ -109,30 +109,46 @@ async fn indexer_scans_network_events(
     let account = world.wallet_accounts.get(&account_name).unwrap_or_else(|| {
         panic!("No wallet account found with name {}", account_name);
     });
-    let mut graphql_client = indexer.get_graphql_indexer_client().await;
-    let query = r#"{ getEvents { substateId, templateAddress, txHash, topic, payload } }"#.to_string();
-    let res = graphql_client
-        .send_request::<HashMap<String, Vec<tari_indexer::graphql::model::events::Event>>>(&query, None, None)
-        .await
-        .expect("Failed to obtain getEvents query result");
+    let component_address = account.component_address().to_string();
+    let expected_topics: Vec<&str> = topics_str.split(',').collect();
 
-    let events = res.get("getEvents").unwrap();
-    let topics_for_component = events
-        .iter()
-        .filter(|e| e.substate_id == Some(account.component_address().to_string()))
-        .map(|e| e.topic.as_str())
-        .collect::<HashSet<_>>();
+    let mut remaining = 30;
+    loop {
+        let mut graphql_client = indexer.get_graphql_indexer_client().await;
+        let query = r#"{ getEvents { substateId, templateAddress, txHash, topic, payload } }"#.to_string();
+        let res = graphql_client
+            .send_request::<HashMap<String, Vec<tari_indexer::graphql::model::events::Event>>>(&query, None, None)
+            .await
+            .expect("Failed to obtain getEvents query result");
 
-    let expected_topics = topics_str.split(',');
-    for (ind, topic) in expected_topics.enumerate() {
-        assert!(
-            topics_for_component.contains(topic),
-            "Unexpected topic at index {}. Events emitted were {}. Expected topic {} (ALL {:?})",
-            ind,
-            topics_for_component.display(),
-            topic,
-            events
-        );
+        let events = res.get("getEvents").unwrap();
+        let topics_for_component = events
+            .iter()
+            .filter(|e| e.substate_id == Some(component_address.clone()))
+            .map(|e| e.topic.as_str())
+            .collect::<HashSet<_>>();
+
+        let all_found = expected_topics.iter().all(|topic| topics_for_component.contains(topic));
+        if all_found {
+            return;
+        }
+
+        if remaining == 0 {
+            // Report which topics were missing
+            for (ind, topic) in expected_topics.iter().enumerate() {
+                assert!(
+                    topics_for_component.contains(topic),
+                    "Unexpected topic at index {}. Events emitted were {}. Expected topic {} (ALL {:?})",
+                    ind,
+                    topics_for_component.display(),
+                    topic,
+                    events
+                );
+            }
+            unreachable!();
+        }
+        remaining -= 1;
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 }
 

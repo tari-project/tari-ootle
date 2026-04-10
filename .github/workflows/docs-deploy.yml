@@ -26,7 +26,7 @@ jobs:
           path: "docs/developer-docs"
           node-version: 24
           package-manager: pnpm@latest
-          build-cmd: pnpm install && pnpm run build
+          build-cmd: pnpm install --ignore-workspace && pnpm run build
         # env:
         # PUBLIC_POKEAPI: 'https://pokeapi.co/api/v2' # Use single quotation marks for the variable value. (optional)
 

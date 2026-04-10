@@ -253,6 +253,7 @@ pub async fn spawn_services(
     save_identities(config, &keypair)?;
     Ok(Services {
         network: config.network,
+        config: config.clone(),
         keypair,
         networking,
         epoch_manager,
@@ -270,6 +271,7 @@ pub async fn spawn_services(
 
 pub struct Services {
     pub network: Network,
+    pub config: ApplicationConfig,
     pub keypair: RistrettoKeypair,
     pub networking: NetworkingHandle<TariMessagingSpec>,
     pub epoch_manager: EpochManagerHandle<PeerAddress>,

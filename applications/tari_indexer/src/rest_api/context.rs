@@ -23,7 +23,7 @@ use crate::{
     bootstrap::Services,
     dry_run::processor::DryRunTransactionProcessor,
     notify::Subscriber,
-    rest_api::cache::HttpCacheConfig,
+    rest_api::{cache::HttpCacheConfig, rate_limit::RateLimitManager},
     storage_sqlite::SqliteIndexerStore,
     store::ReadOnlyStore,
     substate_manager::SubstateManager,
@@ -37,7 +37,7 @@ pub struct HandlerContext {
 }
 
 impl HandlerContext {
-    pub fn from_services(services: &Services) -> Self {
+    pub fn from_services(services: &Services, rate_limit_manager: RateLimitManager) -> Self {
         Self {
             inner: Arc::new(InnerContext {
                 cache_control_enabled: true,
@@ -53,6 +53,7 @@ impl HandlerContext {
                 dry_run_transaction_processor: services.dry_run_transaction_processor.clone(),
                 subscriber: services.event_notifier.to_subscriber(),
                 transaction_event_subscriber: services.transaction_event_notifier.to_subscriber(),
+                rate_limit_manager,
             }),
         }
     }
@@ -104,6 +105,10 @@ impl HandlerContext {
         &self.inner.dry_run_transaction_processor
     }
 
+    pub fn rate_limit_manager(&self) -> &RateLimitManager {
+        &self.inner.rate_limit_manager
+    }
+
     pub fn apply_cache_control(&self, body: impl IntoResponse, max_age: u32) -> Response {
         let mut response = body.into_response();
         let headers = response.headers_mut();
@@ -141,4 +146,5 @@ struct InnerContext {
     dry_run_transaction_processor: DryRunTransactionProcessor,
     subscriber: Subscriber<IndexerEvent>,
     transaction_event_subscriber: Subscriber<TransactionEvent>,
+    rate_limit_manager: RateLimitManager,
 }

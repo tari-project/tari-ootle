@@ -87,6 +87,30 @@ impl ApplicationConfig {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
+pub struct RateLimitConfig {
+    pub transactions_per_min: u64,
+    pub substates_fetch_per_min: u64,
+    pub utxos_fetch_per_min: u64,
+    pub non_fungibles_per_min: u64,
+    pub dry_run_per_min: u64,
+    pub sse_max_concurrent: u32,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            transactions_per_min: 20,
+            substates_fetch_per_min: 30,
+            utxos_fetch_per_min: 15,
+            non_fungibles_per_min: 30,
+            dry_run_per_min: 120,
+            sse_max_concurrent: 3,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct IndexerConfig {
     override_from: Option<String>,
@@ -121,6 +145,8 @@ pub struct IndexerConfig {
     pub burnt_utxo_sidechain_id: Option<RistrettoPublicKey>,
     /// The event filtering configuration
     pub event_filters: Vec<EventFilter>,
+    /// Rate limit configuration for the REST API
+    pub rate_limit: RateLimitConfig,
 }
 
 impl Default for IndexerConfig {
@@ -141,6 +167,7 @@ impl Default for IndexerConfig {
             templates_sidechain_id: None,
             burnt_utxo_sidechain_id: None,
             event_filters: vec![],
+            rate_limit: RateLimitConfig::default(),
         }
     }
 }

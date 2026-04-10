@@ -21,34 +21,43 @@ import time
 import urllib.request
 import urllib.error
 
+# Version tiers:
+#   1 = Stable/foundational — independently versioned, rarely changes
+#   2 = Template authoring & client SDK — independently versioned
+#   3 = Workspace-versioned — moves with the release
+#
 # Topological publish order — dependencies before dependents.
-# (crate_name, crate_directory)
+# (crate_name, crate_directory, tier)
 CRATES = [
-    ("tari_bor", "crates/tari_bor"),
-    ("ootle_serde", "crates/ootle_serde"),
-    ("tari_template_abi", "crates/template_abi"),
-    ("tari_template_lib_types", "crates/template_lib_types"),
-    ("ootle_byte_type", "crates/ootle_byte_type"),
-    ("tari_template_macros", "crates/template_macros"),
-    ("tari_template_lib", "crates/template_lib"),
-    ("tari_engine_types", "crates/engine_types"),
-    ("tari_ootle_common_types", "crates/common_types"),
-    ("tari_ootle_wallet_crypto", "crates/wallet/crypto"),
-    ("tari_ootle_address", "crates/ootle_address"),
-    ("tari_ootle_transaction", "crates/transaction"),
-    ("tari_template_builtin", "crates/template_builtin"),
-    ("tari_transaction_manifest", "crates/transaction_manifest"),
-    ("tari_engine", "crates/engine"),
-    ("tari_consensus_types", "crates/consensus_types"),
-    ("tari_indexer_client", "clients/tari_indexer_client"),
-    ("ootle-wasm-core", "crates/ootle_wasm/core"),
-    ("ootle-wasm", "crates/ootle_wasm/wasm"),
-    ("tari_template_test_tooling", "crates/template_test_tooling"),
-    ("ootle-rs", "crates/wallet/ootle-rs"),
-    ("tari_ootle_wallet_sdk", "crates/wallet/sdk"),
-    ("tari_ootle_wallet_storage_sqlite", "crates/wallet/storage_sqlite"),
-    ("tari_ootle_walletd_client", "clients/wallet_daemon_client"),
+    ("tari_bor", "crates/tari_bor", 1),
+    ("ootle_serde", "crates/ootle_serde", 1),
+    ("tari_template_abi", "crates/template_abi", 2),
+    ("tari_template_lib_types", "crates/template_lib_types", 2),
+    ("ootle_byte_type", "crates/ootle_byte_type", 1),
+    ("tari_template_macros", "crates/template_macros", 2),
+    ("tari_template_lib", "crates/template_lib", 2),
+    ("tari_ootle_template_metadata", "crates/template_metadata", 2),
+    ("tari_ootle_template_build", "crates/template_build", 2),
+    ("tari_engine_types", "crates/engine_types", 3),
+    ("tari_ootle_common_types", "crates/common_types", 3),
+    ("tari_ootle_wallet_crypto", "crates/wallet/crypto", 3),
+    ("tari_ootle_address", "crates/ootle_address", 1),
+    ("tari_ootle_transaction", "crates/transaction", 3),
+    ("tari_template_builtin", "crates/template_builtin", 3),
+    ("tari_transaction_manifest", "crates/transaction_manifest", 3),
+    ("tari_engine", "crates/engine", 3),
+    ("tari_consensus_types", "crates/consensus_types", 3),
+    ("tari_indexer_client", "clients/tari_indexer_client", 3),
+    ("ootle-wasm-core", "crates/ootle_wasm/core", 3),
+    ("ootle-wasm", "crates/ootle_wasm/wasm", 3),
+    ("tari_template_test_tooling", "crates/template_test_tooling", 3),
+    ("ootle-rs", "crates/wallet/ootle-rs", 2),
+    ("tari_ootle_wallet_sdk", "crates/wallet/sdk", 3),
+    ("tari_ootle_wallet_storage_sqlite", "crates/wallet/storage_sqlite", 3),
+    ("tari_ootle_walletd_client", "clients/wallet_daemon_client", 3),
 ]
+
+TIER_LABELS = {1: "stable", 2: "template/sdk", 3: "workspace"}
 
 WAIT_SECS = 20
 
@@ -151,29 +160,30 @@ def main():
     # --list mode
     if args.list:
         print("Publish order:")
-        for name, crate_dir in CRATES:
+        for name, crate_dir, tier in CRATES:
             ver = get_local_version(name, crate_dir)
-            print(f"  {name} ({ver}) — {crate_dir}")
+            label = TIER_LABELS[tier]
+            print(f"  {name} ({ver}) [{label}] — {crate_dir}")
         return
 
     # Build the list of crates to process
     crates_to_publish = []
     if args.from_crate:
         found = False
-        for name, crate_dir in CRATES:
+        for name, crate_dir, tier in CRATES:
             if name == args.from_crate:
                 found = True
             if found:
-                crates_to_publish.append((name, crate_dir))
+                crates_to_publish.append((name, crate_dir, tier))
         if not found:
             print(f"{RED}Error: crate '{args.from_crate}' not found in publish order{NC}")
             sys.exit(1)
     elif args.package:
         pkg_set = set(args.package)
-        for name, crate_dir in CRATES:
+        for name, crate_dir, tier in CRATES:
             if name in pkg_set:
-                crates_to_publish.append((name, crate_dir))
-        unknown = pkg_set - {name for name, _ in CRATES}
+                crates_to_publish.append((name, crate_dir, tier))
+        unknown = pkg_set - {name for name, _, _ in CRATES}
         if unknown:
             print(f"{RED}Error: unknown crate(s): {', '.join(unknown)}{NC}")
             sys.exit(1)
@@ -191,38 +201,39 @@ def main():
     skipped = 0
     last_name = crates_to_publish[-1][0] if crates_to_publish else ""
 
-    for name, crate_dir in crates_to_publish:
+    for name, crate_dir, tier in crates_to_publish:
         ver = get_local_version(name, crate_dir)
+        label = TIER_LABELS[tier]
 
         if is_published(name, ver):
-            print(f"  {GREEN}✓{NC} {name} {ver} — already published, skipping")
+            print(f"  {GREEN}✓{NC} {name} {ver} [{label}] — already published, skipping")
             skipped += 1
             continue
 
         if args.execute:
-            print(f"  {YELLOW}▶{NC} Publishing {name} {ver} ...")
+            print(f"  {YELLOW}▶{NC} Publishing {name} {ver} [{label}] ...")
             if cargo_publish(name):
-                print(f"  {GREEN}✓{NC} {name} {ver} — published")
+                print(f"  {GREEN}✓{NC} {name} {ver} [{label}] — published")
                 published_crates.append((name, ver))
                 if name != last_name:
                     print(f"    {YELLOW}Waiting {args.wait}s for crates.io indexing...{NC}")
                     time.sleep(args.wait)
             else:
-                print(f"  {RED}✗{NC} {name} {ver} — failed")
+                print(f"  {RED}✗{NC} {name} {ver} [{label}] — failed")
                 print()
                 print(f"{RED}Fix the issue and resume with:{NC}")
                 print(f"  ./scripts/publish_crates.py --from {name} --execute")
                 sys.exit(1)
         elif args.dry_run:
-            print(f"  {YELLOW}▶{NC} {name} {ver} — would publish, testing build...")
+            print(f"  {YELLOW}▶{NC} {name} {ver} [{label}] — would publish, testing build...")
             if cargo_publish(name, dry_run=True):
-                print(f"  {GREEN}✓{NC} {name} {ver} — build OK")
+                print(f"  {GREEN}✓{NC} {name} {ver} [{label}] — build OK")
                 published_crates.append((name, ver))
             else:
-                print(f"  {RED}✗{NC} {name} {ver} — build failed")
+                print(f"  {RED}✗{NC} {name} {ver} [{label}] — build failed")
                 failed_crates.append((name, ver))
         else:
-            print(f"  {YELLOW}▶{NC} {name} {ver} — would publish")
+            print(f"  {YELLOW}▶{NC} {name} {ver} [{label}] — would publish")
             published_crates.append((name, ver))
 
     print()

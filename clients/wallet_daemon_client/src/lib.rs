@@ -90,11 +90,14 @@ use crate::{
         AccountsListResponse,
         AccountsRenameRequest,
         AccountsRenameResponse,
+        AuthGetMethodRequest,
         AuthGetMethodResponse,
         AuthListSessionsRequest,
         AuthListSessionsResponse,
         AuthRevokeTokenRequest,
         AuthRevokeTokenResponse,
+        BurnProofsGetRequest,
+        BurnProofsGetResponse,
         BurnProofsListRequest,
         BurnProofsListResponse,
         ClaimValidatorFeesRequest,
@@ -119,6 +122,8 @@ use crate::{
         SettingsGetResponse,
         SettingsSetRequest,
         SettingsSetResponse,
+        SignTemplateMetadataRequest,
+        SignTemplateMetadataResponse,
         StealthTransferRequest,
         StealthTransferResponse,
         StealthUtxosDecryptValueRequest,
@@ -447,6 +452,14 @@ impl WalletDaemonClient {
         self.send_request("burn_proofs.list", req.borrow()).await
     }
 
+    /// Gets the full contents of a specific burn proof file.
+    pub async fn get_burn_proof<T: Borrow<BurnProofsGetRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<BurnProofsGetResponse, WalletDaemonClientError> {
+        self.send_request("burn_proofs.get", req.borrow()).await
+    }
+
     /// Claims a burn transaction, converting burned Minotari into Ootle funds.
     pub async fn claim_burn<T: Borrow<ClaimBurnRequest>>(
         &mut self,
@@ -541,7 +554,7 @@ impl WalletDaemonClient {
 
     /// Requests the current required authentication method to use when authenticating with the wallet daemon.
     pub async fn get_auth_method(&mut self) -> Result<AuthGetMethodResponse, WalletDaemonClientError> {
-        self.send_request("auth.method", &()).await
+        self.send_request("auth.method", &AuthGetMethodRequest {}).await
     }
 
     /// Requests a JWT authentication token with the specified permissions.
@@ -588,6 +601,14 @@ impl WalletDaemonClient {
     ) -> Result<PublishTemplateResponse, WalletDaemonClientError> {
         self.send_request("transactions.publish_template", request.borrow())
             .await
+    }
+
+    /// Signs template metadata with the specified key, returning the signature and CBOR-encoded metadata.
+    pub async fn sign_template_metadata<T: Borrow<SignTemplateMetadataRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<SignTemplateMetadataResponse, WalletDaemonClientError> {
+        self.send_request("templates.sign_metadata", request.borrow()).await
     }
 
     /// Lists stealth UTXOs for an account, with optional resource filtering.

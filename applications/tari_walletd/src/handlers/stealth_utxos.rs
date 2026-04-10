@@ -88,7 +88,7 @@ pub async fn handle_decrypt_value(
     let substates = sdk.substate_api().get_substates_from_network(utxo_ids).await?;
 
     // Get view secret key
-    let view_key = sdk.key_manager_api().get_elgamal_encrypted_view_key(req.view_key_id)?;
+    let view_key = sdk.key_manager_api().get_key(req.view_key_id)?;
 
     let value_range = req.minimum_expected_value.unwrap_or(0)..=req.maximum_expected_value;
 
@@ -150,7 +150,7 @@ pub async fn handle_decrypt_value(
             });
 
             let balance = sdk.viewable_balance_api().try_brute_force_commitment_balances(
-                &view_key.key,
+                view_key.secret(),
                 elgamal_proofs.iter(),
                 value_range,
                 &mut lookup,
@@ -166,7 +166,7 @@ pub async fn handle_decrypt_value(
             );
             spawn_blocking(move || {
                 let balances = sdk.viewable_balance_api().try_brute_force_commitment_balances(
-                    &view_key.key,
+                    view_key.secret(),
                     elgamal_proofs.iter(),
                     value_range,
                     &mut GenerateValueLookup,

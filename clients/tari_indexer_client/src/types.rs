@@ -15,6 +15,7 @@ use tari_engine_types::{
     transaction_receipt::TransactionReceipt,
 };
 use tari_ootle_common_types::{Epoch, Network, NumPreshards, ShardGroup, StateVersion, shard::Shard};
+use tari_ootle_template_metadata::MetadataHash;
 use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
 use tari_template_abi::TemplateDef;
 use tari_template_lib_types::{
@@ -177,13 +178,13 @@ pub struct ListTemplatesRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ListTemplatesResponse {
-    pub templates: Vec<TemplateMetadata>,
+    pub templates: Vec<TemplateMeta>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct TemplateMetadata {
+pub struct TemplateMeta {
     pub name: String,
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub address: TemplateAddress,
@@ -194,6 +195,50 @@ pub struct TemplateMetadata {
     pub code_size: usize,
     #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
     pub epoch: Epoch,
+    /// Optional multihash of off-chain CBOR metadata
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    pub metadata_hash: Option<MetadataHash>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListTemplateCatalogueRequest {
+    /// Optional substring filter on template name.
+    pub name_filter: Option<String>,
+    /// Maximum number of entries to return (default: 20, max: 100).
+    pub limit: Option<u64>,
+    /// Cursor: return entries inserted after the row with this template address.
+    /// When omitted, returns from the beginning.
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub after: Option<TemplateAddress>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListTemplateCatalogueResponse {
+    pub entries: Vec<TemplateCatalogueItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct TemplateCatalogueItem {
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub template_address: TemplateAddress,
+    pub template_name: String,
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub author_public_key: RistrettoPublicKeyBytes,
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub binary_hash: Hash32,
+    pub at_epoch: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    pub metadata_hash: Option<MetadataHash>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -261,6 +306,9 @@ pub struct StreamTransactionEventsRequest {
     pub substate_id: Option<SubstateId>,
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     pub template_address: Option<TemplateAddress>,
+    /// Resume the event stream from this event ID (exclusive). Events with id > after_id will be
+    /// replayed from the database before switching to the live stream.
+    pub after_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

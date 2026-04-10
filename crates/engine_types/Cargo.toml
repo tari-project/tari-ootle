@@ -11,6 +11,7 @@ license.workspace = true
 tari_bor = { workspace = true, features = ["std", "cbor_value_encoding_fix"] }
 tari_crypto = { workspace = true, features = ["borsh"] }
 tari_hashing = { workspace = true }
+tari_ootle_template_metadata = { workspace = true, features = ["borsh"] }
 tari_template_abi = { workspace = true, features = ["std"] }
 tari_template_lib = { workspace = true, features = ["borsh", "precision"] }
 ootle_serde = { workspace = true, features = ["base64", "bincode-compat"] }

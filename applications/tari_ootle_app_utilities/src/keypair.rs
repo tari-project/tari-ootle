@@ -52,6 +52,7 @@ use tari_crypto::{
     keys::{PublicKey as _, SecretKey as _},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
+#[cfg(feature = "p2p")]
 use tari_ootle_p2p::PeerAddress;
 
 const REQUIRED_IDENTITY_PERMS: u32 = 0o100600;
@@ -80,6 +81,7 @@ impl RistrettoKeypair {
         &self.0.public_key
     }
 
+    #[cfg(feature = "p2p")]
     pub fn to_peer_address(&self) -> PeerAddress {
         self.public_key().clone().into()
     }
@@ -155,8 +157,7 @@ pub fn setup_keypair_prompt<P: AsRef<Path>>(identity_file: P, create_id: bool) -
                 Ok(id) => {
                     info!(
                         target: LOG_TARGET,
-                        "New node identity [{}] with public key {} has been created at {}.",
-                        id.to_peer_address(),
+                        "New node identity with public key {} has been created at {}.",
                         id.public_key(),
                         identity_file.as_ref().to_str().unwrap_or("?"),
                     );
@@ -187,11 +188,7 @@ fn load_keypair<P: AsRef<Path>>(path: P) -> Result<RistrettoKeypair, IdentityErr
 
     let mut file = fs::File::open(path)?;
     let id = serde_json5::from_reader::<_, RistrettoKeypair>(&mut file)?;
-    debug!(
-        "Node ID loaded with public key {} and Node id {}",
-        id.public_key(),
-        id.to_peer_address()
-    );
+    debug!("Node ID loaded with public key {}", id.public_key());
     Ok(id)
 }
 

@@ -12,6 +12,7 @@ use crate::{
     wallet::WalletResult,
 };
 
+/// Trait for wallets that can sign transactions on a specific network.
 pub trait NetworkWallet {
     fn default_address(&self) -> &Address;
 
@@ -19,6 +20,9 @@ pub trait NetworkWallet {
     -> impl Future<Output = WalletResult<Transaction>> + Send;
 }
 
+/// A key provider that can sign transactions, derive stealth keys, generate output
+/// statements, and decrypt stealth inputs. Automatically implemented for any type
+/// implementing all four constituent traits.
 pub trait WalletKeyProvider:
     TransactionSigner + TransactionStealthKeySigner + StealthOutputStatementFactory + InputDecryptor
 {

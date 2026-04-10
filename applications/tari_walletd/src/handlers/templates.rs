@@ -2,18 +2,29 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use axum_extra::headers::authorization::Bearer;
+use blake2::{Blake2b512, Digest};
+use ootle_byte_type::ToByteType;
+use rand::rngs::OsRng;
+use tari_crypto::{
+    keys::PublicKey as _,
+    ristretto::{RistrettoPublicKey, RistrettoSchnorr},
+};
 use tari_ootle_common_types::optional::Optional;
 use tari_ootle_wallet_sdk::network::WalletNetworkInterface;
 use tari_ootle_walletd_client::{
     permissions::JrpcPermission,
     types::{
         AuthoredTemplate,
+        SignTemplateMetadataRequest,
+        SignTemplateMetadataResponse,
         TemplatesGetRequest,
         TemplatesGetResponse,
         TemplatesListAuthoredRequest,
         TemplatesListAuthoredResponse,
     },
 };
+use tari_template_lib_types::crypto::Scalar32Bytes;
+use tari_utilities::ByteArray;
 
 use crate::handlers::{HandlerContext, helpers::not_found};
 
@@ -60,5 +71,47 @@ pub async fn handle_list_owned(
     Ok(TemplatesListAuthoredResponse {
         templates: templates.into_iter().map(AuthoredTemplate::from).collect(),
         total_templates,
+    })
+}
+
+const SIGN_METADATA_DOMAIN: &[u8] = b"com.tari.ootle.community.SignedMetadataUpdate";
+
+pub async fn handle_sign_metadata(
+    context: &HandlerContext,
+    token: Option<&Bearer>,
+    req: SignTemplateMetadataRequest,
+) -> Result<SignTemplateMetadataResponse, anyhow::Error> {
+    context.check_auth(token, &[JrpcPermission::Admin])?;
+
+    let sdk = context.wallet_sdk();
+    let key = sdk.key_manager_api().get_key(req.key_id)?;
+    let author_public_key = RistrettoPublicKey::from_secret_key(&key.secret);
+
+    // CBOR-encode the metadata
+    let metadata_cbor = req.metadata.to_cbor()?;
+    let metadata_hash = req.metadata.hash()?;
+
+    // Generate random nonce keypair
+    let (nonce_secret, nonce_public) = RistrettoPublicKey::random_keypair(&mut OsRng);
+
+    // Compute Blake2b-512 challenge
+    let challenge = Blake2b512::new()
+        .chain_update(SIGN_METADATA_DOMAIN)
+        .chain_update(nonce_public.as_bytes())
+        .chain_update(author_public_key.as_bytes())
+        .chain_update(req.template_address.as_ref())
+        .chain_update(&metadata_cbor)
+        .finalize();
+
+    // Sign
+    let sig = RistrettoSchnorr::sign_raw_uniform(&key.secret, nonce_secret, &challenge)
+        .map_err(|e| anyhow::anyhow!("Schnorr signing failed: {e}"))?;
+
+    Ok(SignTemplateMetadataResponse {
+        public_nonce: sig.get_public_nonce().to_byte_type(),
+        signature: Scalar32Bytes::from_bytes(sig.get_signature().as_bytes())?,
+        public_key: author_public_key.to_byte_type(),
+        metadata_cbor,
+        metadata_hash,
     })
 }

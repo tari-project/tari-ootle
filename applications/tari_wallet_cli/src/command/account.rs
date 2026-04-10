@@ -78,8 +78,6 @@ pub struct GetArgs {
 #[derive(Debug, Args, Clone)]
 pub struct CreateFreeTestCoinsArgs {
     pub account: Option<ComponentAddressOrName>,
-    #[clap(long, short, alias = "amount")]
-    pub amount: Option<u64>,
     #[clap(long, short, alias = "fee")]
     pub fee: Option<u64>,
     #[clap(long, short, alias = "key")]
@@ -189,8 +187,6 @@ async fn handle_create_free_test_coins(
     let resp = client
         .create_free_test_coins(AccountsCreateFreeTestCoinsRequest {
             account: account.component_address.into(),
-            // Default 1 tXTR
-            amount: args.amount.unwrap_or(1_000_000).into(),
             max_fee: args.fee,
         })
         .await?;

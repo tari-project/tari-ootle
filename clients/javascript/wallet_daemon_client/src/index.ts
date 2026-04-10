@@ -32,6 +32,8 @@ import type {
   AuthLoginResponse,
   AuthRevokeTokenRequest,
   AuthRevokeTokenResponse,
+  BurnProofsGetRequest,
+  BurnProofsGetResponse,
   BurnProofsListRequest,
   BurnProofsListResponse,
   ClaimBurnRequest,
@@ -191,6 +193,10 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
   public burnProofsList(params: BurnProofsListRequest): Promise<BurnProofsListResponse> {
     return this.sendRequest("burn_proofs.list", params);
+  }
+
+  public burnProofsGet(params: BurnProofsGetRequest): Promise<BurnProofsGetResponse> {
+    return this.sendRequest("burn_proofs.get", params);
   }
 
   public accountsClaimBurn(params: ClaimBurnRequest): Promise<ClaimBurnResponse> {

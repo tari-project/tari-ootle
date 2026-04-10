@@ -7,6 +7,7 @@ use tari_ootle_common_types::{
     SubstateRequirement,
     engine_types::{limits, published_template::TemplateBlob},
 };
+use tari_ootle_template_metadata::MetadataHash;
 use tari_ootle_transaction::{TransactionBuilder, UnsignedTransaction, args};
 use tari_template_lib_types::{Amount, ResourceAddress, constants::TARI_TOKEN};
 
@@ -17,8 +18,20 @@ use crate::{
     provider::{Provider, ProviderError, WantInput},
 };
 
+/// Alias for [`AccountInvokeBuilder`].
 pub type IAccount<'a, P> = AccountInvokeBuilder<'a, P>;
 
+/// Builder for constructing transactions against the built-in Account template.
+///
+/// Supports public transfers, fee payment, and template publishing.
+///
+/// ```rust,ignore
+/// let tx = IAccount::new(&provider)
+///     .pay_fee(1000u64)
+///     .public_transfer(&recipient, TARI_TOKEN, 1_000_000u64)
+///     .prepare()
+///     .await?;
+/// ```
 pub struct AccountInvokeBuilder<'a, P> {
     builder: TransactionBuilder,
     provider: &'a P,
@@ -122,6 +135,21 @@ impl<'a, P: Provider> AccountInvokeBuilder<'a, P> {
             );
         };
         self.builder = self.builder.publish_template(template);
+        self
+    }
+
+    pub fn publish_template_with_metadata<T: TryInto<TemplateBlob>>(
+        mut self,
+        template: T,
+        metadata_hash: MetadataHash,
+    ) -> Self {
+        let Ok(template) = template.try_into() else {
+            panic!(
+                "Template blob exceeds maximum size of {} bytes",
+                limits::ENGINE_LIMITS.max_template_binary_size_bytes
+            );
+        };
+        self.builder = self.builder.publish_template_with_metadata(template, metadata_hash);
         self
     }
 }

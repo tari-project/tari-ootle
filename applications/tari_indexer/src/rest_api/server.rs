@@ -48,6 +48,8 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
     handlers::transactions::get_transaction_result,
     handlers::templates::get_template_definition,
     handlers::templates::list_cached_templates,
+    handlers::templates::list_template_catalogue,
+    handlers::templates::get_template_catalogue_entry,
     handlers::utxos::fetch_utxos,
     handlers::utxos::list_utxos,
     handlers::utxos::stream_utxo_updates,
@@ -120,6 +122,11 @@ impl Server {
             )
             .nest("/templates", Router::new()
                 .route("/cached", get(handlers::templates::list_cached_templates))
+                .route("/catalogue", get(handlers::templates::list_template_catalogue))
+                .route(
+                    "/catalogue/{template_address}",
+                    get(handlers::templates::get_template_catalogue_entry),
+                )
                 .route(
                     "/{template_address}",
                     get(handlers::templates::get_template_definition),

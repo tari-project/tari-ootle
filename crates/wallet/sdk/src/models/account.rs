@@ -131,6 +131,21 @@ pub struct NewAccountData {
     pub address: ComponentAddress,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TransactionContext {
+    NewAccount(NewAccountData),
+    ClaimBurn { file_name: String },
+}
+
+impl TransactionContext {
+    pub fn new_account_data(&self) -> Option<&NewAccountData> {
+        match self {
+            TransactionContext::NewAccount(data) => Some(data),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct AccountUpdate<'a> {
     pub name: Option<&'a str>,

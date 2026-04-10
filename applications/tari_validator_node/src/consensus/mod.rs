@@ -63,7 +63,7 @@ pub async fn spawn(
     client_factory: TariValidatorNodeRpcClientFactory,
     hooks: <TariConsensusSpec as ConsensusSpec>::Hooks,
     shutdown_signal: ShutdownSignal,
-    transaction_executor: TarBlockTransactionExecutor<ValidatorTransactionProcessor, ConsensusTransactionValidator>,
+    transaction_executor: TariBlockTransactionExecutor<ValidatorTransactionProcessor, ConsensusTransactionValidator>,
     tx_hotstuff_events: broadcast::Sender<HotstuffEvent>,
     consensus_constants: ConsensusConstants,
 ) -> (JoinHandle<Result<(), anyhow::Error>>, ConsensusHandle) {

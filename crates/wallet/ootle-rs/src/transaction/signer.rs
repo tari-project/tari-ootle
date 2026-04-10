@@ -8,6 +8,7 @@ use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{signer, types::Address, wallet::TransactionAuthorization};
 
+/// Trait for signing and authorizing transactions with a persistent key.
 // NOTE: async_trait is required because returning impl Future is not currently dyn compatible
 #[async_trait::async_trait]
 pub trait TransactionSigner {
@@ -24,12 +25,17 @@ pub trait TransactionSigner {
     ) -> signer::Result<TransactionAuthorization>;
 }
 
+/// Trait for applying the final seal signature to a transaction.
+///
+/// The seal signature is the last signature applied, proving that the transaction
+/// originator approved the final set of instructions and authorizations.
 #[async_trait]
 pub trait TransactionSealSigner {
     /// Asynchronously sign (seal) an unsealed transaction.
     async fn seal_transaction(&self, transaction: UnsealedTransaction) -> signer::Result<Transaction>;
 }
 
+/// Trait for signing transactions using derived stealth keys for confidential transactions.
 #[async_trait]
 pub trait TransactionStealthKeySigner {
     async fn sign_authorization_with_stealth(

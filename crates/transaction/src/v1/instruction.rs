@@ -10,6 +10,7 @@ use tari_engine_types::{
     published_template::TemplateBlob,
 };
 use tari_ootle_common_types::displayable::Displayable;
+use tari_ootle_template_metadata::MetadataHash;
 use tari_template_lib_types::{
     Amount,
     FunctionName,
@@ -81,6 +82,10 @@ pub enum Instruction {
         #[cfg_attr(feature = "ts", ts(type = "string"))]
         #[serde(with = "ootle_serde::base64")]
         binary: TemplateBlob,
+        /// Optional multihash of off-chain CBOR metadata
+        #[serde(default)]
+        #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+        metadata_hash: Option<MetadataHash>,
     },
     AllocateAddress {
         allocatable_type: AllocatableAddressType,
@@ -104,7 +109,7 @@ pub enum Instruction {
 impl Instruction {
     pub fn published_template_binary(&self) -> Option<&[u8]> {
         match self {
-            Self::PublishTemplate { binary } => Some(binary),
+            Self::PublishTemplate { binary, .. } => Some(binary),
             _ => None,
         }
     }
@@ -377,6 +382,7 @@ mod tests {
 
         let instruction = Instruction::PublishTemplate {
             binary: vec![1, 2, 3].try_into().unwrap(),
+            metadata_hash: None,
         };
         let json = serde_json::to_string(&instruction).unwrap();
         let decoded: Instruction = serde_json::from_str(&json).unwrap();

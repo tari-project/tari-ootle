@@ -195,6 +195,7 @@ async fn handler(
         Some(("templates", method)) => match method {
             "get" => call_handler(context, value, token, templates::handle_get).await,
             "list_authored" => call_handler(context, value, token, templates::handle_list_owned).await,
+            "sign_metadata" => call_handler(context, value, token, templates::handle_sign_metadata).await,
             _ => value.method_not_found(&value.method).into_response(),
         },
         Some(("nfts", method)) => match method {
@@ -346,5 +347,6 @@ pub enum ApplicationErrorCode {
     InvalidRequest = 400,
     Unauthorized = 401,
     TransactionRejected = 1000,
+    FaucetAlreadyClaimed = 1001,
     GeneralError = 500,
 }

@@ -160,7 +160,9 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                 start_state_version,
                 shard: shard.as_u32(),
                 until_epoch: Some(checkpoint.epoch().into()),
-                value_filters: SubstateValueFilterFlags::all_substates().bits(),
+                value_filters: (SubstateValueFilterFlags::all_substates() |
+                    SubstateValueFilterFlags::TEMPLATE_METADATA)
+                    .bits(),
             })
             .await?;
 

@@ -108,7 +108,14 @@ pub async fn run_tari_ootle_walletd(
     wallet_sdk.resources_api().upsert_resource(&addr, &resx)?;
 
     let notify = Notify::new(100);
-    let services = spawn_services(shutdown_signal.clone(), notify.clone(), wallet_sdk.clone());
+    let burn_proof_dir = config.ootle_wallet_daemon.get_burn_proof_dir(wallet_sdk.network());
+    let services = spawn_services(
+        shutdown_signal.clone(),
+        notify.clone(),
+        wallet_sdk.clone(),
+        burn_proof_dir,
+        config.ootle_wallet_daemon.auto_claim_burns,
+    );
 
     // trigger account scanning if needed
     if needs_seed_recovery {

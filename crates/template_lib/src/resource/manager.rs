@@ -208,6 +208,7 @@ impl ResourceManager {
     ///     true,
     /// );
     /// ```
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn create(
         resource_type: ResourceType,
         owner_rule: OwnerRule,

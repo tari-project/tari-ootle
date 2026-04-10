@@ -11,12 +11,13 @@ use ootle_byte_type::{FromByteType, ToByteType};
 use rand::rngs::OsRng;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
+    commit_result::RejectReason,
     component::derive_component_address_from_public_key,
     confidential::ClaimBurnOutputData,
     substate::SubstateId,
 };
 use tari_ootle_common_types::{SubstateRequirement, optional::Optional};
-use tari_ootle_transaction::args;
+use tari_ootle_transaction::{Transaction, args};
 use tari_ootle_wallet_crypto::{OutputWitness, StealthInputWitness, StealthOutputWitness, memo::Memo};
 use tari_ootle_wallet_sdk::{
     apis::{
@@ -25,8 +26,16 @@ use tari_ootle_wallet_sdk::{
         stealth_transfer::{StealthTransferParams, TransferOutput},
         substate::ValidatorScanResult,
     },
-    models::{KeyBranch, NewAccountData, StealthUtxoSpendKeyId, TransactionSubmittedEvent},
+    models::{
+        AccountWithAddress,
+        KeyBranch,
+        NewAccountData,
+        StealthUtxoSpendKeyId,
+        TransactionContext,
+        TransactionSubmittedEvent,
+    },
 };
+use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceHandle;
 use tari_ootle_walletd_client::{
     ComponentAddressOrName,
     permissions::JrpcPermission,
@@ -71,7 +80,14 @@ use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib_types::{
     Amount,
     ResourceType,
-    constants::{STEALTH_TARI_RESOURCE_ADDRESS, TARI_TOKEN, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
+    constants::{
+        STEALTH_TARI_RESOURCE_ADDRESS,
+        TARI_TOKEN,
+        XTR_FAUCET_AMOUNT,
+        XTR_FAUCET_CLAIM_RESOURCE_ADDRESS,
+        XTR_FAUCET_COMPONENT_ADDRESS,
+        XTR_FAUCET_VAULT_ADDRESS,
+    },
     stealth::SpendCondition,
 };
 use tokio::task;
@@ -81,6 +97,7 @@ use crate::{
     DEFAULT_FEE,
     handlers::helpers::{
         complete_burn_proof_to_contents,
+        faucet_already_claimed,
         general_error,
         get_account,
         get_account_by_key_index,
@@ -401,7 +418,6 @@ pub async fn handle_get_default(
     })
 }
 
-#[allow(clippy::too_many_lines)]
 pub async fn handle_claim_burn(
     context: &HandlerContext,
     token: Option<&Bearer>,
@@ -427,16 +443,43 @@ pub async fn handle_claim_burn(
     };
 
     let proof_dir = context.config().get_burn_proof_dir(network);
-    let ClaimBurnProofContents {
-        encrypted_data: claimed_encrypted_data,
-        claim_proof,
-    } = resolve_claim_proof(&proof_dir, claim_proof).await.map_err(|e| {
+    let proof_contents = resolve_claim_proof(&proof_dir, claim_proof).await.map_err(|e| {
         error!(target: LOG_TARGET, "Error resolving claim proof: {}", e);
         invalid_request(format!("Could not resolve claim proof. {e} Is the file name correct?"))
     })?;
 
     let accounts_api = sdk.accounts_api();
     let account = get_account(&account, &accounts_api)?;
+
+    execute_claim_burn(
+        sdk,
+        context.transaction_service(),
+        &account,
+        proof_contents,
+        max_fee,
+        is_dry_run,
+        proof_file_name,
+    )
+    .await
+}
+
+/// Core claim burn logic: decrypts the burn proof, builds and signs the claim transaction,
+/// and submits it (or performs a dry run). Shared between the interactive RPC handler
+/// and the automatic background [`AutoClaimBurnService`].
+#[allow(clippy::too_many_lines)]
+pub(crate) async fn execute_claim_burn(
+    sdk: &crate::WalletSdk,
+    transaction_service: &TransactionServiceHandle,
+    account: &AccountWithAddress,
+    proof_contents: ClaimBurnProofContents,
+    max_fee: u64,
+    is_dry_run: bool,
+    proof_file_name: Option<String>,
+) -> Result<ClaimBurnResponse, anyhow::Error> {
+    let ClaimBurnProofContents {
+        encrypted_data: claimed_encrypted_data,
+        claim_proof,
+    } = proof_contents;
 
     let account_owner_key_id = account
         .owner_key_id()
@@ -557,8 +600,7 @@ pub async fn handle_claim_burn(
         encrypted_data: claimed_encrypted_data,
     };
 
-    let transaction = context
-        .transaction_builder()
+    let transaction = Transaction::builder(network.as_byte())
         .with_fee_instructions_builder(|fee_builder| {
             fee_builder
                 // Mint the UTXO
@@ -577,22 +619,17 @@ pub async fn handle_claim_burn(
 
     if is_dry_run {
         let transaction_id = transaction.calculate_id();
-        let result = context
-            .transaction_service()
-            .submit_dry_run_transaction(transaction)
-            .await?;
+        let result = transaction_service.submit_dry_run_transaction(transaction).await?;
         return Ok(ClaimBurnResponse {
             transaction_id,
             dry_run_result: Some(result),
         });
     }
 
-    let tx_id = context.transaction_service().submit_transaction(transaction).await?;
-
-    if let Some(file_name) = proof_file_name {
-        let proof_dir = context.config().get_burn_proof_dir(network);
-        super::burn_proofs::mark_as_claimed(&proof_dir, &file_name);
-    }
+    let tx_context = proof_file_name.map(|file_name| TransactionContext::ClaimBurn { file_name });
+    let tx_id = transaction_service
+        .submit_transaction_with_opts(transaction, tx_context, None)
+        .await?;
 
     Ok(ClaimBurnResponse {
         transaction_id: tx_id,
@@ -627,11 +664,9 @@ pub async fn handle_create_free_test_coins(
     let sdk = context.wallet_sdk();
     let accounts_api = sdk.accounts_api();
 
-    let AccountsCreateFreeTestCoinsRequest {
-        account,
-        amount,
-        max_fee,
-    } = req;
+    let AccountsCreateFreeTestCoinsRequest { account, max_fee } = req;
+    // Fixed amount: always 1,000 TARI (matches the on-chain faucet template constant)
+    let amount = Amount::from(XTR_FAUCET_AMOUNT);
 
     let max_fee = max_fee.unwrap_or(DEFAULT_FEE);
 
@@ -657,6 +692,7 @@ pub async fn handle_create_free_test_coins(
     let mut inputs = vec![
         SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
         SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
+        SubstateRequirement::unversioned(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS),
     ];
 
     if account.is_confirmed_on_chain() {
@@ -694,10 +730,9 @@ pub async fn handle_create_free_test_coins(
         .transaction_builder()
         .with_fee_instructions_builder(|fee_builder| {
             fee_builder
-                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![amount])
-                .put_last_instruction_output_on_workspace("faucet_funds")
-                .create_account_with_bucket(*account.address.account_public_key(), "faucet_funds")
+                .create_account(*account.address.account_public_key())
                 .put_last_instruction_output_on_workspace("new_account")
+                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Workspace("new_account")])
                 .call_method("new_account", "pay_fee", args![max_fee])
         })
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
@@ -717,8 +752,10 @@ pub async fn handle_create_free_test_coins(
         .transaction_service()
         .submit_transaction_with_opts(
             transaction,
-            account.is_confirmed_on_chain().then(|| NewAccountData {
-                address: *account.component_address(),
+            account.is_confirmed_on_chain().then(|| {
+                TransactionContext::NewAccount(NewAccountData {
+                    address: *account.component_address(),
+                })
             }),
             None,
         )
@@ -726,14 +763,24 @@ pub async fn handle_create_free_test_coins(
 
     // Wait for the monitor to pick up the new or updated account
     let (finalized, _) = wait_for_result_and_account(&mut events, &tx_id, account.component_address()).await?;
-    if let Some(reject) = finalized.finalize.fee_reject() {
-        return Err(transaction_rejected(format!("Fee transaction rejected: {}", reject)));
-    }
     if let Some(reason) = finalized.finalize.any_reject() {
-        return Err(anyhow::anyhow!(
-            "Fee transaction succeeded (fees charged) however, the transaction failed: {}",
-            reason
-        ));
+        return match reason {
+            RejectReason::ExecutionFailure(reason) => {
+                if reason.contains("Duplicate NFT token id") {
+                    return Err(faucet_already_claimed());
+                }
+                Err(transaction_rejected(reason))
+            },
+            // TODO: consensus can emit failed to lock inputs when an output fails to lock and vice versa because it
+            // locks them together in some cases. so we take both as meaning already claimed
+            RejectReason::FailedToLockOutputs(reason) | RejectReason::FailedToLockInputs(reason) => {
+                if reason.contains("is already UP and conflicts with an existing output") {
+                    return Err(faucet_already_claimed());
+                }
+                Err(transaction_rejected(reason))
+            },
+            _ => Err(transaction_rejected(reason)),
+        };
     }
 
     info!(
@@ -975,7 +1022,7 @@ pub async fn handle_confidential_transfer(
 
         notifier.notify(TransactionSubmittedEvent {
             transaction_id: tx_id,
-            new_account: None,
+            context: None,
         });
 
         Ok(ConfidentialTransferResponse { transaction_id: tx_id })
@@ -1105,7 +1152,7 @@ pub async fn handle_stealth_transfer(
 
         notifier.notify(TransactionSubmittedEvent {
             transaction_id: tx_id,
-            new_account: None,
+            context: None,
         });
 
         Ok(StealthTransferResponse { transaction_id: tx_id })

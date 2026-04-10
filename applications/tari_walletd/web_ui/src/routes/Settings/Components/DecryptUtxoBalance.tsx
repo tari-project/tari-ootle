@@ -20,15 +20,25 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Divider } from "@mui/material";
+import { Divider, FormControl, InputLabel, MenuItem, Select, SelectChangeEvent } from "@mui/material";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import { useTheme } from "@mui/material/styles";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
-import { StealthUtxosDecryptValueRequest, StealthUtxosDecryptValueResponse } from "@tari-project/ootle-ts-bindings";
+import { KeyBranch, StealthUtxosDecryptValueRequest, StealthUtxosDecryptValueResponse } from "@tari-project/ootle-ts-bindings";
 import { stealthDecryptUtxoBalance } from "@utils/json_rpc";
 import { useState } from "react";
+
+const KEY_BRANCHES: KeyBranch[] = [
+  "account",
+  "transaction",
+  "elgamal_encryption_view_key",
+  "stealth_mask",
+  "confidential_mask",
+  "nonce",
+  "view_only_key",
+];
 
 function DecryptUtxoBalanceForm() {
   const [formState, setFormState] = useState({
@@ -36,6 +46,7 @@ function DecryptUtxoBalanceForm() {
     utxoId: null,
     minimumExpectedValue: null,
     maximumExpectedValue: 100000000,
+    keyBranch: "elgamal_encryption_view_key",
     keyId: 0,
   });
   const [balance, setBalance] = useState<StealthUtxosDecryptValueResponse | null>(null);
@@ -46,7 +57,7 @@ function DecryptUtxoBalanceForm() {
       ids: [formState.utxoId!],
       minimum_expected_value: formState.minimumExpectedValue ? BigInt(formState.minimumExpectedValue) : null,
       maximum_expected_value: BigInt(formState.maximumExpectedValue),
-      view_key_id: BigInt(formState.keyId),
+      view_key_id: { Derived: { key_branch: formState.keyBranch, index: BigInt(formState.keyId) } },
     } as StealthUtxosDecryptValueRequest);
 
     setBalance(resp);
@@ -71,9 +82,32 @@ function DecryptUtxoBalanceForm() {
     });
   };
 
+  const onSelectChange = (e: SelectChangeEvent) => {
+    setFormState({
+      ...formState,
+      [e.target.name]: e.target.value,
+    });
+  };
+
   return (
     <>
       <Box className="flex-container" sx={{ marginBottom: 4 }}>
+        <FormControl style={{ flexGrow: 1, minWidth: 200 }}>
+          <InputLabel id="key-branch-label">Key Branch</InputLabel>
+          <Select
+            labelId="key-branch-label"
+            name="keyBranch"
+            label="Key Branch"
+            value={formState.keyBranch}
+            onChange={onSelectChange}
+          >
+            {KEY_BRANCHES.map((branch) => (
+              <MenuItem key={branch} value={branch}>
+                {branch}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
         <TextField
           name="keyId"
           label="Key ID"

@@ -29,7 +29,7 @@ tari_shutdown = { workspace = true }
 tari_sidechain = { workspace = true }
 
 tari_crypto = { workspace = true }
-tari_ootle_app_utilities = { workspace = true, features = ["epoch_oracle"] }
+tari_ootle_app_utilities = { workspace = true, features = ["epoch_oracle", "p2p"] }
 tari_ootle_common_types = { workspace = true }
 tari_engine = { workspace = true }
 tari_engine_types = { workspace = true }

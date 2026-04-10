@@ -97,6 +97,11 @@ mod account_template {
             v.withdraw(amount)
         }
 
+        pub fn withdraw_all(&mut self, resource: ResourceAddress) -> Bucket {
+            let v = self.get_vault_mut(resource);
+            v.withdraw_all()
+        }
+
         pub fn withdraw_non_fungible(&mut self, resource: ResourceAddress, nf_id: NonFungibleId) -> Bucket {
             // An event is emitted by the vault.withdraw_non_fungibles method
             let v = self.get_vault_mut(resource);

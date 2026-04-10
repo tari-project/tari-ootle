@@ -3,11 +3,15 @@ import type { Epoch } from "../Epoch";
 import type { Hash32 } from "../Hash32";
 import type { RistrettoPublicKeyBytes } from "../RistrettoPublicKeyBytes";
 
-export type TemplateMetadata = {
+export type TemplateMeta = {
   name: string;
   address: Hash32;
   binary_sha: Hash32;
   author_public_key: RistrettoPublicKeyBytes;
   code_size: number;
   epoch: Epoch;
+  /**
+   * Optional multihash of off-chain CBOR metadata
+   */
+  metadata_hash?: string | null;
 };

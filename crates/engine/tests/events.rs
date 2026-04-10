@@ -4,7 +4,7 @@
 use tari_engine::runtime::RuntimeError;
 use tari_ootle_transaction::{Transaction, args};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::types::{Amount, constants::XTR_FAUCET_COMPONENT_ADDRESS};
+use tari_template_lib::types::Amount;
 use tari_template_test_tooling::{
     TemplateTest,
     support::assert_error::assert_reject_reason,
@@ -59,16 +59,8 @@ fn builtin_vault_events() {
     let mut test = TemplateTest::new(CRATE_PATH, Vec::<&str>::new());
 
     // Create sender and receiver accounts
-    let (sender_address, sender_proof, _) = test.create_empty_account();
+    let (sender_address, sender_proof, _) = test.create_funded_account();
     let (receiver_address, _, _) = test.create_empty_account();
-    test.build_and_execute(
-        Transaction::builder_localnet()
-            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![1000])
-            .put_last_instruction_output_on_workspace("free_coins")
-            .call_method(sender_address, "deposit", args![Workspace("free_coins")]),
-        vec![test.owner_proof()],
-    )
-    .expect_success();
 
     // transfer some tokens between accounts
     let amount = Amount::from(100u64);

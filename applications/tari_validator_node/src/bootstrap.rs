@@ -84,7 +84,7 @@ use crate::{
     ValidatorNodeEpochManagerSpec,
     ValidatorNodeStateStore,
     base_layer::verify_correct_network,
-    consensus::{self, ConsensusHandle, TarBlockTransactionExecutor, ValidationContext},
+    consensus::{self, ConsensusHandle, TariBlockTransactionExecutor, ValidationContext},
     file_l1_submitter::FileLayerOneSubmitter,
     migrations,
     p2p::{
@@ -300,7 +300,7 @@ pub async fn spawn_services(
         fee_table.clone(),
         Arc::new(TariClaimBurnProofVerifier::new(config.network, global_db.clone())),
     );
-    let transaction_executor = TarBlockTransactionExecutor::new(
+    let transaction_executor = TariBlockTransactionExecutor::new(
         transaction_processor,
         create_consensus_transaction_validator(config.network, template_provider.clone()).boxed(),
     );

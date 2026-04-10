@@ -66,6 +66,20 @@ impl ConsensusConstants {
         }
     }
 
+    pub const fn esmeralda() -> Self {
+        Self {
+            base_layer_confirmations: 5,
+            committee_size_per_shard_group: 40,
+            num_preshards: NumPreshards::current(),
+            pacemaker_block_time: Duration::from_secs(10),
+            missed_proposal_suspend_threshold: 5,
+            missed_proposal_evict_threshold: 10,
+            missed_proposal_recovery_threshold: 5,
+            max_number_commands_in_block: 500,
+            fee_exhaust_divisor: 20, // 1/20 = 5%
+        }
+    }
+
     pub const fn testnet() -> Self {
         Self {
             base_layer_confirmations: 100,
@@ -92,7 +106,8 @@ impl From<Network> for ConsensusConstants {
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(7),
             ),
-            Network::StageNet | Network::NextNet | Network::Igor | Network::Esmeralda => Self::testnet(),
+            Network::Esmeralda => Self::esmeralda(),
+            Network::StageNet | Network::NextNet | Network::Igor => Self::testnet(),
         }
     }
 }

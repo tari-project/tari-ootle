@@ -5,6 +5,7 @@ use std::borrow::Cow;
 
 use tari_ootle_common_types::Epoch;
 use tari_ootle_storage::{StorageError, global::DbTemplate};
+use tari_ootle_template_metadata::MetadataHash;
 use tari_template_lib_types::{Hash32, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -16,11 +17,14 @@ pub struct TemplateMetadata {
     pub author_public_key: RistrettoPublicKeyBytes,
     pub code_size: usize,
     pub epoch: Epoch,
+    /// Optional multihash of off-chain CBOR metadata
+    pub metadata_hash: Option<MetadataHash>,
 }
 
 // TODO: Allow fetching of just the template metadata without the compiled code
 impl From<DbTemplate> for TemplateMetadata {
     fn from(record: DbTemplate) -> Self {
+        let metadata_hash = record.metadata_hash.as_deref().and_then(MetadataHash::from_bytes);
         TemplateMetadata {
             name: record.template_name,
             address: record.template_address,
@@ -28,6 +32,7 @@ impl From<DbTemplate> for TemplateMetadata {
             author_public_key: record.author_public_key,
             code_size: record.code.as_ref().map(|code| code.len()).unwrap_or_default(),
             epoch: record.epoch,
+            metadata_hash,
         }
     }
 }
@@ -72,6 +77,7 @@ impl TryFrom<DbTemplate> for Template {
     type Error = StorageError;
 
     fn try_from(record: DbTemplate) -> Result<Self, Self::Error> {
+        let metadata_hash = record.metadata_hash.as_deref().and_then(MetadataHash::from_bytes);
         Ok(Template {
             metadata: TemplateMetadata {
                 name: record.template_name,
@@ -80,6 +86,7 @@ impl TryFrom<DbTemplate> for Template {
                 author_public_key: record.author_public_key,
                 code_size: record.code.as_ref().map(|code| code.len()).unwrap_or_default(),
                 epoch: record.epoch,
+                metadata_hash,
             },
             code: {
                 let code = record.code.ok_or_else(|| StorageError::DataInconsistency {

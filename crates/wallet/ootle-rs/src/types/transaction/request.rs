@@ -12,6 +12,19 @@ use crate::{
 pub struct Initial;
 pub struct WithTx(UnsignedTransaction);
 
+/// A builder for constructing signed transactions ready for submission.
+///
+/// Follows a typestate pattern: start with [`TransactionRequest::new()`], attach an
+/// unsigned transaction with [`with_transaction()`](TransactionRequest::with_transaction),
+/// optionally add extra authorizations, then call [`build()`](TransactionRequest::build)
+/// to seal and sign.
+///
+/// ```rust,ignore
+/// let tx = TransactionRequest::default()
+///     .with_transaction(unsigned_tx)
+///     .build(provider.wallet())
+///     .await?;
+/// ```
 #[derive(Clone, Debug, Default)]
 pub struct TransactionRequest<State = Initial> {
     state: State,

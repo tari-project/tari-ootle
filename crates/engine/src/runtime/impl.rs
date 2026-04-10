@@ -49,6 +49,7 @@ use tari_engine_types::{
     vault::Vault,
 };
 use tari_ootle_common_types::{GetVerifier, services::template_provider::TemplateProvider};
+use tari_ootle_template_metadata::MetadataHash;
 use tari_ootle_transaction::{
     AllocatableAddressType,
     Assertion,
@@ -613,8 +614,7 @@ where
                         .as_component_address()
                         .ok_or_else(|| RuntimeError::InvalidArgument {
                             argument: "component_ref",
-                            reason: "GetState component action should not define a specific component address"
-                                .to_string(),
+                            reason: "GetState component action requires a component address".to_string(),
                         })?;
                 args.assert_no_args("ComponentAction::GetState")?;
                 self.tracker.write_with(|state| {
@@ -745,23 +745,17 @@ where
                         .as_component_address()
                         .ok_or_else(|| RuntimeError::InvalidArgument {
                             argument: "component_ref",
-                            reason: "SetAccessRules component action requires a component address".to_string(),
+                            reason: "GetTemplateAddress component action requires a component address".to_string(),
                         })?;
 
                 args.assert_no_args("Component::GetTemplateAddress")?;
 
-                // The template can never change so we'll just fetch the component
-                self.tracker.read_with(|state| {
-                    let substate = state.store().get_unmodified_substate(&component_address.into())?;
-                    let component = substate
-                        .substate_value()
-                        .component()
-                        .ok_or(RuntimeError::InvariantError {
-                            function: "GetTemplateAddress",
-                            details: format!("Substate at {} is not a component", component_address),
-                        })?;
-
-                    Ok(InvokeResult::encode(&component.template_address)?)
+                self.tracker.write_with(|state| {
+                    let locked = state.read_lock_substate(SubstateId::Component(component_address))?;
+                    let component = state.get_component(&locked)?;
+                    let template_address = component.template_address;
+                    state.unlock_substate(locked)?;
+                    Ok(InvokeResult::encode(&template_address)?)
                 })
             },
             ComponentAction::GetOwnerProof => {
@@ -2143,6 +2137,13 @@ where
 
                 self.tracker.write_with(|state| {
                     let bucket = state.take_bucket(bucket_id)?;
+                    // It is invalid to burn a bucket that has locked funds (e.g. via a proof)
+                    if !bucket.locked_amount().is_zero() {
+                        return Err(RuntimeError::InvalidOpDepositLockedBucket {
+                            bucket_id,
+                            locked_amount: bucket.locked_amount(),
+                        });
+                    }
                     let burnt_amount = bucket.unlocked_amount();
                     state.burn_bucket(bucket)?;
 
@@ -2604,16 +2605,14 @@ where
         self.invoke_modules_on_runtime_call("finalize")?;
         // If the fee module is present, this will add substate storage fees
         self.invoke_modules_on_before_finalize()?;
-        let finalized = self.tracker.finalize(None)?;
-        Ok(finalized)
+        self.tracker.finalize(None)
     }
 
     fn finalize_failure(&mut self, reason: RejectReason) -> Result<FinalizeResult, RuntimeError> {
         self.invoke_modules_on_runtime_call("finalize_failure")?;
         // If the fee module is present, this will add substate storage fees
         self.invoke_modules_on_before_finalize()?;
-        let finalized = self.tracker.finalize(Some(reason))?;
-        Ok(finalized)
+        self.tracker.finalize(Some(reason))
     }
 
     fn validate_finalized(&self) -> Result<(), RuntimeError> {
@@ -2829,7 +2828,12 @@ where
         Ok(())
     }
 
-    fn publish_template(&mut self, template: TemplateBlob) -> Result<(), RuntimeError> {
+    fn publish_template(
+        &mut self,
+        template: TemplateBlob,
+        metadata_hash: Option<MetadataHash>,
+        template_def: TemplateDef,
+    ) -> Result<(), RuntimeError> {
         self.invoke_modules_on_runtime_call("publish_template")?;
         self.tracker.write_with(|state_mut| {
             let template_byte_size = template.len();
@@ -2837,12 +2841,24 @@ where
             let template_address =
                 PublishedTemplateAddress::from_author_and_binary_hash(&self.seal_signer_public_key, &code_hash);
             let epoch = state_mut.get_current_epoch()?;
+            let template_name = template_def
+                .template_name()
+                .try_into()
+                .map_err(|_| RuntimeError::InvalidArgument {
+                    argument: "template_name",
+                    reason: format!(
+                        "Template name exceeds maximum length of {} bytes",
+                        limits::ENGINE_LIMITS.max_template_name_length
+                    ),
+                })?;
             state_mut.new_substate(
                 template_address,
                 SubstateValue::Template(PublishedTemplate {
+                    template_name,
                     binary: template,
                     author: self.seal_signer_public_key,
                     at_epoch: epoch.as_u64(),
+                    metadata_hash: metadata_hash.clone(),
                 }),
             )?;
             // Mark template substate as owned by current call stack

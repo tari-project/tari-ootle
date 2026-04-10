@@ -33,29 +33,6 @@ const LOG_TARGET: &str = "tari::ootle::indexer::rest_api::server";
 // Limit the body size to 4MB to allow for large transactions (wasm uploads)
 const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
 
-/// Middleware for per-IP rate limiting
-async fn rate_limit_middleware(
-    limiter: IpRateLimiter,
-) -> impl Fn(ConnectInfo<SocketAddr>, Request, Next) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>> + Clone {
-    move |ConnectInfo(addr): ConnectInfo<SocketAddr>, request: Request, next: Next| {
-        let limiter = limiter.clone();
-        Box::pin(async move {
-            match limiter.check_rate_limit(addr.ip()) {
-                Ok(()) => next.run(request).await,
-                Err(retry_after) => {
-                    let mut response = Response::new(Body::from("Too Many Requests"));
-                    *response.status_mut() = StatusCode::TOO_MANY_REQUESTS;
-                    response.headers_mut().insert(
-                        header::RETRY_AFTER,
-                        HeaderValue::from_str(&retry_after.as_secs().to_string()).unwrap(),
-                    );
-                    response
-                },
-            }
-        })
-    }
-}
-
 #[derive(OpenApi)]
 #[openapi(paths(
     handlers::misc::get_identity,
@@ -111,6 +88,133 @@ impl Server {
     ) -> anyhow::Result<SocketAddr> {
         let context = HandlerContext::from_services(services);
 
+        // Create rate limiting middleware closures once
+        let submit_transaction_middleware = {
+            let limiter = context.submit_transaction_limiter.clone();
+            middleware::from_fn(move |ConnectInfo(addr): ConnectInfo<SocketAddr>, request: Request, next: Next| {
+                let limiter = limiter.clone();
+                async move {
+                    match limiter.check_rate_limit(addr.ip()) {
+                        Ok(()) => next.run(request).await,
+                        Err(retry_after) => {
+                            let mut response = Response::new(Body::from("Too Many Requests"));
+                            *response.status_mut() = StatusCode::TOO_MANY_REQUESTS;
+                            response.headers_mut().insert(
+                                header::RETRY_AFTER,
+                                HeaderValue::from_str(&retry_after.as_secs().to_string()).unwrap(),
+                            );
+                            response
+                        }
+                    }
+                }
+            })
+        };
+
+        let dry_run_middleware = {
+            let limiter = context.dry_run_limiter.clone();
+            middleware::from_fn(move |ConnectInfo(addr): ConnectInfo<SocketAddr>, request: Request, next: Next| {
+                let limiter = limiter.clone();
+                async move {
+                    match limiter.check_rate_limit(addr.ip()) {
+                        Ok(()) => next.run(request).await,
+                        Err(retry_after) => {
+                            let mut response = Response::new(Body::from("Too Many Requests"));
+                            *response.status_mut() = StatusCode::TOO_MANY_REQUESTS;
+                            response.headers_mut().insert(
+                                header::RETRY_AFTER,
+                                HeaderValue::from_str(&retry_after.as_secs().to_string()).unwrap(),
+                            );
+                            response
+                        }
+                    }
+                }
+            })
+        };
+
+        let fetch_substates_middleware = {
+            let limiter = context.fetch_substates_limiter.clone();
+            middleware::from_fn(move |ConnectInfo(addr): ConnectInfo<SocketAddr>, request: Request, next: Next| {
+                let limiter = limiter.clone();
+                async move {
+                    match limiter.check_rate_limit(addr.ip()) {
+                        Ok(()) => next.run(request).await,
+                        Err(retry_after) => {
+                            let mut response = Response::new(Body::from("Too Many Requests"));
+                            *response.status_mut() = StatusCode::TOO_MANY_REQUESTS;
+                            response.headers_mut().insert(
+                                header::RETRY_AFTER,
+                                HeaderValue::from_str(&retry_after.as_secs().to_string()).unwrap(),
+                            );
+                            response
+                        }
+                    }
+                }
+            })
+        };
+
+        let fetch_utxos_middleware = {
+            let limiter = context.fetch_utxos_limiter.clone();
+            middleware::from_fn(move |ConnectInfo(addr): ConnectInfo<SocketAddr>, request: Request, next: Next| {
+                let limiter = limiter.clone();
+                async move {
+                    match limiter.check_rate_limit(addr.ip()) {
+                        Ok(()) => next.run(request).await,
+                        Err(retry_after) => {
+                            let mut response = Response::new(Body::from("Too Many Requests"));
+                            *response.status_mut() = StatusCode::TOO_MANY_REQUESTS;
+                            response.headers_mut().insert(
+                                header::RETRY_AFTER,
+                                HeaderValue::from_str(&retry_after.as_secs().to_string()).unwrap(),
+                            );
+                            response
+                        }
+                    }
+                }
+            })
+        };
+
+        let get_non_fungibles_middleware = {
+            let limiter = context.get_non_fungibles_limiter.clone();
+            middleware::from_fn(move |ConnectInfo(addr): ConnectInfo<SocketAddr>, request: Request, next: Next| {
+                let limiter = limiter.clone();
+                async move {
+                    match limiter.check_rate_limit(addr.ip()) {
+                        Ok(()) => next.run(request).await,
+                        Err(retry_after) => {
+                            let mut response = Response::new(Body::from("Too Many Requests"));
+                            *response.status_mut() = StatusCode::TOO_MANY_REQUESTS;
+                            response.headers_mut().insert(
+                                header::RETRY_AFTER,
+                                HeaderValue::from_str(&retry_after.as_secs().to_string()).unwrap(),
+                            );
+                            response
+                        }
+                    }
+                }
+            })
+        };
+
+        let list_recent_transactions_middleware = {
+            let limiter = context.list_recent_transactions_limiter.clone();
+            middleware::from_fn(move |ConnectInfo(addr): ConnectInfo<SocketAddr>, request: Request, next: Next| {
+                let limiter = limiter.clone();
+                async move {
+                    match limiter.check_rate_limit(addr.ip()) {
+                        Ok(()) => next.run(request).await,
+                        Err(retry_after) => {
+                            let mut response = Response::new(Body::from("Too Many Requests"));
+                            *response.status_mut() = StatusCode::TOO_MANY_REQUESTS;
+                            response.headers_mut().insert(
+                                header::RETRY_AFTER,
+                                HeaderValue::from_str(&retry_after.as_secs().to_string()).unwrap(),
+                            );
+                            response
+                        }
+                    }
+                }
+            })
+        };
+
         let router = Router::new()
             .route("/health", get(handlers::misc::health))
             .route("/ready", get(handlers::misc::ready))
@@ -122,18 +226,12 @@ impl Server {
             .route("/network/connections", get(handlers::network::get_connections))
             .nest("/substates", Router::new()
                 .route("/fetch", post(handlers::substates::fetch_substates)
-                    .layer(middleware::from_fn({
-                        let limiter = context.fetch_substates_limiter.clone();
-                        move |addr, req, next| rate_limit_middleware(limiter.clone())(addr, req, next)
-                    })))
+                    .layer(fetch_substates_middleware))
                 .route("/{substate_id}", get(handlers::substates::get_substate))
             )
             .nest("/transactions", Router::new()
                 .route("/", post(handlers::transactions::submit_transaction)
-                    .layer(middleware::from_fn({
-                        let limiter = context.submit_transaction_limiter.clone();
-                        move |addr, req, next| rate_limit_middleware(limiter.clone())(addr, req, next)
-                    })))
+                    .layer(submit_transaction_middleware))
                 .route("/dry-run", post(handlers::transactions::submit_transaction_dry_run)
                     .layer(ServiceBuilder::new()
                         .layer(axum::error_handling::HandleErrorLayer::new(|err: axum::BoxError| async move {
@@ -145,17 +243,11 @@ impl Server {
                         .layer(BufferLayer::new(1024))
                         .layer(RateLimitLayer::new(10, Duration::from_secs(5)))
                     )
-                    .layer(middleware::from_fn({
-                        let limiter = context.dry_run_limiter.clone();
-                        move |addr, req, next| rate_limit_middleware(limiter.clone())(addr, req, next)
-                    })))
+                    .layer(dry_run_middleware))
                 .route(
                     "/recent",
                     get(handlers::transactions::list_recent_transactions)
-                        .layer(middleware::from_fn({
-                            let limiter = context.list_recent_transactions_limiter.clone();
-                            move |addr, req, next| rate_limit_middleware(limiter.clone())(addr, req, next)
-                        })),
+                        .layer(list_recent_transactions_middleware),
                 )
                 .route(
                     "/{transaction_id}/result",
@@ -177,17 +269,11 @@ impl Server {
                 )
             )
             .route("/non-fungibles", get(handlers::nfts::get_non_fungibles)
-                .layer(middleware::from_fn({
-                    let limiter = context.get_non_fungibles_limiter.clone();
-                    move |addr, req, next| rate_limit_middleware(limiter.clone())(addr, req, next)
-                })))
+                .layer(get_non_fungibles_middleware))
             .nest("/utxos", Router::new()
                 .route("/", get(handlers::utxos::list_utxos))
                 .route("/fetch", post(handlers::utxos::fetch_utxos)
-                    .layer(middleware::from_fn({
-                        let limiter = context.fetch_utxos_limiter.clone();
-                        move |addr, req, next| rate_limit_middleware(limiter.clone())(addr, req, next)
-                    })))
+                    .layer(fetch_utxos_middleware))
                 .route("/stream", post(handlers::utxos::stream_utxo_updates))
             )
             .nest(

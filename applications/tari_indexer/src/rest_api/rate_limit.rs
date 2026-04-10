@@ -55,10 +55,13 @@ impl TokenBucket {
     pub fn time_until_next_token(&self) -> Duration {
         if self.tokens >= 1.0 {
             Duration::from_secs(0)
-        } else {
+        } else if self.refill_rate > 0.0 {
             let tokens_needed = 1.0 - self.tokens;
             let seconds = tokens_needed / self.refill_rate;
             Duration::from_secs_f64(seconds.max(1.0))
+        } else {
+            // If refill_rate is 0, return a maximum fallback duration
+            Duration::from_secs(60)
         }
     }
 }

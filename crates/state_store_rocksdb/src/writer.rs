@@ -815,6 +815,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         initial_evidence: &Evidence,
         is_ready: bool,
         is_global: bool,
+        max_epoch: Option<Epoch>,
     ) -> Result<(), StorageError> {
         let value = TransactionPoolRecord::load(
             tx_id,
@@ -828,6 +829,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             None,
             None,
             is_ready,
+            max_epoch,
             None,
             time::OffsetDateTime::now_utc(),
             None,

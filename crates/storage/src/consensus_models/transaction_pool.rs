@@ -72,8 +72,9 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
         initial_evidence: &Evidence,
         is_ready: bool,
         is_global: bool,
+        max_epoch: Option<Epoch>,
     ) -> Result<(), TransactionPoolError> {
-        tx.transaction_pool_insert_new(tx_id, decision, initial_evidence, is_ready, is_global)?;
+        tx.transaction_pool_insert_new(tx_id, decision, initial_evidence, is_ready, is_global, max_epoch)?;
         Ok(())
     }
 
@@ -91,6 +92,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
                 &transaction.to_initial_evidence(num_preshards, num_committees),
                 is_ready,
                 transaction.transaction().is_global(),
+                transaction.transaction().max_epoch(),
             )?;
         }
         Ok(())
@@ -345,6 +347,9 @@ pub struct TransactionPoolRecord {
     local_decision: Option<Decision>,
     remote_decision: Option<Decision>,
     is_ready: bool,
+    /// The maximum epoch for which this transaction is valid.
+    #[serde(default)]
+    max_epoch: Option<Epoch>,
     /// Epoch to use when executing the transaction. This updates as foreign proposals are received
     /// until the transaction is executed.
     locked_epoch: Option<Epoch>,
@@ -367,6 +372,7 @@ impl TransactionPoolRecord {
             local_decision: None,
             remote_decision: None,
             is_ready: false,
+            max_epoch: transaction.max_epoch(),
             locked_epoch: None,
             last_updated: time::OffsetDateTime::now_utc(),
             last_updated_in_block: None,
@@ -385,6 +391,7 @@ impl TransactionPoolRecord {
         local_decision: Option<Decision>,
         remote_decision: Option<Decision>,
         is_ready: bool,
+        max_epoch: Option<Epoch>,
         locked_epoch: Option<Epoch>,
         last_updated: time::OffsetDateTime,
         last_updated_in_block: Option<BlockId>,
@@ -401,6 +408,7 @@ impl TransactionPoolRecord {
             local_decision,
             remote_decision,
             is_ready,
+            max_epoch,
             locked_epoch,
             last_updated,
             last_updated_in_block,
@@ -450,6 +458,10 @@ impl TransactionPoolRecord {
 
     pub fn remote_decision(&self) -> Option<Decision> {
         self.remote_decision
+    }
+
+    pub fn max_epoch(&self) -> Option<Epoch> {
+        self.max_epoch
     }
 
     pub fn locked_epoch(&self) -> Option<Epoch> {
@@ -935,6 +947,7 @@ mod tests {
                 local_decision: None,
                 remote_decision: None,
                 is_ready: false,
+                max_epoch: None,
                 locked_epoch: None,
                 last_updated: time::OffsetDateTime::now_utc(),
                 last_updated_in_block: None,

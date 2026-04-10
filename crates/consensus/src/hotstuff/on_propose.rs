@@ -12,7 +12,7 @@ use ootle_byte_type::ToByteType;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{Decision, HighPc, HighestSeenBlock, LeafBlock, ProposalCertificate, TimeoutCertificate};
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
-use tari_engine_types::commit_result::RejectReason;
+use tari_engine_types::commit_result::{AbortReason, RejectReason};
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     Epoch,
@@ -640,6 +640,22 @@ where TConsensusSpec: ConsensusSpec
                 pool_tx.id(),
                 parent_block.epoch(),
             );
+        }
+
+        // Reject the transaction if the locked epoch exceeds max_epoch
+        if let Some(max_epoch) = pool_tx.max_epoch() {
+            if parent_block.epoch() > max_epoch {
+                warn!(
+                    target: LOG_TARGET,
+                    "⏰ Transaction {} has expired: locked epoch {} exceeds max_epoch {}. Proposing ABORT.",
+                    pool_tx.id(),
+                    parent_block.epoch(),
+                    max_epoch,
+                );
+                pool_tx.set_local_decision(Decision::Abort(AbortReason::EpochExpired));
+                let atom = pool_tx.get_current_transaction_atom();
+                return Ok(Some(Command::LocalOnly(atom)));
+            }
         }
 
         match prepared {

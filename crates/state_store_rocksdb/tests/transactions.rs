@@ -85,11 +85,11 @@ mod confirm_all_transitions {
         block1.as_locked().set(&mut tx).unwrap();
         block1.as_leaf().set(&mut tx).unwrap();
 
-        tx.transaction_pool_insert_new(atom1.id, atom1.decision, &Evidence::empty(), true, false)
+        tx.transaction_pool_insert_new(atom1.id, atom1.decision, &Evidence::empty(), true, false, None)
             .unwrap();
-        tx.transaction_pool_insert_new(atom2.id, atom2.decision, &Evidence::empty(), true, false)
+        tx.transaction_pool_insert_new(atom2.id, atom2.decision, &Evidence::empty(), true, false, None)
             .unwrap();
-        tx.transaction_pool_insert_new(atom3.id, atom3.decision, &Evidence::empty(), true, false)
+        tx.transaction_pool_insert_new(atom3.id, atom3.decision, &Evidence::empty(), true, false, None)
             .unwrap();
         let block_id = *block1.id();
         let transactions = tx.transaction_pool_get_all(1000).unwrap();
@@ -317,7 +317,7 @@ mod transaction_execution_operations {
         assert_eq_debug(&res, &exec1);
 
         // transactions_finalize_all
-        tx.transaction_pool_insert_new(*tx1.id(), Decision::Commit, &Evidence::empty(), true, false)
+        tx.transaction_pool_insert_new(*tx1.id(), Decision::Commit, &Evidence::empty(), true, false, None)
             .unwrap();
         let transactions = tx.transaction_pool_get_all(1000).unwrap();
         assert_eq!(transactions.len(), 1);

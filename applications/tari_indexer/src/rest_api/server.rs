@@ -24,7 +24,7 @@ use crate::{
     rest_api::{
         context::HandlerContext,
         handlers,
-        rate_limit::{IpRateLimiter, SseConnectionLimiter, rate_limit_middleware, sse_limit_middleware},
+        rate_limit::{IpRateLimiter, RateLimitConfig, SseConnectionLimiter, rate_limit_middleware, sse_limit_middleware},
     },
 };
 
@@ -108,9 +108,20 @@ impl Server {
         let context = HandlerContext::from_services(services);
 
         // Per-IP rate limiters for specific endpoint groups.
-        let tx_submit_limiter = IpRateLimiter::new(TX_SUBMIT_RATE_CAPACITY, TX_SUBMIT_RATE_WINDOW_SECS);
-        let fetch_limiter = IpRateLimiter::new(FETCH_RATE_CAPACITY, FETCH_RATE_WINDOW_SECS);
-        let read_limiter = IpRateLimiter::new(READ_RATE_CAPACITY, READ_RATE_WINDOW_SECS);
+        // `trust_proxy_headers` is false by default – enable only when the
+        // indexer is behind a trusted reverse proxy.
+        let tx_submit_limiter = RateLimitConfig {
+            limiter: IpRateLimiter::new(TX_SUBMIT_RATE_CAPACITY, TX_SUBMIT_RATE_WINDOW_SECS),
+            trust_proxy_headers: false,
+        };
+        let fetch_limiter = RateLimitConfig {
+            limiter: IpRateLimiter::new(FETCH_RATE_CAPACITY, FETCH_RATE_WINDOW_SECS),
+            trust_proxy_headers: false,
+        };
+        let read_limiter = RateLimitConfig {
+            limiter: IpRateLimiter::new(READ_RATE_CAPACITY, READ_RATE_WINDOW_SECS),
+            trust_proxy_headers: false,
+        };
         let sse_limiter = SseConnectionLimiter::new(SSE_MAX_CONNECTIONS);
 
         let router = Router::new()

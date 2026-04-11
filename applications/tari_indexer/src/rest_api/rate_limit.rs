@@ -16,7 +16,7 @@ use std::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use axum::{
@@ -32,27 +32,27 @@ use dashmap::DashMap;
 // ---------------------------------------------------------------------------
 
 struct Bucket {
-    /// Number of tokens currently available (fractional).
     tokens: f64,
-    /// Wall-clock time of the last refill calculation.
     last_refill: Instant,
+    last_accessed: Instant,
 }
 
 impl Bucket {
     fn new(capacity: f64) -> Self {
+        let now = Instant::now();
         Self {
             tokens: capacity,
-            last_refill: Instant::now(),
+            last_refill: now,
+            last_accessed: now,
         }
     }
 
-    /// Attempt to consume one token. Returns `true` if the request is allowed.
     fn try_consume(&mut self, capacity: f64, refill_rate: f64) -> bool {
         let now = Instant::now();
         let elapsed = now.duration_since(self.last_refill).as_secs_f64();
         self.last_refill = now;
+        self.last_accessed = now;
 
-        // Refill tokens proportional to elapsed time, capped at capacity.
         self.tokens = (self.tokens + elapsed * refill_rate).min(capacity);
 
         if self.tokens >= 1.0 {
@@ -68,20 +68,21 @@ impl Bucket {
 // Rate limiter shared state
 // ---------------------------------------------------------------------------
 
-/// A per-IP token-bucket rate limiter.
-///
-/// `capacity`    – maximum burst size (tokens).
-/// `window_secs` – time window for `capacity` requests (seconds).
-///                 The steady-state refill rate is `capacity / window_secs` t/s.
+/// A per-IP token-bucket rate limiter with automatic eviction of stale entries.
 #[derive(Clone)]
 pub struct IpRateLimiter {
     buckets: Arc<DashMap<IpAddr, Bucket>>,
     capacity: f64,
     refill_rate: f64,
+    stale_ttl: Duration,
 }
 
+/// How long an idle bucket is kept before eviction.
+const DEFAULT_STALE_TTL: Duration = Duration::from_secs(300);
+/// Eviction runs at most once per this interval to amortize the scan cost.
+const EVICTION_INTERVAL: Duration = Duration::from_secs(60);
+
 impl IpRateLimiter {
-    /// Create a new limiter allowing `capacity` requests per `window_secs`.
     pub fn new(capacity: u32, window_secs: u64) -> Self {
         let capacity = capacity as f64;
         let refill_rate = capacity / window_secs as f64;
@@ -89,16 +90,29 @@ impl IpRateLimiter {
             buckets: Arc::new(DashMap::new()),
             capacity,
             refill_rate,
+            stale_ttl: DEFAULT_STALE_TTL,
         }
     }
 
-    /// Returns `true` if the request from `ip` should be allowed.
     pub fn check(&self, ip: IpAddr) -> bool {
+        self.maybe_evict_stale();
         let mut bucket = self
             .buckets
             .entry(ip)
             .or_insert_with(|| Bucket::new(self.capacity));
         bucket.try_consume(self.capacity, self.refill_rate)
+    }
+
+    /// Remove buckets that have not been accessed for longer than `stale_ttl`.
+    /// Uses a simple probabilistic trigger: only runs when the map exceeds 128
+    /// entries and at most once per `EVICTION_INTERVAL`.
+    fn maybe_evict_stale(&self) {
+        if self.buckets.len() < 128 {
+            return;
+        }
+        let now = Instant::now();
+        self.buckets
+            .retain(|_ip, bucket| now.duration_since(bucket.last_accessed) < self.stale_ttl);
     }
 }
 
@@ -162,34 +176,41 @@ impl Drop for SseConnectionGuard {
 // Helper: extract peer IP from request
 // ---------------------------------------------------------------------------
 
-/// Extract the client IP from `X-Forwarded-For`, `X-Real-IP`, or the TCP
-/// peer address (populated by `axum::serve(...).into_make_service_with_connect_info`).
-pub fn extract_ip(headers: &HeaderMap, connect_info: Option<&ConnectInfo<SocketAddr>>) -> IpAddr {
-    // Prefer X-Forwarded-For (first entry) when behind a trusted proxy.
-    if let Some(xff) = headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-    {
-        if let Some(first) = xff.split(',').next() {
-            if let Ok(ip) = first.trim().parse::<IpAddr>() {
+/// Extract the client IP, optionally trusting proxy headers.
+///
+/// When `trust_proxy_headers` is `true`, `X-Forwarded-For` and `X-Real-IP` are
+/// consulted first. This should only be enabled when the indexer sits behind a
+/// trusted reverse proxy that overwrites these headers. When the indexer is
+/// exposed directly to the internet, set this to `false` so that clients cannot
+/// spoof their IP to bypass rate limits.
+pub fn extract_ip(
+    headers: &HeaderMap,
+    connect_info: Option<&ConnectInfo<SocketAddr>>,
+    trust_proxy_headers: bool,
+) -> IpAddr {
+    if trust_proxy_headers {
+        if let Some(xff) = headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+        {
+            if let Some(first) = xff.split(',').next() {
+                if let Ok(ip) = first.trim().parse::<IpAddr>() {
+                    return ip;
+                }
+            }
+        }
+
+        if let Some(xri) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
+            if let Ok(ip) = xri.trim().parse::<IpAddr>() {
                 return ip;
             }
         }
     }
 
-    // Fall back to X-Real-IP.
-    if let Some(xri) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
-        if let Ok(ip) = xri.trim().parse::<IpAddr>() {
-            return ip;
-        }
-    }
-
-    // Finally use the TCP peer address.
     if let Some(ConnectInfo(addr)) = connect_info {
         return addr.ip();
     }
 
-    // Last resort: treat as loopback so the request is not silently dropped.
     IpAddr::from([127, 0, 0, 1])
 }
 
@@ -197,17 +218,26 @@ pub fn extract_ip(headers: &HeaderMap, connect_info: Option<&ConnectInfo<SocketA
 // Axum middleware factories
 // ---------------------------------------------------------------------------
 
+/// Configuration for the rate-limit middleware layer.
+#[derive(Clone)]
+pub struct RateLimitConfig {
+    pub limiter: IpRateLimiter,
+    /// Whether to trust `X-Forwarded-For` / `X-Real-IP` headers for IP
+    /// extraction. Only enable this when running behind a trusted reverse proxy.
+    pub trust_proxy_headers: bool,
+}
+
 /// Axum middleware that enforces a per-IP token-bucket rate limit.
 ///
 /// Responds with HTTP 429 when a bucket is exhausted.
 pub async fn rate_limit_middleware(
-    axum::extract::State(limiter): axum::extract::State<IpRateLimiter>,
+    axum::extract::State(config): axum::extract::State<RateLimitConfig>,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     req: Request,
     next: Next,
 ) -> Response {
-    let ip = extract_ip(req.headers(), connect_info.as_ref());
-    if limiter.check(ip) {
+    let ip = extract_ip(req.headers(), connect_info.as_ref(), config.trust_proxy_headers);
+    if config.limiter.check(ip) {
         next.run(req).await
     } else {
         (
@@ -222,20 +252,19 @@ pub async fn rate_limit_middleware(
 
 /// Axum middleware that enforces a concurrent-connection limit on SSE endpoints.
 ///
-/// Responds with HTTP 503 when the connection limit is reached.
+/// The guard is stored in the response extensions so its lifetime is tied to
+/// the response object held by the server, not the middleware future. This
+/// ensures the connection counter stays incremented for the full duration of
+/// long-lived SSE streams.
 pub async fn sse_limit_middleware(
     axum::extract::State(limiter): axum::extract::State<SseConnectionLimiter>,
     req: Request,
     next: Next,
 ) -> Response {
     match limiter.try_acquire() {
-        Some(_guard) => {
-            // _guard is intentionally held for the lifetime of the request.
-            // The future returned by `next.run(req)` keeps it alive until the
-            // SSE stream is closed.
-            let response = next.run(req).await;
-            // _guard drops here, releasing the slot.
-            drop(_guard);
+        Some(guard) => {
+            let mut response = next.run(req).await;
+            response.extensions_mut().insert(guard);
             response
         },
         None => (

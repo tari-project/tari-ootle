@@ -6,6 +6,7 @@ use std::{net::SocketAddr, time::Duration};
 use axum::{
     Extension,
     Router,
+    middleware,
     routing::{get, post},
 };
 use log::*;
@@ -20,13 +21,36 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::rest_api::metrics;
 use crate::{
     bootstrap::Services,
-    rest_api::{context::HandlerContext, handlers},
+    rest_api::{
+        context::HandlerContext,
+        handlers,
+        rate_limit::{IpRateLimiter, SseConnectionLimiter, rate_limit_middleware, sse_limit_middleware},
+    },
 };
 
 const LOG_TARGET: &str = "tari::ootle::indexer::rest_api::server";
 
 // Limit the body size to 4MB to allow for large transactions (wasm uploads)
 const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
+
+// ---------------------------------------------------------------------------
+// Rate-limit configuration
+// ---------------------------------------------------------------------------
+
+/// POST /transactions – 20 requests per minute per IP.
+const TX_SUBMIT_RATE_CAPACITY: u32 = 20;
+const TX_SUBMIT_RATE_WINDOW_SECS: u64 = 60;
+
+/// POST /substates/fetch and POST /utxos/fetch – 60 requests per minute per IP.
+const FETCH_RATE_CAPACITY: u32 = 60;
+const FETCH_RATE_WINDOW_SECS: u64 = 60;
+
+/// GET /non-fungibles and GET /transactions/recent – 60 requests per minute per IP.
+const READ_RATE_CAPACITY: u32 = 60;
+const READ_RATE_WINDOW_SECS: u64 = 60;
+
+/// Maximum concurrent SSE connections (across all IPs).
+const SSE_MAX_CONNECTIONS: usize = 100;
 
 #[derive(OpenApi)]
 #[openapi(paths(
@@ -83,7 +107,16 @@ impl Server {
     ) -> anyhow::Result<SocketAddr> {
         let context = HandlerContext::from_services(services);
 
+        // Per-IP rate limiters for specific endpoint groups.
+        let tx_submit_limiter = IpRateLimiter::new(TX_SUBMIT_RATE_CAPACITY, TX_SUBMIT_RATE_WINDOW_SECS);
+        let fetch_limiter = IpRateLimiter::new(FETCH_RATE_CAPACITY, FETCH_RATE_WINDOW_SECS);
+        let read_limiter = IpRateLimiter::new(READ_RATE_CAPACITY, READ_RATE_WINDOW_SECS);
+        let sse_limiter = SseConnectionLimiter::new(SSE_MAX_CONNECTIONS);
+
         let router = Router::new()
+            // ----------------------------------------------------------------
+            // Unrestricted endpoints (health / ready / identity)
+            // ----------------------------------------------------------------
             .route("/health", get(handlers::misc::health))
             .route("/ready", get(handlers::misc::ready))
             .route("/identity", get(handlers::misc::get_identity))
@@ -92,13 +125,35 @@ impl Server {
             .route("/network", get(handlers::network::get))
             .route("/network/stats", get(handlers::network::get_network_sync_stats))
             .route("/network/connections", get(handlers::network::get_connections))
+            // ----------------------------------------------------------------
+            // POST /substates/fetch – rate limited (fetch_limiter)
+            // GET /substates/:id   – unrestricted
+            // ----------------------------------------------------------------
             .nest("/substates", Router::new()
-                .route("/fetch", post(handlers::substates::fetch_substates))
+                .route("/fetch", post(handlers::substates::fetch_substates)
+                    .route_layer(middleware::from_fn_with_state(
+                        fetch_limiter.clone(),
+                        rate_limit_middleware,
+                    )))
                 .route("/{substate_id}", get(handlers::substates::get_substate))
             )
+            // ----------------------------------------------------------------
+            // Transactions
+            // ----------------------------------------------------------------
             .nest("/transactions", Router::new()
-                .route("/", post(handlers::transactions::submit_transaction))
+                // POST /transactions – 20 req/min per IP
+                .route("/", post(handlers::transactions::submit_transaction)
+                    .route_layer(middleware::from_fn_with_state(
+                        tx_submit_limiter.clone(),
+                        rate_limit_middleware,
+                    )))
+                // POST /transactions/dry-run – global tower rate limit (existing) +
+                //   per-IP limit reusing tx_submit_limiter
                 .route("/dry-run", post(handlers::transactions::submit_transaction_dry_run)
+                    .route_layer(middleware::from_fn_with_state(
+                        tx_submit_limiter.clone(),
+                        rate_limit_middleware,
+                    ))
                     .layer(ServiceBuilder::new()
                         .layer(axum::error_handling::HandleErrorLayer::new(|err: axum::BoxError| async move {
                             (
@@ -109,16 +164,26 @@ impl Server {
                         .layer(BufferLayer::new(1024))
                         .layer(RateLimitLayer::new(10, Duration::from_secs(5)))
                     ))
+                // GET /transactions/recent – rate limited (read_limiter)
                 .route(
                     "/recent",
-                    get(handlers::transactions::list_recent_transactions),
+                    get(handlers::transactions::list_recent_transactions)
+                        .route_layer(middleware::from_fn_with_state(
+                            read_limiter.clone(),
+                            rate_limit_middleware,
+                        )),
                 )
                 .route(
                     "/{transaction_id}/result",
                     get(handlers::transactions::get_transaction_result),
                 )
                 .route("/events", get(handlers::transactions::query_transaction_events))
-                .route("/events/stream", get(handlers::transaction_events::sse_transaction_events))
+                // SSE stream – concurrent connection limit
+                .route("/events/stream", get(handlers::transaction_events::sse_transaction_events)
+                    .route_layer(middleware::from_fn_with_state(
+                        sse_limiter.clone(),
+                        sse_limit_middleware,
+                    )))
             )
             .nest("/templates", Router::new()
                 .route("/cached", get(handlers::templates::list_cached_templates))
@@ -132,11 +197,26 @@ impl Server {
                     get(handlers::templates::get_template_definition),
                 )
             )
-            .route("/non-fungibles", get(handlers::nfts::get_non_fungibles)) // Placeholder for future non-fungible endpoints
+            // GET /non-fungibles – rate limited (read_limiter)
+            .route("/non-fungibles", get(handlers::nfts::get_non_fungibles)
+                .route_layer(middleware::from_fn_with_state(
+                    read_limiter.clone(),
+                    rate_limit_middleware,
+                )))
             .nest("/utxos", Router::new()
                 .route("/", get(handlers::utxos::list_utxos))
-                .route("/fetch", post(handlers::utxos::fetch_utxos))
-                .route("/stream", post(handlers::utxos::stream_utxo_updates))
+                // POST /utxos/fetch – rate limited (fetch_limiter)
+                .route("/fetch", post(handlers::utxos::fetch_utxos)
+                    .route_layer(middleware::from_fn_with_state(
+                        fetch_limiter.clone(),
+                        rate_limit_middleware,
+                    )))
+                // POST /utxos/stream (SSE-like streaming) – concurrent connection limit
+                .route("/stream", post(handlers::utxos::stream_utxo_updates)
+                    .route_layer(middleware::from_fn_with_state(
+                        sse_limiter.clone(),
+                        sse_limit_middleware,
+                    )))
             )
             .nest(
                 "/transaction-receipts",
@@ -152,7 +232,12 @@ impl Server {
                 .route("/xtr" , get(handlers::resources::get_tari))
                 .route("/tari" , get(handlers::resources::get_tari))
                 .route("/{resource_address}" , get(handlers::resources::get_resource)))
-            .route("/events", get(handlers::indexer_events::sse_events))
+            // SSE /events – concurrent connection limit
+            .route("/events", get(handlers::indexer_events::sse_events)
+                .route_layer(middleware::from_fn_with_state(
+                    sse_limiter.clone(),
+                    sse_limit_middleware,
+                )))
             .layer(CorsLayer::permissive())
             .layer(RequestBodyLimitLayer::new(REQUEST_BODY_LIMIT))
             .merge(SwaggerUi::new("/swagger-ui").url("/openapi.json", ApiDoc::openapi()))
@@ -173,7 +258,16 @@ impl Server {
         let listen_addr = listener.local_addr()?;
         info!(target: LOG_TARGET, "🌐 Indexer REST API server listening on {listen_addr}");
         tokio::spawn(async move {
-            if let Err(error) = axum::serve(listener, router).with_graceful_shutdown(shutdown).await {
+            // `into_make_service_with_connect_info` populates `ConnectInfo<SocketAddr>`
+            // for each connection, which the per-IP rate limiter middleware uses to
+            // identify the remote peer when no proxy headers are present.
+            if let Err(error) = axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(shutdown)
+            .await
+            {
                 error!(target: LOG_TARGET, "Wallet query HTTP server error: {error}");
             }
         });

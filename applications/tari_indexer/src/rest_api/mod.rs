@@ -8,6 +8,7 @@ mod error;
 mod handlers;
 #[cfg(feature = "metrics")]
 mod metrics;
+mod rate_limit;
 mod server;
 mod streaming;
 

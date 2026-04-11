@@ -44,6 +44,7 @@ ootle_byte_type = { workspace = true, features = ["crypto"] }
 
 anyhow = { workspace = true }
 axum = { workspace = true, features = ["query", "matched-path"] }
+dashmap = { workspace = true }
 async-graphql = { workspace = true }
 async-graphql-axum = { workspace = true }
 bytes = { workspace = true }

@@ -2,6 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 export * from "./types/wallet-types/AccountsListResponse";
+export * from "./types/wallet-types/PublishTemplateMetadata";
+export * from "./types/wallet-types/SignTemplateMetadataResponse";
 export * from "./types/wallet-types/WalletGetInfoRequest";
 export * from "./types/wallet-types/AuthListSessionsResponse";
 export * from "./types/wallet-types/ClaimBurnResponse";
@@ -114,6 +116,7 @@ export * from "./types/wallet-types/TemplatesGetResponse";
 export * from "./types/wallet-types/NewAccountData";
 export * from "./types/wallet-types/AccountsTransferRequest";
 export * from "./types/wallet-types/AccountsCreateOrGetResponse";
+export * from "./types/wallet-types/SignTemplateMetadataRequest";
 export * from "./types/wallet-types/AuthLoginRequest";
 export * from "./types/wallet-types/UtxoInfo";
 export * from "./types/wallet-types/AccountsCreateFreeTestCoinsRequest";

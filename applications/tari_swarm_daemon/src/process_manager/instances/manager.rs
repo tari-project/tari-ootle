@@ -461,6 +461,40 @@ impl InstanceManager {
             .chain(self.wallet_daemons.values().map(|x| x.instance()))
     }
 
+    /// Apply updated instance configs from a reloaded config file.
+    /// Updates settings and envs for matching instances and marks them as config dirty
+    /// so that the user knows to restart them.
+    pub fn apply_config_update(
+        &mut self,
+        new_global_settings: HashMap<String, String>,
+        new_instance_configs: &[InstanceConfig],
+    ) {
+        for instance_config in new_instance_configs {
+            for i in 0..instance_config.num_instances {
+                let expected_name = instance_config.instance_name(i);
+                let mut new_settings = new_global_settings.clone();
+                new_settings.extend(instance_config.settings.clone());
+
+                if let Some(instance) = self.instances_mut().find(|inst| inst.name() == expected_name) {
+                    let settings_changed = *instance.settings() != new_settings;
+                    let envs_changed = instance.envs() != instance_config.envs;
+                    if settings_changed || envs_changed {
+                        info!(
+                            "📝 Config changed for instance '{}' (settings_changed={}, envs_changed={}). Restart to \
+                             apply.",
+                            expected_name, settings_changed, envs_changed,
+                        );
+                        instance.set_settings(new_settings);
+                        instance.set_envs(instance_config.envs.clone());
+                        instance.set_config_dirty(true);
+                    }
+                }
+            }
+        }
+        self.global_settings = new_global_settings;
+        self.config = new_instance_configs.to_vec();
+    }
+
     fn next_instance_id(&mut self) -> InstanceId {
         let id = self.instance_id;
         self.instance_id += 1;

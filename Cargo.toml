@@ -1,5 +1,5 @@
 [workspace.package]
-version = "0.27.0"
+version = "0.28.6"
 edition = "2024"
 authors = ["The Tari Development Community"]
 repository = "https://github.com/tari-project/tari-ootle"
@@ -35,10 +35,12 @@ members = [
     "crates/storage",
     "crates/tari_bor",
     "crates/template_abi",
+    "crates/template_build",
     "crates/template_builtin",
     "crates/template_lib",
     "crates/template_lib_types",
     "crates/template_macros",
+    "crates/template_metadata",
     "crates/template_test_tooling",
     "crates/transaction_manifest",
     "crates/transaction",
@@ -83,15 +85,15 @@ tari_ootle_app_utilities = { path = "applications/tari_ootle_app_utilities" }
 
 # core crates
 tari_consensus = { path = "crates/consensus" }
-tari_ootle_address = { path = "crates/ootle_address", version = "0.1" }
-tari_engine = { path = "crates/engine", version = "0.27" }
+tari_ootle_address = { path = "crates/ootle_address", version = "0.4" }
+tari_engine = { path = "crates/engine", version = "0.28" }
 tari_ootle_p2p = { path = "crates/p2p" }
 tari_ootle_storage = { path = "crates/storage" }
 tari_ootle_storage_sqlite = { path = "crates/storage_sqlite" }
-tari_ootle_wallet_crypto = { path = "crates/wallet/crypto", version = "0.2" }
-tari_ootle_wallet_sdk = { path = "crates/wallet/sdk", version = "0.1.0" }
+tari_ootle_wallet_crypto = { path = "crates/wallet/crypto", version = "0.28" }
+tari_ootle_wallet_sdk = { path = "crates/wallet/sdk", version = "0.28" }
 tari_ootle_wallet_sdk_services = { path = "crates/wallet/sdk_services" }
-tari_ootle_wallet_storage_sqlite = { path = "crates/wallet/storage_sqlite" }
+tari_ootle_wallet_storage_sqlite = { path = "crates/wallet/storage_sqlite", version = "0.28" }
 tari_epoch_manager = { path = "crates/epoch_manager" }
 tari_epoch_oracles = { path = "crates/epoch_oracles" }
 tari_indexer_lib = { path = "crates/indexer_lib" }
@@ -99,64 +101,66 @@ tari_rpc_state_sync = { path = "crates/rpc_state_sync" }
 tari_state_store_rocksdb = { path = "crates/state_store_rocksdb" }
 tari_state_tree = { path = "crates/state_tree" }
 tari_template_test_tooling = { path = "crates/template_test_tooling" }
-tari_transaction_manifest = { path = "crates/transaction_manifest", version = "0.27" }
+tari_transaction_manifest = { path = "crates/transaction_manifest", version = "0.28" }
 tari_validator_node_rpc = { path = "crates/validator_node_rpc" }
 sqlite_message_logger = { path = "networking/sqlite_message_logger" }
 tari_base_node_client = { path = "clients/base_node_client" }
-tari_indexer_client = { path = "clients/tari_indexer_client", default-features = false, version = "0.27" }
+tari_indexer_client = { path = "clients/tari_indexer_client", default-features = false, version = "0.28" }
 tari_networking = { path = "networking/core" }
 tari_rpc_framework = { path = "networking/rpc_framework" }
 tari_rpc_macros = { path = "networking/rpc_macros" }
 tari_swarm = { path = "networking/swarm" }
 tari_validator_node_client = { path = "clients/validator_node_client" }
-tari_ootle_walletd_client = { path = "clients/wallet_daemon_client" }
+tari_ootle_walletd_client = { path = "clients/wallet_daemon_client", version = "0.29" }
 transaction_generator = { path = "utilities/transaction_generator" }
 
 # Dependency crates on crates.io (update versions here as well when updating the workspace version)
-tari_consensus_types = { path = "crates/consensus_types", version = "0.27" }
-tari_ootle_common_types = { path = "crates/common_types", version = "0.27" }
-tari_engine_types = { path = "crates/engine_types", version = "0.27" }
-tari_template_builtin = { path = "crates/template_builtin", version = "0.27" }
-tari_ootle_transaction = { path = "crates/transaction", version = "0.27" }
+tari_consensus_types = { path = "crates/consensus_types", version = "0.28" }
+tari_ootle_common_types = { path = "crates/common_types", version = "0.28" }
+tari_engine_types = { path = "crates/engine_types", version = "0.28" }
+tari_template_builtin = { path = "crates/template_builtin", version = "0.28" }
+tari_ootle_transaction = { path = "crates/transaction", version = "0.28" }
 
 # Template lib
-tari_template_lib = { version = "0.22", path = "crates/template_lib" }
-tari_template_lib_types = { version = "0.22", path = "crates/template_lib_types", default-features = false }
+tari_ootle_template_build = { path = "crates/template_build", version = "0.4" }
+tari_ootle_template_metadata = { path = "crates/template_metadata", version = "0.4" }
+tari_template_lib = { version = "0.24", path = "crates/template_lib" }
+tari_template_lib_types = { version = "0.24", path = "crates/template_lib_types", default-features = false }
 tari_template_abi = { version = "0.16", path = "crates/template_abi", default-features = false }
-tari_template_macros = { version = "0.17", path = "crates/template_macros" }
+tari_template_macros = { version = "0.18", path = "crates/template_macros" }
 tari_bor = { version = "0.13", path = "crates/tari_bor", default-features = false }
 
-ootle_byte_type = { path = "crates/ootle_byte_type", version = "0.4" }
+ootle_byte_type = { path = "crates/ootle_byte_type", version = "0.6" }
 ootle_serde = { path = "crates/ootle_serde", version = "0.2" }
 
 # external minotari/tari dependencies
-minotari_app_grpc = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c" }
-minotari_app_utilities = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c" }
-minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c" }
-minotari_wallet_grpc_client = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c" }
-tari_common = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c", version = "5.3.0-pre.3" }
-tari_common_sqlite = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c", version = "5.3.0-pre.3" }
-tari_common_types = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c", version = "5.3.0-pre.3" }
-tari_jellyfish = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c", version = "5.3.0-pre.3" }
-tari_metrics = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c" }
-tari_mmr = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c", version = "5.3.0-pre.3" }
-tari_node_components = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c" }
-tari_shutdown = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c" }
-tari_sidechain = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c", version = "5.3.0-pre.3" }
-tari_transaction_components = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c" }
-minotari_console_wallet = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c" }
-minotari_node = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c" }
-minotari_wallet = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c" }
-tari_comms = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c" }
-tari_comms_dht = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c" }
-tari_p2p = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c" }
+minotari_app_grpc = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4" }
+minotari_app_utilities = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4" }
+minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4" }
+minotari_wallet_grpc_client = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4" }
+tari_common = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4", version = "5.3.0-pre.4" }
+tari_common_sqlite = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4", version = "5.3.0-pre.4" }
+tari_common_types = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4", version = "5.3.0-pre.4" }
+tari_jellyfish = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4", version = "5.3.0-pre.4" }
+tari_metrics = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4" }
+tari_mmr = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4", version = "5.3.0-pre.4" }
+tari_node_components = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4" }
+tari_shutdown = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4" }
+tari_sidechain = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4", version = "5.3.0-pre.4" }
+tari_transaction_components = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4" }
+minotari_console_wallet = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4" }
+minotari_node = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4" }
+minotari_wallet = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4" }
+tari_comms = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4" }
+tari_comms_dht = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4" }
+tari_p2p = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4" }
 
 tari_crypto = "0.22"
 tari_utilities = "0.8"
-tari_hashing = "5.3.0-pre.3"
+tari_hashing = "5.3.0-pre.4"
 
 ## Ledger
-minotari_ledger_wallet_common = { git = "https://github.com/tari-project/tari.git", rev = "5a278cb8834acc10ebe714c39f012249ea2e966c" }
+minotari_ledger_wallet_common = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-pre.4" }
 ootle_ledger_common = { path = "crates/wallet/ledger/common", version = "0.1.0" }
 
 # networking crates
@@ -275,12 +279,43 @@ utoipa-swagger-ui = { version = "9.0.2" }
 uuid = "1.15.0"
 xxhash-rust = "0.8.15"
 
-# Shutdown when panicking so we can see the error, specifically for the wallet
+# Optimize wasmer/cranelift even in dev/test builds (optional but highly recommended).
+#
+# The Cranelift JIT compiler that wasmer uses to compile WASM templates runs ~10x slower
+# when compiled without optimizations (the default for `cargo test`). Without these
+# overrides, each template test spends most of its time in Cranelift codegen rather than
+# actually testing template logic. With opt-level=2 on just these crates, the full
+# `tari_engine` test suite drops from ~150s to ~5s while keeping the rest of the build
+# in debug mode for fast compilation and good error messages.
+#
+# These lines only affect local dev builds — release/CI profiles already compile
+# everything with optimizations. You can safely remove them if you prefer uniform
+# debug builds, at the cost of much slower template tests.
+[profile.dev.package.wasmer]
+opt-level = 2
+[profile.dev.package.wasmer-compiler]
+opt-level = 2
+[profile.dev.package.wasmer-compiler-cranelift]
+opt-level = 2
+[profile.dev.package.cranelift-codegen]
+opt-level = 2
+[profile.dev.package.cranelift-frontend]
+opt-level = 2
+[profile.dev.package.cranelift-entity]
+opt-level = 2
+
 [profile.release]
+# Shutdown when panicking so we can see the error, specifically for the wallet
 panic = 'abort'
 # By default, Rust will wrap an integer in release mode instead of throwing the overflow error
 # seen in debug mode. Panicking at this time is better than silently using the wrong value.
 overflow-checks = true
+
+# CI profile: faster compilation than release (opt-level=1 vs 3), same safety settings.
+# Cuts compile time roughly in half at the cost of slightly slower test execution.
+[profile.ci-build]
+inherits = "release"
+opt-level = 1
 
 ## Make a copy of this code, uncomment and replace account and my-branch with the name of your fork and the branch you want to temporarily use
 #[patch."https://github.com/tari-project/tari.git"]

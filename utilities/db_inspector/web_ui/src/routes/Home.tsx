@@ -50,7 +50,7 @@ export default function Home() {
       </Grid>
 
       <Grid container spacing={3}>
-        {databases.map((db, i) => (
+        {databases?.map((db, i) => (
           <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }} key={i}>
             <Card elevation={3}>
               <CardActionArea component={RouterLink} to={"/databases/" + encodeURIComponent(db.name)}>

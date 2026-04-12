@@ -21,6 +21,9 @@ pub struct TransactionEventFilter {
     pub topic: Option<String>,
     pub substate_id: Option<SubstateId>,
     pub template_address: Option<TemplateAddress>,
+    /// Resume the event stream from this event ID (exclusive).
+    /// Events with id > after_id will be replayed from the database before switching to live.
+    pub after_id: Option<i64>,
 }
 
 impl TransactionEventFilter {
@@ -29,6 +32,7 @@ impl TransactionEventFilter {
             topic: self.topic,
             substate_id: self.substate_id,
             template_address: self.template_address,
+            after_id: self.after_id,
         }
     }
 }
@@ -80,16 +84,18 @@ impl TransactionEventStream {
                 },
             };
 
-            const TX_EVENT_TYPE: &str = "TransactionEvent";
-
             loop {
                 match events.next().await {
                     Some(Ok(evt)) => {
-                        if evt.event_type != TX_EVENT_TYPE {
-                            continue;
-                        }
                         match evt.try_parse_event::<TransactionEvent>() {
-                            Ok(tx_event) => yield Ok(tx_event),
+                            Ok(mut tx_event) => {
+                                // The event ID is transmitted via the SSE `id:` field,
+                                // not in the JSON payload.
+                                if let Some(Ok(id)) = evt.last_event_id.as_deref().map(str::parse::<i64>) {
+                                    tx_event.id = id;
+                                }
+                                yield Ok(tx_event);
+                            },
                             Err(err) => {
                                 error!(%err, "Failed to parse transaction event");
                                 yield Err(EventWatcherError::ParseError(err));

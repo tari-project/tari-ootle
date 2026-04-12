@@ -2,11 +2,14 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 export * from "./types/tari-indexer-client/NetworkDescription";
+export * from "./types/tari-indexer-client/TemplateCatalogueItem";
 export * from "./types/tari-indexer-client/IndexerGetEpochManagerStatsResponse";
 export * from "./types/tari-indexer-client/ListTransactionReceiptsResponse";
 export * from "./types/tari-indexer-client/NonFungibleSubstate";
 export * from "./types/tari-indexer-client/QueryTransactionEventsResponse";
 export * from "./types/tari-indexer-client/IndexerGetIdentityResponse";
+export * from "./types/tari-indexer-client/TemplateMeta";
+export * from "./types/tari-indexer-client/ListTemplateCatalogueResponse";
 export * from "./types/tari-indexer-client/IndexerGetSubstateRequest";
 export * from "./types/tari-indexer-client/GetNetworkInfoResponse";
 export * from "./types/tari-indexer-client/GetTemplateDefinitionResponse";
@@ -20,7 +23,6 @@ export * from "./types/tari-indexer-client/GetNetworkSyncStateResponse";
 export * from "./types/tari-indexer-client/IndexerSubmitTransactionRequest";
 export * from "./types/tari-indexer-client/IndexerConnection";
 export * from "./types/tari-indexer-client/InspectSubstateResponse";
-export * from "./types/tari-indexer-client/TemplateMetadata";
 export * from "./types/tari-indexer-client/InspectSubstateRequest";
 export * from "./types/tari-indexer-client/GetUtxoUpdatesRequest";
 export * from "./types/tari-indexer-client/IndexerGetCommsStatsResponse";
@@ -34,6 +36,7 @@ export * from "./types/tari-indexer-client/GetUtxosRequest";
 export * from "./types/tari-indexer-client/GetResourceResponse";
 export * from "./types/tari-indexer-client/IndexerGetTransactionResultResponse";
 export * from "./types/tari-indexer-client/TransactionEntry";
+export * from "./types/tari-indexer-client/ListTemplateCatalogueRequest";
 export * from "./types/tari-indexer-client/GetUtxosResponse";
 export * from "./types/tari-indexer-client/ListTemplatesResponse";
 export * from "./types/tari-indexer-client/GetSubstatesResponse";

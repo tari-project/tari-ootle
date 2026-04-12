@@ -38,11 +38,17 @@ import Tabs from "@mui/material/Tabs";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import useAccountStore from "@store/accountStore";
-import type { AccountInfo, BurnProofFileInfo, ClaimBurnProof, ComponentAddress } from "@tari-project/ootle-ts-bindings";
+import type {
+  AccountInfo,
+  BurnProofFileInfo,
+  ClaimBurnProof,
+  ClaimBurnProofContents,
+  ComponentAddress,
+} from "@tari-project/ootle-ts-bindings";
 import { rejectReasonToString } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
 import { formatCurrency } from "@utils/helpers";
-import { accountsClaimBurn, burnProofsList, transactionsWaitResult } from "@utils/json_rpc";
+import { accountsClaimBurn, burnProofsGet, burnProofsList, transactionsWaitResult } from "@utils/json_rpc";
 import { FormEvent, useEffect, useState } from "react";
 import { Form } from "react-router";
 
@@ -73,6 +79,8 @@ export default function ClaimBurn() {
   const [isLoadingProofs, setIsLoadingProofs] = useState(false);
   const [isEstimating, setIsEstimating] = useState(false);
   const [proofError, setProofError] = useState<string | null>(null);
+  const [proofDetails, setProofDetails] = useState<ClaimBurnProofContents | null>(null);
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
   const { data: accountsList } = useAccountsList(0, 10);
   const { setPopup } = useAccountStore();
@@ -100,6 +108,9 @@ export default function ClaimBurn() {
       setIsLoadingProofs(false);
     }
   };
+
+  const truncateHex = (hex: string, chars: number = 8): string =>
+    hex.length > chars * 2 + 2 ? `${hex.slice(0, chars)}...${hex.slice(-chars)}` : hex;
 
   /** Extracts the commitment hex from a filename like `{pubkey}-{commitment}.json` */
   const extractCommitment = (fileName: string): string => {
@@ -147,15 +158,31 @@ export default function ClaimBurn() {
 
   const onAccountChange = (e: SelectChangeEvent) => {
     setFormState({ ...formState, account: e.target.value, selectedFile: "" });
+    setProofDetails(null);
   };
 
   const onTabChange = (_: React.SyntheticEvent, newValue: ProofSource) => {
     setFormState({ ...formState, proofSource: newValue });
     setProofError(null);
+    setProofDetails(null);
   };
 
-  const onFileSelect = (e: SelectChangeEvent) => {
-    setFormState({ ...formState, selectedFile: e.target.value });
+  const onFileSelect = async (e: SelectChangeEvent) => {
+    const fileName = e.target.value;
+    setFormState({ ...formState, selectedFile: fileName });
+    setProofDetails(null);
+
+    if (!fileName) return;
+
+    setIsLoadingDetails(true);
+    try {
+      const resp = await burnProofsGet({ file_name: fileName });
+      setProofDetails(resp.proof);
+    } catch (err: any) {
+      console.warn("Failed to load burn proof details:", err.message);
+    } finally {
+      setIsLoadingDetails(false);
+    }
   };
 
   const onPastedProofChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -250,6 +277,7 @@ export default function ClaimBurn() {
   const handleClickOpen = () => {
     setFormState(INITIAL_FORM_STATE);
     setProofError(null);
+    setProofDetails(null);
     setOpen(true);
   };
 
@@ -335,6 +363,52 @@ export default function ClaimBurn() {
                 error={proofError !== null}
                 helperText={proofError}
               />
+            )}
+
+            {isLoadingDetails && (
+              <Box display="flex" alignItems="center" gap={1} py={1}>
+                <CircularProgress size={16} />
+                <Typography variant="body2">Loading proof details...</Typography>
+              </Box>
+            )}
+
+            {proofDetails && !isLoadingDetails && (
+              <Box
+                sx={{
+                  border: 1,
+                  borderColor: "divider",
+                  borderRadius: 1,
+                  p: 1.5,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 0.5,
+                }}
+              >
+                <Typography variant="subtitle2">Burn Proof Summary</Typography>
+                <Typography variant="body2">
+                  <strong>Amount:</strong> {formatCurrency(BigInt(proofDetails.claim_proof.value), XTR_CURRENCY)}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Commitment:</strong>{" "}
+                  <span style={{ fontFamily: "monospace" }}>{truncateHex(proofDetails.claim_proof.commitment)}</span>
+                </Typography>
+                <Typography variant="body2">
+                  <strong>L1 Block:</strong>{" "}
+                  <span style={{ fontFamily: "monospace" }}>
+                    {truncateHex(proofDetails.claim_proof.encoded_merkle_proof.block_hash)}
+                  </span>
+                </Typography>
+                {selectedAccount &&
+                  (proofDetails.claim_proof.burn_public_key === selectedAccount.account.owner_public_key ? (
+                    <Alert severity="success" sx={{ mt: 0.5 }}>
+                      Account matches burn proof
+                    </Alert>
+                  ) : (
+                    <Alert severity="warning" sx={{ mt: 0.5 }}>
+                      This burn proof was created for a different account
+                    </Alert>
+                  ))}
+              </Box>
             )}
 
             <TextField

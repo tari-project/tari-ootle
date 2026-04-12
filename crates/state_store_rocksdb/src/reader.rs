@@ -1325,7 +1325,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 };
 
                 if let Some(stage) = stage &&
-                    tx_pool_rec.pending_stage() != Some(stage)
+                    tx_pool_rec.current_stage() != stage
                 {
                     continue;
                 }
@@ -1667,26 +1667,41 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                         // value, skip it
                         None
                     } else {
-                        value_filter
-                            .contains_substate(&substate.substate_id)
-                            // filter includes substate, return full value if available, otherwise return hash
-                            .then(|| {
-                                substate
-                                    .substate_value
-                                    .map(|v| SubstateValueOrHash::Value(Box::new(v)))
-                                    .unwrap_or_else(|| SubstateValueOrHash::Hash(substate.state_hash))
-                            })
-                            // Otherwise if the client still wants all hashes for filtered out substates
-                            .or_else(|| all_hashes.then_some(SubstateValueOrHash::Hash(substate.state_hash)))
-                            .map(|value| {
-                                SubstateUpdateProof::Create(SubstateCreate {
-                                    substate: SubstateData {
-                                        substate_id: substate.substate_id,
-                                        version: substate.version,
-                                        value,
-                                    },
+                        let metadata_mode = value_filter.contains(SubstateValueFilterFlags::TEMPLATE_METADATA);
+                        let template_metadata_opt = if metadata_mode && substate.substate_id.is_template() {
+                            substate
+                                .substate_value
+                                .as_ref()
+                                .and_then(|v| v.as_template())
+                                .map(|t| t.clone().into_template_metadata())
+                        } else {
+                            None
+                        };
+
+                        let is_metadata_only = metadata_mode && substate.substate_id.is_template();
+                        let resolved_value = value_filter
+                                .contains_substate(&substate.substate_id)
+                                // filter includes substate, return full value if available (unless metadata-only for templates), otherwise return hash
+                                .then(|| {
+                                    substate
+                                        .substate_value
+                                        .filter(|_| !is_metadata_only)
+                                        .map(|v| SubstateValueOrHash::Value(Box::new(v)))
+                                        .unwrap_or_else(|| SubstateValueOrHash::Hash(substate.state_hash))
                                 })
-                            })
+                                // Otherwise if the client still wants all hashes for filtered out substates
+                                .or_else(|| all_hashes.then_some(SubstateValueOrHash::Hash(substate.state_hash)));
+
+                        resolved_value.map(|value| {
+                            SubstateUpdateProof::Create(Box::new(SubstateCreate {
+                                substate: SubstateData {
+                                    substate_id: substate.substate_id,
+                                    version: substate.version,
+                                    value,
+                                    template_metadata: template_metadata_opt,
+                                },
+                            }))
+                        })
                     }
                 },
                 StateTransitionType::Down => (!up_only)

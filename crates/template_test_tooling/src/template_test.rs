@@ -53,7 +53,6 @@ use tari_ootle_transaction::{
     },
 };
 use tari_template_lib::types::{
-    Amount,
     ComponentAddress,
     NonFungibleAddress,
     TemplateAddress,
@@ -570,11 +569,9 @@ impl TemplateTest {
         self.enable_fees = false;
         self.execute_expect_success(
             Transaction::builder_localnet()
-                .call_method(xtr_faucet_component(), "take", args![
-                    Self::FUNDED_ACCOUNT_INITIAL_BALANCE
-                ])
-                .put_last_instruction_output_on_workspace("bucket")
-                .create_account_with_bucket(public_key.to_byte_type(), "bucket")
+                .create_account(public_key.to_byte_type())
+                .put_last_instruction_output_on_workspace("account")
+                .call_method(xtr_faucet_component(), "take", args![Workspace("account")])
                 .build_and_seal(&secret_key),
             vec![owner_proof.clone()],
         );
@@ -585,15 +582,14 @@ impl TemplateTest {
         (account_address, owner_proof, secret_key)
     }
 
-    /// Creates a new account funded with a custom `amount` of tokens from the XTR faucet,
-    /// using a fresh key pair.
+    /// Creates a new account funded from the XTR faucet using a fresh key pair.
     /// Returns `(account_address, owner_proof, secret_key, public_key)`.
     ///
+    /// Unlike [`create_funded_account`], this also returns the public key.
     /// Fees are temporarily disabled for the account creation transaction.
     #[track_caller]
-    pub fn create_custom_funded_account<A: Into<Amount>>(
+    pub fn create_funded_account_with_keypair(
         &mut self,
-        amount: A,
     ) -> (
         ComponentAddress,
         NonFungibleAddress,
@@ -606,9 +602,9 @@ impl TemplateTest {
         let public_key_bytes = public_key.to_byte_type();
         self.execute_expect_success(
             Transaction::builder_localnet()
-                .call_method(xtr_faucet_component(), "take", args![amount.into()])
-                .put_last_instruction_output_on_workspace("bucket")
-                .create_account_with_bucket(public_key_bytes, "bucket")
+                .create_account(public_key_bytes)
+                .put_last_instruction_output_on_workspace("account")
+                .call_method(xtr_faucet_component(), "take", args![Workspace("account")])
                 .build_and_seal(&secret_key),
             vec![owner_proof.clone()],
         );

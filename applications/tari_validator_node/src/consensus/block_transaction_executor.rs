@@ -27,13 +27,13 @@ use crate::{transaction_validators::TransactionValidationError, validator::Valid
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::block_transaction_executor";
 
 #[derive(Debug)]
-pub struct TarBlockTransactionExecutor<TExecutor, TValidator> {
+pub struct TariBlockTransactionExecutor<TExecutor, TValidator> {
     executor: TExecutor,
     validator: Arc<TValidator>,
 }
 
 impl<TExecutor: TransactionExecutor<ReadOnlyMemoryStateStore>, TValidator>
-    TarBlockTransactionExecutor<TExecutor, TValidator>
+    TariBlockTransactionExecutor<TExecutor, TValidator>
 {
     pub fn new(executor: TExecutor, validator: TValidator) -> Self {
         Self {
@@ -57,7 +57,7 @@ impl<TExecutor: TransactionExecutor<ReadOnlyMemoryStateStore>, TValidator>
 }
 
 impl<TExecutor, TStateStore, TValidator> BlockTransactionExecutor<TStateStore>
-    for TarBlockTransactionExecutor<TExecutor, TValidator>
+    for TariBlockTransactionExecutor<TExecutor, TValidator>
 where
     TStateStore: StateStore,
     TExecutor: TransactionExecutor<ReadOnlyMemoryStateStore>,
@@ -128,7 +128,7 @@ where
     }
 }
 
-impl<TExecutor: Clone, TValidator> Clone for TarBlockTransactionExecutor<TExecutor, TValidator> {
+impl<TExecutor: Clone, TValidator> Clone for TariBlockTransactionExecutor<TExecutor, TValidator> {
     fn clone(&self) -> Self {
         Self {
             executor: self.executor.clone(),

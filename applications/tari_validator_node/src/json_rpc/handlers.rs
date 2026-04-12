@@ -49,7 +49,7 @@ use tari_ootle_common_types::{
         ValidatorRegistrationParams,
     },
     optional::Optional,
-    services::template_provider::{TemplateMetadataProvider, TemplateProvider},
+    services::template_provider::TemplateProvider,
 };
 use tari_ootle_p2p::{PeerAddress, TariMessagingSpec, public_key_to_peer_id};
 use tari_ootle_storage::{
@@ -446,20 +446,6 @@ impl JsonRpcHandlers {
                 )
             })?;
 
-        let template = self
-            .template_provider
-            .get_template_metadata(&req.template_address)
-            .map_err(internal_error(answer_id.clone()))?
-            .ok_or_else(|| {
-                not_found(
-                    answer_id.clone(),
-                    format!(
-                        "Template with address {} not found (after template found?)",
-                        req.template_address
-                    ),
-                )
-            })?;
-
         let abi = TemplateAbi {
             template_name: loaded.template_def().template_name().to_string(),
             functions: loaded
@@ -481,7 +467,6 @@ impl JsonRpcHandlers {
                 name: loaded.template_name().to_string(),
                 address: req.template_address,
                 code_size: loaded.code_size(),
-                author: template.author,
             },
             abi,
         }))

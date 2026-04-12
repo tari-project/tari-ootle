@@ -10,7 +10,7 @@
       "name": "BSD-3-Clause",
       "identifier": "BSD-3-Clause"
     },
-    "version": "0.27.0"
+    "version": "0.28.6"
   },
   "paths": {
     "/epoch-manager/stats": {
@@ -487,6 +487,119 @@
         }
       }
     },
+    "/templates/catalogue": {
+      "get": {
+        "tags": [
+          "handlers::templates"
+        ],
+        "description": "List templates discovered on the network via the template catalogue",
+        "operationId": "list_template_catalogue",
+        "parameters": [
+          {
+            "name": "name_filter",
+            "in": "query",
+            "description": "Substring filter on template name",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum entries to return (default: 20, max: 100)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Cursor: return entries inserted after the row with this template address. Omit to start from the beginning",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Template catalogue entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTemplateCatalogueResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to list template catalogue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/templates/catalogue/{template_address}": {
+      "get": {
+        "tags": [
+          "handlers::templates"
+        ],
+        "description": "Get a single template catalogue entry by its address",
+        "operationId": "get_template_catalogue_entry",
+        "responses": {
+          "200": {
+            "description": "Template catalogue entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateCatalogueItem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Template not found in catalogue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to fetch template catalogue entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/templates/{template_id}": {
       "get": {
         "tags": [
@@ -707,7 +820,7 @@
         "tags": [
           "handlers::transaction_events"
         ],
-        "description": "SSE stream of template-emitted transaction events",
+        "description": "SSE stream of template-emitted transaction events. Supports catch-up via the `after_id` query parameter or `Last-Event-ID` header.",
         "operationId": "sse_transaction_events",
         "parameters": [
           {
@@ -735,6 +848,16 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "after_id",
+            "in": "query",
+            "description": "Resume from this event ID (exclusive)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
             }
           }
         ],
@@ -1348,6 +1471,20 @@
           }
         }
       },
+      "ListTemplateCatalogueResponse": {
+        "type": "object",
+        "required": [
+          "entries"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TemplateCatalogueItem"
+            }
+          }
+        }
+      },
       "ListTemplatesResponse": {
         "type": "object",
         "required": [
@@ -1357,7 +1494,7 @@
           "templates": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TemplateMetadata"
+              "$ref": "#/components/schemas/TemplateMeta"
             }
           }
         }
@@ -1555,7 +1692,42 @@
           }
         }
       },
-      "TemplateMetadata": {
+      "TemplateCatalogueItem": {
+        "type": "object",
+        "required": [
+          "template_address",
+          "template_name",
+          "author_public_key",
+          "binary_hash",
+          "at_epoch"
+        ],
+        "properties": {
+          "at_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "author_public_key": {
+            "type": "string"
+          },
+          "binary_hash": {
+            "type": "string"
+          },
+          "metadata_hash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "template_address": {
+            "type": "string"
+          },
+          "template_name": {
+            "type": "string"
+          }
+        }
+      },
+      "TemplateMeta": {
         "type": "object",
         "required": [
           "name",
@@ -1583,6 +1755,13 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          },
+          "metadata_hash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional multihash of off-chain CBOR metadata"
           },
           "name": {
             "type": "string"

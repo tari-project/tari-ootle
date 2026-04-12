@@ -17,9 +17,6 @@ tari_template_test_tooling = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_template_lib = { workspace = true }
 tari_ootle_transaction = { workspace = true }
-ootle_byte_type = { workspace = true, features = ["crypto"] }
-
-tari_crypto = { workspace = true }
 
 [build-dependencies]
 anyhow = { workspace = true }

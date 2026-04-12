@@ -20,7 +20,11 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::rest_api::metrics;
 use crate::{
     bootstrap::Services,
-    rest_api::{context::HandlerContext, handlers},
+    rest_api::{
+        context::HandlerContext,
+        handlers,
+        rate_limit::{RateLimiter, RateLimitEndpoint, RateLimitLayer as CustomRateLimitLayer, SseRateLimitLayer},
+    },
 };
 
 const LOG_TARGET: &str = "tari::ootle::indexer::rest_api::server";
@@ -48,6 +52,8 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
     handlers::transactions::get_transaction_result,
     handlers::templates::get_template_definition,
     handlers::templates::list_cached_templates,
+    handlers::templates::list_template_catalogue,
+    handlers::templates::get_template_catalogue_entry,
     handlers::utxos::fetch_utxos,
     handlers::utxos::list_utxos,
     handlers::utxos::stream_utxo_updates,
@@ -77,11 +83,13 @@ impl Server {
         #[allow(unused_mut)] mut self,
         preferred_addr: SocketAddr,
         services: &Services,
+        rate_limiter: RateLimiter,
         shutdown: ShutdownSignal,
     ) -> anyhow::Result<SocketAddr> {
         let context = HandlerContext::from_services(services);
 
         let router = Router::new()
+            // Health/ready/identity endpoints - NOT rate limited
             .route("/health", get(handlers::misc::health))
             .route("/ready", get(handlers::misc::ready))
             .route("/identity", get(handlers::misc::get_identity))
@@ -90,12 +98,18 @@ impl Server {
             .route("/network", get(handlers::network::get))
             .route("/network/stats", get(handlers::network::get_network_sync_stats))
             .route("/network/connections", get(handlers::network::get_connections))
+            // Substates endpoints with rate limiting
             .nest("/substates", Router::new()
-                .route("/fetch", post(handlers::substates::fetch_substates))
+                .route("/fetch", post(handlers::substates::fetch_substates)
+                    .layer(CustomRateLimitLayer::new(rate_limiter.clone(), RateLimitEndpoint::SubstatesFetch))
+                )
                 .route("/{substate_id}", get(handlers::substates::get_substate))
             )
+            // Transactions endpoints with rate limiting
             .nest("/transactions", Router::new()
-                .route("/", post(handlers::transactions::submit_transaction))
+                .route("/", post(handlers::transactions::submit_transaction)
+                    .layer(CustomRateLimitLayer::new(rate_limiter.clone(), RateLimitEndpoint::Transactions))
+                )
                 .route("/dry-run", post(handlers::transactions::submit_transaction_dry_run)
                     .layer(ServiceBuilder::new()
                         .layer(axum::error_handling::HandleErrorLayer::new(|err: axum::BoxError| async move {
@@ -105,8 +119,12 @@ impl Server {
                             )
                         }))
                         .layer(BufferLayer::new(1024))
+                        // Keep the existing global rate limit for dry-run (10 per 5 seconds)
                         .layer(RateLimitLayer::new(10, Duration::from_secs(5)))
-                    ))
+                        // Add per-IP rate limit for dry-run
+                        .layer(CustomRateLimitLayer::new(rate_limiter.clone(), RateLimitEndpoint::DryRun))
+                    )
+                )
                 .route(
                     "/recent",
                     get(handlers::transactions::list_recent_transactions),
@@ -116,20 +134,35 @@ impl Server {
                     get(handlers::transactions::get_transaction_result),
                 )
                 .route("/events", get(handlers::transactions::query_transaction_events))
-                .route("/events/stream", get(handlers::transaction_events::sse_transaction_events))
+                .route("/events/stream", get(handlers::transaction_events::sse_transaction_events)
+                    .layer(SseRateLimitLayer::new(rate_limiter.clone()))
+                )
             )
             .nest("/templates", Router::new()
                 .route("/cached", get(handlers::templates::list_cached_templates))
+                .route("/catalogue", get(handlers::templates::list_template_catalogue))
+                .route(
+                    "/catalogue/{template_address}",
+                    get(handlers::templates::get_template_catalogue_entry),
+                )
                 .route(
                     "/{template_address}",
                     get(handlers::templates::get_template_definition),
                 )
             )
-            .route("/non-fungibles", get(handlers::nfts::get_non_fungibles)) // Placeholder for future non-fungible endpoints
+            // Non-fungibles endpoint with rate limiting
+            .route("/non-fungibles", get(handlers::nfts::get_non_fungibles)
+                .layer(CustomRateLimitLayer::new(rate_limiter.clone(), RateLimitEndpoint::NonFungibles))
+            )
+            // UTXOs endpoints with rate limiting
             .nest("/utxos", Router::new()
                 .route("/", get(handlers::utxos::list_utxos))
-                .route("/fetch", post(handlers::utxos::fetch_utxos))
-                .route("/stream", post(handlers::utxos::stream_utxo_updates))
+                .route("/fetch", post(handlers::utxos::fetch_utxos)
+                    .layer(CustomRateLimitLayer::new(rate_limiter.clone(), RateLimitEndpoint::UtxosFetch))
+                )
+                .route("/stream", post(handlers::utxos::stream_utxo_updates)
+                    .layer(SseRateLimitLayer::new(rate_limiter.clone()))
+                )
             )
             .nest(
                 "/transaction-receipts",
@@ -145,7 +178,10 @@ impl Server {
                 .route("/xtr" , get(handlers::resources::get_tari))
                 .route("/tari" , get(handlers::resources::get_tari))
                 .route("/{resource_address}" , get(handlers::resources::get_resource)))
-            .route("/events", get(handlers::indexer_events::sse_events))
+            // SSE events endpoint with connection limiting
+            .route("/events", get(handlers::indexer_events::sse_events)
+                .layer(SseRateLimitLayer::new(rate_limiter.clone()))
+            )
             .layer(CorsLayer::permissive())
             .layer(RequestBodyLimitLayer::new(REQUEST_BODY_LIMIT))
             .merge(SwaggerUi::new("/swagger-ui").url("/openapi.json", ApiDoc::openapi()))

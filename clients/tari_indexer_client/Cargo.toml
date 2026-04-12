@@ -1,7 +1,7 @@
 [package]
 name = "tari_indexer_client"
 description = "Tari indexer client library"
-version = "0.27.1"
+version.workspace = true
 edition.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -10,6 +10,7 @@ license.workspace = true
 [dependencies]
 tari_ootle_common_types = { workspace = true }
 tari_engine_types = { workspace = true }
+tari_ootle_template_metadata = { workspace = true }
 tari_ootle_transaction = { workspace = true }
 tari_template_abi = { workspace = true }
 tari_template_lib_types = { workspace = true }

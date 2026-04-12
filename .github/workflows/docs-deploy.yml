@@ -24,9 +24,9 @@ jobs:
         uses: withastro/action@v6
         with:
           path: "docs/developer-docs"
-          node-version: 24 # The specific version of Node that should be used to build your site. Defaults to 22. (optional)
-          package-manager: pnpm@latest # The Node package manager that should be used to install dependencies and build your site. Automatically detected based on your lockfile. (optional)
-          # build-cmd: pnpm run build # The command to run to build your site. Runs the package build script/task by default. (optional)
+          node-version: 24
+          package-manager: pnpm@latest
+          build-cmd: pnpm install --ignore-workspace && pnpm run build
         # env:
         # PUBLIC_POKEAPI: 'https://pokeapi.co/api/v2' # Use single quotation marks for the variable value. (optional)
 
@@ -39,4 +39,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

@@ -272,6 +272,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 url: t.url,
                 status: t.status.parse().expect("DB status corrupted"),
                 added_at: t.added_at,
+                metadata_hash: t.metadata_hash,
             })),
             None => Ok(None),
         }
@@ -352,6 +353,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                     status: t.status.parse().expect("DB status corrupted"),
                     added_at: t.added_at,
                     epoch: Epoch(t.epoch as u64),
+                    metadata_hash: t.metadata_hash,
                 })
             })
             .collect()
@@ -368,6 +370,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             code: item.code,
             epoch: item.epoch.as_u64() as i64,
             status: item.status.as_str().to_string(),
+            metadata_hash: item.metadata_hash,
         };
         diesel::insert_into(templates::table)
             .values(new_template)
@@ -396,6 +399,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             epoch: template.epoch.map(|epoch| epoch.as_u64() as i64),
             code: template.code.map(Some),
             status: template.status.map(|s| s.as_str().to_string()),
+            metadata_hash: template.metadata_hash,
         };
         diesel::update(templates::table)
             .filter(templates::template_address.eq(key))

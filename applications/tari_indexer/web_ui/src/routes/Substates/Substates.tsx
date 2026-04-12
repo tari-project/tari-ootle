@@ -188,8 +188,10 @@ function TemplateView({ data }: { data: any }) {
   return (
     <FieldTable
       fields={[
+        { label: "Template Name", value: data.template_name || "N/A" },
         { label: "Author", value: data.author },
         { label: "Published Epoch", value: String(data.at_epoch) },
+        { label: "Metadata Hash", value: data.metadata_hash || "None" },
         { label: "Binary Size", value: data.binary ? `${data.binary.length} bytes` : "N/A" },
       ]}
     />

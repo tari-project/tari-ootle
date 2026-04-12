@@ -69,4 +69,6 @@ clients/validator_node_grpc_client/package-lock.json
 
 
 # agents
-.claude
+.claude/
+.rtk/
+

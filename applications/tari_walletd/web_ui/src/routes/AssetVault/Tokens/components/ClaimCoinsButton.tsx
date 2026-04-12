@@ -20,38 +20,73 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { useCallback, useEffect, useState } from "react";
 import { useErrorNotification } from "@/contexts/ErrorNotificationContext";
 import { useAccountsCreateFreeTestCoins } from "@api/hooks/useAccounts";
 import queryClient from "@api/queryClient";
+import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import Button from "@mui/material/Button";
 import { useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import useAccountStore, { setAccount, setOotleAddress } from "@store/accountStore";
 import { AccountsCreateFreeTestCoinsResponse, substateIdToString } from "@tari-project/ootle-ts-bindings";
 
+const CLAIMED_KEY = "faucet_claimed_accounts";
+
+function getClaimedAccounts(): Set<string> {
+  try {
+    const stored = localStorage.getItem(CLAIMED_KEY);
+    return new Set(stored ? JSON.parse(stored) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function markAccountClaimed(address: string) {
+  const claimed = getClaimedAccounts();
+  claimed.add(address);
+  localStorage.setItem(CLAIMED_KEY, JSON.stringify([...claimed]));
+}
+
 function ClaimCoinsButton() {
   const { mutate: claimTestnetFaucetFunds, isPending } = useAccountsCreateFreeTestCoins();
   const account = useAccountStore((s) => s.account);
   const { showError, showSuccess } = useErrorNotification();
+  const [hasClaimed, setHasClaimed] = useState(false);
 
   const theme = useTheme();
   const isLg = useMediaQuery(theme.breakpoints.up("md"));
 
-  if (!account) {
+  const accountAddress = account ? substateIdToString(account.component_address) : null;
+
+  useEffect(() => {
+    if (accountAddress) {
+      setHasClaimed(getClaimedAccounts().has(accountAddress));
+    }
+  }, [accountAddress]);
+
+  const markClaimed = useCallback(() => {
+    if (accountAddress) {
+      markAccountClaimed(accountAddress);
+      setHasClaimed(true);
+    }
+  }, [accountAddress]);
+
+  if (!account || !accountAddress) {
     return <></>;
   }
 
   const onClaimFreeCoins = () => {
     claimTestnetFaucetFunds(
       {
-        account: { ComponentAddress: substateIdToString(account.component_address) },
-        amount: 1_000_000_000,
+        account: { ComponentAddress: accountAddress },
         fee: 1000,
       },
       {
         onSuccess: async (resp: AccountsCreateFreeTestCoinsResponse) => {
           setAccount(resp.account);
           setOotleAddress(resp.address);
+          markClaimed();
           showSuccess("Successfully claimed testnet coins!");
           await queryClient.invalidateQueries({
             predicate: (query) => {
@@ -65,12 +100,24 @@ function ClaimCoinsButton() {
         },
         onError: (error: any) => {
           console.error("Error claiming coins:", error);
-          const errorMessage = error?.message || "Failed to claim testnet funds. Please try again.";
-          showError(errorMessage);
+          if ((error?.cause as any)?.code === 1001) {
+            markClaimed();
+            showError("You have already claimed your testnet funds. Each account can only claim once.");
+          } else {
+            showError(error?.message || "Failed to claim testnet funds. Please try again.");
+          }
         },
       },
     );
   };
+
+  if (hasClaimed) {
+    return (
+      <Button variant="outlined" disabled startIcon={<CheckCircleOutlineIcon />} size={isLg ? "large" : "small"}>
+        Already Claimed
+      </Button>
+    );
+  }
 
   return (
     <Button variant="outlined" onClick={() => onClaimFreeCoins()} disabled={isPending} size={isLg ? "large" : "small"}>

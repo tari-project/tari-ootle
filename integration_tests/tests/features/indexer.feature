@@ -54,7 +54,7 @@ Feature: Indexer node
     Then I wait for the indexer INDEXER to sync with the network
 
     # Scan the network for the event emitted on ACC creation
-    When indexer INDEXER scans the network events for account ACC with topics std.component.created,std.vault.pay_fee,std.component.updated
+    When indexer INDEXER scans the network events for account ACC with topics std.component.created,Account.pay_fee,std.component.updated
 
   Scenario: Indexer GraphQL requests work
     # Initialize a base node, wallet, miner and VN
@@ -75,10 +75,10 @@ Feature: Indexer node
     Then I wait for the indexer INDEXER to sync with the network
     ##### Scenario
     # Scan the network for the event emitted on ACC_1 creation
-    When indexer INDEXER scans the network events for account ACC_1 with topics std.component.created,std.vault.pay_fee
+    When indexer INDEXER scans the network events for account ACC_1 with topics std.component.created,Account.pay_fee
 
     # Scan the network for the event emitted on ACC_2 creation
-    When indexer INDEXER scans the network events for account ACC_2 with topics std.component.created,std.vault.pay_fee
+    When indexer INDEXER scans the network events for account ACC_2 with topics std.component.created,Account.pay_fee
 
   Scenario: Indexer GraphQL filtering and pagination of events
     Given a network with registered validator VN and wallet daemon WALLET_D
@@ -120,3 +120,46 @@ Feature: Indexer node
 
     # Query the events from the network
     When indexer INDEXER scans the network for events of resource FAUCET/resources/FAUCET
+
+  @catalogue
+  Scenario: Indexer template catalogue is populated after template publication
+    Given a network with registered validator VN and wallet daemon WALLET_D
+
+    # Create account and publish two templates
+    When I create an account ACC via the wallet daemon WALLET_D with 2 XTR
+    When wallet daemon WALLET_D publishes the template "counter" using account ACC
+    When wallet daemon WALLET_D publishes the template "basic_nft" using account ACC
+
+    # Wait for the indexer to sync template metadata from validators
+    Then I wait for the indexer INDEXER to sync with the network
+
+    # Both templates must appear in the catalogue
+    Then the indexer INDEXER has at least 2 templates in the catalogue
+    Then the indexer INDEXER catalogue contains template counter
+    Then the indexer INDEXER catalogue contains template basic_nft
+
+    # Name filter should narrow results
+    Then the indexer INDEXER catalogue name filter counter returns 1 result
+    Then the indexer INDEXER catalogue name filter nonexistent_xyz returns 0 results
+
+    # Non-existent template address should return 404
+    Then the indexer INDEXER catalogue entry for address "template_0000000000000000000000000000000000000000000000000000000000000000" is not found
+
+  @catalogue_pagination
+  Scenario: Indexer template catalogue pagination works
+    Given a network with registered validator VN and wallet daemon WALLET_D
+
+    # Create account and publish three templates to exercise pagination
+    When I create an account ACC via the wallet daemon WALLET_D with 10 XTR
+    When wallet daemon WALLET_D publishes the template "counter" using account ACC
+    When wallet daemon WALLET_D publishes the template "basic_nft" using account ACC
+    When wallet daemon WALLET_D publishes the template "faucet" using account ACC
+
+    # Wait for the indexer to sync template metadata from validators
+    Then I wait for the indexer INDEXER to sync with the network
+    Then the indexer INDEXER has at least 3 templates in the catalogue
+
+    # Pagination: one entry per page
+    Then the indexer INDEXER catalogue with limit 1 returns 1 entries
+    # All entries in one page
+    Then the indexer INDEXER catalogue with limit 100 returns at least 3 entries

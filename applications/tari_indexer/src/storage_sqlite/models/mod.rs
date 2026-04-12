@@ -23,11 +23,14 @@
 mod events;
 mod key_value;
 mod substate;
+mod template_catalogue;
 mod utxo;
 mod utxo_update;
 
 pub use events::*;
 pub use key_value::*;
 pub use substate::*;
+pub use template_catalogue::TemplateCatalogueEntry;
+pub(crate) use template_catalogue::{NewTemplateCatalogueRow, TemplateCatalogueRow};
 pub(crate) use utxo::*;
 pub(crate) use utxo_update::*;

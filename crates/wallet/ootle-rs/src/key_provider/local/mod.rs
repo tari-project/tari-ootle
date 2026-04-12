@@ -11,6 +11,10 @@ pub use private_key::*;
 
 use crate::Address;
 
+/// A key provider backed by local credentials.
+///
+/// Parameterized by the credential type `C`. The most common instantiation is
+/// [`PrivateKeyProvider`] (i.e. `LocalKeyProvider<OotleSecretKey>`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalKeyProvider<C> {
     address: Address,

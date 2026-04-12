@@ -114,7 +114,6 @@ pub struct TemplateMetadata {
     pub name: String,
     pub address: TemplateAddress,
     pub code_size: usize,
-    pub author: RistrettoPublicKeyBytes,
 }
 
 /// A request to submit a transaction

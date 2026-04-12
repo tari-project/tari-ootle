@@ -35,6 +35,8 @@ use crate::{
         IndexerReadyResponse,
         ListRecentTransactionsRequest,
         ListRecentTransactionsResponse,
+        ListTemplateCatalogueRequest,
+        ListTemplateCatalogueResponse,
         ListTemplatesRequest,
         ListTemplatesResponse,
         ListTransactionReceiptsRequest,
@@ -47,6 +49,7 @@ use crate::{
         SubmitTransactionDryRunResponse,
         SubmitTransactionRequest,
         SubmitTransactionResponse,
+        TemplateCatalogueItem,
     },
 };
 
@@ -153,6 +156,21 @@ impl IndexerRestApiClient {
         template_address: TemplateAddress,
     ) -> Result<GetTemplateDefinitionResponse, IndexerRestClientError> {
         self.send_get(format!("templates/{template_address}"), ()).await
+    }
+
+    pub async fn list_template_catalogue(
+        &self,
+        req: ListTemplateCatalogueRequest,
+    ) -> Result<ListTemplateCatalogueResponse, IndexerRestClientError> {
+        self.send_get("templates/catalogue", req).await
+    }
+
+    pub async fn get_template_catalogue_entry(
+        &self,
+        template_address: TemplateAddress,
+    ) -> Result<TemplateCatalogueItem, IndexerRestClientError> {
+        self.send_get(format!("templates/catalogue/{template_address}"), ())
+            .await
     }
 
     pub async fn query_transaction_events(

@@ -30,6 +30,18 @@ use crate::{
     wallet::{OotleWallet, WalletResult},
 };
 
+/// Builder for constructing confidential stealth transfers.
+///
+/// Supports revealed and stealth inputs, stealth outputs with optional encrypted memos,
+/// change handling, and spending proof generation.
+///
+/// ```rust,ignore
+/// let (statement, sig_reqs) = StealthTransfer::new(TARI_TOKEN, &provider)
+///     .spend_revealed_input(commitment, mask, value)
+///     .to_stealth_output(&recipient, 500_000u64, None)
+///     .prepare()
+///     .await?;
+/// ```
 pub struct StealthTransfer<'a, P> {
     provider: &'a P,
     spec: StealthTransferSpec,

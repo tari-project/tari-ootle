@@ -42,6 +42,7 @@ pub struct TemplateModel {
     pub code: Option<Vec<u8>>,
     pub status: String,
     pub added_at: PrimitiveDateTime,
+    pub metadata_hash: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Error)]
@@ -70,6 +71,7 @@ impl TryInto<DbTemplate> for TemplateModel {
             status: self.status.parse().expect("DB status corrupted"),
             added_at: self.added_at,
             epoch: Epoch(self.epoch as u64),
+            metadata_hash: self.metadata_hash,
         })
     }
 }
@@ -85,6 +87,7 @@ pub struct NewTemplateModel {
     pub code: Option<Vec<u8>>,
     pub epoch: i64,
     pub status: String,
+    pub metadata_hash: Option<Vec<u8>>,
 }
 
 #[derive(Debug, AsChangeset)]
@@ -97,4 +100,5 @@ pub struct TemplateUpdateModel {
     pub epoch: Option<i64>,
     pub status: Option<String>,
     pub code: Option<Option<Vec<u8>>>,
+    pub metadata_hash: Option<Option<Vec<u8>>>,
 }

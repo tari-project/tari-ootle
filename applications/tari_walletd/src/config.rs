@@ -93,6 +93,10 @@ pub struct WalletDaemonConfig {
     /// ~/Library/Application Support/tari/{network}/burn_proofs on macOS).
     pub burn_proof_dir: Option<PathBuf>,
     pub override_keyring_password: Option<SafePassword>,
+    /// If true (default), the wallet daemon will watch the burn_proof_dir and automatically submit claim
+    /// transactions when new burn proof files are detected, deferring each claim to the next epoch as required.
+    #[serde(default = "return_default_auto_claim_burns")]
+    pub auto_claim_burns: bool,
 }
 
 impl WalletDaemonConfig {
@@ -101,6 +105,10 @@ impl WalletDaemonConfig {
             .clone()
             .unwrap_or_else(|| default_burn_proof_dir(network))
     }
+}
+
+fn return_default_auto_claim_burns() -> bool {
+    true
 }
 
 fn return_default_jwt_expiry() -> Duration {
@@ -134,6 +142,7 @@ impl Default for WalletDaemonConfig {
             },
             burn_proof_dir: None,
             override_keyring_password: None,
+            auto_claim_burns: true,
         }
     }
 }

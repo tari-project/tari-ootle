@@ -815,10 +815,10 @@ impl Block {
                         // justify: ProposalCertificate::get(tx, &destroyed.justify)?,
                     }));
                 } else {
-                    updates.push(SubstateUpdateProof::Create(SubstateCreate {
+                    updates.push(SubstateUpdateProof::Create(Box::new(SubstateCreate {
                         // created_qc: substate.get_created_quorum_certificate(tx)?,
                         substate: substate.into(),
-                    }));
+                    })));
                 };
             }
         }

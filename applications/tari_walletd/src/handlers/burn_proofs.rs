@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{fs, path::Path};
+use std::path::Path;
 
 use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
@@ -41,7 +41,7 @@ pub async fn handle_list(
     context.check_auth(token, &[JrpcPermission::Admin])?;
     let dir = context.config().get_burn_proof_dir(context.wallet_sdk().network());
 
-    let entries = match fs::read_dir(&dir) {
+    let mut read_dir = match tokio::fs::read_dir(&dir).await {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Ok(BurnProofsListResponse { proofs: Vec::new() });
@@ -53,17 +53,19 @@ pub async fn handle_list(
     };
 
     let mut proofs = Vec::new();
-    for entry in entries {
-        let entry = match entry {
-            Ok(e) => e,
+    loop {
+        let entry = match read_dir.next_entry().await {
+            Ok(Some(e)) => e,
+            Ok(None) => break,
             Err(e) => {
                 warn!(target: LOG_TARGET, "Failed to read directory entry: {}", e);
                 continue;
             },
         };
 
+        let is_file = entry.file_type().await.map(|ft| ft.is_file()).unwrap_or(false);
         let path = entry.path();
-        if !path.is_file() || path.extension().is_some_and(|ext| ext != "json") {
+        if !is_file || path.extension().is_some_and(|ext| ext != "json") {
             continue;
         }
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
@@ -82,13 +84,16 @@ pub async fn handle_list(
         }
 
         // Read value from the proof file
-        let value = match fs::File::open(&path).and_then(|f| {
-            serde_json::from_reader::<_, CompleteClaimBurnProof>(&f)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-        }) {
-            Ok(proof) => Some(proof.claim_proof.value),
+        let value = match tokio::fs::read(&path).await {
+            Ok(bytes) => match serde_json::from_slice::<CompleteClaimBurnProof>(&bytes) {
+                Ok(proof) => Some(proof.claim_proof.value),
+                Err(e) => {
+                    warn!(target: LOG_TARGET, "Failed to parse burn proof {}: {}", path.display(), e);
+                    None
+                },
+            },
             Err(e) => {
-                warn!(target: LOG_TARGET, "Failed to read burn proof {}: {}", name, e);
+                warn!(target: LOG_TARGET, "Failed to read burn proof {}: {}", path.display(), e);
                 None
             },
         };
@@ -119,12 +124,12 @@ pub async fn handle_get(
     }
 
     let path = dir.join(&req.file_name);
-    let file = fs::File::open(&path).map_err(|e| {
-        warn!(target: LOG_TARGET, "Failed to open burn proof file {}: {}", path.display(), e);
+    let bytes = tokio::fs::read(&path).await.map_err(|e| {
+        warn!(target: LOG_TARGET, "Failed to read burn proof file {}: {}", path.display(), e);
         anyhow!("Burn proof file not found: {}", req.file_name)
     })?;
 
-    let complete_proof: CompleteClaimBurnProof = serde_json::from_reader(&file).map_err(|e| {
+    let complete_proof: CompleteClaimBurnProof = serde_json::from_slice(&bytes).map_err(|e| {
         warn!(target: LOG_TARGET, "Failed to parse burn proof file {}: {}", path.display(), e);
         anyhow!("Invalid burn proof file: {}", req.file_name)
     })?;
@@ -132,37 +137,4 @@ pub async fn handle_get(
     let proof = complete_burn_proof_to_contents(complete_proof)?;
 
     Ok(BurnProofsGetResponse { proof })
-}
-
-/// Moves a burn proof file into the `claimed` subdirectory of the burn proof directory.
-/// This is called after a claim transaction has been successfully submitted.
-pub fn mark_as_claimed(burn_proof_dir: &Path, file_name: &str) {
-    let claimed_dir = burn_proof_dir.join("claimed");
-    if let Err(e) = fs::create_dir_all(&claimed_dir) {
-        warn!(
-            target: LOG_TARGET,
-            "Failed to create claimed directory {}: {}",
-            claimed_dir.display(),
-            e
-        );
-        return;
-    }
-
-    let src = burn_proof_dir.join(file_name);
-    let dst = claimed_dir.join(file_name);
-    if let Err(e) = fs::rename(&src, &dst) {
-        warn!(
-            target: LOG_TARGET,
-            "Failed to move claimed burn proof {} -> {}: {}",
-            src.display(),
-            dst.display(),
-            e
-        );
-    } else {
-        info!(
-            target: LOG_TARGET,
-            "Burn proof {} marked as claimed",
-            file_name
-        );
-    }
 }

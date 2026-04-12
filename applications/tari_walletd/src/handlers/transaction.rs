@@ -523,11 +523,16 @@ pub async fn handle_publish_template(
         .try_into()
         .map_err(|_| invalid_params("binary", Some("WASM binary too large".to_string())))?;
 
-    let transaction = context
+    let metadata_hash = req.metadata.map(resolve_metadata_hash).transpose()?;
+
+    let builder = context
         .transaction_builder()
-        .pay_fee_from_component(*fee_account.component_address(), req.max_fee)
-        .publish_template(wasm_binary)
-        .build_unsigned();
+        .pay_fee_from_component(*fee_account.component_address(), req.max_fee);
+    let builder = match metadata_hash {
+        Some(hash) => builder.publish_template_with_metadata(wasm_binary, hash),
+        None => builder.publish_template(wasm_binary),
+    };
+    let transaction = builder.build_unsigned();
 
     if req.dry_run {
         let request = TransactionSubmitDryRunRequest {
@@ -565,4 +570,20 @@ pub async fn handle_publish_template(
         transaction_id: resp.transaction_id,
         dry_run_fee: None,
     })
+}
+
+fn resolve_metadata_hash(
+    input: tari_ootle_walletd_client::types::PublishTemplateMetadata,
+) -> Result<tari_ootle_template_metadata::MetadataHash, anyhow::Error> {
+    use tari_ootle_template_metadata::TemplateMetadata;
+    use tari_ootle_walletd_client::types::PublishTemplateMetadata;
+
+    match input {
+        PublishTemplateMetadata::Hash(hash) => Ok(hash),
+        PublishTemplateMetadata::Literal(meta) => meta.hash().map_err(|e| anyhow!(e)),
+        PublishTemplateMetadata::RawCbor(bytes) => {
+            let meta = TemplateMetadata::from_cbor(&bytes).map_err(|e| anyhow!(e))?;
+            meta.hash().map_err(|e| anyhow!(e))
+        },
+    }
 }

@@ -7,7 +7,7 @@ pub mod burn_proofs;
 pub mod confidential;
 mod context;
 pub mod error;
-mod helpers;
+pub(crate) mod helpers;
 pub mod keys;
 pub mod nfts;
 pub mod settings;

@@ -86,6 +86,8 @@ pub trait WalletNetworkInterface {
         tag_and_nonce_pairs: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
     ) -> impl Future<Output = Result<Vec<(UtxoId, Utxo)>, Self::Error>> + Send;
 
+    fn get_current_epoch(&self) -> impl Future<Output = Result<Epoch, Self::Error>> + Send;
+
     fn wait_until_ready(&self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 

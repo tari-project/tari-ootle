@@ -54,6 +54,7 @@ export { substateIdToString, stringToSubstateId, rejectReasonToString };
  * Streamed via the /transactions/events/stream SSE endpoint.
  */
 export interface TransactionEvent {
+  id: number;
   transaction_id: TransactionId;
   event: Event;
 }
@@ -173,13 +174,16 @@ export class IndexerClient {
   ): SseStream {
     return this.transport.sendSse(`transactions/events/stream`, params, {
       onEvent(sseEvent) {
-        if (sseEvent.event !== "TransactionEvent") return;
         let parsed: TransactionEvent;
         try {
           parsed = JSON.parse(sseEvent.data);
         } catch (e) {
           options.onError?.(new Error(`Failed to parse TransactionEvent: ${e}`));
           return;
+        }
+        // The event ID is transmitted via the SSE id: field, not in the JSON payload.
+        if (sseEvent.id) {
+          parsed.id = parseInt(sseEvent.id, 10);
         }
         options.onEvent(parsed);
       },

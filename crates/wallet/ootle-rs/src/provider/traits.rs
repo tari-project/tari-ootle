@@ -19,6 +19,11 @@ use crate::{
 };
 
 pub type ProviderResult<T> = Result<T, ProviderError>;
+
+/// Core provider trait for interacting with the Ootle network.
+///
+/// Provides network information, input resolution for transactions, and substate fetching.
+/// Implement this trait to create custom providers backed by different transports.
 pub trait Provider {
     type Client;
 
@@ -43,6 +48,7 @@ pub trait Provider {
     ) -> impl Future<Output = ProviderResult<HashMap<SubstateId, Substate>>> + Send;
 }
 
+/// Extension of [`Provider`] that includes wallet access for signing and submitting transactions.
 pub trait WalletProvider: Provider {
     type Wallet;
 

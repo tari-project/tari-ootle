@@ -131,12 +131,17 @@ where
     // Run the REST API
     let listen_addr = config.indexer.api_listen_address;
     if let Some(listen_addr) = listen_addr {
+        use rest_api::rate_limit::RateLimiter;
+        
+        // Create rate limiter from config
+        let rate_limiter = RateLimiter::new(config.indexer.rate_limit.clone());
+        
         #[cfg(not(feature = "metrics"))]
         let server = rest_api::Server::new();
         #[cfg(feature = "metrics")]
         let server = rest_api::Server::new(registry);
         let listen_address = server
-            .spawn(listen_addr, &services, shutdown_signal.clone())
+            .spawn(listen_addr, &services, rate_limiter, shutdown_signal.clone())
             .await
             .map_err(|e| ExitError::new(ExitCode::ConfigError, e))?;
         debug!(target: LOG_TARGET, "API address {}", listen_address);

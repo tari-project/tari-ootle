@@ -7,7 +7,7 @@
 //  disclaimer.
 //
 //  2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
-//  following disclaimer in the documentation and/or other materials provided with the distribution.
+//  disclaimer in the documentation and/or other materials provided with the distribution.
 //
 //  3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote
 //  products derived from this software without specific prior written permission.
@@ -38,6 +38,7 @@ use tari_ootle_app_utilities::{
 use tari_ootle_common_types::Network;
 
 use crate::network_state_sync::EventFilter;
+use crate::rest_api::rate_limit::RateLimitConfig;
 
 #[derive(Debug, Clone)]
 pub struct ApplicationConfig {
@@ -121,6 +122,9 @@ pub struct IndexerConfig {
     pub burnt_utxo_sidechain_id: Option<RistrettoPublicKey>,
     /// The event filtering configuration
     pub event_filters: Vec<EventFilter>,
+    /// Rate limiting configuration for the REST API
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
 }
 
 impl Default for IndexerConfig {
@@ -141,6 +145,7 @@ impl Default for IndexerConfig {
             templates_sidechain_id: None,
             burnt_utxo_sidechain_id: None,
             event_filters: vec![],
+            rate_limit: RateLimitConfig::default(),
         }
     }
 }

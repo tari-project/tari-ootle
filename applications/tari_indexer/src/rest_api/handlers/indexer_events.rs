@@ -28,11 +28,17 @@ pub async fn sse_events(
         Ok(guard) => guard,
         Err(()) => {
             warn!(target: LOG_TARGET, "SSE connection limit exceeded for IP: {}", addr.ip());
-            return (
+            let mut response = (
                 StatusCode::TOO_MANY_REQUESTS,
                 "Too many concurrent SSE connections from this IP",
             )
                 .into_response();
+            // Add Retry-After header suggesting to retry in 60 seconds
+            response.headers_mut().insert(
+                axum::http::header::RETRY_AFTER,
+                axum::http::HeaderValue::from_static("60"),
+            );
+            return response;
         },
     };
 

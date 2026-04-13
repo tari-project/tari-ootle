@@ -175,7 +175,7 @@ function ManifestEditor() {
           <Editor
             value={manifest.code}
             onValueChange={manifest.setCode}
-            highlight={(code) => (
+            highlight={(code: string) => (
               <Highlight
                 theme={theme.palette.mode === "dark" ? themes.vsDark : themes.vsLight}
                 code={code}

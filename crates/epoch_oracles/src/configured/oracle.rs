@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, VecDeque},
     future::poll_fn,
     task::{Context, Poll},
 };
@@ -25,7 +25,7 @@ pub struct ConfiguredEpochOracle<TStore, TTicker> {
     pending_events: VecDeque<EpochEvent>,
     store: TStore,
     ticker: TTicker,
-    queued_validators: HashMap<Epoch, Vec<Validator>>,
+    queued_validators: BTreeMap<Epoch, Vec<Validator>>,
     is_initialized: bool,
     is_done: bool,
 }
@@ -46,7 +46,7 @@ impl<TStore: EpochOracleStore + Send> ConfiguredEpochOracle<TStore, RealTimeEpoc
             store,
             ticker,
             pending_events: VecDeque::new(),
-            queued_validators: HashMap::new(),
+            queued_validators: BTreeMap::new(),
             is_initialized: false,
             is_done: false,
         })
@@ -60,7 +60,7 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
             store,
             ticker,
             pending_events: VecDeque::new(),
-            queued_validators: HashMap::new(),
+            queued_validators: BTreeMap::new(),
             is_initialized: false,
             is_done: false,
         }
@@ -73,14 +73,16 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
             .unwrap_or_else(Epoch::zero);
 
         for vn in &self.config.validators {
-            if vn.registration_epoch <= epoch {
-                continue;
-            }
+            let activation_epoch = vn.registration_epoch + Epoch(1);
+            // If the activation epoch has already passed, activate on the next epoch we process.
+            // Use Epoch(1) as a sentinel so they are picked up by prepare_next_epoch's <= check.
+            let queue_epoch = if activation_epoch <= epoch {
+                Epoch(1)
+            } else {
+                activation_epoch
+            };
 
-            let vns = self
-                .queued_validators
-                .entry(vn.registration_epoch + Epoch(1))
-                .or_default();
+            let vns = self.queued_validators.entry(queue_epoch).or_default();
             vns.push(vn.clone());
         }
 
@@ -132,10 +134,15 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
                 }))
         }
 
-        if let Some(vns) = self.queued_validators.remove(&next_epoch) {
+        // Activate all validators queued at or before next_epoch (handles skipped epochs).
+        // split_off returns everything > next_epoch, leaving everything <= next_epoch in place.
+        let remaining = self.queued_validators.split_off(&(next_epoch + Epoch(1)));
+        let due = std::mem::replace(&mut self.queued_validators, remaining);
+
+        for (epoch, vns) in due {
             debug!(
                 target: LOG_TARGET,
-                "☘️ {} VNS activated for epoch {next_epoch}",
+                "☘️ {} VNS activated for epoch {epoch} (current: {next_epoch})",
                 vns.len()
             );
             self.pending_events

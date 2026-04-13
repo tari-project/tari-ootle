@@ -1,13 +1,13 @@
 // Copyright 2026 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+import queryClient from "@api/queryClient";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
   AddressBookAddRequest,
-  AddressBookUpdateRequest,
   AddressBookDeleteRequest,
+  AddressBookUpdateRequest,
 } from "@tari-project/ootle-ts-bindings";
-import { queryClient } from "@api/queryClient";
 import { addressBookAdd, addressBookDelete, addressBookList, addressBookUpdate } from "@utils/json_rpc";
 
 const ADDRESS_BOOK_QUERY_KEY = ["address_book"];

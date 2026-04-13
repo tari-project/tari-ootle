@@ -52,7 +52,7 @@ import {
 } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 import { IoPaperPlaneOutline } from "react-icons/io5";
-import QRCode from "react-qr-code";
+import { QRCode } from "react-qr-code";
 
 function AccountDetails() {
   const [payRefDialogOpen, setPayRefDialogOpen] = useState(false);

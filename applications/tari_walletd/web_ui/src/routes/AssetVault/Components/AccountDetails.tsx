@@ -52,7 +52,8 @@ import {
 } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 import { IoPaperPlaneOutline } from "react-icons/io5";
-import QRCode from "react-qr-code";
+// @ts-expect-error CJS interop: Vite 8 dev pre-bundler doesn't unwrap exports.default for this package
+import { QRCode } from "react-qr-code";
 
 function AccountDetails() {
   const [payRefDialogOpen, setPayRefDialogOpen] = useState(false);

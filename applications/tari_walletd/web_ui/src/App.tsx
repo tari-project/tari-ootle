@@ -38,8 +38,9 @@ import TransactionDetails from "@routes/Transactions/TransactionDetails";
 import Transactions from "@routes/Transactions/TransactionsLayout";
 import Wallet from "@routes/Wallet/Wallet";
 import useAuthStore from "@store/authStore";
+import useSettingsStore from "@store/settingsStore";
 import Layout from "@theme/LayoutMain";
-import { getClientInstance, isValidJwt } from "@utils/json_rpc";
+import { getClientInstance, isValidJwt, settingsGet } from "@utils/json_rpc";
 import { useEffect, useState } from "react";
 import { Route, Routes } from "react-router";
 import { ErrorNotificationProvider } from "./contexts/ErrorNotificationContext";
@@ -139,6 +140,7 @@ const GuardedRoute = ({ component: Component, redirect = "/", ...rest }: Guarded
   const { loggedIn, setLoggedIn, needsReauth, setNeedsReauth } = useAuthStore();
   const { data: authMethod, isError: authMethodsIsError, error: authMethodsError, isLoading } = useAuthMethod();
   const [hasToken, setHasToken] = useState<boolean | null>(null);
+  const setAdvancedUiFeatures = useSettingsStore((s) => s.setAdvancedUiFeatures);
 
   useEffect(() => {
     async function initAuth() {
@@ -178,6 +180,14 @@ const GuardedRoute = ({ component: Component, redirect = "/", ...rest }: Guarded
 
     initAuth();
   }, [hasToken, needsReauth]);
+
+  useEffect(() => {
+    if (hasToken && loggedIn) {
+      settingsGet().then((res) => {
+        setAdvancedUiFeatures(res.advanced_ui_features);
+      });
+    }
+  }, [hasToken, loggedIn, setAdvancedUiFeatures]);
 
   const handleOnAuthenticated = () => {
     setHasToken(true);

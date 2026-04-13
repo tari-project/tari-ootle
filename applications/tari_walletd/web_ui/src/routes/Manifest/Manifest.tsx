@@ -57,7 +57,10 @@ import { rejectReasonToString, substateIdToString } from "@tari-project/ootle-ts
 import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
 import { Highlight, themes } from "prism-react-renderer";
 import { useRef, useState } from "react";
-import Editor from "react-simple-code-editor";
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+import EditorImport from "react-simple-code-editor";
+// Vite 8 dev pre-bundler doesn't unwrap exports.default for CJS packages
+const Editor = (EditorImport as any).default ?? EditorImport;
 
 function formatManifestCode(code: string): string {
   const lines = code.split("\n");
@@ -175,7 +178,7 @@ function ManifestEditor() {
           <Editor
             value={manifest.code}
             onValueChange={manifest.setCode}
-            highlight={(code) => (
+            highlight={(code: string) => (
               <Highlight
                 theme={theme.palette.mode === "dark" ? themes.vsDark : themes.vsLight}
                 code={code}

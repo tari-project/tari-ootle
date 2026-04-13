@@ -31,11 +31,19 @@ fn open_store() -> SqliteWalletStore {
 #[test]
 fn insert_and_get_round_trips() {
     let db = open_store();
-    let mut tx = db.create_write_tx().unwrap();
-    let inserted = tx
-        .address_book_insert("alice", "otl_loc_alice", Some("work wallet"))
-        .unwrap();
-    tx.commit().unwrap();
+
+    // Each block releases the MutexGuard when it ends, preventing a deadlock
+    // on the next create_write_tx() call. (SqliteWalletStore uses a single
+    // connection behind a std::sync::Mutex; shadowing a `tx` variable does
+    // NOT drop the old guard before evaluating the right-hand side.)
+    let inserted = {
+        let mut tx = db.create_write_tx().unwrap();
+        let entry = tx
+            .address_book_insert("alice", "otl_loc_alice", Some("work wallet"))
+            .unwrap();
+        tx.commit().unwrap();
+        entry
+    };
 
     assert_eq!(inserted.name, "alice");
     assert_eq!(inserted.address, "otl_loc_alice");
@@ -50,18 +58,23 @@ fn insert_and_get_round_trips() {
 #[test]
 fn update_rename_and_fields_in_single_call() {
     let db = open_store();
-    let mut tx = db.create_write_tx().unwrap();
-    tx.address_book_insert("alice", "otl_loc_alice", Some("old memo"))
-        .unwrap();
-    tx.commit().unwrap();
+
+    {
+        let mut tx = db.create_write_tx().unwrap();
+        tx.address_book_insert("alice", "otl_loc_alice", Some("old memo")).unwrap();
+        tx.commit().unwrap();
+    }
 
     // Rename + change address + change memo should all be applied by the
     // single consolidated UPDATE statement.
-    let mut tx = db.create_write_tx().unwrap();
-    let updated = tx
-        .address_book_update("alice", Some("alice_v2"), Some("otl_loc_alice_v2"), Some("new memo"))
-        .unwrap();
-    tx.commit().unwrap();
+    let updated = {
+        let mut tx = db.create_write_tx().unwrap();
+        let entry = tx
+            .address_book_update("alice", Some("alice_v2"), Some("otl_loc_alice_v2"), Some("new memo"))
+            .unwrap();
+        tx.commit().unwrap();
+        entry
+    };
 
     assert_eq!(updated.name, "alice_v2");
     assert_eq!(updated.address, "otl_loc_alice_v2");
@@ -78,14 +91,20 @@ fn update_rename_and_fields_in_single_call() {
 #[test]
 fn update_with_none_leaves_fields_untouched() {
     let db = open_store();
-    let mut tx = db.create_write_tx().unwrap();
-    tx.address_book_insert("bob", "otl_loc_bob", Some("keep me")).unwrap();
-    tx.commit().unwrap();
+
+    {
+        let mut tx = db.create_write_tx().unwrap();
+        tx.address_book_insert("bob", "otl_loc_bob", Some("keep me")).unwrap();
+        tx.commit().unwrap();
+    }
 
     // All fields `None` — only `updated_at` should be bumped.
-    let mut tx = db.create_write_tx().unwrap();
-    let updated = tx.address_book_update("bob", None, None, None).unwrap();
-    tx.commit().unwrap();
+    let updated = {
+        let mut tx = db.create_write_tx().unwrap();
+        let entry = tx.address_book_update("bob", None, None, None).unwrap();
+        tx.commit().unwrap();
+        entry
+    };
 
     assert_eq!(updated.name, "bob");
     assert_eq!(updated.address, "otl_loc_bob");
@@ -99,14 +118,19 @@ fn update_with_empty_memo_clears_the_memo() {
     // "user cleared the field", and that must actually overwrite the
     // previously-stored memo at the SQL layer.
     let db = open_store();
-    let mut tx = db.create_write_tx().unwrap();
-    tx.address_book_insert("carol", "otl_loc_carol", Some("to be cleared"))
-        .unwrap();
-    tx.commit().unwrap();
 
-    let mut tx = db.create_write_tx().unwrap();
-    let updated = tx.address_book_update("carol", None, None, Some("")).unwrap();
-    tx.commit().unwrap();
+    {
+        let mut tx = db.create_write_tx().unwrap();
+        tx.address_book_insert("carol", "otl_loc_carol", Some("to be cleared")).unwrap();
+        tx.commit().unwrap();
+    }
+
+    let updated = {
+        let mut tx = db.create_write_tx().unwrap();
+        let entry = tx.address_book_update("carol", None, None, Some("")).unwrap();
+        tx.commit().unwrap();
+        entry
+    };
 
     assert_eq!(
         updated.memo.as_deref(),
@@ -120,9 +144,12 @@ fn insert_duplicate_name_returns_duplicate_name_variant() {
     // The UI relies on the typed `DuplicateName` variant to render a
     // user-friendly error without string-matching sqlite's driver text.
     let db = open_store();
-    let mut tx = db.create_write_tx().unwrap();
-    tx.address_book_insert("dave", "otl_loc_dave", None).unwrap();
-    tx.commit().unwrap();
+
+    {
+        let mut tx = db.create_write_tx().unwrap();
+        tx.address_book_insert("dave", "otl_loc_dave", None).unwrap();
+        tx.commit().unwrap();
+    }
 
     let mut tx = db.create_write_tx().unwrap();
     let err = tx.address_book_insert("dave", "otl_loc_dave_second", None).unwrap_err();
@@ -135,10 +162,13 @@ fn insert_duplicate_name_returns_duplicate_name_variant() {
 #[test]
 fn rename_onto_existing_name_returns_duplicate_name_variant() {
     let db = open_store();
-    let mut tx = db.create_write_tx().unwrap();
-    tx.address_book_insert("eve", "otl_loc_eve", None).unwrap();
-    tx.address_book_insert("frank", "otl_loc_frank", None).unwrap();
-    tx.commit().unwrap();
+
+    {
+        let mut tx = db.create_write_tx().unwrap();
+        tx.address_book_insert("eve", "otl_loc_eve", None).unwrap();
+        tx.address_book_insert("frank", "otl_loc_frank", None).unwrap();
+        tx.commit().unwrap();
+    }
 
     // Renaming "frank" -> "eve" must violate the UNIQUE constraint and be
     // surfaced as DuplicateName { name: "eve" } so the UI can show a
@@ -165,13 +195,18 @@ fn update_missing_entry_returns_not_found() {
 #[test]
 fn delete_round_trips() {
     let db = open_store();
-    let mut tx = db.create_write_tx().unwrap();
-    tx.address_book_insert("heidi", "otl_loc_heidi", None).unwrap();
-    tx.commit().unwrap();
 
-    let mut tx = db.create_write_tx().unwrap();
-    tx.address_book_delete("heidi").unwrap();
-    tx.commit().unwrap();
+    {
+        let mut tx = db.create_write_tx().unwrap();
+        tx.address_book_insert("heidi", "otl_loc_heidi", None).unwrap();
+        tx.commit().unwrap();
+    }
+
+    {
+        let mut tx = db.create_write_tx().unwrap();
+        tx.address_book_delete("heidi").unwrap();
+        tx.commit().unwrap();
+    }
 
     let mut tx = db.create_write_tx().unwrap();
     assert!(tx.address_book_get("heidi").is_err());

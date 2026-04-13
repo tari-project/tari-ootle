@@ -24,6 +24,40 @@ use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use config::Config;
 use serde::{Deserialize, Serialize};
+
+/// Rate-limiting configuration for the indexer REST API.
+///
+/// All `*_per_min` values are **per IP address**. The defaults match the
+/// acceptance-criteria values agreed with the maintainers.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct IndexerRateLimitsConfig {
+    /// POST /transactions – requests per minute per IP (default: 20)
+    pub transactions_per_min: u32,
+    /// POST /substates/fetch – requests per minute per IP (default: 30)
+    pub substates_fetch_per_min: u32,
+    /// POST /utxos/fetch – requests per minute per IP (default: 15)
+    pub utxos_fetch_per_min: u32,
+    /// GET /non-fungibles – requests per minute per IP (default: 30)
+    pub non_fungibles_per_min: u32,
+    /// Maximum concurrent SSE connections per IP (default: 3)
+    pub sse_max_connections_per_ip: usize,
+    /// Trust X-Forwarded-For / X-Real-IP proxy headers (default: false).
+    /// Only enable when the indexer is behind a trusted reverse proxy.
+    pub trust_proxy_headers: bool,
+}
+
+impl Default for IndexerRateLimitsConfig {
+    fn default() -> Self {
+        Self {
+            transactions_per_min: 20,
+            substates_fetch_per_min: 30,
+            utxos_fetch_per_min: 15,
+            non_fungibles_per_min: 30,
+            sse_max_connections_per_ip: 3,
+            trust_proxy_headers: false,
+        }
+    }
+}
 use tari_common::{
     ConfigurationError,
     DefaultConfigLoader,
@@ -121,6 +155,8 @@ pub struct IndexerConfig {
     pub burnt_utxo_sidechain_id: Option<RistrettoPublicKey>,
     /// The event filtering configuration
     pub event_filters: Vec<EventFilter>,
+    /// Rate-limiting configuration for the REST API endpoints
+    pub rate_limits: IndexerRateLimitsConfig,
 }
 
 impl Default for IndexerConfig {
@@ -141,6 +177,7 @@ impl Default for IndexerConfig {
             templates_sidechain_id: None,
             burnt_utxo_sidechain_id: None,
             event_filters: vec![],
+            rate_limits: IndexerRateLimitsConfig::default(),
         }
     }
 }

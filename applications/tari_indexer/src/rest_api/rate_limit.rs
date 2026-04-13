@@ -5,15 +5,16 @@
 //!
 //! Each IP address gets its own token bucket. Tokens refill continuously at a
 //! rate of `capacity / window_secs` tokens per second. A request consumes one
-//! token; when the bucket is empty the request is rejected with HTTP 429.
+//! token; when the bucket is empty the request is rejected with HTTP 429 with
+//! a `Retry-After` header indicating the window duration.
 //!
-//! SSE / streaming endpoints use a simple per-IP concurrent-connection counter
+//! SSE / streaming endpoints use a per-IP concurrent-connection counter
 //! instead of a token bucket.
 
 use std::{
     net::{IpAddr, SocketAddr},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
@@ -21,7 +22,7 @@ use std::{
 
 use axum::{
     extract::{ConnectInfo, Request},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -75,6 +76,7 @@ pub struct IpRateLimiter {
     capacity: f64,
     refill_rate: f64,
     stale_ttl: Duration,
+    last_eviction: Arc<Mutex<Instant>>,
 }
 
 /// How long an idle bucket is kept before eviction.
@@ -91,6 +93,7 @@ impl IpRateLimiter {
             capacity,
             refill_rate,
             stale_ttl: DEFAULT_STALE_TTL,
+            last_eviction: Arc::new(Mutex::new(Instant::now())),
         }
     }
 
@@ -111,49 +114,61 @@ impl IpRateLimiter {
             return;
         }
         let now = Instant::now();
+        // Gate eviction by EVICTION_INTERVAL to amortize the scan cost.
+        let mut last = self.last_eviction.lock().unwrap();
+        if now.duration_since(*last) < EVICTION_INTERVAL {
+            return;
+        }
+        *last = now;
+        drop(last);
         self.buckets
             .retain(|_ip, bucket| now.duration_since(bucket.last_accessed) < self.stale_ttl);
     }
 }
 
 // ---------------------------------------------------------------------------
-// SSE concurrent-connection limiter
+// SSE per-IP concurrent-connection limiter
 // ---------------------------------------------------------------------------
 
-/// Limits the number of concurrent SSE connections across all IPs.
+/// Limits the number of concurrent SSE connections per IP address.
 #[derive(Clone)]
 pub struct SseConnectionLimiter {
-    current: Arc<AtomicUsize>,
-    max: usize,
+    connections: Arc<DashMap<IpAddr, Arc<AtomicUsize>>>,
+    max_per_ip: usize,
 }
 
 impl SseConnectionLimiter {
-    pub fn new(max: usize) -> Self {
+    pub fn new(max_per_ip: usize) -> Self {
         Self {
-            current: Arc::new(AtomicUsize::new(0)),
-            max,
+            connections: Arc::new(DashMap::new()),
+            max_per_ip,
         }
     }
 
-    /// Attempt to acquire a connection slot. Returns a guard that releases the
-    /// slot on drop, or `None` if the limit has been reached.
-    pub fn try_acquire(&self) -> Option<SseConnectionGuard> {
-        // Use a compare-exchange loop to avoid going over the limit.
-        let mut current = self.current.load(Ordering::Relaxed);
+    /// Attempt to acquire a connection slot for the given IP. Returns a guard
+    /// that releases the slot on drop, or `None` if the per-IP limit has been
+    /// reached.
+    pub fn try_acquire(&self, ip: IpAddr) -> Option<SseConnectionGuard> {
+        let counter = self
+            .connections
+            .entry(ip)
+            .or_insert_with(|| Arc::new(AtomicUsize::new(0)))
+            .clone();
+
+        // Use a compare-exchange loop to avoid going over the per-IP limit.
+        let mut current = counter.load(Ordering::Relaxed);
         loop {
-            if current >= self.max {
+            if current >= self.max_per_ip {
                 return None;
             }
-            match self.current.compare_exchange_weak(
+            match counter.compare_exchange_weak(
                 current,
                 current + 1,
                 Ordering::AcqRel,
                 Ordering::Relaxed,
             ) {
                 Ok(_) => {
-                    return Some(SseConnectionGuard {
-                        counter: self.current.clone(),
-                    })
+                    return Some(SseConnectionGuard { counter });
                 },
                 Err(actual) => current = actual,
             }
@@ -161,7 +176,7 @@ impl SseConnectionLimiter {
     }
 }
 
-/// RAII guard that decrements the connection counter when dropped.
+/// RAII guard that decrements the per-IP connection counter when dropped.
 pub struct SseConnectionGuard {
     counter: Arc<AtomicUsize>,
 }
@@ -225,23 +240,40 @@ pub struct RateLimitConfig {
     /// Whether to trust `X-Forwarded-For` / `X-Real-IP` headers for IP
     /// extraction. Only enable this when running behind a trusted reverse proxy.
     pub trust_proxy_headers: bool,
+    /// Window duration in seconds, used for the `Retry-After` response header
+    /// when a 429 is returned.
+    pub window_secs: u64,
+}
+
+/// Configuration for the SSE connection-limit middleware layer.
+#[derive(Clone)]
+pub struct SseLimitConfig {
+    pub limiter: SseConnectionLimiter,
+    /// Whether to trust `X-Forwarded-For` / `X-Real-IP` headers for IP
+    /// extraction. Only enable this when running behind a trusted reverse proxy.
+    pub trust_proxy_headers: bool,
 }
 
 /// Axum middleware that enforces a per-IP token-bucket rate limit.
 ///
-/// Responds with HTTP 429 when a bucket is exhausted.
+/// Responds with HTTP 429 (with `Retry-After` header) when a bucket is
+/// exhausted.
+///
+/// `ConnectInfo` is extracted from request extensions rather than as a function
+/// parameter to avoid type-inference issues with `route_layer` in axum 0.8.
 pub async fn rate_limit_middleware(
     axum::extract::State(config): axum::extract::State<RateLimitConfig>,
-    connect_info: Option<ConnectInfo<SocketAddr>>,
     req: Request,
     next: Next,
 ) -> Response {
+    let connect_info = req.extensions().get::<ConnectInfo<SocketAddr>>().cloned();
     let ip = extract_ip(req.headers(), connect_info.as_ref(), config.trust_proxy_headers);
     if config.limiter.check(ip) {
         next.run(req).await
     } else {
         (
             StatusCode::TOO_MANY_REQUESTS,
+            [(header::RETRY_AFTER, config.window_secs.to_string())],
             axum::Json(serde_json::json!({
                 "error": "Rate limit exceeded. Please slow down."
             })),
@@ -250,25 +282,32 @@ pub async fn rate_limit_middleware(
     }
 }
 
-/// Axum middleware that enforces a concurrent-connection limit on SSE endpoints.
+/// Axum middleware that enforces a per-IP concurrent-connection limit on SSE
+/// endpoints.
 ///
 /// The guard is stored in the response extensions so its lifetime is tied to
 /// the response object held by the server, not the middleware future. This
 /// ensures the connection counter stays incremented for the full duration of
 /// long-lived SSE streams.
 pub async fn sse_limit_middleware(
-    axum::extract::State(limiter): axum::extract::State<SseConnectionLimiter>,
+    axum::extract::State(config): axum::extract::State<SseLimitConfig>,
     req: Request,
     next: Next,
 ) -> Response {
-    match limiter.try_acquire() {
+    let connect_info = req.extensions().get::<ConnectInfo<SocketAddr>>().cloned();
+    let ip = extract_ip(req.headers(), connect_info.as_ref(), config.trust_proxy_headers);
+    match config.limiter.try_acquire(ip) {
         Some(guard) => {
             let mut response = next.run(req).await;
-            response.extensions_mut().insert(guard);
+            // Wrap in Arc so we satisfy the Clone + Send + Sync + 'static bounds
+            // required by http::Extensions::insert without deriving Clone on the
+            // guard (which would cause a double-decrement bug).
+            response.extensions_mut().insert(std::sync::Arc::new(guard));
             response
         },
         None => (
-            StatusCode::SERVICE_UNAVAILABLE,
+            StatusCode::TOO_MANY_REQUESTS,
+            [(header::RETRY_AFTER, "60".to_string())],
             axum::Json(serde_json::json!({
                 "error": "Too many concurrent SSE connections. Please try again later."
             })),

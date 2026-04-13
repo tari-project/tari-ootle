@@ -5,14 +5,13 @@
 //!
 //! These exercise the behaviour the walletd JSON-RPC layer and the web-ui
 //! `AddressBookPage` rely on:
-//!   * a single `address_book_update` UPDATE statement applies rename +
-//!     address + memo in one round-trip (previously three separate UPDATEs),
-//!   * passing `memo = Some("")` actually clears the previously-stored memo
-//!     (the UI relies on this to distinguish "unchanged" from "cleared"),
+//!   * a single `address_book_update` UPDATE statement applies rename + address + memo in one round-trip (previously
+//!     three separate UPDATEs),
+//!   * passing `memo = Some("")` actually clears the previously-stored memo (the UI relies on this to distinguish
+//!     "unchanged" from "cleared"),
 //!   * passing `memo = None` leaves the existing memo untouched, and
-//!   * inserting or renaming onto a name that already exists surfaces the
-//!     typed [`WalletStorageError::DuplicateName`] variant — not a generic
-//!     `GeneralFailure` wrapping a sqlite "UNIQUE constraint failed" string.
+//!   * inserting or renaming onto a name that already exists surfaces the typed [`WalletStorageError::DuplicateName`]
+//!     variant — not a generic `GeneralFailure` wrapping a sqlite "UNIQUE constraint failed" string.
 
 use tari_ootle_wallet_sdk::storage::{
     CommittableStore,
@@ -60,12 +59,7 @@ fn update_rename_and_fields_in_single_call() {
     // single consolidated UPDATE statement.
     let mut tx = db.create_write_tx().unwrap();
     let updated = tx
-        .address_book_update(
-            "alice",
-            Some("alice_v2"),
-            Some("otl_loc_alice_v2"),
-            Some("new memo"),
-        )
+        .address_book_update("alice", Some("alice_v2"), Some("otl_loc_alice_v2"), Some("new memo"))
         .unwrap();
     tx.commit().unwrap();
 
@@ -85,8 +79,7 @@ fn update_rename_and_fields_in_single_call() {
 fn update_with_none_leaves_fields_untouched() {
     let db = open_store();
     let mut tx = db.create_write_tx().unwrap();
-    tx.address_book_insert("bob", "otl_loc_bob", Some("keep me"))
-        .unwrap();
+    tx.address_book_insert("bob", "otl_loc_bob", Some("keep me")).unwrap();
     tx.commit().unwrap();
 
     // All fields `None` — only `updated_at` should be bumped.
@@ -132,9 +125,7 @@ fn insert_duplicate_name_returns_duplicate_name_variant() {
     tx.commit().unwrap();
 
     let mut tx = db.create_write_tx().unwrap();
-    let err = tx
-        .address_book_insert("dave", "otl_loc_dave_second", None)
-        .unwrap_err();
+    let err = tx.address_book_insert("dave", "otl_loc_dave_second", None).unwrap_err();
     assert!(
         matches!(err, WalletStorageError::DuplicateName { ref name } if name == "dave"),
         "expected DuplicateName {{ name: \"dave\" }}, got {err:?}",
@@ -153,9 +144,7 @@ fn rename_onto_existing_name_returns_duplicate_name_variant() {
     // surfaced as DuplicateName { name: "eve" } so the UI can show a
     // message scoped to the attempted new name.
     let mut tx = db.create_write_tx().unwrap();
-    let err = tx
-        .address_book_update("frank", Some("eve"), None, None)
-        .unwrap_err();
+    let err = tx.address_book_update("frank", Some("eve"), None, None).unwrap_err();
     assert!(
         matches!(err, WalletStorageError::DuplicateName { ref name } if name == "eve"),
         "expected DuplicateName {{ name: \"eve\" }}, got {err:?}",
@@ -166,9 +155,7 @@ fn rename_onto_existing_name_returns_duplicate_name_variant() {
 fn update_missing_entry_returns_not_found() {
     let db = open_store();
     let mut tx = db.create_write_tx().unwrap();
-    let err = tx
-        .address_book_update("ghost", Some("ghost2"), None, None)
-        .unwrap_err();
+    let err = tx.address_book_update("ghost", Some("ghost2"), None, None).unwrap_err();
     assert!(
         matches!(err, WalletStorageError::NotFound { .. }),
         "expected NotFound, got {err:?}",

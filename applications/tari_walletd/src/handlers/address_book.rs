@@ -25,8 +25,7 @@ use tari_ootle_walletd_client::{
 use crate::handlers::HandlerContext;
 
 fn validate_address(address: &str) -> Result<(), anyhow::Error> {
-    OotleAddress::from_str(address)
-        .map_err(|e| anyhow!("Invalid Ootle address '{address}': {e}"))?;
+    OotleAddress::from_str(address).map_err(|e| anyhow!("Invalid Ootle address '{address}': {e}"))?;
     Ok(())
 }
 

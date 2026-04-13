@@ -3,5 +3,5 @@
 export interface AddressBookAddRequest {
   name: string;
   address: string;
-  memo?: string | null;
+  note?: string | null;
 }

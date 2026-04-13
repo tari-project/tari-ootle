@@ -95,11 +95,6 @@ export default function FormStep({
   const selectedNftIds = useMemo(() => new Set(transferFormState.nfts.map(nftIdToString)), [transferFormState.nfts]);
   const [submitted, setSubmitted] = useState(false);
 
-  const setFormValue = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    updateFormValue(name, value, e.target.validity.valid);
-  };
-
   const isAddressValid = transferFormState.targetAccountAddress
     ? validateOotleAddress(transferFormState.targetAccountAddress)
     : true; // Don't show error for empty field
@@ -170,18 +165,12 @@ export default function FormStep({
           inputValue={transferFormState.targetAccountAddress}
           onInputChange={(_e, newValue, reason) => {
             if (reason === "input" || reason === "clear") {
-              const syntheticEvent = {
-                target: { name: "targetAccountAddress", value: newValue, validity: { valid: true } },
-              } as unknown as React.ChangeEvent<HTMLInputElement>;
-              setFormValue(syntheticEvent);
+              updateFormValue("targetAccountAddress", newValue, true);
             }
           }}
           onChange={(_e, option) => {
             if (option && typeof option !== "string") {
-              const syntheticEvent = {
-                target: { name: "targetAccountAddress", value: option.value, validity: { valid: true } },
-              } as unknown as React.ChangeEvent<HTMLInputElement>;
-              setFormValue(syntheticEvent);
+              updateFormValue("targetAccountAddress", option.value, true);
             }
           }}
           disabled={disabled}

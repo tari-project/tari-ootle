@@ -6,6 +6,7 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
 use tari_ootle_address::OotleAddress;
+use tari_ootle_common_types::Network;
 use tari_ootle_walletd_client::{
     permissions::JrpcPermission,
     types::{
@@ -24,8 +25,16 @@ use tari_ootle_walletd_client::{
 
 use crate::handlers::HandlerContext;
 
-fn validate_address(address: &str) -> Result<(), anyhow::Error> {
-    OotleAddress::from_str(address).map_err(|e| anyhow!("Invalid Ootle address '{address}': {e}"))?;
+fn validate_address(address: &str, network: Network) -> Result<(), anyhow::Error> {
+    let parsed =
+        OotleAddress::from_str(address).map_err(|e| anyhow!("Invalid Ootle address '{address}': {e}"))?;
+    if parsed.network() != network {
+        return Err(anyhow!(
+            "Address network mismatch: address is for {:?} but wallet is configured for {:?}",
+            parsed.network(),
+            network,
+        ));
+    }
     Ok(())
 }
 
@@ -37,11 +46,11 @@ pub async fn handle_add(
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
-    validate_address(&req.address)?;
+    validate_address(&req.address, sdk.network())?;
 
     let entry = sdk
         .address_book_api()
-        .add(&req.name, &req.address, req.memo.as_deref())?;
+        .add(&req.name, &req.address, req.note.as_deref())?;
 
     Ok(AddressBookAddResponse { entry })
 }
@@ -81,14 +90,14 @@ pub async fn handle_update(
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
     if let Some(ref address) = req.address {
-        validate_address(address)?;
+        validate_address(address, sdk.network())?;
     }
 
     let entry = sdk.address_book_api().update(
         &req.name,
         req.new_name.as_deref(),
         req.address.as_deref(),
-        req.memo.as_deref(),
+        req.note.as_deref(),
     )?;
 
     Ok(AddressBookUpdateResponse { entry })

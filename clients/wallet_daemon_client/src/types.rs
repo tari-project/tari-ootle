@@ -1368,7 +1368,7 @@ pub struct AddressBookAddRequest {
     pub name: String,
     pub address: String,
     #[serde(default)]
-    pub memo: Option<String>,
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1408,7 +1408,7 @@ pub struct AddressBookUpdateRequest {
     #[serde(default)]
     pub address: Option<String>,
     #[serde(default)]
-    pub memo: Option<String>,
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

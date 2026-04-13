@@ -32,10 +32,10 @@ import { MdAdd, MdDelete, MdEdit } from "react-icons/md";
 interface EntryFormState {
   name: string;
   address: string;
-  memo: string;
+  note: string;
 }
 
-const EMPTY_FORM: EntryFormState = { name: "", address: "", memo: "" };
+const EMPTY_FORM: EntryFormState = { name: "", address: "", note: "" };
 
 export default function AddressBookPage() {
   const { data, isLoading } = useAddressBookList();
@@ -60,7 +60,7 @@ export default function AddressBookPage() {
 
   const openEditDialog = (entry: AddressBookEntry) => {
     setEditingEntry(entry);
-    setForm({ name: entry.name, address: entry.address, memo: entry.memo ?? "" });
+    setForm({ name: entry.name, address: entry.address, note: entry.note ?? "" });
     setFormError(null);
     setDialogOpen(true);
   };
@@ -81,29 +81,29 @@ export default function AddressBookPage() {
 
     try {
       if (editingEntry) {
-        // Only send fields that actually changed. For `memo` specifically,
+        // Only send fields that actually changed. For `note` specifically,
         // we must distinguish "unchanged" (send undefined, backend skips)
         // from "cleared" (send empty string, backend overwrites to ""):
-        // the previous `form.memo.trim() || undefined` collapsed both to
-        // undefined, so clearing a memo silently did nothing. The same
+        // the previous `form.note.trim() || undefined` collapsed both to
+        // undefined, so clearing a note silently did nothing. The same
         // treatment applies to `new_name` and `address` for symmetry —
         // trimmed comparisons prevent whitespace-only "changes" from
         // triggering pointless UPDATEs.
         const trimmedName = form.name.trim();
         const trimmedAddress = form.address.trim();
-        const trimmedMemo = form.memo.trim();
-        const currentMemo = editingEntry.memo ?? "";
+        const trimmedNote = form.note.trim();
+        const currentNote = editingEntry.note ?? "";
         await updateMutation.mutateAsync({
           name: editingEntry.name,
           new_name: trimmedName !== editingEntry.name ? trimmedName : undefined,
           address: trimmedAddress !== editingEntry.address ? trimmedAddress : undefined,
-          memo: trimmedMemo !== currentMemo ? trimmedMemo : undefined,
+          note: trimmedNote !== currentNote ? trimmedNote : undefined,
         });
       } else {
         await addMutation.mutateAsync({
           name: form.name.trim(),
           address: form.address.trim(),
-          memo: form.memo.trim() || undefined,
+          note: form.note.trim() || undefined,
         });
       }
       setDialogOpen(false);
@@ -135,7 +135,7 @@ export default function AddressBookPage() {
   const columns: GridColDef[] = [
     { field: "name", headerName: "Name", flex: 1, minWidth: 120 },
     { field: "address", headerName: "Address", flex: 2, minWidth: 200 },
-    { field: "memo", headerName: "Memo", flex: 1, minWidth: 120 },
+    { field: "note", headerName: "Note", flex: 1, minWidth: 120 },
     {
       field: "actions",
       headerName: "",
@@ -200,12 +200,12 @@ export default function AddressBookPage() {
               onChange={(e) => setForm({ ...form, address: e.target.value })}
               required
               fullWidth
-              placeholder="otl_loc_..."
+              placeholder="otl_..."
             />
             <TextField
-              label="Memo (optional)"
-              value={form.memo}
-              onChange={(e) => setForm({ ...form, memo: e.target.value })}
+              label="Note (optional)"
+              value={form.note}
+              onChange={(e) => setForm({ ...form, note: e.target.value })}
               fullWidth
               multiline
               rows={2}

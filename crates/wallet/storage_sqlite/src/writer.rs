@@ -1669,7 +1669,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         &mut self,
         name: &str,
         address: &str,
-        memo: Option<&str>,
+        note: Option<&str>,
     ) -> Result<AddressBookEntry, WalletStorageError> {
         const OPERATION: &str = "address_book_insert";
         use crate::schema::address_book;
@@ -1678,7 +1678,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .values((
                 address_book::name.eq(name),
                 address_book::address.eq(address),
-                address_book::memo.eq(memo),
+                address_book::note.eq(note),
             ))
             .execute(self.connection())
             .map_err(|e| map_address_book_error(OPERATION, name, e))?;
@@ -1692,7 +1692,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             id: row.id,
             name: row.name,
             address: row.address,
-            memo: row.memo,
+            note: row.note,
         })
     }
 
@@ -1701,7 +1701,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         name: &str,
         new_name: Option<&str>,
         address: Option<&str>,
-        memo: Option<&str>,
+        note: Option<&str>,
     ) -> Result<AddressBookEntry, WalletStorageError> {
         const OPERATION: &str = "address_book_update";
         use crate::schema::address_book;
@@ -1713,14 +1713,14 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         // own `updated_at` bump, leaving the row timestamps inconsistent with
         // the caller's intent.
         //
-        // `memo` is mapped `Some(s) -> Some(Some(s))` so the column is set to
+        // `note` is mapped `Some(s) -> Some(Some(s))` so the column is set to
         // the supplied string (including the empty string used by the UI to
-        // clear a previously-stored memo). `None` on any field means "leave
+        // clear a previously-stored note). `None` on any field means "leave
         // the column untouched".
         let changeset = AddressBookEntryChangeset {
             name: new_name,
             address,
-            memo: memo.map(Some),
+            note: note.map(Some),
             updated_at: dsl::now,
         };
 
@@ -1750,7 +1750,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             id: row.id,
             name: row.name,
             address: row.address,
-            memo: row.memo,
+            note: row.note,
         })
     }
 

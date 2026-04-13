@@ -268,7 +268,7 @@ diesel::table! {
         id -> Integer,
         name -> Text,
         address -> Text,
-        memo -> Nullable<Text>,
+        note -> Nullable<Text>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }

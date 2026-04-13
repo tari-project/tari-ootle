@@ -1548,7 +1548,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             id: row.id,
             name: row.name,
             address: row.address,
-            memo: row.memo,
+            note: row.note,
         })
     }
 
@@ -1566,7 +1566,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 id: row.id,
                 name: row.name,
                 address: row.address,
-                memo: row.memo,
+                note: row.note,
             })
             .collect())
     }

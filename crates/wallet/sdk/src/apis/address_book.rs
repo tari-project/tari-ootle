@@ -20,9 +20,9 @@ where TStore: WalletStore
         Self { store }
     }
 
-    pub fn add(&self, name: &str, address: &str, memo: Option<&str>) -> Result<AddressBookEntry, AddressBookApiError> {
+    pub fn add(&self, name: &str, address: &str, note: Option<&str>) -> Result<AddressBookEntry, AddressBookApiError> {
         let mut tx = self.store.create_write_tx()?;
-        let entry = tx.address_book_insert(name, address, memo)?;
+        let entry = tx.address_book_insert(name, address, note)?;
         tx.commit()?;
         Ok(entry)
     }
@@ -44,10 +44,10 @@ where TStore: WalletStore
         name: &str,
         new_name: Option<&str>,
         address: Option<&str>,
-        memo: Option<&str>,
+        note: Option<&str>,
     ) -> Result<AddressBookEntry, AddressBookApiError> {
         let mut tx = self.store.create_write_tx()?;
-        let entry = tx.address_book_update(name, new_name, address, memo)?;
+        let entry = tx.address_book_update(name, new_name, address, note)?;
         tx.commit()?;
         Ok(entry)
     }

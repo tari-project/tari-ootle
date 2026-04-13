@@ -122,9 +122,8 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
   const availableBalance = calculateAvailableBalance();
 
-  function setFormValue(e: React.ChangeEvent<HTMLInputElement>) {
+  function setFormValue(name: string, value: string) {
     setFormError(null);
-    const { name, value } = e.target;
 
     // For amount field, parse the input to allow decimal values
     let processedValue = value;

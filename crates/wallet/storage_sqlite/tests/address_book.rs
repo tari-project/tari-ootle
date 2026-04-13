@@ -5,11 +5,11 @@
 //!
 //! These exercise the behaviour the walletd JSON-RPC layer and the web-ui
 //! `AddressBookPage` rely on:
-//!   * a single `address_book_update` UPDATE statement applies rename + address + memo in one round-trip (previously
+//!   * a single `address_book_update` UPDATE statement applies rename + address + note in one round-trip (previously
 //!     three separate UPDATEs),
-//!   * passing `memo = Some("")` actually clears the previously-stored memo (the UI relies on this to distinguish
+//!   * passing `note = Some("")` actually clears the previously-stored note (the UI relies on this to distinguish
 //!     "unchanged" from "cleared"),
-//!   * passing `memo = None` leaves the existing memo untouched, and
+//!   * passing `note = None` leaves the existing note untouched, and
 //!   * inserting or renaming onto a name that already exists surfaces the typed [`WalletStorageError::DuplicateName`]
 //!     variant — not a generic `GeneralFailure` wrapping a sqlite "UNIQUE constraint failed" string.
 
@@ -47,12 +47,12 @@ fn insert_and_get_round_trips() {
 
     assert_eq!(inserted.name, "alice");
     assert_eq!(inserted.address, "otl_loc_alice");
-    assert_eq!(inserted.memo.as_deref(), Some("work wallet"));
+    assert_eq!(inserted.note.as_deref(), Some("work wallet"));
 
     let mut tx = db.create_write_tx().unwrap();
     let fetched = tx.address_book_get("alice").unwrap();
     assert_eq!(fetched.address, "otl_loc_alice");
-    assert_eq!(fetched.memo.as_deref(), Some("work wallet"));
+    assert_eq!(fetched.note.as_deref(), Some("work wallet"));
 }
 
 #[test]
@@ -61,16 +61,16 @@ fn update_rename_and_fields_in_single_call() {
 
     {
         let mut tx = db.create_write_tx().unwrap();
-        tx.address_book_insert("alice", "otl_loc_alice", Some("old memo")).unwrap();
+        tx.address_book_insert("alice", "otl_loc_alice", Some("old note")).unwrap();
         tx.commit().unwrap();
     }
 
-    // Rename + change address + change memo should all be applied by the
+    // Rename + change address + change note should all be applied by the
     // single consolidated UPDATE statement.
     let updated = {
         let mut tx = db.create_write_tx().unwrap();
         let entry = tx
-            .address_book_update("alice", Some("alice_v2"), Some("otl_loc_alice_v2"), Some("new memo"))
+            .address_book_update("alice", Some("alice_v2"), Some("otl_loc_alice_v2"), Some("new note"))
             .unwrap();
         tx.commit().unwrap();
         entry
@@ -78,14 +78,14 @@ fn update_rename_and_fields_in_single_call() {
 
     assert_eq!(updated.name, "alice_v2");
     assert_eq!(updated.address, "otl_loc_alice_v2");
-    assert_eq!(updated.memo.as_deref(), Some("new memo"));
+    assert_eq!(updated.note.as_deref(), Some("new note"));
 
     // The row is now only reachable under the new name.
     let mut tx = db.create_write_tx().unwrap();
     assert!(tx.address_book_get("alice").is_err());
     let fetched = tx.address_book_get("alice_v2").unwrap();
     assert_eq!(fetched.address, "otl_loc_alice_v2");
-    assert_eq!(fetched.memo.as_deref(), Some("new memo"));
+    assert_eq!(fetched.note.as_deref(), Some("new note"));
 }
 
 #[test]
@@ -108,15 +108,15 @@ fn update_with_none_leaves_fields_untouched() {
 
     assert_eq!(updated.name, "bob");
     assert_eq!(updated.address, "otl_loc_bob");
-    assert_eq!(updated.memo.as_deref(), Some("keep me"));
+    assert_eq!(updated.note.as_deref(), Some("keep me"));
 }
 
 #[test]
-fn update_with_empty_memo_clears_the_memo() {
-    // Regression test for the UI bug where clearing a memo silently did
-    // nothing: the walletd client serialises an empty memo string for
+fn update_with_empty_note_clears_the_note() {
+    // Regression test for the UI bug where clearing a note silently did
+    // nothing: the walletd client serialises an empty note string for
     // "user cleared the field", and that must actually overwrite the
-    // previously-stored memo at the SQL layer.
+    // previously-stored note at the SQL layer.
     let db = open_store();
 
     {
@@ -133,9 +133,9 @@ fn update_with_empty_memo_clears_the_memo() {
     };
 
     assert_eq!(
-        updated.memo.as_deref(),
+        updated.note.as_deref(),
         Some(""),
-        "empty memo string must overwrite the stored memo",
+        "empty note string must overwrite the stored note",
     );
 }
 

@@ -12,20 +12,20 @@ pub struct AddressBookEntry {
     pub id: i32,
     pub name: String,
     pub address: String,
-    pub memo: Option<String>,
+    pub note: Option<String>,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
 }
 
 /// Diesel changeset used by `address_book_update` so the three mutable columns
-/// (`name`, `address`, `memo`) are written in a single UPDATE statement. Each
+/// (`name`, `address`, `note`) are written in a single UPDATE statement. Each
 /// field is wrapped in `Option` so callers can pass `None` to leave the column
 /// untouched without issuing a separate query per field.
 ///
-/// `memo` is double-`Option` deliberately: the outer `Option` controls whether
+/// `note` is double-`Option` deliberately: the outer `Option` controls whether
 /// the field is part of the UPDATE at all, and the inner `Option<&str>`
 /// matches the nullable column so it can be set to `NULL` to clear a
-/// previously-stored memo.
+/// previously-stored note.
 ///
 /// `updated_at` is `dsl::now` (a zero-sized type, not `Option`) so every
 /// UPDATE bumps the timestamp — matching the `StealthOutputUpdate` pattern in
@@ -36,6 +36,6 @@ pub struct AddressBookEntry {
 pub struct AddressBookEntryChangeset<'a> {
     pub name: Option<&'a str>,
     pub address: Option<&'a str>,
-    pub memo: Option<Option<&'a str>>,
+    pub note: Option<Option<&'a str>>,
     pub updated_at: dsl::now,
 }

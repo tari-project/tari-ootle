@@ -4,5 +4,5 @@ export interface AddressBookEntry {
   id: number;
   name: string;
   address: string;
-  memo: string | null;
+  note: string | null;
 }

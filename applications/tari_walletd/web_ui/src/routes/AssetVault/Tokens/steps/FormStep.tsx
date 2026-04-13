@@ -60,7 +60,7 @@ interface FormStepProps {
   formError?: FormError | null;
   onSubmit: (e: FormEvent) => void;
   onCancel: () => void;
-  onFormValueChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onFormValueChange: (name: string, value: string) => void;
   onSelectFormValueChange: (e: SelectChangeEvent<unknown>) => void;
   onCheckboxFormValueChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onUseBadgeChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -181,18 +181,12 @@ export default function FormStep({
             inputValue={transferFormState.address}
             onInputChange={(_e, newValue, reason) => {
               if (reason === "input" || reason === "clear") {
-                const syntheticEvent = {
-                  target: { name: "address", value: newValue },
-                } as React.ChangeEvent<HTMLInputElement>;
-                onFormValueChange(syntheticEvent);
+                onFormValueChange("address", newValue);
               }
             }}
             onChange={(_e, option) => {
               if (option && typeof option !== "string") {
-                const syntheticEvent = {
-                  target: { name: "address", value: option.value },
-                } as React.ChangeEvent<HTMLInputElement>;
-                onFormValueChange(syntheticEvent);
+                onFormValueChange("address", option.value);
               }
             }}
             disabled={disabled}
@@ -235,7 +229,7 @@ export default function FormStep({
                   htmlInput: { maxLength: 253 },
                 }}
                 value={transferFormState.memo}
-                onChange={onFormValueChange}
+                onChange={(e) => onFormValueChange(e.target.name, e.target.value)}
                 style={{ flexGrow: 1 }}
                 disabled={disabled}
               />
@@ -263,7 +257,7 @@ export default function FormStep({
           value={formatAmountValue(transferFormState.amount)}
           type="text"
           required
-          onChange={onFormValueChange}
+          onChange={(e) => onFormValueChange(e.target.name, e.target.value)}
           onFocus={() => setIsFocusedAmount(true)}
           onBlur={() => setIsFocusedAmount(false)}
           style={{ flexGrow: 1 }}
@@ -289,7 +283,7 @@ export default function FormStep({
           label="Fee"
           value={transferFormState.fee}
           placeholder={isEstimatingFee ? "Estimating..." : "Auto-calculated"}
-          onChange={onFormValueChange}
+          onChange={(e) => onFormValueChange(e.target.name, e.target.value)}
           style={{ flexGrow: 1 }}
           slotProps={{
             input: {

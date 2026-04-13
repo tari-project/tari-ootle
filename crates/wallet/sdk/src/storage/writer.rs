@@ -232,14 +232,14 @@ pub trait WalletStoreWriter: CommittableStore {
         &mut self,
         name: &str,
         address: &str,
-        memo: Option<&str>,
+        note: Option<&str>,
     ) -> Result<AddressBookEntry, WalletStorageError>;
     fn address_book_update(
         &mut self,
         name: &str,
         new_name: Option<&str>,
         address: Option<&str>,
-        memo: Option<&str>,
+        note: Option<&str>,
     ) -> Result<AddressBookEntry, WalletStorageError>;
     fn address_book_delete(&mut self, name: &str) -> Result<(), WalletStorageError>;
 }

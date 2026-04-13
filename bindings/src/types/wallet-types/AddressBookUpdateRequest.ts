@@ -4,5 +4,5 @@ export interface AddressBookUpdateRequest {
   name: string;
   new_name?: string | null;
   address?: string | null;
-  memo?: string | null;
+  note?: string | null;
 }

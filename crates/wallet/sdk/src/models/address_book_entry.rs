@@ -7,5 +7,5 @@ pub struct AddressBookEntry {
     pub id: i32,
     pub name: String,
     pub address: String,
-    pub memo: Option<String>,
+    pub note: Option<String>,
 }

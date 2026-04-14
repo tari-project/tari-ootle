@@ -19,7 +19,7 @@ Feature: Account transfers
     When I call function "mint" on template "faucet" using account ACCOUNT to pay fees via wallet daemon WALLET_D with args "amount_10000" named "FAUCET"
 
     # Burn some tari in the base layer to have funds for fees in the sender account
-    When I burn 10T on wallet MINOTARI_WALLET to proof BURN_PROOF for wallet daemon WALLET_D
+    When I burn 10T on wallet MINOTARI_WALLET to proof BURN_PROOF for account ACCOUNT using wallet daemon WALLET_D
     When miner MINER mines 13 new blocks
     Then VN has scanned to at least height 40
     Then indexer INDEXER has scanned to at least height 40
@@ -74,7 +74,7 @@ Feature: Account transfers
     When I call function "mint" on template "faucet" using account ACCOUNT_1 to pay fees via wallet daemon WALLET_D with args "amount_10000" named "FAUCET"
 
     # Burn some tari in the base layer to have funds for fees in the sender account
-    When I burn 10T on wallet MINOTARI_WALLET to proof BURN_PROOF for wallet daemon WALLET_D
+    When I burn 10T on wallet MINOTARI_WALLET to proof BURN_PROOF for account ACCOUNT_1 using wallet daemon WALLET_D
     When miner MINER mines 13 new blocks
     Then VN has scanned to at least height 40
     Then indexer INDEXER has scanned to at least height 40

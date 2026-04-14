@@ -39,6 +39,64 @@ async fn start_wallet(world: &mut TariWorld, step: &Step, wallet_name: String, b
     spawn_minotari_wallet(world, wallet_name, bn_name).await;
 }
 
+#[when(expr = "I burn {int}T on wallet {word} to proof {word} for account {word} using wallet daemon {word}")]
+async fn when_i_burn_on_wallet_for_account(
+    world: &mut TariWorld,
+    step: &Step,
+    amount: u64,
+    wallet_name: String,
+    proof_name: String,
+    account_name: String,
+    walletd_name: String,
+) {
+    cucumber_log!("==== Step: {}", step.value);
+    let wallet = world
+        .wallets
+        .get(&wallet_name)
+        .unwrap_or_else(|| panic!("Wallet {} not found", wallet_name));
+
+    let walletd = world.get_wallet_daemon(&walletd_name);
+    let mut client = walletd.get_authed_client().await;
+    let account = client
+        .accounts_get(account_name.clone().into())
+        .await
+        .unwrap_or_else(|e| panic!("Account {} not found: {}", account_name, e));
+
+    let amount = amount * T;
+    let mut client = wallet.create_client().await;
+    let resp = client
+        .create_burn_transaction(minotari_app_grpc::tari_rpc::CreateBurnTransactionRequest {
+            amount: amount.as_u64(),
+            fee_per_gram: 1,
+            payment_id: MemoField::new_open("Burn".as_bytes().to_vec(), TxType::Burn)
+                .unwrap()
+                .to_bytes(),
+            claim_public_key: account.account.owner_public_key().as_bytes().to_vec(),
+            sidechain_deployment_key: vec![],
+        })
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(resp.is_success);
+
+    // Extract kernel signature data
+    let kernel_excess_sig_nonce = resp.kernel_excess_nonce.clone();
+    let kernel_excess_sig_signature = resp.kernel_excess_signature.clone();
+
+    integration_tests::cucumber_log!(
+        "Burn transaction created with kernel_excess_sig nonce: {}, signature: {}",
+        hex::encode(&kernel_excess_sig_nonce),
+        hex::encode(&kernel_excess_sig_signature)
+    );
+
+    world.claim_proofs.insert(proof_name, CucumberClaimProof::Pending {
+        commitment: PedersenCommitmentBytes::from_bytes(&resp.commitment).unwrap(),
+        kernel_excess_sig_nonce,
+        kernel_excess_sig_signature,
+    });
+}
+
 #[when(expr = "I burn {int}T on wallet {word} to proof {word} for wallet daemon {word}")]
 async fn when_i_burn_on_wallet(
     world: &mut TariWorld,

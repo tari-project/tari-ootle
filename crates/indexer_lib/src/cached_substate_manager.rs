@@ -20,7 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashMap, time::SystemTime};
+use std::{
+    collections::HashMap,
+    time::{Duration, SystemTime},
+};
 
 use log::*;
 use tari_engine_types::substate::{Substate, SubstateId};
@@ -44,11 +47,14 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::indexer::scanner";
 
+const DEFAULT_CACHE_TTL: Duration = Duration::from_secs(300);
+
 #[derive(Debug, Clone)]
 pub struct CachedSubstateManager<TEpochManager, TVnClient, TSubstateCache> {
     committee_provider: TEpochManager,
     validator_node_client_factory: TVnClient,
     substate_cache: TSubstateCache,
+    cache_ttl: Duration,
     #[cfg(feature = "metrics")]
     metrics: Option<crate::metrics::Metrics>,
 }
@@ -69,9 +75,15 @@ where
             committee_provider,
             validator_node_client_factory,
             substate_cache,
+            cache_ttl: DEFAULT_CACHE_TTL,
             #[cfg(feature = "metrics")]
             metrics: None,
         }
+    }
+
+    pub fn with_cache_ttl(mut self, ttl: Duration) -> Self {
+        self.cache_ttl = ttl;
+        self
     }
 
     #[cfg(feature = "metrics")]
@@ -101,8 +113,7 @@ where
                 }
             } else {
                 let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs();
-                const CACHE_STALE_SECS: u64 = 300; // 5 minutes
-                if now.saturating_sub(entry.cached_at) > CACHE_STALE_SECS {
+                if now.saturating_sub(entry.cached_at) > self.cache_ttl.as_secs() {
                     debug!(target: LOG_TARGET, "Cached substate {} is stale. Fetching fresh copy.", substate_id);
                 } else {
                     debug!(target: LOG_TARGET, "Substate cache hit for {} with version {}", substate_id, entry.version);

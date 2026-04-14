@@ -119,6 +119,10 @@ pub struct IndexerConfig {
     pub templates_sidechain_id: Option<RistrettoPublicKey>,
     /// The burnt utxos sidechain id
     pub burnt_utxo_sidechain_id: Option<RistrettoPublicKey>,
+    /// Cache TTL for substates fetched during dry run transaction processing.
+    /// A shorter TTL reduces the chance of stale fee estimates.
+    #[serde(with = "serializers::seconds")]
+    pub dry_run_cache_ttl: Duration,
     /// The event filtering configuration
     pub event_filters: Vec<EventFilter>,
 }
@@ -140,6 +144,7 @@ impl Default for IndexerConfig {
             sidechain_id: None,
             templates_sidechain_id: None,
             burnt_utxo_sidechain_id: None,
+            dry_run_cache_ttl: Duration::from_secs(10),
             event_filters: vec![],
         }
     }

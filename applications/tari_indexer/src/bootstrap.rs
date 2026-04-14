@@ -234,13 +234,23 @@ pub async fn spawn_services(
     // Template manager
     let template_manager = TemplateManager::initialize(global_db.clone(), substate_manager.clone())?;
 
-    // dry run
+    // Dry run - use a separate substate manager with a shorter cache TTL for more accurate fee estimates
+    let dry_run_substate_cache_dir = config.to_data_dir().join("substate_cache");
+    let dry_run_substate_cache =
+        SubstateFileCache::new(dry_run_substate_cache_dir).context("Failed to create dry run substate cache")?;
+    let dry_run_substate_manager = SubstateManager::new(
+        store.clone(),
+        epoch_manager.clone(),
+        validator_node_client_factory.clone(),
+        dry_run_substate_cache,
+    )
+    .with_cache_ttl(config.indexer.dry_run_cache_ttl);
     let fee_table = get_fee_table_by_network(config.network);
     let dry_run_transaction_processor = DryRunTransactionProcessor::new(
         fee_table.clone(),
         epoch_manager.clone(),
         template_manager.clone(),
-        substate_manager.clone(),
+        dry_run_substate_manager,
         // We do not verify the kernel merkle proof, since that requires syncing L1 headers
         // TODO: maybe at least validate the well-formedness of the proof
         KnowledgeProofVerifier::new(config.network),

@@ -131,7 +131,7 @@ fn last_matches_generated_using_real_data() {
 /// wrong block causes every dummy block ID to diverge, making all proposals permanently invalid.
 #[test]
 fn dummy_blocks_from_epoch_genesis_vs_zero_block() {
-    let shard_group = ShardGroup::new(1, 256);
+    let shard_group = ShardGroup::all_shards(NumPreshards::P256);
     let non_zero_state_root =
         FixedHash::from_hex("613a7a1b6b83edb2d49c4d740b8b0e7e4ee226b453b004b04d4812dbc51306d9").unwrap();
     let non_zero_epoch_hash =

@@ -132,6 +132,24 @@ where
                                     }
                                 }
                             }
+
+                            for vault_id in value.vault_ids() {
+                                let vault_addr = SubstateId::Vault(*vault_id);
+                                let vault_result =
+                                    self.fetch_substate_from_network(&vault_addr, None).await?;
+                                if let SubstateValue::Vault(vault) = &vault_result.substate {
+                                    let resx_addr = SubstateId::Resource(*vault.resource_address());
+                                    if !substate_ids.contains(&resx_addr) {
+                                        if unversioned {
+                                            substate_ids.insert(resx_addr.into());
+                                        } else {
+                                            let ValidatorScanResult { id, .. } =
+                                                self.fetch_substate_from_network(&resx_addr, None).await?;
+                                            substate_ids.insert(id.into());
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 },
@@ -161,6 +179,25 @@ where
                                     let ValidatorScanResult { id: addr, .. } =
                                         self.fetch_substate_from_network(&addr, None).await?;
                                     substate_ids.insert(addr.into());
+                                }
+                            }
+
+                            // Fetch each vault referenced in the component state and add its
+                            // resource address as a dependency.
+                            for vault_id in value.vault_ids() {
+                                let vault_addr = SubstateId::Vault(*vault_id);
+                                let result = self.fetch_substate_from_network(&vault_addr, None).await?;
+                                if let SubstateValue::Vault(vault) = &result.substate {
+                                    let resx_addr = SubstateId::Resource(*vault.resource_address());
+                                    if !substate_ids.contains(&resx_addr) {
+                                        if unversioned {
+                                            substate_ids.insert(resx_addr.into());
+                                        } else {
+                                            let ValidatorScanResult { id, .. } =
+                                                self.fetch_substate_from_network(&resx_addr, None).await?;
+                                            substate_ids.insert(id.into());
+                                        }
+                                    }
                                 }
                             }
                         },

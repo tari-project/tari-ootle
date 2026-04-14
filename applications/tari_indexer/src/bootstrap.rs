@@ -235,7 +235,9 @@ pub async fn spawn_services(
     let template_manager = TemplateManager::initialize(global_db.clone(), substate_manager.clone())?;
 
     // Dry run - use a shorter cache TTL for more accurate fee estimates
-    let dry_run_substate_manager = substate_manager.clone().with_cache_ttl(config.indexer.dry_run_cache_ttl);
+    let dry_run_substate_manager = substate_manager
+        .clone()
+        .with_cache_ttl(config.indexer.dry_run_cache_ttl);
     let fee_table = get_fee_table_by_network(config.network);
     let dry_run_transaction_processor = DryRunTransactionProcessor::new(
         fee_table.clone(),

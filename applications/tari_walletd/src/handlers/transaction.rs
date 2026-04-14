@@ -327,12 +327,14 @@ pub async fn handle_submit_manifest(
 
     // Sign with each additional signing key (not the seal signer, which seals the transaction)
     let mut transaction = transaction.finish();
-    for signing_key_id in &req.signing_key_ids {
-        if *signing_key_id != seal_signer_key_id {
-            transaction = sdk
-                .signer_api()
-                .with_context(default_account.owner_public_key())
-                .sign(*signing_key_id, transaction)?;
+    if !req.signing_key_ids.is_empty() {
+        let seal_signer_pk = sdk.key_manager_api().get_public_key(seal_signer_key_id)?;
+        let seal_signer_pk_bytes = seal_signer_pk.public_key.to_byte_type();
+        let signer = sdk.signer_api().with_context(&seal_signer_pk_bytes);
+        for signing_key_id in &req.signing_key_ids {
+            if *signing_key_id != seal_signer_key_id {
+                transaction = signer.sign(*signing_key_id, transaction)?;
+            }
         }
     }
 

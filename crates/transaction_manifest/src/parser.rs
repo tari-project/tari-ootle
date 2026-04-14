@@ -685,13 +685,7 @@ fn handle_macro_argument(mac: Macro) -> Result<ManifestLiteral, syn::Error> {
             ))))
         },
         "address" | "substate_id" => {
-            let tokens_str = mac.tokens.to_string();
-            let trimmed = tokens_str.trim();
-            // Check if it looks like a string literal or an identifier (variable reference)
-            if trimmed.starts_with('"') {
-                let lit_str: LitStr = parse2(mac.tokens).map_err(|e| {
-                    syn::Error::new_spanned(name, format!("Expected string literal in {}!: {}", name, e))
-                })?;
+            if let Ok(lit_str) = parse2::<LitStr>(mac.tokens.clone()) {
                 let id: SubstateId = lit_str
                     .value()
                     .parse()
@@ -702,8 +696,12 @@ fn handle_macro_argument(mac: Macro) -> Result<ManifestLiteral, syn::Error> {
                     Ok(ManifestLiteral::Special(SpecialLiteral::SubstateId(OrVar::Value(id))))
                 }
             } else {
-                let ident: Ident = parse2(mac.tokens)
-                    .map_err(|e| syn::Error::new_spanned(name, format!("Expected identifier in {}!: {}", name, e)))?;
+                let ident: Ident = parse2(mac.tokens).map_err(|e| {
+                    syn::Error::new_spanned(
+                        name,
+                        format!("Expected identifier or string literal in {}!: {}", name, e),
+                    )
+                })?;
                 if name == "address" {
                     Ok(ManifestLiteral::Special(SpecialLiteral::Address(OrVar::Var(ident))))
                 } else {

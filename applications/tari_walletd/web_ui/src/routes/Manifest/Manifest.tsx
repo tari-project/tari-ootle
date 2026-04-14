@@ -857,7 +857,7 @@ function SigningKeysEditor({
             {signingKeys.map((key, index) => {
               const accountName = findAccountNameForKey(key, accounts);
               return (
-                <TableRow key={index}>
+                <TableRow key={JSON.stringify(key)}>
                   <DataTableCell sx={{ fontFamily: "monospace", fontSize: "0.8rem" }}>
                     {formatKeyId(key)}
                   </DataTableCell>

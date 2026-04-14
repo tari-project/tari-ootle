@@ -135,8 +135,7 @@ where
 
                             for vault_id in value.vault_ids() {
                                 let vault_addr = SubstateId::Vault(*vault_id);
-                                let vault_result =
-                                    self.fetch_substate_from_network(&vault_addr, None).await?;
+                                let vault_result = self.fetch_substate_from_network(&vault_addr, None).await?;
                                 if let SubstateValue::Vault(vault) = &vault_result.substate {
                                     let resx_addr = SubstateId::Resource(*vault.resource_address());
                                     if !substate_ids.contains(&resx_addr) {

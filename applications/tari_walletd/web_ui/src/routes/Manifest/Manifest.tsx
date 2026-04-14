@@ -136,7 +136,7 @@ function ManifestEditor() {
           throw new Error("No result returned for dry run");
         }
         if ("Accept" in finalize!.result) {
-          setFee(BigInt(finalize!.fee_receipt.total_fees_paid));
+          setFee(BigInt(response.required_fees!));
           setFinalizeError(null);
           console.log("Dry run successful:", finalize);
         } else if ("Reject" in finalize!.result) {

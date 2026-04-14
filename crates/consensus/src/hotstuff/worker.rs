@@ -981,7 +981,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 let high_tc = high_tc
                     .map(|tc| TimeoutCertificate::get(tx, tc.epoch(), tc.id()))
                     .transpose()?;
-                let justify_block = Block::get(tx, &high_qc.calculate_block_id())?;
+                let justify_block = Block::get_justified_block(tx, &high_qc, epoch_state.epoch())?;
                 Ok::<_, HotStuffError>((high_qc, high_tc, justify_block))
             })?;
 

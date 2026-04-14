@@ -145,7 +145,7 @@ where TConsensusSpec: ConsensusSpec
         )?;
 
         // Process newly justified block
-        let mut justified_block = Block::get(&**tx, &valid_block.justify().calculate_block_id())?;
+        let mut justified_block = Block::get_justified_block(&**tx, valid_block.justify(), valid_block.epoch())?;
         // This comes before decide so that all evidence can be in place before LocalPrepare and LocalAccept
         if !justified_block.has_justify_qc() {
             // We need to process this before to ensure that we have the latest state when checking the new block

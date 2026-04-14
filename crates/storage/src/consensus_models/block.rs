@@ -474,6 +474,24 @@ impl Block {
         tx.blocks_get_all_ids_by_height(epoch, height)
     }
 
+    /// Returns the block justified by the given proposal certificate.
+    ///
+    /// When the QC justifies the zero block, `calculate_block_id()` returns `BlockId::zero()` which
+    /// is the global zero block (epoch 0, all-zero fields). However, the epoch-specific genesis block
+    /// has non-trivial fields (state_merkle_root, epoch_hash, etc.) that are needed for deterministic
+    /// dummy block computation. This method correctly resolves to the epoch genesis in that case.
+    pub fn get_justified_block<TTx: StateStoreReadTransaction>(
+        tx: &TTx,
+        justify: &ProposalCertificate,
+        epoch: Epoch,
+    ) -> Result<Self, StorageError> {
+        if justify.justifies_zero_block() {
+            Self::get_genesis_for_epoch(tx, epoch)
+        } else {
+            Self::get(tx, &justify.calculate_block_id())
+        }
+    }
+
     pub fn get_genesis_for_epoch<TTx: StateStoreReadTransaction>(tx: &TTx, epoch: Epoch) -> Result<Self, StorageError> {
         let ids = Self::get_ids_by_epoch_and_height(tx, epoch, NodeHeight::zero())?;
         if ids.is_empty() {

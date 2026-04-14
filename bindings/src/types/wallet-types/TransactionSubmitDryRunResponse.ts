@@ -2,4 +2,8 @@
 import type { ExecuteResult } from "../ExecuteResult";
 import type { TransactionId } from "../TransactionId";
 
-export type TransactionSubmitDryRunResponse = { transaction_id: TransactionId; required_fees: number; result: ExecuteResult };
+export type TransactionSubmitDryRunResponse = {
+  transaction_id: TransactionId;
+  required_fees: number;
+  result: ExecuteResult;
+};

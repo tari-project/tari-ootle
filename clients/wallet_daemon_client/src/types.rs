@@ -247,6 +247,10 @@ pub struct TransactionGetResponse {
     pub transaction: Transaction,
     pub result: Option<FinalizeResult>,
     pub status: TransactionStatus,
+    /// The estimated fee required for the transaction. For dry runs, this is the minimum fee
+    /// that should be used as `max_fee` for the actual submission.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub final_fee: Option<u64>,
     pub invalid_reason: Option<String>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub last_update_time: PrimitiveDateTime,

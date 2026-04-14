@@ -388,6 +388,7 @@ pub async fn handle_get(
         transaction: transaction.transaction,
         result: transaction.finalize,
         status: transaction.status,
+        final_fee: transaction.final_fee,
         invalid_reason: transaction.invalid_reason,
         last_update_time: transaction.last_update_time,
     })

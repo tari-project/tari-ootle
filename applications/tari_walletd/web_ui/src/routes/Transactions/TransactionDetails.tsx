@@ -163,7 +163,7 @@ export default function TransactionDetails() {
                   <TableRow>
                     <TableCell>Total Fees</TableCell>
                     <DataTableCell>
-                      {feeReceipt ? formatCurrency(feeReceipt.total_fees_paid, XTR_CURRENCY) : "0"}
+                      {data.final_fee != null ? formatCurrency(data.final_fee, XTR_CURRENCY) : feeReceipt ? formatCurrency(feeReceipt.total_fees_paid, XTR_CURRENCY) : "0"}
                       {feeReceipt?.total_fee_overcharge ? (
                         <>
                           {" "}
@@ -319,7 +319,7 @@ export default function TransactionDetails() {
                 <Typography variant="h5">Fee Receipt</Typography>
               </AccordionSummary>
               <AccordionDetails>
-                <FeeReceipt data={data.result.fee_receipt} />
+                <FeeReceipt data={data.result.fee_receipt} finalFee={data.final_fee} />
               </AccordionDetails>
             </Accordion>
           )}

@@ -227,12 +227,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         throw new Error(`Transaction rejected: ${rejectReasonToString(transactionResult.AcceptFeeRejectRest[1])}`);
       }
 
-      let fee = resp.final_fee;
-      if (props.resource_type === "Confidential" || props.resource_type === "Stealth") {
-        // Add extra amount for confidential/stealth transactions, since the bullet proof size is variable
-        fee += 100;
-      }
-      setTransferFormState((prevState) => ({ ...prevState, fee: fee.toString() }));
+      setTransferFormState((prevState) => ({ ...prevState, fee: resp.final_fee.toString() }));
     } finally {
       setIsEstimatingFee(false);
     }

@@ -72,6 +72,12 @@ pub struct Template {
     pub code: TemplateCode,
 }
 
+impl Template {
+    pub fn address(&self) -> &TemplateAddress {
+        &self.metadata.address
+    }
+}
+
 // we encapsulate the db row format to not expose it to the caller
 impl TryFrom<DbTemplate> for Template {
     type Error = StorageError;

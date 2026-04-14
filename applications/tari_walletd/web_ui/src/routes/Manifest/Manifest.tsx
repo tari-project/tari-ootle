@@ -52,12 +52,12 @@ import Grid from "@mui/material/Grid";
 import TextField from "@mui/material/TextField";
 import useManifestCodeStore from "@store/manifestStore";
 import type { ManifestTab } from "@store/manifestStore";
-import { FormatAlignLeft, LibraryAdd } from "@mui/icons-material";
+import { FileDownload, FileUpload, FormatAlignLeft, LibraryAdd } from "@mui/icons-material";
 import type { KeyId } from "@tari-project/ootle-ts-bindings";
 import { rejectReasonToString, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
 import { Highlight, themes } from "prism-react-renderer";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 import EditorImport from "react-simple-code-editor";
 // Vite 8 dev pre-bundler doesn't unwrap exports.default for CJS packages
@@ -113,8 +113,59 @@ function ManifestEditor() {
   const theme = useTheme();
 
   const { mutateAsync: submitManifest, isPending: isSubmittingManifest, error } = useSubmitManifest();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isDryRun = !fee;
+
+  const handleSave = useCallback(() => {
+    const data = manifest.tabs.map(({ name, code, variables, signingKeys }) => ({
+      name,
+      code,
+      variables,
+      signingKeys,
+    }));
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "manifest.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [manifest.tabs]);
+
+  const handleLoad = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(reader.result as string);
+          if (!Array.isArray(parsed) || parsed.length === 0) {
+            alert("Invalid manifest file: expected a non-empty array of tabs.");
+            return;
+          }
+          for (const tab of parsed) {
+            if (typeof tab.code !== "string" || typeof tab.name !== "string") {
+              alert("Invalid manifest file: each tab must have a name and code.");
+              return;
+            }
+          }
+          manifest.loadTabs(parsed);
+        } catch {
+          alert("Failed to parse manifest file.");
+        }
+      };
+      reader.readAsText(file);
+      // Reset so the same file can be loaded again
+      e.target.value = "";
+    },
+    [manifest.loadTabs],
+  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -155,6 +206,13 @@ function ManifestEditor() {
   return (
     <>
       <Grid size={12}>
+        <input
+          type="file"
+          accept=".json"
+          ref={fileInputRef}
+          onChange={handleFileChange}
+          style={{ display: "none" }}
+        />
         <form onSubmit={handleSubmit}>
           <ManifestTabBar
             tabs={manifest.tabs}
@@ -164,6 +222,8 @@ function ManifestEditor() {
             onRemove={manifest.removeTab}
             onRename={manifest.renameTab}
             onFormat={() => manifest.setCode(formatManifestCode(manifest.code))}
+            onSave={handleSave}
+            onLoad={handleLoad}
             onImportTemplate={(address, name) => {
               const importLine = `use template_${address} as ${name};`;
               if (manifest.code.includes(importLine)) return;
@@ -262,6 +322,8 @@ function ManifestTabBar({
   onRemove,
   onRename,
   onFormat,
+  onSave,
+  onLoad,
   onImportTemplate,
 }: {
   tabs: ManifestTab[];
@@ -271,6 +333,8 @@ function ManifestTabBar({
   onRemove: (id: string) => void;
   onRename: (id: string, name: string) => void;
   onFormat: () => void;
+  onSave: () => void;
+  onLoad: () => void;
   onImportTemplate: (address: string, name: string) => void;
 }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -309,8 +373,14 @@ function ManifestTabBar({
       <IconButton size="small" onClick={onFormat} title="Format code">
         <FormatAlignLeft fontSize="small" />
       </IconButton>
-      <IconButton size="small" onClick={() => setImportOpen(true)} title="Import template" sx={{ mr: 1 }}>
+      <IconButton size="small" onClick={() => setImportOpen(true)} title="Import template">
         <LibraryAdd fontSize="small" />
+      </IconButton>
+      <IconButton size="small" onClick={onSave} title="Save manifests to file">
+        <FileDownload fontSize="small" />
+      </IconButton>
+      <IconButton size="small" onClick={onLoad} title="Load manifests from file" sx={{ mr: 1 }}>
+        <FileUpload fontSize="small" />
       </IconButton>
 
       <ImportTemplateDialog

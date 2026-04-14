@@ -63,6 +63,7 @@ interface Store {
   renameVariable: (oldKey: string, newKey: string) => void;
   addSigningKey: (key: KeyId) => void;
   removeSigningKey: (index: number) => void;
+  loadTabs: (tabs: ManifestTab[]) => void;
 }
 
 let nextId = 1;
@@ -172,6 +173,20 @@ const useManifestCodeStore = create<Store>()(
         set((state) => {
           const active = state.tabs.find((t) => t.id === state.activeTabId)!;
           return updateActiveTab(state, { signingKeys: active.signingKeys.filter((_, i) => i !== index) });
+        }),
+
+      loadTabs: (loaded: ManifestTab[]) =>
+        set(() => {
+          // Assign fresh IDs to avoid collisions with existing tabs
+          const tabs = loaded.map((t) => ({ ...t, id: generateId(), signingKeys: t.signingKeys || [] }));
+          const first = tabs[0];
+          return {
+            tabs,
+            activeTabId: first.id,
+            code: first.code,
+            variables: first.variables,
+            signingKeys: first.signingKeys,
+          };
         }),
     }),
     {

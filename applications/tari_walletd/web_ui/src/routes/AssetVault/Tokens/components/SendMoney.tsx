@@ -228,8 +228,8 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
       }
 
       let fee = resp.final_fee;
-      if (props.resource_type === "Confidential") {
-        // TODO: Add extra amount for confidential transactions, since the bullet proof size is variable
+      if (props.resource_type === "Confidential" || props.resource_type === "Stealth") {
+        // Add extra amount for confidential/stealth transactions, since the bullet proof size is variable
         fee += 100;
       }
       setTransferFormState((prevState) => ({ ...prevState, fee: fee.toString() }));

@@ -108,6 +108,7 @@ pub enum ManifestLiteral {
 
 #[derive(Debug, Clone)]
 pub enum SpecialLiteral {
+    Null,
     Amount(Amount),
     NonFungibleId(NonFungibleId),
     Cbor(tari_bor::Value),
@@ -450,7 +451,9 @@ fn build_arguments(args: Punctuated<Expr, Comma>) -> Result<Vec<ManifestLiteral>
 
             Expr::Path(ExprPath { path, .. }) => {
                 if let Some(seg) = path.segments.first() {
-                    if seg.ident == "XTR" || seg.ident == "TARI" {
+                    if seg.ident == "None" {
+                        Ok(ManifestLiteral::Special(SpecialLiteral::Null))
+                    } else if seg.ident == "XTR" || seg.ident == "TARI" {
                         Ok(ManifestLiteral::Special(SpecialLiteral::Address(OrVar::Value(
                             TARI_TOKEN.into(),
                         ))))
@@ -483,21 +486,7 @@ fn build_arguments(args: Punctuated<Expr, Comma>) -> Result<Vec<ManifestLiteral>
                     ))
                 }
             },
-            Expr::Macro(ExprMacro { mac, .. }) => match mac.path.get_ident() {
-                Some(name) if name == "cbor" => {
-                    let cbor_value: serde_json::Value = serde_json::from_str(&mac.tokens.to_string()).map_err(|e| {
-                        syn::Error::new_spanned(&mac.tokens, format!("Failed to parse CBOR JSON value: {}", e))
-                    })?;
-                    let cbor = convert_json_to_cbor(cbor_value).map_err(|e| {
-                        syn::Error::new_spanned(&mac.tokens, format!("Failed to convert JSON to CBOR value: {}", e))
-                    })?;
-                    Ok(ManifestLiteral::Special(SpecialLiteral::Cbor(cbor)))
-                },
-                _ => Err(syn::Error::new_spanned(
-                    mac,
-                    "Invalid argument, only literals and variables are supported",
-                )),
-            },
+            Expr::Macro(ExprMacro { mac, .. }) => Ok(handle_macro_argument(mac)?),
             _ => Err(syn::Error::new_spanned(
                 arg,
                 "Invalid argument, only literals and variables are supported",
@@ -645,6 +634,95 @@ fn handle_special_literals(name: &Ident, args: Punctuated<Expr, Comma>) -> Resul
             format!(
                 "Invalid function call '{s}', only Amount, SubstateId, Address, NonFungibleId, Metadata, HexBytes, \
                  Cbor and PublicKey are supported"
+            ),
+        )),
+    }
+}
+
+fn handle_macro_argument(mac: Macro) -> Result<ManifestLiteral, syn::Error> {
+    let name = mac
+        .path
+        .get_ident()
+        .ok_or_else(|| syn::Error::new_spanned(&mac.path, "macro path must have a single segment"))?;
+
+    match name.to_string().as_str() {
+        "cbor" => {
+            let cbor_value: serde_json::Value = serde_json::from_str(&mac.tokens.to_string())
+                .map_err(|e| syn::Error::new_spanned(&mac.tokens, format!("Failed to parse CBOR JSON value: {}", e)))?;
+            let cbor = convert_json_to_cbor(cbor_value).map_err(|e| {
+                syn::Error::new_spanned(&mac.tokens, format!("Failed to convert JSON to CBOR value: {}", e))
+            })?;
+            Ok(ManifestLiteral::Special(SpecialLiteral::Cbor(cbor)))
+        },
+        "metadata" => {
+            let tokens_str = mac.tokens.to_string();
+            let trimmed = tokens_str.trim();
+            if trimmed.is_empty() {
+                Ok(ManifestLiteral::Special(SpecialLiteral::Metadata(Metadata::new())))
+            } else {
+                let lit_str: LitStr = parse2(mac.tokens).map_err(|e| {
+                    syn::Error::new_spanned(name, format!("Expected string literal in metadata!: {}", e))
+                })?;
+                let metadata: Metadata = lit_str
+                    .value()
+                    .parse()
+                    .map_err(|e| syn::Error::new_spanned(&lit_str, format!("Failed to parse Metadata value: {}", e)))?;
+                Ok(ManifestLiteral::Special(SpecialLiteral::Metadata(metadata)))
+            }
+        },
+        "amount" => {
+            let lit: syn::LitInt = parse2(mac.tokens)
+                .map_err(|e| syn::Error::new_spanned(name, format!("Expected integer literal in amount!: {}", e)))?;
+            Ok(ManifestLiteral::Special(SpecialLiteral::Amount(lit.base10_parse()?)))
+        },
+        "hex_bytes" | "public_key" | "bytes" => {
+            let lit_str: LitStr = parse2(mac.tokens)
+                .map_err(|e| syn::Error::new_spanned(name, format!("Expected string literal in {}!: {}", name, e)))?;
+            let bytes = bytes_from_hex(&lit_str.value())
+                .map_err(|e| syn::Error::new_spanned(&lit_str, format!("Failed to parse hex bytes: {}", e)))?;
+            Ok(ManifestLiteral::Special(SpecialLiteral::Cbor(tari_bor::Value::Bytes(
+                bytes,
+            ))))
+        },
+        "address" | "substate_id" => {
+            let tokens_str = mac.tokens.to_string();
+            let trimmed = tokens_str.trim();
+            // Check if it looks like a string literal or an identifier (variable reference)
+            if trimmed.starts_with('"') {
+                let lit_str: LitStr = parse2(mac.tokens).map_err(|e| {
+                    syn::Error::new_spanned(name, format!("Expected string literal in {}!: {}", name, e))
+                })?;
+                let id: SubstateId = lit_str
+                    .value()
+                    .parse()
+                    .map_err(|e| syn::Error::new_spanned(&lit_str, format!("Failed to parse substate id: {}", e)))?;
+                if name == "address" {
+                    Ok(ManifestLiteral::Special(SpecialLiteral::Address(OrVar::Value(id))))
+                } else {
+                    Ok(ManifestLiteral::Special(SpecialLiteral::SubstateId(OrVar::Value(id))))
+                }
+            } else {
+                let ident: Ident = parse2(mac.tokens)
+                    .map_err(|e| syn::Error::new_spanned(name, format!("Expected identifier in {}!: {}", name, e)))?;
+                if name == "address" {
+                    Ok(ManifestLiteral::Special(SpecialLiteral::Address(OrVar::Var(ident))))
+                } else {
+                    Ok(ManifestLiteral::Special(SpecialLiteral::SubstateId(OrVar::Var(ident))))
+                }
+            }
+        },
+        "non_fungible_id" => {
+            let lit: Lit = parse2(mac.tokens)
+                .map_err(|e| syn::Error::new_spanned(name, format!("Expected literal in non_fungible_id!: {}", e)))?;
+            let id = lit_to_nonfungible_id(&lit)
+                .map_err(|e| syn::Error::new_spanned(&lit, format!("Failed to parse NonFungibleId: {}", e)))?;
+            Ok(ManifestLiteral::Special(SpecialLiteral::NonFungibleId(id)))
+        },
+        _ => Err(syn::Error::new_spanned(
+            name,
+            format!(
+                "Invalid argument macro '{name}', supported macros: cbor!, metadata!, amount!, hex_bytes!, bytes!, \
+                 public_key!, address!, substate_id!, non_fungible_id!"
             ),
         )),
     }

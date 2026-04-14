@@ -152,6 +152,13 @@ pub type TransactionSubmitDryRunRequest = TransactionSubmitRequest;
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct TransactionSubmitDryRunResponse {
     pub transaction_id: TransactionId,
+    /// The minimum fee required to submit this transaction. Includes a +1 buffer over
+    /// `total_fees_charged` to account for storage fee rounding differences between the dry run
+    /// and actual submission (the vault balance changes with a different max_fee, which can shift
+    /// `floor(total_bytes / 4)` by 1 at a rounding boundary). Non-refundable overcharge is
+    /// subtracted since it won't recur with a tighter max_fee.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub required_fees: u64,
     pub result: ExecuteResult,
 }
 
@@ -170,6 +177,11 @@ pub struct TransactionSubmitManifestRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct TransactionSubmitManifestResponse {
     pub transaction_id: TransactionId,
+    /// The minimum fee required to submit this transaction. Only present for dry runs.
+    /// Includes a +1 buffer over `total_fees_charged` to account for storage fee rounding
+    /// differences between the dry run and actual submission.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub required_fees: Option<u64>,
     pub result: Option<ExecuteResult>,
 }
 
@@ -671,6 +683,11 @@ pub struct ClaimBurnProofContents {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct ClaimBurnResponse {
     pub transaction_id: TransactionId,
+    /// The minimum fee required to submit this transaction. Only present for dry runs.
+    /// Includes a +1 buffer over `total_fees_charged` to account for storage fee rounding
+    /// differences between the dry run and actual submission.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub required_fees: Option<u64>,
     pub dry_run_result: Option<ExecuteResult>,
 }
 

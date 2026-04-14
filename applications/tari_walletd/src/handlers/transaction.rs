@@ -256,8 +256,10 @@ pub async fn handle_submit_dry_run(
         .await
         .map_err(map_transaction_submission_error)?;
 
+    let required_fees = exec_result.finalize.fee_receipt.required_fees();
     Ok(TransactionSubmitDryRunResponse {
         transaction_id: exec_result.finalize.transaction_hash.into_array().into(),
+        required_fees,
         result: exec_result,
     })
 }
@@ -347,8 +349,10 @@ pub async fn handle_submit_manifest(
             )
             .into());
         }
+        let required_fees = exec_result.finalize.fee_receipt.required_fees();
         return Ok(TransactionSubmitManifestResponse {
             transaction_id: exec_result.finalize.transaction_hash.into_array().into(),
+            required_fees: Some(required_fees),
             result: Some(exec_result),
         });
     }
@@ -357,6 +361,7 @@ pub async fn handle_submit_manifest(
 
     Ok(TransactionSubmitManifestResponse {
         transaction_id,
+        required_fees: None,
         result: None,
     })
 }
@@ -554,7 +559,7 @@ pub async fn handle_publish_template(
         }
         return Ok(PublishTemplateResponse {
             transaction_id: resp.transaction_id,
-            dry_run_fee: Some(resp.result.finalize.fee_receipt.total_fees_charged()),
+            dry_run_fee: Some(resp.result.finalize.fee_receipt.required_fees()),
         });
     }
     let request = TransactionSubmitRequest {

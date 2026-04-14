@@ -121,17 +121,8 @@ where
                         let result = self.fetch_substate_from_network(parent_id, None).await?;
                         if let SubstateValue::Component(data) = &result.substate {
                             let value = IndexedWellKnownTypes::from_value(&data.body.state)?;
-                            for addr in value.referenced_substates() {
-                                if !substate_ids.contains(&addr) {
-                                    if unversioned {
-                                        substate_ids.insert(addr.into());
-                                    } else {
-                                        let ValidatorScanResult { id: versioned, .. } =
-                                            self.fetch_substate_from_network(&addr, None).await?;
-                                        substate_ids.insert(versioned.into());
-                                    }
-                                }
-                            }
+                            self.add_component_dependencies(&value, unversioned, &mut substate_ids)
+                                .await?;
                         }
                     }
                 },
@@ -150,19 +141,8 @@ where
                     match &substate {
                         SubstateValue::Component(data) => {
                             let value = IndexedWellKnownTypes::from_value(&data.body.state)?;
-                            for addr in value.referenced_substates() {
-                                if substate_ids.contains(&addr) {
-                                    continue;
-                                }
-
-                                if unversioned {
-                                    substate_ids.insert(addr.into());
-                                } else {
-                                    let ValidatorScanResult { id: addr, .. } =
-                                        self.fetch_substate_from_network(&addr, None).await?;
-                                    substate_ids.insert(addr.into());
-                                }
-                            }
+                            self.add_component_dependencies(&value, unversioned, &mut substate_ids)
+                                .await?;
                         },
                         SubstateValue::Resource(_) => {},
                         SubstateValue::TransactionReceipt(_) => {
@@ -188,16 +168,8 @@ where
                         },
                         SubstateValue::Vault(vault) => {
                             let resx_addr = SubstateId::Resource(*vault.resource_address());
-                            if substate_ids.contains(&resx_addr) {
-                                continue;
-                            }
-                            if unversioned {
-                                substate_ids.insert(resx_addr.into());
-                            } else {
-                                let ValidatorScanResult { id, .. } =
-                                    self.fetch_substate_from_network(&resx_addr, None).await?;
-                                substate_ids.insert(id.into());
-                            }
+                            self.insert_substate_if_absent(&resx_addr, unversioned, &mut substate_ids)
+                                .await?;
                         },
                         SubstateValue::NonFungible(_) => {
                             let nft_addr = substate_id.substate_id().as_non_fungible_address().ok_or_else(|| {
@@ -208,17 +180,8 @@ where
                             })?;
 
                             let resx_addr = SubstateId::Resource(*nft_addr.resource_address());
-                            if substate_ids.contains(&resx_addr) {
-                                continue;
-                            }
-                            if unversioned {
-                                substate_ids.insert(resx_addr.into());
-                            } else {
-                                // NonFungible substates are always v0
-                                let ValidatorScanResult { id, .. } =
-                                    self.fetch_substate_from_network(&resx_addr, None).await?;
-                                substate_ids.insert(id.into());
-                            }
+                            self.insert_substate_if_absent(&resx_addr, unversioned, &mut substate_ids)
+                                .await?;
                         },
                         SubstateValue::ValidatorFeePool(_) => {
                             let resx_addr = SubstateId::Resource(TARI_TOKEN);
@@ -237,16 +200,8 @@ where
                             })?;
 
                             let resx_addr = SubstateId::Resource(*addr.resource_address());
-                            if substate_ids.contains(&resx_addr) {
-                                continue;
-                            }
-                            if unversioned {
-                                substate_ids.insert(resx_addr.into());
-                            } else {
-                                let ValidatorScanResult { id, .. } =
-                                    self.fetch_substate_from_network(&resx_addr, None).await?;
-                                substate_ids.insert(id.into());
-                            }
+                            self.insert_substate_if_absent(&resx_addr, unversioned, &mut substate_ids)
+                                .await?;
                         },
                     }
 
@@ -261,6 +216,52 @@ where
         }
 
         Ok(substate_ids)
+    }
+
+    /// Adds referenced substates and vault resource addresses from a component's state.
+    async fn add_component_dependencies(
+        &self,
+        value: &IndexedWellKnownTypes,
+        unversioned: bool,
+        substate_ids: &mut HashSet<SubstateRequirement>,
+    ) -> Result<(), SubstateApiError> {
+        for addr in value.referenced_substates() {
+            self.insert_substate_if_absent(&addr, unversioned, substate_ids).await?;
+        }
+
+        // Fetch each vault referenced in the component state and add its resource address
+        // as a dependency.
+        for vault_id in value.vault_ids() {
+            let vault_addr = SubstateId::Vault(*vault_id);
+            let result = self.fetch_substate_from_network(&vault_addr, None).await?;
+            if let SubstateValue::Vault(vault) = &result.substate {
+                let resx_addr = SubstateId::Resource(*vault.resource_address());
+                self.insert_substate_if_absent(&resx_addr, unversioned, substate_ids)
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Inserts a substate ID into the set if it is not already present. If `unversioned` is false,
+    /// fetches the current version from the network before inserting.
+    async fn insert_substate_if_absent(
+        &self,
+        substate_id: &SubstateId,
+        unversioned: bool,
+        substate_ids: &mut HashSet<SubstateRequirement>,
+    ) -> Result<(), SubstateApiError> {
+        if substate_ids.contains(substate_id) {
+            return Ok(());
+        }
+        if unversioned {
+            substate_ids.insert(substate_id.clone().into());
+        } else {
+            let ValidatorScanResult { id, .. } = self.fetch_substate_from_network(substate_id, None).await?;
+            substate_ids.insert(id.into());
+        }
+        Ok(())
     }
 
     pub async fn fetch_substate_from_network(

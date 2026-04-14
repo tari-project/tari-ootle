@@ -94,6 +94,9 @@ Feature: Account transfers
   acc1.deposit(faucet_bucket);
   """
 
+    # Wait for the wallet daemon account monitor to update the sender account information
+    When I check the balance of ACCOUNT_1 on wallet daemon WALLET_D the amount is at least 10000
+
     # Do the transfer from ACCOUNT_1 to another existing account
     When I transfer 50 tokens of resource FAUCET/resources/FAUCET from account ACCOUNT_1 to account ACCOUNT_2 via the wallet daemon WALLET_D named TRANSFER
 

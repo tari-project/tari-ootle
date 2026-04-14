@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import type { KeyId } from "@tari-project/ootle-ts-bindings";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
@@ -37,6 +38,7 @@ export interface ManifestTab {
   name: string;
   code: string;
   variables: Record<string, string>;
+  signingKeys: KeyId[];
 }
 
 interface Store {
@@ -46,6 +48,7 @@ interface Store {
   // Active tab convenience accessors
   code: string;
   variables: Record<string, string>;
+  signingKeys: KeyId[];
 
   // Tab management
   addTab: () => void;
@@ -58,6 +61,8 @@ interface Store {
   addVariable: (key: string, value: string) => void;
   removeVariable: (key: string) => void;
   renameVariable: (oldKey: string, newKey: string) => void;
+  addSigningKey: (key: KeyId) => void;
+  removeSigningKey: (index: number) => void;
 }
 
 let nextId = 1;
@@ -66,7 +71,7 @@ function generateId(): string {
 }
 
 function createTab(name: string): ManifestTab {
-  return { id: generateId(), name, code: DEFAULT_CODE, variables: {} };
+  return { id: generateId(), name, code: DEFAULT_CODE, variables: {}, signingKeys: [] };
 }
 
 function nextTabName(tabs: ManifestTab[]): string {
@@ -79,7 +84,7 @@ function nextTabName(tabs: ManifestTab[]): string {
 function updateActiveTab(state: Store, patch: Partial<ManifestTab>): Partial<Store> {
   const tabs = state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, ...patch } : t));
   const active = tabs.find((t) => t.id === state.activeTabId)!;
-  return { tabs, code: active.code, variables: active.variables };
+  return { tabs, code: active.code, variables: active.variables, signingKeys: active.signingKeys };
 }
 
 const defaultTab = createTab("Manifest 1");
@@ -91,6 +96,7 @@ const useManifestCodeStore = create<Store>()(
       activeTabId: defaultTab.id,
       code: defaultTab.code,
       variables: defaultTab.variables,
+      signingKeys: defaultTab.signingKeys,
 
       addTab: () =>
         set((state) => {
@@ -100,6 +106,7 @@ const useManifestCodeStore = create<Store>()(
             activeTabId: tab.id,
             code: tab.code,
             variables: tab.variables,
+            signingKeys: tab.signingKeys,
           };
         }),
 
@@ -114,14 +121,14 @@ const useManifestCodeStore = create<Store>()(
             activeTabId = tabs[newIdx].id;
           }
           const active = tabs.find((t) => t.id === activeTabId)!;
-          return { tabs, activeTabId, code: active.code, variables: active.variables };
+          return { tabs, activeTabId, code: active.code, variables: active.variables, signingKeys: active.signingKeys };
         }),
 
       setActiveTab: (id: string) =>
         set((state) => {
           const tab = state.tabs.find((t) => t.id === id);
           if (!tab) return state;
-          return { activeTabId: id, code: tab.code, variables: tab.variables };
+          return { activeTabId: id, code: tab.code, variables: tab.variables, signingKeys: tab.signingKeys };
         }),
 
       renameTab: (id: string, name: string) =>
@@ -151,27 +158,57 @@ const useManifestCodeStore = create<Store>()(
           const entries = Object.entries(active.variables).map(([k, v]) => (k === oldKey ? [newKey, v] : [k, v]));
           return updateActiveTab(state, { variables: Object.fromEntries(entries) });
         }),
+
+      addSigningKey: (key: KeyId) =>
+        set((state) => {
+          const active = state.tabs.find((t) => t.id === state.activeTabId)!;
+          // Avoid duplicates
+          const isDuplicate = active.signingKeys.some((k) => JSON.stringify(k) === JSON.stringify(key));
+          if (isDuplicate) return state;
+          return updateActiveTab(state, { signingKeys: [...active.signingKeys, key] });
+        }),
+
+      removeSigningKey: (index: number) =>
+        set((state) => {
+          const active = state.tabs.find((t) => t.id === state.activeTabId)!;
+          return updateActiveTab(state, { signingKeys: active.signingKeys.filter((_, i) => i !== index) });
+        }),
     }),
     {
       name: "manifest-code",
       migrate: (persisted: unknown, version: number) => {
         const state = persisted as Record<string, unknown>;
         // Migrate from single-tab format (no tabs array) to multi-tab format
-        if (version === 0 && state && !state.tabs) {
+        if (version < 1 && state && !state.tabs) {
           const code = (state.code as string) || DEFAULT_CODE;
           const variables = (state.variables as Record<string, string>) || {};
-          const tab: ManifestTab = { id: generateId(), name: "Manifest 1", code, variables };
+          const tab: ManifestTab = { id: generateId(), name: "Manifest 1", code, variables, signingKeys: [] };
           return {
             ...state,
             tabs: [tab],
             activeTabId: tab.id,
             code: tab.code,
             variables: tab.variables,
+            signingKeys: tab.signingKeys,
           } as Store;
+        }
+        // Add signingKeys to existing tabs
+        if (version < 2 && state && state.tabs) {
+          const tabs = (state.tabs as ManifestTab[]).map((t) => ({
+            ...t,
+            signingKeys: t.signingKeys || [],
+          }));
+          const activeTabId = state.activeTabId as string;
+          const active = tabs.find((t) => t.id === activeTabId) || tabs[0];
+          return {
+            ...state,
+            tabs,
+            signingKeys: active?.signingKeys || [],
+          } as unknown as Store;
         }
         return state as unknown as Store;
       },
-      version: 1,
+      version: 2,
     },
   ),
 );

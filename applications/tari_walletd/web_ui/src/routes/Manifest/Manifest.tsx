@@ -53,6 +53,7 @@ import TextField from "@mui/material/TextField";
 import useManifestCodeStore from "@store/manifestStore";
 import type { ManifestTab } from "@store/manifestStore";
 import { FormatAlignLeft, LibraryAdd } from "@mui/icons-material";
+import type { KeyId } from "@tari-project/ootle-ts-bindings";
 import { rejectReasonToString, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
 import { Highlight, themes } from "prism-react-renderer";
@@ -123,7 +124,8 @@ function ManifestEditor() {
       manifest: manifest.code,
       variables: manifest.variables,
       max_fee: isDryRun ? 3000 : Number(fee),
-      signing_key_id: null,
+      seal_signer_key_id: null,
+      signing_key_ids: manifest.signingKeys,
       dry_run: isDryRun,
     })
       .then((response) => {
@@ -214,6 +216,14 @@ function ManifestEditor() {
               onAdd={manifest.addVariable}
               onRemove={manifest.removeVariable}
               onRename={manifest.renameVariable}
+              onAddSigningKey={manifest.addSigningKey}
+            />
+          </Box>
+          <Box className="flex-container" style={{ justifyContent: "flex-start" }}>
+            <SigningKeysEditor
+              signingKeys={manifest.signingKeys}
+              onAdd={manifest.addSigningKey}
+              onRemove={manifest.removeSigningKey}
             />
           </Box>
           <Box className="flex-container" style={{ justifyContent: "flex-end" }}>
@@ -576,11 +586,13 @@ function VariableEditor({
   onAdd,
   onRemove,
   onRename,
+  onAddSigningKey,
 }: {
   variables: Record<string, string>;
   onAdd: (key: string, value: string) => void;
   onRemove: (key: string) => void;
   onRename: (oldKey: string, newKey: string) => void;
+  onAddSigningKey: (key: KeyId) => void;
 }) {
   const [showInputs, setShowInputs] = useState(false);
   const [key, setKey] = useState("");
@@ -593,6 +605,13 @@ function VariableEditor({
     if (!address) return;
     const varName = nextAccountVarName(variables);
     onAdd(varName, address);
+    // Auto-add the account's signing key
+    const accountInfo = accountsData?.accounts.find(
+      (a) => substateIdToString(a.account.component_address) === address,
+    );
+    if (accountInfo?.account.owner_key_id) {
+      onAddSigningKey(accountInfo.account.owner_key_id);
+    }
   };
 
   const handleAdd = () => {
@@ -712,6 +731,99 @@ function VariableEditor({
           )}
         </Stack>
       )}
+    </Grid>
+  );
+}
+
+function formatKeyId(key: KeyId): string {
+  if ("Derived" in key) {
+    return `${key.Derived.key_branch}/${key.Derived.index}`;
+  }
+  return `imported/${key.Imported.local_key_id}`;
+}
+
+function findAccountNameForKey(key: KeyId, accounts: { account: { name: string | null; owner_key_id: KeyId | null } }[]): string | null {
+  const match = accounts.find(
+    (a) => a.account.owner_key_id && JSON.stringify(a.account.owner_key_id) === JSON.stringify(key),
+  );
+  return match?.account.name || null;
+}
+
+function SigningKeysEditor({
+  signingKeys,
+  onAdd,
+  onRemove,
+}: {
+  signingKeys: KeyId[];
+  onAdd: (key: KeyId) => void;
+  onRemove: (index: number) => void;
+}) {
+  const { data: accountsData } = useAccountsList(0, 100);
+  const accounts = accountsData?.accounts || [];
+
+  const handleAddAccountKey = (e: SelectChangeEvent) => {
+    const address = e.target.value;
+    if (!address) return;
+    const accountInfo = accounts.find(
+      (a) => substateIdToString(a.account.component_address) === address,
+    );
+    if (accountInfo?.account.owner_key_id) {
+      onAdd(accountInfo.account.owner_key_id);
+    }
+  };
+
+  return (
+    <Grid size={12} mt={1}>
+      {signingKeys.length > 0 && (
+        <Table sx={{ marginBottom: 2 }}>
+          <TableHead>
+            <TableRow>
+              <TableCell>Signing Keys</TableCell>
+              <TableCell>Account</TableCell>
+              <TableCell />
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {signingKeys.map((key, index) => {
+              const accountName = findAccountNameForKey(key, accounts);
+              return (
+                <TableRow key={index}>
+                  <DataTableCell sx={{ fontFamily: "monospace", fontSize: "0.8rem" }}>
+                    {formatKeyId(key)}
+                  </DataTableCell>
+                  <DataTableCell>
+                    {accountName || "-"}
+                  </DataTableCell>
+                  <DataTableCell>
+                    <IconButton size="small" onClick={() => onRemove(index)} title="Remove signing key">
+                      &times;
+                    </IconButton>
+                  </DataTableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
+      <Stack direction="row" spacing={1} alignItems="center" marginBottom={2}>
+        {accounts.length > 0 && (
+          <FormControl style={{ minWidth: "200px" }}>
+            <InputLabel id="add-signing-key-label">Add Signing Key</InputLabel>
+            <Select labelId="add-signing-key-label" label="Add Signing Key" value="" onChange={handleAddAccountKey}>
+              {accounts
+                .filter((a) => a.account.owner_key_id)
+                .map(({ account }) => {
+                  const address = substateIdToString(account.component_address);
+                  return (
+                    <MenuItem key={address} value={address}>
+                      {account.name || address}
+                    </MenuItem>
+                  );
+                })}
+            </Select>
+          </FormControl>
+        )}
+      </Stack>
     </Grid>
   );
 }

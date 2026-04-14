@@ -167,7 +167,11 @@ pub struct TransactionSubmitDryRunResponse {
 pub struct TransactionSubmitManifestRequest {
     pub manifest: String,
     pub variables: HashMap<String, String>,
-    pub signing_key_id: Option<KeyId>,
+    /// The key used for the seal (owner) signature. If not provided, defaults to the default account's owner key.
+    pub seal_signer_key_id: Option<KeyId>,
+    /// Additional signing keys for accounts involved in the transaction (e.g. for multi-account manifests).
+    #[serde(default)]
+    pub signing_key_ids: Vec<KeyId>,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub max_fee: u64,
     pub dry_run: bool,

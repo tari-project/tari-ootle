@@ -2,4 +2,8 @@
 import type { ExecuteResult } from "../ExecuteResult";
 import type { TransactionId } from "../TransactionId";
 
-export type ClaimBurnResponse = { transaction_id: TransactionId; required_fees: number | null; dry_run_result: ExecuteResult | null };
+export type ClaimBurnResponse = {
+  transaction_id: TransactionId;
+  required_fees: number | null;
+  dry_run_result: ExecuteResult | null;
+};

@@ -81,16 +81,11 @@ impl FeeReceipt {
     }
 
     /// The minimum fee required to submit a transaction based on a dry run result.
-    /// This is `total_fees_charged + 1 - total_fee_overcharge` to account for:
-    /// 1. Potential rounding differences in the storage cost calculation. The storage fee depends on the vault balance
-    ///    at calculation time, which changes when a different max_fee is used in the actual submission vs the dry run —
-    ///    this can shift `floor(total_bytes / 4)` by 1 at a rounding boundary.
-    /// 2. Non-refundable overcharge from the dry run (e.g. stealth reveals where we cannot refund). Since the
-    ///    overcharge won't recur with a tighter max_fee, we subtract it.
+    /// This is `total_fees_charged + 1` to account for potential rounding differences in the storage cost calculation.
+    /// The storage fee depends on the vault balance at calculation time, which changes when a different max_fee is used
+    /// in the actual submission vs the dry run — this can shift `floor(total_bytes / 4)` by 1 at a rounding boundary.
     pub fn required_fees(&self) -> u64 {
-        self.total_fees_charged()
-            .saturating_add(1)
-            .saturating_sub(self.total_fee_overcharge)
+        self.total_fees_charged().saturating_add(1)
     }
 
     /// The total amount of fees refunded to the respective vaults

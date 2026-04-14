@@ -31,7 +31,7 @@ import { XTR_CURRENCY } from "@utils/currency";
 function unsignedSaturatingSub(a: bigint): bigint {
   return a < BigInt(0) ? BigInt(0) : a;
 }
-export default function FeeReceipt({ data }: { data: FeeReceiptProps }) {
+export default function FeeReceipt({ data, finalFee }: { data: FeeReceiptProps; finalFee?: number | null }) {
   if (!data) {
     return (
       <Box sx={{ p: 3, textAlign: "center" }}>
@@ -42,35 +42,35 @@ export default function FeeReceipt({ data }: { data: FeeReceiptProps }) {
     );
   }
 
-  const totalCost = Object.entries(data.cost_breakdown?.breakdown || {}).reduce(
+  const totalFeesCharged = Object.entries(data.cost_breakdown?.breakdown || {}).reduce(
     (sum, [_, value]) => BigInt(sum) + BigInt(value),
     BigInt(0),
   );
 
+  // If final_fee is available, use it as the actual fee paid to compute accurate overcharge/refund
+  const totalFeePayment = finalFee != null ? BigInt(finalFee) : BigInt(data.total_fee_payment);
+  const totalRefunded = unsignedSaturatingSub(totalFeePayment - totalFeesCharged - BigInt(data.total_fee_overcharge));
+  const overcharge = unsignedSaturatingSub(totalFeePayment - totalFeesCharged - totalRefunded);
+
   const feeItems = [
     {
       label: "Total Fees Paid",
-      value: formatCurrency(data.total_fee_payment, XTR_CURRENCY),
+      value: formatCurrency(totalFeePayment, XTR_CURRENCY),
       color: "primary" as const,
     },
     {
       label: "Total Fees Charged",
-      value: formatCurrency(data.total_fees_paid, XTR_CURRENCY),
-      color: "success" as const,
-    },
-    {
-      label: "Total Fees Required",
-      value: formatCurrency(totalCost, XTR_CURRENCY),
+      value: formatCurrency(totalFeesCharged, XTR_CURRENCY),
       color: "success" as const,
     },
     {
       label: "Fees Refunded",
-      value: formatCurrency(unsignedSaturatingSub(BigInt(data.total_fee_payment) - totalCost), XTR_CURRENCY),
+      value: formatCurrency(totalRefunded, XTR_CURRENCY),
       color: "success" as const,
     },
     {
       label: "Fees Overcharge",
-      value: formatCurrency(data.total_fee_overcharge, XTR_CURRENCY),
+      value: formatCurrency(overcharge, XTR_CURRENCY),
       color: "success" as const,
     },
   ];

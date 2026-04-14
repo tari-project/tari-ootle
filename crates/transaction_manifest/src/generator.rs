@@ -240,6 +240,10 @@ impl ManifestInstructionGenerator {
             .map(|arg| match arg {
                 ManifestLiteral::Lit(lit) => lit_to_arg(&lit),
                 ManifestLiteral::Workspace(ident) => self.get_ident(&ident.to_string()),
+                ManifestLiteral::Special(SpecialLiteral::Null) => {
+                    Ok(InstructionArg::literal(tari_bor::Value::Null)
+                        .expect("Null literal serialization should not fail"))
+                },
                 ManifestLiteral::Special(SpecialLiteral::Amount(amount)) => Ok(call_arg!(amount)),
                 ManifestLiteral::Special(SpecialLiteral::NonFungibleId(id)) => Ok(call_arg!(id)),
                 ManifestLiteral::Special(SpecialLiteral::Cbor(value)) => {

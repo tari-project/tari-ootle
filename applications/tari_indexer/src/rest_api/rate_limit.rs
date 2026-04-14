@@ -48,7 +48,9 @@ impl Bucket {
         }
     }
 
-    fn try_consume(&mut self, capacity: f64, refill_rate: f64) -> bool {
+    /// Try to consume one token. Returns `Ok(())` on success, or
+    /// `Err(duration)` with the time until the next token is available.
+    fn try_consume(&mut self, capacity: f64, refill_rate: f64) -> Result<(), Duration> {
         let now = Instant::now();
         let elapsed = now.duration_since(self.last_refill).as_secs_f64();
         self.last_refill = now;
@@ -58,9 +60,15 @@ impl Bucket {
 
         if self.tokens >= 1.0 {
             self.tokens -= 1.0;
-            true
+            Ok(())
         } else {
-            false
+            let tokens_needed = 1.0 - self.tokens;
+            let seconds = if refill_rate > 0.0 {
+                (tokens_needed / refill_rate).max(1.0)
+            } else {
+                60.0
+            };
+            Err(Duration::from_secs_f64(seconds))
         }
     }
 }
@@ -97,7 +105,7 @@ impl IpRateLimiter {
         }
     }
 
-    pub fn check(&self, ip: IpAddr) -> bool {
+    pub fn check(&self, ip: IpAddr) -> Result<(), Duration> {
         self.maybe_evict_stale();
         let mut bucket = self
             .buckets
@@ -240,9 +248,6 @@ pub struct RateLimitConfig {
     /// Whether to trust `X-Forwarded-For` / `X-Real-IP` headers for IP
     /// extraction. Only enable this when running behind a trusted reverse proxy.
     pub trust_proxy_headers: bool,
-    /// Window duration in seconds, used for the `Retry-After` response header
-    /// when a 429 is returned.
-    pub window_secs: u64,
 }
 
 /// Configuration for the SSE connection-limit middleware layer.
@@ -268,17 +273,21 @@ pub async fn rate_limit_middleware(
 ) -> Response {
     let connect_info = req.extensions().get::<ConnectInfo<SocketAddr>>().cloned();
     let ip = extract_ip(req.headers(), connect_info.as_ref(), config.trust_proxy_headers);
-    if config.limiter.check(ip) {
-        next.run(req).await
-    } else {
-        (
-            StatusCode::TOO_MANY_REQUESTS,
-            [(header::RETRY_AFTER, config.window_secs.to_string())],
-            axum::Json(serde_json::json!({
-                "error": "Rate limit exceeded. Please slow down."
-            })),
-        )
-            .into_response()
+    match config.limiter.check(ip) {
+        Ok(()) => next.run(req).await,
+        Err(retry_after) => {
+            (
+                StatusCode::TOO_MANY_REQUESTS,
+                [(
+                    header::RETRY_AFTER,
+                    retry_after.as_secs().to_string(),
+                )],
+                axum::Json(serde_json::json!({
+                    "error": format!("Rate limit exceeded. Please try again in {} seconds.", retry_after.as_secs())
+                })),
+            )
+                .into_response()
+        },
     }
 }
 

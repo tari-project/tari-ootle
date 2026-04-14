@@ -102,22 +102,22 @@ impl Server {
         let tx_submit_limiter = RateLimitConfig {
             limiter: IpRateLimiter::new(rate_limits.transactions_per_min, RATE_LIMIT_WINDOW_SECS),
             trust_proxy_headers: rate_limits.trust_proxy_headers,
-            window_secs: RATE_LIMIT_WINDOW_SECS,
+        };
+        let tx_dry_run_limiter = RateLimitConfig {
+            limiter: IpRateLimiter::new(rate_limits.transactions_per_min, RATE_LIMIT_WINDOW_SECS),
+            trust_proxy_headers: rate_limits.trust_proxy_headers,
         };
         let substates_fetch_limiter = RateLimitConfig {
             limiter: IpRateLimiter::new(rate_limits.substates_fetch_per_min, RATE_LIMIT_WINDOW_SECS),
             trust_proxy_headers: rate_limits.trust_proxy_headers,
-            window_secs: RATE_LIMIT_WINDOW_SECS,
         };
         let utxos_fetch_limiter = RateLimitConfig {
             limiter: IpRateLimiter::new(rate_limits.utxos_fetch_per_min, RATE_LIMIT_WINDOW_SECS),
             trust_proxy_headers: rate_limits.trust_proxy_headers,
-            window_secs: RATE_LIMIT_WINDOW_SECS,
         };
         let non_fungibles_limiter = RateLimitConfig {
             limiter: IpRateLimiter::new(rate_limits.non_fungibles_per_min, RATE_LIMIT_WINDOW_SECS),
             trust_proxy_headers: rate_limits.trust_proxy_headers,
-            window_secs: RATE_LIMIT_WINDOW_SECS,
         };
         let sse_limiter = SseLimitConfig {
             limiter: SseConnectionLimiter::new(rate_limits.sse_max_connections_per_ip),
@@ -153,9 +153,9 @@ impl Server {
                 .route("/", post(handlers::transactions::submit_transaction)
                     .route_layer(middleware::from_fn_with_state(tx_submit_limiter.clone(), rate_limit_middleware)))
                 // POST /transactions/dry-run – global tower rate limit (existing) +
-                //   per-IP limit reusing tx_submit_limiter
+                //   per-IP limit with separate limiter instance
                 .route("/dry-run", post(handlers::transactions::submit_transaction_dry_run)
-                    .route_layer(middleware::from_fn_with_state(tx_submit_limiter.clone(), rate_limit_middleware))
+                    .route_layer(middleware::from_fn_with_state(tx_dry_run_limiter.clone(), rate_limit_middleware))
                     .layer(ServiceBuilder::new()
                         .layer(axum::error_handling::HandleErrorLayer::new(|err: axum::BoxError| async move {
                             (

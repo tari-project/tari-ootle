@@ -16,13 +16,11 @@ use xxhash_rust::xxh3::Xxh3Builder;
 /// in the key, which is assumed to be high.
 ///
 /// # Invariants
-/// - The key type `K` must have uniformly distributed byte representations.
-///   Using this hasher with low-entropy keys (e.g. small integers, sequential
-///   IDs) will produce poor bucket distribution and degrade lookup to O(n).
-/// - Keys must be at least 8 bytes. Shorter keys will still work but use less
-///   entropy for the fold, increasing collision probability.
-/// - This hasher provides NO DoS resistance. It must only be used when the
-///   caller controls or trusts all inserted keys.
+/// - The key type `K` must have uniformly distributed byte representations. Using this hasher with low-entropy keys
+///   (e.g. small integers, sequential IDs) will produce poor bucket distribution and degrade lookup to O(n).
+/// - Keys must be at least 8 bytes. Shorter keys will still work but use less entropy for the fold, increasing
+///   collision probability.
+/// - This hasher provides NO DoS resistance. It must only be used when the caller controls or trusts all inserted keys.
 #[derive(Default)]
 pub struct PassthroughHasher(u64);
 

@@ -879,7 +879,6 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         let rows = query
             .limit(limit as i64)
             .offset(offset as i64)
-            .order_by(watched_substates::created_at.desc())
             .load::<WatchedSubstateRow>(self.connection())
             .map_err(|e| StorageError::QueryError {
                 reason: format!("{OPERATION}: {e}"),

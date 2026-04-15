@@ -104,6 +104,38 @@ export default function ConfirmationStep({
             <Typography variant="body1">{transferFormState.badge}</Typography>
           </Box>
         )}
+
+        {transferFormState.swapPoolAddress && (
+          <>
+            <Divider />
+            <Typography variant="subtitle2" color="text.secondary">
+              Fee Payment via Pool Swap
+            </Typography>
+            <Box>
+              <Typography variant="subtitle2" color="text.secondary">
+                Pool Address:
+              </Typography>
+              <CopyAddress address={transferFormState.swapPoolAddress} />
+            </Box>
+            <Box>
+              <Typography variant="subtitle2" color="text.secondary">
+                Swap Amount:
+              </Typography>
+              <Typography variant="body1">
+                {transferFormState.swapInputAmount}
+                {token_symbol ? ` ${token_symbol}` : ""}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography variant="subtitle2" color="text.secondary">
+                Min TARI Output:
+              </Typography>
+              <Typography variant="body1">
+                {transferFormState.swapMinOutput} {XTR_CURRENCY.symbol}
+              </Typography>
+            </Box>
+          </>
+        )}
       </Stack>
 
       <Divider />

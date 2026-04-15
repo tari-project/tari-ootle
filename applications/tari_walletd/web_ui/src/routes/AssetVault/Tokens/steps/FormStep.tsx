@@ -29,7 +29,7 @@ import MenuItem from "@mui/material/MenuItem";
 import Select, { SelectChangeEvent } from "@mui/material/Select";
 import TextField from "@mui/material/TextField";
 import TypeChip from "@routes/AssetVault/Components/ResourceTypeChip";
-import { Amount, ResourceAddress, ResourceType, validateOotleAddress } from "@tari-project/ootle-ts-bindings";
+import { Amount, ResourceAddress, ResourceType, TARI_TOKEN, validateOotleAddress } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
 import { formatCurrency, parseAmountToBaseUnits } from "@utils/helpers";
 import { FormEvent, useState } from "react";
@@ -43,6 +43,9 @@ export interface SendMoneyFormState {
   fee: string;
   badge: string | null;
   memo: string;
+  swapPoolAddress: string;
+  swapInputAmount: string;
+  swapMinOutput: string;
 }
 
 interface FormStepProps {
@@ -271,6 +274,60 @@ export default function FormStep({
             },
           }}
         />
+
+        {isStealth && resource_address !== TARI_TOKEN && (
+          <>
+            <Divider />
+            <Typography variant="subtitle2" color="text.secondary">
+              Pay fee by pool swap (optional)
+            </Typography>
+            <TextField
+              name="swapPoolAddress"
+              label="Swap Pool Address (optional)"
+              value={transferFormState.swapPoolAddress}
+              onChange={onFormValueChange}
+              style={{ flexGrow: 1 }}
+              disabled={disabled}
+            />
+            {transferFormState.swapPoolAddress && (
+              <>
+                <TextField
+                  name="swapInputAmount"
+                  label="Fee Swap Amount"
+                  value={transferFormState.swapInputAmount}
+                  type="text"
+                  onChange={onFormValueChange}
+                  style={{ flexGrow: 1 }}
+                  disabled={disabled}
+                  placeholder={"0" + (divisibility > 0 ? "." + "0".repeat(divisibility) : "")}
+                  slotProps={{
+                    input: {
+                      endAdornment: token_symbol ? (
+                        <InputAdornment position="end">{token_symbol}</InputAdornment>
+                      ) : undefined,
+                    },
+                  }}
+                />
+                <TextField
+                  name="swapMinOutput"
+                  label="Min TARI Output"
+                  value={transferFormState.swapMinOutput}
+                  type="text"
+                  onChange={onFormValueChange}
+                  style={{ flexGrow: 1 }}
+                  disabled={disabled}
+                  placeholder="0.000000"
+                  helperText="Minimum TARI expected from the swap (slippage protection)"
+                  slotProps={{
+                    input: {
+                      endAdornment: <InputAdornment position="end">{XTR_CURRENCY.symbol}</InputAdornment>,
+                    },
+                  }}
+                />
+              </>
+            )}
+          </>
+        )}
 
         <Divider />
 

@@ -279,6 +279,7 @@ The implementation is complete. The following are implemented:
 | `remove_virtual_substate()` helper in test tooling | `crates/template_test_tooling/src/template_test.rs` | Done |
 | Reference betting template (`EpochBettingHouse` + `EpochBet`) | `crates/engine/tests/templates/epoch_betting_house/`, `crates/engine/tests/templates/epoch_betting/` | Done |
 | Engine test cases 1–6 from this OIP | `crates/engine/tests/test.rs` (mod consensus), `crates/engine/tests/epoch_betting.rs` | Done |
+| Epoch hash mixed into `IdProvider::new_uuid()` | `crates/engine_types/src/id_provider.rs`, `crates/engine/src/runtime/working_state.rs` | Done |
 | Developer documentation for template authors | `docs/developer-docs/epoch-hash-randomness.md` | Done |
 
 ### Betting template design note

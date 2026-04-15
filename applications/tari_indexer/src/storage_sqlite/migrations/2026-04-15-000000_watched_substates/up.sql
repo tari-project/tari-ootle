@@ -1,9 +1,9 @@
 create table watched_substates
 (
-    component_address text not null,
-    template_address  text not null,
-    created_at        timestamp not null default current_timestamp,
-    primary key (component_address)
+    id                integer   not null primary key autoincrement,
+    component_address text      not null unique,
+    template_address  text      not null,
+    created_at        timestamp not null default current_timestamp
 );
 
 create index idx_watched_substates_template on watched_substates (template_address);

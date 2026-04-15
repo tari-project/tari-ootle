@@ -94,7 +94,8 @@ diesel::table! {
 }
 
 diesel::table! {
-    watched_substates (component_address) {
+    watched_substates (id) {
+        id -> Integer,
         component_address -> Text,
         template_address -> Text,
         created_at -> Timestamp,

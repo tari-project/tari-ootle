@@ -9,6 +9,8 @@ use crate::storage_sqlite::schema::watched_substates;
 #[derive(Debug, Clone, Queryable)]
 #[diesel(table_name = watched_substates)]
 pub(crate) struct WatchedSubstateRow {
+    #[allow(dead_code)]
+    pub id: i32,
     pub component_address: String,
     pub template_address: String,
     #[allow(dead_code)]

@@ -7,3 +7,4 @@ create table watched_substates
 );
 
 create index idx_watched_substates_template on watched_substates (template_address);
+create index idx_watched_substates_created_at on watched_substates (created_at);

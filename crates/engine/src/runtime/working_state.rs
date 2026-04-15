@@ -1088,14 +1088,35 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     pub fn id_provider(&self) -> Result<IdProvider<'_>, RuntimeError> {
+        let epoch_hash = self.try_get_current_epoch_hash();
         self.call_frames
             .last()
-            .map(|frame| IdProvider::new(frame.entity_id(), self.transaction_hash, &self.object_ids))
+            .map(|frame| {
+                let mut provider = IdProvider::new(frame.entity_id(), self.transaction_hash, &self.object_ids);
+                if let Some(hash) = epoch_hash {
+                    provider = provider.with_epoch_hash(hash);
+                }
+                provider
+            })
             .ok_or(RuntimeError::NoActiveCallFrame)
     }
 
     pub fn id_provider_for_entity(&self, entity_id: EntityId) -> IdProvider<'_> {
-        IdProvider::new(entity_id, self.transaction_hash, &self.object_ids)
+        let mut provider = IdProvider::new(entity_id, self.transaction_hash, &self.object_ids);
+        if let Some(hash) = self.try_get_current_epoch_hash() {
+            provider = provider.with_epoch_hash(hash);
+        }
+        provider
+    }
+
+    /// Returns the current epoch hash if it is present in the virtual substates, or `None`
+    /// if it has not been injected. This is used by `id_provider` to mix the epoch hash into
+    /// UUID/random-byte generation without hard-failing transactions that don't need it.
+    fn try_get_current_epoch_hash(&self) -> Option<[u8; 32]> {
+        match self.virtual_substates.get(&VirtualSubstateId::CurrentEpochHash) {
+            Some(VirtualSubstate::CurrentEpochHash(hash)) => Some(*hash),
+            _ => None,
+        }
     }
 
     pub fn new_bucket_id(&mut self) -> BucketId {

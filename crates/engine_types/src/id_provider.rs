@@ -27,6 +27,11 @@ use crate::{
 pub struct IdProvider<'a> {
     entity_id: EntityId,
     transaction_hash: Hash32,
+    /// Optional epoch hash mixed into UUID/random-byte generation.
+    /// When present, `new_uuid()` chains this value into its hasher so that
+    /// `random_bytes()` in templates automatically inherits the epoch-level
+    /// manipulation resistance provided by `Consensus::current_epoch_hash()`.
+    epoch_hash: Option<[u8; 32]>,
     object_ids: &'a ObjectIds,
 }
 
@@ -43,8 +48,20 @@ impl<'a> IdProvider<'a> {
         Self {
             entity_id,
             transaction_hash,
+            epoch_hash: None,
             object_ids,
         }
+    }
+
+    /// Set the epoch hash to mix into UUID/random-byte generation.
+    ///
+    /// When set, every call to `new_uuid()` (and therefore `get_random_bytes()`)
+    /// chains this value into the hasher. This means `random_bytes()` in templates
+    /// automatically inherits epoch-level manipulation resistance without the template
+    /// needing to call `Consensus::current_epoch_hash()` explicitly.
+    pub fn with_epoch_hash(mut self, epoch_hash: [u8; 32]) -> Self {
+        self.epoch_hash = Some(epoch_hash);
+        self
     }
 
     pub fn new_resource_address(&self) -> Result<ResourceAddress, IdProviderError> {
@@ -85,12 +102,14 @@ impl<'a> IdProvider<'a> {
 
     pub fn new_uuid(&self) -> Result<[u8; 32], IdProviderError> {
         let n = self.object_ids.next_uuid_id();
-        let id = hasher32(EngineHashDomainLabel::UuidOutput)
+        let mut h = hasher32(EngineHashDomainLabel::UuidOutput)
             .chain(&self.transaction_hash)
             .chain(&self.entity_id)
-            .chain(&n)
-            .result();
-        Ok(id.into_array())
+            .chain(&n);
+        if let Some(epoch_hash) = &self.epoch_hash {
+            h = h.chain(epoch_hash);
+        }
+        Ok(h.result().into_array())
     }
 
     pub fn get_random_bytes(&self, len: usize) -> Result<Vec<u8>, IdProviderError> {

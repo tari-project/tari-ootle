@@ -419,8 +419,24 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 .ok_or_else(|| RuntimeError::VirtualSubstateNotFound {
                     address: address.clone(),
                 })?;
-        let VirtualSubstate::CurrentEpoch(epoch) = current_epoch;
+        let VirtualSubstate::CurrentEpoch(epoch) = current_epoch else {
+            unreachable!("VirtualSubstateId::CurrentEpoch maps to VirtualSubstate::CurrentEpoch");
+        };
         Ok(Epoch(*epoch))
+    }
+
+    pub fn get_current_epoch_hash(&self) -> Result<[u8; 32], RuntimeError> {
+        let address = VirtualSubstateId::CurrentEpochHash;
+        let current_epoch_hash =
+            self.virtual_substates
+                .get(&address)
+                .ok_or_else(|| RuntimeError::VirtualSubstateNotFound {
+                    address: address.clone(),
+                })?;
+        let VirtualSubstate::CurrentEpochHash(hash) = current_epoch_hash else {
+            unreachable!("VirtualSubstateId::CurrentEpochHash maps to VirtualSubstate::CurrentEpochHash");
+        };
+        Ok(*hash)
     }
 
     pub(super) fn validate_finalized(&self) -> Result<(), RuntimeError> {

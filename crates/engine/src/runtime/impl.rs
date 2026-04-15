@@ -2513,6 +2513,10 @@ where
                 let epoch = self.tracker.get_current_epoch()?;
                 Ok(InvokeResult::encode(&epoch)?)
             },
+            ConsensusAction::GetCurrentEpochHash => {
+                let hash = self.tracker.get_current_epoch_hash()?;
+                Ok(InvokeResult::encode(&hash)?)
+            },
         }
     }
 

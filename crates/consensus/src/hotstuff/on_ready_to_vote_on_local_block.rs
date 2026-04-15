@@ -4,6 +4,7 @@
 use std::num::NonZeroU64;
 
 use log::*;
+use tari_common_types::types::FixedHash;
 use tari_consensus_types::{Decision, LastVoted, LeafBlock, PcId};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::commit_result::{AbortReason, RejectReason};
@@ -246,6 +247,7 @@ where TConsensusSpec: ConsensusSpec
         can_propose_epoch_end: bool,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<(), HotStuffError> {
+        let epoch_hash = *block.epoch_hash();
         // Store used for transactions that have inputs without specific versions.
         // It lives through the entire block so multiple transactions can be sequenced together in the same block
         let mut substate_store =
@@ -995,6 +997,7 @@ where TConsensusSpec: ConsensusSpec
                 tx,
                 block.as_leaf(),
                 locked_epoch,
+                epoch_hash,
                 transaction,
                 proposed_block_change_set,
             )?;
@@ -1481,6 +1484,7 @@ where TConsensusSpec: ConsensusSpec
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         block: LeafBlock,
         execution_epoch: Epoch,
+        epoch_hash: FixedHash,
         transaction: TransactionRecord,
         change_set: &ProposedBlockChangeSet,
     ) -> Result<BlockTransactionExecution, HotStuffError> {
@@ -1505,7 +1509,7 @@ where TConsensusSpec: ConsensusSpec
 
         let execution = self
             .transaction_manager
-            .execute(execution_epoch, pledged)
+            .execute(execution_epoch, epoch_hash, pledged)
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
 
         Ok(execution.for_block(block, transaction_id))

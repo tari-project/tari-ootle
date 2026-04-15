@@ -211,8 +211,13 @@ impl TemplateTest {
             }
         }
 
-        let virtual_substates =
-            HashMap::from_iter([(VirtualSubstateId::CurrentEpoch, VirtualSubstate::CurrentEpoch(0))]);
+        let virtual_substates = HashMap::from_iter([
+            (VirtualSubstateId::CurrentEpoch, VirtualSubstate::CurrentEpoch(0)),
+            (
+                VirtualSubstateId::CurrentEpochHash,
+                VirtualSubstate::CurrentEpochHash([0u8; 32]),
+            ),
+        ]);
 
         Self {
             package: Arc::new(package),
@@ -318,6 +323,16 @@ impl TemplateTest {
     /// Sets a virtual substate (e.g. `CurrentEpoch`) that is available to transactions during execution.
     pub fn set_virtual_substate(&mut self, address: VirtualSubstateId, value: VirtualSubstate) -> &mut Self {
         self.virtual_substates.insert(address, value);
+        self
+    }
+
+    /// Removes a virtual substate so that it is not available to transactions during execution.
+    ///
+    /// This is useful for testing that templates handle missing virtual substates correctly (e.g.
+    /// asserting that `Consensus::current_epoch_hash()` returns `VirtualSubstateNotFound` when the
+    /// hash has not been injected).
+    pub fn remove_virtual_substate(&mut self, address: VirtualSubstateId) -> &mut Self {
+        self.virtual_substates.remove(&address);
         self
     }
 

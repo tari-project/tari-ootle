@@ -98,7 +98,7 @@ impl DryRunTransactionProcessor {
 
         let package = self.construct_template_package(&transaction, &found_substates).await?;
 
-        let virtual_substates = self.get_virtual_substates(&transaction, epoch);
+        let virtual_substates = self.get_virtual_substates(&transaction, epoch).await?;
 
         let mut state_store = new_memory_store();
         state_store.set_many(found_substates)?;
@@ -153,10 +153,25 @@ impl DryRunTransactionProcessor {
         Ok(susbtates)
     }
 
-    fn get_virtual_substates(&self, _transaction: &Transaction, epoch: Epoch) -> VirtualSubstates {
-        VirtualSubstates::from_iter([(
-            VirtualSubstateId::CurrentEpoch,
-            VirtualSubstate::CurrentEpoch(epoch.as_u64()),
-        )])
+    async fn get_virtual_substates(
+        &self,
+        _transaction: &Transaction,
+        epoch: Epoch,
+    ) -> Result<VirtualSubstates, DryRunTransactionProcessorError> {
+        let epoch_hash = self
+            .epoch_manager
+            .get_current_epoch_hash()
+            .await
+            .map_err(DryRunTransactionProcessorError::EpochManager)?;
+        Ok(VirtualSubstates::from_iter([
+            (
+                VirtualSubstateId::CurrentEpoch,
+                VirtualSubstate::CurrentEpoch(epoch.as_u64()),
+            ),
+            (
+                VirtualSubstateId::CurrentEpochHash,
+                VirtualSubstate::CurrentEpochHash(epoch_hash.into_array()),
+            ),
+        ]))
     }
 }

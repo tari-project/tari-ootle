@@ -1,0 +1,11 @@
+[workspace]
+[package]
+name = "epoch_betting_house"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tari_template_lib = { path = "../../../../template_lib" }
+
+[lib]
+crate-type = ["cdylib"]

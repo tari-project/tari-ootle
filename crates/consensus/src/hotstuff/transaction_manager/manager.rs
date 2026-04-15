@@ -5,6 +5,7 @@ use std::{collections::HashMap, marker::PhantomData};
 
 use indexmap::{IndexMap, IndexSet};
 use log::*;
+use tari_common_types::types::FixedHash;
 use tari_consensus_types::{Decision, LeafBlock};
 use tari_engine_types::{
     commit_result::{AbortReason, RejectReason},
@@ -65,6 +66,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         local_committee_info: &CommitteeInfo,
         pool_tx: &TransactionPoolRecord,
         block: LeafBlock,
+        epoch_hash: FixedHash,
         change_set: &ProposedBlockChangeSet,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         let _timer = TraceTimer::info(LOG_TARGET, "prepare");
@@ -100,6 +102,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                     local_versions,
                     block,
                     execution_epoch,
+                    epoch_hash,
                 )
             },
             ResolvedTransactionInputs::LocalAndForeignInputs {
@@ -128,6 +131,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                     block,
                     change_set,
                     execution_epoch,
+                    epoch_hash,
                 )
             },
             ResolvedTransactionInputs::OnlyTombstones => {
@@ -142,6 +146,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                     IndexMap::new(),
                     block,
                     execution_epoch,
+                    epoch_hash,
                 )
             },
             ResolvedTransactionInputs::OneOrMoreLocalInputsNotFound { is_local_only, err } => {
@@ -223,6 +228,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
     pub fn execute(
         &self,
         execution_epoch: Epoch,
+        epoch_hash: FixedHash,
         pledged_transaction: PledgedTransaction,
     ) -> Result<TransactionExecution, BlockTransactionExecutorError> {
         // Abort before execution if the execution epoch exceeds the transaction's max_epoch
@@ -262,6 +268,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         self.executor.execute(
             pledged_transaction.transaction.transaction(),
             execution_epoch,
+            epoch_hash,
             &resolved_inputs,
         )
     }
@@ -273,6 +280,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         resolved_inputs: &HashMap<SubstateRequirement, Substate>,
         block: &LeafBlock,
         execution_epoch: Epoch,
+        epoch_hash: FixedHash,
     ) -> Result<TransactionExecution, BlockTransactionExecutorError> {
         // Abort before execution if the execution epoch exceeds the transaction's max_epoch
         if let Some(max_epoch) = transaction.transaction().max_epoch() &&
@@ -307,7 +315,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             transaction.id(),
         );
         self.executor
-            .execute(transaction.transaction(), execution_epoch, resolved_inputs)
+            .execute(transaction.transaction(), execution_epoch, epoch_hash, resolved_inputs)
     }
 
     pub fn fetch_execution(
@@ -389,6 +397,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         local_versions: IndexMap<SubstateRequirementRef<'_>, u32>,
         block: LeafBlock,
         execution_epoch: Epoch,
+        epoch_hash: FixedHash,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         let transaction_id = *transaction.id();
         // CASE: All inputs are local and we can execute the transaction.
@@ -403,7 +412,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         );
 
         let local_inputs = store.get_many(local_versions.iter().map(|(req, v)| (req.to_owned(), *v)))?;
-        let execution = self.execute_or_fetch(store, transaction, &local_inputs, &block, execution_epoch)?;
+        let execution = self.execute_or_fetch(store, transaction, &local_inputs, &block, execution_epoch, epoch_hash)?;
 
         let is_outputs_local_only = local_committee_info.is_all_local(execution.resulting_outputs());
         if is_outputs_local_only {
@@ -578,6 +587,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         block: LeafBlock,
         change_set: &ProposedBlockChangeSet,
         execution_epoch: Epoch,
+        epoch_hash: FixedHash,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         let transaction_id = *transaction.id();
         // We're output-only, so only need to gather foreign pledges
@@ -622,7 +632,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             )));
         }
 
-        let execution = self.execute_or_fetch(store, transaction, &resolved_inputs, &block, execution_epoch)?;
+        let execution = self.execute_or_fetch(store, transaction, &resolved_inputs, &block, execution_epoch, epoch_hash)?;
         info!(
             target: LOG_TARGET,
             "👨‍🔧 PREPARE: Output-Only Executed transaction {} with {} decision",

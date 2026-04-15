@@ -97,6 +97,10 @@ impl<TStore: StateReader> StateTracker<TStore> {
         self.read_with(|state| state.get_current_epoch())
     }
 
+    pub fn get_current_epoch_hash(&self) -> Result<[u8; 32], RuntimeError> {
+        self.read_with(|state| state.get_current_epoch_hash())
+    }
+
     pub fn get_pseudorandom_bytes(&self, length: usize) -> Result<Vec<u8>, RuntimeError> {
         self.read_with(|state| {
             let id_provider = state.id_provider()?;

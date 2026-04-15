@@ -254,6 +254,7 @@ where TConsensusSpec: ConsensusSpec
     fn transaction_pool_record_to_command(
         &self,
         start_of_chain_id: &LeafBlock,
+        epoch_hash: FixedHash,
         pool_tx: TransactionPoolRecord,
         local_committee_info: &CommitteeInfo,
         change_set: &ProposedBlockChangeSet,
@@ -264,6 +265,7 @@ where TConsensusSpec: ConsensusSpec
         match pool_tx.current_stage() {
             TransactionPoolStage::New => self.prepare_transaction(
                 start_of_chain_id,
+                epoch_hash,
                 pool_tx,
                 local_committee_info,
                 change_set,
@@ -275,6 +277,7 @@ where TConsensusSpec: ConsensusSpec
             // ready)
             TransactionPoolStage::LocalPrepared => self.local_accept_transaction(
                 start_of_chain_id,
+                epoch_hash,
                 local_committee_info,
                 change_set,
                 pool_tx,
@@ -421,6 +424,7 @@ where TConsensusSpec: ConsensusSpec
             change_set.apply_transaction_update(&mut transaction);
             if let Some(command) = self.transaction_pool_record_to_command(
                 &start_of_chain_block.as_leaf(),
+                epoch_hash,
                 transaction,
                 local_committee_info,
                 &change_set,
@@ -597,6 +601,7 @@ where TConsensusSpec: ConsensusSpec
     fn prepare_transaction(
         &self,
         parent_block: &LeafBlock,
+        epoch_hash: FixedHash,
         mut pool_tx: TransactionPoolRecord,
         local_committee_info: &CommitteeInfo,
         change_set: &ProposedBlockChangeSet,
@@ -617,6 +622,7 @@ where TConsensusSpec: ConsensusSpec
                 local_committee_info,
                 &pool_tx,
                 *parent_block,
+                epoch_hash,
                 change_set,
             )
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
@@ -797,6 +803,7 @@ where TConsensusSpec: ConsensusSpec
     fn local_accept_transaction(
         &self,
         parent_block: &LeafBlock,
+        epoch_hash: FixedHash,
         local_committee_info: &CommitteeInfo,
         change_set: &ProposedBlockChangeSet,
         mut tx_rec: TransactionPoolRecord,
@@ -817,7 +824,7 @@ where TConsensusSpec: ConsensusSpec
 
         let tx = substate_store.read_transaction();
         let transaction = tx_rec.get_transaction(tx)?;
-        let execution = self.execute_transaction(tx, parent_block, transaction, change_set, locked_epoch)?;
+        let execution = self.execute_transaction(tx, parent_block, epoch_hash, transaction, change_set, locked_epoch)?;
 
         // Try to lock all local outputs
         let local_outputs = execution
@@ -923,6 +930,7 @@ where TConsensusSpec: ConsensusSpec
         &self,
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         parent_block: &LeafBlock,
+        epoch_hash: FixedHash,
         transaction: TransactionRecord,
         change_set: &ProposedBlockChangeSet,
         execution_epoch: Epoch,
@@ -952,7 +960,7 @@ where TConsensusSpec: ConsensusSpec
         );
 
         self.transaction_manager
-            .execute(execution_epoch, pledged)
+            .execute(execution_epoch, epoch_hash, pledged)
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))
     }
 }

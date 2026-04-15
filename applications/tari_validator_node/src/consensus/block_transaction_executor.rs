@@ -10,6 +10,7 @@ use tari_engine::state_store::{
     memory::{MemoryStateStore, ReadOnlyMemoryStateStore},
     new_memory_store,
 };
+use tari_common_types::types::FixedHash;
 use tari_engine_types::{
     substate::Substate,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
@@ -79,6 +80,7 @@ where
         &self,
         transaction: &Transaction,
         current_epoch: Epoch,
+        current_epoch_hash: FixedHash,
         resolved_inputs: &HashMap<SubstateRequirement, Substate>,
     ) -> Result<TransactionExecution, BlockTransactionExecutorError> {
         let id = transaction.calculate_id();
@@ -89,10 +91,16 @@ where
         let mut state_db = new_memory_store();
         Self::add_substates_to_memory_db(resolved_inputs, &mut state_db)?;
 
-        let virtual_substates = VirtualSubstates::from_iter([(
-            VirtualSubstateId::CurrentEpoch,
-            VirtualSubstate::CurrentEpoch(current_epoch.as_u64()),
-        )]);
+        let virtual_substates = VirtualSubstates::from_iter([
+            (
+                VirtualSubstateId::CurrentEpoch,
+                VirtualSubstate::CurrentEpoch(current_epoch.as_u64()),
+            ),
+            (
+                VirtualSubstateId::CurrentEpochHash,
+                VirtualSubstate::CurrentEpochHash(current_epoch_hash.into_array()),
+            ),
+        ]);
 
         // Execute the transaction and get the result
         let exec_output = self

@@ -13,12 +13,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum VirtualSubstateId {
     CurrentEpoch,
+    CurrentEpochHash,
 }
 
 impl Display for VirtualSubstateId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             VirtualSubstateId::CurrentEpoch => write!(f, "Virtual(CurrentEpoch)"),
+            VirtualSubstateId::CurrentEpochHash => write!(f, "Virtual(CurrentEpochHash)"),
         }
     }
 }
@@ -26,6 +28,7 @@ impl Display for VirtualSubstateId {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum VirtualSubstate {
     CurrentEpoch(u64),
+    CurrentEpochHash([u8; 32]),
 }
 
 /// Read-only Virtual substate collection. THis collection is cheap to clone.
@@ -40,6 +43,13 @@ impl VirtualSubstates {
     pub fn current_epoch(&self) -> Option<u64> {
         match self.get(&VirtualSubstateId::CurrentEpoch) {
             Some(VirtualSubstate::CurrentEpoch(epoch)) => Some(*epoch),
+            _ => None,
+        }
+    }
+
+    pub fn current_epoch_hash(&self) -> Option<[u8; 32]> {
+        match self.get(&VirtualSubstateId::CurrentEpochHash) {
+            Some(VirtualSubstate::CurrentEpochHash(hash)) => Some(*hash),
             _ => None,
         }
     }

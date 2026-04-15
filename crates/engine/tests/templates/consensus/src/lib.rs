@@ -30,7 +30,11 @@ mod consensus_template {
 
     impl TestConsensus {
         pub fn current_epoch() -> u64 {
-            Consensus::current_epoch()    
+            Consensus::current_epoch()
+        }
+
+        pub fn current_epoch_hash() -> Vec<u8> {
+            Consensus::current_epoch_hash().to_vec()
         }
     }
 }

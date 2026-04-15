@@ -403,6 +403,92 @@ mod consensus {
         let result: u64 = template_test.call_function("TestConsensus", "current_epoch", args![], vec![]);
         assert_eq!(result, 1);
     }
+
+    /// Test 1 from OIP-0002: the epoch hash returned by the template matches the injected virtual substate.
+    #[test]
+    fn test_epoch_hash_is_injected() {
+        let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/consensus"]);
+
+        let injected_hash = [0xABu8; 32];
+        template_test.set_virtual_substate(
+            VirtualSubstateId::CurrentEpochHash,
+            VirtualSubstate::CurrentEpochHash(injected_hash),
+        );
+
+        let result: Vec<u8> =
+            template_test.call_function("TestConsensus", "current_epoch_hash", args![], vec![]);
+        assert_eq!(result, injected_hash.to_vec());
+    }
+
+    /// Test 2 from OIP-0002: epoch hashes differ across epochs.
+    #[test]
+    fn test_epoch_hash_differs_across_epochs() {
+        let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/consensus"]);
+
+        let hash_epoch_0 = [0x11u8; 32];
+        template_test.set_virtual_substate(
+            VirtualSubstateId::CurrentEpochHash,
+            VirtualSubstate::CurrentEpochHash(hash_epoch_0),
+        );
+        let result_0: Vec<u8> =
+            template_test.call_function("TestConsensus", "current_epoch_hash", args![], vec![]);
+
+        let hash_epoch_1 = [0x22u8; 32];
+        template_test.set_virtual_substate(
+            VirtualSubstateId::CurrentEpochHash,
+            VirtualSubstate::CurrentEpochHash(hash_epoch_1),
+        );
+        let result_1: Vec<u8> =
+            template_test.call_function("TestConsensus", "current_epoch_hash", args![], vec![]);
+
+        assert_ne!(result_0, result_1, "Epoch hashes should differ across epochs");
+        assert_eq!(result_0, hash_epoch_0.to_vec());
+        assert_eq!(result_1, hash_epoch_1.to_vec());
+    }
+
+    /// Test 3 from OIP-0002: epoch hash is constant within an epoch (same hash for two calls in the same epoch).
+    #[test]
+    fn test_epoch_hash_constant_within_epoch() {
+        let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/consensus"]);
+
+        let fixed_hash = [0xCCu8; 32];
+        template_test.set_virtual_substate(
+            VirtualSubstateId::CurrentEpochHash,
+            VirtualSubstate::CurrentEpochHash(fixed_hash),
+        );
+
+        // Two calls in the same epoch (hash not changed between calls) must return the same value.
+        let result_a: Vec<u8> =
+            template_test.call_function("TestConsensus", "current_epoch_hash", args![], vec![]);
+        let result_b: Vec<u8> =
+            template_test.call_function("TestConsensus", "current_epoch_hash", args![], vec![]);
+
+        assert_eq!(result_a, result_b, "Epoch hash must be constant within the same epoch");
+        assert_eq!(result_a, fixed_hash.to_vec());
+    }
+
+    /// Test 6 from OIP-0002: executing a template that calls `current_epoch_hash()` without the virtual
+    /// substate injected returns a `VirtualSubstateNotFound` execution failure.
+    #[test]
+    fn test_epoch_hash_not_available_without_injection() {
+        let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/consensus"]);
+
+        // Remove the epoch hash virtual substate so it is not available during execution.
+        template_test.remove_virtual_substate(VirtualSubstateId::CurrentEpochHash);
+
+        let reason = template_test.execute_expect_failure(
+            Transaction::builder_localnet()
+                .call_function(
+                    template_test.get_template_address("TestConsensus"),
+                    "current_epoch_hash",
+                    args![],
+                )
+                .build_and_seal(&Default::default()),
+            vec![],
+        );
+
+        assert_reject_reason(reason, "Virtual substate not found: Virtual(CurrentEpochHash)");
+    }
 }
 
 mod fungible {

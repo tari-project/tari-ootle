@@ -41,12 +41,12 @@ import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
 import { listWatchedTemplates, listWatchedSubstates } from "../../utils/api";
 import CopyToClipboard from "../../Components/CopyToClipboard";
 import { Link } from "react-router-dom";
-import type { WatchedSubstateItem } from "@tari-project/ootle-ts-bindings";
+import type { WatchedSubstateItem, WatchedTemplateItem } from "@tari-project/ootle-ts-bindings";
 
 const PAGE_SIZE = 20;
 
 function WatchedSubstatesLayout() {
-  const [templates, setTemplates] = useState<string[]>([]);
+  const [templates, setTemplates] = useState<WatchedTemplateItem[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [substates, setSubstates] = useState<WatchedSubstateItem[]>([]);
   const [page, setPage] = useState(0);
@@ -56,7 +56,7 @@ function WatchedSubstatesLayout() {
     listWatchedTemplates().then((resp) => {
       setTemplates(resp.templates);
       if (resp.templates.length > 0) {
-        setSelectedTemplate(resp.templates[0]);
+        setSelectedTemplate(resp.templates[0].template_address);
       }
       setLoading(false);
     });
@@ -82,8 +82,8 @@ function WatchedSubstatesLayout() {
     await fetchSubstates(selectedTemplate, newPage);
   }
 
-  function handleSelectTemplate(template: string) {
-    setSelectedTemplate(template);
+  function handleSelectTemplate(templateAddress: string) {
+    setSelectedTemplate(templateAddress);
     setPage(0);
   }
 
@@ -112,12 +112,12 @@ function WatchedSubstatesLayout() {
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               {templates.map((t) => (
                 <Chip
-                  key={t}
-                  label={truncateText(t, 24)}
-                  color={selectedTemplate === t ? "primary" : "default"}
-                  variant={selectedTemplate === t ? "filled" : "outlined"}
-                  onClick={() => handleSelectTemplate(t)}
-                  title={t}
+                  key={t.template_address}
+                  label={t.template_name || truncateText(t.template_address, 24)}
+                  color={selectedTemplate === t.template_address ? "primary" : "default"}
+                  variant={selectedTemplate === t.template_address ? "filled" : "outlined"}
+                  onClick={() => handleSelectTemplate(t.template_address)}
+                  title={t.template_address}
                 />
               ))}
             </Stack>

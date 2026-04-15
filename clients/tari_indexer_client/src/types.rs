@@ -752,6 +752,14 @@ pub struct WatchedSubstateItem {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ListWatchedTemplatesResponse {
-    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<String>))]
-    pub templates: Vec<TemplateAddress>,
+    pub templates: Vec<WatchedTemplateItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct WatchedTemplateItem {
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub template_address: TemplateAddress,
+    pub template_name: Option<String>,
 }

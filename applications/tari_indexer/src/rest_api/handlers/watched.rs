@@ -7,6 +7,7 @@ use tari_indexer_client::types::{
     ListWatchedSubstatesResponse,
     ListWatchedTemplatesResponse,
     WatchedSubstateItem,
+    WatchedTemplateItem,
 };
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
@@ -59,6 +60,21 @@ pub async fn list_watched_substates(
 pub async fn list_watched_templates(
     Extension(context): Extension<HandlerContext>,
 ) -> HandlerResult<Json<ListWatchedTemplatesResponse>> {
-    let templates = context.watched_templates().iter().copied().collect();
+    let store = context.read_only_store();
+    let templates = context
+        .watched_templates()
+        .iter()
+        .map(|addr| {
+            let template_name = store
+                .get_template_catalogue_entry(addr)
+                .ok()
+                .flatten()
+                .map(|e| e.template_name);
+            WatchedTemplateItem {
+                template_address: *addr,
+                template_name,
+            }
+        })
+        .collect();
     Ok(Json(ListWatchedTemplatesResponse { templates }))
 }

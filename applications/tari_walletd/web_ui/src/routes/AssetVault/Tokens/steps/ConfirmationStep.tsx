@@ -123,15 +123,24 @@ export default function ConfirmationStep({
                 Fee Swap Amount:
               </Typography>
               <Typography variant="body1">
-                {formatCurrency(parseInt(transferFormState.fee) || 0, { symbol: token_symbol, decimals: divisibility })}{" "}
-                {token_symbol}
+                {formatCurrency(parseInt(transferFormState.fee) || 0, { symbol: token_symbol, decimals: divisibility })}
               </Typography>
             </Box>
             <Box>
               <Typography variant="subtitle2" color="text.secondary">
                 Slippage Tolerance:
               </Typography>
-              <Typography variant="body1">{transferFormState.swapSlippagePercent}%</Typography>
+              <Typography variant="body1">
+                {transferFormState.swapSlippagePercent}% (min{" "}
+                {formatCurrency(
+                  Math.floor(
+                    (parseInt(transferFormState.fee) || 0) *
+                      (100 - (parseFloat(transferFormState.swapSlippagePercent) || 0)) / 100,
+                  ),
+                  XTR_CURRENCY,
+                )}{" "}
+                {XTR_CURRENCY.symbol})
+              </Typography>
             </Box>
           </>
         )}

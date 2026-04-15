@@ -292,7 +292,7 @@ export default function FormStep({
               <>
                 {transferFormState.fee && (
                   <Typography variant="body2" color="text.secondary">
-                    Fee swap amount: {formatCurrency(parseInt(transferFormState.fee) || 0, currency)} {token_symbol}
+                    Fee swap amount: {formatCurrency(parseInt(transferFormState.fee) || 0, currency)}
                   </Typography>
                 )}
                 <TextField

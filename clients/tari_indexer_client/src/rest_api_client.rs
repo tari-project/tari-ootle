@@ -46,6 +46,9 @@ use crate::{
         ListTransactionReceiptsResponse,
         ListUtxosRequest,
         ListUtxosResponse,
+        ListWatchedSubstatesRequest,
+        ListWatchedSubstatesResponse,
+        ListWatchedTemplatesResponse,
         QueryTransactionEventsRequest,
         QueryTransactionEventsResponse,
         StreamTransactionEventsRequest,
@@ -174,6 +177,17 @@ impl IndexerRestApiClient {
     ) -> Result<TemplateCatalogueItem, IndexerRestClientError> {
         self.send_get(format!("templates/catalogue/{template_address}"), ())
             .await
+    }
+
+    pub async fn list_watched_templates(&self) -> Result<ListWatchedTemplatesResponse, IndexerRestClientError> {
+        self.send_get("templates/watched", ()).await
+    }
+
+    pub async fn list_watched_substates(
+        &self,
+        req: ListWatchedSubstatesRequest,
+    ) -> Result<ListWatchedSubstatesResponse, IndexerRestClientError> {
+        self.send_get("substates/watched", req).await
     }
 
     pub async fn query_transaction_events(

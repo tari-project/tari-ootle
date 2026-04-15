@@ -719,3 +719,47 @@ pub struct GetLatestEpochCheckpointResponse {
     #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
     pub checkpoint: serde_json::Value,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListWatchedSubstatesRequest {
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub template_address: Option<TemplateAddress>,
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListWatchedSubstatesResponse {
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<WatchedSubstateItem>))]
+    pub substates: Vec<WatchedSubstateItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct WatchedSubstateItem {
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub component_address: SubstateId,
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub template_address: TemplateAddress,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListWatchedTemplatesResponse {
+    pub templates: Vec<WatchedTemplateItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct WatchedTemplateItem {
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub template_address: TemplateAddress,
+    pub template_name: Option<String>,
+}

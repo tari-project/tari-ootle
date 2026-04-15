@@ -216,7 +216,7 @@ pub struct PublishTemplateRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub enum PublishTemplateMetadata {
     /// Inline template metadata object. The server CBOR-encodes it and computes the hash.
-    Literal(TemplateMetadata),
+    Literal(Box<TemplateMetadata>),
     /// Pre-encoded CBOR metadata (base64-encoded). The server decodes and computes the hash.
     RawCbor(
         #[cfg_attr(feature = "ts", ts(type = "string"))]

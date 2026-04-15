@@ -41,7 +41,14 @@ use tari_template_lib_types::{
 
 use crate::{
     network_state_sync::{EventFilter, SyncProgress},
-    storage_sqlite::models::{Key, KeyValue, SubstateRecord, TemplateCatalogueEntry, UtxoUpdateRecord},
+    storage_sqlite::models::{
+        Key,
+        KeyValue,
+        SubstateRecord,
+        TemplateCatalogueEntry,
+        UtxoUpdateRecord,
+        WatchedSubstateEntry,
+    },
 };
 
 const LOG_TARGET: &str = "tari::indexer::store";
@@ -200,6 +207,15 @@ pub trait IndexerStoreReadTransaction {
         &mut self,
         template_address: &TemplateAddress,
     ) -> Result<Option<TemplateCatalogueEntry>, StorageError>;
+
+    // -------------------------------- Watched Substates -------------------------------- //
+
+    fn list_watched_substates(
+        &mut self,
+        template_address: Option<&TemplateAddress>,
+        limit: u64,
+        offset: u64,
+    ) -> Result<Vec<WatchedSubstateEntry>, StorageError>;
 }
 
 pub trait IndexerStoreWriteTransaction {
@@ -230,6 +246,14 @@ pub trait IndexerStoreWriteTransaction {
         template_address: &TemplateAddress,
         metadata: &PublishedTemplateMetadata,
     ) -> Result<(), StorageError>;
+
+    fn insert_watched_substate(
+        &mut self,
+        component_address: &SubstateId,
+        template_address: &TemplateAddress,
+    ) -> Result<(), StorageError>;
+
+    fn delete_watched_substate(&mut self, component_address: &SubstateId) -> Result<(), StorageError>;
 }
 
 /// An event that was inserted into the database, with its assigned auto-increment ID.
@@ -362,5 +386,15 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
 
     pub fn epoch_checkpoint_get_latest(&self) -> Result<EpochCheckpoint, StorageError> {
         self.inner.with_read_tx(|tx| tx.epoch_checkpoint_get_latest())
+    }
+
+    pub fn list_watched_substates(
+        &self,
+        template_address: Option<&TemplateAddress>,
+        limit: u64,
+        offset: u64,
+    ) -> Result<Vec<WatchedSubstateEntry>, StorageError> {
+        self.inner
+            .with_read_tx(|tx| tx.list_watched_substates(template_address, limit, offset))
     }
 }

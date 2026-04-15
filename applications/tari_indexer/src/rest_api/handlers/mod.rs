@@ -14,5 +14,6 @@ pub mod transaction_events;
 pub mod transaction_receipts;
 pub mod transactions;
 pub mod utxos;
+pub mod watched;
 
 pub type HandlerResult<T> = Result<T, super::error::ErrorResponse>;

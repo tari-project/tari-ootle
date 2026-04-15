@@ -140,9 +140,14 @@ impl IpRateLimiter {
 
     /// Check and consume one token for `ip`.
     ///
-    /// Returns `Ok(())` when a token is available, or `Err(retry_after)` when
-    /// the bucket is empty.
+    /// Returns `Ok(())` when a token is available or when the limiter is
+    /// disabled (capacity == 0), or `Err(retry_after)` when the bucket is
+    /// empty.
     pub fn check(&self, ip: IpAddr) -> Result<(), Duration> {
+        // capacity == 0 means "no rate limit" for this endpoint group.
+        if self.capacity == 0.0 {
+            return Ok(());
+        }
         let now = now_ms();
         let mut entry = self.buckets.entry(ip).or_insert_with(|| BucketState {
             tokens: self.capacity,
@@ -220,11 +225,19 @@ impl SseConnectionLimiter {
         })
     }
 
+    /// Returns `None` when the per-IP limit is reached, `Some(permit)` when a
+    /// slot is available.  If `max_per_ip == 0` the limiter is disabled and
+    /// always returns a permit (uses a semaphore with `usize::MAX` permits).
     fn try_acquire(&self, ip: IpAddr) -> Option<OwnedSemaphorePermit> {
+        let max = if self.max_per_ip == 0 {
+            usize::MAX
+        } else {
+            self.max_per_ip
+        };
         let sem = self
             .semaphores
             .entry(ip)
-            .or_insert_with(|| Arc::new(Semaphore::new(self.max_per_ip)))
+            .or_insert_with(|| Arc::new(Semaphore::new(max)))
             .clone();
         sem.try_acquire_owned().ok()
     }

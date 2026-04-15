@@ -131,8 +131,7 @@ export interface TransferParams {
   dry_run: boolean;
   output_memo?: Memo;
   swap_pool_address?: string | null;
-  swap_input_amount?: bigint | null;
-  swap_min_output?: bigint | null;
+  swap_slippage_percent?: number;
 }
 
 export const useAccountsTransfer = () => {
@@ -169,8 +168,10 @@ export const useAccountsTransfer = () => {
               ? {
                   pool_address: params.swap_pool_address,
                   input_resource: params.resource_address,
-                  input_amount: params.swap_input_amount || 0n,
-                  min_xtr_output_amount: params.swap_min_output || 0n,
+                  input_amount: max_fee,
+                  min_xtr_output_amount: Math.floor(
+                    max_fee * (100 - (params.swap_slippage_percent || 0)) / 100,
+                  ),
                 }
               : null,
           },

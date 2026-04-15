@@ -62,8 +62,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     badge: null,
     memo: "",
     swapPoolAddress: "",
-    swapInputAmount: "",
-    swapMinOutput: "",
+    swapSlippagePercent: "5",
   };
 
   const [activeStep, setActiveStep] = useState(0);
@@ -131,7 +130,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
     // For amount fields, parse the input to allow decimal values
     let processedValue = value;
-    if ((name === "amount" || name === "swapInputAmount" || name === "swapMinOutput") && value) {
+    if ((name === "amount" || name === "swapSlippagePercent") && value) {
       // Remove currency symbol and extra spaces, but keep numbers and decimal point
       processedValue = value.replace(/[^\d.]/g, "");
       // Ensure only one decimal point
@@ -215,12 +214,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         badge_usage: transferFormState.badge ? { Resource: transferFormState.badge } : ("None" as BadgeUsage),
         output_memo: transferFormState.memo ? { Message: transferFormState.memo } : undefined,
         swap_pool_address: transferFormState.swapPoolAddress || null,
-        swap_input_amount: transferFormState.swapInputAmount
-          ? parseAmountToBaseUnits(transferFormState.swapInputAmount, balanceEntry.divisibility)
-          : null,
-        swap_min_output: transferFormState.swapMinOutput
-          ? parseAmountToBaseUnits(transferFormState.swapMinOutput, 6)
-          : null,
+        swap_slippage_percent: parseFloat(transferFormState.swapSlippagePercent) || 0,
       };
 
       const result = await sendIt?.({ ...currentTransfer, dry_run: true, max_fee: 3000 });
@@ -296,12 +290,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         badge_usage: transferFormState.badge ? { Resource: transferFormState.badge } : ("None" as BadgeUsage),
         output_memo: transferFormState.memo ? { Message: transferFormState.memo } : undefined,
         swap_pool_address: transferFormState.swapPoolAddress || null,
-        swap_input_amount: transferFormState.swapInputAmount
-          ? parseAmountToBaseUnits(transferFormState.swapInputAmount, balanceEntry.divisibility)
-          : null,
-        swap_min_output: transferFormState.swapMinOutput
-          ? parseAmountToBaseUnits(transferFormState.swapMinOutput, 6)
-          : null,
+        swap_slippage_percent: parseFloat(transferFormState.swapSlippagePercent) || 0,
       };
 
       await sendIt?.({

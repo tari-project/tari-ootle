@@ -44,8 +44,7 @@ export interface SendMoneyFormState {
   badge: string | null;
   memo: string;
   swapPoolAddress: string;
-  swapInputAmount: string;
-  swapMinOutput: string;
+  swapSlippagePercent: string;
 }
 
 interface FormStepProps {
@@ -283,7 +282,7 @@ export default function FormStep({
             </Typography>
             <TextField
               name="swapPoolAddress"
-              label="Swap Pool Address (optional)"
+              label="Swap Pool Address"
               value={transferFormState.swapPoolAddress}
               onChange={onFormValueChange}
               style={{ flexGrow: 1 }}
@@ -291,36 +290,24 @@ export default function FormStep({
             />
             {transferFormState.swapPoolAddress && (
               <>
+                {transferFormState.fee && (
+                  <Typography variant="body2" color="text.secondary">
+                    Fee swap amount: {formatCurrency(parseInt(transferFormState.fee) || 0, currency)} {token_symbol}
+                  </Typography>
+                )}
                 <TextField
-                  name="swapInputAmount"
-                  label="Fee Swap Amount"
-                  value={transferFormState.swapInputAmount}
+                  name="swapSlippagePercent"
+                  label="Slippage Tolerance"
+                  value={transferFormState.swapSlippagePercent}
                   type="text"
                   onChange={onFormValueChange}
                   style={{ flexGrow: 1 }}
                   disabled={disabled}
-                  placeholder={"0" + (divisibility > 0 ? "." + "0".repeat(divisibility) : "")}
+                  placeholder="5"
+                  helperText="Maximum acceptable slippage for the pool swap"
                   slotProps={{
                     input: {
-                      endAdornment: token_symbol ? (
-                        <InputAdornment position="end">{token_symbol}</InputAdornment>
-                      ) : undefined,
-                    },
-                  }}
-                />
-                <TextField
-                  name="swapMinOutput"
-                  label="Min TARI Output"
-                  value={transferFormState.swapMinOutput}
-                  type="text"
-                  onChange={onFormValueChange}
-                  style={{ flexGrow: 1 }}
-                  disabled={disabled}
-                  placeholder="0.000000"
-                  helperText="Minimum TARI expected from the swap (slippage protection)"
-                  slotProps={{
-                    input: {
-                      endAdornment: <InputAdornment position="end">{XTR_CURRENCY.symbol}</InputAdornment>,
+                      endAdornment: <InputAdornment position="end">%</InputAdornment>,
                     },
                   }}
                 />

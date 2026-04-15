@@ -338,6 +338,15 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         // We need to fetch the resource substate to check if there is a view key present.
         let resource = self.substate_api.fetch_resource(params.resource_address).await?;
 
+        // Resolve the swap pool's dependent substates (e.g. its vaults) before entering the critical section
+        let swap_pool_deps = if let Some(swap) = params.fee_params.pay_fee_with_swap.as_ref() {
+            self.substate_api
+                .locate_dependent_substates(&[swap.pool_address.into()], true)
+                .await?
+        } else {
+            Default::default()
+        };
+
         // Generate outputs
         let resource_view_key = resource
             .view_key()
@@ -583,19 +592,12 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             );
 
             // Add any swap-related inputs if any
-            substate_inputs.extend(
-                params
-                    .fee_params
-                    .pay_fee_with_swap
-                    .as_ref()
-                    .into_iter()
-                    .flat_map(|swap| {
-                        [
-                            SubstateRequirement::unversioned(swap.input_resource),
-                            SubstateRequirement::unversioned(swap.pool_address),
-                        ]
-                    }),
-            );
+            if let Some(swap) = params.fee_params.pay_fee_with_swap.as_ref() {
+                substate_inputs.push(SubstateRequirement::unversioned(swap.input_resource));
+                substate_inputs.push(SubstateRequirement::unversioned(swap.pool_address));
+                // Add the pool component's dependent substates (e.g. its vaults)
+                substate_inputs.extend(swap_pool_deps);
+            }
 
             // Add badge vault if needed
             if let Some(badge_resource_address) = params.badge_usage.resource_address() {

@@ -46,6 +46,7 @@ export default function ConfirmationStep({
   onBack,
   onConfirm,
   token_symbol,
+  divisibility,
 }: ConfirmationStepProps) {
   return (
     <Stack spacing={3} sx={{ py: 2 }}>
@@ -119,20 +120,18 @@ export default function ConfirmationStep({
             </Box>
             <Box>
               <Typography variant="subtitle2" color="text.secondary">
-                Swap Amount:
+                Fee Swap Amount:
               </Typography>
               <Typography variant="body1">
-                {transferFormState.swapInputAmount}
-                {token_symbol ? ` ${token_symbol}` : ""}
+                {formatCurrency(parseInt(transferFormState.fee) || 0, { symbol: token_symbol, decimals: divisibility })}{" "}
+                {token_symbol}
               </Typography>
             </Box>
             <Box>
               <Typography variant="subtitle2" color="text.secondary">
-                Min TARI Output:
+                Slippage Tolerance:
               </Typography>
-              <Typography variant="body1">
-                {transferFormState.swapMinOutput} {XTR_CURRENCY.symbol}
-              </Typography>
+              <Typography variant="body1">{transferFormState.swapSlippagePercent}%</Typography>
             </Box>
           </>
         )}

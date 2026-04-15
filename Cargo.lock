@@ -11470,7 +11470,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_template_build"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "tari_ootle_template_metadata",
  "tempfile",
@@ -11480,7 +11480,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_template_metadata"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "borsh",
  "cargo_toml 0.22.3",

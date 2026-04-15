@@ -21,6 +21,7 @@
 //  USE OF THIS SOFTWARE, SUCH DAMAGE.
 
 import CopyAddress from "@components/CopyAddress";
+import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
 import { Divider, InputAdornment, InputLabel, Stack, Typography } from "@mui/material";
 import Button from "@mui/material/Button";
 import CheckBox from "@mui/material/Checkbox";
@@ -28,8 +29,15 @@ import FormControlLabel from "@mui/material/FormControlLabel";
 import MenuItem from "@mui/material/MenuItem";
 import Select, { SelectChangeEvent } from "@mui/material/Select";
 import TextField from "@mui/material/TextField";
+import Tooltip from "@mui/material/Tooltip";
 import TypeChip from "@routes/AssetVault/Components/ResourceTypeChip";
-import { Amount, ResourceAddress, ResourceType, TARI_TOKEN, validateOotleAddress } from "@tari-project/ootle-ts-bindings";
+import {
+  Amount,
+  ResourceAddress,
+  ResourceType,
+  TARI_TOKEN,
+  validateOotleAddress,
+} from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
 import { formatCurrency, parseAmountToBaseUnits } from "@utils/helpers";
 import { FormEvent, useState } from "react";
@@ -279,6 +287,19 @@ export default function FormStep({
             <Divider />
             <Typography variant="subtitle2" color="text.secondary">
               Pay fee by pool swap (optional)
+              <Tooltip
+                title={
+                  <>
+                    Network fees (a.k.a gas) on Tari are paid in the native TARI token. If you don't have TARI, you can
+                    optionally pay the fee by swapping a small amount of your {token_symbol} token for TARI in a swap
+                    pool within the transfer transaction.
+                  </>
+                }
+                arrow
+                placement="right"
+              >
+                <HelpOutlineIcon sx={{ fontSize: 16, color: "text.secondary", cursor: "help" }} />
+              </Tooltip>
             </Typography>
             <TextField
               name="swapPoolAddress"

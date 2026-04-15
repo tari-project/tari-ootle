@@ -30,6 +30,8 @@ use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common::configuration::bootstrap::{ApplicationType, grpc_default_port};
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_crypto::tari_utilities::ByteArray;
+use tari_engine::wasm::WasmModule;
+use tari_engine_types::{calculate_template_binary_hash, published_template::PublishedTemplateMetadata};
 use tari_epoch_manager::service::{EpochManagerConfig, EpochManagerHandle};
 use tari_epoch_oracles::{
     EpochOracle,
@@ -60,6 +62,7 @@ use tari_ootle_p2p::{PeerAddress, TariMessagingSpec};
 use tari_ootle_storage::global::GlobalDb;
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_shutdown::ShutdownSignal;
+use tari_template_builtin::all_builtin_templates;
 use tari_template_lib_types::{Amount, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
@@ -166,6 +169,8 @@ pub async fn spawn_services(
     // Connect to substate db
     let store = SqliteIndexerStore::try_create(config.state_db_path())?;
     check_store(config, &store)?;
+
+    seed_builtin_template_catalogue(&store)?;
 
     if config.network.is_testnet() {
         // TODO: We happen to know that the testnet faucet mints u64::MAX tXTR. This is hacky.
@@ -411,6 +416,25 @@ fn check_store<TStore: IndexerStore>(config: &ApplicationConfig, store: &TStore)
                     .map_err(|e| anyhow!("Failed to set network in the store: {}", e))
             },
         }
+    })
+}
+
+fn seed_builtin_template_catalogue<TStore: IndexerStore>(store: &TStore) -> anyhow::Result<()> {
+    store.with_write_tx(|tx| {
+        for (address, code) in all_builtin_templates() {
+            let loaded = WasmModule::load_template_from_code(code)
+                .map_err(|e| anyhow!("Failed to load built-in template: {e}"))?;
+            let binary_hash = calculate_template_binary_hash(code);
+            let metadata = PublishedTemplateMetadata {
+                template_name: loaded.template_name().to_string(),
+                author_public_key: RistrettoPublicKeyBytes::default(),
+                binary_hash,
+                at_epoch: 0,
+                metadata_hash: None,
+            };
+            tx.upsert_template_catalogue(address, &metadata)?;
+        }
+        Ok(())
     })
 }
 

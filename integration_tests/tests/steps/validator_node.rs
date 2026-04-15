@@ -17,6 +17,7 @@ use integration_tests::{
     validator_node::{ValidatorNodeProcess, spawn_validator_node},
 };
 use libp2p::Multiaddr;
+use log::warn;
 use minotari_app_grpc::tari_rpc::{RegisterValidatorNodeRequest, Signature};
 use notify::Watcher;
 use tari_base_node_client::{BaseNodeClient, grpc::GrpcBaseNodeClient};

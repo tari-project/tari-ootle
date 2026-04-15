@@ -706,6 +706,7 @@ pub struct ListEpochCheckpointsRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ListEpochCheckpointsResponse {
+    #[cfg_attr(feature = "ts", ts(type = "Array<Record<string, unknown>>"))]
     #[cfg_attr(feature = "utoipa", schema(value_type = Vec<Object>))]
     pub checkpoints: Vec<serde_json::Value>,
 }
@@ -714,6 +715,7 @@ pub struct ListEpochCheckpointsResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetLatestEpochCheckpointResponse {
+    #[cfg_attr(feature = "ts", ts(type = "Record<string, unknown>"))]
     #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
     pub checkpoint: serde_json::Value,
 }

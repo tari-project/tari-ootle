@@ -41,8 +41,9 @@ pub async fn list_epoch_checkpoints(
 
     let checkpoints = checkpoints
         .into_iter()
-        .map(|cp| serde_json::to_value(cp).map_err(ErrorResponse::anyhow))
-        .collect::<Result<Vec<_>, _>>()?;
+        .map(serde_json::to_value)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(ErrorResponse::anyhow)?;
 
     Ok(Json(ListEpochCheckpointsResponse { checkpoints }))
 }

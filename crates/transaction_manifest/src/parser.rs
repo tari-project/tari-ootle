@@ -21,6 +21,7 @@ use syn::{
     Macro,
     Pat,
     PatIdent,
+    PatTuple,
     Path,
     Signature,
     Stmt,
@@ -64,8 +65,14 @@ pub struct ManifestImport {
 }
 
 #[derive(Debug, Clone)]
+pub enum OutputBinding {
+    Single(Ident),
+    Tuple(Vec<Ident>),
+}
+
+#[derive(Debug, Clone)]
 pub struct InvokeIntent {
-    pub output_variable: Option<Ident>,
+    pub output_variable: Option<OutputBinding>,
     pub component_variable: Option<Ident>,
     pub template_variable: Option<Ident>,
     pub function_name: Ident,
@@ -236,17 +243,29 @@ impl ManifestParser {
     }
 
     fn handle_local(&self, local: Local) -> Result<ManifestIntent, syn::Error> {
-        // Parse let variable ident
-        let var_ident = match local.pat {
-            Pat::Ident(PatIdent { ref ident, .. }) => ident,
-            // Pat::Tuple(pat) => return Ok(ManifestStmt::Todo),
-            // Pat::Type(_) => {}
-            // Pat::Macro(_) => {}
-            // Pat::Reference(_) => {}
-            // Pat::Slice(_) => {}
-            // Pat::Struct(_) => {}
-            // Pat::TupleStruct(_) => {}
-            p => unimplemented!("{:?} not supported", p),
+        // Parse let variable binding
+        let output_binding = match &local.pat {
+            Pat::Ident(PatIdent { ident, .. }) => OutputBinding::Single(ident.clone()),
+            Pat::Tuple(PatTuple { elems, .. }) => {
+                let idents = elems
+                    .iter()
+                    .map(|p| match p {
+                        Pat::Ident(PatIdent { ident, .. }) => Ok(ident.clone()),
+                        _ => Err(syn::Error::new_spanned(
+                            p,
+                            "Only identifiers are supported in tuple destructuring patterns",
+                        )),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                if idents.is_empty() {
+                    return Err(syn::Error::new_spanned(
+                        &local.pat,
+                        "Empty tuple pattern is not supported",
+                    ));
+                }
+                OutputBinding::Tuple(idents)
+            },
+            p => return Err(syn::Error::new_spanned(p, format!("{:?} pattern is not supported", p))),
         };
 
         let expr = local.init.as_ref().map(|init| &init.expr).ok_or_else(|| {
@@ -269,7 +288,7 @@ impl ManifestParser {
                         if let Some(second) = iter.next() {
                             // Two segments: Template::function()
                             ManifestIntent::InvokeTemplate(InvokeIntent {
-                                output_variable: Some(var_ident.clone()),
+                                output_variable: Some(output_binding),
                                 component_variable: None,
                                 template_variable: Some(first.ident.clone()),
                                 function_name: second.ident.clone(),
@@ -288,7 +307,7 @@ impl ManifestParser {
             }) => {
                 let receiver = extract_single_var_name(&receiver)?;
                 ManifestIntent::InvokeComponent(InvokeIntent {
-                    output_variable: Some(var_ident.clone()),
+                    output_variable: Some(output_binding),
                     component_variable: Some(receiver),
                     template_variable: None,
                     function_name: method,
@@ -304,8 +323,18 @@ impl ManifestParser {
                     return Err(syn::Error::new_spanned(path, "macro path must have a single segment"));
                 }
 
+                let var_ident = match output_binding {
+                    OutputBinding::Single(ident) => ident,
+                    OutputBinding::Tuple(_) => {
+                        return Err(syn::Error::new_spanned(
+                            &local.pat,
+                            "Tuple destructuring is not supported for macro assignments",
+                        ));
+                    },
+                };
+
                 assignment_from_macro(
-                    var_ident.clone(),
+                    var_ident,
                     &path
                         .segments
                         .first()

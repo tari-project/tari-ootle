@@ -138,8 +138,8 @@ export default function ConfirmationStep({
                       (100 - (parseFloat(transferFormState.swapSlippagePercent) || 0)) / 100,
                   ),
                   XTR_CURRENCY,
-                )}{" "}
-                {XTR_CURRENCY.symbol})
+                )}
+                )
               </Typography>
             </Box>
           </>

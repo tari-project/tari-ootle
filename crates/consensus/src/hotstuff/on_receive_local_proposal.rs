@@ -507,13 +507,16 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                         });
                     }
 
-                    // Create the next genesis
+                    // Create the next genesis using the EOE block's state merkle root (which matches
+                    // the checkpoint root). This ensures all nodes produce identical genesis blocks,
+                    // including nodes that join via state sync and compute the root from the synced
+                    // state tree.
                     let mut genesis = Block::genesis(
                         network,
                         next_epoch,
                         epoch_hash,
                         next_shard_group,
-                        *valid_tip_block.block().state_merkle_root(),
+                        *eoe_block.state_merkle_root(),
                         sidechain_id,
                     );
                     info!(target: LOG_TARGET, "⭐️ Creating new genesis block {genesis}");

@@ -165,6 +165,10 @@ pub async fn send_vn_registration(world: &mut TariWorld, step: &Step, vn_name: S
         response.failure_message
     );
     integration_tests::cucumber_log!("Validator node registration tx id: {}", response.transaction_id);
+
+    world
+        .wait_until_base_nodes_have_transaction_in_mempool(1, Duration::from_secs(10))
+        .await;
     world.mark_point_in_logs("after register_validator_node");
 }
 
@@ -503,8 +507,10 @@ async fn when_i_wait_for_validator_leaf_block_at_least(
     cucumber_log!("==== Step: {}", step.value);
     let vn = world.get_validator_node(&name);
     let mut client = vn.create_client();
-    let epoch_stats = client.get_epoch_manager_stats().await.unwrap();
-    for _ in 0..40 {
+
+    // Allow enough time for force_beat to trigger (block_time=10s + delta + latency)
+    for _ in 0..120 {
+        let epoch_stats = client.get_epoch_manager_stats().await.unwrap();
         let resp = client
             .list_blocks_paginated(GetBlocksRequest {
                 limit: 1,
@@ -512,23 +518,22 @@ async fn when_i_wait_for_validator_leaf_block_at_least(
                 ordering_index: Some(2),
                 ordering: Some(Ordering::Descending),
                 filter_index: Some(1),
-                filter: Some(epoch_stats.current_epoch.as_u64().to_string()),
+                filter: Some(epoch.to_string()),
             })
             .await
             .unwrap();
 
+        let block_height = resp.blocks.first().map(|b| b.height().as_u64()).unwrap_or(0);
+
         integration_tests::cucumber_log!(
             "Validator {name} leaf block height at epoch {} is {} (current epoch is {})",
             epoch,
-            resp.blocks.first().map(|b| b.height().as_u64()).unwrap_or(0),
+            block_height,
             epoch_stats.current_epoch.as_u64()
         );
 
         if let Some(block) = resp.blocks.first() {
             assert!(block.epoch().as_u64() <= epoch);
-            if block.epoch().as_u64() < epoch {
-                eprintln!("VN {name} is in {}. Waiting for epoch {epoch}", block.epoch())
-            }
             if block.epoch().as_u64() == epoch && block.height().as_u64() >= height {
                 return;
             }
@@ -536,32 +541,23 @@ async fn when_i_wait_for_validator_leaf_block_at_least(
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 
-    let resp = client
+    let consensus_status = client.get_consensus_status().await.unwrap();
+    let block_height = client
         .list_blocks_paginated(GetBlocksRequest {
             limit: 1,
             offset: 0,
             ordering_index: Some(2),
             ordering: Some(Ordering::Descending),
             filter_index: Some(1),
-            filter: Some(epoch_stats.current_epoch.as_u64().to_string()),
+            filter: Some(epoch.to_string()),
         })
         .await
-        .unwrap();
-    let block = resp
-        .blocks
-        .first()
-        .unwrap_or_else(|| panic!("Validator {name} has no blocks"));
-    if block.epoch().as_u64() < epoch {
-        panic!("Validator {} at {} is less than epoch {}", name, block.epoch(), epoch);
-    }
-    if block.height().as_u64() < height {
-        panic!(
-            "Validator {} leaf block height {} is less than {}",
-            name,
-            block.height().as_u64(),
-            height
-        );
-    }
+        .map(|r| r.blocks.first().map(|b| b.height().as_u64()).unwrap_or(0))
+        .unwrap_or(0);
+    panic!(
+        "Validator {} leaf block height {} is less than {} at epoch {} (consensus: epoch={}, height={}, state={})",
+        name, block_height, height, epoch, consensus_status.epoch, consensus_status.height, consensus_status.state,
+    );
 }
 
 #[when(expr = "Block height on VN {word} is at least {int}")]

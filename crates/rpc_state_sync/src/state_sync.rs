@@ -113,6 +113,12 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             Ok(GetCheckpointsResponse { mut checkpoints }) => {
                 match EpochCheckpoint::try_from(checkpoints.pop().expect("checked is_empty")) {
                     Ok(checkpoint) => {
+                        checkpoint.checked_shard_group().map_err(|err| {
+                            RpcStateSyncError::InvalidResponse(anyhow!(
+                                "Fetched checkpoint for epoch {} has invalid shard group: {err}",
+                                checkpoint.epoch()
+                            ))
+                        })?;
                         info!(target: LOG_TARGET, "🛜 Checkpoint: {checkpoint}");
                         self.validate_checkpoint(&checkpoint, prev_committee, prev_epoch)?;
                         self.state_store.with_write_tx(|tx| checkpoint.save(tx))?;
@@ -450,16 +456,15 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             {
                 Ok(Some(cp)) => cp,
                 Ok(None) => {
-                    // TODO: we should check with f + 1 validators in this case. If a single validator reports
-                    // this falsely, this will prevent us from continuing with consensus for a long time (state
-                    // root will mismatch).
-                    // TODO: we should instead ask the epoch manager if this is the first epoch in the network (NOTE:
-                    // first epoch is not 0 but the first epoch where validators become active).
                     warn!(
                         target: LOG_TARGET,
-                        "❓️ No checkpoint for epoch {prev_epoch}. This may mean that this is the first epoch in the network or the epoch has not yet been finalized.",
+                        "❓️ No checkpoint for epoch {prev_epoch} from {member}. Previous committee exists, so state \
+                         sync will retry instead of proceeding without a checkpoint.",
                     );
-                    return Ok(None);
+                    if remaining_members == 0 {
+                        return Err(RpcStateSyncError::CheckpointNotAvailable { epoch: prev_epoch });
+                    }
+                    continue;
                 },
                 Err(err) => {
                     warn!(

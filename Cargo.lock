@@ -11459,7 +11459,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_template_metadata"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "borsh",
  "cargo_toml 0.22.3",
@@ -11469,6 +11469,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tari_bor",
+ "tari_template_lib_types",
  "tempfile",
  "thiserror 2.0.18",
  "ts-rs",

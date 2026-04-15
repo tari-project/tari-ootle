@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use tari_template_lib_types::TemplateAddress;
 
 use crate::{MetadataHash, MetadataHashWriter};
 
@@ -37,6 +38,9 @@ pub struct TemplateMetadata {
     pub license: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logo_url: Option<String>,
+    /// The template address of a previous version that this template supersedes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supersedes: Option<TemplateAddress>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, String>,
 }
@@ -56,6 +60,7 @@ impl TemplateMetadata {
             homepage: None,
             license: None,
             logo_url: None,
+            supersedes: None,
             extra: BTreeMap::new(),
         }
     }
@@ -135,6 +140,7 @@ mod tests {
             homepage: None,
             license: Some("BSD-3-Clause".to_string()),
             logo_url: None,
+            supersedes: None,
             extra: BTreeMap::new(),
         };
 
@@ -200,6 +206,7 @@ mod tests {
             homepage: None,
             license: None,
             logo_url: None,
+            supersedes: None,
             extra: BTreeMap::new(),
         };
 

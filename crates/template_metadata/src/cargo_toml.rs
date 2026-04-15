@@ -4,6 +4,7 @@
 use std::{collections::BTreeMap, path::Path};
 
 use cargo_toml::Manifest;
+use tari_template_lib_types::TemplateAddress;
 
 use crate::{TemplateMetadata, metadata::SCHEMA_VERSION};
 
@@ -73,6 +74,13 @@ fn from_manifest(manifest: &Manifest) -> Result<TemplateMetadata, CargoTomlError
         .and_then(|v| v.as_str())
         .map(String::from);
 
+    let supersedes = tari_template
+        .and_then(|t| t.get("supersedes"))
+        .and_then(|v| v.as_str())
+        .map(TemplateAddress::from_hex)
+        .transpose()
+        .map_err(|_| CargoTomlError::InvalidTemplateAddress("supersedes"))?;
+
     let extra = tari_template
         .and_then(|t| t.get("extra"))
         .and_then(|v| v.as_table())
@@ -95,6 +103,7 @@ fn from_manifest(manifest: &Manifest) -> Result<TemplateMetadata, CargoTomlError
         homepage,
         license,
         logo_url,
+        supersedes,
         extra,
     })
 }
@@ -107,6 +116,8 @@ pub enum CargoTomlError {
     MissingPackageSection,
     #[error("Field '{0}' uses workspace inheritance which is not supported in this context")]
     InheritedField(&'static str),
+    #[error("Invalid template address in field '{0}'")]
+    InvalidTemplateAddress(&'static str),
 }
 
 #[cfg(test)]

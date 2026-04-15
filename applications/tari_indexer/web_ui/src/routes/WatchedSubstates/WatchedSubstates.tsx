@@ -103,6 +103,12 @@ function WatchedSubstatesLayout() {
       </Grid>
       <Grid size={12}>
         <StyledPaper>
+          <Typography variant="body2" color="textSecondary" sx={{ marginBottom: 3 }}>
+            The indexer monitors configured template addresses for component creation events. When a transaction creates
+            a component using a watched template, it is tracked here. This is useful for discovering
+            components such as liquidity pools without scanning the entire substate space.
+            Each indexer may configure different or no templates to watch.
+          </Typography>
           <Typography variant="h6" sx={{ marginBottom: 2 }}>
             Watched Templates
           </Typography>

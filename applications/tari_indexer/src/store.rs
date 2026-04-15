@@ -151,6 +151,9 @@ pub trait IndexerStoreReadTransaction {
 
     // -------------------------------- Epoch Checkpoints -------------------------------- //
     fn epoch_checkpoint_exists(&mut self, shard_group: ShardGroup, epoch: Epoch) -> Result<bool, StorageError>;
+    fn epoch_checkpoint_get_all(&mut self, from_epoch: Epoch, limit: u64)
+    -> Result<Vec<EpochCheckpoint>, StorageError>;
+    fn epoch_checkpoint_get_latest(&mut self) -> Result<EpochCheckpoint, StorageError>;
 
     // -------------------------------- UTXOs -------------------------------- //
 
@@ -346,5 +349,18 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
     ) -> Result<Option<crate::storage_sqlite::models::TemplateCatalogueEntry>, StorageError> {
         self.inner
             .with_read_tx(|tx| tx.get_template_catalogue_entry(template_address))
+    }
+
+    pub fn epoch_checkpoint_get_all(
+        &self,
+        from_epoch: Epoch,
+        limit: u64,
+    ) -> Result<Vec<EpochCheckpoint>, StorageError> {
+        self.inner
+            .with_read_tx(|tx| tx.epoch_checkpoint_get_all(from_epoch, limit))
+    }
+
+    pub fn epoch_checkpoint_get_latest(&self) -> Result<EpochCheckpoint, StorageError> {
+        self.inner.with_read_tx(|tx| tx.epoch_checkpoint_get_latest())
     }
 }

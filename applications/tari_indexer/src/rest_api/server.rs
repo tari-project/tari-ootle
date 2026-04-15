@@ -55,7 +55,9 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
     handlers::utxos::stream_utxo_updates,
     handlers::transaction_receipts::list_transaction_receipts,
     handlers::transaction_receipts::get_transaction_receipt,
-    handlers::transaction_events::sse_transaction_events
+    handlers::transaction_events::sse_transaction_events,
+    handlers::epoch_checkpoints::list_epoch_checkpoints,
+    handlers::epoch_checkpoints::get_latest_epoch_checkpoint
 ))]
 pub struct ApiDoc;
 
@@ -152,6 +154,10 @@ impl Server {
                 .route("/xtr" , get(handlers::resources::get_tari))
                 .route("/tari" , get(handlers::resources::get_tari))
                 .route("/{resource_address}" , get(handlers::resources::get_resource)))
+            .nest("/epoch-checkpoints", Router::new()
+                .route("/", get(handlers::epoch_checkpoints::list_epoch_checkpoints))
+                .route("/latest", get(handlers::epoch_checkpoints::get_latest_epoch_checkpoint))
+            )
             .route("/events", get(handlers::indexer_events::sse_events))
             .layer(CorsLayer::permissive())
             .layer(RequestBodyLimitLayer::new(REQUEST_BODY_LIMIT))

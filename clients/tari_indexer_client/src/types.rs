@@ -690,3 +690,30 @@ pub struct GetResourceResponse {
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     pub total_supply: Option<Amount>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListEpochCheckpointsRequest {
+    /// The epoch to start listing from (inclusive). Defaults to 0.
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<u64>))]
+    pub from_epoch: Option<Epoch>,
+    /// Maximum number of checkpoints to return (default: 20, max: 100).
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListEpochCheckpointsResponse {
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<Object>))]
+    pub checkpoints: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct GetLatestEpochCheckpointResponse {
+    #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
+    pub checkpoint: serde_json::Value,
+}

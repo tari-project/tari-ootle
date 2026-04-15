@@ -32,7 +32,7 @@ use tari_ootle_common_types::{
     shard::Shard,
     substate_type::SubstateType,
 };
-use tari_ootle_storage::{Ordering, StorageError, time::PrimitiveDateTime};
+use tari_ootle_storage::{Ordering, StorageError, consensus_models::EpochCheckpoint, time::PrimitiveDateTime};
 use tari_ootle_storage_sqlite::SqliteTransaction;
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_template_lib_types::{
@@ -558,6 +558,47 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                 reason: format!("{OPERATION}: {}", e),
             })?;
         Ok(count > 0)
+    }
+
+    fn epoch_checkpoint_get_all(
+        &mut self,
+        from_epoch: Epoch,
+        limit: u64,
+    ) -> Result<Vec<EpochCheckpoint>, StorageError> {
+        const OPERATION: &str = "epoch_checkpoint_get_all";
+        use crate::storage_sqlite::schema::epoch_checkpoints;
+
+        let rows: Vec<String> = epoch_checkpoints::table
+            .select(epoch_checkpoints::json_data)
+            .filter(epoch_checkpoints::epoch.ge(from_epoch.as_u64() as i64))
+            .order_by(epoch_checkpoints::epoch.asc())
+            .limit(limit as i64)
+            .load(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?;
+
+        rows.into_iter().map(|json_data| deserialize_json(&json_data)).collect()
+    }
+
+    fn epoch_checkpoint_get_latest(&mut self) -> Result<EpochCheckpoint, StorageError> {
+        const OPERATION: &str = "epoch_checkpoint_get_latest";
+        use crate::storage_sqlite::schema::epoch_checkpoints;
+
+        let json_data: String = epoch_checkpoints::table
+            .select(epoch_checkpoints::json_data)
+            .order_by(epoch_checkpoints::epoch.desc())
+            .first(self.connection())
+            .optional()
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?
+            .ok_or_else(|| StorageError::NotFound {
+                item: "EpochCheckpoint",
+                key: "latest".to_string(),
+            })?;
+
+        deserialize_json(&json_data)
     }
 
     fn utxos_get_max_state_version(

@@ -1,6 +1,9 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+export * from "./types/tari-indexer-client/GetLatestEpochCheckpointResponse";
+export * from "./types/tari-indexer-client/ListEpochCheckpointsRequest";
+export * from "./types/tari-indexer-client/ListEpochCheckpointsResponse";
 export * from "./types/tari-indexer-client/NetworkDescription";
 export * from "./types/tari-indexer-client/TemplateCatalogueItem";
 export * from "./types/tari-indexer-client/IndexerGetEpochManagerStatsResponse";

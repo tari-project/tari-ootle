@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{fs, io, str::FromStr, sync::Arc};
+use std::{collections::HashSet, fs, io, str::FromStr, sync::Arc};
 
 use anyhow::{Context, anyhow};
 use libp2p::identity;
@@ -60,7 +60,7 @@ use tari_ootle_p2p::{PeerAddress, TariMessagingSpec};
 use tari_ootle_storage::global::GlobalDb;
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_shutdown::ShutdownSignal;
-use tari_template_lib_types::{Amount, crypto::RistrettoPublicKeyBytes};
+use tari_template_lib_types::{Amount, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
 use crate::{
@@ -203,6 +203,9 @@ pub async fn spawn_services(
         consensus_constants.num_preshards,
     );
 
+    let watched_templates: Arc<HashSet<TemplateAddress>> =
+        Arc::new(config.indexer.watched_templates.iter().copied().collect());
+
     let event_notifier = Notify::new(1000);
     let transaction_event_notifier = Notify::new(1024);
 
@@ -213,6 +216,7 @@ pub async fn spawn_services(
         NetworkWideStateSyncConfig {
             event_filters: Arc::from(config.indexer.event_filters.clone()),
             work_interval: config.indexer.state_scanning_interval,
+            watched_templates: watched_templates.clone(),
         },
         event_notifier.clone(),
         transaction_event_notifier.clone(),
@@ -268,6 +272,7 @@ pub async fn spawn_services(
         dry_run_transaction_processor,
         event_notifier,
         transaction_event_notifier,
+        watched_templates,
     })
 }
 
@@ -286,6 +291,7 @@ pub struct Services {
     pub dry_run_transaction_processor: DryRunTransactionProcessor,
     pub event_notifier: Notify<IndexerEvent>,
     pub transaction_event_notifier: Notify<TransactionEvent>,
+    pub watched_templates: Arc<HashSet<TemplateAddress>>,
 }
 
 fn ensure_directories_exist(config: &ApplicationConfig) -> io::Result<()> {

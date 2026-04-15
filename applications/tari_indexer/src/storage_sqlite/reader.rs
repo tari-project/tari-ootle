@@ -48,7 +48,15 @@ use crate::{
     network_state_sync::EventFilter,
     storage_sqlite::{
         models,
-        models::{EventRecord, KeyValue, SubstateRecord, TemplateCatalogueEntry, TemplateCatalogueRow},
+        models::{
+            EventRecord,
+            KeyValue,
+            SubstateRecord,
+            TemplateCatalogueEntry,
+            TemplateCatalogueRow,
+            WatchedSubstateEntry,
+            WatchedSubstateRow,
+        },
         serialization::{deserialize_hex_try_from, deserialize_json, serialize_hex},
     },
     store::IndexerStoreReadTransaction,
@@ -851,5 +859,47 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             })
         })
         .transpose()
+    }
+
+    fn list_watched_substates(
+        &mut self,
+        template_address: Option<&TemplateAddress>,
+        limit: u64,
+        offset: u64,
+    ) -> Result<Vec<WatchedSubstateEntry>, StorageError> {
+        const OPERATION: &str = "list_watched_substates";
+        use crate::storage_sqlite::schema::watched_substates;
+
+        let mut query = watched_substates::table.into_boxed();
+
+        if let Some(template_address) = template_address {
+            query = query.filter(watched_substates::template_address.eq(template_address.to_string()));
+        }
+
+        let rows = query
+            .limit(limit as i64)
+            .offset(offset as i64)
+            .order_by(watched_substates::created_at.desc())
+            .load::<WatchedSubstateRow>(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {e}"),
+            })?;
+
+        rows.into_iter()
+            .map(|row| {
+                let component_address =
+                    SubstateId::from_str(&row.component_address).map_err(|e| StorageError::DataInconsistency {
+                        details: format!("{OPERATION}: Invalid component address {}: {e}", row.component_address),
+                    })?;
+                let template_address =
+                    TemplateAddress::from_hex(&row.template_address).map_err(|e| StorageError::DataInconsistency {
+                        details: format!("{OPERATION}: Invalid template address {}: {e}", row.template_address),
+                    })?;
+                Ok(WatchedSubstateEntry {
+                    component_address,
+                    template_address,
+                })
+            })
+            .collect()
     }
 }

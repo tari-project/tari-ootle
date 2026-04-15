@@ -96,6 +96,7 @@ impl Server {
             .route("/network/connections", get(handlers::network::get_connections))
             .nest("/substates", Router::new()
                 .route("/fetch", post(handlers::substates::fetch_substates))
+                .route("/watched", get(handlers::watched::list_watched_substates))
                 .route("/{substate_id}", get(handlers::substates::get_substate))
             )
             .nest("/transactions", Router::new()
@@ -124,6 +125,7 @@ impl Server {
             )
             .nest("/templates", Router::new()
                 .route("/cached", get(handlers::templates::list_cached_templates))
+                .route("/watched", get(handlers::watched::list_watched_templates))
                 .route("/catalogue", get(handlers::templates::list_template_catalogue))
                 .route(
                     "/catalogue/{template_address}",

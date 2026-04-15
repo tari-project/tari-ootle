@@ -94,6 +94,14 @@ diesel::table! {
 }
 
 diesel::table! {
+    watched_substates (component_address) {
+        component_address -> Text,
+        template_address -> Text,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     utxos (id) {
         id -> Integer,
         commitment -> Text,
@@ -122,4 +130,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     transaction_receipts,
     transactions,
     utxos,
+    watched_substates,
 );

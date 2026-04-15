@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use tari_template_lib_types::TemplateAddress;
+use url::Url;
 
 use crate::{MetadataHash, MetadataHashWriter};
 
@@ -29,18 +30,18 @@ pub struct TemplateMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub repository: Option<String>,
+    pub repository: Option<Url>,
     /// The commit hash of the source code used to build this template, for reproducible build verification.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub commit_hash: Option<String>,
+    pub commit_hash: Option<gix_hash::ObjectId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub documentation: Option<String>,
+    pub documentation: Option<Url>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub homepage: Option<String>,
+    pub homepage: Option<Url>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub logo_url: Option<String>,
+    pub logo_url: Option<Url>,
     /// The template address of a previous version that this template supersedes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supersedes: Option<TemplateAddress>,
@@ -139,7 +140,7 @@ mod tests {
             description: "A test template".to_string(),
             tags: vec!["test".to_string(), "example".to_string()],
             category: Some("utility".to_string()),
-            repository: Some("https://github.com/example/test".to_string()),
+            repository: Some(Url::parse("https://github.com/example/test").unwrap()),
             commit_hash: None,
             documentation: None,
             homepage: None,

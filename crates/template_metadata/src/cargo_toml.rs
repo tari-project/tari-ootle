@@ -5,6 +5,7 @@ use std::{collections::BTreeMap, path::Path};
 
 use cargo_toml::Manifest;
 use tari_template_lib_types::TemplateAddress;
+use url::Url;
 
 use crate::{TemplateMetadata, metadata::SCHEMA_VERSION};
 
@@ -39,7 +40,13 @@ fn from_manifest(manifest: &Manifest) -> Result<TemplateMetadata, CargoTomlError
         .cloned()
         .unwrap_or_default();
     let license = package.license.as_ref().and_then(|l| l.get().ok()).cloned();
-    let repository = package.repository.as_ref().and_then(|r| r.get().ok()).cloned();
+    let repository = package
+        .repository
+        .as_ref()
+        .and_then(|r| r.get().ok())
+        .map(|r| Url::parse(r))
+        .transpose()
+        .map_err(|e| CargoTomlError::InvalidUrl("repository", e))?;
 
     // Read [package.metadata.tari-template]
     let tari_template = package
@@ -62,22 +69,30 @@ fn from_manifest(manifest: &Manifest) -> Result<TemplateMetadata, CargoTomlError
     let commit_hash = tari_template
         .and_then(|t| t.get("commit_hash"))
         .and_then(|v| v.as_str())
-        .map(String::from);
+        .map(|s| gix_hash::ObjectId::from_hex(s.as_bytes()))
+        .transpose()
+        .map_err(CargoTomlError::InvalidCommitHash)?;
 
     let documentation = tari_template
         .and_then(|t| t.get("documentation"))
         .and_then(|v| v.as_str())
-        .map(String::from);
+        .map(Url::parse)
+        .transpose()
+        .map_err(|e| CargoTomlError::InvalidUrl("documentation", e))?;
 
     let homepage = tari_template
         .and_then(|t| t.get("homepage"))
         .and_then(|v| v.as_str())
-        .map(String::from);
+        .map(Url::parse)
+        .transpose()
+        .map_err(|e| CargoTomlError::InvalidUrl("homepage", e))?;
 
     let logo_url = tari_template
         .and_then(|t| t.get("logo_url"))
         .and_then(|v| v.as_str())
-        .map(String::from);
+        .map(Url::parse)
+        .transpose()
+        .map_err(|e| CargoTomlError::InvalidUrl("logo_url", e))?;
 
     let supersedes = tari_template
         .and_then(|t| t.get("supersedes"))
@@ -124,6 +139,10 @@ pub enum CargoTomlError {
     InheritedField(&'static str),
     #[error("Invalid template address in field '{0}'")]
     InvalidTemplateAddress(&'static str),
+    #[error("Invalid URL in field '{0}': {1}")]
+    InvalidUrl(&'static str, url::ParseError),
+    #[error("Invalid commit hash: {0}")]
+    InvalidCommitHash(gix_hash::decode::Error),
 }
 
 #[cfg(test)]
@@ -159,16 +178,19 @@ audit = "https://example.com/audit-report"
         );
         assert_eq!(metadata.license.as_deref(), Some("BSD-3-Clause"));
         assert_eq!(
-            metadata.repository.as_deref(),
+            metadata.repository.as_ref().map(|u| u.as_str()),
             Some("https://github.com/example/fungible-token")
         );
         assert_eq!(metadata.tags, vec!["token", "fungible", "defi"]);
         assert_eq!(metadata.category.as_deref(), Some("token"));
         assert_eq!(
-            metadata.documentation.as_deref(),
+            metadata.documentation.as_ref().map(|u| u.as_str()),
             Some("https://docs.example.com/fungible-token")
         );
-        assert_eq!(metadata.homepage.as_deref(), Some("https://example.com"));
+        assert_eq!(
+            metadata.homepage.as_ref().map(|u| u.as_str()),
+            Some("https://example.com/")
+        );
         assert_eq!(
             metadata.extra.get("audit").map(|s| s.as_str()),
             Some("https://example.com/audit-report")

@@ -279,16 +279,15 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         max_fee: A,
         fee_params: &TransferFeeParams,
     ) -> Result<InputsToSpend, StealthTransferApiError> {
-        let resource = fee_params
-            .pay_fee_with_swap
-            .as_ref()
-            .map(|swap| swap.input_resource)
-            .unwrap_or(TARI_TOKEN);
+        let (resource, amount) = match fee_params.pay_fee_with_swap.as_ref() {
+            Some(swap) => (swap.input_resource, swap.input_amount),
+            None => (TARI_TOKEN, max_fee.into()),
+        };
         self.lock_inputs_for_transfer(
             lock_id,
             owner_account_address,
             resource,
-            max_fee.into(),
+            amount,
             fee_params.input_selection,
         )
     }
@@ -380,9 +379,16 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 params.max_fee,
             );
 
+            // When paying with a swap, the amount to spend is the swap input_amount (non-TARI token),
+            // not max_fee (which is in microtari and has a different exchange rate).
+            let fee_amount_to_spend = match params.fee_params.pay_fee_with_swap.as_ref() {
+                Some(swap) => swap.input_amount,
+                None => params.max_fee.into(),
+            };
+
             let fee_stealth_change_amt = fee_inputs_to_spend
                 .total_stealth_input_amount()
-                .saturating_sub(params.max_fee.into())
+                .saturating_sub(fee_amount_to_spend)
                 .to_u64_checked()
                 .ok_or_else(|| {
                     StealthTransferApiError::InvariantViolation {
@@ -427,7 +433,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 inputs: &fee_inputs_to_spend.inputs,
                 input_revealed_amount: fee_inputs_to_spend.revealed,
                 outputs: fee_change_output,
-                output_revealed_amount: Amount::from(params.max_fee),
+                output_revealed_amount: fee_amount_to_spend,
             })?;
 
             // Add the unconfirmed fee change output to the wallet store
@@ -773,9 +779,13 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                         if let Some(swap) = params.fee_params.pay_fee_with_swap.as_ref() {
                             b.put_last_instruction_output_on_workspace("fee_swap_input_bucket")
                              .call_method(swap.pool_address, "swap", args![Workspace("fee_swap_input_bucket")])
-                             .put_last_instruction_output_on_workspace("fee_input_bucket")
+                             .put_last_instruction_output_on_workspace("fee_swap_output_bucket")
                              // Slippage protection - ensure that the output from the swap is at least the minimum fee amount
-                             .assert_bucket_contains_at_least("fee_input_bucket", TARI_TOKEN, swap.min_xtr_output_amount)
+                             .assert_bucket_contains_at_least("fee_swap_output_bucket", TARI_TOKEN, swap.min_xtr_output_amount)
+                             // Take only max_fee from the swap output for the fee payment
+                             .take_from_bucket("fee_swap_output_bucket", params.max_fee, "fee_input_bucket")
+                             // Deposit any excess TARI back to the user's account
+                             .call_method(*owner_account.component_address(), "deposit", args![Workspace("fee_swap_output_bucket")])
                         } else {
                             b.put_last_instruction_output_on_workspace("fee_input_bucket")
                         }

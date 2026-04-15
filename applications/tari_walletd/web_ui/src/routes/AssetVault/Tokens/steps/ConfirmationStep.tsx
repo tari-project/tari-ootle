@@ -23,9 +23,10 @@
 import CopyAddress from "@components/CopyAddress";
 import { Box, Button, Divider, Stack, Typography } from "@mui/material";
 import type { ResourceAddress, ResourceType } from "@tari-project/ootle-ts-bindings";
+import { TARI_TOKEN } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
 import { formatCurrency } from "@utils/helpers";
-import { SendMoneyFormState } from "./FormStep";
+import { SendMoneyFormState, PoolRateInfo } from "./FormStep";
 
 interface ConfirmationStepProps {
   resource_address?: ResourceAddress;
@@ -36,6 +37,7 @@ interface ConfirmationStepProps {
   onConfirm: () => void;
   token_symbol: string;
   divisibility: number;
+  poolRate: PoolRateInfo | null;
 }
 
 export default function ConfirmationStep({
@@ -47,7 +49,10 @@ export default function ConfirmationStep({
   onConfirm,
   token_symbol,
   divisibility,
+  poolRate,
 }: ConfirmationStepProps) {
+  const currency = { symbol: token_symbol, decimals: divisibility };
+
   return (
     <Stack spacing={3} sx={{ py: 2 }}>
       <Stack spacing={2}>
@@ -106,10 +111,10 @@ export default function ConfirmationStep({
           </Box>
         )}
 
-        {transferFormState.swapPoolAddress && (
+        {transferFormState.swapPoolAddress && poolRate && (
           <>
             <Divider />
-            <Typography variant="subtitle2" color="text.secondary">
+            <Typography variant="subtitle1" color="text.primary" fontWeight="bold">
               Fee Payment via Pool Swap
             </Typography>
             <Box>
@@ -120,26 +125,30 @@ export default function ConfirmationStep({
             </Box>
             <Box>
               <Typography variant="subtitle2" color="text.secondary">
-                Fee Swap Amount:
+                Swap Amount (calculated):
               </Typography>
               <Typography variant="body1">
-                {formatCurrency(parseInt(transferFormState.fee) || 0, { symbol: token_symbol, decimals: divisibility })}
+                {transferFormState.swapInputAmount
+                  ? formatCurrency(BigInt(transferFormState.swapInputAmount), currency)
+                  : "—"}
               </Typography>
             </Box>
             <Box>
               <Typography variant="subtitle2" color="text.secondary">
-                Slippage Tolerance:
+                Min TARI Output (estimated fee):
               </Typography>
               <Typography variant="body1">
-                {transferFormState.swapSlippagePercent}% (min{" "}
-                {formatCurrency(
-                  Math.floor(
-                    (parseInt(transferFormState.fee) || 0) *
-                      (100 - (parseFloat(transferFormState.swapSlippagePercent) || 0)) / 100,
-                  ),
-                  XTR_CURRENCY,
-                )}
-                )
+                {formatCurrency(parseInt(transferFormState.fee) || 0, XTR_CURRENCY)}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography variant="subtitle2" color="text.secondary">
+                Pool Reserves:
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {poolRate.resource_a === TARI_TOKEN
+                  ? `${formatCurrency(poolRate.balance_a, XTR_CURRENCY)} / ${formatCurrency(poolRate.balance_b, currency)}`
+                  : `${formatCurrency(poolRate.balance_a, currency)} / ${formatCurrency(poolRate.balance_b, XTR_CURRENCY)}`}
               </Typography>
             </Box>
           </>

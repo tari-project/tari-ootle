@@ -85,6 +85,10 @@ import type {
   SubstatesGetResponse,
   SubstatesListRequest,
   SubstatesListResponse,
+  SwapPoolGetExchangeRateRequest,
+  SwapPoolGetExchangeRateResponse,
+  SwapPoolsListRequest,
+  SwapPoolsListResponse,
   TemplatesGetRequest,
   TemplatesGetResponse,
   TemplatesListAuthoredRequest,
@@ -301,3 +305,10 @@ export const walletGetInfo = (): Promise<WalletGetInfoResponse> => client().then
 // utxos
 export const stealthUtxosList = (request: StealthUtxosListRequest): Promise<StealthUtxosListResponse> =>
   client().then((c) => c.stealthUtxosList(request));
+
+// swap pools
+export const swapPoolGetExchangeRate = (request: SwapPoolGetExchangeRateRequest): Promise<SwapPoolGetExchangeRateResponse> =>
+  client().then((c) => c.swapPoolGetExchangeRate(request));
+
+export const swapPoolsList = (request: SwapPoolsListRequest): Promise<SwapPoolsListResponse> =>
+  client().then((c) => c.swapPoolsList(request));

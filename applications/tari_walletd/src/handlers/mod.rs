@@ -13,6 +13,7 @@ pub mod nfts;
 pub mod settings;
 pub mod stealth_utxos;
 pub mod substates;
+pub mod swap_pools;
 pub mod templates;
 pub mod transaction;
 pub mod validator;

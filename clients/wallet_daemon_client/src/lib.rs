@@ -134,6 +134,10 @@ use crate::{
         SubstatesGetResponse,
         SubstatesListRequest,
         SubstatesListResponse,
+        SwapPoolGetExchangeRateRequest,
+        SwapPoolGetExchangeRateResponse,
+        SwapPoolsListRequest,
+        SwapPoolsListResponse,
         TemplatesGetRequest,
         TemplatesGetResponse,
         TemplatesListAuthoredRequest,
@@ -656,6 +660,22 @@ impl WalletDaemonClient {
         req: T,
     ) -> Result<SubstatesListResponse, WalletDaemonClientError> {
         self.send_request("substates.list", req.borrow()).await
+    }
+
+    /// Gets the exchange rate for a swap pool by fetching its vault balances.
+    pub async fn swap_pool_get_exchange_rate<T: Borrow<SwapPoolGetExchangeRateRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<SwapPoolGetExchangeRateResponse, WalletDaemonClientError> {
+        self.send_request("swap_pools.get_exchange_rate", req.borrow()).await
+    }
+
+    /// Lists swap pools known to the indexer with their current exchange rates.
+    pub async fn swap_pools_list<T: Borrow<SwapPoolsListRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<SwapPoolsListResponse, WalletDaemonClientError> {
+        self.send_request("swap_pools.list", req.borrow()).await
     }
 
     /// Fetches a template by its address, including its function definitions.

@@ -24,7 +24,9 @@ use tari_indexer_client::{
         GetUtxoUpdatesRequest,
         GetUtxosRequest,
         IndexerTransactionFinalizedResult,
+        ListWatchedSubstatesRequest,
         SubmitTransactionRequest,
+        WatchedSubstateItem,
     },
 };
 use tari_ootle_common_types::{
@@ -284,6 +286,25 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
             })
             .await?;
         Ok(resp.utxos)
+    }
+
+    async fn list_watched_substates(
+        &self,
+        template_address: Option<TemplateAddress>,
+        limit: Option<u64>,
+        offset: Option<u64>,
+    ) -> Result<Vec<WatchedSubstateItem>, Self::Error> {
+        let client = self.get_client()?;
+
+        let resp = client
+            .list_watched_substates(ListWatchedSubstatesRequest {
+                template_address,
+                limit,
+                offset,
+            })
+            .await?;
+
+        Ok(resp.substates)
     }
 
     async fn get_current_epoch(&self) -> Result<Epoch, Self::Error> {

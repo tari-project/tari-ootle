@@ -131,7 +131,7 @@ export interface TransferParams {
   dry_run: boolean;
   output_memo?: Memo;
   swap_pool_address?: string | null;
-  swap_slippage_percent?: number;
+  swap_input_amount?: bigint | null;
 }
 
 export const useAccountsTransfer = () => {
@@ -168,10 +168,10 @@ export const useAccountsTransfer = () => {
               ? {
                   pool_address: params.swap_pool_address,
                   input_resource: params.resource_address,
-                  input_amount: max_fee,
-                  min_xtr_output_amount: Math.floor(
-                    max_fee * (100 - (params.swap_slippage_percent || 0)) / 100,
-                  ),
+                  input_amount: params.swap_input_amount || 0n,
+                  // Set min output to max_fee so the swap must produce enough TARI to cover the fee.
+                  // Any excess TARI from the swap is deposited back to the user's account.
+                  min_xtr_output_amount: max_fee,
                 }
               : null,
           },

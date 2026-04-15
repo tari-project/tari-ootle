@@ -24,6 +24,48 @@ use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use config::Config;
 use serde::{Deserialize, Serialize};
+
+/// Rate limiting configuration for the indexer REST API.
+///
+/// All request-count limits are per-IP. Set a value to `0` to disable that
+/// limit entirely (the middleware skips rate checking when capacity is 0).
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RateLimitConfig {
+    /// `POST /transactions`: maximum requests per minute per IP (default: 20).
+    pub transactions_submit_per_min: u64,
+    /// `POST /transactions/dry-run`: maximum requests per 5 seconds per IP (default: 10).
+    pub dry_run_per_5s: u64,
+    /// `POST /substates/fetch`: maximum requests per minute per IP (default: 30).
+    pub substates_fetch_per_min: u64,
+    /// `POST /utxos/fetch`: maximum requests per minute per IP (default: 15).
+    pub utxos_fetch_per_min: u64,
+    /// `GET /non-fungibles`: maximum requests per minute per IP (default: 30).
+    pub non_fungibles_per_min: u64,
+    /// `GET /transactions/recent`: maximum requests per minute per IP (default: 60).
+    pub recent_transactions_per_min: u64,
+    /// SSE stream endpoints (`/events`, `/events/stream`, `/utxos/stream`):
+    /// maximum concurrent connections per IP (default: 3).
+    pub sse_max_connections_per_ip: usize,
+    /// If `true`, the `X-Forwarded-For` header is used to determine the
+    /// client IP instead of the TCP peer address.  Enable this when the
+    /// indexer runs behind a trusted reverse proxy (default: false).
+    pub trust_proxy_headers: bool,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            transactions_submit_per_min: 20,
+            dry_run_per_5s: 10,
+            substates_fetch_per_min: 30,
+            utxos_fetch_per_min: 15,
+            non_fungibles_per_min: 30,
+            recent_transactions_per_min: 60,
+            sse_max_connections_per_ip: 3,
+            trust_proxy_headers: false,
+        }
+    }
+}
 use tari_common::{
     ConfigurationError,
     DefaultConfigLoader,
@@ -125,6 +167,8 @@ pub struct IndexerConfig {
     pub dry_run_cache_ttl: Duration,
     /// The event filtering configuration
     pub event_filters: Vec<EventFilter>,
+    /// Rate limiting configuration for the REST API.
+    pub rate_limit: RateLimitConfig,
 }
 
 impl Default for IndexerConfig {
@@ -146,6 +190,7 @@ impl Default for IndexerConfig {
             burnt_utxo_sidechain_id: None,
             dry_run_cache_ttl: Duration::from_secs(10),
             event_filters: vec![],
+            rate_limit: RateLimitConfig::default(),
         }
     }
 }

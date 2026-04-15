@@ -11080,6 +11080,7 @@ dependencies = [
  "cacache",
  "clap 3.2.25",
  "config",
+ "dashmap 5.5.3",
  "diesel",
  "diesel_migrations",
  "futures 0.3.31",

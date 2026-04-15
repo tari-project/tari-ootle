@@ -147,18 +147,13 @@ mod tests {
             tags: vec!["test".to_string(), "example".to_string()],
             category: Some("utility".to_string()),
             repository: Some(Url::parse("https://github.com/example/test").unwrap()),
-            commit_hash: Some(
-                gix_hash::ObjectId::from_hex(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap(),
-            ),
+            commit_hash: Some(gix_hash::ObjectId::from_hex(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap()),
             documentation: None,
             homepage: None,
             license: Some("BSD-3-Clause".to_string()),
             logo_url: None,
             supersedes: Some(
-                TemplateAddress::from_hex(
-                    "0000000000000000000000000000000000000000000000000000000000000001",
-                )
-                .unwrap(),
+                TemplateAddress::from_hex("0000000000000000000000000000000000000000000000000000000000000001").unwrap(),
             ),
             extra: BTreeMap::new(),
         };

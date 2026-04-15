@@ -11475,6 +11475,7 @@ dependencies = [
  "tari_ootle_template_metadata",
  "tempfile",
  "thiserror 2.0.18",
+ "url",
 ]
 
 [[package]]

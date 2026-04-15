@@ -56,6 +56,8 @@ mod auth_hook;
 pub mod confidential;
 mod log_level;
 mod owner_rule;
+#[cfg(feature = "extra-maps")]
+pub mod fast_hash;
 #[cfg(feature = "precision")]
 pub mod precision;
 pub mod stealth;

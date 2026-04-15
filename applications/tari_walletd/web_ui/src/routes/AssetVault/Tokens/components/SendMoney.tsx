@@ -414,7 +414,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
       // Wait for the transaction to be finalized
       const waitResult = await transactionsWaitResult({
         transaction_id: submitResult.transaction_id,
-        timeout_secs: null,
+        timeout_secs: 120,
       });
 
       const txResult = waitResult.result?.result;

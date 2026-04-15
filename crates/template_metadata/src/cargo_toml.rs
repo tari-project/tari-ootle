@@ -59,6 +59,11 @@ fn from_manifest(manifest: &Manifest) -> Result<TemplateMetadata, CargoTomlError
         .and_then(|v| v.as_str())
         .map(String::from);
 
+    let commit_hash = tari_template
+        .and_then(|t| t.get("commit_hash"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
     let documentation = tari_template
         .and_then(|t| t.get("documentation"))
         .and_then(|v| v.as_str())
@@ -99,6 +104,7 @@ fn from_manifest(manifest: &Manifest) -> Result<TemplateMetadata, CargoTomlError
         tags,
         category,
         repository,
+        commit_hash,
         documentation,
         homepage,
         license,

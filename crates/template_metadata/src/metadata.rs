@@ -30,6 +30,9 @@ pub struct TemplateMetadata {
     pub category: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
+    /// The commit hash of the source code used to build this template, for reproducible build verification.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub documentation: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -56,6 +59,7 @@ impl TemplateMetadata {
             tags: Vec::new(),
             category: None,
             repository: None,
+            commit_hash: None,
             documentation: None,
             homepage: None,
             license: None,
@@ -136,6 +140,7 @@ mod tests {
             tags: vec!["test".to_string(), "example".to_string()],
             category: Some("utility".to_string()),
             repository: Some("https://github.com/example/test".to_string()),
+            commit_hash: None,
             documentation: None,
             homepage: None,
             license: Some("BSD-3-Clause".to_string()),
@@ -202,6 +207,7 @@ mod tests {
             tags: vec!["a".to_string()],
             category: Some("test".to_string()),
             repository: None,
+            commit_hash: None,
             documentation: None,
             homepage: None,
             license: None,

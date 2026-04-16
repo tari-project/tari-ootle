@@ -109,8 +109,7 @@ impl ManifestInstructionGenerator {
                     args: self.process_args(arguments)?,
                 }];
                 if let Some(binding) = output_variable {
-                    let key = self.current_workspace_id;
-                    self.current_workspace_id += 1;
+                    let key = self.next_workspace_id_raw();
                     instructions.push(Instruction::PutLastInstructionOutputOnWorkspace { key });
                     self.register_output_binding(binding, key);
                 }
@@ -130,6 +129,14 @@ impl ManifestInstructionGenerator {
                 let call = if let Some(value) = self.global_aliases.get(&component_ident) {
                     ComponentReference::Address(Self::extract_component_address(value)?)
                 } else if let Some(workspace_offset) = self.workspace_ids.get(&component_ident) {
+                    if workspace_offset.offset().is_some() {
+                        return Err(ManifestError::InvalidInstruction {
+                            reason: format!(
+                                "Tuple-destructured variable '{component_ident}' cannot be used as a component \
+                                 reference. Use a single variable binding instead."
+                            ),
+                        });
+                    }
                     ComponentReference::Workspace(workspace_offset.id())
                 } else if let Some(value) = self.globals.get(&component_ident) {
                     ComponentReference::Address(Self::extract_component_address(value)?)
@@ -147,8 +154,7 @@ impl ManifestInstructionGenerator {
                     args: self.process_args(arguments)?,
                 }];
                 if let Some(binding) = output_variable {
-                    let key = self.current_workspace_id;
-                    self.current_workspace_id += 1;
+                    let key = self.next_workspace_id_raw();
                     instructions.push(Instruction::PutLastInstructionOutputOnWorkspace { key });
                     self.register_output_binding(binding, key);
                 }
@@ -232,10 +238,15 @@ impl ManifestInstructionGenerator {
         }
     }
 
-    fn next_workspace_id(&mut self, name: String) -> WorkspaceId {
+    fn next_workspace_id_raw(&mut self) -> WorkspaceId {
         let id = self.current_workspace_id;
-        self.workspace_ids.insert(name, WorkspaceOffsetId::new(id));
         self.current_workspace_id += 1;
+        id
+    }
+
+    fn next_workspace_id(&mut self, name: String) -> WorkspaceId {
+        let id = self.next_workspace_id_raw();
+        self.workspace_ids.insert(name, WorkspaceOffsetId::new(id));
         id
     }
 

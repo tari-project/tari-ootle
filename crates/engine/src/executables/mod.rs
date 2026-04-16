@@ -3,7 +3,7 @@
 
 mod transaction;
 
-use tari_ootle_common_types::SubstateRequirementRef;
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_transaction::{Instruction, TransactionId, TransactionWeight};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
@@ -15,7 +15,7 @@ pub struct Instructions {
 pub trait Executable {
     fn to_id(&self) -> TransactionId;
 
-    fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateRequirementRef<'_>> + '_;
+    fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateId> + '_;
 
     /// Returns the main signer of the executable, if any.
     fn main_signer(&self) -> Option<RistrettoPublicKeyBytes> {

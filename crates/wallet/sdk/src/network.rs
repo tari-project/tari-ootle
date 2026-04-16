@@ -11,6 +11,7 @@ use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{Substate, SubstateId, SubstateValue},
 };
+use tari_indexer_client::types::WatchedSubstateItem;
 use tari_ootle_common_types::{
     Epoch,
     StateVersion,
@@ -86,6 +87,12 @@ pub trait WalletNetworkInterface {
         tag_and_nonce_pairs: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
     ) -> impl Future<Output = Result<Vec<(UtxoId, Utxo)>, Self::Error>> + Send;
 
+    fn list_watched_substates(
+        &self,
+        template_address: Option<TemplateAddress>,
+        limit: Option<u64>,
+        offset: Option<u64>,
+    ) -> impl Future<Output = Result<Vec<WatchedSubstateItem>, Self::Error>> + Send;
     fn get_current_epoch(&self) -> impl Future<Output = Result<Epoch, Self::Error>> + Send;
 
     fn wait_until_ready(&self) -> impl Future<Output = Result<(), Self::Error>> + Send;

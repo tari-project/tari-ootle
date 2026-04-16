@@ -40,7 +40,7 @@ use tari_ootle_storage::{
     StateStoreReadTransaction,
     consensus_models::{Block, Command, SubstateRecord, TransactionRecord},
 };
-use tari_ootle_transaction::Transaction;
+use tari_ootle_transaction::{Transaction, args};
 
 use crate::support::{
     ExecuteSpec,
@@ -1513,3 +1513,116 @@ async fn multishard_validator_fee_claim() {
 //            serde_json::to_writer_pretty(f, &p).unwrap();
 //    }
 // }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn single_transaction_epoch_expired() {
+    setup_logger();
+    let mut test = Test::builder().add_committee(0, vec!["1"]).start().await;
+
+    let inputs = test.create_substates_on_vns(TestVnDestination::All, 1);
+    let tx = build_transaction_from(
+        Transaction::builder_localnet()
+            .with_inputs(inputs.iter().cloned().map(|i| i.into()))
+            .with_max_epoch(Some(Epoch(0)))
+            .call_function(Default::default(), "foo", args![])
+            .build_and_seal(&PrivateKey::default()),
+    );
+    test.create_execution_at_destination_for_transaction(
+        TestVnDestination::All,
+        &tx,
+        Decision::Commit,
+        1,
+        inputs
+            .into_iter()
+            .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
+            .collect(),
+        vec![],
+    );
+    test.send_transaction_to_destination(TestVnDestination::All, tx.clone())
+        .await;
+
+    // Start at epoch 1, which exceeds max_epoch(0) — transaction should be aborted
+    test.start_epoch(Epoch(1)).await;
+
+    loop {
+        test.on_block_committed().await;
+
+        if test.is_transaction_pool_empty() {
+            break;
+        }
+        let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+        if leaf.height >= NodeHeight(10) {
+            panic!("Not all transactions finalized after {} blocks", leaf.height);
+        }
+    }
+
+    test.stop();
+    test.assert_all_validators_have_decision(tx.id(), Decision::Abort(AbortReason::EpochExpired))
+        .await;
+
+    test.assert_clean_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn multishard_transaction_epoch_expired() {
+    setup_logger();
+    let mut test = Test::builder()
+        .add_committee(0, vec!["1", "2"])
+        .add_committee(1, vec!["3", "4"])
+        .start()
+        .await;
+
+    let inputs = test.create_substates_on_vns(TestVnDestination::Committee(0), 2);
+    let outputs = test.build_outputs_for_committee(1, 1);
+    let tx = build_transaction_from(
+        Transaction::builder_localnet()
+            .with_inputs(inputs.iter().cloned().map(|i| i.into()))
+            .with_max_epoch(Some(Epoch(0)))
+            .call_function(Default::default(), "foo", args![])
+            .build_and_seal(&PrivateKey::default()),
+    );
+    test.create_execution_at_destination_for_transaction(
+        TestVnDestination::All,
+        &tx,
+        Decision::Commit,
+        5,
+        inputs
+            .into_iter()
+            .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
+            .collect(),
+        outputs,
+    );
+    test.send_transaction_to_destination(TestVnDestination::All, tx.clone())
+        .await;
+
+    // Start at epoch 1, which exceeds max_epoch(0) — the input committee should abort with EpochExpired.
+    // The output committee (committee 1) will not process the transaction because the epoch expiry abort
+    // prevents execution and therefore no foreign proposal is sent to it.
+    test.start_epoch(Epoch(1)).await;
+
+    loop {
+        test.on_block_committed().await;
+
+        if test.is_transaction_finalized_at_destination(TestVnDestination::Committee(0), tx.id()) {
+            break;
+        }
+
+        let leaf1 = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+        if leaf1.height > NodeHeight(30) {
+            panic!(
+                "Transaction not finalized after {} blocks",
+                leaf1.height,
+            );
+        }
+    }
+
+    test.stop();
+    test.assert_validators_have_decision(
+        TestVnDestination::Committee(0),
+        tx.id(),
+        Decision::Abort(AbortReason::EpochExpired),
+    )
+    .await;
+
+    test.assert_clean_shutdown().await;
+}

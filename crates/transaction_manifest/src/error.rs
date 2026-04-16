@@ -46,4 +46,6 @@ pub enum ManifestError {
     InvalidInstruction { reason: String },
     #[error("Maximum call depth of {max} exceeded")]
     MaxCallDepthExceeded { max: usize },
+    #[error("Failed to serialize CBOR literal: {0}")]
+    CborSerializationError(#[from] tari_bor::BorError),
 }

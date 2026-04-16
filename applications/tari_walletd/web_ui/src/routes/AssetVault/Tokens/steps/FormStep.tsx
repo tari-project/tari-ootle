@@ -22,7 +22,7 @@
 
 import CopyAddress from "@components/CopyAddress";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
-import { Alert, CircularProgress, Divider, InputAdornment, InputLabel, Stack, Typography } from "@mui/material";
+import { Alert, Chip, CircularProgress, Divider, InputAdornment, InputLabel, Stack, Typography } from "@mui/material";
 import Button from "@mui/material/Button";
 import CheckBox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
@@ -88,6 +88,7 @@ interface FormStepProps {
   onCheckboxFormValueChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onUseBadgeChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onPoolSelect: (poolAddress: string) => void;
+  hasTariBalance?: boolean;
 }
 
 export type FormError = {
@@ -139,6 +140,7 @@ export default function FormStep({
   onCheckboxFormValueChange,
   onUseBadgeChange,
   onPoolSelect,
+  hasTariBalance,
 }: FormStepProps) {
   const isConfidential = resource_type === "Confidential";
   const isStealth = resource_type === "Stealth";
@@ -151,13 +153,16 @@ export default function FormStep({
   const isNaNAmount = isNaN(enteredAmount);
   const enteredAmountInBaseUnits = isNaNAmount ? 0n : parseAmountToBaseUnits(transferFormState.amount, divisibility);
   const hasInsufficientFunds = availableBalance !== undefined && enteredAmountInBaseUnits > BigInt(availableBalance);
+  const poolHasNoLiquidity =
+    !!transferFormState.swapPoolAddress && poolRate !== null && (poolRate.balance_a === 0n || poolRate.balance_b === 0n);
 
   const isFormValid =
     !isNaNAmount &&
     validateOotleAddress(transferFormState.address) &&
     transferFormState.amount &&
     !hasInsufficientFunds &&
-    !poolError;
+    !poolError &&
+    !poolHasNoLiquidity;
 
   // Format amount for display
   const formatAmountValue = (amount: string) => {
@@ -358,7 +363,7 @@ export default function FormStep({
                   Loading pools...
                 </Typography>
               </Stack>
-            ) : relevantPools.length > 0 ? (
+            ) : (
               <>
                 <InputLabel id="select-pool">Select Pool</InputLabel>
                 <Select
@@ -380,7 +385,12 @@ export default function FormStep({
                     }
                   }}
                 >
-                  <MenuItem value="">None (pay fee in TARI)</MenuItem>
+                  <MenuItem value="">
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <span>None (pay fee in TARI)</span>
+                      {hasTariBalance && <Chip label="Recommended" size="small" color="success" variant="outlined" />}
+                    </Stack>
+                  </MenuItem>
                   {relevantPools.map((pool) => {
                     const isTokenA = pool.resource_a === resource_address;
                     const tokenBalance = isTokenA ? BigInt(pool.balance_a) : BigInt(pool.balance_b);
@@ -388,16 +398,16 @@ export default function FormStep({
                     const rate = tokenBalance > 0n ? Number(tariBalance) / Number(tokenBalance) : 0;
                     return (
                       <MenuItem key={pool.pool_address} value={pool.pool_address}>
-                        {pool.pool_address.substring(0, 16)}... (1 {token_symbol} = {rate.toFixed(4)} TARI)
+                        Swap: {pool.pool_address.substring(0, 16)}... (1 {token_symbol} = {rate.toFixed(4)} TARI)
                       </MenuItem>
                     );
                   })}
                   <MenuItem value="__custom__">Custom pool address...</MenuItem>
                 </Select>
               </>
-            ) : null}
+            )}
 
-            {(showCustomPool || relevantPools.length === 0) && (
+            {showCustomPool && (
               <TextField
                 name="swapPoolAddress"
                 label="Swap Pool Address"
@@ -428,12 +438,14 @@ export default function FormStep({
             )}
 
             {poolRate && transferFormState.swapPoolAddress && !poolError && (
-              <Alert severity="info" variant="outlined">
-                Pool exchange rate: {formatPoolRate(poolRate, token_symbol)}
+              <Alert severity={poolHasNoLiquidity ? "warning" : "info"} variant="outlined">
+                {poolHasNoLiquidity
+                  ? "This pool has no liquidity. Please select a different pool."
+                  : `Pool exchange rate: ${formatPoolRate(poolRate, token_symbol)}`}
               </Alert>
             )}
 
-            {poolError && !showCustomPool && relevantPools.length > 0 && (
+            {poolError && !showCustomPool && (
               <Alert severity="error" variant="outlined">
                 {poolError}
               </Alert>

@@ -149,6 +149,12 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   // Find the available balance for the resource we're trying to send
   const balanceEntry = data?.balances?.find((b: BalanceEntry) => b.resource_address === props.resource_address);
 
+  // Check if user has TARI balance available (for recommending direct fee payment)
+  const tariBalanceEntry = data?.balances?.find((b: BalanceEntry) => b.resource_address === TARI_TOKEN);
+  const hasTariBalance = tariBalanceEntry
+    ? BigInt(tariBalanceEntry.balance) + BigInt(tariBalanceEntry.confidential_balance) >= 500n
+    : false;
+
   if (!balanceEntry) {
     console.warn("No balance entry found for resource", props.resource_address);
     return null;
@@ -497,6 +503,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
             onCheckboxFormValueChange={setCheckboxFormValue}
             onUseBadgeChange={handleUseBadgeChange}
             onPoolSelect={handlePoolSelect}
+            hasTariBalance={hasTariBalance}
           />
         );
       case 1:

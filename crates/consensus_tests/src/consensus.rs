@@ -1609,10 +1609,7 @@ async fn multishard_transaction_epoch_expired() {
 
         let leaf1 = test.get_validator(&TestAddress::new("1")).get_leaf_block();
         if leaf1.height > NodeHeight(30) {
-            panic!(
-                "Transaction not finalized after {} blocks",
-                leaf1.height,
-            );
+            panic!("Transaction not finalized after {} blocks", leaf1.height,);
         }
     }
 

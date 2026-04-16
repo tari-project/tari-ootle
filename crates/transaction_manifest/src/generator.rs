@@ -265,9 +265,7 @@ impl ManifestInstructionGenerator {
                 },
                 ManifestLiteral::Special(SpecialLiteral::Amount(amount)) => Ok(call_arg!(amount)),
                 ManifestLiteral::Special(SpecialLiteral::NonFungibleId(id)) => Ok(call_arg!(id)),
-                ManifestLiteral::Special(SpecialLiteral::Cbor(value)) => {
-                    Ok(InstructionArg::literal(value).expect("CBOR literal serialization should not fail"))
-                },
+                ManifestLiteral::Special(SpecialLiteral::Cbor(value)) => Ok(InstructionArg::literal(value)?),
                 ManifestLiteral::Special(SpecialLiteral::Metadata(metadata)) => Ok(call_arg!(metadata)),
                 ManifestLiteral::Special(SpecialLiteral::SubstateId(id_or_var)) => match id_or_var {
                     OrVar::Var(ident) => self.get_ident(&ident.to_string()),

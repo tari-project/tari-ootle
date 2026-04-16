@@ -6,5 +6,9 @@ export type SwapPoolGetExchangeRateResponse = {
   balance_a: Amount;
   resource_b: string;
   balance_b: Amount;
+  /**
+   * The calculated input amount of the non-TARI token needed to receive at least
+   * `desired_tari_output` TARI from the pool. Only present when `desired_tari_output` was provided.
+   */
   swap_input_amount?: Amount | null;
 };

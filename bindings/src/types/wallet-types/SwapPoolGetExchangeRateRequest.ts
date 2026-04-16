@@ -3,5 +3,9 @@ import type { Amount } from "../Amount";
 
 export type SwapPoolGetExchangeRateRequest = {
   pool_address: string;
-  desired_tari_output?: Amount | null;
+  /**
+   * If provided, the response will include the calculated swap input amount needed
+   * to receive at least this amount of TARI from the pool (with a slippage margin).
+   */
+  desired_tari_output: Amount | null;
 };

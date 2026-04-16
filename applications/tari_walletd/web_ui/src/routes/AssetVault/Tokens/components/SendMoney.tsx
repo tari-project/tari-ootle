@@ -89,17 +89,13 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
   // Fetch known pools when dialog opens for stealth non-TARI tokens
   useEffect(() => {
-    if (
-      props.open &&
-      props.resource_type === "Stealth" &&
-      props.resource_address !== TARI_TOKEN
-    ) {
+    if (props.open && props.resource_type === "Stealth" && props.resource_address !== TARI_TOKEN) {
       setIsLoadingPools(true);
       swapPoolsList({
-          resource_pair: props.resource_address ? [TARI_TOKEN, props.resource_address] : null,
-          limit: 10,
-          offset: 0,
-        })
+        resource_pair: props.resource_address ? [TARI_TOKEN, props.resource_address] : null,
+        limit: 10n,
+        offset: 0n,
+      })
         .then((resp) => {
           setKnownPools(resp.pools);
         })
@@ -121,7 +117,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     setIsLoadingPoolRate(true);
     setPoolError(null);
     try {
-      const resp = await swapPoolGetExchangeRate({ pool_address: poolAddress });
+      const resp = await swapPoolGetExchangeRate({ pool_address: poolAddress, desired_tari_output: null });
       setPoolRate({
         resource_a: resp.resource_a,
         balance_a: BigInt(resp.balance_a),
@@ -131,7 +127,11 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
       setPoolError(null);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      setPoolError(msg.includes("not a liquidity pool") ? "This component is not a liquidity pool" : `Failed to fetch pool: ${msg}`);
+      setPoolError(
+        msg.includes("not a liquidity pool")
+          ? "This component is not a liquidity pool"
+          : `Failed to fetch pool: ${msg}`,
+      );
       setPoolRate(null);
     } finally {
       setIsLoadingPoolRate(false);
@@ -406,9 +406,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         badge_usage: transferFormState.badge ? { Resource: transferFormState.badge } : ("None" as BadgeUsage),
         output_memo: transferFormState.memo ? { Message: transferFormState.memo } : undefined,
         swap_pool_address: transferFormState.swapPoolAddress || null,
-        swap_input_amount: transferFormState.swapInputAmount
-          ? BigInt(transferFormState.swapInputAmount)
-          : null,
+        swap_input_amount: transferFormState.swapInputAmount ? BigInt(transferFormState.swapInputAmount) : null,
       };
 
       const submitResult = await sendIt?.({

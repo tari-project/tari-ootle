@@ -11,6 +11,8 @@
 //! time since the last check refills tokens at the configured rate, then one
 //! token is consumed. If no token is available the middleware returns
 //! `429 Too Many Requests` with a `Retry-After` header (integer seconds).
+//! When `trust_proxy` is enabled, the **rightmost** `X-Forwarded-For` entry is
+//! used — it is appended by the adjacent trusted proxy and cannot be spoofed.
 //!
 //! `SseConnectionLimiter` tracks concurrent SSE connections per IP using a
 //! `DashMap<IpAddr, Arc<tokio::sync::Semaphore>>`.  The middleware acquires an
@@ -55,14 +57,17 @@ fn now_ms() -> u64 {
 /// Extracts the client IP from the request.
 ///
 /// If `trust_proxy` is true and an `X-Forwarded-For` header is present, the
-/// first (leftmost) address in the header is used.  Otherwise the peer address
+/// **rightmost** (last) address in the header is used.  The rightmost entry is
+/// appended by the immediately-adjacent trusted reverse proxy and cannot be
+/// spoofed by the remote client; leftmost entries are client-controlled and
+/// must not be trusted for rate-limiting purposes.  Otherwise the peer address
 /// from the TCP connection (`ConnectInfo<SocketAddr>`) is used.
 fn extract_ip(req: &Request, trust_proxy: bool) -> IpAddr {
     if trust_proxy {
         if let Some(forwarded) = req.headers().get("x-forwarded-for") {
             if let Ok(s) = forwarded.to_str() {
-                if let Some(first) = s.split(',').next() {
-                    if let Ok(ip) = first.trim().parse::<IpAddr>() {
+                if let Some(last) = s.split(',').last() {
+                    if let Ok(ip) = last.trim().parse::<IpAddr>() {
                         return ip;
                     }
                 }

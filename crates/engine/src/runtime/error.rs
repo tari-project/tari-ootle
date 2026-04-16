@@ -327,7 +327,8 @@ impl IsNotFoundError for RuntimeError {
                 RuntimeError::BucketNotFound { .. } |
                 RuntimeError::ResourceNotFound { .. } |
                 RuntimeError::NonFungibleNotFound { .. } |
-                RuntimeError::ProofNotFound { .. }
+                RuntimeError::ProofNotFound { .. } |
+                RuntimeError::VirtualSubstateNotFound { .. }
         )
     }
 }

@@ -2533,8 +2533,9 @@ where
     fn generate_uuid(&mut self) -> Result<[u8; 32], RuntimeError> {
         self.invoke_modules_on_runtime_call("generate_uuid")?;
         self.tracker.read_with(|state| {
+            let epoch_hash = state.get_current_epoch_hash()?;
             let id_provider = state.id_provider()?;
-            Ok(id_provider.new_uuid()?)
+            Ok(id_provider.new_uuid(&epoch_hash)?)
         })
     }
 

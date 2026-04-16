@@ -169,7 +169,7 @@ fn test_keeper_can_settle() {
     win_hash[0] = 0x01; // odd → win
     test.set_virtual_substate(
         VirtualSubstateId::CurrentEpochHash,
-        VirtualSubstate::CurrentEpochHash(win_hash),
+        VirtualSubstate::CurrentEpochHash(win_hash.into()),
     );
 
     // Keeper settles the bet.
@@ -253,7 +253,7 @@ fn test_player_settles_own_bet_win() {
     win_hash[0] = 0x03; // odd → win
     test.set_virtual_substate(
         VirtualSubstateId::CurrentEpochHash,
-        VirtualSubstate::CurrentEpochHash(win_hash),
+        VirtualSubstate::CurrentEpochHash(win_hash.into()),
     );
 
     test.execute_expect_success(
@@ -315,7 +315,7 @@ fn test_player_settles_own_bet_loss() {
     loss_hash[0] = 0x02; // even → loss
     test.set_virtual_substate(
         VirtualSubstateId::CurrentEpochHash,
-        VirtualSubstate::CurrentEpochHash(loss_hash),
+        VirtualSubstate::CurrentEpochHash(loss_hash.into()),
     );
 
     test.execute_expect_success(

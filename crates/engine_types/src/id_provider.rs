@@ -27,11 +27,6 @@ use crate::{
 pub struct IdProvider<'a> {
     entity_id: EntityId,
     transaction_hash: Hash32,
-    /// Optional epoch hash mixed into UUID/random-byte generation.
-    /// When present, `new_uuid()` chains this value into its hasher so that
-    /// `random_bytes()` in templates automatically inherits the epoch-level
-    /// manipulation resistance provided by `Consensus::current_epoch_hash()`.
-    epoch_hash: Option<[u8; 32]>,
     object_ids: &'a ObjectIds,
 }
 
@@ -48,20 +43,8 @@ impl<'a> IdProvider<'a> {
         Self {
             entity_id,
             transaction_hash,
-            epoch_hash: None,
             object_ids,
         }
-    }
-
-    /// Set the epoch hash to mix into UUID/random-byte generation.
-    ///
-    /// When set, every call to `new_uuid()` (and therefore `get_random_bytes()`)
-    /// chains this value into the hasher. This means `random_bytes()` in templates
-    /// automatically inherits epoch-level manipulation resistance without the template
-    /// needing to call `Consensus::current_epoch_hash()` explicitly.
-    pub fn with_epoch_hash(mut self, epoch_hash: [u8; 32]) -> Self {
-        self.epoch_hash = Some(epoch_hash);
-        self
     }
 
     pub fn new_resource_address(&self) -> Result<ResourceAddress, IdProviderError> {
@@ -100,22 +83,20 @@ impl<'a> IdProvider<'a> {
         self.object_ids.next_proof_id()
     }
 
-    pub fn new_uuid(&self) -> Result<[u8; 32], IdProviderError> {
+    pub fn new_uuid(&self, entropy: &[u8]) -> Result<[u8; 32], IdProviderError> {
         let n = self.object_ids.next_uuid_id();
-        let mut h = hasher32(EngineHashDomainLabel::UuidOutput)
+        let h = hasher32(EngineHashDomainLabel::UuidOutput)
             .chain(&self.transaction_hash)
             .chain(&self.entity_id)
+            .chain(entropy)
             .chain(&n);
-        if let Some(epoch_hash) = &self.epoch_hash {
-            h = h.chain(epoch_hash);
-        }
         Ok(h.result().into_array())
     }
 
-    pub fn get_random_bytes(&self, len: usize) -> Result<Vec<u8>, IdProviderError> {
+    pub fn get_random_bytes(&self, entropy: &[u8], len: usize) -> Result<Vec<u8>, IdProviderError> {
         let mut result = Vec::with_capacity(len);
         while result.len() < len {
-            let bytes = self.new_uuid()?;
+            let bytes = self.new_uuid(entropy)?;
             let remaining = len - result.len();
             let end = bytes.len().min(remaining);
             result.extend_from_slice(bytes.get(..end).expect("end bound is always <= length"));
@@ -216,7 +197,7 @@ mod tests {
         let id_provider = IdProvider::new(EntityId::default(), Hash32::default(), &object_ids);
         const CASES: [usize; 7] = [0, 4, 32, 33, 64, 65, 129];
         for len in CASES {
-            let b = id_provider.get_random_bytes(len).unwrap();
+            let b = id_provider.get_random_bytes(&[], len).unwrap();
             assert_eq!(b.len(), len);
             if len > 0 {
                 assert!(b.iter().any(|&x| x != 0));

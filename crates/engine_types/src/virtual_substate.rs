@@ -9,6 +9,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use tari_template_lib::types::Hash32;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum VirtualSubstateId {
@@ -28,7 +29,7 @@ impl Display for VirtualSubstateId {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum VirtualSubstate {
     CurrentEpoch(u64),
-    CurrentEpochHash([u8; 32]),
+    CurrentEpochHash(Hash32),
 }
 
 /// Read-only Virtual substate collection. THis collection is cheap to clone.
@@ -47,7 +48,7 @@ impl VirtualSubstates {
         }
     }
 
-    pub fn current_epoch_hash(&self) -> Option<[u8; 32]> {
+    pub fn current_epoch_hash(&self) -> Option<Hash32> {
         match self.get(&VirtualSubstateId::CurrentEpochHash) {
             Some(VirtualSubstate::CurrentEpochHash(hash)) => Some(*hash),
             _ => None,

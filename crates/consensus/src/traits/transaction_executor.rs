@@ -3,13 +3,12 @@
 
 use std::collections::HashMap;
 
-use tari_common_types::types::FixedHash;
 use tari_engine_types::substate::Substate;
 use tari_ootle_common_types::{Epoch, SubstateRequirement, optional::IsNotFoundError};
 use tari_ootle_storage::{
     StateStore,
     StorageError,
-    consensus_models::{TransactionExecution, TransactionPoolError},
+    consensus_models::{LockedEpoch, TransactionExecution, TransactionPoolError},
 };
 use tari_ootle_transaction::Transaction;
 
@@ -65,8 +64,7 @@ pub trait BlockTransactionExecutor<TStateStore: StateStore> {
     fn execute(
         &self,
         transaction: &Transaction,
-        current_epoch: Epoch,
-        current_epoch_hash: FixedHash,
+        locked_epoch: LockedEpoch,
         resolved_inputs: &HashMap<SubstateRequirement, Substate>,
     ) -> Result<TransactionExecution, BlockTransactionExecutorError>;
 }

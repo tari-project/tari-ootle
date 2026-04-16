@@ -34,7 +34,7 @@ use tari_engine_types::{
 };
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
 use tari_ootle_app_utilities::transaction_executor::{TariTransactionProcessor, TransactionExecutor as _};
-use tari_ootle_common_types::{Epoch, SubstateRequirementRef};
+use tari_ootle_common_types::SubstateRequirementRef;
 use tari_ootle_p2p::PeerAddress;
 use tari_ootle_transaction::Transaction;
 use tari_template_lib_types::constants::TARI_TOKEN;
@@ -84,7 +84,6 @@ impl DryRunTransactionProcessor {
 
         info!(target: LOG_TARGET, "process_transaction: {}", transaction.calculate_id());
 
-        let epoch = self.epoch_manager.current_epoch().await?;
         let mut found_substates = self.fetch_input_substates(&transaction).await?;
         // Add the TARI resource - this is what consensus does, so we'll need to do it for dry runs
         let id = TARI_TOKEN.into();
@@ -98,7 +97,7 @@ impl DryRunTransactionProcessor {
 
         let package = self.construct_template_package(&transaction, &found_substates).await?;
 
-        let virtual_substates = self.get_virtual_substates(&transaction, epoch).await?;
+        let virtual_substates = self.get_virtual_substates().await?;
 
         let mut state_store = new_memory_store();
         state_store.set_many(found_substates)?;
@@ -153,11 +152,8 @@ impl DryRunTransactionProcessor {
         Ok(susbtates)
     }
 
-    async fn get_virtual_substates(
-        &self,
-        _transaction: &Transaction,
-        epoch: Epoch,
-    ) -> Result<VirtualSubstates, DryRunTransactionProcessorError> {
+    async fn get_virtual_substates(&self) -> Result<VirtualSubstates, DryRunTransactionProcessorError> {
+        let epoch = self.epoch_manager.current_epoch().await?;
         let epoch_hash = self
             .epoch_manager
             .get_current_epoch_hash()
@@ -170,7 +166,7 @@ impl DryRunTransactionProcessor {
             ),
             (
                 VirtualSubstateId::CurrentEpochHash,
-                VirtualSubstate::CurrentEpochHash(epoch_hash.into_array()),
+                VirtualSubstate::CurrentEpochHash(epoch_hash.into_array().into()),
             ),
         ]))
     }

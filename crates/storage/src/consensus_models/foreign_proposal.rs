@@ -10,6 +10,7 @@ use std::{
 
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
+use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, LeafBlock};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, committee::CommitteeInfo};
@@ -17,7 +18,7 @@ use tari_ootle_transaction::TransactionId;
 use tari_sidechain::QuorumCertificate;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
-use super::{BlockPledge, Command, CommandOrHash, CommandsCommitProof};
+use super::{BlockPledge, Command, CommandOrHash, CommandsCommitProof, LockedEpoch};
 use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -369,6 +370,14 @@ impl ForeignProposal {
 
     pub fn height(&self) -> NodeHeight {
         NodeHeight(self.commit_proof.sidechain_block_commit_proof().header.height)
+    }
+
+    pub fn epoch_hash(&self) -> &FixedHash {
+        &self.commit_proof.sidechain_block_commit_proof().header().epoch_hash
+    }
+
+    pub fn to_locked_epoch(&self) -> LockedEpoch {
+        LockedEpoch::new(self.epoch(), self.epoch_hash().into_array().into())
     }
 
     pub fn proposed_by(&self) -> RistrettoPublicKeyBytes {

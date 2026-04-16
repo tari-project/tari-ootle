@@ -24,6 +24,8 @@ use tari_template_lib::prelude::*;
 
 #[template]
 mod consensus_template {
+    use tari_template_lib::types::Hash32;
+
     use super::*;
 
     pub struct TestConsensus {}
@@ -33,8 +35,8 @@ mod consensus_template {
             Consensus::current_epoch()
         }
 
-        pub fn current_epoch_hash() -> Vec<u8> {
-            Consensus::current_epoch_hash().to_vec()
+        pub fn current_epoch_hash() -> Hash32 {
+            Consensus::current_epoch_hash()
         }
     }
 }

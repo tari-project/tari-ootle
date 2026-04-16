@@ -36,6 +36,7 @@ use crate::{
         BlockTransactionExecution,
         Evidence,
         LeaderFee,
+        LockedEpoch,
         TransactionAtom,
         TransactionExecution,
         TransactionRecord,
@@ -352,7 +353,7 @@ pub struct TransactionPoolRecord {
     max_epoch: Option<Epoch>,
     /// Epoch to use when executing the transaction. This updates as foreign proposals are received
     /// until the transaction is executed.
-    locked_epoch: Option<Epoch>,
+    locked_epoch: Option<LockedEpoch>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     last_updated: time::OffsetDateTime,
     last_updated_in_block: Option<BlockId>,
@@ -392,7 +393,7 @@ impl TransactionPoolRecord {
         remote_decision: Option<Decision>,
         is_ready: bool,
         max_epoch: Option<Epoch>,
-        locked_epoch: Option<Epoch>,
+        locked_epoch: Option<LockedEpoch>,
         last_updated: time::OffsetDateTime,
         last_updated_in_block: Option<BlockId>,
     ) -> Self {
@@ -464,8 +465,8 @@ impl TransactionPoolRecord {
         self.max_epoch
     }
 
-    pub fn locked_epoch(&self) -> Option<Epoch> {
-        self.locked_epoch
+    pub fn locked_epoch(&self) -> Option<&LockedEpoch> {
+        self.locked_epoch.as_ref()
     }
 
     pub fn id(&self) -> &TransactionId {
@@ -608,8 +609,8 @@ impl TransactionPoolRecord {
 
     /// Updates the locked epoch if the new epoch is less than the current locked epoch.
     /// Returns true if the locked epoch was updated, otherwise false.
-    pub fn update_locked_epoch(&mut self, new_epoch: Epoch) -> bool {
-        if self.locked_epoch.is_none_or(|e| e > new_epoch) {
+    pub fn update_locked_epoch(&mut self, new_epoch: LockedEpoch) -> bool {
+        if self.locked_epoch.as_ref().is_none_or(|e| e.epoch() > new_epoch.epoch()) {
             self.locked_epoch = Some(new_epoch);
             return true;
         }
@@ -619,7 +620,7 @@ impl TransactionPoolRecord {
     /// Sets the locked epoch to the given value.
     /// This is used for database loading and transaction pool record update merging only.
     /// Use `update_locked_epoch` to update the locked epoch during foreign proposal etc processing.
-    pub fn set_locked_epoch(&mut self, locked_epoch: Option<Epoch>) -> &mut Self {
+    pub fn set_locked_epoch(&mut self, locked_epoch: Option<LockedEpoch>) -> &mut Self {
         self.locked_epoch = locked_epoch;
         self
     }

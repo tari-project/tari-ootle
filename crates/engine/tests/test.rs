@@ -412,7 +412,7 @@ mod consensus {
         let injected_hash = [0xABu8; 32];
         template_test.set_virtual_substate(
             VirtualSubstateId::CurrentEpochHash,
-            VirtualSubstate::CurrentEpochHash(injected_hash),
+            VirtualSubstate::CurrentEpochHash(injected_hash.into()),
         );
 
         let result: Vec<u8> = template_test.call_function("TestConsensus", "current_epoch_hash", args![], vec![]);
@@ -427,14 +427,14 @@ mod consensus {
         let hash_epoch_0 = [0x11u8; 32];
         template_test.set_virtual_substate(
             VirtualSubstateId::CurrentEpochHash,
-            VirtualSubstate::CurrentEpochHash(hash_epoch_0),
+            VirtualSubstate::CurrentEpochHash(hash_epoch_0.into()),
         );
         let result_0: Vec<u8> = template_test.call_function("TestConsensus", "current_epoch_hash", args![], vec![]);
 
         let hash_epoch_1 = [0x22u8; 32];
         template_test.set_virtual_substate(
             VirtualSubstateId::CurrentEpochHash,
-            VirtualSubstate::CurrentEpochHash(hash_epoch_1),
+            VirtualSubstate::CurrentEpochHash(hash_epoch_1.into()),
         );
         let result_1: Vec<u8> = template_test.call_function("TestConsensus", "current_epoch_hash", args![], vec![]);
 
@@ -451,7 +451,7 @@ mod consensus {
         let fixed_hash = [0xCCu8; 32];
         template_test.set_virtual_substate(
             VirtualSubstateId::CurrentEpochHash,
-            VirtualSubstate::CurrentEpochHash(fixed_hash),
+            VirtualSubstate::CurrentEpochHash(fixed_hash.into()),
         );
 
         // Two calls in the same epoch (hash not changed between calls) must return the same value.

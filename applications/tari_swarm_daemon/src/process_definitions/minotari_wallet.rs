@@ -63,6 +63,8 @@ impl ProcessDefinition for MinotariWallet {
             ))
             .arg(format!("-pwallet.p2p.public_addresses={public_address}"))
             .arg(format!("-pwallet.grpc_address=/ip4/{listen_ip}/tcp/{grpc_port}"))
+            // VN reg has a very small amount
+            .arg("-pwallet.outputs.prevent_fee_gt_amount=false")
             .arg(format!(
                 "-pwallet.http_server_url=http://{listen_ip}:{base_node_api_port}"
             ))

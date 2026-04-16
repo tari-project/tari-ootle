@@ -215,7 +215,7 @@ impl TemplateTest {
             (VirtualSubstateId::CurrentEpoch, VirtualSubstate::CurrentEpoch(0)),
             (
                 VirtualSubstateId::CurrentEpochHash,
-                VirtualSubstate::CurrentEpochHash([0u8; 32]),
+                VirtualSubstate::CurrentEpochHash(Default::default()),
             ),
         ]);
 

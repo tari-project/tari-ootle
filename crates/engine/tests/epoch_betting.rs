@@ -12,10 +12,7 @@ use tari_template_lib::types::{Amount, constants::TARI_TOKEN};
 use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
-const TEMPLATE_PATHS: &[&str] = &[
-    "tests/templates/epoch_betting_house",
-    "tests/templates/epoch_betting",
-];
+const TEMPLATE_PATHS: &[&str] = &["tests/templates/epoch_betting_house", "tests/templates/epoch_betting"];
 
 /// Initial house reserve used in tests.
 const HOUSE_RESERVE: u64 = 10_000_000;
@@ -102,7 +99,14 @@ fn test_settle_bet_requires_later_epoch() {
     let house = setup_house(&mut test);
     let (player_account, player_proof, player_secret) = test.create_funded_account();
 
-    let bet_component = place_bet(&mut test, house, player_account, &player_secret, player_proof.clone(), 1_000);
+    let bet_component = place_bet(
+        &mut test,
+        house,
+        player_account,
+        &player_secret,
+        player_proof.clone(),
+        1_000,
+    );
 
     // Still epoch 1: settle must fail.
     let reason = test.execute_expect_failure(
@@ -355,7 +359,14 @@ fn test_cannot_settle_twice() {
     let house = setup_house(&mut test);
     let (player_account, player_proof, player_secret) = test.create_funded_account();
 
-    let bet_component = place_bet(&mut test, house, player_account, &player_secret, player_proof.clone(), 1_000);
+    let bet_component = place_bet(
+        &mut test,
+        house,
+        player_account,
+        &player_secret,
+        player_proof.clone(),
+        1_000,
+    );
 
     // Advance epoch.
     test.set_virtual_substate(VirtualSubstateId::CurrentEpoch, VirtualSubstate::CurrentEpoch(2));

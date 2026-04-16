@@ -4,13 +4,13 @@
 use std::{collections::HashMap, sync::Arc};
 
 use log::info;
+use tari_common_types::types::FixedHash;
 use tari_consensus::traits::{BlockTransactionExecutor, BlockTransactionExecutorError};
 use tari_engine::state_store::{
     StateWriter,
     memory::{MemoryStateStore, ReadOnlyMemoryStateStore},
     new_memory_store,
 };
-use tari_common_types::types::FixedHash;
 use tari_engine_types::{
     substate::Substate,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},

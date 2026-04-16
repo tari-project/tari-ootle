@@ -824,7 +824,8 @@ where TConsensusSpec: ConsensusSpec
 
         let tx = substate_store.read_transaction();
         let transaction = tx_rec.get_transaction(tx)?;
-        let execution = self.execute_transaction(tx, parent_block, epoch_hash, transaction, change_set, locked_epoch)?;
+        let execution =
+            self.execute_transaction(tx, parent_block, epoch_hash, transaction, change_set, locked_epoch)?;
 
         // Try to lock all local outputs
         let local_outputs = execution

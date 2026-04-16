@@ -74,6 +74,7 @@ The `epoch_hash` field is already present on every `BlockHeader`
 > block hash of the epoch."
 
 Key properties:
+
 - Derived from the **L1 base layer block hash** that triggers the epoch transition.
 - **Fixed for all blocks within an epoch** — every block in epoch N carries the same
   `epoch_hash`.
@@ -267,20 +268,20 @@ The following test cases should be implemented in `crates/consensus_tests/` and
 
 The implementation is complete. The following are implemented:
 
-| Component | File | Status |
-|---|---|---|
-| `VirtualSubstateId::CurrentEpochHash` | `crates/engine_types/src/virtual_substate.rs` | Done |
-| Injection in validator node executor | `applications/tari_validator_node/src/consensus/block_transaction_executor.rs` | Done |
-| `epoch_hash` threaded through consensus | `crates/consensus/src/hotstuff/transaction_manager/manager.rs`, `on_propose.rs`, `on_ready_to_vote_on_local_block.rs` | Done |
-| `get_current_epoch_hash()` in runtime | `crates/engine/src/runtime/working_state.rs`, `tracker.rs`, `impl.rs` | Done |
-| `Consensus::current_epoch_hash()` template API | `crates/template_lib/src/consensus.rs` | Done |
-| Injection in indexer dry-run | `applications/tari_indexer/src/dry_run/processor.rs` | Done |
-| Default value in test tooling | `crates/template_test_tooling/src/template_test.rs` | Done |
-| `remove_virtual_substate()` helper in test tooling | `crates/template_test_tooling/src/template_test.rs` | Done |
-| Reference betting template (`EpochBettingHouse` + `EpochBet`) | `crates/engine/tests/templates/epoch_betting_house/`, `crates/engine/tests/templates/epoch_betting/` | Done |
-| Engine test cases 1–6 from this OIP | `crates/engine/tests/test.rs` (mod consensus), `crates/engine/tests/epoch_betting.rs` | Done |
-| Epoch hash mixed into `IdProvider::new_uuid()` | `crates/engine_types/src/id_provider.rs`, `crates/engine/src/runtime/working_state.rs` | Done |
-| Developer documentation for template authors | `docs/developer-docs/epoch-hash-randomness.md` | Done |
+| Component                                                     | File                                                                                                                  | Status |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------ |
+| `VirtualSubstateId::CurrentEpochHash`                         | `crates/engine_types/src/virtual_substate.rs`                                                                         | Done   |
+| Injection in validator node executor                          | `applications/tari_validator_node/src/consensus/block_transaction_executor.rs`                                        | Done   |
+| `epoch_hash` threaded through consensus                       | `crates/consensus/src/hotstuff/transaction_manager/manager.rs`, `on_propose.rs`, `on_ready_to_vote_on_local_block.rs` | Done   |
+| `get_current_epoch_hash()` in runtime                         | `crates/engine/src/runtime/working_state.rs`, `tracker.rs`, `impl.rs`                                                 | Done   |
+| `Consensus::current_epoch_hash()` template API                | `crates/template_lib/src/consensus.rs`                                                                                | Done   |
+| Injection in indexer dry-run                                  | `applications/tari_indexer/src/dry_run/processor.rs`                                                                  | Done   |
+| Default value in test tooling                                 | `crates/template_test_tooling/src/template_test.rs`                                                                   | Done   |
+| `remove_virtual_substate()` helper in test tooling            | `crates/template_test_tooling/src/template_test.rs`                                                                   | Done   |
+| Reference betting template (`EpochBettingHouse` + `EpochBet`) | `crates/engine/tests/templates/epoch_betting_house/`, `crates/engine/tests/templates/epoch_betting/`                  | Done   |
+| Engine test cases 1–6 from this OIP                           | `crates/engine/tests/test.rs` (mod consensus), `crates/engine/tests/epoch_betting.rs`                                 | Done   |
+| Epoch hash mixed into `IdProvider::new_uuid()`                | `crates/engine_types/src/id_provider.rs`, `crates/engine/src/runtime/working_state.rs`                                | Done   |
+| Developer documentation for template authors                  | `docs/developer-docs/epoch-hash-randomness.md`                                                                        | Done   |
 
 ### Betting template design note
 

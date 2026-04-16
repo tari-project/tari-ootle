@@ -53,11 +53,10 @@ pub fn my_function() {
 `Consensus::current_epoch_hash()` is available alongside the existing `Consensus::current_epoch()`.
 
 <Aside type="caution">
-  For high-value applications, the epoch hash provides sufficient resistance against casual
-  manipulation but is not as strong as a VRF-based randomness beacon. A dishonest leader can
-  choose not to propose a block (at the cost of losing their leader reward), but cannot choose
-  the epoch hash itself. Use this primitive for moderate-stakes use cases; for very high-value
-  applications, wait for the dedicated VRF beacon (future work).
+  For high-value applications, the epoch hash provides sufficient resistance against casual manipulation but is not as
+  strong as a VRF-based randomness beacon. A dishonest leader can choose not to propose a block (at the cost of losing
+  their leader reward), but cannot choose the epoch hash itself. Use this primitive for moderate-stakes use cases; for
+  very high-value applications, wait for the dedicated VRF beacon (future work).
 </Aside>
 
 ---
@@ -184,9 +183,9 @@ pub fn settle(&mut self, caller_account: ComponentAddress) {
 ```
 
 <Aside type="tip">
-  Buckets can be passed as arguments to cross-component `invoke` calls. Returning a `Bucket`
-  from a cross-component call is not required and is avoided in this design — the house deposits
-  directly into the player's account rather than returning a `Bucket` to the `EpochBet` caller.
+  Buckets can be passed as arguments to cross-component `invoke` calls. Returning a `Bucket` from a cross-component call
+  is not required and is avoided in this design — the house deposits directly into the player's account rather than
+  returning a `Bucket` to the `EpochBet` caller.
 </Aside>
 
 ---
@@ -221,12 +220,12 @@ test.remove_virtual_substate(VirtualSubstateId::CurrentEpochHash);
 
 ### Security considerations
 
-| Threat | Mitigation |
-|---|---|
-| Player chooses settlement epoch | Settlement is valid only from `placement_epoch + 1` onwards. The relevant epoch hash is always future at placement time. |
-| Validator manipulates epoch hash | The epoch hash is derived from the L1 block hash at the epoch boundary, which is fixed by L1 mining and not controllable by any single validator. |
-| Dishonest leader withholds block | The leader forfeits their block reward; they cannot choose the epoch hash. Epoch-level granularity reduces the attack surface vs per-block randomness. |
-| Keeper manipulates settlement timing | Keepers can only call `settle` after the settlement epoch begins. They cannot choose the epoch hash. |
+| Threat                               | Mitigation                                                                                                                                             |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Player chooses settlement epoch      | Settlement is valid only from `placement_epoch + 1` onwards. The relevant epoch hash is always future at placement time.                               |
+| Validator manipulates epoch hash     | The epoch hash is derived from the L1 block hash at the epoch boundary, which is fixed by L1 mining and not controllable by any single validator.      |
+| Dishonest leader withholds block     | The leader forfeits their block reward; they cannot choose the epoch hash. Epoch-level granularity reduces the attack surface vs per-block randomness. |
+| Keeper manipulates settlement timing | Keepers can only call `settle` after the settlement epoch begins. They cannot choose the epoch hash.                                                   |
 
 ---
 

@@ -415,8 +415,7 @@ mod consensus {
             VirtualSubstate::CurrentEpochHash(injected_hash),
         );
 
-        let result: Vec<u8> =
-            template_test.call_function("TestConsensus", "current_epoch_hash", args![], vec![]);
+        let result: Vec<u8> = template_test.call_function("TestConsensus", "current_epoch_hash", args![], vec![]);
         assert_eq!(result, injected_hash.to_vec());
     }
 
@@ -430,16 +429,14 @@ mod consensus {
             VirtualSubstateId::CurrentEpochHash,
             VirtualSubstate::CurrentEpochHash(hash_epoch_0),
         );
-        let result_0: Vec<u8> =
-            template_test.call_function("TestConsensus", "current_epoch_hash", args![], vec![]);
+        let result_0: Vec<u8> = template_test.call_function("TestConsensus", "current_epoch_hash", args![], vec![]);
 
         let hash_epoch_1 = [0x22u8; 32];
         template_test.set_virtual_substate(
             VirtualSubstateId::CurrentEpochHash,
             VirtualSubstate::CurrentEpochHash(hash_epoch_1),
         );
-        let result_1: Vec<u8> =
-            template_test.call_function("TestConsensus", "current_epoch_hash", args![], vec![]);
+        let result_1: Vec<u8> = template_test.call_function("TestConsensus", "current_epoch_hash", args![], vec![]);
 
         assert_ne!(result_0, result_1, "Epoch hashes should differ across epochs");
         assert_eq!(result_0, hash_epoch_0.to_vec());
@@ -458,10 +455,8 @@ mod consensus {
         );
 
         // Two calls in the same epoch (hash not changed between calls) must return the same value.
-        let result_a: Vec<u8> =
-            template_test.call_function("TestConsensus", "current_epoch_hash", args![], vec![]);
-        let result_b: Vec<u8> =
-            template_test.call_function("TestConsensus", "current_epoch_hash", args![], vec![]);
+        let result_a: Vec<u8> = template_test.call_function("TestConsensus", "current_epoch_hash", args![], vec![]);
+        let result_b: Vec<u8> = template_test.call_function("TestConsensus", "current_epoch_hash", args![], vec![]);
 
         assert_eq!(result_a, result_b, "Epoch hash must be constant within the same epoch");
         assert_eq!(result_a, fixed_hash.to_vec());

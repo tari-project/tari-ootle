@@ -412,7 +412,8 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         );
 
         let local_inputs = store.get_many(local_versions.iter().map(|(req, v)| (req.to_owned(), *v)))?;
-        let execution = self.execute_or_fetch(store, transaction, &local_inputs, &block, execution_epoch, epoch_hash)?;
+        let execution =
+            self.execute_or_fetch(store, transaction, &local_inputs, &block, execution_epoch, epoch_hash)?;
 
         let is_outputs_local_only = local_committee_info.is_all_local(execution.resulting_outputs());
         if is_outputs_local_only {
@@ -632,7 +633,14 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             )));
         }
 
-        let execution = self.execute_or_fetch(store, transaction, &resolved_inputs, &block, execution_epoch, epoch_hash)?;
+        let execution = self.execute_or_fetch(
+            store,
+            transaction,
+            &resolved_inputs,
+            &block,
+            execution_epoch,
+            epoch_hash,
+        )?;
         info!(
             target: LOG_TARGET,
             "👨‍🔧 PREPARE: Output-Only Executed transaction {} with {} decision",

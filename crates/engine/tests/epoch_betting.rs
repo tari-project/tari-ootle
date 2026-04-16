@@ -60,11 +60,13 @@ fn place_bet(
 ) -> tari_template_lib::prelude::ComponentAddress {
     let bet_template = test.get_template_address("EpochBet");
 
-    let bets_before = test
+    let addrs_before: std::collections::HashSet<_> = test
         .read_only_state_store()
         .get_components_by_template_address(bet_template)
         .unwrap()
-        .len();
+        .into_iter()
+        .map(|(addr, _)| addr)
+        .collect();
 
     test.execute_expect_success(
         Transaction::builder_localnet()
@@ -75,14 +77,17 @@ fn place_bet(
         vec![player_proof],
     );
 
-    // The newest EpochBet component is at the end of the list.
-    let mut bets = test
+    // Find the one new address that wasn't there before.
+    let addrs_after: std::collections::HashSet<_> = test
         .read_only_state_store()
         .get_components_by_template_address(bet_template)
-        .unwrap();
-    assert_eq!(bets.len(), bets_before + 1, "Expected exactly one new EpochBet component");
-    bets.sort_by_key(|(addr, _)| *addr);
-    bets.last().map(|(addr, _)| *addr).unwrap()
+        .unwrap()
+        .into_iter()
+        .map(|(addr, _)| addr)
+        .collect();
+    let mut new_addrs: Vec<_> = addrs_after.difference(&addrs_before).copied().collect();
+    assert_eq!(new_addrs.len(), 1, "Expected exactly one new EpochBet component");
+    new_addrs.remove(0)
 }
 
 /// Test 4 from OIP-0002:
@@ -289,11 +294,7 @@ fn test_player_settles_own_bet_loss() {
         .unwrap()
         .balance();
 
-    let house_reserve_before = test
-        .read_only_state_store()
-        .get_component(house)
-        .unwrap();
-    // We read reserve_balance via the state store after settlement instead.
+    let house_reserve_before: Amount = test.call_method(house, "reserve_balance", args![], vec![]);
 
     let bet_component = place_bet(
         &mut test,
@@ -335,8 +336,13 @@ fn test_player_settles_own_bet_loss() {
         "Player should lose the stake on a losing bet"
     );
 
-    // Verify the reserve balance is checked (drop the unused component header)
-    drop(house_reserve_before);
+    // House reserve grows by exactly the stake amount.
+    let house_reserve_after: Amount = test.call_method(house, "reserve_balance", args![], vec![]);
+    assert_eq!(
+        house_reserve_after,
+        house_reserve_before + Amount::from(stake_amount),
+        "House reserve should increase by the lost stake"
+    );
 }
 
 /// Additional test: a settled bet cannot be settled again.

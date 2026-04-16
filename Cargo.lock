@@ -12034,7 +12034,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_lib"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "borsh",
  "serde",
@@ -12048,11 +12048,12 @@ dependencies = [
 
 [[package]]
 name = "tari_template_lib_types"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "bincode 2.0.1",
  "bnum",
  "borsh",
+ "indexmap 2.13.0",
  "num-integer",
  "serde",
  "serde_json",
@@ -12060,6 +12061,7 @@ dependencies = [
  "tari_crypto",
  "tari_template_abi",
  "ts-rs",
+ "xxhash-rust",
 ]
 
 [[package]]

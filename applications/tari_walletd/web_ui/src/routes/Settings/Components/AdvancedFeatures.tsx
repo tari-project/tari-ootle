@@ -22,7 +22,7 @@ function AdvancedFeatures() {
     const updated = { ...advancedUiFeatures, enable_manifest: e.target.checked };
     setAdvancedUiFeatures(updated);
     const current = await settingsGet();
-    settingsSet({ indexer_url: current.indexer_url, advanced_ui_features: updated });
+    settingsSet({ indexer_url: current.indexer_url, advanced_ui_features: updated, claimed_accounts: null });
   };
 
   return (

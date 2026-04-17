@@ -956,6 +956,8 @@ pub struct SettingsSetRequest {
     pub indexer_url: Url,
     #[serde(default)]
     pub advanced_ui_features: Option<AdvancedUiFeatures>,
+    #[serde(default)]
+    pub claimed_accounts: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -969,6 +971,7 @@ pub struct SettingsGetResponse {
     pub indexer_url: Url,
     pub network: NetworkInfo,
     pub advanced_ui_features: AdvancedUiFeatures,
+    pub claimed_accounts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

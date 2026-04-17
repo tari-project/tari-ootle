@@ -30,23 +30,7 @@ import { useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import useAccountStore, { setAccount, setOotleAddress } from "@store/accountStore";
 import { AccountsCreateFreeTestCoinsResponse, substateIdToString } from "@tari-project/ootle-ts-bindings";
-
-const CLAIMED_KEY = "faucet_claimed_accounts";
-
-function getClaimedAccounts(): Set<string> {
-  try {
-    const stored = localStorage.getItem(CLAIMED_KEY);
-    return new Set(stored ? JSON.parse(stored) : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function markAccountClaimed(address: string) {
-  const claimed = getClaimedAccounts();
-  claimed.add(address);
-  localStorage.setItem(CLAIMED_KEY, JSON.stringify([...claimed]));
-}
+import { settingsGet, settingsSet } from "@utils/json_rpc";
 
 function ClaimCoinsButton() {
   const { mutate: claimTestnetFaucetFunds, isPending } = useAccountsCreateFreeTestCoins();
@@ -60,15 +44,36 @@ function ClaimCoinsButton() {
   const accountAddress = account ? substateIdToString(account.component_address) : null;
 
   useEffect(() => {
-    if (accountAddress) {
-      setHasClaimed(getClaimedAccounts().has(accountAddress));
-    }
+    if (!accountAddress) return;
+    let cancelled = false;
+    settingsGet()
+      .then((res) => {
+        if (!cancelled) {
+          setHasClaimed(res.claimed_accounts.includes(accountAddress));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setHasClaimed(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [accountAddress]);
 
-  const markClaimed = useCallback(() => {
-    if (accountAddress) {
-      markAccountClaimed(accountAddress);
-      setHasClaimed(true);
+  const markClaimed = useCallback(async () => {
+    if (!accountAddress) return;
+    setHasClaimed(true);
+    try {
+      const current = await settingsGet();
+      if (current.claimed_accounts.includes(accountAddress)) return;
+      const updated = [...current.claimed_accounts, accountAddress];
+      await settingsSet({
+        indexer_url: current.indexer_url,
+        advanced_ui_features: null,
+        claimed_accounts: updated,
+      });
+    } catch (e) {
+      console.error("Failed to persist claimed account:", e);
     }
   }, [accountAddress]);
 

@@ -29,6 +29,11 @@ pub async fn handle_get(
         .get(ConfigKey::AdvancedUiFeatures)
         .optional()?
         .unwrap_or_default();
+    let claimed_accounts = sdk
+        .config_api()
+        .get(ConfigKey::ClaimedAccounts)
+        .optional()?
+        .unwrap_or_default();
 
     Ok(SettingsGetResponse {
         indexer_url,
@@ -37,6 +42,7 @@ pub async fn handle_get(
             byte: network.as_byte(),
         },
         advanced_ui_features,
+        claimed_accounts,
     })
 }
 
@@ -52,6 +58,9 @@ pub async fn handle_set(
     if let Some(advanced_ui_features) = &req.advanced_ui_features {
         sdk.config_api()
             .set(ConfigKey::AdvancedUiFeatures, advanced_ui_features)?;
+    }
+    if let Some(claimed_accounts) = &req.claimed_accounts {
+        sdk.config_api().set(ConfigKey::ClaimedAccounts, claimed_accounts)?;
     }
     Ok(SettingsSetResponse {})
 }

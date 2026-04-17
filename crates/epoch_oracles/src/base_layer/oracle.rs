@@ -366,8 +366,12 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
                 }
                 self.last_scanned_validator_node_mr = Some(current_validator_node_mr);
             }
-            // self.set_last_scanned_block(&header, tip.tip_hash)?;
-            self.last_scanned_tip = Some(tip.tip_hash);
+            // Track incremental progress of hash/height so a mid-loop failure can resume from the
+            // last processed header. `last_scanned_tip` is intentionally NOT updated here — it
+            // represents the un-lagged tip we've fully caught up to, and is set only by
+            // set_last_scanned_block below once the whole batch has been persisted. Otherwise an
+            // interrupted sync would cause get_blockchain_progression to short-circuit on the next
+            // round and silently skip the remaining headers.
             self.last_scanned_hash = Some(header_hash);
             self.last_scanned_height = header_height;
         }

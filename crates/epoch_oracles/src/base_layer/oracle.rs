@@ -276,8 +276,6 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
             .get_consensus_constants(tip.height_of_longest_chain)
             .await?;
 
-        let end_scan_epoch = constants.height_to_epoch(lag_tip_height);
-
         // We'll buffer 1000 headers at a time
         // note: 10_000 is the maximum permitted by the base node gRPC service
         let limit = 1_000.min(num_blocks);
@@ -314,21 +312,22 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
                 );
                 self.last_epoch_hash = Some(header_hash);
 
-                // Only emit epoch changed for the last 5 for efficiency
-                if end_scan_epoch.saturating_sub(current_epoch).as_u64() <= 5 {
-                    // TODO: we do not handle consensus constants changing during scan here for performance reasons.
-                    // constants = self.base_node_client.get_consensus_constants(header_height).await?;
+                // TODO: we do not handle consensus constants changing during scan here for performance reasons.
+                // constants = self.base_node_client.get_consensus_constants(header_height).await?;
 
-                    info!(
-                        target: LOG_TARGET,
-                        "🟩 epoch change {}->{} (height({}) hash({}))", scan_epoch, current_epoch, header_height, header_hash
-                    );
-                    self.pending_events.push_back(EpochEvent::EpochChanged {
-                        epoch: current_epoch,
-                        // Set above
-                        epoch_hash: self.last_epoch_hash.unwrap_or_default(),
-                    });
-                }
+                // Emit EpochChanged for every boundary so every (epoch, epoch_hash) pair is persisted
+                // by the epoch manager. Consensus's get_epoch_hash(epoch) lookup depends on that
+                // row being present for any epoch it may transition into — including epochs
+                // crossed during a long catch-up.
+                info!(
+                    target: LOG_TARGET,
+                    "🟩 epoch change {}->{} (height({}) hash({}))", scan_epoch, current_epoch, header_height, header_hash
+                );
+                self.pending_events.push_back(EpochEvent::EpochChanged {
+                    epoch: current_epoch,
+                    // Set above
+                    epoch_hash: self.last_epoch_hash.unwrap_or_default(),
+                });
                 scan_epoch = current_epoch;
             }
 

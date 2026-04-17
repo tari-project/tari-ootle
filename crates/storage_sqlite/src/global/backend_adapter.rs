@@ -979,7 +979,7 @@ fn distinct_validators_sorted<TAddr: NodeAddressable>(
     sqlite_vns: Vec<DbValidatorNode>,
 ) -> Result<Vec<ValidatorNode<TAddr>>, SqliteStorageError> {
     let mut db_vns = distinct_validators(sqlite_vns)?;
-    db_vns.sort_by(|a, b| a.shard_key.cmp(&b.shard_key));
+    db_vns.sort_by_key(|a| a.shard_key);
     Ok(db_vns)
 }
 

@@ -294,22 +294,17 @@ impl Fold for TraitInfoCollector {
     }
 
     fn fold_trait_item(&mut self, mut node: TraitItem) -> TraitItem {
-        match &mut node {
-            TraitItem::Fn(fn_item) => {
-                if self.is_rpc_method(fn_item) {
-                    let info = match self.parse_trait_item_method(fn_item) {
-                        Ok(i) => i,
-                        Err(err) => {
-                            panic!("{}", err);
-                        },
-                    };
+        if let TraitItem::Fn(fn_item) = &mut node &&
+            self.is_rpc_method(fn_item)
+        {
+            let info = match self.parse_trait_item_method(fn_item) {
+                Ok(i) => i,
+                Err(err) => {
+                    panic!("{}", err);
+                },
+            };
 
-                    self.rpc_methods.push(info);
-                }
-            },
-            _ => {
-                // Nothing
-            },
+            self.rpc_methods.push(info);
         }
 
         fold::fold_trait_item(self, node)

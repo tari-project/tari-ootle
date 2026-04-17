@@ -208,8 +208,16 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
         if tip.height_of_longest_chain <= self.lag_start_height() {
             return Ok(BlockchainProgression::NoProgress);
         }
-        match &self.last_scanned_tip {
-            Some(hash) if *hash == tip.tip_hash => Ok(BlockchainProgression::NoProgress),
+        // Short-circuit when the un-lagged tip is unchanged — nothing to do.
+        if self.last_scanned_tip.as_ref() == Some(&tip.tip_hash) {
+            return Ok(BlockchainProgression::NoProgress);
+        }
+        // Probe for reorgs using our deepest scanned block, NOT the un-lagged tip. The un-lagged
+        // tip naturally gets displaced every block or two when a competing miner's tip is
+        // orphaned — that lookup returns NotFound and declares "reorg" even though nothing at our
+        // (lagged) scan depth has changed. Using last_scanned_hash restricts reorg detection to
+        // changes that actually invalidate data we've stored.
+        match &self.last_scanned_hash {
             Some(hash) => {
                 let header = self.base_node_client.get_header_by_hash(hash).await.optional()?;
                 if header.is_some() {

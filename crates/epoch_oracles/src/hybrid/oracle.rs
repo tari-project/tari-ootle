@@ -3,29 +3,29 @@
 
 use log::*;
 use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle};
-use tokio::sync::watch;
+use tokio::sync::mpsc;
 
 use crate::{
     base_layer::{BaseLayerBlockHeaderStore, BaseLayerOracle},
     configured::{ConfiguredEpochOracle, EpochTickerData},
-    hybrid::watch_ticker::WatchEpochTicker,
+    hybrid::mpsc_ticker::MpscEpochTicker,
     store::EpochOracleStore,
 };
 
 const LOG_TARGET: &str = "tari::ootle::epoch_oracles::hybrid";
 
 pub struct HybridEpochOracle<TStore> {
-    configured: ConfiguredEpochOracle<TStore, WatchEpochTicker>,
+    configured: ConfiguredEpochOracle<TStore, MpscEpochTicker>,
     base_layer: BaseLayerOracle<TStore>,
-    trigger: watch::Sender<EpochTickerData>,
+    trigger: mpsc::UnboundedSender<EpochTickerData>,
     has_initial_sync_completed: bool,
 }
 
 impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> HybridEpochOracle<TStore> {
     pub fn new(
-        configured: ConfiguredEpochOracle<TStore, WatchEpochTicker>,
+        configured: ConfiguredEpochOracle<TStore, MpscEpochTicker>,
         base_layer: BaseLayerOracle<TStore>,
-        trigger: watch::Sender<EpochTickerData>,
+        trigger: mpsc::UnboundedSender<EpochTickerData>,
     ) -> Self {
         Self {
             configured,

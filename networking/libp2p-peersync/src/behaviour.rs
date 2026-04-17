@@ -265,19 +265,19 @@ where TPeerStore: PeerStore
             FromSwarm::ConnectionEstablished(_) => {},
             FromSwarm::ConnectionClosed(connection_closed) => self.on_connection_closed(connection_closed),
             FromSwarm::AddressChange(_) => {},
-            FromSwarm::ExternalAddrConfirmed(addr_confirmed) => {
-                if self.local_peer_record.add_address(addr_confirmed.addr.clone()) {
-                    self.handle_update_local_record();
-                    self.pending_events
-                        .push_back(ToSwarm::GenerateEvent(Event::LocalPeerRecordUpdated));
-                }
+            FromSwarm::ExternalAddrConfirmed(addr_confirmed)
+                if self.local_peer_record.add_address(addr_confirmed.addr.clone()) =>
+            {
+                self.handle_update_local_record();
+                self.pending_events
+                    .push_back(ToSwarm::GenerateEvent(Event::LocalPeerRecordUpdated));
             },
-            FromSwarm::ExternalAddrExpired(addr_expired) => {
-                if self.local_peer_record.remove_address(addr_expired.addr) {
-                    self.handle_update_local_record();
-                    self.pending_events
-                        .push_back(ToSwarm::GenerateEvent(Event::LocalPeerRecordUpdated));
-                }
+            FromSwarm::ExternalAddrExpired(addr_expired)
+                if self.local_peer_record.remove_address(addr_expired.addr) =>
+            {
+                self.handle_update_local_record();
+                self.pending_events
+                    .push_back(ToSwarm::GenerateEvent(Event::LocalPeerRecordUpdated));
             },
             _ => {},
         }

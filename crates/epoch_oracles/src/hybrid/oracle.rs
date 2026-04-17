@@ -61,15 +61,13 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> Epoc
                                 done_for_now: self.has_initial_sync_completed,
                             });
                         },
-                        EpochEvent::DoneForNow {epoch, epoch_hash} => {
-                            if !self.has_initial_sync_completed {
-                                let _ignore = self.trigger.send(EpochTickerData{
-                                    epoch,
-                                    epoch_hash,
-                                    done_for_now: true,
-                                });
-                                self.has_initial_sync_completed = true;
-                            }
+                        EpochEvent::DoneForNow {epoch, epoch_hash} if !self.has_initial_sync_completed => {
+                            let _ignore = self.trigger.send(EpochTickerData{
+                                epoch,
+                                epoch_hash,
+                                done_for_now: true,
+                            });
+                            self.has_initial_sync_completed = true;
                         },
                         // Ignore other events that are not epoch changes
                         _ => {},

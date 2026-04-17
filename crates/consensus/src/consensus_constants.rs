@@ -68,7 +68,7 @@ impl ConsensusConstants {
 
     pub const fn esmeralda() -> Self {
         Self {
-            base_layer_confirmations: 5,
+            base_layer_confirmations: 20,
             committee_size_per_shard_group: 40,
             num_preshards: NumPreshards::current(),
             pacemaker_block_time: Duration::from_secs(10),

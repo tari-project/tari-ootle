@@ -208,8 +208,16 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
         if tip.height_of_longest_chain <= self.lag_start_height() {
             return Ok(BlockchainProgression::NoProgress);
         }
-        match &self.last_scanned_tip {
-            Some(hash) if *hash == tip.tip_hash => Ok(BlockchainProgression::NoProgress),
+        // Short-circuit when the un-lagged tip is unchanged — nothing to do.
+        if self.last_scanned_tip.as_ref() == Some(&tip.tip_hash) {
+            return Ok(BlockchainProgression::NoProgress);
+        }
+        // Probe for reorgs using our deepest scanned block, NOT the un-lagged tip. The un-lagged
+        // tip naturally gets displaced every block or two when a competing miner's tip is
+        // orphaned — that lookup returns NotFound and declares "reorg" even though nothing at our
+        // (lagged) scan depth has changed. Using last_scanned_hash restricts reorg detection to
+        // changes that actually invalidate data we've stored.
+        match &self.last_scanned_hash {
             Some(hash) => {
                 let header = self.base_node_client.get_header_by_hash(hash).await.optional()?;
                 if header.is_some() {
@@ -268,8 +276,6 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
             .get_consensus_constants(tip.height_of_longest_chain)
             .await?;
 
-        let end_scan_epoch = constants.height_to_epoch(lag_tip_height);
-
         // We'll buffer 1000 headers at a time
         // note: 10_000 is the maximum permitted by the base node gRPC service
         let limit = 1_000.min(num_blocks);
@@ -306,21 +312,22 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
                 );
                 self.last_epoch_hash = Some(header_hash);
 
-                // Only emit epoch changed for the last 5 for efficiency
-                if end_scan_epoch.saturating_sub(current_epoch).as_u64() <= 5 {
-                    // TODO: we do not handle consensus constants changing during scan here for performance reasons.
-                    // constants = self.base_node_client.get_consensus_constants(header_height).await?;
+                // TODO: we do not handle consensus constants changing during scan here for performance reasons.
+                // constants = self.base_node_client.get_consensus_constants(header_height).await?;
 
-                    info!(
-                        target: LOG_TARGET,
-                        "🟩 epoch change {}->{} (height({}) hash({}))", scan_epoch, current_epoch, header_height, header_hash
-                    );
-                    self.pending_events.push_back(EpochEvent::EpochChanged {
-                        epoch: current_epoch,
-                        // Set above
-                        epoch_hash: self.last_epoch_hash.unwrap_or_default(),
-                    });
-                }
+                // Emit EpochChanged for every boundary so every (epoch, epoch_hash) pair is persisted
+                // by the epoch manager. Consensus's get_epoch_hash(epoch) lookup depends on that
+                // row being present for any epoch it may transition into — including epochs
+                // crossed during a long catch-up.
+                info!(
+                    target: LOG_TARGET,
+                    "🟩 epoch change {}->{} (height({}) hash({}))", scan_epoch, current_epoch, header_height, header_hash
+                );
+                self.pending_events.push_back(EpochEvent::EpochChanged {
+                    epoch: current_epoch,
+                    // Set above
+                    epoch_hash: self.last_epoch_hash.unwrap_or_default(),
+                });
                 scan_epoch = current_epoch;
             }
 
@@ -359,8 +366,12 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
                 }
                 self.last_scanned_validator_node_mr = Some(current_validator_node_mr);
             }
-            // self.set_last_scanned_block(&header, tip.tip_hash)?;
-            self.last_scanned_tip = Some(tip.tip_hash);
+            // Track incremental progress of hash/height so a mid-loop failure can resume from the
+            // last processed header. `last_scanned_tip` is intentionally NOT updated here — it
+            // represents the un-lagged tip we've fully caught up to, and is set only by
+            // set_last_scanned_block below once the whole batch has been persisted. Otherwise an
+            // interrupted sync would cause get_blockchain_progression to short-circuit on the next
+            // round and silently skip the remaining headers.
             self.last_scanned_hash = Some(header_hash);
             self.last_scanned_height = header_height;
         }

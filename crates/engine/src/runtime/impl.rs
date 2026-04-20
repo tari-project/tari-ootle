@@ -253,6 +253,22 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         })
     }
 
+    fn check_token_symbol_length(metadata: &Metadata) -> Result<(), RuntimeError> {
+        if let Some(symbol) = metadata.get(TOKEN_SYMBOL) &&
+            symbol.len() > limits::MAX_TOKEN_SYMBOL_LEN
+        {
+            return Err(RuntimeError::InvalidArgument {
+                argument: "metadata",
+                reason: format!(
+                    "token symbol exceeds {} bytes (got {})",
+                    limits::MAX_TOKEN_SYMBOL_LEN,
+                    symbol.len()
+                ),
+            });
+        }
+        Ok(())
+    }
+
     fn emit_std_event<T: Into<SubstateId>>(
         object_name: &str,
         action: &str,
@@ -856,6 +872,8 @@ where
                     });
                 }
 
+                Self::check_token_symbol_length(&arg.metadata)?;
+
                 let owner_rule = match arg.owner_rule {
                     OwnerRule::OwnedBySigner => SubstateOwnerRule::ByPublicKey(self.seal_signer_public_key),
                     OwnerRule::ByPublicKey(key) => SubstateOwnerRule::ByPublicKey(key),
@@ -1206,6 +1224,8 @@ where
                             reason: "UpdateMetadata resource action requires a resource address".to_string(),
                         })?;
                 let new_metadata: Metadata = args.assert_one_arg()?;
+
+                Self::check_token_symbol_length(&new_metadata)?;
 
                 let (resource_lock, maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
                     let resource_lock = state_mut.write_lock_substate(SubstateId::Resource(resource_address))?;

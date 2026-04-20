@@ -24,6 +24,18 @@ mod template {
             .create()
         }
 
+        pub fn new_with_custom_symbol(symbol: String) -> Component<Self> {
+            let fungible = ResourceBuilder::public_fungible()
+                .with_token_symbol(symbol)
+                .update_metadata(rule!(allow_all))
+                .initial_supply(1000u32);
+            Component::new(Self {
+                fungible: Vault::from_bucket(fungible),
+            })
+            .with_access_rules(AccessRules::allow_all())
+            .create()
+        }
+
         pub fn new_without_symbol() -> Component<Self> {
             let fungible = ResourceBuilder::public_fungible()
                 .update_metadata(rule!(allow_all))

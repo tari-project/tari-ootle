@@ -247,16 +247,17 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         &mut self,
         substate_id_filter: Option<&SubstateId>,
         topic_filter: Option<&str>,
+        resource_address_filter: Option<&ResourceAddress>,
         offset: u32,
         limit: u32,
     ) -> Result<Vec<(TransactionId, Event)>, StorageError> {
-        // TODO: allow to query by payload as well, unifying all event methods into one
         info!(
             target: LOG_TARGET,
-            "Querying substate scanner database: get_events with substate_id_filter = {:?} and \
-            topic_filter = {:?}",
+            "Querying substate scanner database: get_events with substate_id_filter = {:?}, \
+            topic_filter = {:?}, resource_address_filter = {:?}",
             substate_id_filter,
-            topic_filter
+            topic_filter,
+            resource_address_filter
         );
         use crate::storage_sqlite::schema::events;
 
@@ -275,6 +276,10 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                     query = query.filter(events::topic.eq(topic));
                 },
             }
+        }
+
+        if let Some(resource_address) = resource_address_filter {
+            query = query.filter(events::resource_address.eq(resource_address.to_string()));
         }
 
         let event_rows = query
@@ -331,6 +336,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         topic_filter: Option<&str>,
         substate_id_filter: Option<&SubstateId>,
         template_address_filter: Option<&TemplateAddress>,
+        resource_address_filter: Option<&ResourceAddress>,
         limit: u32,
     ) -> Result<Vec<(i64, TransactionId, Event)>, StorageError> {
         use crate::storage_sqlite::schema::events;
@@ -353,6 +359,9 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         }
         if let Some(template_address) = template_address_filter {
             query = query.filter(events::template_address.eq(template_address.to_string()));
+        }
+        if let Some(resource_address) = resource_address_filter {
+            query = query.filter(events::resource_address.eq(resource_address.to_string()));
         }
 
         let event_rows = query

@@ -21,15 +21,24 @@
 //  USE OF THIS SOFTWARE, SUCH DAMAGE.
 
 import CopyAddress from "@components/CopyAddress";
-import { Divider, InputAdornment, InputLabel, Stack, Typography } from "@mui/material";
+import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
+import { Alert, Chip, CircularProgress, Divider, InputAdornment, InputLabel, Stack, Typography } from "@mui/material";
 import Button from "@mui/material/Button";
 import CheckBox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import MenuItem from "@mui/material/MenuItem";
 import Select, { SelectChangeEvent } from "@mui/material/Select";
 import TextField from "@mui/material/TextField";
+import Tooltip from "@mui/material/Tooltip";
 import TypeChip from "@routes/AssetVault/Components/ResourceTypeChip";
-import { Amount, ResourceAddress, ResourceType, validateOotleAddress } from "@tari-project/ootle-ts-bindings";
+import {
+  Amount,
+  ResourceAddress,
+  ResourceType,
+  SwapPoolInfo,
+  TARI_TOKEN,
+  validateOotleAddress,
+} from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
 import { formatCurrency, parseAmountToBaseUnits } from "@utils/helpers";
 import { FormEvent, useState } from "react";
@@ -43,6 +52,16 @@ export interface SendMoneyFormState {
   fee: string;
   badge: string | null;
   memo: string;
+  swapPoolAddress: string;
+  // Calculated from fee estimate + pool ratio, not user-entered
+  swapInputAmount: string;
+}
+
+export interface PoolRateInfo {
+  resource_a: string;
+  balance_a: bigint;
+  resource_b: string;
+  balance_b: bigint;
 }
 
 interface FormStepProps {
@@ -57,18 +76,45 @@ interface FormStepProps {
   token_symbol: string;
   divisibility: number;
   formError?: FormError | null;
+  knownPools: SwapPoolInfo[];
+  isLoadingPools: boolean;
+  poolRate: PoolRateInfo | null;
+  poolError: string | null;
+  isLoadingPoolRate: boolean;
   onSubmit: (e: FormEvent) => void;
   onCancel: () => void;
   onFormValueChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onSelectFormValueChange: (e: SelectChangeEvent<unknown>) => void;
   onCheckboxFormValueChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onUseBadgeChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onPoolSelect: (poolAddress: string) => void;
+  hasTariBalance?: boolean;
 }
 
 export type FormError = {
   type: "general" | "address" | "amount" | "fee";
   message: string;
 };
+
+function formatPoolRate(poolRate: PoolRateInfo, tokenSymbol: string): string {
+  const a = poolRate.balance_a;
+  const b = poolRate.balance_b;
+  if (a === 0n || b === 0n) return "Pool has no liquidity";
+
+  // Determine which side is the token and which is TARI
+  if (poolRate.resource_a === TARI_TOKEN) {
+    // resource_b is the token: rate = balance_a / balance_b (TARI per token)
+    const rate = Number(a) / Number(b);
+    return `1 ${tokenSymbol} = ${rate.toFixed(6)} TARI`;
+  } else if (poolRate.resource_b === TARI_TOKEN) {
+    // resource_a is the token: rate = balance_b / balance_a (TARI per token)
+    const rate = Number(b) / Number(a);
+    return `1 ${tokenSymbol} = ${rate.toFixed(6)} TARI`;
+  }
+  // Neither side is TARI — show raw ratio
+  const rate = Number(a) / Number(b);
+  return `1:${rate.toFixed(6)}`;
+}
 
 export default function FormStep({
   resource_address,
@@ -82,29 +128,41 @@ export default function FormStep({
   token_symbol,
   divisibility,
   formError,
+  knownPools,
+  isLoadingPools,
+  poolRate,
+  poolError,
+  isLoadingPoolRate,
   onSubmit,
   onCancel,
   onFormValueChange,
   onSelectFormValueChange,
   onCheckboxFormValueChange,
   onUseBadgeChange,
+  onPoolSelect,
+  hasTariBalance,
 }: FormStepProps) {
   const isConfidential = resource_type === "Confidential";
   const isStealth = resource_type === "Stealth";
 
   // Track if the user is currently typing in the amount field
   const [isFocusedAmount, setIsFocusedAmount] = useState(false);
+  const [showCustomPool, setShowCustomPool] = useState(false);
 
   const enteredAmount = parseFloat(transferFormState.amount);
   const isNaNAmount = isNaN(enteredAmount);
   const enteredAmountInBaseUnits = isNaNAmount ? 0n : parseAmountToBaseUnits(transferFormState.amount, divisibility);
   const hasInsufficientFunds = availableBalance !== undefined && enteredAmountInBaseUnits > BigInt(availableBalance);
+  const poolHasNoLiquidity =
+    !!transferFormState.swapPoolAddress && poolRate !== null && (poolRate.balance_a === 0n || poolRate.balance_b === 0n);
 
   const isFormValid =
     !isNaNAmount &&
     validateOotleAddress(transferFormState.address) &&
     transferFormState.amount &&
-    !hasInsufficientFunds;
+    !hasInsufficientFunds &&
+    !poolError &&
+    !poolHasNoLiquidity;
 
   // Format amount for display
   const formatAmountValue = (amount: string) => {
@@ -128,6 +186,11 @@ export default function FormStep({
     symbol: token_symbol,
     decimals: divisibility,
   };
+
+  // Find pools that contain our resource
+  const relevantPools = knownPools.filter(
+    (p) => p.resource_a === resource_address || p.resource_b === resource_address,
+  );
 
   return (
     <Form onSubmit={onSubmit}>
@@ -272,6 +335,124 @@ export default function FormStep({
           }}
         />
 
+        {isStealth && resource_address !== TARI_TOKEN && (
+          <>
+            <Divider />
+            <Typography variant="subtitle2" color="text.secondary">
+              Pay fee by pool swap (optional)
+              <Tooltip
+                title={
+                  <>
+                    Network fees (a.k.a gas) on Tari are paid in the native TARI token. If you don't have TARI, you can
+                    optionally pay the fee by swapping a small amount of your {token_symbol} token for TARI in a swap
+                    pool within the transfer transaction. The swap amount is calculated automatically from the estimated
+                    fee and pool exchange rate.
+                  </>
+                }
+                arrow
+                placement="right"
+              >
+                <HelpOutlineIcon sx={{ fontSize: 16, color: "text.secondary", cursor: "help" }} />
+              </Tooltip>
+            </Typography>
+
+            {isLoadingPools ? (
+              <Stack direction="row" spacing={1} alignItems="center">
+                <CircularProgress size={16} />
+                <Typography variant="body2" color="text.secondary">
+                  Loading pools...
+                </Typography>
+              </Stack>
+            ) : (
+              <>
+                <InputLabel id="select-pool">Select Pool</InputLabel>
+                <Select
+                  id="select-pool"
+                  value={showCustomPool ? "__custom__" : transferFormState.swapPoolAddress || ""}
+                  displayEmpty
+                  disabled={disabled}
+                  onChange={(e) => {
+                    const val = e.target.value as string;
+                    if (val === "__custom__") {
+                      setShowCustomPool(true);
+                      onPoolSelect("");
+                    } else if (val === "") {
+                      setShowCustomPool(false);
+                      onPoolSelect("");
+                    } else {
+                      setShowCustomPool(false);
+                      onPoolSelect(val);
+                    }
+                  }}
+                >
+                  <MenuItem value="">
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <span>None (pay fee in TARI)</span>
+                      {hasTariBalance && <Chip label="Recommended" size="small" color="success" variant="outlined" />}
+                    </Stack>
+                  </MenuItem>
+                  {relevantPools.map((pool) => {
+                    const isTokenA = pool.resource_a === resource_address;
+                    const tokenBalance = isTokenA ? BigInt(pool.balance_a) : BigInt(pool.balance_b);
+                    const tariBalance = isTokenA ? BigInt(pool.balance_b) : BigInt(pool.balance_a);
+                    const rate = tokenBalance > 0n ? Number(tariBalance) / Number(tokenBalance) : 0;
+                    return (
+                      <MenuItem key={pool.pool_address} value={pool.pool_address}>
+                        Swap: {pool.pool_address.substring(0, 16)}... (1 {token_symbol} = {rate.toFixed(4)} TARI)
+                      </MenuItem>
+                    );
+                  })}
+                  <MenuItem value="__custom__">Custom pool address...</MenuItem>
+                </Select>
+              </>
+            )}
+
+            {showCustomPool && (
+              <TextField
+                name="swapPoolAddress"
+                label="Swap Pool Address"
+                value={transferFormState.swapPoolAddress}
+                onChange={(e) => {
+                  onFormValueChange(e as React.ChangeEvent<HTMLInputElement>);
+                  // Fetch rate when user finishes typing (debounced via onBlur)
+                }}
+                onBlur={() => {
+                  if (transferFormState.swapPoolAddress) {
+                    onPoolSelect(transferFormState.swapPoolAddress);
+                  }
+                }}
+                style={{ flexGrow: 1 }}
+                disabled={disabled}
+                error={!!poolError}
+                helperText={poolError || "Enter a liquidity pool component address"}
+              />
+            )}
+
+            {isLoadingPoolRate && (
+              <Stack direction="row" spacing={1} alignItems="center">
+                <CircularProgress size={16} />
+                <Typography variant="body2" color="text.secondary">
+                  Fetching pool rate...
+                </Typography>
+              </Stack>
+            )}
+
+            {poolRate && transferFormState.swapPoolAddress && !poolError && (
+              <Alert severity={poolHasNoLiquidity ? "warning" : "info"} variant="outlined">
+                {poolHasNoLiquidity
+                  ? "This pool has no liquidity. Please select a different pool."
+                  : `Pool exchange rate: ${formatPoolRate(poolRate, token_symbol)}`}
+              </Alert>
+            )}
+
+            {poolError && !showCustomPool && (
+              <Alert severity="error" variant="outlined">
+                {poolError}
+              </Alert>
+            )}
+          </>
+        )}
+
         <Divider />
 
         <DisplayFormError forType="general" formError={formError} />
@@ -280,7 +461,7 @@ export default function FormStep({
             Cancel
           </Button>
           <Button variant="contained" type="submit" disabled={disabled || !isFormValid}>
-            {isEstimatingFee ? "Estimating..." : transferFormState.fee ? "Continue" : "Continue"}
+            {isEstimatingFee ? "Estimating..." : "Continue"}
           </Button>
         </Stack>
       </Stack>

@@ -7,7 +7,7 @@ use indexmap::{IndexMap, IndexSet};
 use log::*;
 use tari_consensus_types::{Decision, LeafBlock};
 use tari_engine_types::{
-    commit_result::RejectReason,
+    commit_result::{AbortReason, RejectReason},
     substate::{Substate, SubstateId},
 };
 use tari_ootle_common_types::{
@@ -225,6 +225,25 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         execution_epoch: Epoch,
         pledged_transaction: PledgedTransaction,
     ) -> Result<TransactionExecution, BlockTransactionExecutorError> {
+        // Abort before execution if the execution epoch exceeds the transaction's max_epoch
+        if let Some(max_epoch) = pledged_transaction.transaction.transaction().max_epoch() &&
+            execution_epoch > max_epoch
+        {
+            warn!(
+                target: LOG_TARGET,
+                "⏰ Transaction {} has expired: execution epoch {} exceeds max_epoch {}",
+                pledged_transaction.transaction.id(),
+                execution_epoch,
+                max_epoch,
+            );
+            return Ok(TransactionExecution::abort(
+                pledged_transaction.transaction.id(),
+                RejectReason::Abort {
+                    reason: AbortReason::EpochExpired,
+                },
+            ));
+        }
+
         let resolved_inputs = pledged_transaction
             .local_pledges
             .into_iter()
@@ -255,6 +274,22 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         block: &LeafBlock,
         execution_epoch: Epoch,
     ) -> Result<TransactionExecution, BlockTransactionExecutorError> {
+        // Abort before execution if the execution epoch exceeds the transaction's max_epoch
+        if let Some(max_epoch) = transaction.transaction().max_epoch() &&
+            execution_epoch > max_epoch
+        {
+            warn!(
+                target: LOG_TARGET,
+                "⏰ Transaction {} has expired: execution epoch {} exceeds max_epoch {}",
+                transaction.id(),
+                execution_epoch,
+                max_epoch,
+            );
+            return Ok(TransactionExecution::abort(transaction.id(), RejectReason::Abort {
+                reason: AbortReason::EpochExpired,
+            }));
+        }
+
         // Might have been executed already in on propose
         if let Some(execution) = self.fetch_execution(store, transaction.id(), block)? {
             info!(
@@ -416,8 +451,8 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 Ok(PreparedTransaction::new_multishard_executed(execution, lock_status))
             },
             Decision::Abort(reason) => {
-                // CASE: All outputs are local, but we're aborting, so this is a local-only transaction since no
-                // outputs need to be created
+                // CASE: We're aborting, so this is a local-only transaction since no outputs need to be
+                // created
                 warn!(target: LOG_TARGET, "⚠️ PREPARE: Aborted: {reason:?}");
                 Ok(PreparedTransaction::new_local_early_abort(execution))
             },

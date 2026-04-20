@@ -12,7 +12,7 @@ Add to your template's `Cargo.toml`:
 
 ```toml
 [build-dependencies]
-tari_ootle_template_build = "0.4"
+tari_ootle_template_build = "0.5"
 ```
 
 Create a `build.rs`:
@@ -61,6 +61,8 @@ fn main() {
 
 ## Output
 
+URL fields (`repository`, `documentation`, `homepage`, `logo_url`) are parsed and validated at build time. Invalid URLs will cause a build error.
+
 On a successful `build()`:
 
 - Writes `template_metadata.cbor` to `OUT_DIR`
@@ -86,6 +88,7 @@ category = "token"
 documentation = "https://docs.example.com/fungible-token"
 homepage = "https://example.com"
 logo_url = "https://example.com/logo.png"
+supersedes = "0000000000000000000000000000000000000000000000000000000000000000"
 
 [package.metadata.tari-template.extra]
 audit = "https://example.com/audit-report"

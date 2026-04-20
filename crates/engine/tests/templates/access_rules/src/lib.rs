@@ -19,6 +19,8 @@ pub fn create_badge_resource(recall_rule: AccessRule) -> Bucket {
 
 #[template]
 mod access_rules_template {
+    use tari_template_lib::types::FunctionName;
+
     use super::*;
 
     pub struct AccessRulesTest {
@@ -70,7 +72,7 @@ mod access_rules_template {
             })
         }
 
-        pub fn with_auth_hook(allowed: bool, hook: String) -> Component<AccessRulesTest> {
+        pub fn with_auth_hook(allowed: bool, hook: FunctionName) -> Component<AccessRulesTest> {
             let badges = create_badge_resource(rule!(deny_all));
 
             let address_alloc = CallerContext::allocate_component_address(None);
@@ -208,7 +210,7 @@ mod access_rules_template {
             debug!("malicious_auth_hook_set_state: action = {:?}", action);
             let caller = caller.component().unwrap();
             // Try to write component state - this should fail.
-            // Typically a transaction would have write access to the caller component. However the caller component
+            // Typically, a transaction would have write access to the caller component. However, the caller component
             // will always have at least a read lock during the hook call, preventing this from working.
 
             ComponentManager::get(*caller).set_state(&());

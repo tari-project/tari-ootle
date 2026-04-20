@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{fs, io, str::FromStr, sync::Arc};
+use std::{collections::HashSet, fs, io, str::FromStr, sync::Arc};
 
 use anyhow::{Context, anyhow};
 use libp2p::identity;
@@ -30,6 +30,8 @@ use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common::configuration::bootstrap::{ApplicationType, grpc_default_port};
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_crypto::tari_utilities::ByteArray;
+use tari_engine::wasm::WasmModule;
+use tari_engine_types::{calculate_template_binary_hash, published_template::PublishedTemplateMetadata};
 use tari_epoch_manager::service::{EpochManagerConfig, EpochManagerHandle};
 use tari_epoch_oracles::{
     EpochOracle,
@@ -40,7 +42,7 @@ use tari_epoch_oracles::{
         BaseLayerOracle,
     },
     configured::{ConfiguredEpochOracle, RealTimeEpochTicker},
-    hybrid::{HybridEpochOracle, watch_ticker},
+    hybrid::{HybridEpochOracle, mpsc_ticker},
     store::EpochOracleStore,
 };
 use tari_indexer_client::event::{IndexerEvent, TransactionEvent};
@@ -60,7 +62,8 @@ use tari_ootle_p2p::{PeerAddress, TariMessagingSpec};
 use tari_ootle_storage::global::GlobalDb;
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_shutdown::ShutdownSignal;
-use tari_template_lib_types::{Amount, crypto::RistrettoPublicKeyBytes};
+use tari_template_builtin::all_builtin_templates;
+use tari_template_lib_types::{Amount, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
 use crate::{
@@ -167,6 +170,8 @@ pub async fn spawn_services(
     let store = SqliteIndexerStore::try_create(config.state_db_path())?;
     check_store(config, &store)?;
 
+    seed_builtin_template_catalogue(&store)?;
+
     if config.network.is_testnet() {
         // TODO: We happen to know that the testnet faucet mints u64::MAX tXTR. This is hacky.
         hack_xtr_initial_supply(&store)?;
@@ -203,6 +208,9 @@ pub async fn spawn_services(
         consensus_constants.num_preshards,
     );
 
+    let watched_templates: Arc<HashSet<TemplateAddress>> =
+        Arc::new(config.indexer.watched_templates.iter().copied().collect());
+
     let event_notifier = Notify::new(1000);
     let transaction_event_notifier = Notify::new(1024);
 
@@ -213,6 +221,7 @@ pub async fn spawn_services(
         NetworkWideStateSyncConfig {
             event_filters: Arc::from(config.indexer.event_filters.clone()),
             work_interval: config.indexer.state_scanning_interval,
+            watched_templates: watched_templates.clone(),
         },
         event_notifier.clone(),
         transaction_event_notifier.clone(),
@@ -268,6 +277,7 @@ pub async fn spawn_services(
         dry_run_transaction_processor,
         event_notifier,
         transaction_event_notifier,
+        watched_templates,
     })
 }
 
@@ -286,6 +296,7 @@ pub struct Services {
     pub dry_run_transaction_processor: DryRunTransactionProcessor,
     pub event_notifier: Notify<IndexerEvent>,
     pub transaction_event_notifier: Notify<TransactionEvent>,
+    pub watched_templates: Arc<HashSet<TemplateAddress>>,
 }
 
 fn ensure_directories_exist(config: &ApplicationConfig) -> io::Result<()> {
@@ -381,7 +392,7 @@ async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHea
 ) -> anyhow::Result<HybridEpochOracle<TStore>> {
     let base_layer_oracle = create_base_layer_epoch_oracle(config, store.clone(), consensus_constants).await?;
     let oracle_config = config.epoch_oracle.configured.load().await?;
-    let (ticker, trigger) = watch_ticker();
+    let (ticker, trigger) = mpsc_ticker();
     let configured_oracle = ConfiguredEpochOracle::with_custom_ticker(oracle_config, store, ticker);
     Ok(HybridEpochOracle::new(configured_oracle, base_layer_oracle, trigger))
 }
@@ -405,6 +416,25 @@ fn check_store<TStore: IndexerStore>(config: &ApplicationConfig, store: &TStore)
                     .map_err(|e| anyhow!("Failed to set network in the store: {}", e))
             },
         }
+    })
+}
+
+fn seed_builtin_template_catalogue<TStore: IndexerStore>(store: &TStore) -> anyhow::Result<()> {
+    store.with_write_tx(|tx| {
+        for (address, code) in all_builtin_templates() {
+            let loaded = WasmModule::load_template_from_code(code)
+                .map_err(|e| anyhow!("Failed to load built-in template: {e}"))?;
+            let binary_hash = calculate_template_binary_hash(code);
+            let metadata = PublishedTemplateMetadata {
+                template_name: loaded.template_name().to_string(),
+                author_public_key: RistrettoPublicKeyBytes::default(),
+                binary_hash,
+                at_epoch: 0,
+                metadata_hash: None,
+            };
+            tx.upsert_template_catalogue(address, &metadata)?;
+        }
+        Ok(())
     })
 }
 

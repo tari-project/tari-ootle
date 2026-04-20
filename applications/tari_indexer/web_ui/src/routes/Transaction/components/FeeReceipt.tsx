@@ -41,22 +41,20 @@ export default function FeeReceipt({ data }: { data: FeeReceiptType }) {
     );
   }
 
-  const totalCost = Object.entries(data.cost_breakdown?.breakdown || {}).reduce(
+  const totalFeesCharged = Object.entries(data.cost_breakdown?.breakdown || {}).reduce(
     (sum, [_, value]) => BigInt(sum) + BigInt(value),
     BigInt(0),
+  );
+  const totalRefunded = unsignedSaturatingSub(
+    BigInt(data.total_fee_payment) - totalFeesCharged - BigInt(data.total_fee_overcharge),
   );
 
   const feeItems = [
     { label: "Total Fees Paid", value: formatCurrency(data.total_fee_payment, CURRENCY.DECIMALS, CURRENCY.SYMBOL) },
-    { label: "Total Fees Charged", value: formatCurrency(data.total_fees_paid, CURRENCY.DECIMALS, CURRENCY.SYMBOL) },
-    { label: "Total Fees Required", value: formatCurrency(totalCost, CURRENCY.DECIMALS, CURRENCY.SYMBOL) },
+    { label: "Total Fees Charged", value: formatCurrency(totalFeesCharged, CURRENCY.DECIMALS, CURRENCY.SYMBOL) },
     {
       label: "Fees Refunded",
-      value: formatCurrency(
-        unsignedSaturatingSub(BigInt(data.total_fee_payment) - totalCost),
-        CURRENCY.DECIMALS,
-        CURRENCY.SYMBOL,
-      ),
+      value: formatCurrency(totalRefunded, CURRENCY.DECIMALS, CURRENCY.SYMBOL),
     },
     { label: "Fees Overcharge", value: formatCurrency(data.total_fee_overcharge, CURRENCY.DECIMALS, CURRENCY.SYMBOL) },
   ];

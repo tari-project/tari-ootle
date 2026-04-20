@@ -31,6 +31,8 @@ import { PiPuzzlePiece } from "react-icons/pi";
 import {
   IoBarChart,
   IoBarChartOutline,
+  IoEye,
+  IoEyeOutline,
   IoGitNetwork,
   IoGitNetworkOutline,
   IoHome,
@@ -89,6 +91,12 @@ const mainItems = [
     icon: <TbTemplate style={iconStyle} />,
     activeIcon: <TbTemplate style={activeIconStyle} />,
     link: "templates",
+  },
+  {
+    title: "Watched",
+    icon: <IoEyeOutline style={iconStyle} />,
+    activeIcon: <IoEye style={activeIconStyle} />,
+    link: "watched",
   },
   {
     title: "Connections",

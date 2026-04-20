@@ -451,7 +451,10 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
         // We're registered for the next epoch. Checkpoint and create a new genesis block.
         let num_committees = self.epoch_manager.get_num_committees(next_epoch).await?;
-        let epoch_hash = self.epoch_manager.get_current_epoch_hash().await?;
+        // Must look up the hash for `next_epoch` specifically. The oracle's "current" hash can
+        // race ahead when the base-layer scanner catches up across multiple epoch boundaries,
+        // which would stamp a later epoch's hash into this genesis block and wedge consensus.
+        let epoch_hash = self.epoch_manager.get_epoch_hash(next_epoch).await?;
         let our_vn_for_next_epoch = self.epoch_manager.get_our_validator_node(next_epoch).await.optional()?;
         let next_shard_group = our_vn_for_next_epoch.map(|vn| {
             vn.shard_key

@@ -796,6 +796,7 @@ impl From<AbortReason> for proto::consensus::AbortReason {
             AbortReason::ForeignPledgeInputConflict => Self::ForeignPledgeInputConflict,
             AbortReason::InsufficientFeesPaid => Self::InsufficientFeesPaid,
             AbortReason::FeePaymentInMainIntent => Self::FeePaymentInMainIntent,
+            AbortReason::EpochExpired => Self::EpochExpired,
         }
     }
 }
@@ -814,6 +815,7 @@ impl TryFrom<proto::consensus::AbortReason> for AbortReason {
             proto::consensus::AbortReason::ForeignPledgeInputConflict => Ok(Self::ForeignPledgeInputConflict),
             proto::consensus::AbortReason::InsufficientFeesPaid => Ok(Self::InsufficientFeesPaid),
             proto::consensus::AbortReason::FeePaymentInMainIntent => Ok(Self::FeePaymentInMainIntent),
+            proto::consensus::AbortReason::EpochExpired => Ok(Self::EpochExpired),
         }
     }
 }

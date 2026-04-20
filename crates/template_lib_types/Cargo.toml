@@ -1,6 +1,6 @@
 [package]
 name = "tari_template_lib_types"
-version = "0.24.0"
+version = "0.25.1"
 edition.workspace = true
 authors.workspace = true
 description = "Tari template library types"
@@ -14,6 +14,7 @@ alloc = ["serde/alloc", "tari_template_abi/alloc"]
 precision = ["dep:bnum"]
 extra-arith = ["dep:num-integer", "bnum?/numtraits"]
 borsh = ["dep:borsh", "tari_bor/borsh", "bnum?/borsh"]
+extra-maps = ["dep:indexmap", "dep:xxhash-rust"]
 ts = ["std", "ts-rs", "tari_template_abi/ts", "tari_bor/ts"]
 # This feature removes the ability to deserialize Amounts as an integer/string (using deserialize_any), as formats like bincode do not support this.
 # DO NOT USE if authoring contracts/templates as this will force transactions to convert integers to Amounts in instruction calls to your template.
@@ -26,8 +27,10 @@ tari_bor = { workspace = true }
 bnum = { workspace = true, optional = true }
 num-integer = { workspace = true, optional = true, default-features = false }
 borsh = { workspace = true, optional = true, default-features = false, features = ["derive"] }
+indexmap = { workspace = true, optional = true, features = ["serde"] }
 serde = { workspace = true, default-features = false, features = ["derive"] }
 ts-rs = { workspace = true, optional = true }
+xxhash-rust = { workspace = true, optional = true, features = ["xxh3"] }
 
 [dev-dependencies]
 serde_json = { workspace = true }

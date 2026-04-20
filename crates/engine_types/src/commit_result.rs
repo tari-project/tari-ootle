@@ -423,6 +423,7 @@ pub enum AbortReason {
     OneOrMoreInputsNotFound,
     InsufficientFeesPaid,
     FeePaymentInMainIntent,
+    EpochExpired,
 }
 
 impl Display for AbortReason {

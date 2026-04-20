@@ -12,7 +12,7 @@ use tari_indexer_client::{
     types::StreamTransactionEventsRequest,
 };
 use tari_ootle_common_types::engine_types::substate::SubstateId;
-use tari_template_lib_types::TemplateAddress;
+use tari_template_lib_types::{ResourceAddress, TemplateAddress};
 use tracing::error;
 
 /// Filter for subscribing to transaction events via SSE.
@@ -21,6 +21,10 @@ pub struct TransactionEventFilter {
     pub topic: Option<String>,
     pub substate_id: Option<SubstateId>,
     pub template_address: Option<TemplateAddress>,
+    /// Filter by resource address. Useful for tracking all activity (deposits, withdrawals,
+    /// mints, burns, freezes, etc.) for a specific token regardless of which template
+    /// orchestrated the call.
+    pub resource_address: Option<ResourceAddress>,
     /// Resume the event stream from this event ID (exclusive).
     /// Events with id > after_id will be replayed from the database before switching to live.
     pub after_id: Option<i64>,
@@ -32,6 +36,7 @@ impl TransactionEventFilter {
             topic: self.topic,
             substate_id: self.substate_id,
             template_address: self.template_address,
+            resource_address: self.resource_address,
             after_id: self.after_id,
         }
     }

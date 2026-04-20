@@ -204,6 +204,7 @@ where TConsensusSpec: ConsensusSpec
             ),
             is_ready,
             transaction.transaction().is_global(),
+            transaction.transaction().max_epoch(),
         )?;
         Ok(())
     }

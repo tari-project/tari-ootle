@@ -26,6 +26,8 @@
 pub use tari_bor;
 #[expect(deprecated)]
 pub use tari_template_lib_types::constants::XTR;
+#[cfg(feature = "extra-maps")]
+pub use tari_template_lib_types::fast_hash::{FastMap, PrehashedMap};
 pub use tari_template_lib_types::{
     AccessRule,
     AuthHookCaller,

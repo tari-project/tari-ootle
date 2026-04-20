@@ -294,14 +294,14 @@ pub async fn handle_submit_manifest(
         .optional()?
         .ok_or_else(|| invalid_request("No default account found".to_string()))?;
 
-    let account_owner_key_id = default_account.owner_key_id().ok_or_else(|| {
+    let default_owner_key_id = default_account.owner_key_id().ok_or_else(|| {
         invalid_params(
-            "signing_key_id",
+            "seal_signer_key_id",
             Some("Default account does not have an owner key set".to_string()),
         )
     })?;
 
-    let signing_key_id = req.signing_key_id.unwrap_or(account_owner_key_id);
+    let seal_signer_key_id = req.seal_signer_key_id.unwrap_or(default_owner_key_id);
 
     let fee_amount = req.max_fee;
 
@@ -325,15 +325,20 @@ pub async fn handle_submit_manifest(
 
     let transaction = transaction.with_inputs(inputs);
 
-    let transaction = if signing_key_id == account_owner_key_id {
-        transaction.finish()
-    } else {
-        sdk.signer_api()
-            .with_context(default_account.owner_public_key())
-            .sign(signing_key_id, transaction)?
-    };
+    // Sign with each additional signing key (not the seal signer, which seals the transaction)
+    let mut transaction = transaction.finish();
+    if !req.signing_key_ids.is_empty() {
+        let seal_signer_pk = sdk.key_manager_api().get_public_key(seal_signer_key_id)?;
+        let seal_signer_pk_bytes = seal_signer_pk.public_key.to_byte_type();
+        let signer = sdk.signer_api().with_context(&seal_signer_pk_bytes);
+        for signing_key_id in &req.signing_key_ids {
+            if *signing_key_id != seal_signer_key_id {
+                transaction = signer.sign(*signing_key_id, transaction)?;
+            }
+        }
+    }
 
-    let transaction = sdk.signer_api().sign(account_owner_key_id, transaction)?;
+    let transaction = sdk.signer_api().sign(seal_signer_key_id, transaction)?;
 
     if req.dry_run {
         let exec_result = context
@@ -383,6 +388,7 @@ pub async fn handle_get(
         transaction: transaction.transaction,
         result: transaction.finalize,
         status: transaction.status,
+        final_fee: transaction.final_fee,
         invalid_reason: transaction.invalid_reason,
         last_update_time: transaction.last_update_time,
     })

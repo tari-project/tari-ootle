@@ -79,6 +79,9 @@ impl FromStr for Metadata {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.trim().is_empty() {
+            return Ok(Self::new());
+        }
         let pairs = s.split(',').map(|pair| {
             let (key, value) = pair
                 .split_once('=')

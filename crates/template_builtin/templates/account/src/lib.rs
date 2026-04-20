@@ -20,19 +20,21 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_template_abi::rust::collections::BTreeMap;
 use tari_template_lib::prelude::*;
+
+type VaultMap = PrehashedMap<ResourceAddress, Vault>;
+type ApprovalMap = PrehashedMap<(ResourceAddress, NonFungibleAddress), Amount>;
 
 #[template]
 mod account_template {
     use super::*;
 
     pub struct Account {
-        vaults: BTreeMap<ResourceAddress, Vault>,
+        vaults: VaultMap,
         #[serde(default)]
         /// Approvals for other accounts to withdraw from this account. The key is a tuple of (approved resource,
         /// required spender_badge), and the value is the approved amount.
-        approvals: BTreeMap<(ResourceAddress, NonFungibleAddress), Amount>,
+        approvals: ApprovalMap,
     }
 
     impl Account {
@@ -64,14 +66,14 @@ mod account_template {
             );
 
             // add the funds from the (optional) bucket
-            let mut vaults = BTreeMap::new();
+            let mut vaults = VaultMap::default();
             if let Some(b) = bucket {
                 vaults.insert(b.resource_address(), Vault::from_bucket(b));
             }
 
             Component::new(Self {
                 vaults,
-                approvals: BTreeMap::new(),
+                approvals: ApprovalMap::default(),
             })
             .with_access_rules(access_rules)
             .with_public_key_address(public_key)
@@ -230,7 +232,7 @@ mod account_template {
         pub fn approve(&mut self, spender_badge: NonFungibleAddress, resource: ResourceAddress, amount: Amount) {
             if amount.is_zero() {
                 let key = (resource, spender_badge);
-                if self.approvals.remove(&key).is_some() {
+                if self.approvals.swap_remove(&key).is_some() {
                     emit_event("revoke_approval", [
                         ("resource", key.0.to_string()),
                         ("spender_badge", key.1.to_string()),
@@ -274,7 +276,7 @@ mod account_template {
                 .unwrap_or_else(|| panic!("Amount exceeds approval (max: {}, attempted: {})", approval, amount));
             // Clean up zero approvals
             if approval.is_zero() {
-                self.approvals.remove(&(resource, badge));
+                self.approvals.swap_remove(&(resource, badge));
             }
 
             emit_event("withdraw_approved", [

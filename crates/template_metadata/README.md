@@ -73,18 +73,21 @@ println!("Hash: {hash}");
 | `version` | `[package] version` |
 | `description` | `[package] description` |
 | `license` | `[package] license` |
-| `repository` | `[package] repository` |
+| `repository` | `[package] repository` (parsed as `Url`) |
 | `tags` | `[package.metadata.tari-template] tags` |
 | `category` | `[package.metadata.tari-template] category` |
-| `documentation` | `[package.metadata.tari-template] documentation` |
-| `homepage` | `[package.metadata.tari-template] homepage` |
-| `logo_url` | `[package.metadata.tari-template] logo_url` |
+| `commit_hash` | `[package.metadata.tari-template] commit_hash` (full 40-char hex SHA-1 git object ID) |
+| `documentation` | `[package.metadata.tari-template] documentation` (parsed as `Url`) |
+| `homepage` | `[package.metadata.tari-template] homepage` (parsed as `Url`) |
+| `logo_url` | `[package.metadata.tari-template] logo_url` (parsed as `Url`) |
+| `supersedes` | `[package.metadata.tari-template] supersedes` (64-char hex template address) |
 | `extra` | `[package.metadata.tari-template] extra` |
 
 ## Features
 
 - **`json`** — enables `to_json()` / `from_json()` on `TemplateMetadata`
 - **`borsh`** — enables `BorshSerialize` for `MetadataHash`
+- **`ts`** — enables TypeScript type generation via `ts-rs`
 
 ## Hash details
 

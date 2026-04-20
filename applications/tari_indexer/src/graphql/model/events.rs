@@ -28,8 +28,9 @@ use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::displayable::Displayable;
 use tari_ootle_transaction::TransactionId;
+use tari_template_lib_types::ResourceAddress;
 
-use crate::event_manager::EventManager;
+use crate::{event_manager::EventManager, network_state_sync::EventFilter};
 
 const LOG_TARGET: &str = "tari::indexer::graphql::events";
 
@@ -41,6 +42,7 @@ pub struct Event {
     pub tx_hash: [u8; 32],
     pub topic: String,
     pub payload: BTreeMap<String, String>,
+    pub resource_address: Option<String>,
 }
 
 impl Event {
@@ -48,12 +50,14 @@ impl Event {
         transaction_id: TransactionId,
         event: tari_engine_types::events::Event,
     ) -> Result<Self, anyhow::Error> {
+        let resource_address = EventFilter::event_resource_address(&event).map(|r| r.to_string());
         Ok(Self {
             substate_id: event.substate_id().map(|sub_id| sub_id.to_string()),
             template_address: event.template_address().into_array(),
             tx_hash: transaction_id.into_array(),
             topic: event.topic().to_string(),
             payload: event.into_payload().into_iter().collect(),
+            resource_address,
         })
     }
 }
@@ -69,14 +73,19 @@ impl EventQuery {
         ctx: &Context<'_>,
         topic: Option<String>,
         substate_id: Option<String>,
+        resource_address: Option<String>,
         offset: Option<u32>,
         limit: Option<u32>,
     ) -> Result<Vec<Event>, anyhow::Error> {
         info!(
             target: LOG_TARGET,
-            "Querying events. topic: {}, substate_id: {}, offset: {}, limit: {}, ", topic.display(), substate_id.display(), offset.display(), limit.display(),
+            "Querying events. topic: {}, substate_id: {}, resource_address: {}, offset: {}, limit: {}",
+            topic.display(), substate_id.display(), resource_address.display(), offset.display(), limit.display(),
         );
         let substate_id = substate_id.map(|str| SubstateId::from_str(&str)).transpose()?;
+        let resource_address = resource_address
+            .map(|str| ResourceAddress::from_str(&str))
+            .transpose()?;
         let event_manager = ctx.data_unchecked::<EventManager>();
         let limit = limit.unwrap_or(100);
         if limit == 0 {
@@ -87,7 +96,13 @@ impl EventQuery {
             return Err(anyhow::anyhow!("Limit cannot be greater than 1000"));
         }
         event_manager
-            .get_events_from_db(topic.as_deref(), substate_id.as_ref(), offset.unwrap_or(0), limit)
+            .get_events_from_db(
+                topic.as_deref(),
+                substate_id.as_ref(),
+                resource_address.as_ref(),
+                offset.unwrap_or(0),
+                limit,
+            )
             .await?
             .into_iter()
             .map(|(id, ev)| Event::from_engine_event(id, ev))

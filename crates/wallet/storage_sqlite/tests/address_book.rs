@@ -61,7 +61,8 @@ fn update_rename_and_fields_in_single_call() {
 
     {
         let mut tx = db.create_write_tx().unwrap();
-        tx.address_book_insert("alice", "otl_loc_alice", Some("old note")).unwrap();
+        tx.address_book_insert("alice", "otl_loc_alice", Some("old note"))
+            .unwrap();
         tx.commit().unwrap();
     }
 
@@ -121,7 +122,8 @@ fn update_with_empty_note_clears_the_note() {
 
     {
         let mut tx = db.create_write_tx().unwrap();
-        tx.address_book_insert("carol", "otl_loc_carol", Some("to be cleared")).unwrap();
+        tx.address_book_insert("carol", "otl_loc_carol", Some("to be cleared"))
+            .unwrap();
         tx.commit().unwrap();
     }
 

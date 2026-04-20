@@ -20,8 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useAddressBookList } from "@api/hooks/useAddressBook";
-import { Alert, Autocomplete, Avatar, Divider, InputLabel, Stack } from "@mui/material";
+import AddressAutocomplete from "@components/AddressAutocomplete";
+import { Alert, Avatar, Divider, InputLabel, Stack } from "@mui/material";
 import Button from "@mui/material/Button";
 import Checkbox from "@mui/material/Checkbox";
 import ListItemText from "@mui/material/ListItemText";
@@ -84,12 +84,6 @@ export default function FormStep({
   onNftsChange,
   onPayerAccountChange,
 }: FormStepProps) {
-  const { data: addressBookData } = useAddressBookList();
-  const addressBookOptions = (addressBookData?.entries ?? []).map((e) => ({
-    label: `${e.name} (${e.address.slice(0, 16)}...)`,
-    value: e.address,
-  }));
-
   const hasBatchSelection = preSelectedNfts?.length;
   const { transferFormState, disabled, updateFormValue } = useNftTransferStore();
   const selectedNftIds = useMemo(() => new Set(transferFormState.nfts.map(nftIdToString)), [transferFormState.nfts]);
@@ -159,35 +153,19 @@ export default function FormStep({
           </>
         )}
 
-        <Autocomplete
-          freeSolo
-          options={addressBookOptions}
-          inputValue={transferFormState.targetAccountAddress}
-          onInputChange={(_e, newValue, reason) => {
-            if (reason === "input" || reason === "clear") {
-              updateFormValue("targetAccountAddress", newValue, true);
-            }
-          }}
-          onChange={(_e, option) => {
-            if (option && typeof option !== "string") {
-              updateFormValue("targetAccountAddress", option.value, true);
-            }
-          }}
+        <AddressAutocomplete
+          name="targetAccountAddress"
+          label="To Account address"
+          value={transferFormState.targetAccountAddress}
+          onChange={(v) => updateFormValue("targetAccountAddress", v, true)}
           disabled={disabled}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              name="targetAccountAddress"
-              label="To Account address"
-              required
-              error={transferFormState.targetAccountAddress !== "" && !isAddressValid}
-              helperText={
-                transferFormState.targetAccountAddress !== "" && !isAddressValid
-                  ? "Invalid address format. Expected format: otl_loc_..."
-                  : "Enter the recipient's address or select from address book"
-              }
-            />
-          )}
+          required
+          error={transferFormState.targetAccountAddress !== "" && !isAddressValid}
+          helperText={
+            transferFormState.targetAccountAddress !== "" && !isAddressValid
+              ? "Invalid address format. Expected format: otl_loc_..."
+              : "Enter the recipient's address or select from address book"
+          }
         />
 
         {hasBatchSelection ? (

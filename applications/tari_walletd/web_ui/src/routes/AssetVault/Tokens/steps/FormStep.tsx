@@ -20,10 +20,19 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, SUCH DAMAGE.
 
+import AddressAutocomplete from "@components/AddressAutocomplete";
 import CopyAddress from "@components/CopyAddress";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
-import { Alert,Autocomplete,  Chip, CircularProgress, Divider, InputAdornment, InputLabel, Stack, Typography } from "@mui/material";
-import { useAddressBookList } from "@api/hooks/useAddressBook";
+import {
+  Alert,
+  Chip,
+  CircularProgress,
+  Divider,
+  InputAdornment,
+  InputLabel,
+  Stack,
+  Typography,
+} from "@mui/material";
 import Button from "@mui/material/Button";
 import CheckBox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
@@ -42,7 +51,7 @@ import {
 } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
 import { formatCurrency, parseAmountToBaseUnits } from "@utils/helpers";
-import { FormEvent, useState } from "react";
+import { SyntheticEvent, useState } from "react";
 import { Form } from "react-router";
 
 export interface SendMoneyFormState {
@@ -82,7 +91,7 @@ interface FormStepProps {
   poolRate: PoolRateInfo | null;
   poolError: string | null;
   isLoadingPoolRate: boolean;
-  onSubmit: (e: FormEvent) => void;
+  onSubmit: (e: SyntheticEvent) => void;
   onCancel: () => void;
   onFormValueChange: (name: string, value: string) => void;
   onSelectFormValueChange: (e: SelectChangeEvent<unknown>) => void;
@@ -143,12 +152,6 @@ export default function FormStep({
   onPoolSelect,
   hasTariBalance,
 }: FormStepProps) {
-  const { data: addressBookData } = useAddressBookList();
-  const addressBookOptions = (addressBookData?.entries ?? []).map((e) => ({
-    label: `${e.name} (${e.address.slice(0, 16)}...)`,
-    value: e.address,
-  }));
-
   const isConfidential = resource_type === "Confidential";
   const isStealth = resource_type === "Stealth";
 
@@ -161,7 +164,9 @@ export default function FormStep({
   const enteredAmountInBaseUnits = isNaNAmount ? 0n : parseAmountToBaseUnits(transferFormState.amount, divisibility);
   const hasInsufficientFunds = availableBalance !== undefined && enteredAmountInBaseUnits > BigInt(availableBalance);
   const poolHasNoLiquidity =
-    !!transferFormState.swapPoolAddress && poolRate !== null && (poolRate.balance_a === 0n || poolRate.balance_b === 0n);
+    !!transferFormState.swapPoolAddress &&
+    poolRate !== null &&
+    (poolRate.balance_a === 0n || poolRate.balance_b === 0n);
 
   const isFormValid =
     !isNaNAmount &&
@@ -238,30 +243,11 @@ export default function FormStep({
         )}
         <Stack direction="column" spacing={0.5}>
           <DisplayFormError forType="address" formError={formError} />
-          <Autocomplete
-            freeSolo
-            options={addressBookOptions}
-            inputValue={transferFormState.address}
-            onInputChange={(_e, newValue, reason) => {
-              if (reason === "input" || reason === "clear") {
-                onFormValueChange("address", newValue);
-              }
-            }}
-            onChange={(_e, option) => {
-              if (option && typeof option !== "string") {
-                onFormValueChange("address", option.value);
-              }
-            }}
+          <AddressAutocomplete
+            value={transferFormState.address}
+            onChange={(v) => onFormValueChange("address", v)}
             disabled={disabled}
-            renderInput={(params) => (
-              <TextField
-                {...params}
-                name="address"
-                label="To Address"
-                required
-                placeholder="otl_loc_... or select from address book"
-              />
-            )}
+            required
           />
         </Stack>
 
@@ -436,7 +422,7 @@ export default function FormStep({
                 label="Swap Pool Address"
                 value={transferFormState.swapPoolAddress}
                 onChange={(e) => {
-                  onFormValueChange(e as React.ChangeEvent<HTMLInputElement>);
+                  onFormValueChange("swapPoolAddress", e.target.value);
                   // Fetch rate when user finishes typing (debounced via onBlur)
                 }}
                 onBlur={() => {

@@ -4,6 +4,7 @@ use tari_template_abi::rust::prelude::*;
 use tari_template_lib_types::{
     AuthHook,
     ComponentAddress,
+    FunctionName,
     Metadata,
     OwnerRule,
     ResourceAddress,
@@ -14,6 +15,7 @@ use tari_template_lib_types::{
 
 use crate::{
     args::MintArg,
+    error_variants::ERR_AUTH_HOOK_FN_NAME_LEN,
     models::{Bucket, ResourceAddressAllocation},
     resource::ResourceManager,
     types::{ResourceType, crypto::RistrettoPublicKeyBytes},
@@ -250,8 +252,17 @@ impl ConfidentialResourceBuilder {
     ///     .with_authorization_hook(*alloc.address(), "my_hook")
     ///     .build();
     /// ```
-    pub fn with_authorization_hook<T: Into<String>>(mut self, address: ComponentAddress, auth_callback: T) -> Self {
-        self.authorize_hook = Some(AuthHook::new(address, auth_callback.into()));
+    pub fn with_authorization_hook<T: TryInto<FunctionName>>(
+        mut self,
+        address: ComponentAddress,
+        auth_callback: T,
+    ) -> Self {
+        self.authorize_hook = Some(AuthHook::new(
+            address,
+            auth_callback
+                .try_into()
+                .unwrap_or_else(|_| panic!("{}", ERR_AUTH_HOOK_FN_NAME_LEN)),
+        ));
         self
     }
 

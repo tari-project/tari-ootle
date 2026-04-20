@@ -30,7 +30,7 @@ import { useTheme } from "@mui/material/styles";
 import Tooltip from "@mui/material/Tooltip";
 import useSettingsStore from "@store/settingsStore";
 import { IoHome, IoHomeOutline, IoSettings, IoSettingsOutline, IoTerminal, IoTerminalOutline } from "react-icons/io5";
-import { LuLayoutTemplate } from "react-icons/lu";
+import { LuBookOpen, LuLayoutTemplate } from "react-icons/lu";
 import { NavLink } from "react-router";
 
 function MainListItems() {
@@ -62,6 +62,12 @@ function MainListItems() {
       link: "templates",
     },
 
+    {
+      title: "Address Book",
+      icon: <LuBookOpen style={iconStyle} />,
+      activeIcon: <LuBookOpen style={activeIconStyle} />,
+      link: "address-book",
+    },
     {
       title: "Settings",
       icon: <IoSettingsOutline style={iconStyle} />,

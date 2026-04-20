@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import AddressAutocomplete from "@components/AddressAutocomplete";
 import { Alert, Avatar, Divider, InputLabel, Stack } from "@mui/material";
 import Button from "@mui/material/Button";
 import Checkbox from "@mui/material/Checkbox";
@@ -88,11 +89,6 @@ export default function FormStep({
   const selectedNftIds = useMemo(() => new Set(transferFormState.nfts.map(nftIdToString)), [transferFormState.nfts]);
   const [submitted, setSubmitted] = useState(false);
 
-  const setFormValue = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    updateFormValue(name, value, e.target.validity.valid);
-  };
-
   const isAddressValid = transferFormState.targetAccountAddress
     ? validateOotleAddress(transferFormState.targetAccountAddress)
     : true; // Don't show error for empty field
@@ -157,19 +153,18 @@ export default function FormStep({
           </>
         )}
 
-        <TextField
+        <AddressAutocomplete
           name="targetAccountAddress"
           label="To Account address"
           value={transferFormState.targetAccountAddress}
-          required
-          onChange={setFormValue}
-          style={{ flexGrow: 1 }}
+          onChange={(v) => updateFormValue("targetAccountAddress", v, true)}
           disabled={disabled}
+          required
           error={transferFormState.targetAccountAddress !== "" && !isAddressValid}
           helperText={
             transferFormState.targetAccountAddress !== "" && !isAddressValid
               ? "Invalid address format. Expected format: otl_loc_..."
-              : "Enter the recipient's address (e.g., otl_loc_1enpsfkx...)"
+              : "Enter the recipient's address or select from address book"
           }
         />
 

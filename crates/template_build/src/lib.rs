@@ -24,6 +24,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 pub use tari_ootle_template_metadata;
 use tari_ootle_template_metadata::{MetadataHash, TemplateMetadata, from_cargo_toml};
+use url::Url;
 
 /// Result of a successful metadata build.
 pub struct TemplateBuildOutput {
@@ -147,7 +148,7 @@ impl TemplateMetadataBuilder {
     }
 
     /// Apply builder overrides to the given metadata.
-    fn apply_overrides(&self, metadata: &mut TemplateMetadata) {
+    fn apply_overrides(&self, metadata: &mut TemplateMetadata) -> Result<(), TemplateBuildError> {
         if let Some(ref description) = self.description {
             metadata.description = description.clone();
         }
@@ -158,23 +159,26 @@ impl TemplateMetadataBuilder {
             metadata.category = Some(category.clone());
         }
         if let Some(ref repository) = self.repository {
-            metadata.repository = Some(repository.clone());
+            metadata.repository =
+                Some(Url::parse(repository).map_err(|e| TemplateBuildError::InvalidUrl("repository", e))?);
         }
         if let Some(ref documentation) = self.documentation {
-            metadata.documentation = Some(documentation.clone());
+            metadata.documentation =
+                Some(Url::parse(documentation).map_err(|e| TemplateBuildError::InvalidUrl("documentation", e))?);
         }
         if let Some(ref homepage) = self.homepage {
-            metadata.homepage = Some(homepage.clone());
+            metadata.homepage = Some(Url::parse(homepage).map_err(|e| TemplateBuildError::InvalidUrl("homepage", e))?);
         }
         if let Some(ref license) = self.license {
             metadata.license = Some(license.clone());
         }
         if let Some(ref logo_url) = self.logo_url {
-            metadata.logo_url = Some(logo_url.clone());
+            metadata.logo_url = Some(Url::parse(logo_url).map_err(|e| TemplateBuildError::InvalidUrl("logo_url", e))?);
         }
         if let Some(ref extra) = self.extra {
             metadata.extra = extra.clone();
         }
+        Ok(())
     }
 
     /// Generate metadata files from `Cargo.toml` with any builder overrides applied.
@@ -193,7 +197,7 @@ impl TemplateMetadataBuilder {
         let cargo_toml_path = PathBuf::from(manifest_dir).join("Cargo.toml");
         let mut metadata = from_cargo_toml(&cargo_toml_path)?;
 
-        self.apply_overrides(&mut metadata);
+        self.apply_overrides(&mut metadata)?;
 
         // Write CBOR
         let cbor = metadata.to_cbor()?;
@@ -234,6 +238,8 @@ pub enum TemplateBuildError {
     CargoToml(#[from] tari_ootle_template_metadata::CargoTomlError),
     #[error("Metadata error: {0}")]
     Metadata(#[from] tari_ootle_template_metadata::TemplateMetadataError),
+    #[error("Invalid URL in field '{0}': {1}")]
+    InvalidUrl(&'static str, url::ParseError),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -323,9 +329,15 @@ category = "utility"
         assert_eq!(m.description, "Overridden description");
         assert_eq!(m.tags, vec!["new-tag-1", "new-tag-2"]);
         assert_eq!(m.category.as_deref(), Some("defi"));
-        assert_eq!(m.repository.as_deref(), Some("https://github.com/example/overridden"));
-        assert_eq!(m.documentation.as_deref(), Some("https://docs.example.com"));
-        assert_eq!(m.homepage.as_deref(), Some("https://example.com"));
+        assert_eq!(
+            m.repository.as_ref().map(|u| u.as_str()),
+            Some("https://github.com/example/overridden")
+        );
+        assert_eq!(
+            m.documentation.as_ref().map(|u| u.as_str()),
+            Some("https://docs.example.com/")
+        );
+        assert_eq!(m.homepage.as_ref().map(|u| u.as_str()), Some("https://example.com/"));
         assert_eq!(m.license.as_deref(), Some("BSD-3-Clause"));
 
         // CBOR file should contain overridden values

@@ -3,29 +3,29 @@
 
 use log::*;
 use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle};
-use tokio::sync::watch;
+use tokio::sync::mpsc;
 
 use crate::{
     base_layer::{BaseLayerBlockHeaderStore, BaseLayerOracle},
     configured::{ConfiguredEpochOracle, EpochTickerData},
-    hybrid::watch_ticker::WatchEpochTicker,
+    hybrid::mpsc_ticker::MpscEpochTicker,
     store::EpochOracleStore,
 };
 
 const LOG_TARGET: &str = "tari::ootle::epoch_oracles::hybrid";
 
 pub struct HybridEpochOracle<TStore> {
-    configured: ConfiguredEpochOracle<TStore, WatchEpochTicker>,
+    configured: ConfiguredEpochOracle<TStore, MpscEpochTicker>,
     base_layer: BaseLayerOracle<TStore>,
-    trigger: watch::Sender<EpochTickerData>,
+    trigger: mpsc::UnboundedSender<EpochTickerData>,
     has_initial_sync_completed: bool,
 }
 
 impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> HybridEpochOracle<TStore> {
     pub fn new(
-        configured: ConfiguredEpochOracle<TStore, WatchEpochTicker>,
+        configured: ConfiguredEpochOracle<TStore, MpscEpochTicker>,
         base_layer: BaseLayerOracle<TStore>,
-        trigger: watch::Sender<EpochTickerData>,
+        trigger: mpsc::UnboundedSender<EpochTickerData>,
     ) -> Self {
         Self {
             configured,
@@ -61,15 +61,13 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> Epoc
                                 done_for_now: self.has_initial_sync_completed,
                             });
                         },
-                        EpochEvent::DoneForNow {epoch, epoch_hash} => {
-                            if !self.has_initial_sync_completed {
-                                let _ignore = self.trigger.send(EpochTickerData{
-                                    epoch,
-                                    epoch_hash,
-                                    done_for_now: true,
-                                });
-                                self.has_initial_sync_completed = true;
-                            }
+                        EpochEvent::DoneForNow {epoch, epoch_hash} if !self.has_initial_sync_completed => {
+                            let _ignore = self.trigger.send(EpochTickerData{
+                                epoch,
+                                epoch_hash,
+                                done_for_now: true,
+                            });
+                            self.has_initial_sync_completed = true;
                         },
                         // Ignore other events that are not epoch changes
                         _ => {},

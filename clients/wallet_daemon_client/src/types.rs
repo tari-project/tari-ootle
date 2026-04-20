@@ -153,6 +153,13 @@ pub type TransactionSubmitDryRunRequest = TransactionSubmitRequest;
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct TransactionSubmitDryRunResponse {
     pub transaction_id: TransactionId,
+    /// The minimum fee required to submit this transaction. Includes a +1 buffer over
+    /// `total_fees_charged` to account for storage fee rounding differences between the dry run
+    /// and actual submission (the vault balance changes with a different max_fee, which can shift
+    /// `floor(total_bytes / 4)` by 1 at a rounding boundary). Non-refundable overcharge is
+    /// subtracted since it won't recur with a tighter max_fee.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub required_fees: u64,
     pub result: ExecuteResult,
 }
 
@@ -161,7 +168,11 @@ pub struct TransactionSubmitDryRunResponse {
 pub struct TransactionSubmitManifestRequest {
     pub manifest: String,
     pub variables: HashMap<String, String>,
-    pub signing_key_id: Option<KeyId>,
+    /// The key used for the seal (owner) signature. If not provided, defaults to the default account's owner key.
+    pub seal_signer_key_id: Option<KeyId>,
+    /// Additional signing keys for accounts involved in the transaction (e.g. for multi-account manifests).
+    #[serde(default)]
+    pub signing_key_ids: Vec<KeyId>,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub max_fee: u64,
     pub dry_run: bool,
@@ -171,6 +182,11 @@ pub struct TransactionSubmitManifestRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct TransactionSubmitManifestResponse {
     pub transaction_id: TransactionId,
+    /// The minimum fee required to submit this transaction. Only present for dry runs.
+    /// Includes a +1 buffer over `total_fees_charged` to account for storage fee rounding
+    /// differences between the dry run and actual submission.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub required_fees: Option<u64>,
     pub result: Option<ExecuteResult>,
 }
 
@@ -201,7 +217,7 @@ pub struct PublishTemplateRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub enum PublishTemplateMetadata {
     /// Inline template metadata object. The server CBOR-encodes it and computes the hash.
-    Literal(TemplateMetadata),
+    Literal(Box<TemplateMetadata>),
     /// Pre-encoded CBOR metadata (base64-encoded). The server decodes and computes the hash.
     RawCbor(
         #[cfg_attr(feature = "ts", ts(type = "string"))]
@@ -232,6 +248,10 @@ pub struct TransactionGetResponse {
     pub transaction: Transaction,
     pub result: Option<FinalizeResult>,
     pub status: TransactionStatus,
+    /// The estimated fee required for the transaction. For dry runs, this is the minimum fee
+    /// that should be used as `max_fee` for the actual submission.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub final_fee: Option<u64>,
     pub invalid_reason: Option<String>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub last_update_time: PrimitiveDateTime,
@@ -672,6 +692,11 @@ pub struct ClaimBurnProofContents {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct ClaimBurnResponse {
     pub transaction_id: TransactionId,
+    /// The minimum fee required to submit this transaction. Only present for dry runs.
+    /// Includes a +1 buffer over `total_fees_charged` to account for storage fee rounding
+    /// differences between the dry run and actual submission.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub required_fees: Option<u64>,
     pub dry_run_result: Option<ExecuteResult>,
 }
 
@@ -928,10 +953,13 @@ pub struct ClaimValidatorFeesResponse {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct SettingsSetRequest {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub indexer_url: Url,
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    #[serde(default)]
+    pub indexer_url: Option<Url>,
     #[serde(default)]
     pub advanced_ui_features: Option<AdvancedUiFeatures>,
+    #[serde(default)]
+    pub claimed_accounts: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -945,6 +973,7 @@ pub struct SettingsGetResponse {
     pub indexer_url: Url,
     pub network: NetworkInfo,
     pub advanced_ui_features: AdvancedUiFeatures,
+    pub claimed_accounts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -1358,6 +1387,63 @@ pub struct SignTemplateMetadataResponse {
     /// The metadata hash derived from the CBOR encoding.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub metadata_hash: MetadataHash,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SwapPoolGetExchangeRateRequest {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub pool_address: ComponentAddress,
+    /// If provided, the response will include the calculated swap input amount needed
+    /// to receive at least this amount of TARI from the pool (with a slippage margin).
+    #[serde(default)]
+    pub desired_tari_output: Option<Amount>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SwapPoolGetExchangeRateResponse {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub resource_a: ResourceAddress,
+    pub balance_a: Amount,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub resource_b: ResourceAddress,
+    pub balance_b: Amount,
+    /// The calculated input amount of the non-TARI token needed to receive at least
+    /// `desired_tari_output` TARI from the pool. Only present when `desired_tari_output` was provided.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swap_input_amount: Option<Amount>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SwapPoolsListRequest {
+    /// Filter pools to only those containing this exact resource pair (in any order).
+    /// Both must be provided for filtering to take effect.
+    #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(type = "[string, string] | null"))]
+    pub resource_pair: Option<(ResourceAddress, ResourceAddress)>,
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SwapPoolsListResponse {
+    pub pools: Vec<SwapPoolInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SwapPoolInfo {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub pool_address: ComponentAddress,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub resource_a: ResourceAddress,
+    pub balance_a: Amount,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub resource_b: ResourceAddress,
+    pub balance_b: Amount,
 }
 
 // -------------------------------- AddressBook -------------------------------- //

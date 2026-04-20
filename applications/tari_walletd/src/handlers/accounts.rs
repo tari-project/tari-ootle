@@ -620,8 +620,10 @@ pub(crate) async fn execute_claim_burn(
     if is_dry_run {
         let transaction_id = transaction.calculate_id();
         let result = transaction_service.submit_dry_run_transaction(transaction).await?;
+        let required_fees = result.finalize.fee_receipt.required_fees();
         return Ok(ClaimBurnResponse {
             transaction_id,
+            required_fees: Some(required_fees),
             dry_run_result: Some(result),
         });
     }
@@ -633,6 +635,7 @@ pub(crate) async fn execute_claim_burn(
 
     Ok(ClaimBurnResponse {
         transaction_id: tx_id,
+        required_fees: None,
         dry_run_result: None,
     })
 }

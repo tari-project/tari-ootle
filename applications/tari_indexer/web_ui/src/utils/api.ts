@@ -33,6 +33,9 @@ import type {
   ListRecentTransactionsResponse,
   ListTransactionReceiptsRequest,
   ListTransactionReceiptsResponse,
+  ListWatchedSubstatesRequest,
+  ListWatchedSubstatesResponse,
+  ListWatchedTemplatesResponse,
   SubstateId,
   TransactionReceiptAddress,
   QueryTransactionEventsRequest,
@@ -127,3 +130,10 @@ export const getTransactionReceipt = (
 
 export const getTemplateDefinition = (templateAddress: string): Promise<any> =>
   client().then((c) => c.templatesGet(templateAddress));
+
+export const listWatchedTemplates = (): Promise<ListWatchedTemplatesResponse> =>
+  client().then((c) => c.listWatchedTemplates());
+
+export const listWatchedSubstates = (
+  params: Partial<ListWatchedSubstatesRequest>,
+): Promise<ListWatchedSubstatesResponse> => client().then((c) => c.listWatchedSubstates(params));

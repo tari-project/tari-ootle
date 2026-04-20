@@ -211,7 +211,7 @@ pub async fn get_transaction_result(
 #[utoipa::path(
     get,
     path = "/transactions/events",
-    description = "Query and filter transaction events by substate ID and/or topic.",
+    description = "Query and filter transaction events by substate ID, topic, and/or resource address.",
     responses(
         (status = 200, description = "List of transaction events matching the filters", body = QueryTransactionEventsResponse),
         (status = BAD_REQUEST, description = "Invalid request parameters", body = ErrorResponse),
@@ -234,8 +234,8 @@ pub async fn query_transaction_events(
     let offset = req.offset.unwrap_or(0);
 
     debug!(target: LOG_TARGET,
-        "Querying transaction events with filters - substate_id: {}, topic: {}, offset: {}, limit: {}",
-        req.substate_id.display(), req.topic.display(), offset, limit
+        "Querying transaction events with filters - substate_id: {}, topic: {}, resource_address: {}, offset: {}, limit: {}",
+        req.substate_id.display(), req.topic.display(), req.resource_address.display(), offset, limit
     );
 
     let events = context
@@ -243,6 +243,7 @@ pub async fn query_transaction_events(
         .get_events(
             req.substate_id.as_ref(),
             req.topic.as_deref().map(|t| t.trim()).filter(|t| !t.is_empty()),
+            req.resource_address.as_ref(),
             offset,
             limit,
         )

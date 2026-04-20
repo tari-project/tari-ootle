@@ -18,7 +18,7 @@ use crate::{
     ManifestValue,
     ast::ManifestAst,
     error::ManifestError,
-    parser::{InvokeIntent, ManifestIntent, ManifestLiteral, OrVar, SpecialLiteral},
+    parser::{InvokeIntent, ManifestIntent, ManifestLiteral, OrVar, OutputBinding, SpecialLiteral},
     value::lit_to_arg,
 };
 
@@ -29,7 +29,7 @@ pub struct ManifestInstructionGenerator {
     global_aliases: HashMap<String, ManifestValue>,
     globals: HashMap<String, ManifestValue>,
     current_workspace_id: WorkspaceId,
-    workspace_ids: HashMap<String, WorkspaceId>,
+    workspace_ids: HashMap<String, WorkspaceOffsetId>,
     templates: HashMap<String, TemplateAddress>,
     functions: HashMap<String, Vec<ManifestIntent>>,
     call_depth: usize,
@@ -108,9 +108,10 @@ impl ManifestInstructionGenerator {
                         })?,
                     args: self.process_args(arguments)?,
                 }];
-                if let Some(var_name) = output_variable {
-                    let key = self.next_workspace_id(var_name.to_string());
+                if let Some(binding) = output_variable {
+                    let key = self.next_workspace_id_raw();
                     instructions.push(Instruction::PutLastInstructionOutputOnWorkspace { key });
+                    self.register_output_binding(binding, key);
                 }
                 Ok(instructions)
             },
@@ -127,8 +128,16 @@ impl ManifestInstructionGenerator {
                     .to_string();
                 let call = if let Some(value) = self.global_aliases.get(&component_ident) {
                     ComponentReference::Address(Self::extract_component_address(value)?)
-                } else if let Some(&workspace_id) = self.workspace_ids.get(&component_ident) {
-                    ComponentReference::Workspace(workspace_id)
+                } else if let Some(workspace_offset) = self.workspace_ids.get(&component_ident) {
+                    if workspace_offset.offset().is_some() {
+                        return Err(ManifestError::InvalidInstruction {
+                            reason: format!(
+                                "Tuple-destructured variable '{component_ident}' cannot be used as a component \
+                                 reference. Use a single variable binding instead."
+                            ),
+                        });
+                    }
+                    ComponentReference::Workspace(workspace_offset.id())
                 } else if let Some(value) = self.globals.get(&component_ident) {
                     ComponentReference::Address(Self::extract_component_address(value)?)
                 } else {
@@ -144,9 +153,10 @@ impl ManifestInstructionGenerator {
                         })?,
                     args: self.process_args(arguments)?,
                 }];
-                if let Some(var_name) = output_variable {
-                    let key = self.next_workspace_id(var_name.to_string());
+                if let Some(binding) = output_variable {
+                    let key = self.next_workspace_id_raw();
                     instructions.push(Instruction::PutLastInstructionOutputOnWorkspace { key });
+                    self.register_output_binding(binding, key);
                 }
                 Ok(instructions)
             },
@@ -176,7 +186,7 @@ impl ManifestInstructionGenerator {
                         let name = ident.to_string();
                         self.workspace_ids
                             .get(&name)
-                            .map(|id| WorkspaceOffsetId::new(*id))
+                            .copied()
                             .ok_or(ManifestError::UndefinedVariable { name })
                     })
                     .transpose()?;
@@ -228,11 +238,31 @@ impl ManifestInstructionGenerator {
         }
     }
 
-    fn next_workspace_id(&mut self, name: String) -> WorkspaceId {
+    fn next_workspace_id_raw(&mut self) -> WorkspaceId {
         let id = self.current_workspace_id;
-        self.workspace_ids.insert(name, id);
         self.current_workspace_id += 1;
         id
+    }
+
+    fn next_workspace_id(&mut self, name: String) -> WorkspaceId {
+        let id = self.next_workspace_id_raw();
+        self.workspace_ids.insert(name, WorkspaceOffsetId::new(id));
+        id
+    }
+
+    fn register_output_binding(&mut self, binding: OutputBinding, workspace_id: WorkspaceId) {
+        match binding {
+            OutputBinding::Single(ident) => {
+                self.workspace_ids
+                    .insert(ident.to_string(), WorkspaceOffsetId::new(workspace_id));
+            },
+            OutputBinding::Tuple(idents) => {
+                for (i, ident) in idents.into_iter().enumerate() {
+                    self.workspace_ids
+                        .insert(ident.to_string(), WorkspaceOffsetId::new(workspace_id).with_offset(i));
+                }
+            },
+        }
     }
 
     fn process_args(&self, args: Vec<ManifestLiteral>) -> Result<Vec<InstructionArg>, ManifestError> {
@@ -240,11 +270,13 @@ impl ManifestInstructionGenerator {
             .map(|arg| match arg {
                 ManifestLiteral::Lit(lit) => lit_to_arg(&lit),
                 ManifestLiteral::Workspace(ident) => self.get_ident(&ident.to_string()),
+                ManifestLiteral::Special(SpecialLiteral::Null) => {
+                    Ok(InstructionArg::literal(tari_bor::Value::Null)
+                        .expect("Null literal serialization should not fail"))
+                },
                 ManifestLiteral::Special(SpecialLiteral::Amount(amount)) => Ok(call_arg!(amount)),
                 ManifestLiteral::Special(SpecialLiteral::NonFungibleId(id)) => Ok(call_arg!(id)),
-                ManifestLiteral::Special(SpecialLiteral::Cbor(value)) => {
-                    Ok(InstructionArg::literal(value).expect("CBOR literal serialization should not fail"))
-                },
+                ManifestLiteral::Special(SpecialLiteral::Cbor(value)) => Ok(InstructionArg::literal(value)?),
                 ManifestLiteral::Special(SpecialLiteral::Metadata(metadata)) => Ok(call_arg!(metadata)),
                 ManifestLiteral::Special(SpecialLiteral::SubstateId(id_or_var)) => match id_or_var {
                     OrVar::Var(ident) => self.get_ident(&ident.to_string()),
@@ -332,8 +364,7 @@ impl ManifestInstructionGenerator {
                 // Or is it a variable on the worktop?
                 self.workspace_ids
                     .get(name)
-                    // TODO: support offsets
-                    .map(|id| Ok(InstructionArg::Workspace(WorkspaceOffsetId::new(*id))))
+                    .map(|id| Ok(InstructionArg::Workspace(*id)))
             })
             .ok_or_else(|| {
                 // Or undefined

@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine::executables::{Executable, Instructions, WeightedExecutable};
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::SubstateRequirement;
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
@@ -29,12 +30,13 @@ impl Executable for WrappedTransaction {
         self.transaction.calculate_id()
     }
 
-    fn all_inputs_iter(&self) -> impl Iterator<Item = tari_ootle_common_types::SubstateRequirementRef<'_>> + '_ {
+    fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateId> + '_ {
         // Combine the inputs from the transaction and the additional inputs
         // Note: duplicates are possible
         self.transaction
             .all_inputs_iter()
             .chain(self.inputs.iter().map(|id| id.as_ref()))
+            .map(|req| req.substate_id().clone())
     }
 
     fn main_signer(&self) -> Option<RistrettoPublicKeyBytes> {

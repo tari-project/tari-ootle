@@ -317,7 +317,7 @@ where TConsensusSpec: ConsensusSpec
         can_propose_epoch_end: bool,
     ) -> Result<NextBlock, HotStuffError> {
         let high_qc_id = high_qc_certificate.calculate_id();
-        let justify_block = Block::get(tx, &high_qc_certificate.calculate_block_id())?;
+        let justify_block = Block::get_justified_block(tx, &high_qc_certificate, epoch)?;
         let start_of_chain_block = highest_seen_block;
         let parent_block = dummy_block.unwrap_or_else(|| highest_seen_block.as_leaf());
         let highest_seen_block = Block::get(tx, highest_seen_block.block_id())?;

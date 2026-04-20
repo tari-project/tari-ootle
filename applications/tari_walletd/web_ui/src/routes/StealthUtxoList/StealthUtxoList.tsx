@@ -88,7 +88,7 @@ function StealthUtxoList({ account }: { account: Account }) {
                     getDisplayName={getStatusDisplayName}
                   />
                 </TableCell>
-                <TableCell width={columnWidths[4]}>Memo</TableCell>
+                <TableCell width={columnWidths[4]}>Encrypted Memo</TableCell>
                 <TableCell width={columnWidths[5]}>Burnt</TableCell>
                 <TableCell width={columnWidths[6]}>Frozen</TableCell>
               </TableRow>

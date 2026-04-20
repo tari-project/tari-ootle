@@ -141,7 +141,7 @@ function IndexerSettings({ indexerUrl, walletNetwork }: IndexerSettingsProps) {
       return;
     }
     try {
-      await settingsSet({ indexer_url: inputUrl, advanced_ui_features: null });
+      await settingsSet({ indexer_url: inputUrl, advanced_ui_features: null, claimed_accounts: null });
       setCurrentUrl(inputUrl);
       setShowForm(false);
       setSaveError(null);

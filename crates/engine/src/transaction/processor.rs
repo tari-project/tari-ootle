@@ -147,13 +147,13 @@ where
         // Because XTR resource is immutable, we can make it available to every shard group (genesis state) and
         // transaction (payment of fees)
         initial_call_scope.add_substate_to_owned(STEALTH_TARI_RESOURCE_ADDRESS.into());
-        for input in executable.all_inputs_iter() {
+        for input_substate_id in executable.all_inputs_iter() {
             debug!(
                 target: LOG_TARGET,
                 "Adding substate to initial call scope: {}",
-                input.substate_id
+                input_substate_id
             );
-            initial_call_scope.add_substate_to_owned(input.substate_id.clone());
+            initial_call_scope.add_substate_to_owned(input_substate_id);
         }
 
         let transaction_weight = executable.calculate_weight();

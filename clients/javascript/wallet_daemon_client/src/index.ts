@@ -75,6 +75,10 @@ import type {
   SubstatesGetResponse,
   SubstatesListRequest,
   SubstatesListResponse,
+  SwapPoolGetExchangeRateRequest,
+  SwapPoolGetExchangeRateResponse,
+  SwapPoolsListRequest,
+  SwapPoolsListResponse,
   TemplatesGetRequest,
   TemplatesGetResponse,
   TemplatesListAuthoredRequest,
@@ -274,6 +278,16 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
   public substatesList(params: SubstatesListRequest): Promise<SubstatesListResponse> {
     return this.sendRequest("substates.list", params);
+  }
+
+  public swapPoolGetExchangeRate(
+    params: SwapPoolGetExchangeRateRequest,
+  ): Promise<SwapPoolGetExchangeRateResponse> {
+    return this.sendRequest("swap_pools.get_exchange_rate", params);
+  }
+
+  public swapPoolsList(params: SwapPoolsListRequest): Promise<SwapPoolsListResponse> {
+    return this.sendRequest("swap_pools.list", params);
   }
 
   public transactionsList(params: TransactionGetAllRequest): Promise<TransactionGetAllResponse> {

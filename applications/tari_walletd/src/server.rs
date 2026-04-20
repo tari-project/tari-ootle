@@ -35,6 +35,7 @@ use crate::handlers::{
     keys,
     nfts,
     settings,
+    swap_pools,
     transaction,
     validator,
     webrtc,
@@ -219,6 +220,11 @@ async fn handler(
         Some(("burn_proofs", method)) => match method {
             "list" => call_handler(context, value, token, burn_proofs::handle_list).await,
             "get" => call_handler(context, value, token, burn_proofs::handle_get).await,
+            _ => value.method_not_found(&value.method).into_response(),
+        },
+        Some(("swap_pools", method)) => match method {
+            "get_exchange_rate" => call_handler(context, value, token, swap_pools::handle_get_exchange_rate).await,
+            "list" => call_handler(context, value, token, swap_pools::handle_list).await,
             _ => value.method_not_found(&value.method).into_response(),
         },
         Some(("address_book", method)) => match method {

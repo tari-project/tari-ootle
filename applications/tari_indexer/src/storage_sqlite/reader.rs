@@ -32,7 +32,7 @@ use tari_ootle_common_types::{
     shard::Shard,
     substate_type::SubstateType,
 };
-use tari_ootle_storage::{Ordering, StorageError, time::PrimitiveDateTime};
+use tari_ootle_storage::{Ordering, StorageError, consensus_models::EpochCheckpoint, time::PrimitiveDateTime};
 use tari_ootle_storage_sqlite::SqliteTransaction;
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_template_lib_types::{
@@ -48,7 +48,15 @@ use crate::{
     network_state_sync::EventFilter,
     storage_sqlite::{
         models,
-        models::{EventRecord, KeyValue, SubstateRecord, TemplateCatalogueEntry, TemplateCatalogueRow},
+        models::{
+            EventRecord,
+            KeyValue,
+            SubstateRecord,
+            TemplateCatalogueEntry,
+            TemplateCatalogueRow,
+            WatchedSubstateEntry,
+            WatchedSubstateRow,
+        },
         serialization::{deserialize_hex_try_from, deserialize_json, serialize_hex},
     },
     store::IndexerStoreReadTransaction,
@@ -239,16 +247,17 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         &mut self,
         substate_id_filter: Option<&SubstateId>,
         topic_filter: Option<&str>,
+        resource_address_filter: Option<&ResourceAddress>,
         offset: u32,
         limit: u32,
     ) -> Result<Vec<(TransactionId, Event)>, StorageError> {
-        // TODO: allow to query by payload as well, unifying all event methods into one
         info!(
             target: LOG_TARGET,
-            "Querying substate scanner database: get_events with substate_id_filter = {:?} and \
-            topic_filter = {:?}",
+            "Querying substate scanner database: get_events with substate_id_filter = {:?}, \
+            topic_filter = {:?}, resource_address_filter = {:?}",
             substate_id_filter,
-            topic_filter
+            topic_filter,
+            resource_address_filter
         );
         use crate::storage_sqlite::schema::events;
 
@@ -267,6 +276,10 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                     query = query.filter(events::topic.eq(topic));
                 },
             }
+        }
+
+        if let Some(resource_address) = resource_address_filter {
+            query = query.filter(events::resource_address.eq(resource_address.to_string()));
         }
 
         let event_rows = query
@@ -323,6 +336,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         topic_filter: Option<&str>,
         substate_id_filter: Option<&SubstateId>,
         template_address_filter: Option<&TemplateAddress>,
+        resource_address_filter: Option<&ResourceAddress>,
         limit: u32,
     ) -> Result<Vec<(i64, TransactionId, Event)>, StorageError> {
         use crate::storage_sqlite::schema::events;
@@ -345,6 +359,9 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         }
         if let Some(template_address) = template_address_filter {
             query = query.filter(events::template_address.eq(template_address.to_string()));
+        }
+        if let Some(resource_address) = resource_address_filter {
+            query = query.filter(events::resource_address.eq(resource_address.to_string()));
         }
 
         let event_rows = query
@@ -558,6 +575,47 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                 reason: format!("{OPERATION}: {}", e),
             })?;
         Ok(count > 0)
+    }
+
+    fn epoch_checkpoint_get_all(
+        &mut self,
+        from_epoch: Epoch,
+        limit: u64,
+    ) -> Result<Vec<EpochCheckpoint>, StorageError> {
+        const OPERATION: &str = "epoch_checkpoint_get_all";
+        use crate::storage_sqlite::schema::epoch_checkpoints;
+
+        let rows: Vec<String> = epoch_checkpoints::table
+            .select(epoch_checkpoints::json_data)
+            .filter(epoch_checkpoints::epoch.ge(from_epoch.as_u64() as i64))
+            .order_by(epoch_checkpoints::epoch.asc())
+            .limit(limit as i64)
+            .load(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?;
+
+        rows.into_iter().map(|json_data| deserialize_json(&json_data)).collect()
+    }
+
+    fn epoch_checkpoint_get_latest(&mut self) -> Result<EpochCheckpoint, StorageError> {
+        const OPERATION: &str = "epoch_checkpoint_get_latest";
+        use crate::storage_sqlite::schema::epoch_checkpoints;
+
+        let json_data: String = epoch_checkpoints::table
+            .select(epoch_checkpoints::json_data)
+            .order_by(epoch_checkpoints::epoch.desc())
+            .first(self.connection())
+            .optional()
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?
+            .ok_or_else(|| StorageError::NotFound {
+                item: "EpochCheckpoint",
+                key: "latest".to_string(),
+            })?;
+
+        deserialize_json(&json_data)
     }
 
     fn utxos_get_max_state_version(
@@ -810,5 +868,46 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             })
         })
         .transpose()
+    }
+
+    fn list_watched_substates(
+        &mut self,
+        template_address: Option<&TemplateAddress>,
+        limit: u64,
+        offset: u64,
+    ) -> Result<Vec<WatchedSubstateEntry>, StorageError> {
+        const OPERATION: &str = "list_watched_substates";
+        use crate::storage_sqlite::schema::watched_substates;
+
+        let mut query = watched_substates::table.into_boxed();
+
+        if let Some(template_address) = template_address {
+            query = query.filter(watched_substates::template_address.eq(template_address.to_string()));
+        }
+
+        let rows = query
+            .limit(limit as i64)
+            .offset(offset as i64)
+            .load::<WatchedSubstateRow>(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {e}"),
+            })?;
+
+        rows.into_iter()
+            .map(|row| {
+                let component_address =
+                    SubstateId::from_str(&row.component_address).map_err(|e| StorageError::DataInconsistency {
+                        details: format!("{OPERATION}: Invalid component address {}: {e}", row.component_address),
+                    })?;
+                let template_address =
+                    TemplateAddress::from_hex(&row.template_address).map_err(|e| StorageError::DataInconsistency {
+                        details: format!("{OPERATION}: Invalid template address {}: {e}", row.template_address),
+                    })?;
+                Ok(WatchedSubstateEntry {
+                    component_address,
+                    template_address,
+                })
+            })
+            .collect()
     }
 }

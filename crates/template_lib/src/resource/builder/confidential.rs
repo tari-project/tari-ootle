@@ -15,6 +15,7 @@ use tari_template_lib_types::{
 
 use crate::{
     args::MintArg,
+    error_variants::ERR_AUTH_HOOK_FN_NAME_LEN,
     models::{Bucket, ResourceAddressAllocation},
     resource::ResourceManager,
     types::{ResourceType, crypto::RistrettoPublicKeyBytes},
@@ -260,7 +261,7 @@ impl ConfidentialResourceBuilder {
             address,
             auth_callback
                 .try_into()
-                .unwrap_or_else(|_| panic!("AUTHHOOK_FN_NAME_LEN")),
+                .unwrap_or_else(|_| panic!("{}", ERR_AUTH_HOOK_FN_NAME_LEN)),
         ));
         self
     }

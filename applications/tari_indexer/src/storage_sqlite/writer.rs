@@ -287,6 +287,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                     topic: event.topic(),
                     payload: serialize_json(event.payload())?,
                     substate_id: event.substate_id().map(|s| s.to_string()),
+                    resource_address: EventFilter::event_resource_address(&event).map(|r| r.to_string()),
                 };
 
                 let id: i64 = diesel::insert_into(events::table)

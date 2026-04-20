@@ -130,6 +130,7 @@ pub trait IndexerStoreReadTransaction {
         topic_filter: Option<&str>,
         substate_id_filter: Option<&SubstateId>,
         template_address_filter: Option<&TemplateAddress>,
+        resource_address_filter: Option<&ResourceAddress>,
         limit: u32,
     ) -> Result<Vec<(i64, TransactionId, Event)>, StorageError>;
 
@@ -344,6 +345,7 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
         topic_filter: Option<&str>,
         substate_id_filter: Option<&SubstateId>,
         template_address_filter: Option<&TemplateAddress>,
+        resource_address_filter: Option<&ResourceAddress>,
         limit: u32,
     ) -> Result<Vec<(i64, TransactionId, Event)>, StorageError> {
         self.inner.with_read_tx(|tx| {
@@ -352,6 +354,7 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
                 topic_filter,
                 substate_id_filter,
                 template_address_filter,
+                resource_address_filter,
                 limit,
             )
         })

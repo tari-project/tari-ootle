@@ -39,6 +39,7 @@ pub struct EventRecord {
     pub topic: String,
     pub payload: String,
     pub substate_id: Option<String>,
+    pub resource_address: Option<String>,
     pub created_at: PrimitiveDateTime,
 }
 
@@ -51,6 +52,7 @@ pub struct NewEvent<'a> {
     pub topic: &'a str,
     pub payload: String,
     pub substate_id: Option<String>,
+    pub resource_address: Option<String>,
 }
 
 #[derive(Clone, Debug, QueryableByName, Deserialize, Serialize)]

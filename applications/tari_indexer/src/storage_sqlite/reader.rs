@@ -331,6 +331,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         topic_filter: Option<&str>,
         substate_id_filter: Option<&SubstateId>,
         template_address_filter: Option<&TemplateAddress>,
+        resource_address_filter: Option<&ResourceAddress>,
         limit: u32,
     ) -> Result<Vec<(i64, TransactionId, Event)>, StorageError> {
         use crate::storage_sqlite::schema::events;
@@ -353,6 +354,9 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         }
         if let Some(template_address) = template_address_filter {
             query = query.filter(events::template_address.eq(template_address.to_string()));
+        }
+        if let Some(resource_address) = resource_address_filter {
+            query = query.filter(events::resource_address.eq(resource_address.to_string()));
         }
 
         let event_rows = query

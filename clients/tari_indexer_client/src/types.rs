@@ -306,6 +306,12 @@ pub struct StreamTransactionEventsRequest {
     pub substate_id: Option<SubstateId>,
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     pub template_address: Option<TemplateAddress>,
+    /// Filter by resource address. Matches when either the event's `substate_id` is the given
+    /// resource (std.resource.* events) or the event payload contains a `resource_address` entry
+    /// equal to the given address (std.vault.deposit / std.vault.withdraw).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub resource_address: Option<ResourceAddress>,
     /// Resume the event stream from this event ID (exclusive). Events with id > after_id will be
     /// replayed from the database before switching to the live stream.
     pub after_id: Option<i64>,

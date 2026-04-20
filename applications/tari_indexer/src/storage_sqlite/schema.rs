@@ -33,6 +33,7 @@ diesel::table! {
         topic -> Text,
         payload -> Text,
         substate_id -> Nullable<Text>,
+        resource_address -> Nullable<Text>,
         created_at -> Timestamp,
     }
 }

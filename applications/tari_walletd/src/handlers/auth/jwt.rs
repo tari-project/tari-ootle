@@ -59,10 +59,11 @@ impl<'a> JwtApi<'a> {
         let token = token.ok_or(JwtApiError::AccessDeniedNoBearerToken)?;
         let token_data = self.decode_jwt(token.token())?;
         let token_permissions = &token_data.claims.permissions;
+        if token_permissions.has_permission(&JrpcPermission::Admin) {
+            return Ok(());
+        }
         for permission in req_permissions {
-            if !token_permissions.has_permission(permission) &&
-                !token_permissions.has_permission(&JrpcPermission::Admin)
-            {
+            if !token_permissions.has_permission(permission) {
                 return Err(JwtApiError::InsufficientPermissions {
                     required: permission.clone(),
                 });

@@ -32,6 +32,7 @@ use tari_ootle_transaction::TransactionId;
 use tari_ootle_wallet_sdk::{
     models::{
         Account,
+        AddressBookEntry,
         AuthoredTemplateModel,
         ConfidentialOutputModel,
         Config,
@@ -1527,6 +1528,47 @@ impl WalletStoreReader for ReadTransaction<'_> {
         }
 
         Ok(result)
+    }
+
+    fn address_book_get(&mut self, name: &str) -> Result<AddressBookEntry, WalletStorageError> {
+        use crate::schema::address_book;
+
+        let row = address_book::table
+            .filter(address_book::name.eq(name))
+            .first::<models::AddressBookEntry>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general("address_book_get", e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: "address_book_get",
+                entity: "address_book_entry".to_string(),
+                key: name.to_string(),
+            })?;
+
+        Ok(AddressBookEntry {
+            id: row.id,
+            name: row.name,
+            address: row.address,
+            note: row.note,
+        })
+    }
+
+    fn address_book_get_all(&mut self) -> Result<Vec<AddressBookEntry>, WalletStorageError> {
+        use crate::schema::address_book;
+
+        let rows = address_book::table
+            .order(address_book::name.asc())
+            .load::<models::AddressBookEntry>(self.connection())
+            .map_err(|e| WalletStorageError::general("address_book_get_all", e))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| AddressBookEntry {
+                id: row.id,
+                name: row.name,
+                address: row.address,
+                note: row.note,
+            })
+            .collect())
     }
 }
 

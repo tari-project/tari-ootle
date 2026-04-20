@@ -3,18 +3,19 @@
 
 use tari_template_abi::rust::{fmt, prelude::*};
 
-use crate::{ComponentAddress, TemplateAddress};
+use crate::{ComponentAddress, FunctionName, TemplateAddress};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct AuthHook {
     pub component_address: ComponentAddress,
-    pub method: String,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub method: FunctionName,
 }
 
 impl AuthHook {
-    pub fn new(component_address: ComponentAddress, method: String) -> Self {
+    pub fn new(component_address: ComponentAddress, method: FunctionName) -> Self {
         Self {
             component_address,
             method,

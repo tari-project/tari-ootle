@@ -90,6 +90,11 @@ impl ComponentManager {
         result.decode().expect(ERR_ENGINE_DECODE_FAIL)
     }
 
+    /// Gets the component state as a CBOR value enum
+    pub fn get_state_value(&self) -> tari_bor::Value {
+        self.get_state()
+    }
+
     /// Update the component state
     pub fn set_state<T: Serialize>(&self, state: T) {
         let state = to_value(&state).expect("Failed to encode component state");

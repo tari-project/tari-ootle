@@ -4,8 +4,11 @@
 name: Publish Packages to npmjs
 
 on:
-  push:
-    branches: development
+  release:
+    types:
+      - published
+  # Allows you to run this workflow manually from the Actions tab on GitHub.
+  workflow_dispatch:
 
 env:
   # Set the Node.js version to use
@@ -27,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@v6
         with:
           version: ${{ env.PNPM_VERSION }}
       - name: Use Node.js ${{ env.NODE_VERSION }}
@@ -75,7 +78,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@v6
         with:
           version: ${{ env.PNPM_VERSION }}
       - name: Use Node.js ${{ env.NODE_VERSION }}
@@ -126,7 +129,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@v6
         with:
           version: ${{ env.PNPM_VERSION }}
       - name: Use Node.js ${{ env.NODE_VERSION }}

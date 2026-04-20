@@ -70,7 +70,7 @@ pub fn select<A: Into<Amount>, K: Clone>(
     // Sort descending to improve pruning efficiency
     // Collect references to avoid cloning keys/values unnecessarily
     let mut items = inputs.iter().collect::<Vec<_>>();
-    items.sort_by(|a, b| b.value.cmp(&a.value));
+    items.sort_by_key(|b| std::cmp::Reverse(b.value));
 
     let mut best_sum: Option<Amount> = None;
     let mut best_keys = Vec::new();

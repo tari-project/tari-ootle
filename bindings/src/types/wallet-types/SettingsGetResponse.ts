@@ -6,4 +6,5 @@ export type SettingsGetResponse = {
   indexer_url: string;
   network: NetworkInfo;
   advanced_ui_features: AdvancedUiFeatures;
+  claimed_accounts: Array<string>;
 };

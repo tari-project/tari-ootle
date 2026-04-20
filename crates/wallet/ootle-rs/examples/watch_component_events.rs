@@ -61,6 +61,7 @@ async fn main() {
             topic: TOPIC_FILTER.map(String::from),
             substate_id: Some(component.into()),
             template_address: None,
+            resource_address: None,
             after_id: last_event_id,
         };
 

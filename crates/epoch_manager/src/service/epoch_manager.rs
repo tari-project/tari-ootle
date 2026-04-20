@@ -324,7 +324,7 @@ where TSpec: EpochManagerSpec
                 })?;
             res.push(vn);
         }
-        res.sort_by(|a, b| a.shard_key.cmp(&b.shard_key));
+        res.sort_by_key(|a| a.shard_key);
         Ok(res)
     }
 

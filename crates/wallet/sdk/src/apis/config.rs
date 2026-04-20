@@ -104,6 +104,8 @@ pub enum ConfigKey {
     KeyringPasswordEntryKey,
     /// Advanced UI features. type: AdvancedUiFeatures
     AdvancedUiFeatures,
+    /// Accounts that have successfully claimed testnet faucet funds. type: Vec<String>
+    ClaimedAccounts,
 }
 
 impl ConfigKey {
@@ -115,6 +117,7 @@ impl ConfigKey {
             Self::RecoveryNeeded => "recovery_needed",
             Self::KeyringPasswordEntryKey => "keyring_password_entry_key",
             Self::AdvancedUiFeatures => "advanced_ui_features",
+            Self::ClaimedAccounts => "claimed_accounts",
         }
     }
 }

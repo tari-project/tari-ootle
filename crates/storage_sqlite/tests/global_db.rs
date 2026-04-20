@@ -8,7 +8,7 @@ use tari_common_types::types::FixedHash;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, SubstateAddress, VotePower};
 use tari_ootle_p2p::PeerAddress;
-use tari_ootle_storage::global::{GlobalDb, ValidatorNodeDb};
+use tari_ootle_storage::global::{BlockHeaderModel, GlobalDb, ValidatorNodeDb};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_utilities::ByteArray;
 
@@ -105,4 +105,34 @@ fn change_committee_shard_group() {
         .get_committee_for_shard_group(Epoch(3), ShardGroup::new(4, 5), false, 100)
         .unwrap();
     assert_eq!(vns.len(), 2);
+}
+
+#[test]
+fn block_header_insert_is_idempotent() {
+    // The base-layer scanner rescans from genesis on reorg detection, which re-inserts
+    // already-seen (block_hash, epoch) rows. These must be swallowed rather than erroring out the
+    // scan.
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut headers = db.block_headers(&mut tx);
+    let model = BlockHeaderModel {
+        epoch: Epoch(1),
+        height: 100,
+        block_hash: FixedHash::from([1u8; 32]),
+        kernel_merkle_root: FixedHash::from([2u8; 32]),
+        validator_node_merkle_root: FixedHash::from([3u8; 32]),
+    };
+    headers.insert(model.clone()).unwrap();
+    // Second insert of the same (block_hash, epoch) must succeed without error.
+    headers.insert(model).unwrap();
+
+    // A different epoch with the same hash should also succeed (the unique index is on the pair).
+    let other_epoch = BlockHeaderModel {
+        epoch: Epoch(2),
+        height: 200,
+        block_hash: FixedHash::from([1u8; 32]),
+        kernel_merkle_root: FixedHash::from([4u8; 32]),
+        validator_node_merkle_root: FixedHash::from([5u8; 32]),
+    };
+    headers.insert(other_epoch).unwrap();
 }

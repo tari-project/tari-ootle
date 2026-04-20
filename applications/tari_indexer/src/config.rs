@@ -36,6 +36,7 @@ use tari_ootle_app_utilities::{
     p2p_config::{P2pConfig, PeerSeedsConfig},
 };
 use tari_ootle_common_types::Network;
+use tari_template_lib_types::TemplateAddress;
 
 use crate::network_state_sync::EventFilter;
 
@@ -125,6 +126,15 @@ pub struct IndexerConfig {
     pub dry_run_cache_ttl: Duration,
     /// The event filtering configuration
     pub event_filters: Vec<EventFilter>,
+    /// Template addresses to watch for component creation/update events.
+    /// Components created from these templates are tracked in a separate table for fast lookup.
+    /// Defaults to the builtin liquidity pool template.
+    #[serde(default = "default_watched_templates")]
+    pub watched_templates: Vec<TemplateAddress>,
+}
+
+fn default_watched_templates() -> Vec<TemplateAddress> {
+    vec![tari_template_builtin::LIQUIDITY_POOL_TEMPLATE_ADDRESS]
 }
 
 impl Default for IndexerConfig {
@@ -146,6 +156,7 @@ impl Default for IndexerConfig {
             burnt_utxo_sidechain_id: None,
             dry_run_cache_ttl: Duration::from_secs(10),
             event_filters: vec![],
+            watched_templates: default_watched_templates(),
         }
     }
 }

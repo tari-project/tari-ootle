@@ -33,14 +33,15 @@ import {
   ResourceAddress,
   ResourceType,
   substateIdToString,
+  SwapPoolInfo,
   TARI_TOKEN,
   UtxoInputSelection,
 } from "@tari-project/ootle-ts-bindings";
 import { parseAmountToBaseUnits } from "@utils/helpers";
-import { transactionsWaitResult } from "@utils/json_rpc";
-import { FormEvent, useState } from "react";
+import { swapPoolGetExchangeRate, swapPoolsList, transactionsWaitResult } from "@utils/json_rpc";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import ConfirmationStep from "../steps/ConfirmationStep";
-import FormStep, { FormError, SendMoneyFormState } from "../steps/FormStep";
+import FormStep, { FormError, PoolRateInfo, SendMoneyFormState } from "../steps/FormStep";
 import ResultStep, { TransferResult } from "../steps/ResultStep";
 
 export interface SendMoneyDialogProps {
@@ -52,6 +53,7 @@ export interface SendMoneyDialogProps {
   token_symbol: string;
 }
 const U64_MAX = 2n ** 64n - 1n;
+
 export function SendMoneyDialog(props: SendMoneyDialogProps) {
   const INITIAL_VALUES: SendMoneyFormState = {
     address: "",
@@ -61,6 +63,8 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     fee: "",
     badge: null,
     memo: "",
+    swapPoolAddress: "",
+    swapInputAmount: "",
   };
 
   const [activeStep, setActiveStep] = useState(0);
@@ -72,9 +76,67 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   const [formError, setFormError] = useState<FormError | null>(null);
   const { mutateAsync: sendIt } = useAccountsTransfer();
 
+  // Pool state
+  const [knownPools, setKnownPools] = useState<SwapPoolInfo[]>([]);
+  const [isLoadingPools, setIsLoadingPools] = useState(false);
+  const [poolRate, setPoolRate] = useState<PoolRateInfo | null>(null);
+  const [poolError, setPoolError] = useState<string | null>(null);
+  const [isLoadingPoolRate, setIsLoadingPoolRate] = useState(false);
+
   const { account } = useAccountStore();
 
   const { data } = useAccountsGetBalances(account?.component_address);
+
+  // Fetch known pools when dialog opens for stealth non-TARI tokens
+  useEffect(() => {
+    if (props.open && props.resource_type === "Stealth" && props.resource_address !== TARI_TOKEN) {
+      setIsLoadingPools(true);
+      swapPoolsList({
+        resource_pair: props.resource_address ? [TARI_TOKEN, props.resource_address] : null,
+        limit: 10n,
+        offset: 0n,
+      })
+        .then((resp) => {
+          setKnownPools(resp.pools);
+        })
+        .catch((e) => {
+          console.warn("Failed to fetch swap pools:", e);
+          setKnownPools([]);
+        })
+        .finally(() => setIsLoadingPools(false));
+    }
+  }, [props.open, props.resource_type, props.resource_address]);
+
+  const fetchPoolRate = useCallback(async (poolAddress: string) => {
+    if (!poolAddress) {
+      setPoolRate(null);
+      setPoolError(null);
+      return;
+    }
+
+    setIsLoadingPoolRate(true);
+    setPoolError(null);
+    try {
+      const resp = await swapPoolGetExchangeRate({ pool_address: poolAddress, desired_tari_output: null });
+      setPoolRate({
+        resource_a: resp.resource_a,
+        balance_a: BigInt(resp.balance_a),
+        resource_b: resp.resource_b,
+        balance_b: BigInt(resp.balance_b),
+      });
+      setPoolError(null);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setPoolError(
+        msg.includes("not a liquidity pool")
+          ? "This component is not a liquidity pool"
+          : `Failed to fetch pool: ${msg}`,
+      );
+      setPoolRate(null);
+    } finally {
+      setIsLoadingPoolRate(false);
+    }
+  }, []);
 
   if (!account) {
     return null;
@@ -86,6 +148,12 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
   // Find the available balance for the resource we're trying to send
   const balanceEntry = data?.balances?.find((b: BalanceEntry) => b.resource_address === props.resource_address);
+
+  // Check if user has TARI balance available (for recommending direct fee payment)
+  const tariBalanceEntry = data?.balances?.find((b: BalanceEntry) => b.resource_address === TARI_TOKEN);
+  const hasTariBalance = tariBalanceEntry
+    ? BigInt(tariBalanceEntry.balance) + BigInt(tariBalanceEntry.confidential_balance) >= 500n
+    : false;
 
   if (!balanceEntry) {
     console.warn("No balance entry found for resource", props.resource_address);
@@ -126,7 +194,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     setFormError(null);
     const { name, value } = e.target;
 
-    // For amount field, parse the input to allow decimal values
+    // For amount fields, parse the input to allow decimal values
     let processedValue = value;
     if (name === "amount" && value) {
       // Remove currency symbol and extra spaces, but keep numbers and decimal point
@@ -136,20 +204,11 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
       if (parts.length > 2) {
         processedValue = parts[0] + "." + parts.slice(1).join("");
       }
-    } else if (name === "fee" && value) {
-      // let parsed = parseInt(transferFormState.fee);
-      // if (!isNaN(parsed)) {
-      //   processedValue = parsed.toString(); // (parsed / XTR_CURRENCY.DIVISOR).toString();
-      // }
     }
-
-    // Clear fee when amount or publicKey changes to trigger re-estimation
-    // const shouldClearFee = (name === "amount" || name === "address") && transferFormState.fee;
 
     setTransferFormState({
       ...transferFormState,
       [name]: processedValue,
-      // ...(shouldClearFee ? { fee: "" } : {}),
     });
   }
 
@@ -180,6 +239,20 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     }
   };
 
+  const handlePoolSelect = (poolAddress: string) => {
+    setTransferFormState((prev) => ({
+      ...prev,
+      swapPoolAddress: poolAddress,
+      swapInputAmount: "", // Reset calculated amount
+    }));
+    if (poolAddress) {
+      fetchPoolRate(poolAddress);
+    } else {
+      setPoolRate(null);
+      setPoolError(null);
+    }
+  };
+
   const estimateFee = async () => {
     if (!account || isEstimatingFee || !transferFormState.address.trim() || !transferFormState.amount) {
       return;
@@ -194,10 +267,22 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     try {
       const amount = parseAmountToBaseUnits(transferFormState.amount, balanceEntry.divisibility);
       if (!transferFormState.outputToRevealed && amount > U64_MAX) {
-        // The maximum "whole" amount depends on the divisibility of the token
         throw new RangeError(
           `Amount exceeds maximum value for a UTXO (${U64_MAX / 10n ** BigInt(balanceEntry.divisibility)} ${props.token_symbol})`,
         );
+      }
+
+      // For dry-run with a swap pool, we need a preliminary swap input amount.
+      // Ask the server to calculate one using a generous initial fee estimate.
+      let dryRunSwapInputAmount: bigint | null = null;
+      if (transferFormState.swapPoolAddress && poolRate) {
+        const prelimResp = await swapPoolGetExchangeRate({
+          pool_address: transferFormState.swapPoolAddress,
+          desired_tari_output: 3000,
+        });
+        if (prelimResp.swap_input_amount != null) {
+          dryRunSwapInputAmount = BigInt(prelimResp.swap_input_amount);
+        }
       }
 
       // Create transfer object with current form state
@@ -211,6 +296,8 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         input_selection: transferFormState.inputSelection as UtxoInputSelection,
         badge_usage: transferFormState.badge ? { Resource: transferFormState.badge } : ("None" as BadgeUsage),
         output_memo: transferFormState.memo ? { Message: transferFormState.memo } : undefined,
+        swap_pool_address: transferFormState.swapPoolAddress || null,
+        swap_input_amount: dryRunSwapInputAmount,
       };
 
       const result = await sendIt?.({ ...currentTransfer, dry_run: true, max_fee: 3000 });
@@ -227,7 +314,32 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         throw new Error(`Transaction rejected: ${rejectReasonToString(transactionResult.AcceptFeeRejectRest[1])}`);
       }
 
-      setTransferFormState((prevState) => ({ ...prevState, fee: resp.final_fee.toString() }));
+      const estimatedFee = resp.final_fee;
+
+      // Ask the server to calculate the precise swap input from the actual fee estimate
+      let swapInputAmount = "";
+      if (transferFormState.swapPoolAddress) {
+        const rateResp = await swapPoolGetExchangeRate({
+          pool_address: transferFormState.swapPoolAddress,
+          desired_tari_output: Number(estimatedFee),
+        });
+        if (rateResp.swap_input_amount != null) {
+          swapInputAmount = rateResp.swap_input_amount.toString();
+        }
+        // Also refresh the pool rate display
+        setPoolRate({
+          resource_a: rateResp.resource_a,
+          balance_a: BigInt(rateResp.balance_a),
+          resource_b: rateResp.resource_b,
+          balance_b: BigInt(rateResp.balance_b),
+        });
+      }
+
+      setTransferFormState((prevState) => ({
+        ...prevState,
+        fee: estimatedFee.toString(),
+        swapInputAmount,
+      }));
     } finally {
       setIsEstimatingFee(false);
     }
@@ -241,6 +353,15 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
     // Check if required fields are filled
     if (!transferFormState.address.trim() || !transferFormState.amount) {
+      return;
+    }
+
+    // If a swap pool is selected, ensure we have a valid rate
+    if (transferFormState.swapPoolAddress && !poolRate) {
+      setFormError({
+        type: "general",
+        message: "Waiting for pool exchange rate. Please try again.",
+      });
       return;
     }
 
@@ -282,22 +403,46 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         resourceType: props.resource_type,
         output_to_revealed: transferFormState.outputToRevealed,
         input_selection: transferFormState.inputSelection as UtxoInputSelection,
-        // TODO: support for other types of BadgeUsage
         badge_usage: transferFormState.badge ? { Resource: transferFormState.badge } : ("None" as BadgeUsage),
         output_memo: transferFormState.memo ? { Message: transferFormState.memo } : undefined,
+        swap_pool_address: transferFormState.swapPoolAddress || null,
+        swap_input_amount: transferFormState.swapInputAmount ? BigInt(transferFormState.swapInputAmount) : null,
       };
 
-      await sendIt?.({
+      const submitResult = await sendIt?.({
         ...transfer,
         dry_run: false,
         max_fee: parseInt(transferFormState.fee),
       });
 
-      setTransferResult({
-        success: true,
-        message: "Transfer completed successfully",
+      // Wait for the transaction to be finalized
+      const waitResult = await transactionsWaitResult({
+        transaction_id: submitResult.transaction_id,
+        timeout_secs: 120,
       });
-      // Auto-close after 10 seconds - don't call onSendComplete immediately
+
+      const txResult = waitResult.result?.result;
+      if (txResult && "Accept" in txResult) {
+        setTransferResult({
+          success: true,
+          message: "Transfer completed successfully",
+        });
+      } else if (txResult && "AcceptFeeRejectRest" in txResult) {
+        setTransferResult({
+          success: false,
+          message: `Transfer rejected: ${rejectReasonToString(txResult.AcceptFeeRejectRest[1])}`,
+        });
+      } else if (txResult && "Reject" in txResult) {
+        setTransferResult({
+          success: false,
+          message: `Transfer rejected: ${rejectReasonToString(txResult.Reject)}`,
+        });
+      } else {
+        setTransferResult({
+          success: false,
+          message: `Transaction status: ${waitResult.status}`,
+        });
+      }
     } catch (error) {
       setTransferResult({
         success: false,
@@ -314,6 +459,8 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     setTransferResult(undefined);
     setUseBadge(false);
     setDisabled(false);
+    setPoolRate(null);
+    setPoolError(null);
     props.handleClose?.();
     // Call onSendComplete only after successful transfer when dialog closes
     if (wasSuccessful) {
@@ -342,12 +489,19 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
             token_symbol={props.token_symbol}
             divisibility={balanceEntry.divisibility}
             formError={formError}
+            knownPools={knownPools}
+            isLoadingPools={isLoadingPools}
+            poolRate={poolRate}
+            poolError={poolError}
+            isLoadingPoolRate={isLoadingPoolRate}
             onSubmit={handleFormSubmit}
             onCancel={handleClose}
             onFormValueChange={setFormValue}
             onSelectFormValueChange={setSelectFormValue}
             onCheckboxFormValueChange={setCheckboxFormValue}
             onUseBadgeChange={handleUseBadgeChange}
+            onPoolSelect={handlePoolSelect}
+            hasTariBalance={hasTariBalance}
           />
         );
       case 1:
@@ -361,6 +515,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
             onConfirm={handleConfirm}
             token_symbol={props.token_symbol}
             divisibility={balanceEntry?.divisibility || 6}
+            poolRate={poolRate}
           />
         );
       case 2:

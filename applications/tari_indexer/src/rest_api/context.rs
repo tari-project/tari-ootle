@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use axum::{
     http,
@@ -15,7 +15,7 @@ use tari_ootle_common_types::Network;
 use tari_ootle_p2p::{PeerAddress, TariMessagingSpec};
 use tari_ootle_storage::global::GlobalDb;
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+use tari_template_lib_types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 use tokio::sync::broadcast;
 
@@ -53,6 +53,7 @@ impl HandlerContext {
                 dry_run_transaction_processor: services.dry_run_transaction_processor.clone(),
                 subscriber: services.event_notifier.to_subscriber(),
                 transaction_event_subscriber: services.transaction_event_notifier.to_subscriber(),
+                watched_templates: services.watched_templates.clone(),
             }),
         }
     }
@@ -117,6 +118,10 @@ impl HandlerContext {
         }
     }
 
+    pub fn watched_templates(&self) -> &HashSet<TemplateAddress> {
+        &self.inner.watched_templates
+    }
+
     pub fn subscribe_events(&self) -> broadcast::Receiver<IndexerEvent> {
         self.inner.subscriber.subscribe()
     }
@@ -141,4 +146,5 @@ struct InnerContext {
     dry_run_transaction_processor: DryRunTransactionProcessor,
     subscriber: Subscriber<IndexerEvent>,
     transaction_event_subscriber: Subscriber<TransactionEvent>,
+    watched_templates: Arc<HashSet<TemplateAddress>>,
 }

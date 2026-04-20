@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_ootle_common_types::SubstateRequirementRef;
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_transaction::{Transaction, TransactionId, TransactionWeight};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
@@ -12,8 +12,8 @@ impl Executable for Transaction {
         self.calculate_id()
     }
 
-    fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateRequirementRef<'_>> + '_ {
-        self.all_inputs_iter()
+    fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateId> + '_ {
+        self.all_inputs_iter().map(|req| req.substate_id().clone())
     }
 
     fn signers_iter(&self) -> impl Iterator<Item = &RistrettoPublicKeyBytes> {

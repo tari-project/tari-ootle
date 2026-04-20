@@ -470,6 +470,7 @@ impl ProposedBlockChangeSet {
                 pool_rec.evidence(),
                 pool_rec.is_ready(),
                 pool_rec.is_global(),
+                pool_rec.max_epoch(),
             )?;
         }
 

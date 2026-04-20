@@ -1,5 +1,5 @@
 [workspace.package]
-version = "0.28.9"
+version = "0.28.12"
 edition = "2024"
 authors = ["The Tari Development Community"]
 repository = "https://github.com/tari-project/tari-ootle"
@@ -122,10 +122,10 @@ tari_template_builtin = { path = "crates/template_builtin", version = "0.28" }
 tari_ootle_transaction = { path = "crates/transaction", version = "0.28" }
 
 # Template lib
-tari_ootle_template_build = { path = "crates/template_build", version = "0.4" }
-tari_ootle_template_metadata = { path = "crates/template_metadata", version = "0.4" }
-tari_template_lib = { version = "0.24", path = "crates/template_lib" }
-tari_template_lib_types = { version = "0.24", path = "crates/template_lib_types", default-features = false }
+tari_ootle_template_build = { path = "crates/template_build", version = "0.5" }
+tari_ootle_template_metadata = { path = "crates/template_metadata", version = "0.5" }
+tari_template_lib = { version = "0.25", path = "crates/template_lib" }
+tari_template_lib_types = { version = "0.25", path = "crates/template_lib_types", default-features = false }
 tari_template_abi = { version = "0.16", path = "crates/template_abi", default-features = false }
 tari_template_macros = { version = "0.18", path = "crates/template_macros" }
 tari_bor = { version = "0.13", path = "crates/tari_bor", default-features = false }
@@ -204,6 +204,7 @@ fern = "0.7.1"
 futures = "0.3.30"
 futures-util = "0.3"
 futures-bounded = "0.2.3"
+gix-hash = { version = "0.15", features = ["serde"] }
 jsonwebtoken = "10.3.0"
 hashbrown = { version = "0.13.2" }
 hex = "0.4"
@@ -214,9 +215,9 @@ indexmap = "2.11.4"
 indoc = "1.0.6"
 lazy_static = "1.4.0"
 # Use Tari's libp2p fork that adds support for Schnorr-Ristretto
-libp2p-identity = { git = "https://github.com/tari-project/rust-libp2p.git", rev = "6929685c9818d30a3bacdcf842951b8e890e3f01" }
-libp2p = { git = "https://github.com/tari-project/rust-libp2p.git", rev = "6929685c9818d30a3bacdcf842951b8e890e3f01", version = "0.56.0", default-features = false }
-libp2p-peer-store = { git = "https://github.com/tari-project/rust-libp2p.git", rev = "6929685c9818d30a3bacdcf842951b8e890e3f01", version = "0.1.0", default-features = false }
+libp2p-identity = { git = "https://github.com/tari-project/rust-libp2p.git", rev = "470c41380d6c5140b52ef65becf4f643e4769e66" }
+libp2p = { git = "https://github.com/tari-project/rust-libp2p.git", rev = "470c41380d6c5140b52ef65becf4f643e4769e66", version = "0.56.0", default-features = false }
+libp2p-peer-store = { git = "https://github.com/tari-project/rust-libp2p.git", rev = "470c41380d6c5140b52ef65becf4f643e4769e66", version = "0.1.0", default-features = false }
 #libp2p = "0.53.1"
 #libp2p-identity = "0.2.8"
 libsqlite3-sys = "0.30.1"
@@ -224,7 +225,7 @@ log = "0.4.20"
 log4rs = "1.3"
 mime_guess = "2.0.4"
 mini-moka = "0.10.0"
-multiaddr = { git = "https://github.com/tari-project/rust-libp2p.git", rev = "6929685c9818d30a3bacdcf842951b8e890e3f01" }
+multiaddr = { git = "https://github.com/tari-project/rust-libp2p.git", rev = "470c41380d6c5140b52ef65becf4f643e4769e66" }
 #multiaddr = "0.18"
 newtype-ops = "0.1.4"
 num-integer = { version = "0.1.46", default-features = false }

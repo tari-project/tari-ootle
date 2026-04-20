@@ -68,7 +68,7 @@ function ClaimCoinsButton() {
       if (current.claimed_accounts.includes(accountAddress)) return;
       const updated = [...current.claimed_accounts, accountAddress];
       await settingsSet({
-        indexer_url: current.indexer_url,
+        indexer_url: null,
         advanced_ui_features: null,
         claimed_accounts: updated,
       });

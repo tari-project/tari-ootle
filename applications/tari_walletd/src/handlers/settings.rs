@@ -53,8 +53,10 @@ pub async fn handle_set(
 ) -> Result<SettingsSetResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
-    sdk.config_api().set(ConfigKey::IndexerUrl, &req.indexer_url)?;
-    sdk.get_network_interface().set_endpoint(req.indexer_url);
+    if let Some(indexer_url) = req.indexer_url {
+        sdk.config_api().set(ConfigKey::IndexerUrl, &indexer_url)?;
+        sdk.get_network_interface().set_endpoint(indexer_url);
+    }
     if let Some(advanced_ui_features) = &req.advanced_ui_features {
         sdk.config_api()
             .set(ConfigKey::AdvancedUiFeatures, advanced_ui_features)?;

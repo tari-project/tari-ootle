@@ -2,7 +2,7 @@
 import type { AdvancedUiFeatures } from "./AdvancedUiFeatures";
 
 export type SettingsSetRequest = {
-  indexer_url: string;
+  indexer_url: string | null;
   advanced_ui_features: AdvancedUiFeatures | null;
   claimed_accounts: Array<string> | null;
 };

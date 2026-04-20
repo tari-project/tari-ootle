@@ -392,7 +392,15 @@ async fn wait_account_balance_via_daemon_with_timeout(
         .ok()
         .filter(|secs| *secs > 0)
         .unwrap_or_else(|| panic!("Expected timeout to be a positive integer that fits into u32, got {timeout_secs}"));
-    wait_account_balance_impl(world, &account_name, &wallet_daemon_name, &operator, amount, timeout_secs).await;
+    wait_account_balance_impl(
+        world,
+        &account_name,
+        &wallet_daemon_name,
+        &operator,
+        amount,
+        timeout_secs,
+    )
+    .await;
 }
 
 async fn wait_account_balance_impl(

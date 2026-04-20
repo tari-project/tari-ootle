@@ -937,6 +937,26 @@ impl ResourceManager {
         resp.decode().expect("[set_access_rules] Failed")
     }
 
+    /// Replaces the resource's metadata map.
+    ///
+    /// The token symbol (`SYMBOL` key) is immutable once set: if the resource already has a symbol,
+    /// `metadata` must carry that exact same symbol or the transaction is rejected. If the resource
+    /// has no symbol yet, the caller may set one for the first time, and it becomes immutable thereafter.
+    ///
+    /// # Panics
+    ///
+    /// - The caller does not have the necessary [`ResourceAccessRules`] or [`OwnerRule`] to update the metadata.
+    /// - The new metadata would change or drop an existing token symbol.
+    pub fn set_metadata(&self, metadata: Metadata) {
+        let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
+            resource_ref: self.resource_address.into(),
+            action: ResourceAction::UpdateMetadata,
+            args: invoke_args![metadata],
+        });
+
+        resp.decode().expect("[set_metadata] Failed")
+    }
+
     /// Freezes all withdrawals, deposits and burns for the specified vault.
     pub fn freeze_vault(&self, vault_id: VaultId) {
         self.set_freeze_vault_flags(vault_id, VaultFreezeFlags::all());

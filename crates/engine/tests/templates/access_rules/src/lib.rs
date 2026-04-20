@@ -314,6 +314,10 @@ mod access_rules_template {
             ResourceManager::get(self.tokens.resource_address()).set_access_rules(access_rules);
         }
 
+        pub fn set_tokens_metadata(&mut self, metadata: Metadata) {
+            ResourceManager::get(self.tokens.resource_address()).set_metadata(metadata);
+        }
+
         pub fn create_proof_from_bucket(bucket: Bucket) -> Proof {
             bucket.create_proof()
         }

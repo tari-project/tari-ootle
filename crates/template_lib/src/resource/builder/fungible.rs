@@ -262,6 +262,13 @@ impl FungibleResourceBuilder {
         self
     }
 
+    /// Sets up who (apart from the owner) can update the resource's metadata. The token symbol
+    /// remains immutable once set.
+    pub fn update_metadata(mut self, rule: AccessRule) -> Self {
+        self.access_rules = self.access_rules.update_metadata(rule);
+        self
+    }
+
     /// Sets up the specified `symbol` as the token symbol in the metadata of the resource
     ///
     /// # Examples

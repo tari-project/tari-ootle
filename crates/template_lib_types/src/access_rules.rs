@@ -204,6 +204,8 @@ pub enum ResourceAuthAction {
     UpdateNonFungibleData,
     UpdateAccessRules,
     Freeze,
+    /// Appended at the end to keep bincode discriminants stable for prior variants.
+    UpdateMetadata,
 }
 
 impl ResourceAuthAction {
@@ -225,6 +227,10 @@ pub struct ResourceAccessRules {
     update_non_fungible_data: AccessRule,
     update_access_rules: AccessRule,
     freeze: AccessRule,
+    /// Added post-launch. Appended last to keep bincode field positions stable for prior fields;
+    /// this is still a breaking change for pre-existing substates because bincode cannot read a
+    /// missing trailing field, so the chain must be reset or data migrated on upgrade.
+    update_metadata: AccessRule,
 }
 
 impl ResourceAccessRules {
@@ -241,6 +247,7 @@ impl ResourceAccessRules {
             burnable: AccessRule::DenyAll,
             recallable: AccessRule::DenyAll,
             update_access_rules: AccessRule::DenyAll,
+            update_metadata: AccessRule::DenyAll,
             freeze: AccessRule::DenyAll,
             // But explicitly disable withdrawing, updating and/or depositing
             withdrawable: AccessRule::AllowAll,
@@ -256,6 +263,7 @@ impl ResourceAccessRules {
             burnable: AccessRule::DenyAll,
             recallable: AccessRule::DenyAll,
             update_access_rules: AccessRule::DenyAll,
+            update_metadata: AccessRule::DenyAll,
             withdrawable: AccessRule::DenyAll,
             depositable: AccessRule::DenyAll,
             update_non_fungible_data: AccessRule::DenyAll,
@@ -313,6 +321,12 @@ impl ResourceAccessRules {
         self
     }
 
+    /// Sets up who can update the resource's metadata. The token symbol remains immutable once set.
+    pub fn update_metadata(mut self, rule: AccessRule) -> Self {
+        self.update_metadata = rule;
+        self
+    }
+
     /// Returns a reference to the access rule for the specified action
     pub fn get_access_rule(&self, action: &ResourceAuthAction) -> &AccessRule {
         match action {
@@ -323,6 +337,7 @@ impl ResourceAccessRules {
             ResourceAuthAction::Deposit => &self.depositable,
             ResourceAuthAction::UpdateNonFungibleData => &self.update_non_fungible_data,
             ResourceAuthAction::UpdateAccessRules => &self.update_access_rules,
+            ResourceAuthAction::UpdateMetadata => &self.update_metadata,
             ResourceAuthAction::Freeze => &self.freeze,
         }
     }

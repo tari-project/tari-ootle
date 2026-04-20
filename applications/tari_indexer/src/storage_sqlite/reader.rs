@@ -247,16 +247,17 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         &mut self,
         substate_id_filter: Option<&SubstateId>,
         topic_filter: Option<&str>,
+        resource_address_filter: Option<&ResourceAddress>,
         offset: u32,
         limit: u32,
     ) -> Result<Vec<(TransactionId, Event)>, StorageError> {
-        // TODO: allow to query by payload as well, unifying all event methods into one
         info!(
             target: LOG_TARGET,
-            "Querying substate scanner database: get_events with substate_id_filter = {:?} and \
-            topic_filter = {:?}",
+            "Querying substate scanner database: get_events with substate_id_filter = {:?}, \
+            topic_filter = {:?}, resource_address_filter = {:?}",
             substate_id_filter,
-            topic_filter
+            topic_filter,
+            resource_address_filter
         );
         use crate::storage_sqlite::schema::events;
 
@@ -275,6 +276,10 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                     query = query.filter(events::topic.eq(topic));
                 },
             }
+        }
+
+        if let Some(resource_address) = resource_address_filter {
+            query = query.filter(events::resource_address.eq(resource_address.to_string()));
         }
 
         let event_rows = query

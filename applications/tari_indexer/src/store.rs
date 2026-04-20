@@ -118,6 +118,7 @@ pub trait IndexerStoreReadTransaction {
         &mut self,
         substate_id_filter: Option<&SubstateId>,
         topic_filter: Option<&str>,
+        resource_address_filter: Option<&ResourceAddress>,
         offset: u32,
         limit: u32,
     ) -> Result<Vec<(TransactionId, Event)>, StorageError>;
@@ -332,11 +333,12 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
         &self,
         substate_id_filter: Option<&SubstateId>,
         topic_filter: Option<&str>,
+        resource_address_filter: Option<&ResourceAddress>,
         offset: u32,
         limit: u32,
     ) -> Result<Vec<(TransactionId, Event)>, StorageError> {
         self.inner
-            .with_read_tx(|tx| tx.get_events(substate_id_filter, topic_filter, offset, limit))
+            .with_read_tx(|tx| tx.get_events(substate_id_filter, topic_filter, resource_address_filter, offset, limit))
     }
 
     pub fn get_events_after_id(

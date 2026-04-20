@@ -284,6 +284,12 @@ pub struct QueryTransactionEventsRequest {
     pub topic: Option<String>,
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     pub substate_id: Option<SubstateId>,
+    /// Filter by resource address. Matches when either the event's `substate_id` is the given
+    /// resource (std.resource.* events) or the event payload contains a `resource_address` entry
+    /// equal to the given address (std.vault.deposit / std.vault.withdraw).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub resource_address: Option<ResourceAddress>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
 }

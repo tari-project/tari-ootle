@@ -67,6 +67,8 @@ pub struct EventData {
     pub payload: String,
     #[diesel(sql_type = Nullable<Text>)]
     pub substate_id: Option<String>,
+    #[diesel(sql_type = Nullable<Text>)]
+    pub resource_address: Option<String>,
 }
 
 impl TryFrom<EventData> for crate::graphql::model::events::Event {
@@ -87,6 +89,7 @@ impl TryFrom<EventData> for crate::graphql::model::events::Event {
             tx_hash,
             payload,
             topic: event_data.topic,
+            resource_address: event_data.resource_address,
         })
     }
 }

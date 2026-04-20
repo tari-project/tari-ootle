@@ -8,7 +8,7 @@ use axum_extra::headers::authorization::Bearer;
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::Network;
 use tari_ootle_walletd_client::{
-    permissions::JrpcPermission,
+    permissions::{AddressBookPermission, JrpcPermission},
     types::{
         AddressBookAddRequest,
         AddressBookAddResponse,
@@ -26,8 +26,7 @@ use tari_ootle_walletd_client::{
 use crate::handlers::HandlerContext;
 
 fn validate_address(address: &str, network: Network) -> Result<(), anyhow::Error> {
-    let parsed =
-        OotleAddress::from_str(address).map_err(|e| anyhow!("Invalid Ootle address '{address}': {e}"))?;
+    let parsed = OotleAddress::from_str(address).map_err(|e| anyhow!("Invalid Ootle address '{address}': {e}"))?;
     if parsed.network() != network {
         return Err(anyhow!(
             "Address network mismatch: address is for {:?} but wallet is configured for {:?}",
@@ -44,7 +43,7 @@ pub async fn handle_add(
     req: AddressBookAddRequest,
 ) -> Result<AddressBookAddResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::AddressBook(AddressBookPermission::Create)])?;
 
     validate_address(&req.address, sdk.network())?;
 
@@ -61,7 +60,7 @@ pub async fn handle_list(
     _req: AddressBookListRequest,
 ) -> Result<AddressBookListResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::AddressBook(AddressBookPermission::Read)])?;
 
     let entries = sdk.address_book_api().list()?;
 
@@ -74,7 +73,7 @@ pub async fn handle_get(
     req: AddressBookGetRequest,
 ) -> Result<AddressBookGetResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::AddressBook(AddressBookPermission::Read)])?;
 
     let entry = sdk.address_book_api().get(&req.name)?;
 
@@ -87,7 +86,7 @@ pub async fn handle_update(
     req: AddressBookUpdateRequest,
 ) -> Result<AddressBookUpdateResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::AddressBook(AddressBookPermission::Update)])?;
 
     if let Some(ref address) = req.address {
         validate_address(address, sdk.network())?;
@@ -109,7 +108,7 @@ pub async fn handle_delete(
     req: AddressBookDeleteRequest,
 ) -> Result<AddressBookDeleteResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::AddressBook(AddressBookPermission::Delete)])?;
 
     sdk.address_book_api().delete(&req.name)?;
 

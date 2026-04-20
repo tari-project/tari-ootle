@@ -952,10 +952,13 @@ pub struct ClaimValidatorFeesResponse {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct SettingsSetRequest {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub indexer_url: Url,
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    #[serde(default)]
+    pub indexer_url: Option<Url>,
     #[serde(default)]
     pub advanced_ui_features: Option<AdvancedUiFeatures>,
+    #[serde(default)]
+    pub claimed_accounts: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -969,6 +972,7 @@ pub struct SettingsGetResponse {
     pub indexer_url: Url,
     pub network: NetworkInfo,
     pub advanced_ui_features: AdvancedUiFeatures,
+    pub claimed_accounts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

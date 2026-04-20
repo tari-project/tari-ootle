@@ -1239,7 +1239,11 @@ where
                 self.tracker.write_with(|state_mut| {
                     let resource_mut = state_mut.get_resource_mut(&resource_lock)?;
                     resource_mut.set_metadata(new_metadata);
-                    let payload = Metadata::from_iter([("resource_type", resource_mut.resource_type().to_string())]);
+                    let mut payload =
+                        Metadata::from_iter([("resource_type", resource_mut.resource_type().to_string())]);
+                    if let Some(symbol) = resource_mut.token_symbol() {
+                        payload.insert(TOKEN_SYMBOL, symbol);
+                    }
                     Self::emit_std_event("resource", "update_metadata", resource_address, payload, state_mut)?;
 
                     state_mut.unlock_substate(resource_lock)?;

@@ -406,7 +406,7 @@ mod consensus {
         assert_eq!(result, 1);
     }
 
-    /// Test 1 from OIP-0002: the epoch hash returned by the template matches the injected virtual substate.
+    /// The epoch hash returned by the template matches the injected virtual substate.
     #[test]
     fn test_epoch_hash_is_injected() {
         let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/consensus"]);
@@ -421,7 +421,7 @@ mod consensus {
         assert_eq!(result.as_slice(), injected_hash);
     }
 
-    /// Test 2 from OIP-0002: epoch hashes differ across epochs.
+    /// Epoch hashes differ across epochs.
     #[test]
     fn test_epoch_hash_differs_across_epochs() {
         let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/consensus"]);
@@ -445,7 +445,7 @@ mod consensus {
         assert_eq!(result_1.as_slice(), hash_epoch_1);
     }
 
-    /// Test 3 from OIP-0002: epoch hash is constant within an epoch (same hash for two calls in the same epoch).
+    /// Epoch hash is constant within an epoch (same hash for two calls in the same epoch).
     #[test]
     fn test_epoch_hash_constant_within_epoch() {
         let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/consensus"]);
@@ -464,8 +464,8 @@ mod consensus {
         assert_eq!(result_a.as_slice(), fixed_hash);
     }
 
-    /// Test 6 from OIP-0002: executing a template that calls `current_epoch_hash()` without the virtual
-    /// substate injected returns a `VirtualSubstateNotFound` execution failure.
+    /// Executing a template that calls `current_epoch_hash()` without the virtual substate injected returns a
+    /// `VirtualSubstateNotFound` execution failure.
     #[test]
     fn test_epoch_hash_not_available_without_injection() {
         let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/consensus"]);

@@ -135,7 +135,7 @@ use crate::{
         RuntimeError,
         RuntimeInterface,
         engine_args::EngineArgs,
-        error::ArgumentValidationError,
+        error::{ArgumentValidationError, LimitError},
         locking::{LockError, LockedSubstate},
         pay_fee::PayFee,
         scope::PushCallFrame,
@@ -2598,7 +2598,11 @@ where
         self.invoke_modules_on_runtime_call("generate_random_invoke")?;
         match action {
             GenerateRandomAction::GetRandomBytes { len } => {
-                let random = self.tracker.get_pseudorandom_bytes(len as usize)?;
+                let len = len as usize;
+                if len > limits::ENGINE_LIMITS.max_random_bytes_len {
+                    return Err(LimitError::MaxRandomBytesLenExceeded { len }.into());
+                }
+                let random = self.tracker.get_pseudorandom_bytes(len)?;
                 Ok(InvokeResult::encode(&random)?)
             },
         }

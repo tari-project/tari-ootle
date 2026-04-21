@@ -1,0 +1,106 @@
+---
+title: Randomness in Templates
+description: How pseudorandom values are produced in Tari Ootle, what guarantees they carry, and when you must not rely on them.
+---
+
+### Covered in this guide
+
+In this guide, you will:
+- Learn which randomness APIs templates can call.
+- Understand how those values are derived and why they are deterministic across shards.
+- See exactly which adversarial properties the current randomness does and does not provide.
+- Learn which contract patterns are safe to build on it and which are not.
+
+### The APIs
+
+Templates can request pseudorandom bytes through `tari_template_lib::rand`:
+
+```rust
+use tari_template_lib::rand::{random_bytes, random_u32};
+
+let bytes: Vec<u8> = random_bytes(32);
+let n: u32 = random_u32();
+```
+
+Each call to `random_bytes` is capped at `ENGINE_LIMITS.max_random_bytes_len` (1 KiB). Requests over this limit cause the transaction to be rejected — request only as many bytes as you actually use.
+
+The L1 block hash observed at the start of the current epoch is also exposed directly, for templates that want to derive their own values from it:
+
+```rust
+use tari_template_lib::consensus::Consensus;
+
+let epoch_hash: Hash = Consensus::current_epoch_hash();
+```
+
+### How randomness is derived
+
+Each call to `random_bytes` / `random_u32` produces 32 bytes from a domain-separated hash, and loops to fill longer buffers:
+
+```
+H( "UuidOutput" || tx_hash || entity_id || epoch_hash || counter )
+```
+
+- `tx_hash` — the hash of the transaction being executed.
+- `entity_id` — the id of the component or entity making the call.
+- `epoch_hash` — the L1 block hash captured at the start of the current epoch.
+- `counter` — a per-call monotonically increasing integer within the transaction.
+
+The `counter` ensures that two successive calls within the same transaction yield independent output. `tx_hash` ensures that two different transactions — even within the same epoch and from the same caller — get different output.
+
+### Determinism properties
+
+Execution must produce the same result on every validator in a shard group, so randomness has to be derivable from inputs that all honest validators already agree on. That gives you:
+
+- **Deterministic across shards.** Every validator executing the same transaction derives the same bytes.
+- **Constant within an epoch.** `epoch_hash` does not change between blocks of the same epoch; only `tx_hash`, `entity_id`, and `counter` vary between calls.
+- **Changes between epochs.** When the epoch rolls over, `epoch_hash` is refreshed from a new L1 block, so equivalent calls in a new epoch produce different bytes.
+
+### Adversarial properties
+
+This is the part that matters if you are building anything a user might try to exploit.
+
+- **`epoch_hash` is predictable in advance.** The L1 oracle observes L1 blocks with some lag, and epoch length is on the order of ~20 minutes. An attacker knows the seed for the current (and often the next) epoch before submitting a transaction.
+- **Transaction inputs are fully attacker-controlled.** `tx_hash` is a hash of the transaction body — the attacker picks everything in it. They can vary inputs offline, hash locally, and only submit the transaction whose derived randomness lands on a favourable value.
+- **Grinding difficulty scales with the bits of output used.** If a contract branches on `random_u32() % 2`, an attacker needs on the order of 2 tries. If a contract compares all 32 bytes of `random_bytes(32)` against a target, the search is infeasible. **How many bits of the random output your contract actually inspects is what determines grinding resistance.**
+- **Not a cryptographic RNG.** Do not use these values where unpredictability is a security property — nonces, keys, secrets, commitments, anything feeding a crypto primitive.
+
+### Safe uses
+
+These are fine because either the attacker doesn't gain by grinding, or the grinding cost outweighs the prize:
+
+- Cosmetic variation (colour, flavour text, procedural content).
+- Load / sharding hints that don't affect outcomes.
+- Salting public identifiers where collisions are merely inconvenient.
+- Tie-breaking in deterministic algorithms where either side is acceptable.
+- Games where the prize per transaction is smaller than the cost of grinding many attempts at the submission rate.
+
+### Unsafe uses
+
+Avoid these on the current randomness API:
+
+- Lotteries, raffles, or gambling with real stakes.
+- Matchmaking or reward allocation that is worth grinding.
+- Commit/reveal replacement ("just hash the RNG").
+- Cryptographic nonces, keys, or protocol secrets.
+- Any scheme where the attacker benefits from picking their own outcome, and the outcome depends on only a few bits of RNG.
+
+### Patterns for higher-integrity randomness
+
+If you need randomness that resists grinding, don't derive it from a single transaction. Combine entropy from multiple parties who cannot all be the attacker:
+
+- **Commit-reveal with participant entropy.** Each participant submits a hash commitment in one transaction, reveals a preimage in a later transaction, and the contract XORs the reveals. An attacker must predict every other participant's reveal, or collude with all of them, to grind the output.
+- **Entropy from future consensus state.** Have the contract commit to using a value that is unknown at submission time — e.g. an epoch hash strictly greater than the one at submission — and execute the random-dependent logic in a follow-up transaction. This converts "grind the seed" into "grind a future L1 block hash," which a non-miner cannot do.
+
+Both patterns move randomness out of a single-transaction execution boundary, which is the constraint that forces the current API to be grindable.
+
+### Summary
+
+| Property | Current API |
+|---|---|
+| Deterministic across validators | Yes |
+| Constant within an epoch (seed) | Yes |
+| Unpredictable to the transaction submitter | **No** |
+| Resistant to offline grinding | **No** (scales with bits of output used) |
+| Cryptographically secure | **No** |
+
+Use `random_bytes` and `random_u32` freely for cosmetic and low-stakes variation. For anything an attacker could profit from, build a commit-reveal or multi-transaction scheme on top.

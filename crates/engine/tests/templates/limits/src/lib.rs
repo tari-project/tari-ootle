@@ -19,5 +19,9 @@ mod template {
         pub fn set_data(&mut self, data: Bytes) {
             self.data = data;
         }
+
+        pub fn request_random_bytes(len: u32) -> Vec<u8> {
+            rand::random_bytes(len)
+        }
     }
 }

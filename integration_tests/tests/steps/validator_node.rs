@@ -658,10 +658,7 @@ async fn then_i_wait_for_validator_node_to_be_evicted(
         // cross-platform happy path is covered. We deliberately do NOT match
         // `Access(_)` because that also fires for metadata reads (e.g. the
         // watcher's own stat calls), producing spurious loop iterations.
-        let is_file_write_event = matches!(
-            event.kind,
-            notify::EventKind::Create(_) | notify::EventKind::Modify(_)
-        );
+        let is_file_write_event = matches!(event.kind, notify::EventKind::Create(_) | notify::EventKind::Modify(_));
         if is_file_write_event &&
             let Some(json_file) = event
                 .paths

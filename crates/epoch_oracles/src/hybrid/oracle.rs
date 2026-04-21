@@ -3,6 +3,7 @@
 
 use log::*;
 use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle};
+use tari_ootle_common_types::Epoch;
 use tokio::sync::mpsc;
 
 use crate::{
@@ -75,5 +76,10 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> Epoc
                 },
             }
         }
+    }
+
+    fn is_within_epoch_end_spread(&self, current_epoch: Epoch) -> bool {
+        // Epoch timing in hybrid mode is driven by the base-layer scanner; defer to it.
+        self.base_layer.is_within_epoch_end_spread(current_epoch)
     }
 }

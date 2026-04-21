@@ -253,6 +253,22 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         })
     }
 
+    fn check_token_symbol_length(metadata: &Metadata) -> Result<(), RuntimeError> {
+        if let Some(symbol) = metadata.get(TOKEN_SYMBOL) &&
+            symbol.len() > limits::MAX_TOKEN_SYMBOL_LEN
+        {
+            return Err(RuntimeError::InvalidArgument {
+                argument: "metadata",
+                reason: format!(
+                    "token symbol exceeds {} bytes (got {})",
+                    limits::MAX_TOKEN_SYMBOL_LEN,
+                    symbol.len()
+                ),
+            });
+        }
+        Ok(())
+    }
+
     fn emit_std_event<T: Into<SubstateId>>(
         object_name: &str,
         action: &str,
@@ -856,6 +872,8 @@ where
                     });
                 }
 
+                Self::check_token_symbol_length(&arg.metadata)?;
+
                 let owner_rule = match arg.owner_rule {
                     OwnerRule::OwnedBySigner => SubstateOwnerRule::ByPublicKey(self.seal_signer_public_key),
                     OwnerRule::ByPublicKey(key) => SubstateOwnerRule::ByPublicKey(key),
@@ -1191,6 +1209,62 @@ where
                     resource_mut.set_access_rules(access_rules);
                     let payload = Metadata::from_iter([("resource_type", resource_mut.resource_type().to_string())]);
                     Self::emit_std_event("resource", "update_access_rules", resource_address, payload, state_mut)?;
+
+                    state_mut.unlock_substate(resource_lock)?;
+
+                    Ok(InvokeResult::unit())
+                })
+            },
+            ResourceAction::UpdateMetadata => {
+                let resource_address =
+                    resource_ref
+                        .as_resource_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "UpdateMetadata resource action requires a resource address".to_string(),
+                        })?;
+                let new_metadata: Metadata = args.assert_one_arg()?;
+
+                Self::check_token_symbol_length(&new_metadata)?;
+
+                let (resource_lock, maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                    let resource_lock = state_mut.write_lock_substate(SubstateId::Resource(resource_address))?;
+
+                    let resource = state_mut.get_resource(&resource_lock)?;
+
+                    state_mut.authorization().check_resource_access_rules(
+                        ResourceAuthAction::UpdateMetadata,
+                        resource.as_ownership(),
+                        resource.access_rules(),
+                    )?;
+
+                    // The token symbol is immutable once set.
+                    if let Some(existing_symbol) = resource.token_symbol() &&
+                        new_metadata.get(TOKEN_SYMBOL) != Some(existing_symbol)
+                    {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "metadata",
+                            reason: "cannot update an existing token symbol".to_string(),
+                        });
+                    }
+
+                    let auth_caller = state_mut.get_auth_caller()?;
+                    Ok::<_, RuntimeError>((resource_lock, resource.auth_hook().cloned(), auth_caller))
+                })?;
+
+                if let Some(auth_hook) = maybe_auth_hook {
+                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::UpdateMetadata)?;
+                }
+
+                self.tracker.write_with(|state_mut| {
+                    let resource_mut = state_mut.get_resource_mut(&resource_lock)?;
+                    resource_mut.set_metadata(new_metadata);
+                    let mut payload =
+                        Metadata::from_iter([("resource_type", resource_mut.resource_type().to_string())]);
+                    if let Some(symbol) = resource_mut.token_symbol() {
+                        payload.insert(TOKEN_SYMBOL, symbol);
+                    }
+                    Self::emit_std_event("resource", "update_metadata", resource_address, payload, state_mut)?;
 
                     state_mut.unlock_substate(resource_lock)?;
 

@@ -121,4 +121,12 @@ pub enum EpochManagerRequest<TAddr> {
     GetNetworkDescription {
         reply: Reply<NetworkDescription>,
     },
+    LockEpoch {
+        epoch: Epoch,
+        reply: Reply<()>,
+    },
+    IsWithinEpochEndSpread {
+        current_epoch: Epoch,
+        reply: Reply<bool>,
+    },
 }

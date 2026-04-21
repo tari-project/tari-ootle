@@ -281,7 +281,13 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         debug!(target: LOG_TARGET, "process_block: [{}] processing block: {}", current_epoch, valid_block);
 
         let em_epoch = self.epoch_manager.current_epoch().await?;
-        let can_propose_epoch_end = em_epoch > current_epoch;
+        // Accept an EndEpoch proposal when our oracle has advanced past `current_epoch`, OR when
+        // the oracle believes we are close enough to the epoch boundary to vote speculatively.
+        // The speculative branch rescues the case where a short base-layer reorg near the lag
+        // horizon leaves our scanner a handful of blocks behind the leader's — without this,
+        // such splits can wedge consensus because every node requires the strict inequality.
+        let can_propose_epoch_end =
+            em_epoch > current_epoch || self.epoch_manager.is_within_epoch_end_spread(current_epoch).await?;
         let is_epoch_end = valid_block.block().is_epoch_end();
 
         let mut on_ready_to_vote_on_local_block = self.on_ready_to_vote_on_local_block.clone();
@@ -455,6 +461,10 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         // race ahead when the base-layer scanner catches up across multiple epoch boundaries,
         // which would stamp a later epoch's hash into this genesis block and wedge consensus.
         let epoch_hash = self.epoch_manager.get_epoch_hash(next_epoch).await?;
+        // Now that EndEpoch has committed and we're about to stamp `epoch_hash` into the genesis
+        // block for `next_epoch`, prevent the oracle from later rewriting this epoch's stored hash
+        // if a base-layer reorg surfaces a different view.
+        self.epoch_manager.lock_epoch(next_epoch).await?;
         let our_vn_for_next_epoch = self.epoch_manager.get_our_validator_node(next_epoch).await.optional()?;
         let next_shard_group = our_vn_for_next_epoch.map(|vn| {
             vn.shard_key

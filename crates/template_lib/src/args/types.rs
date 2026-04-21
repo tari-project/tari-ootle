@@ -196,6 +196,9 @@ pub enum ResourceAction {
     SetStealthUtxosFreeze,
     /// Burns a stealth UTXO of a resource
     StealthUtxoBurn,
+    /// Update the metadata of a resource (token symbol remains immutable once set).
+    /// Appended at the end to keep bincode discriminants stable for prior variants.
+    UpdateMetadata,
 }
 
 /// All the possible minting operation types

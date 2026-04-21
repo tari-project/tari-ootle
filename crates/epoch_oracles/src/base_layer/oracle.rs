@@ -6,7 +6,6 @@ use std::{
     future::{Future, poll_fn},
     pin::Pin,
     task::{Context, Poll},
-    time::Duration,
 };
 
 use log::*;
@@ -21,16 +20,10 @@ use tari_common_types::types::FixedHash;
 use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle};
 use tari_node_components::blocks::BlockHeader;
 use tari_ootle_common_types::{Epoch, Network, displayable::Displayable, optional::Optional};
-use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 use tokio::time;
 
 use crate::{
-    base_layer::{
-        BaseLayerBlockHeaderStore,
-        BaseLayerEpochOracleConfig,
-        BaseLayerEpochOracleFeatures,
-        header_hasher::hash_header,
-    },
+    base_layer::{BaseLayerBlockHeaderStore, BaseLayerEpochOracleConfig, header_hasher::hash_header},
     store::{EpochOracleStore, StoreKey},
 };
 
@@ -41,7 +34,6 @@ type TaskOutput<TStore> = (Result<bool, BaseLayerOracleError>, Box<BaseLayerOrac
 #[allow(clippy::struct_excessive_bools)]
 pub struct BaseLayerOracle<TStore> {
     inner: Option<Box<BaseLayerOracleInner<TStore>>>,
-    scanning_interval: Duration,
     is_initialized: bool,
     is_done: bool,
     has_more: bool,
@@ -51,6 +43,7 @@ pub struct BaseLayerOracle<TStore> {
 }
 
 struct BaseLayerOracleInner<TStore> {
+    config: BaseLayerEpochOracleConfig,
     store: TStore,
     last_scanned_height: u64,
     last_scanned_tip: Option<FixedHash>,
@@ -58,18 +51,13 @@ struct BaseLayerOracleInner<TStore> {
     last_epoch_hash: Option<FixedHash>,
     last_scanned_validator_node_mr: Option<FixedHash>,
     base_node_client: GrpcBaseNodeClient,
-    start_height: u64,
-    height_lag: u64,
     has_attempted_scan: bool,
-    features: BaseLayerEpochOracleFeatures,
-    validator_node_sidechain_id: Option<RistrettoPublicKeyBytes>,
     pending_events: VecDeque<EpochEvent>,
     header_buf: Vec<(Epoch, FixedHash, BlockHeader)>,
     network: Network,
     /// Epoch length in base-layer blocks, cached from consensus constants on the first scan
     /// that obtains them. `None` until the first scan completes.
     cached_epoch_length: Option<u64>,
-    epoch_end_spread_blocks: u64,
 }
 
 impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + 'static> BaseLayerOracle<TStore> {
@@ -81,6 +69,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + 'static> BaseLayerOr
     ) -> Self {
         Self {
             inner: Some(Box::new(BaseLayerOracleInner {
+                config,
                 store,
                 last_scanned_tip: None,
                 last_scanned_height: 0,
@@ -88,18 +77,12 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + 'static> BaseLayerOr
                 last_epoch_hash: None,
                 last_scanned_validator_node_mr: None,
                 base_node_client,
-                start_height: config.start_height,
-                height_lag: config.height_lag,
                 has_attempted_scan: false,
-                validator_node_sidechain_id: config.sidechain_id,
-                features: config.features,
                 pending_events: VecDeque::new(),
                 header_buf: Vec::new(),
                 network,
                 cached_epoch_length: None,
-                epoch_end_spread_blocks: config.epoch_end_spread_blocks,
             })),
-            scanning_interval: config.scanning_interval,
             is_initialized: false,
             is_done: false,
             has_more: false,
@@ -114,7 +97,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
     /// The configured start height adjusted for the height lag. This is the minimum height
     /// that the scanner will scan from.
     fn lag_start_height(&self) -> u64 {
-        self.start_height.saturating_sub(self.height_lag)
+        self.config.start_height.saturating_sub(self.config.height_lag)
     }
 
     /// The effective last scanned height, which is the maximum of the last scanned height and
@@ -153,7 +136,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
                 "⛓️ Forcing blockchain sync. We last scanned {}/{}",
                 self.last_scanned_height,
                 tip.height_of_longest_chain
-                    .saturating_sub(self.height_lag)
+                    .saturating_sub(self.config.height_lag)
             );
             self.has_attempted_scan = true;
             return self.sync_blockchain(tip).await;
@@ -167,7 +150,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
                     tip.height_of_longest_chain,
                     self.effective_last_scanned_height(),
                     tip.height_of_longest_chain
-                        .saturating_sub(self.height_lag)
+                        .saturating_sub(self.config.height_lag)
                 );
                 self.has_attempted_scan = true;
                 self.sync_blockchain(tip).await
@@ -192,7 +175,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
                         .get_consensus_constants(tip.height_of_longest_chain)
                         .await?;
                     self.cached_epoch_length = Some(constants.epoch_length());
-                    let lagged_height = tip.height_of_longest_chain.saturating_sub(self.height_lag);
+                    let lagged_height = tip.height_of_longest_chain.saturating_sub(self.config.height_lag);
                     let epoch = constants.height_to_epoch(lagged_height);
                     // If no progress has been made since restarting, we still need to tell the epoch manager that
                     // scanning is done
@@ -239,7 +222,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
 
     #[allow(clippy::too_many_lines)]
     async fn sync_blockchain(&mut self, tip: BaseLayerMetadata) -> Result<bool, BaseLayerOracleError> {
-        let Some(lag_tip_height) = tip.height_of_longest_chain.checked_sub(self.height_lag) else {
+        let Some(lag_tip_height) = tip.height_of_longest_chain.checked_sub(self.config.height_lag) else {
             debug!(
                 target: LOG_TARGET,
                 "Base layer blockchain is not yet at the required height to start scanning it"
@@ -309,7 +292,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
             // Note: Cant use header.hash() because it uses CURRENT_NETWORK global
             let header_hash = hash_header(self.network, &header);
             let current_validator_node_mr = header.validator_node_mr;
-            if self.features.sync_headers {
+            if self.config.features.sync_headers {
                 self.header_buf.push((current_epoch, header_hash, header));
             }
 
@@ -346,10 +329,10 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
                     "⛓️ last_scanned_validator_node_mr = {} current = {}", self.last_scanned_validator_node_mr.display(), current_validator_node_mr
                 );
 
-                if self.features.sync_validator_node_changes {
+                if self.config.features.sync_validator_node_changes {
                     let node_changes = self
                         .base_node_client
-                        .get_validator_node_changes(current_epoch, self.validator_node_sidechain_id.as_ref())
+                        .get_validator_node_changes(current_epoch, self.config.sidechain_id.as_ref())
                         .await
                         .map_err(BaseLayerOracleError::BaseNodeError)?;
                     let node_changes = node_changes
@@ -429,7 +412,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
         }
 
         let latest = self.base_node_client.get_tip_info().await?;
-        let lagged_height = latest.height_of_longest_chain.saturating_sub(self.height_lag);
+        let lagged_height = latest.height_of_longest_chain.saturating_sub(self.config.height_lag);
         if lagged_height > lag_tip_height {
             info!(
                 target: LOG_TARGET,
@@ -489,7 +472,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
     /// next epoch boundary. Used by consensus to accept `EndEpoch` proposals speculatively when
     /// peers' oracles have already crossed and ours is almost there.
     fn is_within_epoch_end_spread(&self, current_epoch: Epoch) -> bool {
-        if self.epoch_end_spread_blocks == 0 {
+        if self.config.epoch_end_spread_blocks == 0 {
             return false;
         }
         let Some(epoch_length) = self.cached_epoch_length else {
@@ -505,7 +488,9 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
         else {
             return false;
         };
-        self.last_scanned_height.saturating_add(self.epoch_end_spread_blocks) >= next_start
+        self.last_scanned_height
+            .saturating_add(self.config.epoch_end_spread_blocks) >=
+            next_start
     }
 }
 
@@ -567,8 +552,14 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> Base
 
             // On the first call of this method, sleep_or_shutdown is false and scanning will immediately begin
             if !self.has_more && self.sleep_or_shutdown && self.sleep_task.is_none() {
-                trace!(target: LOG_TARGET, "Starting sleep task {:?}", self.scanning_interval);
-                self.sleep_task = Some(Box::pin(time::sleep(self.scanning_interval)));
+                let scanning_interval = self
+                    .inner
+                    .as_ref()
+                    .expect("inner must be Some when starting sleep task")
+                    .config
+                    .scanning_interval;
+                trace!(target: LOG_TARGET, "Starting sleep task {:?}", scanning_interval);
+                self.sleep_task = Some(Box::pin(time::sleep(scanning_interval)));
             }
 
             if let Some(sleep) = self.sleep_task.as_mut() {

@@ -543,6 +543,7 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + BaseLayerBloc
                 .as_ref()
                 .map(|p| p.to_byte_type()),
             features,
+            epoch_end_spread_blocks: config.epoch_oracle.base_layer.epoch_end_spread_blocks,
         },
         config.network,
     ))

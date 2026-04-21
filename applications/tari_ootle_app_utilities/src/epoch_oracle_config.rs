@@ -48,6 +48,16 @@ pub struct BaseLayerOracleConfig {
     pub scanning_interval: Duration,
     /// Height to start base layer scanning
     pub start_height: u64,
+    /// Number of base-layer blocks of leeway when voting on `EndEpoch` proposals. If our scanner
+    /// has not yet crossed the next epoch boundary but the (lagged) scan height is within this
+    /// many blocks of it, we accept `EndEpoch` proposals speculatively so a slightly lagging
+    /// scanner cannot wedge consensus at the boundary. Set to 0 to disable.
+    #[serde(default = "default_epoch_end_spread_blocks")]
+    pub epoch_end_spread_blocks: u64,
+}
+
+fn default_epoch_end_spread_blocks() -> u64 {
+    2
 }
 
 impl Default for BaseLayerOracleConfig {
@@ -59,6 +69,7 @@ impl Default for BaseLayerOracleConfig {
             // greater than this value to avoid a race condition resulting in leader failure.
             scanning_interval: Duration::from_secs(8),
             start_height: 0,
+            epoch_end_spread_blocks: default_epoch_end_spread_blocks(),
         }
     }
 }

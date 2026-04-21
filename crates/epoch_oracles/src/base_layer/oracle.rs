@@ -66,6 +66,10 @@ struct BaseLayerOracleInner<TStore> {
     pending_events: VecDeque<EpochEvent>,
     header_buf: Vec<(Epoch, FixedHash, BlockHeader)>,
     network: Network,
+    /// Epoch length in base-layer blocks, cached from consensus constants on the first scan
+    /// that obtains them. `None` until the first scan completes.
+    cached_epoch_length: Option<u64>,
+    epoch_end_spread_blocks: u64,
 }
 
 impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + 'static> BaseLayerOracle<TStore> {
@@ -92,6 +96,8 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + 'static> BaseLayerOr
                 pending_events: VecDeque::new(),
                 header_buf: Vec::new(),
                 network,
+                cached_epoch_length: None,
+                epoch_end_spread_blocks: config.epoch_end_spread_blocks,
             })),
             scanning_interval: config.scanning_interval,
             is_initialized: false,
@@ -174,7 +180,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
                 // TODO: we need to figure out where the fork happened, and delete data after the fork if able.
                 self.last_scanned_hash = None;
                 self.last_scanned_validator_node_mr = None;
-                self.last_scanned_height = 0;
+                self.last_scanned_height = self.start_height;
                 self.has_attempted_scan = true;
                 self.sync_blockchain(tip).await
             },
@@ -185,6 +191,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
                         .base_node_client
                         .get_consensus_constants(tip.height_of_longest_chain)
                         .await?;
+                    self.cached_epoch_length = Some(constants.epoch_length());
                     let lagged_height = tip.height_of_longest_chain.saturating_sub(self.height_lag);
                     let epoch = constants.height_to_epoch(lagged_height);
                     // If no progress has been made since restarting, we still need to tell the epoch manager that
@@ -275,6 +282,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
             .base_node_client
             .get_consensus_constants(tip.height_of_longest_chain)
             .await?;
+        self.cached_epoch_length = Some(constants.epoch_length());
 
         // We'll buffer 1000 headers at a time
         // note: 10_000 is the maximum permitted by the base node gRPC service
@@ -476,6 +484,29 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
             self.pending_events.shrink_to(TARGET_CAP);
         }
     }
+
+    /// Returns true when our lagged scanner position is within `epoch_end_spread_blocks` of the
+    /// next epoch boundary. Used by consensus to accept `EndEpoch` proposals speculatively when
+    /// peers' oracles have already crossed and ours is almost there.
+    fn is_within_epoch_end_spread(&self, current_epoch: Epoch) -> bool {
+        if self.epoch_end_spread_blocks == 0 {
+            return false;
+        }
+        let Some(epoch_length) = self.cached_epoch_length else {
+            return false;
+        };
+        if epoch_length == 0 {
+            return false;
+        }
+        let Some(next_start) = current_epoch
+            .as_u64()
+            .checked_add(1)
+            .and_then(|e| e.checked_mul(epoch_length))
+        else {
+            return false;
+        };
+        self.last_scanned_height.saturating_add(self.epoch_end_spread_blocks) >= next_start
+    }
 }
 
 impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> BaseLayerOracle<TStore> {
@@ -568,6 +599,15 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> Epoc
     /// This Future is cancel-safe. Returns None if a shutdown is triggered.
     async fn next_epoch_event(&mut self) -> Option<EpochEvent> {
         poll_fn(|cx| self.poll_next_event(cx)).await
+    }
+
+    fn is_within_epoch_end_spread(&self, current_epoch: Epoch) -> bool {
+        // `inner` is briefly None while a scan task is in flight; return false then so voting
+        // falls back to the strict em_epoch > current_epoch check.
+        self.inner
+            .as_deref()
+            .map(|inner| inner.is_within_epoch_end_spread(current_epoch))
+            .unwrap_or(false)
     }
 }
 

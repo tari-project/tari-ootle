@@ -290,7 +290,6 @@ impl BlockHeader {
         let fields = MetadataHashFields::V1(MetadataHashFieldsV1 {
             total_leader_fee: self.total_leader_fee,
             timestamp: self.timestamp,
-            epoch_hash: &self.epoch_hash,
             extra_data: &self.extra_data,
         });
         hashing::block_metadata_hasher().chain(&fields).finalize().into()
@@ -307,6 +306,7 @@ impl BlockHeader {
             justify_id: self.justify_id.hash(),
             height: self.height.as_u64(),
             epoch: self.epoch.as_u64(),
+            epoch_hash: &self.epoch_hash,
             shard_group: tari_sidechain::ShardGroup {
                 start: self.shard_group.start().as_u32(),
                 end_inclusive: self.shard_group.end().as_u32(),
@@ -498,6 +498,5 @@ enum MetadataHashFields<'a> {
 struct MetadataHashFieldsV1<'a> {
     total_leader_fee: u64,
     timestamp: u64,
-    epoch_hash: &'a FixedHash,
     extra_data: &'a ExtraData,
 }

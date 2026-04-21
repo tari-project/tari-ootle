@@ -23,7 +23,13 @@
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::{BlockId, Decision};
 use tari_ootle_common_types::{Epoch, NodeHeight};
-use tari_ootle_storage::consensus_models::{Evidence, LeaderFee, TransactionPoolRecord, TransactionPoolStage};
+use tari_ootle_storage::consensus_models::{
+    Evidence,
+    LeaderFee,
+    LockedEpoch,
+    TransactionPoolRecord,
+    TransactionPoolStage,
+};
 use tari_ootle_transaction::TransactionId;
 
 use crate::{
@@ -44,7 +50,7 @@ pub struct TransactionPoolStateUpdateData {
     pub stage: TransactionPoolStage,
     pub local_decision: Decision,
     pub remote_decision: Option<Decision>,
-    pub locked_epoch: Option<Epoch>,
+    pub locked_epoch: Option<LockedEpoch>,
     pub is_ready: bool,
 }
 

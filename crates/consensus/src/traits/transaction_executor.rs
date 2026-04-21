@@ -8,7 +8,7 @@ use tari_ootle_common_types::{Epoch, SubstateRequirement, optional::IsNotFoundEr
 use tari_ootle_storage::{
     StateStore,
     StorageError,
-    consensus_models::{TransactionExecution, TransactionPoolError},
+    consensus_models::{LockedEpoch, TransactionExecution, TransactionPoolError},
 };
 use tari_ootle_transaction::Transaction;
 
@@ -64,7 +64,7 @@ pub trait BlockTransactionExecutor<TStateStore: StateStore> {
     fn execute(
         &self,
         transaction: &Transaction,
-        current_epoch: Epoch,
+        locked_epoch: LockedEpoch,
         resolved_inputs: &HashMap<SubstateRequirement, Substate>,
     ) -> Result<TransactionExecution, BlockTransactionExecutorError>;
 }

@@ -11,7 +11,6 @@ use tari_engine_types::{
     substate::{Substate, SubstateId},
 };
 use tari_ootle_common_types::{
-    Epoch,
     LockIntent,
     SubstateRequirement,
     SubstateRequirementRef,
@@ -23,6 +22,7 @@ use tari_ootle_storage::{
     consensus_models::{
         BlockTransactionExecution,
         Evidence,
+        LockedEpoch,
         SubstateRequirementLockIntent,
         TransactionExecution,
         TransactionPoolRecord,
@@ -82,6 +82,12 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 LockStatus::new(),
             ));
         }
+        let execution_epoch = pool_tx.locked_epoch().ok_or_else(|| {
+            BlockTransactionExecutorError::InvariantError(format!(
+                "Pool transaction {} prepare without locked epoch",
+                transaction_id
+            ))
+        })?;
 
         let resolved_inputs = self.resolve_inputs(store, &transaction, local_committee_info)?;
 
@@ -89,17 +95,13 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             ResolvedTransactionInputs::OnlyLocalInputs { local_versions } => {
                 // Because we have only local inputs, this shard group unilaterally decides the locked epoch (though
                 // output shardgroups still may abort)
-
-                // TODO: the pool record needs to be updated after this function returns by the caller, which is not
-                // ideal
-                let execution_epoch = block.epoch();
                 self.prepare_local_input_transaction(
                     store,
                     local_committee_info,
                     &transaction,
                     local_versions,
                     block,
-                    execution_epoch,
+                    execution_epoch.clone(),
                 )
             },
             ResolvedTransactionInputs::LocalAndForeignInputs {
@@ -113,35 +115,27 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 non_local_inputs,
                 block,
             ),
-            ResolvedTransactionInputs::OnlyForeignInputs { non_local_inputs } => {
-                let execution_epoch = pool_tx.locked_epoch().ok_or_else(|| {
-                    BlockTransactionExecutorError::InvariantError(format!(
-                        "Output-only transaction {} has no locked epoch",
-                        transaction_id
-                    ))
-                })?;
-                self.prepare_multishard_output_only_transaction(
+            ResolvedTransactionInputs::OnlyForeignInputs { non_local_inputs } => self
+                .prepare_multishard_output_only_transaction(
                     store,
                     local_committee_info,
                     &transaction,
                     non_local_inputs,
                     block,
                     change_set,
-                    execution_epoch,
-                )
-            },
+                    execution_epoch.clone(),
+                ),
             ResolvedTransactionInputs::OnlyTombstones => {
                 // Because we have only local inputs, this shard group unilaterally decides the locked epoch (though
                 // output shards may abort) TODO: the pool record needs to be updated after this
                 // function returns by the caller, which is not ideal
-                let execution_epoch = block.epoch();
                 self.prepare_local_input_transaction(
                     store,
                     local_committee_info,
                     &transaction,
                     IndexMap::new(),
                     block,
-                    execution_epoch,
+                    execution_epoch.clone(),
                 )
             },
             ResolvedTransactionInputs::OneOrMoreLocalInputsNotFound { is_local_only, err } => {
@@ -222,12 +216,12 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
 
     pub fn execute(
         &self,
-        execution_epoch: Epoch,
+        execution_epoch: LockedEpoch,
         pledged_transaction: PledgedTransaction,
     ) -> Result<TransactionExecution, BlockTransactionExecutorError> {
         // Abort before execution if the execution epoch exceeds the transaction's max_epoch
         if let Some(max_epoch) = pledged_transaction.transaction.transaction().max_epoch() &&
-            execution_epoch > max_epoch
+            execution_epoch.epoch() > max_epoch
         {
             warn!(
                 target: LOG_TARGET,
@@ -272,17 +266,17 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         transaction: &TransactionRecord,
         resolved_inputs: &HashMap<SubstateRequirement, Substate>,
         block: &LeafBlock,
-        execution_epoch: Epoch,
+        execution_locked_epoch: LockedEpoch,
     ) -> Result<TransactionExecution, BlockTransactionExecutorError> {
         // Abort before execution if the execution epoch exceeds the transaction's max_epoch
         if let Some(max_epoch) = transaction.transaction().max_epoch() &&
-            execution_epoch > max_epoch
+            execution_locked_epoch.epoch() > max_epoch
         {
             warn!(
                 target: LOG_TARGET,
                 "⏰ Transaction {} has expired: execution epoch {} exceeds max_epoch {}",
                 transaction.id(),
-                execution_epoch,
+                execution_locked_epoch.epoch(),
                 max_epoch,
             );
             return Ok(TransactionExecution::abort(transaction.id(), RejectReason::Abort {
@@ -307,7 +301,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             transaction.id(),
         );
         self.executor
-            .execute(transaction.transaction(), execution_epoch, resolved_inputs)
+            .execute(transaction.transaction(), execution_locked_epoch, resolved_inputs)
     }
 
     pub fn fetch_execution(
@@ -388,7 +382,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         transaction: &TransactionRecord,
         local_versions: IndexMap<SubstateRequirementRef<'_>, u32>,
         block: LeafBlock,
-        execution_epoch: Epoch,
+        execution_locked_epoch: LockedEpoch,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         let transaction_id = *transaction.id();
         // CASE: All inputs are local and we can execute the transaction.
@@ -403,7 +397,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         );
 
         let local_inputs = store.get_many(local_versions.iter().map(|(req, v)| (req.to_owned(), *v)))?;
-        let execution = self.execute_or_fetch(store, transaction, &local_inputs, &block, execution_epoch)?;
+        let execution = self.execute_or_fetch(store, transaction, &local_inputs, &block, execution_locked_epoch)?;
 
         let is_outputs_local_only = local_committee_info.is_all_local(execution.resulting_outputs());
         if is_outputs_local_only {
@@ -577,7 +571,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         non_local_inputs: IndexSet<SubstateRequirementRef<'_>>,
         block: LeafBlock,
         change_set: &ProposedBlockChangeSet,
-        execution_epoch: Epoch,
+        execution_locked_epoch: LockedEpoch,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         let transaction_id = *transaction.id();
         // We're output-only, so only need to gather foreign pledges
@@ -622,7 +616,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             )));
         }
 
-        let execution = self.execute_or_fetch(store, transaction, &resolved_inputs, &block, execution_epoch)?;
+        let execution = self.execute_or_fetch(store, transaction, &resolved_inputs, &block, execution_locked_epoch)?;
         info!(
             target: LOG_TARGET,
             "👨‍🔧 PREPARE: Output-Only Executed transaction {} with {} decision",

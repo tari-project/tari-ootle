@@ -860,7 +860,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             stage: update.stage(),
             local_decision: update.decision(),
             remote_decision: update.remote_decision(),
-            locked_epoch: update.locked_epoch(),
+            locked_epoch: update.locked_epoch().cloned(),
             is_ready: update.is_ready(),
         };
 

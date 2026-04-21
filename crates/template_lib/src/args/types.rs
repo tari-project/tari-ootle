@@ -498,6 +498,7 @@ pub struct ConsensusInvokeArg {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ConsensusAction {
     GetCurrentEpoch,
+    GetCurrentEpochHash,
 }
 
 // -------------------------------- GenerateRandom -------------------------------- //

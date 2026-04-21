@@ -327,7 +327,8 @@ impl IsNotFoundError for RuntimeError {
                 RuntimeError::BucketNotFound { .. } |
                 RuntimeError::ResourceNotFound { .. } |
                 RuntimeError::NonFungibleNotFound { .. } |
-                RuntimeError::ProofNotFound { .. }
+                RuntimeError::ProofNotFound { .. } |
+                RuntimeError::VirtualSubstateNotFound { .. }
         )
     }
 }
@@ -398,4 +399,6 @@ pub enum LimitError {
     MaxLogsExceeded,
     #[error("Exceeded maximum number of events per transaction: {}", limits::ENGINE_LIMITS.max_events)]
     MaxEventsExceeded,
+    #[error("Requested random bytes length {len} exceeds maximum of {} bytes", limits::ENGINE_LIMITS.max_random_bytes_len)]
+    MaxRandomBytesLenExceeded { len: usize },
 }

@@ -64,7 +64,7 @@ async fn epoch_change(mut test: Test) {
 
                 // NB: executions use a consistent epoch
                 assert_eq!(
-                    execution.current_epoch, other_exec.current_epoch,
+                    execution.execution_epoch, other_exec.execution_epoch,
                     "epoch mismatch for tx_id {}",
                     tx_id
                 );

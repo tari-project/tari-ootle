@@ -24,13 +24,19 @@ use tari_template_lib::prelude::*;
 
 #[template]
 mod consensus_template {
+    use tari_template_lib::types::Hash32;
+
     use super::*;
 
     pub struct TestConsensus {}
 
     impl TestConsensus {
         pub fn current_epoch() -> u64 {
-            Consensus::current_epoch()    
+            Consensus::current_epoch()
+        }
+
+        pub fn current_epoch_hash() -> Hash32 {
+            Consensus::current_epoch_hash()
         }
     }
 }

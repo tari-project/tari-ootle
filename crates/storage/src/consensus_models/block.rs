@@ -55,6 +55,7 @@ use super::{
     EvictNodeAtom,
     ForeignProposalAtom,
     ForeignProposalRecord,
+    LockedEpoch,
     PendingShardStateTreeDiff,
     SubstateDestroy,
     SubstateRecord,
@@ -355,6 +356,14 @@ impl Block {
         self.header.epoch()
     }
 
+    pub fn epoch_hash(&self) -> &FixedHash {
+        self.header.epoch_hash()
+    }
+
+    pub fn to_locked_epoch(&self) -> LockedEpoch {
+        LockedEpoch::new(self.epoch(), self.epoch_hash().into_array().into())
+    }
+
     pub fn shard_group(&self) -> ShardGroup {
         self.header.shard_group()
     }
@@ -421,10 +430,6 @@ impl Block {
 
     pub fn signature(&self) -> Option<&SchnorrSignatureBytes> {
         self.header.signature()
-    }
-
-    pub fn epoch_hash(&self) -> &FixedHash {
-        self.header.epoch_hash()
     }
 
     pub fn extra_data(&self) -> &ExtraData {

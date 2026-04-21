@@ -20,7 +20,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::{
     StateStore,
-    consensus_models::{TransactionExecution, VersionedSubstateIdLockIntent},
+    consensus_models::{LockedEpoch, TransactionExecution, VersionedSubstateIdLockIntent},
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_template_lib_types::{TransactionReceiptAddress, constants::TARI_TOKEN};
@@ -79,7 +79,7 @@ impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBloc
     fn execute(
         &self,
         transaction: &Transaction,
-        current_epoch: Epoch,
+        execution_epoch: LockedEpoch,
         resolved_inputs: &HashMap<SubstateRequirement, Substate>,
     ) -> Result<TransactionExecution, BlockTransactionExecutorError> {
         let id = transaction.calculate_id();
@@ -187,7 +187,7 @@ impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBloc
         );
         self.history.lock().unwrap().insert(id, TestHistoricalExecution {
             execution: executed.clone(),
-            current_epoch,
+            execution_epoch,
         });
         Ok(executed)
     }
@@ -196,5 +196,5 @@ impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBloc
 #[derive(Debug, Clone)]
 pub struct TestHistoricalExecution {
     pub execution: TransactionExecution,
-    pub current_epoch: Epoch,
+    pub execution_epoch: LockedEpoch,
 }

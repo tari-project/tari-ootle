@@ -371,7 +371,7 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + BaseLayerBloc
                 sync_headers: false,
                 sync_validator_node_changes: true,
             },
-            epoch_end_spread_blocks: config.epoch_oracle.base_layer.epoch_end_spread_blocks,
+            epoch_end_spread_blocks: consensus_constants.epoch_end_spread_blocks,
         },
         config.network,
     ))

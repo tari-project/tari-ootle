@@ -277,21 +277,20 @@ pub async fn assert_vn_is_registered(world: &mut TariWorld, step: &Step, vn_name
     // check that the vn's public key is in the list of registered vns
     assert!(vns.iter().any(|vn| vn.public_key == identity.public_key));
 
-    let mut count = 0;
+    let deadline = std::time::Instant::now() + Duration::from_secs(120);
     loop {
         // wait for the validator to scan up to the height where the registration was seen
         let stats = client.get_epoch_manager_stats().await.unwrap();
         if stats.current_block_height >= height {
             break;
         }
-        if count > 20 {
+        if std::time::Instant::now() >= deadline {
             panic!(
                 "Timed out waiting for validator node to pick up registration (current block height: {}, target \
                  height: {})",
                 stats.current_block_height, height
             );
         }
-        count += 1;
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }

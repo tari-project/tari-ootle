@@ -49,6 +49,8 @@ pub const ENGINE_LIMITS: EngineLimits = EngineLimits {
 
 pub const MAX_DIVISIBILITY: u8 = 18;
 
+pub const MAX_TOKEN_SYMBOL_LEN: usize = 10;
+
 pub struct StealthLimits {
     pub max_inputs: usize,
     pub max_outputs: usize,

@@ -308,11 +308,8 @@ mod tests {
         let waker = Waker::noop();
         let mut cx = Context::from_waker(waker);
         let mut events = vec![];
-        loop {
-            match oracle.poll(&mut cx) {
-                Poll::Ready(Some(e)) => events.push(e),
-                Poll::Ready(None) | Poll::Pending => break,
-            }
+        while let Poll::Ready(Some(event)) = oracle.poll(&mut cx) {
+            events.push(event);
         }
         events
     }

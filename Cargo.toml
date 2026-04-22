@@ -49,6 +49,7 @@ members = [
     "crates/wallet/crypto",
     "crates/wallet/sdk",
     "crates/wallet/sdk_services",
+    "crates/wallet/sdk_tests",
     "crates/wallet/storage_sqlite",
     "crates/wallet/ledger/client",
     "crates/wallet/ledger/common",

@@ -174,7 +174,7 @@ where
                 self.wallet_sdk.accounts_api().add_account(
                     Some(format!("recovered-account-{}", key.key_index()).as_str()),
                     &account_addr,
-                    key.as_key_id(),
+                    KeyId::derived(KeyBranch::ViewOnlyKey, key.key_index()),
                     key.as_key_id(),
                     birthday_epoch,
                     false,

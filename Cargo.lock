@@ -11472,6 +11472,7 @@ dependencies = [
  "blake2",
  "clap 3.2.25",
  "config",
+ "dirs-next 2.0.0",
  "libp2p-identity 0.2.13 (git+https://github.com/tari-project/rust-libp2p.git?rev=470c41380d6c5140b52ef65becf4f643e4769e66)",
  "log",
  "multiaddr 0.18.3",

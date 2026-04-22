@@ -270,8 +270,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let (current_epoch, current_epoch_hash) = self.get_starting_epoch().await?;
         let local_committee_info = self.epoch_manager.get_local_committee_info(current_epoch).await?;
 
-        self.create_genesis_block_if_required(current_epoch, current_epoch_hash, local_committee_info.shard_group())
-            .await?;
+        self.create_genesis_block_if_required(current_epoch, current_epoch_hash, local_committee_info.shard_group())?;
         // Resume pacemaker from the last epoch/height
         let (current_height, leaf_height) = self.state_store.with_read_tx(|tx| {
             let height = get_highest_seen_justified_view(tx, current_epoch)?;
@@ -1252,29 +1251,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         Ok(())
     }
 
-    async fn create_genesis_block_if_required(
+    fn create_genesis_block_if_required(
         &self,
         epoch: Epoch,
         epoch_hash: FixedHash,
         shard_group: ShardGroup,
     ) -> Result<bool, HotStuffError> {
-        let prev_epoch = epoch.checked_sub(Epoch(1));
-        let allow_calculated_root_without_checkpoint = match prev_epoch {
-            Some(prev_epoch) => {
-                let prev_epoch_committees = self
-                    .epoch_manager
-                    .get_committees_overlapping_shard_group(prev_epoch, shard_group)
-                    .await?;
-
-                prev_epoch_committees.is_empty() ||
-                    (prev_epoch_committees.len() == 1 &&
-                        prev_epoch_committees.values().all(|committee| {
-                            committee.len() == 1 && committee.contains(&self.local_validator_addr)
-                        }))
-            },
-            None => true,
-        };
-
         self.state_store.with_write_tx(|tx| {
             // The parent for genesis blocks refer to this zero block
             let mut zero_block = Block::zero_block(self.config.network, self.config.consensus_constants.num_preshards);
@@ -1290,74 +1272,18 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 return Ok(false);
             }
 
-            // Use the previous epoch's checkpoint root if available to ensure all nodes
-            // (both in-consensus and state-synced) produce identical genesis blocks.
-            let checkpoint = prev_epoch
-                .and_then(|pe| {
-                    EpochCheckpoint::get_by_shard_group(&**tx, pe, shard_group)
-                        .optional()
-                        .transpose()
-                })
-                .transpose()?;
-
-            let checkpoint_root = checkpoint
-                .map(|cp| cp.compute_state_merkle_root())
-                .transpose()?
-                .map(|root| FixedHash::new(root.into_array()));
-
-            let calculated_root =
-                FixedHash::new(ShardedStateTree::new(&**tx).calculate_state_root(shard_group)?.into_array());
-
-            let state_merkle_root = if let Some(cp_root) = checkpoint_root {
-                if cp_root != calculated_root {
-                    warn!(
-                        target: LOG_TARGET,
-                        "⚠️ Local state root {} does not match checkpoint root {} for epoch {}, shard group {}. \
-                         Using checkpoint root for genesis.",
-                        calculated_root, cp_root, epoch, shard_group
-                    );
-                }
-                cp_root
-            } else if let Some(pe) = prev_epoch {
-                // Check if this node participated in the previous epoch by looking for blocks.
-                // If we were in the previous committee, our local state is canonical and
-                // calculated_root is correct. If we were NOT (new node), we need a checkpoint.
-                let was_in_prev_epoch =
-                    !Block::get_ids_by_epoch_and_height(&**tx, pe, NodeHeight::zero())?.is_empty();
-                if was_in_prev_epoch {
-                    info!(
-                        target: LOG_TARGET,
-                        "No checkpoint for epoch {pe}, but this node was in the previous committee. \
-                         Using calculated state root for genesis.",
-                    );
-                    calculated_root
-                } else if allow_calculated_root_without_checkpoint {
-                    info!(
-                        target: LOG_TARGET,
-                        "No checkpoint for epoch {pe}, but previous overlapping committees were empty or this node was the \
-                         only validator. Using calculated state root for genesis.",
-                    );
-                    calculated_root
-                } else {
-                    return Err(HotStuffError::NeedsSync {
-                        reason: format!(
-                            "Checkpoint for previous epoch {pe} not available for shard group {shard_group}. \
-                             Cannot create genesis block without canonical state root.",
-                        ),
-                    });
-                }
-            } else {
-                calculated_root
-            };
+            let state_merkle_root = ShardedStateTree::new(&**tx).calculate_state_root(shard_group)?;
 
             let mut genesis = Block::genesis(
                 self.config.network,
                 epoch,
                 epoch_hash,
                 shard_group,
-                state_merkle_root,
+                FixedHash::new(state_merkle_root.into_array()),
                 self.config.sidechain_id,
             );
+            // Warn: you cannot use genesis.exists(tx) here, because we're calculating the current state merkle root,
+            // not the merkle root at height = 0.
             info!(target: LOG_TARGET, "✨Creating genesis block {genesis}");
             genesis.justify().save(tx)?;
             genesis.insert(tx)?;

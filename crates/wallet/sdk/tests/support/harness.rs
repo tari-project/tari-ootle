@@ -10,6 +10,7 @@ use tari_engine_types::{
     crypto::commit_amount,
     substate::{Substate, SubstateId},
 };
+use tari_indexer_client::types::WatchedSubstateItem;
 use tari_ootle_common_types::{
     Epoch,
     Network,
@@ -234,6 +235,15 @@ impl WalletNetworkInterface for PanicNetworkInterface {
         _shard_state_versions: Vec<(Shard, StateVersion)>,
         _unspent_only: bool,
     ) -> Result<UtxoUpdateStream<Self::Error>, Self::Error> {
+        panic!("PanicNetworkInterface called")
+    }
+
+    async fn list_watched_substates(
+        &self,
+        _template_address: Option<TemplateAddress>,
+        _limit: Option<u64>,
+        _offset: Option<u64>,
+    ) -> Result<Vec<WatchedSubstateItem>, Self::Error> {
         panic!("PanicNetworkInterface called")
     }
 

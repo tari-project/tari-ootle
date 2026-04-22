@@ -27,6 +27,7 @@ pub enum JrpcPermission {
     GetNft(Option<SubstateId>, Option<ResourceAddress>),
     // User should never grant this permission, it will be generated only by the UI to start the webrtc session.
     StartWebrtc,
+    AddressBook(AddressBookPermission),
     Admin,
 }
 
@@ -52,6 +53,7 @@ impl FromStr for JrpcPermission {
             Some(("TransactionSend", addr)) => Ok(JrpcPermission::TransactionSend(Some(
                 SubstateId::from_str(addr).map_err(|e| InvalidJrpcPermissionsFormat(e.to_string()))?,
             ))),
+            Some(("AddressBook", perm)) => Ok(JrpcPermission::AddressBook(perm.parse()?)),
             Some(_) => Err(InvalidJrpcPermissionsFormat(s.to_string())),
             None => match s {
                 "AccountInfo" => Ok(JrpcPermission::AccountInfo),
@@ -74,21 +76,22 @@ impl FromStr for JrpcPermission {
 impl Display for JrpcPermission {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            JrpcPermission::AccountInfo => f.write_str("AccountInfo"),
-            JrpcPermission::NftGetOwnershipProof(Some(a)) => f.write_str(&format!("NftGetOwnershipProof_{}", a)),
-            JrpcPermission::NftGetOwnershipProof(None) => f.write_str("NftGetOwnershipProof"),
-            JrpcPermission::AccountBalance(a) => f.write_str(&format!("AccountBalance_{}", a)),
-            JrpcPermission::AccountList(None) => f.write_str("AccountList"),
-            JrpcPermission::AccountList(Some(a)) => f.write_str(&format!("AccountList_{}", a)),
-            JrpcPermission::KeyList => f.write_str("KeyList"),
-            JrpcPermission::TransactionGet => f.write_str("TransactionGet"),
-            JrpcPermission::TransactionSend(None) => f.write_str("TransactionSend"),
-            JrpcPermission::TransactionSend(Some(s)) => f.write_str(&format!("TransactionSend_{}", s)),
-            JrpcPermission::GetNft(_, _) => f.write_str("GetNft"),
-            JrpcPermission::StartWebrtc => f.write_str("StartWebrtc"),
-            JrpcPermission::Admin => f.write_str("Admin"),
-            JrpcPermission::SubstatesRead => f.write_str("SubstatesRead"),
-            JrpcPermission::TemplatesRead => f.write_str("TemplatesRead"),
+            JrpcPermission::AccountInfo => write!(f, "AccountInfo"),
+            JrpcPermission::NftGetOwnershipProof(Some(a)) => write!(f, "NftGetOwnershipProof_{}", a),
+            JrpcPermission::NftGetOwnershipProof(None) => write!(f, "NftGetOwnershipProof"),
+            JrpcPermission::AccountBalance(a) => write!(f, "AccountBalance_{}", a),
+            JrpcPermission::AccountList(None) => write!(f, "AccountList"),
+            JrpcPermission::AccountList(Some(a)) => write!(f, "AccountList_{}", a),
+            JrpcPermission::KeyList => write!(f, "KeyList"),
+            JrpcPermission::TransactionGet => write!(f, "TransactionGet"),
+            JrpcPermission::TransactionSend(None) => write!(f, "TransactionSend"),
+            JrpcPermission::TransactionSend(Some(s)) => write!(f, "TransactionSend_{}", s),
+            JrpcPermission::GetNft(_, _) => write!(f, "GetNft"),
+            JrpcPermission::StartWebrtc => write!(f, "StartWebrtc"),
+            JrpcPermission::Admin => write!(f, "Admin"),
+            JrpcPermission::SubstatesRead => write!(f, "SubstatesRead"),
+            JrpcPermission::TemplatesRead => write!(f, "TemplatesRead"),
+            JrpcPermission::AddressBook(perm) => write!(f, "AddressBook({})", perm),
         }
     }
 }
@@ -157,4 +160,39 @@ impl FromIterator<JrpcPermission> for JrpcPermissions {
 pub struct Claims {
     pub permissions: JrpcPermissions,
     pub exp: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Hash, Eq, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[repr(u8)]
+pub enum AddressBookPermission {
+    Read = 0x01,
+    Create = 0x10,
+    Update = 0x20,
+    Delete = 0x80,
+}
+
+impl FromStr for AddressBookPermission {
+    type Err = InvalidJrpcPermissionsFormat;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "read" => Ok(AddressBookPermission::Read),
+            "create" => Ok(AddressBookPermission::Create),
+            "update" => Ok(AddressBookPermission::Update),
+            "delete" => Ok(AddressBookPermission::Delete),
+            _ => Err(InvalidJrpcPermissionsFormat(s.to_string())),
+        }
+    }
+}
+
+impl Display for AddressBookPermission {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AddressBookPermission::Read => write!(f, "read"),
+            AddressBookPermission::Create => write!(f, "create"),
+            AddressBookPermission::Update => write!(f, "update"),
+            AddressBookPermission::Delete => write!(f, "delete"),
+        }
+    }
 }

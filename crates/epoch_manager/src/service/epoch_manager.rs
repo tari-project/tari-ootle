@@ -62,6 +62,9 @@ pub struct EpochManager<TSpec: EpochManagerSpec> {
     current_shard_key: Option<SubstateAddress>,
     layer_one_submitter: TSpec::LayerOneSubmitter,
     current_epoch: Arc<AtomicU64>,
+    /// Highest epoch whose hash has been locked by a committed EndEpoch block in consensus.
+    /// Oracle-driven activations for epochs <= this value are ignored.
+    highest_locked_epoch: Epoch,
 }
 
 impl<TSpec> EpochManager<TSpec>
@@ -82,6 +85,7 @@ where TSpec: EpochManagerSpec
             current_shard_key: None,
             layer_one_submitter,
             current_epoch: current_epoch_atomic,
+            highest_locked_epoch: Epoch::zero(),
         }
     }
 
@@ -101,6 +105,9 @@ where TSpec: EpochManagerSpec
         self.current_epoch_hash = metadata
             .get_metadata(MetadataKey::EpochManagerLastEpochHash.as_key_bytes())?
             .unwrap_or(Default::default());
+        self.highest_locked_epoch = metadata
+            .get_metadata(MetadataKey::EpochManagerHighestLockedEpoch.as_key_bytes())?
+            .unwrap_or_else(Epoch::zero);
         Ok(())
     }
 
@@ -198,6 +205,33 @@ where TSpec: EpochManagerSpec
         tx.commit()?;
         self.set_current_epoch(epoch);
         self.current_epoch_hash = epoch_hash;
+        Ok(())
+    }
+
+    pub fn current_epoch_hash(&self) -> FixedHash {
+        self.current_epoch_hash
+    }
+
+    pub fn highest_locked_epoch(&self) -> Epoch {
+        self.highest_locked_epoch
+    }
+
+    pub fn is_epoch_locked(&self, epoch: Epoch) -> bool {
+        epoch <= self.highest_locked_epoch
+    }
+
+    /// Records that `epoch`'s hash is canonical and may no longer be corrected by the oracle.
+    /// Called when consensus commits an EndEpoch block that transitions into `epoch`.
+    pub fn lock_epoch(&mut self, epoch: Epoch) -> Result<(), EpochManagerError> {
+        if epoch <= self.highest_locked_epoch {
+            return Ok(());
+        }
+        let mut tx = self.global_db.create_transaction()?;
+        self.global_db
+            .metadata(&mut tx)
+            .set_metadata(MetadataKey::EpochManagerHighestLockedEpoch.as_key_bytes(), &epoch)?;
+        tx.commit()?;
+        self.highest_locked_epoch = epoch;
         Ok(())
     }
 
@@ -324,7 +358,7 @@ where TSpec: EpochManagerSpec
                 })?;
             res.push(vn);
         }
-        res.sort_by(|a, b| a.shard_key.cmp(&b.shard_key));
+        res.sort_by_key(|a| a.shard_key);
         Ok(res)
     }
 

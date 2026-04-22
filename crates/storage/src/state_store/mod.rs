@@ -461,6 +461,7 @@ pub trait StateStoreWriteTransaction {
         initial_evidence: &Evidence,
         is_ready: bool,
         is_global: bool,
+        max_epoch: Option<Epoch>,
     ) -> Result<(), StorageError>;
     fn transaction_pool_add_pending_update(
         &mut self,

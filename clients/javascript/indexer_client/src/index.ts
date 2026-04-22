@@ -40,6 +40,9 @@ import type {
   QueryTransactionEventsRequest,
   QueryTransactionEventsResponse,
   GetNetworkInfoResponse,
+  ListWatchedSubstatesRequest,
+  ListWatchedSubstatesResponse,
+  ListWatchedTemplatesResponse,
 } from "@tari-project/ootle-ts-bindings";
 import { FetchTransport, HttpTransport } from "./transports";
 import type { SseStream } from "./sse";
@@ -161,6 +164,14 @@ export class IndexerClient {
 
   public resourceGetTari(): Promise<GetResourceResponse> {
     return this.transport.sendGet(`resources/tari`, {});
+  }
+
+  public listWatchedTemplates(): Promise<ListWatchedTemplatesResponse> {
+    return this.transport.sendGet(`templates/watched`, {});
+  }
+
+  public listWatchedSubstates(params: Partial<ListWatchedSubstatesRequest>): Promise<ListWatchedSubstatesResponse> {
+    return this.transport.sendGet(`substates/watched`, params);
   }
 
   /**

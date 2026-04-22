@@ -15,9 +15,17 @@ export type TemplateMetadata = {
   tags?: Array<string>;
   category?: string | null;
   repository?: string | null;
+  /**
+   * The commit hash of the source code used to build this template, for reproducible build verification.
+   */
+  commit_hash?: { Sha1: string } | null;
   documentation?: string | null;
   homepage?: string | null;
   license?: string | null;
   logo_url?: string | null;
+  /**
+   * The template address of a previous version that this template supersedes.
+   */
+  supersedes?: string | null;
   extra?: { [key in string]?: string };
 };

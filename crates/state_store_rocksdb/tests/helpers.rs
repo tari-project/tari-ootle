@@ -20,6 +20,7 @@ use tari_ootle_common_types::{
     ShardGroup,
     VersionedSubstateId,
     VersionedSubstateIdRef,
+    hashing::tari_consensus_hasher,
     shard::Shard,
 };
 use tari_ootle_storage::{
@@ -441,6 +442,8 @@ pub fn create_foreign_proposal(parent_id: BlockId, epoch: Epoch) -> ForeignPropo
             justify_id: *qc1.calculate_id().hash(),
             height: foreign_block.height().as_u64(),
             epoch: epoch.as_u64(),
+            // Any hash will do
+            epoch_hash: tari_consensus_hasher("dummy").chain(&epoch).finalize().into(),
             shard_group: tari_sidechain::ShardGroup {
                 start: shard_group.start().as_u32(),
                 end_inclusive: shard_group.end().as_u32(),

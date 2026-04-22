@@ -229,6 +229,19 @@ pub trait EpochManagerReader: Send + Sync {
         shard_group: Option<ShardGroup>,
         excluding: HashSet<Self::Addr>,
     ) -> impl Future<Output = Result<ValidatorNode<Self::Addr>, EpochManagerError>> + Send;
+
+    /// Marks `epoch`'s hash as canonical. After this call, oracle-driven hash corrections for
+    /// `epoch` (and any earlier epoch) are ignored. Consensus calls this when an `EndEpoch` block
+    /// commits, transitioning into `epoch`.
+    fn lock_epoch(&self, epoch: Epoch) -> impl Future<Output = Result<(), EpochManagerError>> + Send;
+
+    /// Asks the epoch event oracle whether `current_epoch` is close enough to ending that
+    /// `EndEpoch` proposals should be accepted speculatively, even if this node has not yet
+    /// received its own `EpochChanged` event. The interpretation of "close" is oracle-specific.
+    fn is_within_epoch_end_spread(
+        &self,
+        current_epoch: Epoch,
+    ) -> impl Future<Output = Result<bool, EpochManagerError>> + Send;
 }
 
 pub trait LayerOneTransactionSubmitter {

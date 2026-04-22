@@ -4,6 +4,8 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use tari_template_lib_types::TemplateAddress;
+use url::Url;
 
 use crate::{MetadataHash, MetadataHashWriter};
 
@@ -28,15 +30,27 @@ pub struct TemplateMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub repository: Option<String>,
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    pub repository: Option<Url>,
+    /// The commit hash of the source code used to build this template, for reproducible build verification.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub documentation: Option<String>,
+    #[cfg_attr(feature = "ts", ts(type = "{ Sha1: string } | null"))]
+    pub commit_hash: Option<gix_hash::ObjectId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub homepage: Option<String>,
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    pub documentation: Option<Url>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    pub homepage: Option<Url>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub logo_url: Option<String>,
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    pub logo_url: Option<Url>,
+    /// The template address of a previous version that this template supersedes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    pub supersedes: Option<TemplateAddress>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, String>,
 }
@@ -52,10 +66,12 @@ impl TemplateMetadata {
             tags: Vec::new(),
             category: None,
             repository: None,
+            commit_hash: None,
             documentation: None,
             homepage: None,
             license: None,
             logo_url: None,
+            supersedes: None,
             extra: BTreeMap::new(),
         }
     }
@@ -130,11 +146,15 @@ mod tests {
             description: "A test template".to_string(),
             tags: vec!["test".to_string(), "example".to_string()],
             category: Some("utility".to_string()),
-            repository: Some("https://github.com/example/test".to_string()),
+            repository: Some(Url::parse("https://github.com/example/test").unwrap()),
+            commit_hash: Some(gix_hash::ObjectId::from_hex(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap()),
             documentation: None,
             homepage: None,
             license: Some("BSD-3-Clause".to_string()),
             logo_url: None,
+            supersedes: Some(
+                TemplateAddress::from_hex("0000000000000000000000000000000000000000000000000000000000000001").unwrap(),
+            ),
             extra: BTreeMap::new(),
         };
 
@@ -196,10 +216,12 @@ mod tests {
             tags: vec!["a".to_string()],
             category: Some("test".to_string()),
             repository: None,
+            commit_hash: None,
             documentation: None,
             homepage: None,
             license: None,
             logo_url: None,
+            supersedes: None,
             extra: BTreeMap::new(),
         };
 

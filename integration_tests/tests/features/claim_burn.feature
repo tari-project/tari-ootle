@@ -65,5 +65,6 @@ Feature: Claim Burn
     # Drop the burn proof file into the wallet daemon's burn_proof_dir.
     # The auto-claim service detects it, waits for the next epoch, then submits the claim.
     When I drop burn proof BURN_PROOF as a file for wallet daemon WALLET_D
+    Then miner MINER mines to the next epoch
 
-    Then I wait for ACC on wallet daemon WALLET_D to have balance gte 900000
+    Then I wait for ACC on wallet daemon WALLET_D to have balance gte 900000 with timeout 60s

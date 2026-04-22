@@ -284,6 +284,12 @@ pub struct QueryTransactionEventsRequest {
     pub topic: Option<String>,
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     pub substate_id: Option<SubstateId>,
+    /// Filter by resource address. Matches when either the event's `substate_id` is the given
+    /// resource (std.resource.* events) or the event payload contains a `resource_address` entry
+    /// equal to the given address (std.vault.deposit / std.vault.withdraw).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub resource_address: Option<ResourceAddress>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
 }
@@ -306,6 +312,12 @@ pub struct StreamTransactionEventsRequest {
     pub substate_id: Option<SubstateId>,
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     pub template_address: Option<TemplateAddress>,
+    /// Filter by resource address. Matches when either the event's `substate_id` is the given
+    /// resource (std.resource.* events) or the event payload contains a `resource_address` entry
+    /// equal to the given address (std.vault.deposit / std.vault.withdraw).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub resource_address: Option<ResourceAddress>,
     /// Resume the event stream from this event ID (exclusive). Events with id > after_id will be
     /// replayed from the database before switching to the live stream.
     pub after_id: Option<i64>,
@@ -689,4 +701,77 @@ pub struct GetResourceResponse {
     pub version: u32,
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     pub total_supply: Option<Amount>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListEpochCheckpointsRequest {
+    /// The epoch to start listing from (inclusive). Defaults to 0.
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<u64>))]
+    pub from_epoch: Option<Epoch>,
+    /// Maximum number of checkpoints to return (default: 20, max: 100).
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListEpochCheckpointsResponse {
+    #[cfg_attr(feature = "ts", ts(type = "Array<Record<string, unknown>>"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<Object>))]
+    pub checkpoints: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct GetLatestEpochCheckpointResponse {
+    #[cfg_attr(feature = "ts", ts(type = "Record<string, unknown>"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
+    pub checkpoint: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListWatchedSubstatesRequest {
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub template_address: Option<TemplateAddress>,
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListWatchedSubstatesResponse {
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<WatchedSubstateItem>))]
+    pub substates: Vec<WatchedSubstateItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct WatchedSubstateItem {
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub component_address: SubstateId,
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub template_address: TemplateAddress,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListWatchedTemplatesResponse {
+    pub templates: Vec<WatchedTemplateItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct WatchedTemplateItem {
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub template_address: TemplateAddress,
+    pub template_name: Option<String>,
 }

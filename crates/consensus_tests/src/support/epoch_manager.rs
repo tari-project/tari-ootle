@@ -222,12 +222,8 @@ impl EpochManagerReader for TestEpochManager {
         Ok(self.inner.lock().await.last_epoch_hash)
     }
 
-    async fn get_epoch_hash(&self, epoch: Epoch) -> Result<FixedHash, EpochManagerError> {
-        let lock = self.inner.lock().await;
-        if epoch != lock.current_epoch {
-            panic!("TestEpochManager does not support fetching historical epoch hashes");
-        }
-        Ok(lock.last_epoch_hash)
+    async fn get_epoch_hash(&self, _epoch: Epoch) -> Result<FixedHash, EpochManagerError> {
+        Ok(self.inner.lock().await.last_epoch_hash)
     }
 
     async fn get_num_committees(&self, _epoch: Epoch) -> Result<u32, EpochManagerError> {
@@ -432,6 +428,14 @@ impl EpochManagerReader for TestEpochManager {
             epoch,
             total_power,
         ))
+    }
+
+    async fn lock_epoch(&self, _epoch: Epoch) -> Result<(), EpochManagerError> {
+        Ok(())
+    }
+
+    async fn is_within_epoch_end_spread(&self, _current_epoch: Epoch) -> Result<bool, EpochManagerError> {
+        Ok(false)
     }
 }
 

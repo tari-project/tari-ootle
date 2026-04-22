@@ -497,3 +497,83 @@ fn empty_metadata_function_call_syntax() {
     assert_eq!(instructions, expected);
     assert_eq!(fee_instructions, vec![]);
 }
+
+#[test]
+fn tuple_destructuring() {
+    let manifest = r#"
+        use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as MyTemplate;
+
+        fn main() {
+            let comp = var!["comp"];
+            let (a, b) = comp.redeem(100);
+            comp.deposit(a);
+            comp.deposit(b);
+        }
+    "#;
+
+    let comp_address = ComponentAddress::new([5u8; ObjectKey::LENGTH].into());
+    let globals = HashMap::from([("comp".to_string(), SubstateId::Component(comp_address).into())]);
+
+    let ManifestInstructions {
+        instructions,
+        fee_instructions,
+    } = parse_manifest(manifest, globals, Default::default()).unwrap();
+
+    use tari_ootle_transaction::args::InstructionArg;
+
+    let expected = vec![
+        // comp.redeem(100) -> workspace key 0
+        Instruction::CallMethod {
+            call: comp_address.into(),
+            method: "redeem".try_into().unwrap(),
+            args: call_args![100],
+        },
+        Instruction::PutLastInstructionOutputOnWorkspace { key: 0 },
+        // comp.deposit(a) where a = workspace 0, offset 0
+        Instruction::CallMethod {
+            call: comp_address.into(),
+            method: "deposit".try_into().unwrap(),
+            args: vec![InstructionArg::Workspace(WorkspaceOffsetId::new(0).with_offset(0))],
+        },
+        // comp.deposit(b) where b = workspace 0, offset 1
+        Instruction::CallMethod {
+            call: comp_address.into(),
+            method: "deposit".try_into().unwrap(),
+            args: vec![InstructionArg::Workspace(WorkspaceOffsetId::new(0).with_offset(1))],
+        },
+    ];
+
+    assert_eq!(instructions, expected);
+    assert_eq!(fee_instructions, vec![]);
+}
+
+#[test]
+fn tuple_destructuring_template_call() {
+    let manifest = r#"
+        use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as MyTemplate;
+
+        fn main() {
+            let (x, y, z) = MyTemplate::split(42);
+        }
+    "#;
+
+    let template_addr =
+        TemplateAddress::from_hex("c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7").unwrap();
+
+    let ManifestInstructions {
+        instructions,
+        fee_instructions,
+    } = parse_manifest(manifest, HashMap::new(), Default::default()).unwrap();
+
+    let expected = vec![
+        Instruction::CallFunction {
+            address: template_addr,
+            function: "split".try_into().unwrap(),
+            args: call_args![42],
+        },
+        Instruction::PutLastInstructionOutputOnWorkspace { key: 0 },
+    ];
+
+    assert_eq!(instructions, expected);
+    assert_eq!(fee_instructions, vec![]);
+}

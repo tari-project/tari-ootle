@@ -40,7 +40,13 @@ use crate::{
         SqliteStoreWriteTransaction,
         models::{Key, UtxoSpent, UtxoUnspent, UtxoUpdateRecord},
     },
-    store::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreReader, IndexerStoreWriteTransaction},
+    store::{
+        IndexerStore,
+        IndexerStoreReadTransaction,
+        IndexerStoreReader,
+        IndexerStoreWriteTransaction,
+        InsertedEvent,
+    },
 };
 
 const LOG_TARGET: &str = "tari::indexer::network_state_sync::worker";
@@ -476,6 +482,10 @@ impl NetworkWideStateSync {
         // the ID for catch-up/replay.
         let inserted_events = tx.batch_insert_transaction_receipts(receipts, &self.config.event_filters)?;
 
+        if !self.config.watched_templates.is_empty() {
+            self.process_watched_substate_events(tx, &inserted_events)?;
+        }
+
         for inserted in inserted_events {
             self.transaction_event_notify.notify(TransactionEvent {
                 id: inserted.id,
@@ -484,6 +494,67 @@ impl NetworkWideStateSync {
             });
         }
 
+        Ok(())
+    }
+
+    fn process_watched_substate_events(
+        &self,
+        tx: &mut SqliteStoreWriteTransaction<'_>,
+        events: &[InsertedEvent],
+    ) -> Result<(), StorageError> {
+        use crate::store::IndexerStoreWriteTransaction;
+
+        for inserted in events {
+            let event = &inserted.event;
+            match event.topic() {
+                "std.component.created" => {
+                    if self.config.watched_templates.contains(&event.template_address()) &&
+                        let Some(substate_id) = event.substate_id()
+                    {
+                        debug!(
+                            target: LOG_TARGET,
+                            "📌 Watched component created: {} (template: {})",
+                            substate_id,
+                            event.template_address()
+                        );
+                        tx.insert_watched_substate(substate_id, &event.template_address())?;
+                    }
+                },
+                "std.component.template_update" => {
+                    if let Some(substate_id) = event.substate_id() {
+                        let prev_template = event
+                            .payload()
+                            .get("prev_template")
+                            .and_then(|v| TemplateAddress::from_hex(v).ok());
+
+                        let prev_was_watched = prev_template
+                            .as_ref()
+                            .is_some_and(|t| self.config.watched_templates.contains(t));
+                        let new_is_watched = self.config.watched_templates.contains(&event.template_address());
+
+                        if prev_was_watched && !new_is_watched {
+                            debug!(
+                                target: LOG_TARGET,
+                                "📌 Watched component removed (template update): {}",
+                                substate_id
+                            );
+                            tx.delete_watched_substate(substate_id)?;
+                        } else if new_is_watched {
+                            debug!(
+                                target: LOG_TARGET,
+                                "📌 Watched component updated: {} (template: {})",
+                                substate_id,
+                                event.template_address()
+                            );
+                            tx.insert_watched_substate(substate_id, &event.template_address())?;
+                        } else {
+                            // N/A
+                        }
+                    }
+                },
+                _ => {},
+            }
+        }
         Ok(())
     }
 }

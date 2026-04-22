@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 mod account;
+mod address_book_entry;
 mod authored_template;
 mod confidential_output;
 mod config;
@@ -20,6 +21,7 @@ mod wallet_transaction;
 mod webauthn_registration;
 
 pub use account::*;
+pub use address_book_entry::*;
 pub use authored_template::*;
 pub use confidential_output::*;
 pub use config::Config;

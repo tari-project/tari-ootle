@@ -2,6 +2,7 @@
 import type { ComponentAddress } from "./ComponentAddress";
 import type { ResourceAddress } from "./ResourceAddress";
 import type { SubstateId } from "./SubstateId";
+import type { AddressBookPermission } from "./AddressBookPermission";
 
 export type JrpcPermission =
   | "AccountInfo"
@@ -15,4 +16,5 @@ export type JrpcPermission =
   | { TransactionSend: SubstateId | null }
   | { GetNft: [SubstateId | null, ResourceAddress | null] }
   | "StartWebrtc"
+  | { AddressBook: AddressBookPermission }
   | "Admin";

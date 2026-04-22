@@ -12,13 +12,15 @@ use tari_engine::{
     state_store::memory::ReadOnlyMemoryStateStore,
     transaction::TransactionProcessor,
 };
-use tari_engine_types::virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates};
-use tari_ootle_common_types::SubstateRequirementRef;
-use tari_ootle_transaction::{Instruction, TransactionId, TransactionWeight, args::WorkspaceOffsetId, call_args};
-use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+use tari_engine_types::{
+    substate::SubstateId,
+    virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
+};
+use tari_ootle_transaction::{Instruction, TransactionId, TransactionWeight, call_args};
+use tari_template_lib::types::{constants::XTR_FAUCET_CLAIM_RESOURCE_ADDRESS, crypto::RistrettoPublicKeyBytes};
 use tari_template_test_tooling::{Package, mocks::AlwaysPassesProofVerifier};
 
-use crate::common::{FAUCET_COMPONENT_ADDRESS, setup_store};
+use crate::common::{FAUCET_COMPONENT_ADDRESS, FAUCET_VAULT_ID, setup_store};
 
 type BenchTxProcessor = TransactionProcessor<ReadOnlyMemoryStateStore, Package>;
 
@@ -29,8 +31,13 @@ impl Executable for CreateAndFundAccountExecutable {
         TransactionId::default()
     }
 
-    fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateRequirementRef<'_>> + '_ {
-        iter::empty()
+    fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateId> + '_ {
+        [
+            SubstateId::from(FAUCET_COMPONENT_ADDRESS),
+            SubstateId::from(FAUCET_VAULT_ID),
+            SubstateId::from(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS),
+        ]
+        .into_iter()
     }
 
     fn signers_iter(&self) -> impl Iterator<Item = &RistrettoPublicKeyBytes> {
@@ -41,17 +48,17 @@ impl Executable for CreateAndFundAccountExecutable {
     fn into_instructions(self) -> Instructions {
         Instructions {
             fee: vec![
-                Instruction::CallMethod {
-                    call: FAUCET_COMPONENT_ADDRESS.into(),
-                    method: "take".try_into().unwrap(),
-                    args: call_args![],
-                },
-                Instruction::PutLastInstructionOutputOnWorkspace { key: 0 },
                 Instruction::CreateAccount {
                     owner_public_key: Default::default(),
                     owner_rule: None,
                     access_rules: None,
-                    bucket_workspace_id: Some(WorkspaceOffsetId::new(0)),
+                    bucket_workspace_id: None,
+                },
+                Instruction::PutLastInstructionOutputOnWorkspace { key: 0 },
+                Instruction::CallMethod {
+                    call: FAUCET_COMPONENT_ADDRESS.into(),
+                    method: "take".try_into().unwrap(),
+                    args: call_args![Workspace(0)],
                 },
             ],
             main: vec![],

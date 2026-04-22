@@ -10,9 +10,105 @@
       "name": "BSD-3-Clause",
       "identifier": "BSD-3-Clause"
     },
-    "version": "0.28.6"
+    "version": "0.28.9"
   },
   "paths": {
+    "/epoch-checkpoints": {
+      "get": {
+        "tags": [
+          "handlers::epoch_checkpoints"
+        ],
+        "description": "List epoch checkpoints from storage",
+        "operationId": "list_epoch_checkpoints",
+        "parameters": [
+          {
+            "name": "from_epoch",
+            "in": "query",
+            "description": "Epoch to start listing from (inclusive). Defaults to 0",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of checkpoints to return (default: 20, max: 100)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of epoch checkpoints",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListEpochCheckpointsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/epoch-checkpoints/latest": {
+      "get": {
+        "tags": [
+          "handlers::epoch_checkpoints"
+        ],
+        "description": "Get the latest epoch checkpoint",
+        "operationId": "get_latest_epoch_checkpoint",
+        "responses": {
+          "200": {
+            "description": "The latest epoch checkpoint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetLatestEpochCheckpointResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No epoch checkpoints found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/epoch-manager/stats": {
       "get": {
         "tags": [
@@ -1205,6 +1301,17 @@
           }
         }
       },
+      "GetLatestEpochCheckpointResponse": {
+        "type": "object",
+        "required": [
+          "checkpoint"
+        ],
+        "properties": {
+          "checkpoint": {
+            "type": "object"
+          }
+        }
+      },
       "GetNetworkSyncStateResponse": {
         "type": "object",
         "required": [
@@ -1453,6 +1560,20 @@
                   "type": "object"
                 }
               ]
+            }
+          }
+        }
+      },
+      "ListEpochCheckpointsResponse": {
+        "type": "object",
+        "required": [
+          "checkpoints"
+        ],
+        "properties": {
+          "checkpoints": {
+            "type": "array",
+            "items": {
+              "type": "object"
             }
           }
         }

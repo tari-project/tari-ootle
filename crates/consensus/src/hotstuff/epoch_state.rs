@@ -42,7 +42,7 @@ impl<TAddr> EpochState<TAddr> {
     ) -> Result<(), EpochManagerError> {
         self.local_committee_info = epoch_manager.get_local_committee_info(current_epoch).await?;
         self.local_committee = epoch_manager.get_local_committee(current_epoch).await?;
-        self.epoch_hash = epoch_manager.get_current_epoch_hash().await?;
+        self.epoch_hash = epoch_manager.get_epoch_hash(current_epoch).await?;
         self.epoch = current_epoch;
 
         Ok(())

@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 pub mod accounts;
+pub mod address_book;
 pub mod confidential_crypto;
 pub mod confidential_outputs;
 pub mod confidential_transfer;

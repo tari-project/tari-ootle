@@ -9,7 +9,11 @@ use std::{
 use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
 use log::{debug, info, warn};
 use serde::Serialize;
-use tari_engine_types::{published_template::PublishedTemplateMetadata, transaction_receipt::TransactionReceipt};
+use tari_engine_types::{
+    published_template::PublishedTemplateMetadata,
+    substate::SubstateId,
+    transaction_receipt::TransactionReceipt,
+};
 use tari_ootle_common_types::{Epoch, StateVersion, shard::Shard, substate_type::SubstateType};
 use tari_ootle_storage::{
     StorageError,
@@ -27,6 +31,7 @@ use crate::{
             NewEvent,
             NewSubstate,
             NewTemplateCatalogueRow,
+            NewWatchedSubstate,
             SubstateRecord,
             UtxoRecordInsert,
             UtxoRecordUpdate,
@@ -282,6 +287,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                     topic: event.topic(),
                     payload: serialize_json(event.payload())?,
                     substate_id: event.substate_id().map(|s| s.to_string()),
+                    resource_address: EventFilter::event_resource_address(&event).map(|r| r.to_string()),
                 };
 
                 let id: i64 = diesel::insert_into(events::table)
@@ -358,6 +364,44 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             .set(&row)
             .execute(self.connection())
             .map_err(|e| StorageError::general(OPERATION, e))?;
+
+        Ok(())
+    }
+
+    fn insert_watched_substate(
+        &mut self,
+        component_address: &SubstateId,
+        template_address: &TemplateAddress,
+    ) -> Result<(), StorageError> {
+        const OPERATION: &str = "insert_watched_substate";
+        use crate::storage_sqlite::schema::watched_substates;
+
+        let component_addr_str = component_address.to_string();
+        let template_addr_str = template_address.to_string();
+
+        diesel::insert_into(watched_substates::table)
+            .values(NewWatchedSubstate {
+                component_address: &component_addr_str,
+                template_address: &template_addr_str,
+            })
+            .on_conflict(watched_substates::component_address)
+            .do_update()
+            .set(watched_substates::template_address.eq(&template_addr_str))
+            .execute(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+
+        Ok(())
+    }
+
+    fn delete_watched_substate(&mut self, component_address: &SubstateId) -> Result<(), StorageError> {
+        const OPERATION: &str = "delete_watched_substate";
+        use crate::storage_sqlite::schema::watched_substates;
+
+        diesel::delete(
+            watched_substates::table.filter(watched_substates::component_address.eq(component_address.to_string())),
+        )
+        .execute(self.connection())
+        .map_err(|e| StorageError::general(OPERATION, e))?;
 
         Ok(())
     }

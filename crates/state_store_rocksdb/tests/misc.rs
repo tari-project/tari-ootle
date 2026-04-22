@@ -176,6 +176,7 @@ fn miscellaneous_rocksdb() {
             justify_id: Default::default(),
             height: 0,
             epoch: 0,
+            epoch_hash: Default::default(),
             shard_group: tari_sidechain::ShardGroup {
                 start: 0,
                 end_inclusive: 1,

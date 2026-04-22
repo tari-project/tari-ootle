@@ -75,6 +75,10 @@ import type {
   SubstatesGetResponse,
   SubstatesListRequest,
   SubstatesListResponse,
+  SwapPoolGetExchangeRateRequest,
+  SwapPoolGetExchangeRateResponse,
+  SwapPoolsListRequest,
+  SwapPoolsListResponse,
   TemplatesGetRequest,
   TemplatesGetResponse,
   TemplatesListAuthoredRequest,
@@ -107,6 +111,15 @@ import type {
   WebRtcStartRequest,
   WebRtcStartResponse,
   AuthRefreshResponse,
+  AddressBookAddRequest,
+  AddressBookAddResponse,
+  AddressBookListResponse,
+  AddressBookGetRequest,
+  AddressBookGetResponse,
+  AddressBookUpdateRequest,
+  AddressBookUpdateResponse,
+  AddressBookDeleteRequest,
+  AddressBookDeleteResponse,
 } from "@tari-project/ootle-ts-bindings";
 import { FetchRpcTransport, RpcErrorResponse, RpcResponse, RpcTransport } from "./transports";
 
@@ -267,6 +280,16 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
     return this.sendRequest("substates.list", params);
   }
 
+  public swapPoolGetExchangeRate(
+    params: SwapPoolGetExchangeRateRequest,
+  ): Promise<SwapPoolGetExchangeRateResponse> {
+    return this.sendRequest("swap_pools.get_exchange_rate", params);
+  }
+
+  public swapPoolsList(params: SwapPoolsListRequest): Promise<SwapPoolsListResponse> {
+    return this.sendRequest("swap_pools.list", params);
+  }
+
   public transactionsList(params: TransactionGetAllRequest): Promise<TransactionGetAllResponse> {
     return this.sendRequest("transactions.list", params);
   }
@@ -367,6 +390,28 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
   public stealthUtxosDecryptValue(params: StealthUtxosDecryptValueRequest): Promise<StealthUtxosDecryptValueResponse> {
     return this.sendRequest("stealth_utxos.decrypt_value", params);
+  }
+
+  // Address book
+
+  public addressBookAdd(params: AddressBookAddRequest): Promise<AddressBookAddResponse> {
+    return this.sendRequest("address_book.add", params);
+  }
+
+  public addressBookList(): Promise<AddressBookListResponse> {
+    return this.sendRequest("address_book.list", {});
+  }
+
+  public addressBookGet(params: AddressBookGetRequest): Promise<AddressBookGetResponse> {
+    return this.sendRequest("address_book.get", params);
+  }
+
+  public addressBookUpdate(params: AddressBookUpdateRequest): Promise<AddressBookUpdateResponse> {
+    return this.sendRequest("address_book.update", params);
+  }
+
+  public addressBookDelete(params: AddressBookDeleteRequest): Promise<AddressBookDeleteResponse> {
+    return this.sendRequest("address_book.delete", params);
   }
 
   async sendRequest<R>(method: string, params: object = null): Promise<R> {

@@ -47,6 +47,7 @@ use tari_ootle_wallet_sdk::{
     crypto::{memo::Memo, pay_to::PayTo},
     models::{
         Account,
+        AddressBookEntry,
         AuthoredTemplateModel,
         DerivedKeyIndex,
         KeyBranch,
@@ -216,7 +217,7 @@ pub struct PublishTemplateRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub enum PublishTemplateMetadata {
     /// Inline template metadata object. The server CBOR-encodes it and computes the hash.
-    Literal(TemplateMetadata),
+    Literal(Box<TemplateMetadata>),
     /// Pre-encoded CBOR metadata (base64-encoded). The server decodes and computes the hash.
     RawCbor(
         #[cfg_attr(feature = "ts", ts(type = "string"))]
@@ -952,10 +953,13 @@ pub struct ClaimValidatorFeesResponse {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct SettingsSetRequest {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub indexer_url: Url,
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    #[serde(default)]
+    pub indexer_url: Option<Url>,
     #[serde(default)]
     pub advanced_ui_features: Option<AdvancedUiFeatures>,
+    #[serde(default)]
+    pub claimed_accounts: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -969,6 +973,7 @@ pub struct SettingsGetResponse {
     pub indexer_url: Url,
     pub network: NetworkInfo,
     pub advanced_ui_features: AdvancedUiFeatures,
+    pub claimed_accounts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -1383,3 +1388,127 @@ pub struct SignTemplateMetadataResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub metadata_hash: MetadataHash,
 }
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SwapPoolGetExchangeRateRequest {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub pool_address: ComponentAddress,
+    /// If provided, the response will include the calculated swap input amount needed
+    /// to receive at least this amount of TARI from the pool (with a slippage margin).
+    #[serde(default)]
+    pub desired_tari_output: Option<Amount>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SwapPoolGetExchangeRateResponse {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub resource_a: ResourceAddress,
+    pub balance_a: Amount,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub resource_b: ResourceAddress,
+    pub balance_b: Amount,
+    /// The calculated input amount of the non-TARI token needed to receive at least
+    /// `desired_tari_output` TARI from the pool. Only present when `desired_tari_output` was provided.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swap_input_amount: Option<Amount>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SwapPoolsListRequest {
+    /// Filter pools to only those containing this exact resource pair (in any order).
+    /// Both must be provided for filtering to take effect.
+    #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(type = "[string, string] | null"))]
+    pub resource_pair: Option<(ResourceAddress, ResourceAddress)>,
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SwapPoolsListResponse {
+    pub pools: Vec<SwapPoolInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SwapPoolInfo {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub pool_address: ComponentAddress,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub resource_a: ResourceAddress,
+    pub balance_a: Amount,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub resource_b: ResourceAddress,
+    pub balance_b: Amount,
+}
+
+// -------------------------------- AddressBook -------------------------------- //
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AddressBookAddRequest {
+    pub name: String,
+    pub address: String,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AddressBookAddResponse {
+    pub entry: AddressBookEntry,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AddressBookListRequest {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AddressBookListResponse {
+    pub entries: Vec<AddressBookEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AddressBookGetRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AddressBookGetResponse {
+    pub entry: AddressBookEntry,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AddressBookUpdateRequest {
+    pub name: String,
+    #[serde(default)]
+    pub new_name: Option<String>,
+    #[serde(default)]
+    pub address: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AddressBookUpdateResponse {
+    pub entry: AddressBookEntry,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AddressBookDeleteRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AddressBookDeleteResponse {}

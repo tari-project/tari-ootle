@@ -49,7 +49,7 @@ use tari_epoch_oracles::{
         BaseLayerOracle,
     },
     configured::{ConfiguredEpochOracle, RealTimeEpochTicker},
-    hybrid::{HybridEpochOracle, watch_ticker},
+    hybrid::{HybridEpochOracle, mpsc_ticker},
     store::EpochOracleStore,
 };
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
@@ -543,6 +543,7 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + BaseLayerBloc
                 .as_ref()
                 .map(|p| p.to_byte_type()),
             features,
+            epoch_end_spread_blocks: consensus_constants.epoch_end_spread_blocks,
         },
         config.network,
     ))
@@ -573,7 +574,7 @@ async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHea
     let oracle_config = config.epoch_oracle.configured.load().await?;
 
     info!(target: LOG_TARGET, "🔮Hybrid epoch oracle initializing: {}", oracle_config);
-    let (ticker, trigger) = watch_ticker();
+    let (ticker, trigger) = mpsc_ticker();
     let configured_oracle = ConfiguredEpochOracle::with_custom_ticker(oracle_config, store, ticker);
     Ok(HybridEpochOracle::new(configured_oracle, base_layer_oracle, trigger))
 }

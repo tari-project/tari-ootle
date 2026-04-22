@@ -22,7 +22,7 @@ use tari_indexer_client::{
 use tari_ootle_common_types::{
     engine_types::{
         commit_result::TransactionResult,
-        transaction_receipt::{FinalizeOutcome, TransactionReceipt},
+        transaction_receipt::{DiffSummary, FinalizeOutcome, TransactionReceipt},
     },
     optional::Optional,
 };
@@ -425,12 +425,16 @@ impl PendingTransaction {
                 //
                 // TODO: improvements to the indexer may be needed to fully resolve this.
                 tracing::warn!("Transaction committed but receipt not found for tx_id: {}", self.tx_id);
+                let execute_epoch = execution_result
+                    .as_ref()
+                    .and_then(|res| res.execute_epoch)
+                    .unwrap_or_default();
                 return Ok(TransactionReceipt {
                     outcome: FinalizeOutcome::Commit,
                     diff_summary: execution_result
                         .as_ref()
                         .and_then(|res| res.finalize.any_accept())
-                        .map(Into::into)
+                        .map(|diff| DiffSummary::from_diff(diff, execute_epoch))
                         .unwrap_or_default(),
                     fee_withdrawals: execution_result
                         .as_ref()
@@ -449,10 +453,7 @@ impl PendingTransaction {
                         .as_ref()
                         .map(|res| res.finalize.fee_receipt.clone())
                         .unwrap_or_default(),
-                    epoch: execution_result
-                        .as_ref()
-                        .and_then(|res| res.execute_epoch)
-                        .unwrap_or_default(),
+                    epoch: execute_epoch,
                 });
 
                 // return Err(PendingTransactionError::ReceiptNotFound { tx_id: self.tx_id });

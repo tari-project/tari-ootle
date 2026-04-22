@@ -115,13 +115,14 @@ pub fn transaction_id_from_seed(seed: u32) -> TransactionId {
 pub fn build_substate_record(substate_id: &SubstateId, version: u32, state_version: Version) -> SubstateRecord {
     let entity_id = substate_id.to_object_key().as_entity_id();
     let value = build_substate_value(Some(entity_id));
+    let at_epoch = Epoch::zero();
     SubstateRecord {
         substate_id: substate_id.clone(),
         version,
-        state_hash: hash_substate(&value, version),
+        state_hash: hash_substate(&value, version, at_epoch.as_u64()),
         substate_value: Some(value),
         created: SubstateCreated {
-            at_epoch: Epoch::zero(),
+            at_epoch,
             in_shard: VersionedSubstateIdRef::new(substate_id, version).to_shard(num_preshards()),
             at_state_version: state_version,
         },

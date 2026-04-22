@@ -42,6 +42,11 @@ pub enum HotStuffError {
     EpochNotActive { epoch: Epoch, details: String },
     #[error("Not registered for current epoch {epoch}")]
     NotRegisteredForCurrentEpoch { epoch: Epoch },
+    #[error(
+        "Binary does not support the schema version required at epoch {epoch}. This node must be upgraded before it \
+         can participate in consensus."
+    )]
+    UnsupportedProtocolVersion { epoch: Epoch },
     #[error("Received vote from non-committee member. Epoch: {epoch}, Sender: {sender}, {context}")]
     ReceivedVoteFromNonCommitteeMember {
         epoch: Epoch,

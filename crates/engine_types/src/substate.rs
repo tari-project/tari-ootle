@@ -99,8 +99,8 @@ impl Substate {
         decode(bytes)
     }
 
-    pub fn to_value_hash(&self) -> Hash32 {
-        hash_substate(self.substate_value(), self.version)
+    pub fn to_value_hash(&self, epoch: u64) -> Hash32 {
+        hash_substate(self.substate_value(), self.version, epoch)
     }
 
     pub fn previous_version(&self) -> Option<u32> {
@@ -108,10 +108,14 @@ impl Substate {
     }
 }
 
-pub fn hash_substate(substate: &SubstateValue, version: u32) -> Hash32 {
+/// Hashes a substate into its canonical value hash. The `epoch` argument binds the schema version
+/// (derived from epoch via `ProtocolVersion::at`) into the hash preimage, so substates produced
+/// under different schema versions can never collide in the JMT.
+pub fn hash_substate(substate: &SubstateValue, version: u32, epoch: u64) -> Hash32 {
     substate_value_hasher32()
         .chain(substate)
         .chain(&version)
+        .chain(&epoch)
         .result()
         .into_array()
         .into()
@@ -985,6 +989,35 @@ mod tests {
             check(
                 "utxo_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff",
             );
+        }
+    }
+
+    mod hash_substate_epoch_binding {
+        use super::*;
+        use crate::confidential::ClaimedOutputTombstone;
+
+        fn sample_value() -> SubstateValue {
+            SubstateValue::ClaimedOutputTombstone(ClaimedOutputTombstone { value: 1 })
+        }
+
+        #[test]
+        fn different_epochs_yield_different_hashes() {
+            let v = sample_value();
+            let h0 = hash_substate(&v, 0, 0);
+            let h1 = hash_substate(&v, 0, 1);
+            assert_ne!(h0, h1, "epoch must bind into the hash preimage");
+        }
+
+        #[test]
+        fn same_epoch_same_inputs_stable() {
+            let v = sample_value();
+            assert_eq!(hash_substate(&v, 0, 42), hash_substate(&v, 0, 42));
+        }
+
+        #[test]
+        fn version_still_binds() {
+            let v = sample_value();
+            assert_ne!(hash_substate(&v, 0, 0), hash_substate(&v, 1, 0));
         }
     }
 }

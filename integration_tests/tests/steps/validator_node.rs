@@ -632,7 +632,7 @@ async fn then_i_wait_for_validator_node_to_be_evicted(
     let l1_tx_path = vn.layer_one_transaction_path();
     fs::create_dir_all(&l1_tx_path).unwrap();
 
-    if let Some(proof) = scan_for_eviction_proof(&l1_tx_path, &evict_vn) {
+    if let Some(proof) = scan_for_eviction_proof(&l1_tx_path, evict_vn) {
         world.add_eviction_proof(proof_name.clone(), proof);
         return;
     }
@@ -666,7 +666,7 @@ async fn then_i_wait_for_validator_node_to_be_evicted(
 
         // On Create the file may still be partially written, so scan the directory which
         // gracefully skips incomplete files and retries on the next event.
-        if let Some(proof) = scan_for_eviction_proof(&l1_tx_path, &evict_vn) {
+        if let Some(proof) = scan_for_eviction_proof(&l1_tx_path, evict_vn) {
             watcher.unwatch(&l1_tx_path).unwrap();
             world.add_eviction_proof(proof_name.clone(), proof);
             return;

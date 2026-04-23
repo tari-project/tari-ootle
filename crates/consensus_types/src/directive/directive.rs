@@ -3,19 +3,24 @@
 
 use std::fmt;
 
-use blake2::{Blake2b, Digest, digest::consts};
 use borsh::{BorshDeserialize, BorshSerialize};
+use digest::consts;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use tari_crypto::{
+    hash_domain,
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
     signatures::SchnorrSignatureError,
 };
+use tari_hashing::layer2::TariDomainHasher;
 
 use super::{body::DirectiveBody, signature::DirectiveSignature};
 
-/// Domain tag mixed into the `DirectiveId` hash to prevent cross-protocol signature replay.
-const DIRECTIVE_ID_DOMAIN: &[u8] = b"tari.ootle.consensus_directive.id.v1";
+hash_domain!(TariConsensusDirectiveHashDomain, "com.tari.consensus.directive", 0);
+
+fn hasher() -> TariDomainHasher<TariConsensusDirectiveHashDomain, consts::U32> {
+    TariDomainHasher::new_with_label("ConsensusDirective")
+}
 
 /// The ID of a [`ConsensusDirective`] — the Blake2b-256 hash of a domain-tagged canonical
 /// serialisation of its [`DirectiveBody`].
@@ -26,6 +31,8 @@ const DIRECTIVE_ID_DOMAIN: &[u8] = b"tari.ootle.consensus_directive.id.v1";
 pub struct DirectiveId([u8; 32]);
 
 impl DirectiveId {
+    pub const LENGTH: usize = 32;
+
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
@@ -33,6 +40,35 @@ impl DirectiveId {
     pub fn from_bytes(bytes: [u8; 32]) -> Self {
         Self(bytes)
     }
+}
+
+impl AsRef<[u8]> for DirectiveId {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl TryFrom<&[u8]> for DirectiveId {
+    type Error = InvalidDirectiveIdLength;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        let arr: [u8; Self::LENGTH] = bytes
+            .try_into()
+            .map_err(|_| InvalidDirectiveIdLength { got: bytes.len() })?;
+        Ok(Self(arr))
+    }
+}
+
+impl From<[u8; DirectiveId::LENGTH]> for DirectiveId {
+    fn from(bytes: [u8; DirectiveId::LENGTH]) -> Self {
+        Self(bytes)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("DirectiveId must be {} bytes, got {got}", DirectiveId::LENGTH)]
+pub struct InvalidDirectiveIdLength {
+    pub got: usize,
 }
 
 impl fmt::Display for DirectiveId {
@@ -89,14 +125,8 @@ impl ConsensusDirective {
     }
 
     fn compute_id(body: &DirectiveBody) -> Result<DirectiveId, DirectiveError> {
-        let body_bytes = borsh::to_vec(body).map_err(|e| DirectiveError::Serialise(e.to_string()))?;
-        let hash = Blake2b::<consts::U32>::new()
-            .chain_update(DIRECTIVE_ID_DOMAIN)
-            .chain_update(body_bytes)
-            .finalize();
-        let mut out = [0u8; 32];
-        out.copy_from_slice(&hash);
-        Ok(DirectiveId(out))
+        let hash = hasher().chain(body).finalize();
+        Ok(DirectiveId(hash.into()))
     }
 
     /// Verify the signature against `gov_pk`. Returns `Ok(())` on success; otherwise a specific

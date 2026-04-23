@@ -10993,7 +10993,6 @@ dependencies = [
 name = "tari_consensus_types"
 version = "0.29.1"
 dependencies = [
- "blake2",
  "borsh",
  "digest 0.10.7",
  "ootle_serde",

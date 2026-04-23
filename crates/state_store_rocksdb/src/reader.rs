@@ -30,6 +30,7 @@ use rocksdb::{Transaction, TransactionDB};
 use serde::{Serialize, de::DeserializeOwned};
 use tari_consensus_types::{
     BlockId,
+    DirectiveId,
     HighPc,
     HighTc,
     HighestSeenBlock,
@@ -65,6 +66,7 @@ use tari_ootle_storage::{
     StateStoreReadTransaction,
     StorageError,
     consensus_models::{
+        AppliedDirective,
         Block,
         BlockDiff,
         BlockTransactionExecution,
@@ -119,6 +121,7 @@ use crate::{
             LeafBlockCf,
             LockedBlockCf,
         },
+        applied_directive::AppliedDirectivesCf,
         certificates::{proposal::ProposalCertificateCf, timeout::TimeoutCertificateCf},
         chain,
         epoch_checkpoint,
@@ -1832,6 +1835,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             key: "last".to_string(),
         })??;
         Ok(checkpoint)
+    }
+
+    fn applied_directive_get(&self, id: &DirectiveId) -> Result<AppliedDirective, StorageError> {
+        const OPERATION: &str = "applied_directive_get";
+        let cf = self.db().cf(AppliedDirectivesCf)?;
+        let record = cf.get(id, OPERATION)?;
+        Ok(record)
     }
 
     fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(

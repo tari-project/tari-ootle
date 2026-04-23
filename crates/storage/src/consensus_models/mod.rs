@@ -1,6 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+mod applied_directive;
 mod block;
 mod block_diff;
 mod block_header;
@@ -32,6 +33,7 @@ mod transaction_pool_status_update;
 mod validated_block;
 mod validator_stats;
 
+pub use applied_directive::*;
 pub use block::*;
 pub use block_diff::*;
 pub use block_header::*;

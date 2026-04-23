@@ -10,6 +10,7 @@ pub use shard_scoped_state_tree::*;
 use tari_consensus_types::{
     BlockId,
     Decision,
+    DirectiveId,
     HighPc,
     HighTc,
     HighestSeenBlock,
@@ -46,6 +47,7 @@ use time::PrimitiveDateTime;
 use crate::{
     StorageError,
     consensus_models::{
+        AppliedDirective,
         Block,
         BlockDiff,
         BlockTransactionExecution,
@@ -343,6 +345,13 @@ pub trait StateStoreReadTransaction: Sized {
 
     fn epoch_checkpoint_get_last(&self) -> Result<EpochCheckpoint, StorageError>;
 
+    // -------------------------------- Applied directives -------------------------------- //
+
+    /// Fetch a persisted record describing a previously-applied consensus directive.
+    /// Returns `StorageError::QueryError`/NotFound if no such record exists; use `.optional()`
+    /// at the call site to get `Option<AppliedDirective>`.
+    fn applied_directive_get(&self, id: &DirectiveId) -> Result<AppliedDirective, StorageError>;
+
     // -------------------------------- Foreign Substate Pledges -------------------------------- //
     fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(
         &self,
@@ -611,6 +620,13 @@ pub trait StateStoreWriteTransaction {
 
     // -------------------------------- Epoch checkpoint -------------------------------- //
     fn epoch_checkpoint_save(&mut self, checkpoint: &EpochCheckpoint) -> Result<(), StorageError>;
+
+    // -------------------------------- Applied directives -------------------------------- //
+
+    /// Persist an applied-directive record. Overwrites any existing record with the same
+    /// `directive_id` — callers are expected to have checked `applied_directive_get` first
+    /// for idempotency, so overwriting should only occur in recovery scenarios.
+    fn applied_directive_save(&mut self, record: &AppliedDirective) -> Result<(), StorageError>;
 
     // -------------------------------- Lock conflicts -------------------------------- //
     fn lock_conflicts_insert_all<'a, I: IntoIterator<Item = (&'a TransactionId, &'a Vec<LockConflict>)>>(

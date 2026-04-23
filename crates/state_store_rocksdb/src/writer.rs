@@ -59,6 +59,7 @@ use tari_ootle_storage::{
     StateStoreWriteTransaction,
     StorageError,
     consensus_models::{
+        AppliedDirective,
         Block,
         BlockTransactionExecution,
         EpochCheckpoint,
@@ -117,6 +118,7 @@ use crate::{
             LeafBlockCf,
             LockedBlockCf,
         },
+        applied_directive::AppliedDirectivesCf,
         certificates::{proposal::ProposalCertificateCf, timeout::TimeoutCertificateCf},
         chain,
         chain::PendingChainIndex,
@@ -1741,6 +1743,14 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             .cf(EpochCheckpointCf)?
             .put(&(checkpoint.epoch(), shard_group), checkpoint, OPERATION)?;
 
+        Ok(())
+    }
+
+    fn applied_directive_save(&mut self, record: &AppliedDirective) -> Result<(), StorageError> {
+        const OPERATION: &str = "applied_directive_save";
+        self.db()
+            .cf(AppliedDirectivesCf)?
+            .put(&record.directive_id, record, OPERATION)?;
         Ok(())
     }
 

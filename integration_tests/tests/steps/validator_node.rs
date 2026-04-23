@@ -685,7 +685,7 @@ fn scan_for_eviction_proof(
         if !path.is_file() || path.extension().is_none_or(|ext| ext != "json") {
             continue;
         }
-        let contents = fs::read(&path).ok()?;
+        let Ok(contents) = fs::read(&path) else { continue; };
         let def = match serde_json::from_slice::<LayerOneTransactionDef<EvictionProof>>(&contents) {
             Ok(d) => d,
             Err(_) => continue,

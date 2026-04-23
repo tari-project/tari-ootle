@@ -1,0 +1,27 @@
+[package]
+name = "tari_validator_admin_cli"
+description = "Operator CLI for issuing break-glass consensus directives to Tari validator nodes"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_consensus_types = { workspace = true }
+tari_ootle_common_types = { workspace = true }
+tari_validator_node_client = { workspace = true }
+tari_crypto = { workspace = true }
+
+anyhow = { workspace = true }
+borsh = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+hex = { workspace = true }
+log = { workspace = true }
+rand = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

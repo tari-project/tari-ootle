@@ -13,6 +13,7 @@ members = [
     "applications/tari_walletd",
     "applications/tari_indexer",
     "applications/tari_swarm_daemon",
+    "applications/tari_validator_admin_cli",
     "applications/tari_validator_node",
     "applications/tari_watcher",
     "clients/base_node_client",

@@ -8,4 +8,5 @@ export type FeeSource =
   | "Logs"
   | "TransactionWeight"
   | "SignatureVerification"
-  | "TemplateLoad";
+  | "TemplateLoad"
+  | "SubstateCreate";

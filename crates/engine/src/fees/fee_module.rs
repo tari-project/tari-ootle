@@ -83,6 +83,14 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
             cost / STORAGE_COST_REDUCTION_DIVISOR,
         );
 
+        let new_substate_count = track
+            .count_newly_created_substates()
+            .map_err(|e| RuntimeModuleError::Runtime(e.to_string()))?;
+        let create_cost = (new_substate_count as u64)
+            .checked_mul(self.fee_table.per_substate_create_cost())
+            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating substate create cost".to_string()))?;
+        track.add_fee_charge(FeeSource::SubstateCreate, create_cost);
+
         let log_cost = (track.num_logs() as u64)
             .checked_mul(self.fee_table.per_log_cost())
             .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating log cost".to_string()))?;

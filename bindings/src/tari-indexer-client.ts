@@ -58,3 +58,5 @@ export * from "./types/tari-indexer-client/SyncProgress";
 export * from "./types/tari-indexer-client/IndexerGetTransactionResultRequest";
 export * from "./types/tari-indexer-client/QueryTransactionEventsResponse";
 export * from "./types/tari-indexer-client/IndexerReadyResponse";
+export * from "./types/tari-indexer-client/ValidatorConsensusState";
+export * from "./types/tari-indexer-client/ValidatorStatus";

@@ -626,6 +626,48 @@ pub struct GetNetworkInfoResponse {
 pub struct GetNetworkSyncStateResponse {
     pub network_desc: NetworkDescription,
     pub sync_progress: Option<SyncProgress>,
+    /// Per-validator consensus state as last observed by this indexer while
+    /// syncing from the network. Populated lazily, so validators that have
+    /// never been contacted for a sync will not appear here. Each entry is
+    /// timestamped (`observed_at_unix_s`, `age_seconds`) so callers can judge
+    /// whether the reading is fresh.
+    #[serde(default)]
+    pub validators: Vec<ValidatorStatus>,
+}
+
+/// A snapshot of one validator's consensus pacemaker state as observed by the
+/// indexer during a recent sync round.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ValidatorStatus {
+    /// libp2p PeerId of the validator.
+    pub peer_id: String,
+    #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
+    pub shard_group: ShardGroup,
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    pub epoch: Epoch,
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    pub height: u64,
+    pub state: ValidatorConsensusState,
+    /// Unix timestamp (seconds) at which this snapshot was captured.
+    pub observed_at_unix_s: u64,
+    /// Seconds between the snapshot and when this response was produced. Large
+    /// values indicate that the indexer has not been able to refresh the
+    /// validator's state recently and it may be down.
+    pub age_seconds: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub enum ValidatorConsensusState {
+    Idle,
+    CheckSync,
+    Syncing,
+    Running,
+    Sleeping,
+    Shutdown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

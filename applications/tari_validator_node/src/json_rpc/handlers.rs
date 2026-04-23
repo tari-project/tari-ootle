@@ -33,7 +33,7 @@ use serde_json::{self as json, json};
 use tari_base_node_client::types::BaseLayerValidatorNode;
 use tari_common_types::types::CompressedPublicKey;
 use tari_consensus::hotstuff::ConsensusCurrentState;
-use tari_consensus_types::{Decision, LeafBlock};
+use tari_consensus_types::{ConsensusDirective, Decision, DirectiveKind, LeafBlock};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle, traits::LayerOneTransactionSubmitter};
 use tari_epoch_oracles::store::StoreKey;
@@ -885,6 +885,89 @@ impl JsonRpcHandlers {
         Ok(JsonRpcResponse::success(
             answer_id,
             types::PrepareLayerOneTransactionResponse { path },
+        ))
+    }
+
+    /// Apply a governance-signed consensus directive. Only served on the admin JSON-RPC
+    /// listener.
+    ///
+    /// Current behaviour (pre-orchestrator): verify the signature against the configured
+    /// governance public key and return an `already_applied` / `would_apply` outcome based
+    /// on the `applied_directives` table. Wiring into the rollback orchestrator lands in a
+    /// follow-up change; until then this endpoint does not mutate consensus state.
+    pub async fn admin_apply_consensus_directive(&self, value: JsonRpcExtractor) -> JrpcResult {
+        let answer_id = value.get_answer_id();
+        let params: types::ApplyConsensusDirectiveRequest = value.parse_params()?;
+
+        let gov_pk = self
+            .config
+            .validator_node
+            .governance_public_key
+            .as_ref()
+            .ok_or_else(|| {
+                invalid_operation(
+                    answer_id.clone(),
+                    "governance_public_key is not configured on this validator",
+                )
+            })?;
+
+        let directive_bytes = hex::decode(&params.directive_hex).map_err(|e| {
+            invalid_operation(
+                answer_id.clone(),
+                &format!("directive hex is not valid hex: {e}"),
+            )
+        })?;
+        let directive: ConsensusDirective = borsh::from_slice(&directive_bytes).map_err(|e| {
+            invalid_operation(
+                answer_id.clone(),
+                &format!("directive bytes do not decode: {e}"),
+            )
+        })?;
+
+        if let Err(err) = directive.verify(gov_pk) {
+            return Err(invalid_operation(
+                answer_id.clone(),
+                &format!("signature verification failed: {err}"),
+            ));
+        }
+
+        let directive_id = directive.id();
+
+        // Idempotency short-circuit.
+        let already = self
+            .state_store
+            .with_read_tx(|tx| tx.applied_directive_get(&directive_id).optional())
+            .map_err(internal_error(answer_id.clone()))?;
+        if let Some(record) = already {
+            return Ok(JsonRpcResponse::success(
+                answer_id,
+                types::ApplyConsensusDirectiveResponse {
+                    directive_id: directive_id.to_string(),
+                    outcome: "already_applied".into(),
+                    target_epoch: record.body.kind.target_epoch().map(|e| e.0),
+                    applied_at_epoch: Some(record.applied_at_epoch.0),
+                    applied_at_block_id: Some(hex::encode(record.applied_at_block_id.as_bytes())),
+                },
+            ));
+        }
+
+        // Dispatch by kind. Match is exhaustive so a new DirectiveKind variant forces a
+        // compile error until its handler is wired in.
+        let target_epoch = match directive.body().kind {
+            DirectiveKind::RollbackToEpochCheckpoint { target_epoch } => Some(target_epoch),
+        };
+
+        // Orchestrator wiring is deferred (Block E). For now, confirm the directive is
+        // authenticated and would be applied, without mutating consensus state.
+        Ok(JsonRpcResponse::success(
+            answer_id,
+            types::ApplyConsensusDirectiveResponse {
+                directive_id: directive_id.to_string(),
+                outcome: "accepted_pending_orchestrator".into(),
+                target_epoch,
+                applied_at_epoch: None,
+                applied_at_block_id: None,
+            },
         ))
     }
 }

@@ -109,6 +109,13 @@ pub struct ValidatorNodeConfig {
     pub layer_one_transaction_path: PathBuf,
     /// Consensus configuration
     pub consensus: ConsensusConfig,
+    /// Address the admin JSON-RPC listens on. Admin methods (consensus directives, etc.) are
+    /// served *only* on this address, never on the public `json_rpc_listener_address`. If
+    /// unset, admin RPC is disabled entirely.
+    pub admin_json_rpc_listener_address: Option<SocketAddr>,
+    /// Public key authorised to sign consensus directives. If unset, all directive submissions
+    /// are rejected regardless of what key they are signed with.
+    pub governance_public_key: Option<RistrettoPublicKey>,
 }
 
 impl ValidatorNodeConfig {
@@ -167,6 +174,10 @@ impl Default for ValidatorNodeConfig {
             burnt_utxo_sidechain_id: None,
             layer_one_transaction_path: PathBuf::from("data/layer_one_transactions"),
             consensus: ConsensusConfig::default(),
+            // Admin RPC is opt-in; leave both unset in the default config so existing
+            // deployments don't accidentally expose a directive endpoint.
+            admin_json_rpc_listener_address: None,
+            governance_public_key: None,
         }
     }
 }

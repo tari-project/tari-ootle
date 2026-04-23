@@ -62,7 +62,7 @@ use crate::{
     bootstrap::{Services, spawn_services},
     consensus::spec::ValidatorNodeStateStore,
     file_l1_submitter::FileLayerOneSubmitter,
-    json_rpc::{JsonRpcHandlers, spawn_json_rpc},
+    json_rpc::{JsonRpcHandlers, spawn_admin_json_rpc, spawn_json_rpc},
     node::ValidatorNode,
 };
 
@@ -147,6 +147,15 @@ pub async fn run_validator_node(
             base_registry,
         )
         .await?;
+
+        // Admin JSON-RPC runs on its own address so admin methods never share a listener
+        // with the public endpoint. Opt-in: only spawned if the operator has configured an
+        // admin address.
+        if let Some(admin_address) = config.validator_node.admin_json_rpc_listener_address {
+            let admin_handlers = JsonRpcHandlers::new(&services);
+            let bound = spawn_admin_json_rpc(admin_address, admin_handlers).await?;
+            info!(target: LOG_TARGET, "🛠️ Started admin JSON-RPC server on {}", bound);
+        }
         // Run the web ui
         #[cfg(feature = "web_ui")]
         if let Some(address) = config.validator_node.web_ui_listener_address {

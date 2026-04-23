@@ -562,3 +562,30 @@ pub enum LayerOneTransactionParams {
 pub struct PrepareLayerOneTransactionResponse {
     pub path: PathBuf,
 }
+
+/// Request body for `admin.apply_consensus_directive`.
+///
+/// The directive is carried as a borsh-serialised `ConsensusDirective` encoded in hex.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
+pub struct ApplyConsensusDirectiveRequest {
+    pub directive_hex: String,
+}
+
+/// Response from `admin.apply_consensus_directive`.
+///
+/// `outcome` values:
+/// - `"already_applied"`: directive ID matched a persisted record; no mutation.
+/// - `"accepted_pending_orchestrator"`: signature verified and idempotency check passed,
+///   but the rollback orchestrator is not yet wired. Transitional; removed once the
+///   orchestrator lands.
+/// - `"applied"`: directive was executed; `applied_at_*` fields describe where.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
+pub struct ApplyConsensusDirectiveResponse {
+    pub directive_id: String,
+    pub outcome: String,
+    pub target_epoch: Option<u64>,
+    pub applied_at_epoch: Option<u64>,
+    pub applied_at_block_id: Option<String>,
+}

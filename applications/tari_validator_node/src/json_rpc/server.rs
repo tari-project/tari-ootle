@@ -67,6 +67,63 @@ pub async fn spawn_json_rpc(
     Ok(addr)
 }
 
+/// Spawn a separate admin JSON-RPC listener that serves *only* admin methods (consensus
+/// directives, etc.). Keeping it on its own address is defence-in-depth — the signature
+/// on every directive is the primary authentication — and prevents accidental exposure of
+/// admin methods if the public `json_rpc_listener_address` ends up bound to a public
+/// interface.
+///
+/// The caller is responsible for ensuring `preferred_address` is not publicly routable in
+/// production (typically a loopback address).
+pub async fn spawn_admin_json_rpc(
+    preferred_address: SocketAddr,
+    handlers: JsonRpcHandlers,
+) -> Result<SocketAddr, anyhow::Error> {
+    let router = Router::new()
+        .route("/", post(admin_handler))
+        .route("/json_rpc", post(admin_handler))
+        .layer(Extension(Arc::new(handlers)))
+        .layer(CorsLayer::permissive());
+
+    let listener = try_bind_with_fallback(preferred_address).await?;
+    let server = axum::serve(listener, router);
+    let addr = server.local_addr()?;
+    info!(target: LOG_TARGET, "🛠️ Admin JSON-RPC listening on {}", addr);
+    tokio::spawn(server.into_future());
+
+    Ok(addr)
+}
+
+async fn admin_handler(
+    Extension(handlers): Extension<Arc<JsonRpcHandlers>>,
+    value: JsonRpcExtractor,
+) -> JrpcResult {
+    debug!(target: LOG_TARGET, "🛠️ Admin JSON-RPC request: {}", value.method);
+    let result = match value.method.as_str() {
+        "admin.apply_consensus_directive" => handlers.admin_apply_consensus_directive(value).await,
+        method => Ok(value.method_not_found(method)),
+    };
+
+    if let Err(ref e) = result {
+        match &e.result {
+            JsonRpcAnswer::Result(val) => {
+                error!(
+                    target: LOG_TARGET,
+                    "🚨 Admin JSON-RPC request failed: {}",
+                    serde_json::to_string_pretty(val).unwrap_or_else(|e| e.to_string())
+                );
+            },
+            JsonRpcAnswer::Error(err) if matches!(err.error_reason(), JsonRpcErrorReason::ApplicationError(_)) => {
+                debug!(target: LOG_TARGET, "Admin JSON-RPC: {}", err);
+            },
+            JsonRpcAnswer::Error(err) => {
+                error!(target: LOG_TARGET, "Admin JSON-RPC request failed: {}", err);
+            },
+        }
+    }
+    result
+}
+
 async fn handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: JsonRpcExtractor) -> JrpcResult {
     debug!(target: LOG_TARGET, "🌐 JSON-RPC request: {}", value.method);
     let result = match value.method.as_str() {

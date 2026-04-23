@@ -33,7 +33,7 @@ use serde_json::{self as json, json};
 use tari_base_node_client::types::BaseLayerValidatorNode;
 use tari_common_types::types::CompressedPublicKey;
 use tari_consensus::hotstuff::ConsensusCurrentState;
-use tari_consensus_types::{ConsensusDirective, Decision, DirectiveKind, LeafBlock};
+use tari_consensus_types::{ConsensusDirective, Decision, LeafBlock};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle, traits::LayerOneTransactionSubmitter};
 use tari_epoch_oracles::store::StoreKey;
@@ -911,18 +911,10 @@ impl JsonRpcHandlers {
                 )
             })?;
 
-        let directive_bytes = hex::decode(&params.directive_hex).map_err(|e| {
-            invalid_operation(
-                answer_id.clone(),
-                &format!("directive hex is not valid hex: {e}"),
-            )
-        })?;
-        let directive: ConsensusDirective = borsh::from_slice(&directive_bytes).map_err(|e| {
-            invalid_operation(
-                answer_id.clone(),
-                &format!("directive bytes do not decode: {e}"),
-            )
-        })?;
+        let directive_bytes = hex::decode(&params.directive_hex)
+            .map_err(|e| invalid_operation(answer_id.clone(), &format!("directive hex is not valid hex: {e}")))?;
+        let directive: ConsensusDirective = borsh::from_slice(&directive_bytes)
+            .map_err(|e| invalid_operation(answer_id.clone(), &format!("directive bytes do not decode: {e}")))?;
 
         if let Err(err) = directive.verify(gov_pk) {
             return Err(invalid_operation(
@@ -938,6 +930,9 @@ impl JsonRpcHandlers {
             .state_store
             .with_read_tx(|tx| tx.applied_directive_get(&directive_id).optional())
             .map_err(internal_error(answer_id.clone()))?;
+        // Idempotency check happens inside the orchestrator as well, but short-circuit
+        // here so we don't pointlessly request an on-hold for a directive we've already
+        // processed.
         if let Some(record) = already {
             return Ok(JsonRpcResponse::success(
                 answer_id,
@@ -951,22 +946,29 @@ impl JsonRpcHandlers {
             ));
         }
 
-        // Dispatch by kind. Match is exhaustive so a new DirectiveKind variant forces a
-        // compile error until its handler is wired in.
-        let target_epoch = match directive.body().kind {
-            DirectiveKind::RollbackToEpochCheckpoint { target_epoch } => Some(target_epoch),
-        };
+        // Dispatch to the orchestrator.
+        let outcome = crate::admin::apply_rollback_directive(
+            directive,
+            self.state_store.clone(),
+            self.consensus.clone(),
+            self.epoch_manager.clone(),
+            gov_pk,
+        )
+        .await
+        .map_err(|err| invalid_operation(answer_id.clone(), &format!("rollback failed: {err}")))?;
 
-        // Orchestrator wiring is deferred (Block E). For now, confirm the directive is
-        // authenticated and would be applied, without mutating consensus state.
         Ok(JsonRpcResponse::success(
             answer_id,
             types::ApplyConsensusDirectiveResponse {
                 directive_id: directive_id.to_string(),
-                outcome: "accepted_pending_orchestrator".into(),
-                target_epoch,
-                applied_at_epoch: None,
-                applied_at_block_id: None,
+                outcome: if outcome.already_applied {
+                    "already_applied".into()
+                } else {
+                    "applied".into()
+                },
+                target_epoch: Some(outcome.target_epoch.0),
+                applied_at_epoch: Some(outcome.applied_at_epoch.0),
+                applied_at_block_id: outcome.applied_at_block_id,
             },
         ))
     }

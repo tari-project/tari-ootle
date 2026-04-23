@@ -11,10 +11,10 @@ use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError}
 /// successfully applied to a validator node.
 ///
 /// Exists for two reasons:
-/// 1. **Idempotency.** The directive orchestrator consults this table before applying; if the
-///    ID is already present, the call is a no-op so operator retries cannot double-apply.
-/// 2. **Audit.** The stored body + application context records what was done and when, even
-///    after blocks/bookkeeping rows from that point have been rewritten by the rollback itself.
+/// 1. **Idempotency.** The directive orchestrator consults this table before applying; if the ID is already present,
+///    the call is a no-op so operator retries cannot double-apply.
+/// 2. **Audit.** The stored body + application context records what was done and when, even after blocks/bookkeeping
+///    rows from that point have been rewritten by the rollback itself.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppliedDirective {
     pub directive_id: DirectiveId,
@@ -25,10 +25,7 @@ pub struct AppliedDirective {
 }
 
 impl AppliedDirective {
-    pub fn get<TTx: StateStoreReadTransaction>(
-        tx: &TTx,
-        id: &DirectiveId,
-    ) -> Result<AppliedDirective, StorageError> {
+    pub fn get<TTx: StateStoreReadTransaction>(tx: &TTx, id: &DirectiveId) -> Result<AppliedDirective, StorageError> {
         tx.applied_directive_get(id)
     }
 

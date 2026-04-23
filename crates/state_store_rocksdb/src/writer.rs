@@ -40,6 +40,7 @@ use tari_consensus_types::{
     LockedBlock,
     PcId,
     ProposalCertificate,
+    TcId,
     TimeoutCertificate,
 };
 use tari_engine_types::substate::SubstateId;
@@ -71,6 +72,7 @@ use tari_ootle_storage::{
         LockConflict,
         NoVoteReason,
         PendingShardStateTreeDiff,
+        RollbackDeleteStats,
         StateTreeTruncateStats,
         SubstateChange,
         SubstateCreated,
@@ -98,6 +100,7 @@ use crate::{
     cf_api::{CfContext, DbContext},
     codecs::{ByteColumn, DbEncoder, DefaultCodec},
     column_families::{
+        applied_directive::AppliedDirectivesCf,
         block,
         block::BlockCf,
         block_diff,
@@ -118,7 +121,6 @@ use crate::{
             LeafBlockCf,
             LockedBlockCf,
         },
-        applied_directive::AppliedDirectivesCf,
         certificates::{proposal::ProposalCertificateCf, timeout::TimeoutCertificateCf},
         chain,
         chain::PendingChainIndex,
@@ -1346,10 +1348,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         // Collect transition records to process (we can't delete while iterating).
         let mut records: Vec<(Version, StateTransitionModelDataV1)> = transitions_query
-            .query_range_iterator(
-                Ordering::Descending,
-                (shard, start_version)..(shard, Version::MAX),
-            )
+            .query_range_iterator(Ordering::Descending, (shard, start_version)..(shard, Version::MAX))
             .map(|res| {
                 let ((key_shard, version), data) = res?;
                 debug_assert_eq!(key_shard, shard);
@@ -1752,6 +1751,176 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             .cf(AppliedDirectivesCf)?
             .put(&record.directive_id, record, OPERATION)?;
         Ok(())
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn rollback_delete_after_epoch(&mut self, target_epoch: Epoch) -> Result<RollbackDeleteStats, StorageError> {
+        const OPERATION: &str = "rollback_delete_after_epoch";
+
+        use crate::column_families::{
+            bookkeeping::{
+                HighPcCf,
+                HighTcCf,
+                HighestSeenBlockCf,
+                LastExecutedCf,
+                LastProposedCf,
+                LastSentNewViewCf,
+                LastSentVoteCf,
+                LastVotedCf,
+                LeafBlockCf,
+                LockedBlockCf,
+            },
+            certificates::{proposal::ProposalCertificateCf, timeout::TimeoutCertificateCf},
+            chain::{self, CommittedParentChildChainIndex},
+            foreign_proposal::{self, EpochIndex as ForeignProposalEpochIndex, ForeignProposalCf},
+            validator_node_epoch_stats::ValidatorNodeEpochStatsCf,
+        };
+
+        let mut stats = RollbackDeleteStats::default();
+        let start_epoch = target_epoch + Epoch(1);
+
+        // 1. Collect block_ids where epoch > target. We collect first so that per-block cascade helpers (which take
+        //    `&mut self`) can run without holding an immutable CF-handle borrow over the iteration.
+        let to_delete: Vec<(Epoch, NodeHeight, BlockId)> = self
+            .db()
+            .cf(block::ByEpochQuery)?
+            .query_range_key_iterator(Ordering::Ascending, start_epoch..Epoch::max())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        for (epoch, height, block_id) in &to_delete {
+            // Per-block cascades via existing helpers. Keeps this list consistent with what
+            // block insertion creates, so the cascade stays correct as new tables are added.
+            self.block_diffs_remove(block_id)?;
+            self.block_transaction_executions_remove_any_by_block_id(block_id)?;
+            self.pending_state_tree_diffs_remove_by_block(block_id)?;
+            self.substate_locks_remove_any_by_block_id(block_id)?;
+            self.transaction_pool_state_updates_remove_any_by_block_id(block_id)?;
+            self.lock_conflicts_remove_by_block_id(block_id)?;
+
+            // Delete the block record and its chain/epoch indexes.
+            self.db().cf(BlockCf)?.delete(block_id, OPERATION)?;
+            self.db()
+                .cf(block::EpochHeightIndex)?
+                .delete(&(*epoch, *height, *block_id), OPERATION)?;
+            self.db()
+                .cf(CommittedParentChildChainIndex)?
+                .delete_or_not_found(block_id, OPERATION)?;
+            self.db()
+                .cf(chain::PendingChainIndex)?
+                .delete_or_not_found(block_id, OPERATION)?;
+            // PendingParentChildIndex is keyed by (parent, child). Precise deletion needs the
+            // block's parent, which itself may already be gone. Stale entries are benign —
+            // all index consumers start from known block_ids and won't reach orphans.
+        }
+        stats.blocks_deleted = to_delete.len();
+
+        // 2. Proposal certificates with epoch > target.
+        let pc_cf = self.db().cf(ProposalCertificateCf)?;
+        let pc_query = self
+            .db()
+            .cf(crate::column_families::certificates::proposal::ByEpochQuery)?;
+        let pc_keys: Vec<(Epoch, PcId)> = pc_query
+            .query_range_key_iterator(Ordering::Ascending, start_epoch..Epoch::max())
+            .collect::<Result<Vec<_>, _>>()?;
+        for key in &pc_keys {
+            pc_cf.delete(key, OPERATION)?;
+        }
+        stats.certificates_deleted += pc_keys.len();
+
+        // 3. Timeout certificates with epoch > target.
+        let tc_cf = self.db().cf(TimeoutCertificateCf)?;
+        let tc_query = self
+            .db()
+            .cf(crate::column_families::certificates::timeout::ByEpochQuery)?;
+        let tc_keys: Vec<(Epoch, TcId)> = tc_query
+            .query_range_key_iterator(Ordering::Ascending, start_epoch..Epoch::max())
+            .collect::<Result<Vec<_>, _>>()?;
+        for key in &tc_keys {
+            tc_cf.delete(key, OPERATION)?;
+        }
+        stats.certificates_deleted += tc_keys.len();
+
+        // 4. Epoch checkpoints with epoch > target.
+        let cp_cf = self.db().cf(EpochCheckpointCf)?;
+        let cp_query = self.db().cf(crate::column_families::epoch_checkpoint::ByEpochQuery)?;
+        let cp_keys: Vec<(Epoch, ShardGroup)> = cp_query
+            .query_range_key_iterator(Ordering::Ascending, start_epoch..Epoch::max())
+            .collect::<Result<Vec<_>, _>>()?;
+        for key in &cp_keys {
+            cp_cf.delete(key, OPERATION)?;
+        }
+        stats.checkpoints_deleted = cp_keys.len();
+
+        // 5. Foreign proposals with epoch > target. Use the ByEpochQuery to find block_ids, then delete via the
+        //    existing per-block helper which handles all the secondary indexes.
+        let fp_query = self.db().cf(foreign_proposal::ByEpochQuery)?;
+        let fp_epoch_index_cf = self.db().cf(ForeignProposalEpochIndex)?;
+        let fp_epoch_keys: Vec<((Epoch, BlockId), foreign_proposal::ForeignProposalEpochIndexData)> = fp_query
+            .query_range_iterator(Ordering::Ascending, start_epoch..Epoch::max())
+            .collect::<Result<Vec<_>, _>>()?;
+        for ((epoch, block_id), _) in &fp_epoch_keys {
+            // foreign_proposals_delete handles the main CF + secondary indexes; if the row is
+            // already gone (e.g. a prior deletion cascade), tolerate it.
+            let _ = self
+                .db()
+                .cf(ForeignProposalCf)?
+                .delete_or_not_found(block_id, OPERATION)?;
+            let _ = fp_epoch_index_cf.delete_or_not_found(&(*epoch, *block_id), OPERATION)?;
+        }
+        stats.foreign_proposals_deleted = fp_epoch_keys.len();
+
+        // 6. Validator epoch stats with epoch > target.
+        let stats_cf = self.db().cf(ValidatorNodeEpochStatsCf)?;
+        let stats_query = self
+            .db()
+            .cf(crate::column_families::validator_node_epoch_stats::ByEpochQuery)?;
+        let stats_keys: Vec<(Epoch, RistrettoPublicKeyBytes)> = stats_query
+            .query_range_key_iterator(Ordering::Ascending, start_epoch..Epoch::max())
+            .collect::<Result<Vec<_>, _>>()?;
+        for key in &stats_keys {
+            stats_cf.delete(key, OPERATION)?;
+        }
+        stats.validator_stats_deleted = stats_keys.len();
+
+        // 7. Clear bookkeeping singletons. These are all keyed by `ByteColumn`; deleting the single entry removes the
+        //    pointer entirely. On consensus resume the genesis path in `create_genesis_block_if_required` repopulates
+        //    them for the fresh epoch.
+        self.db().cf(LeafBlockCf)?.delete_or_not_found(&ByteColumn, OPERATION)?;
+        self.db()
+            .cf(LockedBlockCf)?
+            .delete_or_not_found(&ByteColumn, OPERATION)?;
+        self.db()
+            .cf(HighestSeenBlockCf)?
+            .delete_or_not_found(&ByteColumn, OPERATION)?;
+        self.db()
+            .cf(LastExecutedCf)?
+            .delete_or_not_found(&ByteColumn, OPERATION)?;
+        self.db().cf(LastVotedCf)?.delete_or_not_found(&ByteColumn, OPERATION)?;
+        self.db()
+            .cf(LastProposedCf)?
+            .delete_or_not_found(&ByteColumn, OPERATION)?;
+        self.db()
+            .cf(LastSentVoteCf)?
+            .delete_or_not_found(&ByteColumn, OPERATION)?;
+        self.db()
+            .cf(LastSentNewViewCf)?
+            .delete_or_not_found(&ByteColumn, OPERATION)?;
+        self.db().cf(HighPcCf)?.delete_or_not_found(&ByteColumn, OPERATION)?;
+        self.db().cf(HighTcCf)?.delete_or_not_found(&ByteColumn, OPERATION)?;
+        stats.bookkeeping_cleared = true;
+
+        info!(
+            target: LOG_TARGET,
+            "🔄 Rollback delete for epoch > {target_epoch}: {} blocks, {} certificates, \
+             {} checkpoints, {} foreign proposals, {} validator-stats rows; bookkeeping cleared",
+            stats.blocks_deleted,
+            stats.certificates_deleted,
+            stats.checkpoints_deleted,
+            stats.foreign_proposals_deleted,
+            stats.validator_stats_deleted,
+        );
+
+        Ok(stats)
     }
 
     fn lock_conflicts_insert_all<'a, I: IntoIterator<Item = (&'a TransactionId, &'a Vec<LockConflict>)>>(

@@ -61,13 +61,14 @@ use crate::{
         LockedSubstateValue,
         NoVoteReason,
         PendingShardStateTreeDiff,
+        RollbackDeleteStats,
         StateTreeTruncateStats,
         StateVersionTransitions,
-        SubstateRewindStats,
         SubstateChange,
         SubstateLock,
         SubstatePledges,
         SubstateRecord,
+        SubstateRewindStats,
         SubstateUpdateBatch,
         SubstateValueFilterFlags,
         TransactionExecution,
@@ -550,8 +551,8 @@ pub trait StateStoreWriteTransaction {
     /// balance-bearing state ride along automatically — they are ordinary substates.
     ///
     /// Caller responsibilities:
-    /// - Must not rewind past the prune cut (`substates_prune_downed_values`); any downed
-    ///   substate whose `substate_value` has been pruned cannot be correctly restored.
+    /// - Must not rewind past the prune cut (`substates_prune_downed_values`); any downed substate whose
+    ///   `substate_value` has been pruned cannot be correctly restored.
     fn substates_rewind_to_state_version(
         &mut self,
         shard: Shard,
@@ -627,6 +628,29 @@ pub trait StateStoreWriteTransaction {
     /// `directive_id` — callers are expected to have checked `applied_directive_get` first
     /// for idempotency, so overwriting should only occur in recovery scenarios.
     fn applied_directive_save(&mut self, record: &AppliedDirective) -> Result<(), StorageError>;
+
+    /// Delete every epoch-indexed record with `epoch > target_epoch`, and clear the
+    /// singleton bookkeeping pointers. Paired with `state_tree_truncate_to_version` and
+    /// `substates_rewind_to_state_version`, this is the storage side of a break-glass
+    /// rollback to the `target_epoch` checkpoint.
+    ///
+    /// The rollback orchestrator is expected to call this *inside the same write transaction*
+    /// as the state-tree truncate + substate rewind + `applied_directive_save`.
+    ///
+    /// After commit, consensus resumes via the `create_genesis_block_if_required` path in
+    /// hotstuff: with no blocks at `(current_epoch, height=0)` the worker creates a fresh
+    /// genesis and repopulates all bookkeeping pointers from it.
+    ///
+    /// Deletes:
+    /// - Blocks (and cascades: block diffs, block transaction executions, pending state tree diffs, substate locks,
+    ///   lock conflicts, transaction pool state updates).
+    /// - Proposal certificates, timeout certificates.
+    /// - Epoch checkpoints.
+    /// - Foreign proposals.
+    /// - Validator epoch stats.
+    /// - All singleton bookkeeping pointers (LeafBlock, LockedBlock, HighestSeenBlock, LastExecuted, LastVoted,
+    ///   LastProposed, LastSentVote, LastSentNewView, HighPc, HighTc).
+    fn rollback_delete_after_epoch(&mut self, target_epoch: Epoch) -> Result<RollbackDeleteStats, StorageError>;
 
     // -------------------------------- Lock conflicts -------------------------------- //
     fn lock_conflicts_insert_all<'a, I: IntoIterator<Item = (&'a TransactionId, &'a Vec<LockConflict>)>>(

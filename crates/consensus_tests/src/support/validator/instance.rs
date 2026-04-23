@@ -52,6 +52,7 @@ pub struct Validator {
     pub epoch_manager: TestEpochManager,
     pub events: broadcast::Receiver<HotstuffEvent>,
     pub current_state_machine_state: watch::Receiver<ConsensusCurrentState>,
+    pub tx_on_hold: watch::Sender<bool>,
 
     pub handle: JoinHandle<()>,
 }
@@ -77,6 +78,38 @@ impl Validator {
 
     pub fn current_state_machine_state(&self) -> ConsensusCurrentState {
         *self.current_state_machine_state.borrow()
+    }
+
+    /// Request the state machine enter `OnHold` and wait for it to do so. Test helper.
+    pub async fn request_on_hold_and_wait(&self, timeout: std::time::Duration) {
+        self.tx_on_hold.send(true).expect("state machine dropped");
+        self.wait_for_state(ConsensusCurrentState::OnHold, timeout).await;
+    }
+
+    /// Release an on-hold and wait for the state machine to leave `OnHold`. Test helper.
+    pub async fn release_on_hold_and_wait(&self, timeout: std::time::Duration) {
+        self.tx_on_hold.send(false).expect("state machine dropped");
+        let mut rx = self.current_state_machine_state.clone();
+        let fut = async {
+            while *rx.borrow() == ConsensusCurrentState::OnHold {
+                rx.changed().await.expect("state machine dropped");
+            }
+        };
+        tokio::time::timeout(timeout, fut)
+            .await
+            .expect("timed out leaving OnHold");
+    }
+
+    async fn wait_for_state(&self, target: ConsensusCurrentState, timeout: std::time::Duration) {
+        let mut rx = self.current_state_machine_state.clone();
+        let fut = async {
+            while *rx.borrow() != target {
+                rx.changed().await.expect("state machine dropped");
+            }
+        };
+        tokio::time::timeout(timeout, fut)
+            .await
+            .unwrap_or_else(|_| panic!("timed out waiting for state {target}"));
     }
 
     pub fn get_leaf_block(&self) -> LeafBlock {

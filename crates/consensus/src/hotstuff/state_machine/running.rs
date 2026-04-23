@@ -7,6 +7,7 @@ use crate::{
     hotstuff::{
         HotStuffError,
         ProposalValidationError,
+        WorkerExitReason,
         state_machine::{
             check_sync::CheckSync,
             event::ConsensusStateEvent,
@@ -32,9 +33,13 @@ where TSpec: ConsensusSpec
         context: &mut ConsensusWorkerContext<TSpec>,
     ) -> Result<ConsensusStateEvent, HotStuffError> {
         match context.hotstuff.start().await {
-            Ok(_) => {
+            Ok(WorkerExitReason::Shutdown) => {
                 info!(target: LOG_TARGET, "HotStuff shut down");
                 Ok(ConsensusStateEvent::Shutdown)
+            },
+            Ok(WorkerExitReason::OnHoldRequested) => {
+                info!(target: LOG_TARGET, "HotStuff exited for on-hold");
+                Ok(ConsensusStateEvent::OnHoldRequested)
             },
             Err(ref err @ HotStuffError::NotRegisteredForCurrentEpoch { epoch }) => {
                 info!(target: LOG_TARGET, "Not registered for current epoch ({err})");

@@ -35,6 +35,9 @@ pub struct ConsensusWorkerContext<TSpec: ConsensusSpec> {
     pub hotstuff: HotstuffWorker<TSpec>,
     pub state_sync: TSpec::SyncManager,
     pub tx_current_state: watch::Sender<ConsensusCurrentState>,
+    /// Watch receiver observed by the `OnHold` state. The hotstuff worker observes its own
+    /// clone of the same channel to exit its run loop cleanly when a hold is requested.
+    pub rx_on_hold: watch::Receiver<bool>,
 }
 
 impl<TSpec> ConsensusWorker<TSpec>
@@ -75,6 +78,7 @@ where
                 .on_enter(context)
                 .await
                 .unwrap_or_else(|err| ConsensusStateEvent::Failure { error: err }),
+            ConsensusState::OnHold(state) => self.result_or_shutdown(state.on_enter(context)).await,
             ConsensusState::Shutdown => ConsensusStateEvent::Shutdown,
         }
     }
@@ -96,6 +100,13 @@ where
             (ConsensusState::Running(state), ConsensusStateEvent::NeedSync) => ConsensusState::CheckSync(state.into()),
             (ConsensusState::Running(state), ConsensusStateEvent::NotRegisteredForEpoch { .. }) => {
                 ConsensusState::Idle(state.into())
+            },
+            (ConsensusState::Running(state), ConsensusStateEvent::OnHoldRequested) => {
+                ConsensusState::OnHold(state.into())
+            },
+            (ConsensusState::OnHold(_), ConsensusStateEvent::OnHoldReleased) => {
+                // Re-check sync on release so the pacemaker/view gets reloaded from (possibly mutated) storage.
+                ConsensusState::Idle(Idle::new())
             },
             (_, ConsensusStateEvent::Failure { error }) => {
                 error!(target: LOG_TARGET, "🚨 Failure: {}", error);

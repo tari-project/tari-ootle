@@ -4,6 +4,7 @@
 mod check_sync;
 mod event;
 mod idle;
+mod on_hold;
 mod running;
 mod state;
 mod syncing;

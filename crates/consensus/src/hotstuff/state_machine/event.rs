@@ -16,6 +16,8 @@ pub enum ConsensusStateEvent {
     Ready,
     Failure { error: HotStuffError },
     Resume,
+    OnHoldRequested,
+    OnHoldReleased,
     Shutdown,
 }
 
@@ -31,6 +33,8 @@ impl Display for ConsensusStateEvent {
             Ready => write!(f, "Ready"),
             Failure { error } => write!(f, "Failure({error})"),
             Resume => write!(f, "Resume"),
+            OnHoldRequested => write!(f, "OnHold requested"),
+            OnHoldReleased => write!(f, "OnHold released"),
             Shutdown => write!(f, "Shutdown"),
         }
     }

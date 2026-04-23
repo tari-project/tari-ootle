@@ -11,6 +11,8 @@ mod eviction_proof;
 #[cfg(test)]
 mod leader_failure;
 #[cfg(test)]
+mod on_hold;
+#[cfg(test)]
 mod state_tree;
 #[cfg(test)]
 mod substate_store;

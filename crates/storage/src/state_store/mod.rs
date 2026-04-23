@@ -59,7 +59,9 @@ use crate::{
         LockedSubstateValue,
         NoVoteReason,
         PendingShardStateTreeDiff,
+        StateTreeTruncateStats,
         StateVersionTransitions,
+        SubstateRewindStats,
         SubstateChange,
         SubstateLock,
         SubstatePledges,
@@ -77,7 +79,6 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::ootle::storage";
-
 pub trait StateStore {
     type Addr: NodeAddressable;
     type ReadTransaction<'a>: StateStoreReadTransaction<Addr = Self::Addr>
@@ -525,6 +526,29 @@ pub trait StateStoreWriteTransaction {
     fn substates_commit_batch(&mut self, update_batch: SubstateUpdateBatch) -> Result<(), StorageError>;
     fn substates_prune_downed_values(&mut self, epoch: Epoch) -> Result<usize, StorageError>;
 
+    /// Rewind substate state for `shard` back to `target_state_version` by inverting every
+    /// state transition recorded for versions > `target_state_version`.
+    ///
+    /// Inverse operations:
+    /// - An `Up` transition → delete the `SubstateRecord` it created.
+    /// - A `Down` transition → clear the `destroyed` field on the affected `SubstateRecord`.
+    ///
+    /// After the inverses are applied, the `HeadIndex` is rebuilt for every touched `SubstateId`
+    /// from the highest-version `SubstateRecord` that survives in storage.
+    ///
+    /// This is a destructive operation intended for break-glass recovery (rolling back to a
+    /// prior epoch checkpoint). Fee claims, validator-fee-pool balances, and any other
+    /// balance-bearing state ride along automatically — they are ordinary substates.
+    ///
+    /// Caller responsibilities:
+    /// - Must not rewind past the prune cut (`substates_prune_downed_values`); any downed
+    ///   substate whose `substate_value` has been pruned cannot be correctly restored.
+    fn substates_rewind_to_state_version(
+        &mut self,
+        shard: Shard,
+        target_state_version: Version,
+    ) -> Result<SubstateRewindStats, StorageError>;
+
     // -------------------------------- Foreign pledges -------------------------------- //
 
     fn foreign_substate_pledges_save(
@@ -568,6 +592,22 @@ pub trait StateStoreWriteTransaction {
 
     fn state_tree_nodes_clear_stale(&mut self, num_preshards: NumPreshards) -> Result<usize, StorageError>;
     fn state_tree_shard_versions_set(&mut self, shard: Shard, version: Version) -> Result<(), StorageError>;
+
+    /// Truncate the state tree for the given shard back to `target_version`.
+    ///
+    /// After this call:
+    /// - `state_tree_versions_get_latest(shard)` returns `target_version` (or `None` if the shard had no state at or
+    ///   below `target_version`).
+    /// - All nodes at versions > `target_version` are deleted from the tree store.
+    /// - All stale-node records at versions > `target_version` are deleted.
+    ///
+    /// This is a destructive operation intended for break-glass recovery (e.g. rolling back to a prior
+    /// epoch checkpoint). Versions <= `target_version` are untouched.
+    fn state_tree_truncate_to_version(
+        &mut self,
+        shard: Shard,
+        target_version: Version,
+    ) -> Result<StateTreeTruncateStats, StorageError>;
 
     // -------------------------------- Epoch checkpoint -------------------------------- //
     fn epoch_checkpoint_save(&mut self, checkpoint: &EpochCheckpoint) -> Result<(), StorageError>;

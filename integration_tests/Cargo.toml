@@ -15,6 +15,7 @@ tari_ootle_walletd = { workspace = true, default-features = false }
 tari_ootle_address = { workspace = true }
 tari_ootle_storage = { workspace = true }
 tari_consensus = { workspace = true }
+tari_consensus_types = { workspace = true }
 tari_template_builtin = { workspace = true }
 tari_template_test_tooling = { workspace = true }
 
@@ -58,6 +59,7 @@ cucumber = { version = "0.21.1", features = [
     "libtest",
     "output-junit",
 ] }
+borsh = { workspace = true }
 hex = { workspace = true }
 httpmock = { version = "0.8.0-alpha.1", features = ["remote"] }
 indexmap = { workspace = true }

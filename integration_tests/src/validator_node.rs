@@ -60,6 +60,7 @@ pub struct ValidatorNodeProcess {
     pub public_key: RistrettoPublicKeyBytes,
     pub p2p_port: u16,
     pub json_rpc_port: u16,
+    pub admin_json_rpc_port: u16,
     pub web_ui_port: u16,
     pub base_node_grpc_port: u16,
     pub handle: task::JoinHandle<Result<(), anyhow::Error>>,
@@ -129,8 +130,10 @@ pub async fn spawn_validator_node(
 ) -> ValidatorNodeProcess {
     // each spawned VN will use different ports
     let (port, json_rpc_port) = get_os_assigned_ports();
+    let admin_json_rpc_port = get_os_assigned_port();
     let web_ui_port = get_os_assigned_port();
     let base_node_grpc_port = world.base_nodes.get(&base_node_name).unwrap().grpc_port;
+    let governance_public_key = world.governance_public_key();
     // get the default wallet account public key
     let account = claim_account_name.map(|n| {
         world
@@ -188,6 +191,9 @@ pub async fn spawn_validator_node(
             config.validator_node.p2p.enable_mdns = false;
             config.validator_node.json_rpc_listener_address =
                 Some(format!("127.0.0.1:{}", json_rpc_port).parse().unwrap());
+            config.validator_node.admin_json_rpc_listener_address =
+                Some(format!("127.0.0.1:{}", admin_json_rpc_port).parse().unwrap());
+            config.validator_node.governance_public_key = Some(governance_public_key);
             config.validator_node.web_ui_listener_address = Some(format!("127.0.0.1:{}", web_ui_port).parse().unwrap());
             config.validator_node.p2p.listener_port = port;
 
@@ -222,6 +228,7 @@ pub async fn spawn_validator_node(
         web_ui_port,
         handle,
         json_rpc_port,
+        admin_json_rpc_port,
         temp_dir_path,
         shutdown,
     }
@@ -247,5 +254,9 @@ impl ValidatorNodeProcess {
     pub fn get_client(&self) -> ValidatorNodeClient {
         let endpoint: Url = Url::parse(&format!("http://localhost:{}", self.json_rpc_port)).unwrap();
         ValidatorNodeClient::connect(endpoint).unwrap()
+    }
+
+    pub fn admin_json_rpc_url(&self) -> String {
+        format!("http://localhost:{}/json_rpc", self.admin_json_rpc_port)
     }
 }

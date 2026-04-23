@@ -40,7 +40,10 @@ use tari_common_types::{
     types::{CompressedPublicKey, PrivateKey},
 };
 use tari_consensus::consensus_constants::ConsensusConstants;
-use tari_crypto::keys::SecretKey;
+use tari_crypto::{
+    keys::{PublicKey as CryptoPublicKey, SecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::SubstateRequirement;
 use tari_ootle_wallet_sdk::models::AccountWithAddress;
@@ -98,6 +101,10 @@ pub struct TariWorld {
     pub default_payment_address: TariAddress,
     pub consensus_manager: ConsensusManager,
     pub eviction_proofs: HashMap<String, EvictionProof>,
+    /// Governance keypair shared across all validator nodes spawned in the scenario. The
+    /// public key is injected into each VN's config at spawn; the secret is used to sign
+    /// consensus directives from admin-facing steps.
+    pub governance_secret_key: RistrettoSecretKey,
 }
 
 impl TariWorld {
@@ -132,7 +139,14 @@ impl TariWorld {
             default_payment_address,
             consensus_manager: ConsensusManager::builder(L1Network::LocalNet).build(),
             eviction_proofs: HashMap::new(),
+            governance_secret_key: RistrettoSecretKey::random(&mut OsRng),
         }
+    }
+
+    /// Public key corresponding to the scenario's shared governance secret. Injected into
+    /// each spawned validator node's `governance_public_key` config.
+    pub fn governance_public_key(&self) -> RistrettoPublicKey {
+        RistrettoPublicKey::from_secret_key(&self.governance_secret_key)
     }
 
     pub fn mark_point_in_logs(&self, point_name: &str) {

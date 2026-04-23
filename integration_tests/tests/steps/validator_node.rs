@@ -639,7 +639,7 @@ async fn then_i_wait_for_validator_node_to_be_evicted(
 
     let mut watcher = notify::RecommendedWatcher::new(
         move |res| {
-            let _ = tx.blocking_send(res);
+            drop(tx.blocking_send(res));
         },
         notify::Config::default(),
     )

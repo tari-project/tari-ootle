@@ -94,10 +94,7 @@ pub async fn spawn_admin_json_rpc(
     Ok(addr)
 }
 
-async fn admin_handler(
-    Extension(handlers): Extension<Arc<JsonRpcHandlers>>,
-    value: JsonRpcExtractor,
-) -> JrpcResult {
+async fn admin_handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: JsonRpcExtractor) -> JrpcResult {
     debug!(target: LOG_TARGET, "🛠️ Admin JSON-RPC request: {}", value.method);
     let result = match value.method.as_str() {
         "admin.apply_consensus_directive" => handlers.admin_apply_consensus_directive(value).await,

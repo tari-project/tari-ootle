@@ -83,10 +83,9 @@ impl ConsensusHandle {
     /// machine reports `ConsensusCurrentState::OnHold` (which guarantees the hotstuff
     /// worker has unwound its run loop) or the timeout elapses.
     pub async fn request_on_hold(&self, timeout: Duration) -> Result<(), ConsensusHandleError> {
-        self.tx_on_hold
-            .send(true)
-            .map_err(|_| ConsensusHandleError::Shutdown)?;
-        self.wait_for_state(ConsensusCurrentState::OnHold, timeout, "OnHold").await
+        self.tx_on_hold.send(true).map_err(|_| ConsensusHandleError::Shutdown)?;
+        self.wait_for_state(ConsensusCurrentState::OnHold, timeout, "OnHold")
+            .await
     }
 
     /// Release a pending on-hold. Blocks until the state machine has left `OnHold`.

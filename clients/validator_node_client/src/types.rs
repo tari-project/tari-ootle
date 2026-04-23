@@ -576,9 +576,8 @@ pub struct ApplyConsensusDirectiveRequest {
 ///
 /// `outcome` values:
 /// - `"already_applied"`: directive ID matched a persisted record; no mutation.
-/// - `"accepted_pending_orchestrator"`: signature verified and idempotency check passed,
-///   but the rollback orchestrator is not yet wired. Transitional; removed once the
-///   orchestrator lands.
+/// - `"accepted_pending_orchestrator"`: signature verified and idempotency check passed, but the rollback orchestrator
+///   is not yet wired. Transitional; removed once the orchestrator lands.
 /// - `"applied"`: directive was executed; `applied_at_*` fields describe where.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]

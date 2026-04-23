@@ -229,7 +229,12 @@ fn rewind_preserves_other_shards() {
         assert_eq!((v, is_up), (0, true));
 
         // a's substate is gone.
-        assert!(tx.substates_get(&a_v0.to_substate_address()).optional().unwrap().is_none());
+        assert!(
+            tx.substates_get(&a_v0.to_substate_address())
+                .optional()
+                .unwrap()
+                .is_none()
+        );
         Ok::<_, tari_ootle_storage::StorageError>(())
     })
     .unwrap();

@@ -59,8 +59,8 @@ impl DirectiveSignature {
     pub fn to_schnorr(&self) -> Result<RistrettoSchnorr, DirectiveError> {
         let public_nonce = RistrettoPublicKey::from_canonical_bytes(&self.public_nonce)
             .map_err(|_| DirectiveError::BadSignatureEncoding)?;
-        let scalar = RistrettoSecretKey::from_canonical_bytes(&self.scalar)
-            .map_err(|_| DirectiveError::BadSignatureEncoding)?;
+        let scalar =
+            RistrettoSecretKey::from_canonical_bytes(&self.scalar).map_err(|_| DirectiveError::BadSignatureEncoding)?;
         Ok(RistrettoSchnorr::new(public_nonce, scalar))
     }
 }

@@ -101,6 +101,7 @@ use crate::{
     cf_api::DbContext,
     codecs::DbEncoder,
     column_families::{
+        applied_directive::AppliedDirectivesCf,
         block,
         block::BlockCf,
         block_diff,
@@ -121,7 +122,6 @@ use crate::{
             LeafBlockCf,
             LockedBlockCf,
         },
-        applied_directive::AppliedDirectivesCf,
         certificates::{proposal::ProposalCertificateCf, timeout::TimeoutCertificateCf},
         chain,
         epoch_checkpoint,

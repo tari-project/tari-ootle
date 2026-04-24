@@ -628,9 +628,9 @@ pub struct GetNetworkSyncStateResponse {
     pub sync_progress: Option<SyncProgress>,
     /// Per-validator consensus state as last observed by this indexer while
     /// syncing from the network. Populated lazily, so validators that have
-    /// never been contacted for a sync will not appear here. Each entry is
-    /// timestamped (`observed_at_unix_s`, `age_seconds`) so callers can judge
-    /// whether the reading is fresh.
+    /// never been contacted for a sync will not appear here. Each entry
+    /// carries an `observed_at_unix_s` timestamp so callers can judge whether
+    /// the reading is fresh.
     #[serde(default)]
     pub validators: Vec<ValidatorStatus>,
 }

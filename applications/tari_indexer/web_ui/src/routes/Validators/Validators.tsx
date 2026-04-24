@@ -176,6 +176,13 @@ function Validators() {
         <PageHeading>Validators</PageHeading>
       </Grid>
       <Grid size={12}>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          The indexer periodically syncs state from random validators and records their reported consensus status on
+          each visit. Each card below shows the last known status observed for that validator, along with how long ago
+          the snapshot was taken.
+        </Typography>
+      </Grid>
+      <Grid size={12}>
         <StyledPaper>
           {error ? (
             <Typography color="error">{error}</Typography>

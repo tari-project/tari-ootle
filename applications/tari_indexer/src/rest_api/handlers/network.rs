@@ -58,6 +58,7 @@ pub async fn get_network_sync_stats(
     let validators = context
         .validator_status()
         .snapshots()
+        .await
         .into_iter()
         .map(|(peer, snapshot)| {
             let observed_at_unix_s = snapshot

@@ -1,16 +1,13 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
-    time::SystemTime,
-};
+use std::{collections::HashMap, sync::Arc, time::SystemTime};
 
 use log::*;
 use tari_consensus::hotstuff::ConsensusCurrentState;
 use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup};
 use tari_ootle_p2p::{PeerAddress, proto::rpc};
+use tokio::sync::RwLock;
 
 use crate::network_state_sync::committee_client::ValidatorRpcSession;
 
@@ -38,8 +35,8 @@ impl ValidatorStatusMonitor {
         Self::default()
     }
 
-    pub fn snapshots(&self) -> Vec<(PeerAddress, ValidatorStatusSnapshot)> {
-        let guard = self.inner.read().expect("validator status lock poisoned");
+    pub async fn snapshots(&self) -> Vec<(PeerAddress, ValidatorStatusSnapshot)> {
+        let guard = self.inner.read().await;
         guard.iter().map(|(k, v)| (*k, v.clone())).collect()
     }
 
@@ -93,7 +90,7 @@ impl ValidatorStatusMonitor {
             snapshot.epoch, snapshot.height, snapshot.state
         );
 
-        let mut guard = self.inner.write().expect("validator status lock poisoned");
+        let mut guard = self.inner.write().await;
         guard.insert(peer, snapshot);
     }
 }

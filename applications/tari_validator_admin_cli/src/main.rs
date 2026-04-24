@@ -119,15 +119,12 @@ async fn run_rollback(
     eprintln!("Directive ID: {}", directive_id);
     eprintln!("Target epoch: {target_epoch}, nonce: {nonce}");
 
-    let directive_bytes = borsh::to_vec(&directive).context("serialising directive")?;
-    let directive_hex = hex::encode(&directive_bytes);
-
     let client = reqwest::Client::new();
     let mut any_failed = false;
 
     for url in &validator_rpc {
         eprintln!("\n→ {url}");
-        match submit_to(&client, url, &directive_hex).await {
+        match submit_to(&client, url, &directive).await {
             Ok(resp) => {
                 println!(
                     "{}",
@@ -151,10 +148,10 @@ async fn run_rollback(
 async fn submit_to(
     client: &reqwest::Client,
     url: &str,
-    directive_hex: &str,
+    directive: &ConsensusDirective,
 ) -> Result<ApplyConsensusDirectiveResponse> {
     let req = ApplyConsensusDirectiveRequest {
-        directive_hex: directive_hex.to_string(),
+        directive: directive.clone(),
     };
     let body = json!({
         "jsonrpc": "2.0",

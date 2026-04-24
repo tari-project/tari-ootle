@@ -33,7 +33,7 @@ use serde_json::{self as json, json};
 use tari_base_node_client::types::BaseLayerValidatorNode;
 use tari_common_types::types::CompressedPublicKey;
 use tari_consensus::hotstuff::ConsensusCurrentState;
-use tari_consensus_types::{ConsensusDirective, Decision, LeafBlock};
+use tari_consensus_types::{Decision, LeafBlock};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle, traits::LayerOneTransactionSubmitter};
 use tari_epoch_oracles::store::StoreKey;
@@ -911,10 +911,7 @@ impl JsonRpcHandlers {
                 )
             })?;
 
-        let directive_bytes = hex::decode(&params.directive_hex)
-            .map_err(|e| invalid_operation(answer_id.clone(), format!("directive hex is not valid hex: {e}")))?;
-        let directive: ConsensusDirective = borsh::from_slice(&directive_bytes)
-            .map_err(|e| invalid_operation(answer_id.clone(), format!("directive bytes do not decode: {e}")))?;
+        let directive = params.directive;
 
         if let Err(err) = directive.verify(gov_pk) {
             return Err(invalid_operation(

@@ -27,7 +27,7 @@ use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
 use tari_base_node_client::types::BaseLayerValidatorNode;
 use tari_common_types::types::FixedHash;
-use tari_consensus_types::{BlockId, Decision};
+use tari_consensus_types::{BlockId, ConsensusDirective, Decision};
 use tari_engine_types::{
     commit_result::FinalizeResult,
     fees::FeeCostBreakdown,
@@ -564,12 +564,9 @@ pub struct PrepareLayerOneTransactionResponse {
 }
 
 /// Request body for `admin.apply_consensus_directive`.
-///
-/// The directive is carried as a borsh-serialised `ConsensusDirective` encoded in hex.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
 pub struct ApplyConsensusDirectiveRequest {
-    pub directive_hex: String,
+    pub directive: ConsensusDirective,
 }
 
 /// Response from `admin.apply_consensus_directive`.

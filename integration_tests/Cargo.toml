@@ -59,7 +59,6 @@ cucumber = { version = "0.21.1", features = [
     "libtest",
     "output-junit",
 ] }
-borsh = { workspace = true }
 hex = { workspace = true }
 httpmock = { version = "0.8.0-alpha.1", features = ["remote"] }
 indexmap = { workspace = true }

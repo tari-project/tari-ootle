@@ -14,7 +14,6 @@ tari_validator_node_client = { workspace = true }
 tari_crypto = { workspace = true }
 
 anyhow = { workspace = true }
-borsh = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 hex = { workspace = true }
 rand = { workspace = true }

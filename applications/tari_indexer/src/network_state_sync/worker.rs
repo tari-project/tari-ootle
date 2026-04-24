@@ -33,6 +33,7 @@ use crate::{
         stats::SyncStats,
         sync_plan::SyncPlan,
         sync_progress::SyncProgress,
+        validator_status::ValidatorStatusMonitor,
     },
     notify::Notify,
     storage_sqlite::{
@@ -60,6 +61,7 @@ pub struct NetworkWideStateSync {
     config: NetworkWideStateSyncConfig,
     notify: Notify<IndexerEvent>,
     transaction_event_notify: Notify<TransactionEvent>,
+    validator_status: ValidatorStatusMonitor,
 }
 
 impl NetworkWideStateSync {
@@ -70,6 +72,7 @@ impl NetworkWideStateSync {
         config: NetworkWideStateSyncConfig,
         notify: Notify<IndexerEvent>,
         transaction_event_notify: Notify<TransactionEvent>,
+        validator_status: ValidatorStatusMonitor,
     ) -> Self {
         Self {
             epoch_manager,
@@ -79,6 +82,7 @@ impl NetworkWideStateSync {
             config,
             notify,
             transaction_event_notify,
+            validator_status,
         }
     }
 
@@ -177,6 +181,7 @@ impl NetworkWideStateSync {
         Ok(())
     }
 
+    #[expect(clippy::too_many_lines)]
     async fn sync_checkpoints(&mut self, sync_plan_mut: &mut SyncPlan) -> Result<(), NetworkStateSyncError> {
         let prev_epoch = sync_plan_mut
             .network_description()
@@ -200,25 +205,35 @@ impl NetworkWideStateSync {
             }
             info!(target: LOG_TARGET, "🌍️ Syncing checkpoints from {from_epoch} for shard group {shard_group}");
             // Perform sync operations using the pool and checkpoint
+            let validator_status = self.validator_status.clone();
             let checkpoints: Vec<_> = pool
-                .try_with_random_members(|mut session| async move {
-                    let resp = session
-                        .get_checkpoints(rpc::GetCheckpointsRequest {
-                            from_epoch: Some(from_epoch.into()),
-                            num_to_return: 100,
-                        })
-                        .await?;
-
-                    debug!(target: LOG_TARGET, "🌍️ Received {} checkpoints for shard group {} from peer {}", resp.checkpoints.len(), shard_group, session.peer_address());
-
-                    resp.checkpoints
-                        .into_iter()
-                        .map(|cp| {
-                            EpochCheckpoint::try_from(cp).map_err(|e| NetworkStateSyncError::InvalidCheckpoint {
-                                details: format!("Failed to convert checkpoint for shard group {}: {}", shard_group, e),
+                .try_with_random_members(|mut session| {
+                    let validator_status = validator_status.clone();
+                    async move {
+                        validator_status.probe(&mut session, shard_group).await;
+                        let resp = session
+                            .get_checkpoints(rpc::GetCheckpointsRequest {
+                                from_epoch: Some(from_epoch.into()),
+                                num_to_return: 100,
                             })
-                        })
-                        .collect()
+                            .await?;
+
+                        debug!(target: LOG_TARGET, "🌍️ Received {} checkpoints for shard group {} from peer {}", resp.checkpoints.len(), shard_group, session.peer_address());
+
+                        resp.checkpoints
+                            .into_iter()
+                            .map(|cp| {
+                                EpochCheckpoint::try_from(cp).map_err(|e| {
+                                    NetworkStateSyncError::InvalidCheckpoint {
+                                        details: format!(
+                                            "Failed to convert checkpoint for shard group {}: {}",
+                                            shard_group, e
+                                        ),
+                                    }
+                                })
+                            })
+                            .collect()
+                    }
                 })
                 .await?;
 
@@ -316,6 +331,7 @@ impl NetworkWideStateSync {
                     continue;
                 },
             };
+            self.validator_status.probe(&mut session, shard_group).await;
             if !has_synced_global_shard {
                 self.sync_shard_state(
                     Shard::global(),

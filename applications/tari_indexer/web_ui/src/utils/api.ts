@@ -21,6 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import type {
+  GetNetworkSyncStateResponse,
   IndexerGetConnectionsResponse,
   IndexerGetIdentityResponse,
   GetNonFungiblesRequest,
@@ -44,9 +45,7 @@ import type {
 import { IndexerClient } from "@tari-project/indexer-client";
 
 const DEFAULT_API_ADDRESS = new URL(
-  import.meta.env.VITE_INDEXER_API_ADDRESS ||
-  import.meta.env.VITE_API_ADDRESS ||
-  "http://localhost:9000",
+  import.meta.env.VITE_INDEXER_API_ADDRESS || import.meta.env.VITE_API_ADDRESS || "http://localhost:9000",
 );
 
 export async function getClientAddress(): Promise<URL> {
@@ -85,47 +84,42 @@ export async function client() {
   return pendingClientInstance;
 }
 
+export const getIdentity = (): Promise<IndexerGetIdentityResponse> => client().then((c) => c.identityGet());
 
-export const getIdentity = (): Promise<IndexerGetIdentityResponse> =>
-  client().then((c) => c.identityGet());
+export const getConnections = (): Promise<IndexerGetConnectionsResponse> => client().then((c) => c.getConnections());
 
-export const getConnections = (): Promise<IndexerGetConnectionsResponse> =>
-  client().then((c) => c.getConnections());
+export const getNetworkStats = (): Promise<GetNetworkSyncStateResponse> => client().then((c) => c.networkStats());
 
 export const getSubstate = (
   id: SubstateId,
   version?: number | null,
   local_search_only?: boolean,
-): Promise<IndexerGetSubstateResponse> => client().then((c) => c.substatesGet(id, {
-  version: version ?? null,
-  local_search_only: local_search_only ?? false,
-}));
-export const getNonFungibles = (
-  request: GetNonFungiblesRequest,
-): Promise<GetNonFungiblesResponse> =>
+): Promise<IndexerGetSubstateResponse> =>
+  client().then((c) =>
+    c.substatesGet(id, {
+      version: version ?? null,
+      local_search_only: local_search_only ?? false,
+    }),
+  );
+export const getNonFungibles = (request: GetNonFungiblesRequest): Promise<GetNonFungiblesResponse> =>
   client().then((c) => c.getNonFungibles(request));
 
 export const getTransactionResult = (
   request: IndexerGetTransactionResultRequest,
-): Promise<IndexerGetTransactionResultResponse> =>
-  client().then((c) => c.getTransactionResult(request.transaction_id));
+): Promise<IndexerGetTransactionResultResponse> => client().then((c) => c.getTransactionResult(request.transaction_id));
 
 export const listRecentTransactions = (
   request: ListRecentTransactionsRequest,
-): Promise<ListRecentTransactionsResponse> =>
-  client().then((c) => c.listRecentTransactions(request));
+): Promise<ListRecentTransactionsResponse> => client().then((c) => c.listRecentTransactions(request));
 
 export const queryTransactionEvents = (req: QueryTransactionEventsRequest): Promise<QueryTransactionEventsResponse> =>
   client().then((c) => c.queryTransactionEvents(req));
 
 export const listTransactionReceipts = (
   request: ListTransactionReceiptsRequest,
-): Promise<ListTransactionReceiptsResponse> =>
-  client().then((c) => c.listTransactionReceipts(request));
+): Promise<ListTransactionReceiptsResponse> => client().then((c) => c.listTransactionReceipts(request));
 
-export const getTransactionReceipt = (
-  address: TransactionReceiptAddress,
-): Promise<GetTransactionReceiptResponse> =>
+export const getTransactionReceipt = (address: TransactionReceiptAddress): Promise<GetTransactionReceiptResponse> =>
   client().then((c) => c.getTransactionReceipt(address));
 
 export const getTemplateDefinition = (templateAddress: string): Promise<any> =>

@@ -31,6 +31,7 @@ import Templates from "./routes/Templates/Templates";
 import TransactionDetails from "./routes/Transaction/TransactionDetails";
 import TransactionReceipts from "./routes/TransactionReceipts/TransactionReceiptsLayout";
 import TransactionReceiptDetails from "./routes/TransactionReceipts/TransactionReceiptDetailsLayout";
+import Validators from "./routes/Validators/Validators";
 import WatchedSubstates from "./routes/WatchedSubstates/WatchedSubstates";
 import ErrorPage from "./routes/ErrorPage";
 import Layout from "./theme/LayoutMain";
@@ -82,6 +83,11 @@ export const breadcrumbRoutes = [
     dynamic: false,
   },
   {
+    label: "Validators",
+    path: "/validators",
+    dynamic: false,
+  },
+  {
     label: "Transaction Receipts",
     path: "/transaction-receipts",
     dynamic: false,
@@ -111,6 +117,7 @@ export default function App() {
           <Route path="substates" element={<Substates />} />
           <Route path="templates" element={<Templates />} />
           <Route path="watched" element={<WatchedSubstates />} />
+          <Route path="validators" element={<Validators />} />
           <Route path="transaction-receipts" element={<TransactionReceipts />} />
           <Route path="transaction-receipts/:receipt_address" element={<TransactionReceiptDetails />} />
           <Route path="*" element={<ErrorPage />} />

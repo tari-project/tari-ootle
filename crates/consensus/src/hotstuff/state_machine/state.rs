@@ -5,13 +5,7 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
-use crate::hotstuff::state_machine::{
-    check_sync::CheckSync,
-    idle::Idle,
-    on_hold::OnHold,
-    running::Running,
-    syncing::Syncing,
-};
+use crate::hotstuff::state_machine::{check_sync::CheckSync, idle::Idle, running::Running, syncing::Syncing};
 
 #[derive(Debug)]
 pub(super) enum ConsensusState<TSpec> {
@@ -19,7 +13,6 @@ pub(super) enum ConsensusState<TSpec> {
     CheckSync(CheckSync<TSpec>),
     Syncing(Syncing<TSpec>),
     Running(Running<TSpec>),
-    OnHold(OnHold<TSpec>),
     Sleeping,
     Shutdown,
 }
@@ -31,7 +24,6 @@ pub enum ConsensusCurrentState {
     CheckSync,
     Syncing,
     Running,
-    OnHold,
     Sleeping,
     Shutdown,
 }
@@ -45,7 +37,6 @@ impl Display for ConsensusCurrentState {
             CheckSync => write!(f, "CheckSync"),
             Syncing => write!(f, "Syncing"),
             Running => write!(f, "Running"),
-            OnHold => write!(f, "OnHold"),
             Sleeping => write!(f, "Sleeping"),
             Shutdown => write!(f, "Shutdown"),
         }
@@ -55,10 +46,6 @@ impl Display for ConsensusCurrentState {
 impl ConsensusCurrentState {
     pub fn is_running(&self) -> bool {
         matches!(self, ConsensusCurrentState::Running)
-    }
-
-    pub fn is_on_hold(&self) -> bool {
-        matches!(self, ConsensusCurrentState::OnHold)
     }
 }
 
@@ -81,7 +68,6 @@ impl<TSpec> From<&ConsensusState<TSpec>> for ConsensusCurrentState {
             ConsensusState::CheckSync(_) => ConsensusCurrentState::CheckSync,
             ConsensusState::Syncing(_) => ConsensusCurrentState::Syncing,
             ConsensusState::Running(_) => ConsensusCurrentState::Running,
-            ConsensusState::OnHold(_) => ConsensusCurrentState::OnHold,
             ConsensusState::Sleeping => ConsensusCurrentState::Sleeping,
             ConsensusState::Shutdown => ConsensusCurrentState::Shutdown,
         }

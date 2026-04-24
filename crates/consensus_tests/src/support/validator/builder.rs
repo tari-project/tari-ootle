@@ -171,7 +171,6 @@ impl ValidatorBuilder {
         let transaction_executor =
             TestBlockTransactionProcessor::new(self.address.clone(), self.transaction_executions.clone());
 
-        let (tx_on_hold, rx_on_hold) = watch::channel(false);
         let worker = HotstuffWorker::<TestConsensusSpec>::new(
             self.config
                 .clone()
@@ -180,7 +179,6 @@ impl ValidatorBuilder {
             inbound_messaging,
             outbound_messaging,
             rx_new_transactions,
-            rx_on_hold.clone(),
             store.clone(),
             epoch_manager.clone(),
             self.leader_strategy,
@@ -200,7 +198,6 @@ impl ValidatorBuilder {
             hotstuff: worker,
             state_sync: AlwaysSyncedSyncManager,
             tx_current_state: tx_current_state.clone(),
-            rx_on_hold,
         };
 
         let mut worker = ConsensusWorker::new(shutdown_signal).no_initial_delay();
@@ -229,7 +226,6 @@ impl ValidatorBuilder {
             epoch_manager,
             events: tx_events.subscribe(),
             current_state_machine_state: rx_current_state,
-            tx_on_hold,
             handle,
         };
         (channels, validator)

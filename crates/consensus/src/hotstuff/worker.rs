@@ -38,7 +38,7 @@ use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::{
-    sync::{broadcast, mpsc, watch},
+    sync::{broadcast, mpsc},
     time,
 };
 
@@ -82,11 +82,9 @@ use crate::{
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::worker";
 
 /// Reason the hotstuff worker loop exited cleanly (i.e. returned Ok).
-/// Distinguishes a shutdown request (terminal) from a hold request (transient, resumable).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkerExitReason {
     Shutdown,
-    OnHoldRequested,
 }
 
 pub struct HotstuffWorker<TConsensusSpec: ConsensusSpec> {
@@ -98,7 +96,6 @@ pub struct HotstuffWorker<TConsensusSpec: ConsensusSpec> {
     tx_events: broadcast::Sender<HotstuffEvent>,
     rx_new_transactions: mpsc::Receiver<(Transaction, usize)>,
     rx_missing_transactions: mpsc::UnboundedReceiver<Vec<TransactionId>>,
-    rx_on_hold: watch::Receiver<bool>,
 
     on_inbound_message: OnInboundMessage<TConsensusSpec>,
     on_next_sync_view: OnNextSyncViewHandler<TConsensusSpec>,
@@ -134,7 +131,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         inbound_messaging: TConsensusSpec::InboundMessaging,
         outbound_messaging: TConsensusSpec::OutboundMessaging,
         rx_new_transactions: mpsc::Receiver<(Transaction, usize)>,
-        rx_on_hold: watch::Receiver<bool>,
         state_store: TConsensusSpec::StateStore,
         epoch_manager: TConsensusSpec::EpochManager,
         leader_strategy: TConsensusSpec::LeaderStrategy,
@@ -159,7 +155,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             config: config.clone(),
             rx_new_transactions,
             rx_missing_transactions,
-            rx_on_hold,
 
             on_inbound_message: OnInboundMessage::new(inbound_messaging, hooks.clone()),
             on_message_validate: OnMessageValidate::new(
@@ -278,12 +273,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
     }
 
     pub async fn start(&mut self) -> Result<WorkerExitReason, HotStuffError> {
-        // If a hold was requested while we were idle (e.g. between state transitions), short-circuit
-        // before expensive setup so the state machine can transition into OnHold immediately.
-        if *self.rx_on_hold.borrow() {
-            info!(target: LOG_TARGET, "⏸️ Hotstuff start short-circuited — on-hold already requested");
-            return Ok(WorkerExitReason::OnHoldRequested);
-        }
         let (current_epoch, current_epoch_hash) = self.get_starting_epoch().await?;
         let local_committee_info = self.epoch_manager.get_local_committee_info(current_epoch).await?;
 
@@ -466,21 +455,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     exit_reason = WorkerExitReason::Shutdown;
                     break;
                 },
-
-                changed = self.rx_on_hold.changed() => {
-                    if changed.is_err() {
-                        // Sender dropped — treat as shutdown to avoid spinning.
-                        warn!(target: LOG_TARGET, "on-hold watch sender dropped, treating as shutdown");
-                        exit_reason = WorkerExitReason::Shutdown;
-                        break;
-                    }
-                    if *self.rx_on_hold.borrow() {
-                        info!(target: LOG_TARGET, "⏸️ Consensus on-hold requested, exiting run loop");
-                        exit_reason = WorkerExitReason::OnHoldRequested;
-                        break;
-                    }
-                    // Flipped back to false without us seeing true first — ignore.
-                }
             }
         }
 

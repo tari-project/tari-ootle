@@ -10,7 +10,6 @@ pub use shard_scoped_state_tree::*;
 use tari_consensus_types::{
     BlockId,
     Decision,
-    DirectiveId,
     HighPc,
     HighTc,
     HighestSeenBlock,
@@ -47,10 +46,10 @@ use time::PrimitiveDateTime;
 use crate::{
     StorageError,
     consensus_models::{
-        AppliedDirective,
         Block,
         BlockDiff,
         BlockTransactionExecution,
+        BlocksAfterEpochRow,
         EpochCheckpoint,
         Evidence,
         ForeignParkedProposal,
@@ -62,12 +61,14 @@ use crate::{
         NoVoteReason,
         PendingShardStateTreeDiff,
         RollbackDeleteStats,
+        RollbackHistoryEntry,
         StateTreeTruncateStats,
         StateVersionTransitions,
         SubstateChange,
         SubstateLock,
         SubstatePledges,
         SubstateRecord,
+        SubstateRewindPlanRow,
         SubstateRewindStats,
         SubstateUpdateBatch,
         SubstateValueFilterFlags,
@@ -346,12 +347,29 @@ pub trait StateStoreReadTransaction: Sized {
 
     fn epoch_checkpoint_get_last(&self) -> Result<EpochCheckpoint, StorageError>;
 
-    // -------------------------------- Applied directives -------------------------------- //
+    // -------------------------------- Rollback history -------------------------------- //
 
-    /// Fetch a persisted record describing a previously-applied consensus directive.
-    /// Returns `StorageError::QueryError`/NotFound if no such record exists; use `.optional()`
-    /// at the call site to get `Option<AppliedDirective>`.
-    fn applied_directive_get(&self, id: &DirectiveId) -> Result<AppliedDirective, StorageError>;
+    /// List all rollback-history breadcrumbs in chronological order (oldest first).
+    /// Returns an empty vec if no rollback has ever been applied.
+    fn rollback_history_list(&self) -> Result<Vec<RollbackHistoryEntry>, StorageError>;
+
+    // -------------------------------- Rollback dry-run collection -------------------------------- //
+
+    /// Collect (read-only) every `(shard, state_version > target_version)` transition that
+    /// `substates_rewind_to_state_version` would revert. Rows are returned in the same
+    /// reverse-application order the mutating call processes them, so an audit trail
+    /// built from this collection mirrors what the rewind actually does.
+    fn rollback_plan_collect_substates(
+        &self,
+        shard: Shard,
+        target_version: Version,
+    ) -> Result<Vec<SubstateRewindPlanRow>, StorageError>;
+
+    /// Collect (read-only) every block with `epoch > target_epoch` — what
+    /// `rollback_delete_after_epoch` would remove. Each row carries the block's
+    /// finalising-transaction ids, the payload indexers/wallets need to decide what to
+    /// resync after a rollback.
+    fn rollback_plan_collect_blocks(&self, target_epoch: Epoch) -> Result<Vec<BlocksAfterEpochRow>, StorageError>;
 
     // -------------------------------- Foreign Substate Pledges -------------------------------- //
     fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(
@@ -622,20 +640,20 @@ pub trait StateStoreWriteTransaction {
     // -------------------------------- Epoch checkpoint -------------------------------- //
     fn epoch_checkpoint_save(&mut self, checkpoint: &EpochCheckpoint) -> Result<(), StorageError>;
 
-    // -------------------------------- Applied directives -------------------------------- //
+    // -------------------------------- Rollback history -------------------------------- //
 
-    /// Persist an applied-directive record. Overwrites any existing record with the same
-    /// `directive_id` — callers are expected to have checked `applied_directive_get` first
-    /// for idempotency, so overwriting should only occur in recovery scenarios.
-    fn applied_directive_save(&mut self, record: &AppliedDirective) -> Result<(), StorageError>;
+    /// Append a rollback-history breadcrumb. Written by the offline rollback tool inside the
+    /// same write transaction as the state-tree truncate + substate rewind + epoch-after
+    /// deletion so either all four succeed or none do.
+    fn rollback_history_insert(&mut self, entry: &RollbackHistoryEntry) -> Result<(), StorageError>;
 
     /// Delete every epoch-indexed record with `epoch > target_epoch`, and clear the
     /// singleton bookkeeping pointers. Paired with `state_tree_truncate_to_version` and
     /// `substates_rewind_to_state_version`, this is the storage side of a break-glass
     /// rollback to the `target_epoch` checkpoint.
     ///
-    /// The rollback orchestrator is expected to call this *inside the same write transaction*
-    /// as the state-tree truncate + substate rewind + `applied_directive_save`.
+    /// The offline rollback tool calls this *inside the same write transaction*
+    /// as the state-tree truncate + substate rewind + `rollback_history_insert`.
     ///
     /// After commit, consensus resumes via the `create_genesis_block_if_required` path in
     /// hotstuff: with no blocks at `(current_epoch, height=0)` the worker creates a fresh

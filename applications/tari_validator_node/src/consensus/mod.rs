@@ -68,7 +68,6 @@ pub async fn spawn(
     consensus_constants: ConsensusConstants,
 ) -> (JoinHandle<Result<(), anyhow::Error>>, ConsensusHandle) {
     let (tx_new_transaction, rx_new_transactions) = mpsc::channel(10);
-    let (tx_on_hold, rx_on_hold) = watch::channel(false);
 
     let leader_strategy = RoundRobinLeaderStrategy::new();
     let transaction_pool = TransactionPool::new();
@@ -93,7 +92,6 @@ pub async fn spawn(
         inbound_messaging,
         outbound_messaging,
         rx_new_transactions,
-        rx_on_hold.clone(),
         store.clone(),
         epoch_manager.clone(),
         leader_strategy,
@@ -112,7 +110,6 @@ pub async fn spawn(
         hotstuff: hotstuff_worker,
         state_sync: RpcStateSyncClientProtocol::new(epoch_manager, store, client_factory),
         tx_current_state,
-        rx_on_hold,
     };
 
     let join_handle = ConsensusWorker::new(shutdown_signal).spawn(context);
@@ -122,7 +119,6 @@ pub async fn spawn(
         EventSubscription::new(tx_hotstuff_events.downgrade()),
         current_view,
         tx_new_transaction,
-        tx_on_hold,
     );
 
     (join_handle, consensus_handle)

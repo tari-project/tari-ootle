@@ -20,7 +20,6 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-pub mod admin;
 mod base_layer;
 mod bootstrap;
 mod cmap_semaphore;
@@ -63,7 +62,7 @@ use crate::{
     bootstrap::{Services, spawn_services},
     consensus::spec::ValidatorNodeStateStore,
     file_l1_submitter::FileLayerOneSubmitter,
-    json_rpc::{JsonRpcHandlers, spawn_admin_json_rpc, spawn_json_rpc},
+    json_rpc::{JsonRpcHandlers, spawn_json_rpc},
     node::ValidatorNode,
 };
 
@@ -123,7 +122,7 @@ pub async fn run_validator_node(
     let metrics_registry = create_metrics_registry(keypair.public_key(), &mut base_registry);
 
     let consensus_constants = ConsensusConstants::from(config.network);
-    let services = spawn_services(
+    let mut services = spawn_services(
         config.clone(),
         shutdown.to_signal(),
         keypair.clone(),
@@ -141,22 +140,20 @@ pub async fn run_validator_node(
     if let Some(jrpc_address) = jrpc_address.as_mut() {
         info!(target: LOG_TARGET, "🌐 Started JSON-RPC server on {}", jrpc_address);
         let handlers = JsonRpcHandlers::new(&services);
-        *jrpc_address = spawn_json_rpc(
+        let (bound_addr, jrpc_handle) = spawn_json_rpc(
             *jrpc_address,
             handlers,
+            shutdown.to_signal(),
             #[cfg(feature = "metrics")]
             base_registry,
         )
         .await?;
+        *jrpc_address = bound_addr;
+        // Track the axum handle so `Services::join_all` awaits it at shutdown — this is
+        // what guarantees the final `Arc<TransactionDB>` clone held by the handlers is
+        // dropped before `run_validator_node` returns.
+        services.handles.push(jrpc_handle);
 
-        // Admin JSON-RPC runs on its own address so admin methods never share a listener
-        // with the public endpoint. Opt-in: only spawned if the operator has configured an
-        // admin address.
-        if let Some(admin_address) = config.validator_node.admin_json_rpc_listener_address {
-            let admin_handlers = JsonRpcHandlers::new(&services);
-            let bound = spawn_admin_json_rpc(admin_address, admin_handlers).await?;
-            info!(target: LOG_TARGET, "🛠️ Started admin JSON-RPC server on {}", bound);
-        }
         // Run the web ui
         #[cfg(feature = "web_ui")]
         if let Some(address) = config.validator_node.web_ui_listener_address {

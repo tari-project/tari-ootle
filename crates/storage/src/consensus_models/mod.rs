@@ -1,7 +1,6 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-mod applied_directive;
 mod block;
 mod block_diff;
 mod block_header;
@@ -19,6 +18,8 @@ mod lock_intent;
 mod locked_epoch;
 mod no_vote;
 mod rollback_delete;
+mod rollback_history;
+mod rollback_plan;
 mod state_transition;
 mod state_tree_diff;
 mod state_tree_truncate;
@@ -34,7 +35,6 @@ mod transaction_pool_status_update;
 mod validated_block;
 mod validator_stats;
 
-pub use applied_directive::*;
 pub use block::*;
 pub use block_diff::*;
 pub use block_header::*;
@@ -52,6 +52,8 @@ pub use lock_intent::*;
 pub use locked_epoch::*;
 pub use no_vote::*;
 pub use rollback_delete::*;
+pub use rollback_history::*;
+pub use rollback_plan::*;
 pub use state_transition::*;
 pub use state_tree_diff::*;
 pub use state_tree_truncate::*;

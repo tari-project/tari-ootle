@@ -20,7 +20,6 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-pub mod applied_directive;
 pub mod block;
 pub mod block_diff;
 pub mod block_transaction_execution;
@@ -39,6 +38,7 @@ pub mod lock_conflict;
 pub mod missing_transactions;
 pub mod parked_block;
 pub mod pending_state_tree_diff;
+pub mod rollback_history;
 pub mod state_transition;
 pub mod state_tree;
 pub mod state_tree_shard_versions;

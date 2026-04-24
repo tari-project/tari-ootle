@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{future::IntoFuture, net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
     Json,
@@ -34,17 +34,24 @@ use log::*;
 use serde_json::json;
 use tari_consensus::hotstuff::ConsensusCurrentState;
 use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
+use tari_shutdown::ShutdownSignal;
+use tokio::task::JoinHandle;
 use tower_http::cors::CorsLayer;
 
 use super::handlers::JsonRpcHandlers;
 
 const LOG_TARGET: &str = "tari::validator_node::json_rpc";
 
+/// Spawn the JSON-RPC server. The returned [`JoinHandle`] completes when `shutdown_signal`
+/// fires and axum's graceful shutdown has drained in-flight requests — this is how the
+/// validator releases its final `Arc<TransactionDB>` clones at shutdown. Callers should
+/// push the handle into `Services.handles` so `join_all` awaits it.
 pub async fn spawn_json_rpc(
     preferred_address: SocketAddr,
     handlers: JsonRpcHandlers,
+    mut shutdown_signal: ShutdownSignal,
     #[cfg(feature = "metrics")] registry: prometheus_client::registry::Registry,
-) -> Result<SocketAddr, anyhow::Error> {
+) -> Result<(SocketAddr, JoinHandle<Result<(), anyhow::Error>>), anyhow::Error> {
     let router = Router::new()
         .route("/", post(handler))
         .route("/json_rpc", post(handler))
@@ -59,66 +66,18 @@ pub async fn spawn_json_rpc(
         .layer(CorsLayer::permissive());
 
     let listener = try_bind_with_fallback(preferred_address).await?;
-    let server = axum::serve(listener, router);
+    let server = axum::serve(listener, router).with_graceful_shutdown(async move {
+        shutdown_signal.wait().await;
+    });
     let addr = server.local_addr()?;
     info!(target: LOG_TARGET, "🌐 JSON-RPC listening on {}", addr);
-    tokio::spawn(server.into_future());
+    let handle = tokio::spawn(async move {
+        server.await.map_err(anyhow::Error::from)?;
+        info!(target: LOG_TARGET, "💤 JSON-RPC server exited cleanly");
+        Ok(())
+    });
 
-    Ok(addr)
-}
-
-/// Spawn a separate admin JSON-RPC listener that serves *only* admin methods (consensus
-/// directives, etc.). Keeping it on its own address is defence-in-depth — the signature
-/// on every directive is the primary authentication — and prevents accidental exposure of
-/// admin methods if the public `json_rpc_listener_address` ends up bound to a public
-/// interface.
-///
-/// The caller is responsible for ensuring `preferred_address` is not publicly routable in
-/// production (typically a loopback address).
-pub async fn spawn_admin_json_rpc(
-    preferred_address: SocketAddr,
-    handlers: JsonRpcHandlers,
-) -> Result<SocketAddr, anyhow::Error> {
-    let router = Router::new()
-        .route("/", post(admin_handler))
-        .route("/json_rpc", post(admin_handler))
-        .layer(Extension(Arc::new(handlers)))
-        .layer(CorsLayer::permissive());
-
-    let listener = try_bind_with_fallback(preferred_address).await?;
-    let server = axum::serve(listener, router);
-    let addr = server.local_addr()?;
-    info!(target: LOG_TARGET, "🛠️ Admin JSON-RPC listening on {}", addr);
-    tokio::spawn(server.into_future());
-
-    Ok(addr)
-}
-
-async fn admin_handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: JsonRpcExtractor) -> JrpcResult {
-    debug!(target: LOG_TARGET, "🛠️ Admin JSON-RPC request: {}", value.method);
-    let result = match value.method.as_str() {
-        "admin.apply_consensus_directive" => handlers.admin_apply_consensus_directive(value).await,
-        method => Ok(value.method_not_found(method)),
-    };
-
-    if let Err(ref e) = result {
-        match &e.result {
-            JsonRpcAnswer::Result(val) => {
-                error!(
-                    target: LOG_TARGET,
-                    "🚨 Admin JSON-RPC request failed: {}",
-                    serde_json::to_string_pretty(val).unwrap_or_else(|e| e.to_string())
-                );
-            },
-            JsonRpcAnswer::Error(err) if matches!(err.error_reason(), JsonRpcErrorReason::ApplicationError(_)) => {
-                debug!(target: LOG_TARGET, "Admin JSON-RPC: {}", err);
-            },
-            JsonRpcAnswer::Error(err) => {
-                error!(target: LOG_TARGET, "Admin JSON-RPC request failed: {}", err);
-            },
-        }
-    }
-    result
+    Ok((addr, handle))
 }
 
 async fn handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: JsonRpcExtractor) -> JrpcResult {

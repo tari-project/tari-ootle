@@ -4,7 +4,6 @@
 mod bookkeeping;
 mod certificates;
 mod decision;
-mod directive;
 mod ids;
 mod traits;
 mod types;
@@ -13,7 +12,6 @@ pub mod validator_signature;
 pub use bookkeeping::*;
 pub use certificates::*;
 pub use decision::*;
-pub use directive::*;
 pub use ids::*;
 pub use traits::*;
 pub use types::*;

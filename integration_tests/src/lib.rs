@@ -40,13 +40,9 @@ use tari_common_types::{
     types::{CompressedPublicKey, PrivateKey},
 };
 use tari_consensus::consensus_constants::ConsensusConstants;
-use tari_crypto::{
-    keys::{PublicKey as CryptoPublicKey, SecretKey},
-    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
-};
+use tari_crypto::keys::SecretKey;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::SubstateRequirement;
-use tari_ootle_transaction::TransactionId;
 use tari_ootle_wallet_sdk::models::AccountWithAddress;
 use tari_sidechain::EvictionProof;
 use tari_transaction_components::{
@@ -95,10 +91,6 @@ pub struct TariWorld {
     pub num_databases_saved: usize,
     pub key_manager: KeyManager,
     pub wallet_accounts: IndexMap<String, AccountWithAddress>,
-    /// Transaction ids submitted by helpers (e.g. account-creation flows) keyed by a
-    /// human-readable name (typically the account name). Used by cucumber steps that need
-    /// to assert a transaction was or is no longer committed — e.g. rollback scenarios.
-    pub submitted_transactions: IndexMap<String, TransactionId>,
     pub wallet_daemons: IndexMap<String, TariWalletDaemonProcess>,
     /// Used for all one-sided coinbase payments
     pub minotari_wallet_private_key: PrivateKey,
@@ -106,10 +98,6 @@ pub struct TariWorld {
     pub default_payment_address: TariAddress,
     pub consensus_manager: ConsensusManager,
     pub eviction_proofs: HashMap<String, EvictionProof>,
-    /// Governance keypair shared across all validator nodes spawned in the scenario. The
-    /// public key is injected into each VN's config at spawn; the secret is used to sign
-    /// consensus directives from admin-facing steps.
-    pub governance_secret_key: RistrettoSecretKey,
 }
 
 impl TariWorld {
@@ -139,20 +127,12 @@ impl TariWorld {
             num_databases_saved: 0,
             key_manager: KeyManager::new_random().unwrap(),
             wallet_accounts: IndexMap::new(),
-            submitted_transactions: IndexMap::new(),
             wallet_daemons: IndexMap::new(),
             minotari_wallet_private_key: wallet_private_key,
             default_payment_address,
             consensus_manager: ConsensusManager::builder(L1Network::LocalNet).build(),
             eviction_proofs: HashMap::new(),
-            governance_secret_key: RistrettoSecretKey::random(&mut OsRng),
         }
-    }
-
-    /// Public key corresponding to the scenario's shared governance secret. Injected into
-    /// each spawned validator node's `governance_public_key` config.
-    pub fn governance_public_key(&self) -> RistrettoPublicKey {
-        RistrettoPublicKey::from_secret_key(&self.governance_secret_key)
     }
 
     pub fn mark_point_in_logs(&self, point_name: &str) {

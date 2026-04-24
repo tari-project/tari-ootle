@@ -60,7 +60,6 @@ use tari_ootle_storage::{
     StateStoreWriteTransaction,
     StorageError,
     consensus_models::{
-        AppliedDirective,
         Block,
         BlockTransactionExecution,
         EpochCheckpoint,
@@ -73,6 +72,7 @@ use tari_ootle_storage::{
         NoVoteReason,
         PendingShardStateTreeDiff,
         RollbackDeleteStats,
+        RollbackHistoryEntry,
         StateTreeTruncateStats,
         SubstateChange,
         SubstateCreated,
@@ -100,7 +100,6 @@ use crate::{
     cf_api::{CfContext, DbContext},
     codecs::{ByteColumn, DbEncoder, DefaultCodec},
     column_families::{
-        applied_directive::AppliedDirectivesCf,
         block,
         block::BlockCf,
         block_diff,
@@ -142,6 +141,7 @@ use crate::{
         parked_block::{ParkedBlockCf, ParkedBlockDataRef},
         pending_state_tree_diff,
         pending_state_tree_diff::PendingStateTreeDiffCf,
+        rollback_history::RollbackHistoryCf,
         state_transition::{
             StateTransitionCf,
             StateTransitionModelDataV1,
@@ -1717,13 +1717,12 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             stale_cf.delete(key, OPERATION)?;
         }
 
-        // 3. Reset the latest-version pointer. State versions start at 1 (see
-        //    `put_substate_tree_changes` — `next_version = current_version.unwrap_or(0) + 1`),
-        //    so an entry with value 0 is never valid: a shard with no committed state has *no
-        //    entry*, and downstream readers (JMT root lookup, state-sync's
-        //    `calculate_state_root_for_shard`) distinguish None (empty tree → placeholder
-        //    hash) from Some(v) (load root at v). If we wrote 0 here, those readers would
-        //    try to load a v0 root node that never existed and error with JMT NotFound.
+        // 3. Reset the latest-version pointer. State versions start at 1 (see `put_substate_tree_changes` —
+        //    `next_version = current_version.unwrap_or(0) + 1`), so an entry with value 0 is never valid: a shard with
+        //    no committed state has *no entry*, and downstream readers (JMT root lookup, state-sync's
+        //    `calculate_state_root_for_shard`) distinguish None (empty tree → placeholder hash) from Some(v) (load root
+        //    at v). If we wrote 0 here, those readers would try to load a v0 root node that never existed and error
+        //    with JMT NotFound.
         if target_version == 0 {
             versions_cf.delete(&shard, OPERATION)?;
         } else {
@@ -1758,11 +1757,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
-    fn applied_directive_save(&mut self, record: &AppliedDirective) -> Result<(), StorageError> {
-        const OPERATION: &str = "applied_directive_save";
+    fn rollback_history_insert(&mut self, entry: &RollbackHistoryEntry) -> Result<(), StorageError> {
+        const OPERATION: &str = "rollback_history_insert";
         self.db()
-            .cf(AppliedDirectivesCf)?
-            .put(&record.directive_id, record, OPERATION)?;
+            .cf(RollbackHistoryCf)?
+            .put(&(entry.applied_at_unix_secs, entry.target_epoch), entry, OPERATION)?;
         Ok(())
     }
 

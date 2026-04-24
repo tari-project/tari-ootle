@@ -4995,7 +4995,6 @@ dependencies = [
  "tari_comms",
  "tari_comms_dht",
  "tari_consensus",
- "tari_consensus_types",
  "tari_crypto",
  "tari_engine",
  "tari_engine_types",
@@ -5004,6 +5003,7 @@ dependencies = [
  "tari_ootle_address",
  "tari_ootle_app_utilities",
  "tari_ootle_common_types",
+ "tari_ootle_p2p",
  "tari_ootle_storage",
  "tari_ootle_transaction",
  "tari_ootle_wallet_sdk",
@@ -5012,6 +5012,7 @@ dependencies = [
  "tari_p2p",
  "tari_shutdown",
  "tari_sidechain",
+ "tari_state_store_rocksdb",
  "tari_template_builtin",
  "tari_template_lib_types",
  "tari_template_test_tooling",
@@ -5019,6 +5020,7 @@ dependencies = [
  "tari_transaction_manifest",
  "tari_validator_node",
  "tari_validator_node_client",
+ "tari_validator_rollback",
  "time",
  "tokio",
  "tonic 0.13.1",
@@ -12381,24 +12383,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tari_validator_admin_cli"
-version = "0.29.1"
-dependencies = [
- "anyhow",
- "clap 3.2.25",
- "hex",
- "rand 0.8.5",
- "reqwest 0.13.2",
- "serde_json",
- "tari_consensus_types",
- "tari_crypto",
- "tari_ootle_common_types",
- "tari_validator_node_client",
- "time",
- "tokio",
-]
-
-[[package]]
 name = "tari_validator_node"
 version = "0.29.1"
 dependencies = [
@@ -12510,6 +12494,25 @@ dependencies = [
  "tari_rpc_macros",
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "tari_validator_rollback"
+version = "0.29.1"
+dependencies = [
+ "anyhow",
+ "borsh",
+ "clap 3.2.25",
+ "serde",
+ "serde_json",
+ "tari_consensus_types",
+ "tari_engine_types",
+ "tari_ootle_common_types",
+ "tari_ootle_p2p",
+ "tari_ootle_storage",
+ "tari_ootle_transaction",
+ "tari_state_store_rocksdb",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

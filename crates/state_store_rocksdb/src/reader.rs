@@ -30,7 +30,6 @@ use rocksdb::{Transaction, TransactionDB};
 use serde::{Serialize, de::DeserializeOwned};
 use tari_consensus_types::{
     BlockId,
-    DirectiveId,
     HighPc,
     HighTc,
     HighestSeenBlock,
@@ -66,14 +65,16 @@ use tari_ootle_storage::{
     StateStoreReadTransaction,
     StorageError,
     consensus_models::{
-        AppliedDirective,
         Block,
         BlockDiff,
         BlockTransactionExecution,
+        BlocksAfterEpochRow,
         EpochCheckpoint,
         ForeignProposalRecord,
         LockedSubstateValue,
         PendingShardStateTreeDiff,
+        RewindTransitionKind,
+        RollbackHistoryEntry,
         StateVersionTransitions,
         SubstateChange,
         SubstateCreate,
@@ -82,6 +83,7 @@ use tari_ootle_storage::{
         SubstateLock,
         SubstatePledges,
         SubstateRecord,
+        SubstateRewindPlanRow,
         SubstateUpdateProof,
         SubstateValueFilterFlags,
         SubstateValueOrHash,
@@ -101,7 +103,6 @@ use crate::{
     cf_api::DbContext,
     codecs::DbEncoder,
     column_families::{
-        applied_directive::AppliedDirectivesCf,
         block,
         block::BlockCf,
         block_diff,
@@ -137,8 +138,9 @@ use crate::{
         lock_conflict,
         parked_block,
         pending_state_tree_diff,
+        rollback_history::RollbackHistoryCf,
         state_transition,
-        state_transition::StateTransitionType,
+        state_transition::{StateTransitionCf, StateTransitionType},
         state_tree,
         state_tree::StateTreeCf,
         state_tree_shard_versions,
@@ -1837,11 +1839,89 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(checkpoint)
     }
 
-    fn applied_directive_get(&self, id: &DirectiveId) -> Result<AppliedDirective, StorageError> {
-        const OPERATION: &str = "applied_directive_get";
-        let cf = self.db().cf(AppliedDirectivesCf)?;
-        let record = cf.get(id, OPERATION)?;
-        Ok(record)
+    fn rollback_history_list(&self) -> Result<Vec<RollbackHistoryEntry>, StorageError> {
+        const OPERATION: &str = "rollback_history_list";
+        let cf = self.db().cf(RollbackHistoryCf)?;
+        let iter = cf.iterator(Ordering::Ascending, OPERATION);
+        iter.map(|result| result.map(|(_, entry)| entry))
+            .collect::<Result<_, _>>()
+            .map_err(Into::into)
+    }
+
+    fn rollback_plan_collect_substates(
+        &self,
+        shard: Shard,
+        target_version: Version,
+    ) -> Result<Vec<SubstateRewindPlanRow>, StorageError> {
+        // Mirrors the walk performed by `substates_rewind_to_state_version`: collect every
+        // state_version > target for this shard in descending order, then for each record
+        // yield one row per transition in *reverse index order* so dry-run produces the
+        // same reverse-application sequence the mutating rewind applies.
+        const OPERATION: &str = "rollback_plan_collect_substates";
+
+        let db = self.db();
+        let transitions_cf = db.cf(StateTransitionCf)?;
+        let transitions_query = db.cf(state_transition::ByShardAndStateVersionQuery)?;
+        let substates_cf = db.cf(SubstateCf)?;
+
+        let start_version = target_version.saturating_add(1);
+
+        let versions: Vec<Version> = transitions_query
+            .query_range_key_iterator(Ordering::Descending, (shard, start_version)..(shard, Version::MAX))
+            .map(|res| {
+                let (key_shard, version) = res?;
+                debug_assert_eq!(key_shard, shard);
+                Ok::<_, StorageError>(version)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut rows = Vec::new();
+        for state_version in versions {
+            let record = transitions_cf.get(&(shard, state_version), OPERATION)?;
+            for transition in record.transitions.iter().rev() {
+                let substate = substates_cf.get(&transition.substate_address, OPERATION)?;
+                let kind = match transition.transition {
+                    StateTransitionType::Up => RewindTransitionKind::UpReverted,
+                    StateTransitionType::Down => RewindTransitionKind::DownReverted,
+                };
+                rows.push(SubstateRewindPlanRow {
+                    substate_id: substate.substate_id,
+                    shard,
+                    state_version,
+                    transition: kind,
+                    epoch: record.epoch,
+                });
+            }
+        }
+        Ok(rows)
+    }
+
+    fn rollback_plan_collect_blocks(&self, target_epoch: Epoch) -> Result<Vec<BlocksAfterEpochRow>, StorageError> {
+        // Mirrors the block-collection step of `rollback_delete_after_epoch`: enumerate
+        // every block with epoch > target, load each to extract the ids of transactions
+        // whose finalising commit would be undone.
+        const OPERATION: &str = "rollback_plan_collect_blocks";
+
+        let db = self.db();
+        let block_cf = db.cf(BlockCf)?;
+        let block_query = db.cf(block::ByEpochQuery)?;
+        let start_epoch = target_epoch + Epoch(1);
+
+        let keys: Vec<(Epoch, NodeHeight, BlockId)> = block_query
+            .query_range_key_iterator(Ordering::Ascending, start_epoch..Epoch::max())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut rows = Vec::with_capacity(keys.len());
+        for (epoch, _height, block_id) in keys {
+            let block = block_cf.get(&block_id, OPERATION)?;
+            let finalising_transaction_ids = block.all_finalising_transactions_ids().copied().collect();
+            rows.push(BlocksAfterEpochRow {
+                block_id,
+                epoch,
+                finalising_transaction_ids,
+            });
+        }
+        Ok(rows)
     }
 
     fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(

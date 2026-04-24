@@ -10,12 +10,14 @@ license.workspace = true
 [dependencies]
 # Apps
 tari_validator_node = { workspace = true, default-features = false }
+tari_validator_rollback = { workspace = true }
+tari_state_store_rocksdb = { workspace = true }
+tari_ootle_p2p = { workspace = true }
 tari_indexer = { workspace = true, default-features = false }
 tari_ootle_walletd = { workspace = true, default-features = false }
 tari_ootle_address = { workspace = true }
 tari_ootle_storage = { workspace = true }
 tari_consensus = { workspace = true }
-tari_consensus_types = { workspace = true }
 tari_template_builtin = { workspace = true }
 tari_template_test_tooling = { workspace = true }
 

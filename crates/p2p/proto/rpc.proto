@@ -300,5 +300,4 @@ enum ConsensusState {
   Running = 3;
   Sleeping = 4;
   Shutdown = 5;
-  OnHold = 6;
 }

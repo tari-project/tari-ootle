@@ -27,7 +27,7 @@ use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
 use tari_base_node_client::types::BaseLayerValidatorNode;
 use tari_common_types::types::FixedHash;
-use tari_consensus_types::{BlockId, ConsensusDirective, Decision};
+use tari_consensus_types::{BlockId, Decision};
 use tari_engine_types::{
     commit_result::FinalizeResult,
     fees::FeeCostBreakdown,
@@ -561,27 +561,4 @@ pub enum LayerOneTransactionParams {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
 pub struct PrepareLayerOneTransactionResponse {
     pub path: PathBuf,
-}
-
-/// Request body for `admin.apply_consensus_directive`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApplyConsensusDirectiveRequest {
-    pub directive: ConsensusDirective,
-}
-
-/// Response from `admin.apply_consensus_directive`.
-///
-/// `outcome` values:
-/// - `"already_applied"`: directive ID matched a persisted record; no mutation.
-/// - `"accepted_pending_orchestrator"`: signature verified and idempotency check passed, but the rollback orchestrator
-///   is not yet wired. Transitional; removed once the orchestrator lands.
-/// - `"applied"`: directive was executed; `applied_at_*` fields describe where.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
-pub struct ApplyConsensusDirectiveResponse {
-    pub directive_id: String,
-    pub outcome: String,
-    pub target_epoch: Option<u64>,
-    pub applied_at_epoch: Option<u64>,
-    pub applied_at_block_id: Option<String>,
 }

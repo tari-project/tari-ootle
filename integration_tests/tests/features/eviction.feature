@@ -37,10 +37,7 @@ Feature: Eviction scenarios
     Then I submit the eviction proof EVICT_PROOF to MINOTARI_WALLET
 
     When miner MINER mines to the next epoch
-    Then all validators have scanned to height 42
     When all validator nodes have started epoch 4
-#    When miner MINER mines to the next epoch (TODO: make this step)
-    When miner MINER mines 13 new blocks
+    When miner MINER mines to the next epoch
     When all validator nodes have started epoch 5
-    # TODO: this is flaky - the implementation of this step does not currently panic if this assertion fails
     Then validator VN5 is not a member of the current network according to BASE_NODE

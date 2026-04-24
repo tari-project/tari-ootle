@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{net::SocketAddr, path::PathBuf};
+use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
@@ -30,8 +30,8 @@ pub struct StressTestArgs {
     pub num_transactions: Option<u64>,
     #[clap(long, alias = "skip", short = 'k')]
     pub skip_transactions: Option<u64>,
-    #[clap(long, short = 'a')]
-    pub jrpc_addresses: Vec<SocketAddr>,
+    #[clap(long = "indexer-url", alias = "indexer", short = 'a')]
+    pub indexer_urls: Vec<String>,
     #[clap(long, short = 'f')]
     pub transaction_file: PathBuf,
     #[clap(long, short = 'y')]

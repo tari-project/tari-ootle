@@ -39,11 +39,6 @@ passwords = "3.1.16"
 zeroize = { workspace = true, features = ["serde", "simd"] }
 tokio = { workspace = true, default-features = false, features = ["sync", "rt-multi-thread"] }
 
-[dev-dependencies]
-tari_transaction_components = { workspace = true }
-tari_ootle_wallet_storage_sqlite = { workspace = true }
-tempfile = { workspace = true }
-
 [features]
 ts = [
     "ts-rs",

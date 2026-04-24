@@ -83,20 +83,20 @@ impl<'a> IdProvider<'a> {
         self.object_ids.next_proof_id()
     }
 
-    pub fn new_uuid(&self) -> Result<[u8; 32], IdProviderError> {
+    pub fn new_uuid(&self, entropy: &[u8]) -> Result<[u8; 32], IdProviderError> {
         let n = self.object_ids.next_uuid_id();
-        let id = hasher32(EngineHashDomainLabel::UuidOutput)
+        let h = hasher32(EngineHashDomainLabel::UuidOutput)
             .chain(&self.transaction_hash)
             .chain(&self.entity_id)
-            .chain(&n)
-            .result();
-        Ok(id.into_array())
+            .chain(entropy)
+            .chain(&n);
+        Ok(h.result().into_array())
     }
 
-    pub fn get_random_bytes(&self, len: usize) -> Result<Vec<u8>, IdProviderError> {
+    pub fn get_random_bytes(&self, entropy: &[u8], len: usize) -> Result<Vec<u8>, IdProviderError> {
         let mut result = Vec::with_capacity(len);
         while result.len() < len {
-            let bytes = self.new_uuid()?;
+            let bytes = self.new_uuid(entropy)?;
             let remaining = len - result.len();
             let end = bytes.len().min(remaining);
             result.extend_from_slice(bytes.get(..end).expect("end bound is always <= length"));
@@ -197,7 +197,7 @@ mod tests {
         let id_provider = IdProvider::new(EntityId::default(), Hash32::default(), &object_ids);
         const CASES: [usize; 7] = [0, 4, 32, 33, 64, 65, 129];
         for len in CASES {
-            let b = id_provider.get_random_bytes(len).unwrap();
+            let b = id_provider.get_random_bytes(&[], len).unwrap();
             assert_eq!(b.len(), len);
             if len > 0 {
                 assert!(b.iter().any(|&x| x != 0));

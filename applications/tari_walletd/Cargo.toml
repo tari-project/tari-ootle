@@ -14,6 +14,7 @@ tari_crypto = { workspace = true }
 tari_ootle_app_utilities = { workspace = true }
 tari_shutdown = { workspace = true }
 tari_ootle_wallet_crypto = { workspace = true, features = ["mmap-value-lookup"] }
+tari_ootle_address = { workspace = true }
 tari_ootle_wallet_sdk = { workspace = true }
 tari_ootle_wallet_sdk_services = { workspace = true, features = ["indexer_client"] }
 tari_ootle_wallet_storage_sqlite = { workspace = true }
@@ -37,7 +38,7 @@ axum = { workspace = true }
 axum-extra = { workspace = true, features = ["typed-header", "cookie"] }
 axum-jrpc = { workspace = true, features = ["anyhow_error"] }
 clap = { workspace = true, features = ["derive", "env"] }
-dirs-next = "2.0.0"
+dirs-next = { workspace = true }
 notify = "8.2.0"
 config = { workspace = true }
 either = { workspace = true }

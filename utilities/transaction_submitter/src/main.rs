@@ -4,12 +4,18 @@
 use std::{cmp, fs::File, io::Write, time::Duration};
 
 use anyhow::bail;
-use tari_ootle_common_types::optional::Optional;
-use tari_ootle_transaction::TransactionId;
-use tari_validator_node_client::{
-    ValidatorNodeClient,
-    types::{GetTransactionResultRequest, SubmitTransactionRequest, SubmitTransactionResponse},
+use tari_indexer_client::{
+    rest_api_client::IndexerRestApiClient,
+    types::{
+        GetTransactionResultRequest,
+        GetTransactionResultResponse,
+        IndexerTransactionFinalizedResult,
+        SubmitTransactionRequest,
+        SubmitTransactionResponse,
+    },
 };
+use tari_ootle_common_types::optional::Optional;
+use tari_ootle_transaction::{TransactionEnvelope, TransactionId};
 use tokio::{
     sync::mpsc,
     task,
@@ -40,16 +46,20 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn stress_test(args: StressTestArgs) -> anyhow::Result<Option<StressTestResultSummary>> {
-    if args.jrpc_addresses.is_empty() {
-        bail!("No validator nodes specified");
+    if args.indexer_urls.is_empty() {
+        bail!("No indexer URLs specified");
     }
-    let mut clients = Vec::with_capacity(args.jrpc_addresses.len());
-    for address in args.jrpc_addresses {
-        let mut client = ValidatorNodeClient::connect(format!("http://{}/json_rpc", address))?;
-        if let Err(e) = client.get_identity().await {
-            bail!("Failed to connect to {}: {}", address, e);
+    let mut clients = Vec::with_capacity(args.indexer_urls.len());
+    for url in &args.indexer_urls {
+        let endpoint = normalize_endpoint(url);
+        let client = IndexerRestApiClient::connect(endpoint.clone())?;
+        if let Err(e) = client.get_network_info().await {
+            bail!("Failed to connect to {}: {}", endpoint, e);
         }
-        clients.push(client);
+        clients.push(IndexerClient {
+            client,
+            endpoint: endpoint.clone(),
+        });
     }
 
     let num_transactions = read_number_of_transactions(&mut File::open(&args.transaction_file)?)?;
@@ -94,15 +104,23 @@ async fn stress_test(args: StressTestArgs) -> anyhow::Result<Option<StressTestRe
     let bounded_spawn = BoundedSpawn::new(clients.len() * 100);
     let (submitted_tx, submitted_rx) = mpsc::unbounded_channel();
     while let Ok(transaction) = transactions.recv() {
-        let mut client = clients[count % clients.len()].clone();
+        let client = clients[count % clients.len()].clone();
         let submitted_tx = submitted_tx.clone();
 
         // Bounded spawn prevents too many tasks from being spawned at once, to prevent opening too many sockets in the
         // OS.
         bounded_spawn
             .spawn(async move {
+                let envelope = match TransactionEnvelope::encode(transaction) {
+                    Ok(env) => env,
+                    Err(e) => {
+                        println!("Failed to encode transaction: {}", e);
+                        return;
+                    },
+                };
                 match client
-                    .submit_transaction(SubmitTransactionRequest { transaction })
+                    .client
+                    .submit_transaction(SubmitTransactionRequest { transaction: envelope })
                     .await
                 {
                     Ok(SubmitTransactionResponse { transaction_id, .. }) => {
@@ -132,7 +150,7 @@ async fn stress_test(args: StressTestArgs) -> anyhow::Result<Option<StressTestRe
 
 #[allow(clippy::too_many_lines)]
 async fn fetch_result_summary(
-    clients: Vec<ValidatorNodeClient>,
+    clients: Vec<IndexerClient>,
     mut submitted_rx: mpsc::UnboundedReceiver<TransactionId>,
 ) -> StressTestResultSummary {
     let bounded_spawn = BoundedSpawn::new(clients.len());
@@ -173,49 +191,71 @@ async fn fetch_result_summary(
 
     // Result emitter
     while let Some(transaction_id) = submitted_rx.recv().await {
-        let mut clients = clients.clone();
+        let clients = clients.clone();
         let num_clients = clients.len();
         let results_tx = results_tx.clone();
         bounded_spawn
             .spawn(async move {
                 let mut i = 0usize;
                 loop {
-                    let client = &mut clients[i % num_clients];
+                    let client = &clients[i % num_clients];
                     i += 1;
                     match client
+                        .client
                         .get_transaction_result(GetTransactionResultRequest { transaction_id })
                         .await
                         .optional()
                     {
-                        Ok(Some(result)) => {
-                            let exec_result = result.transaction_execution.result();
-                            let result = if let Some(diff) = exec_result.finalize.result.any_accept() {
-                                TxFinalized {
-                                    is_committed: true,
-                                    is_error: false,
-                                    num_up_substates: diff.up_len(),
-                                    num_down_substates: diff.down_len(),
-                                    execution_time: result.transaction_execution.execution_time(),
-                                }
-                            } else {
-                                TxFinalized {
+                        Ok(Some(GetTransactionResultResponse {
+                            result:
+                                IndexerTransactionFinalizedResult::Finalized {
+                                    execution_result,
+                                    execution_time,
+                                    ..
+                                },
+                        })) => {
+                            let result = match execution_result {
+                                Some(exec_result) => {
+                                    if let Some(diff) = exec_result.finalize.result.any_accept() {
+                                        TxFinalized {
+                                            is_committed: true,
+                                            is_error: false,
+                                            num_up_substates: diff.up_len(),
+                                            num_down_substates: diff.down_len(),
+                                            execution_time,
+                                        }
+                                    } else {
+                                        TxFinalized {
+                                            is_committed: false,
+                                            is_error: false,
+                                            num_up_substates: 0,
+                                            num_down_substates: 0,
+                                            execution_time,
+                                        }
+                                    }
+                                },
+                                None => TxFinalized {
                                     is_committed: false,
                                     is_error: false,
                                     num_up_substates: 0,
                                     num_down_substates: 0,
-                                    execution_time: result.transaction_execution.execution_time(),
-                                }
+                                    execution_time,
+                                },
                             };
 
                             results_tx.send(result).await.unwrap();
                             break;
                         },
+                        Ok(Some(GetTransactionResultResponse {
+                            result: IndexerTransactionFinalizedResult::Pending,
+                        })) => {
+                            sleep(Duration::from_secs(1)).await;
+                        },
                         Ok(None) => {
                             println!(
-                                "[{}] Result not found for transaction {}. This is likely due to a race condition or \
-                                 requesting the result from a non-involved validator (multi-shard). Retrying later...",
-                                client.endpoint(),
-                                transaction_id
+                                "[{}] Result not found for transaction {}. The indexer may not have seen it yet. \
+                                 Retrying later...",
+                                client.endpoint, transaction_id
                             );
                             sleep(Duration::from_secs(1)).await;
                         },
@@ -242,6 +282,24 @@ async fn fetch_result_summary(
     // Drop the remaining sender handle so that the result collector ends when all results have been received
     drop(results_tx);
     results_handle.await.unwrap()
+}
+
+#[derive(Clone)]
+struct IndexerClient {
+    client: IndexerRestApiClient,
+    endpoint: String,
+}
+
+fn normalize_endpoint(input: &str) -> String {
+    let mut url = if input.starts_with("http://") || input.starts_with("https://") {
+        input.to_string()
+    } else {
+        format!("http://{input}")
+    };
+    if !url.ends_with('/') {
+        url.push('/');
+    }
+    url
 }
 
 struct TxFinalized {

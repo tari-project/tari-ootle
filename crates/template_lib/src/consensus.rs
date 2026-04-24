@@ -21,6 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tari_template_abi::{EngineOp, call_engine};
+use tari_template_lib_types::Hash32;
 
 use crate::args::{ConsensusAction, ConsensusInvokeArg, InvokeResult};
 
@@ -36,5 +37,22 @@ impl Consensus {
         });
         resp.decode()
             .expect("Consensus GetCurrentEpoch returned invalid resource type")
+    }
+
+    /// Returns the epoch hash of the current epoch.
+    ///
+    /// The epoch hash is derived from the base layer (L1) block hash at the start of the epoch and
+    /// is fixed for the entire duration of the epoch. It is unpredictable before the epoch begins,
+    /// making it suitable as a deterministic randomness seed for settling epoch-based bets.
+    ///
+    /// # Example usage
+    /// - Epoch N: record a bet and `Consensus::current_epoch()` as the placement epoch
+    /// - Epoch N+1: call `Consensus::current_epoch_hash()` to obtain the settlement seed
+    pub fn current_epoch_hash() -> Hash32 {
+        let resp: InvokeResult = call_engine(EngineOp::ConsensusInvoke, &ConsensusInvokeArg {
+            action: ConsensusAction::GetCurrentEpochHash,
+        });
+        resp.decode()
+            .expect("Consensus GetCurrentEpochHash returned invalid resource type")
     }
 }

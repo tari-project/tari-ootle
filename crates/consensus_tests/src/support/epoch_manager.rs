@@ -429,6 +429,14 @@ impl EpochManagerReader for TestEpochManager {
             total_power,
         ))
     }
+
+    async fn lock_epoch(&self, _epoch: Epoch) -> Result<(), EpochManagerError> {
+        Ok(())
+    }
+
+    async fn is_within_epoch_end_spread(&self, _current_epoch: Epoch) -> Result<bool, EpochManagerError> {
+        Ok(false)
+    }
 }
 
 #[derive(Debug, Clone)]

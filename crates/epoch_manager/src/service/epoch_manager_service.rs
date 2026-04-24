@@ -238,18 +238,47 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
     }
 
     fn activate_epoch(&mut self, epoch: Epoch, epoch_hash: FixedHash) -> Result<(), EpochManagerError> {
-        if self.current_epoch() >= epoch {
-            // no need to update the epoch
-            return Ok(());
+        use std::cmp::Ordering;
+        match epoch.cmp(&self.current_epoch()) {
+            Ordering::Less => Ok(()),
+            Ordering::Equal => {
+                // Same epoch re-activated. Permit a hash correction only if the epoch has not yet
+                // been locked in by a committed EndEpoch block. This lets the base-layer scanner
+                // self-heal during the pre-commit window if a reorg near the epoch boundary causes
+                // the initial hash to be wrong, without ever rewriting a hash that consensus has
+                // already committed against.
+                if self.inner.current_epoch_hash() == epoch_hash {
+                    return Ok(());
+                }
+                if self.inner.is_epoch_locked(epoch) {
+                    warn!(
+                        target: LOG_TARGET,
+                        "⛓️ Ignoring oracle hash correction for already-locked epoch {}: stored={}, candidate={}",
+                        epoch,
+                        self.inner.current_epoch_hash(),
+                        epoch_hash,
+                    );
+                    return Ok(());
+                }
+                warn!(
+                    target: LOG_TARGET,
+                    "🩹 Correcting epoch_hash for {}: {} -> {}",
+                    epoch,
+                    self.inner.current_epoch_hash(),
+                    epoch_hash,
+                );
+                self.inner.insert_current_epoch(epoch, epoch_hash)?;
+                Ok(())
+            },
+            Ordering::Greater => {
+                self.has_epoch_changed = true;
+                // In the base layer case, the epoch_hash is the first block of the epoch
+                // persist the epoch data including the validator node set
+                self.inner.insert_current_epoch(epoch, epoch_hash)?;
+                self.inner.assign_validators_for_epoch(epoch)?;
+                Ok(())
+            },
         }
-
-        self.has_epoch_changed = true;
-
-        // In the base layer case, the epoch_hash is the first block of the epoch
-        // persist the epoch data including the validator node set
-        self.inner.insert_current_epoch(epoch, epoch_hash)?;
-        self.inner.assign_validators_for_epoch(epoch)?;
-        Ok(())
     }
 
     fn current_epoch(&self) -> Epoch {
@@ -450,6 +479,16 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
             ),
             EpochManagerRequest::GetNetworkDescription { reply } => {
                 handle(reply, self.inner.get_network_description(), context)
+            },
+            EpochManagerRequest::LockEpoch { epoch, reply } => {
+                handle(reply, self.inner.lock_epoch(epoch), context);
+            },
+            EpochManagerRequest::IsWithinEpochEndSpread { current_epoch, reply } => {
+                handle(
+                    reply,
+                    Ok(self.epoch_events.is_within_epoch_end_spread(current_epoch)),
+                    context,
+                );
             },
         }
     }

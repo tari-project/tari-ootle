@@ -191,6 +191,35 @@ impl From<EpochCheckpoint> for proto::rpc::EpochCheckpoint {
     }
 }
 
+// -------------------------------- ConsensusState -------------------------------- //
+impl From<tari_consensus::hotstuff::ConsensusCurrentState> for proto::rpc::ConsensusState {
+    fn from(value: tari_consensus::hotstuff::ConsensusCurrentState) -> Self {
+        use tari_consensus::hotstuff::ConsensusCurrentState::*;
+        match value {
+            Idle => proto::rpc::ConsensusState::Idle,
+            CheckSync => proto::rpc::ConsensusState::CheckSync,
+            Syncing => proto::rpc::ConsensusState::Syncing,
+            Running => proto::rpc::ConsensusState::Running,
+            Sleeping => proto::rpc::ConsensusState::Sleeping,
+            Shutdown => proto::rpc::ConsensusState::Shutdown,
+        }
+    }
+}
+
+impl From<proto::rpc::ConsensusState> for tari_consensus::hotstuff::ConsensusCurrentState {
+    fn from(value: proto::rpc::ConsensusState) -> Self {
+        use tari_consensus::hotstuff::ConsensusCurrentState::*;
+        match value {
+            proto::rpc::ConsensusState::Idle => Idle,
+            proto::rpc::ConsensusState::CheckSync => CheckSync,
+            proto::rpc::ConsensusState::Syncing => Syncing,
+            proto::rpc::ConsensusState::Running => Running,
+            proto::rpc::ConsensusState::Sleeping => Sleeping,
+            proto::rpc::ConsensusState::Shutdown => Shutdown,
+        }
+    }
+}
+
 // -------------------------------- TreeRootSummary -------------------------------- //
 impl TryFrom<proto::rpc::TreeRootSummary> for TreeRootSummary {
     type Error = anyhow::Error;

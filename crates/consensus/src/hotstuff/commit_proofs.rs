@@ -207,6 +207,7 @@ pub fn convert_block_to_sidechain_block_header(header: &BlockHeader) -> Result<S
         justify_id: *header.justify_id().hash(),
         height: header.height().as_u64(),
         epoch: header.epoch().as_u64(),
+        epoch_hash: *header.epoch_hash(),
         shard_group: tari_sidechain::ShardGroup {
             start: header.shard_group().start().as_u32(),
             end_inclusive: header.shard_group().end().as_u32(),
@@ -330,6 +331,7 @@ mod tests {
             justify_id: *qc1_id.hash(),
             height: 2,
             epoch: 1,
+            epoch_hash: Default::default(),
             shard_group: tari_sidechain::ShardGroup {
                 start: 1,
                 end_inclusive: 256,

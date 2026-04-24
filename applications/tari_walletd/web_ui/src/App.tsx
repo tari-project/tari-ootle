@@ -27,6 +27,7 @@ import Loading from "@components/Loading";
 import AccessTokensLayout from "@routes/AccessTokens/AccessTokens";
 import AccountDetails from "@routes/AccountDetails/AccountDetails";
 import Accounts from "@routes/Accounts/Accounts";
+import AddressBookPage from "@routes/AddressBook/AddressBookPage";
 import MyAssets from "@routes/AssetVault/Components/MyAssets";
 import ErrorPage from "@routes/ErrorPage";
 import Keys from "@routes/Keys/Keys";
@@ -114,6 +115,11 @@ export const breadcrumbRoutes = [
   {
     label: "Manifest",
     path: "/manifest",
+    dynamic: false,
+  },
+  {
+    label: "Address Book",
+    path: "/address-book",
     dynamic: false,
   },
   // {
@@ -235,6 +241,7 @@ function App() {
           <Route path="settings" element={<GuardedRoute redirect="/settings" component={SettingsPage} />} />
           <Route path="templates" element={<GuardedRoute redirect="/templates" component={Templates} />} />
           <Route path="manifest" element={<GuardedRoute redirect="/manifest" component={Manifest} />} />
+          <Route path="address-book" element={<GuardedRoute redirect="/address-book" component={AddressBookPage} />} />
           {/*<Route path="flow-editor" element={<GuardedRoute redirect="/flow-editor" component={FlowEditor} />} />*/}
           <Route
             path="stealth-utxos/:resource_address"

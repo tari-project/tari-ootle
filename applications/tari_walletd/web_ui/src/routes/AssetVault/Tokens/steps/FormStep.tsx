@@ -20,9 +20,19 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, SUCH DAMAGE.
 
+import AddressAutocomplete from "@components/AddressAutocomplete";
 import CopyAddress from "@components/CopyAddress";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
-import { Alert, Chip, CircularProgress, Divider, InputAdornment, InputLabel, Stack, Typography } from "@mui/material";
+import {
+  Alert,
+  Chip,
+  CircularProgress,
+  Divider,
+  InputAdornment,
+  InputLabel,
+  Stack,
+  Typography,
+} from "@mui/material";
 import Button from "@mui/material/Button";
 import CheckBox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
@@ -41,7 +51,7 @@ import {
 } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
 import { formatCurrency, parseAmountToBaseUnits } from "@utils/helpers";
-import { FormEvent, useState } from "react";
+import { SyntheticEvent, useState } from "react";
 import { Form } from "react-router";
 
 export interface SendMoneyFormState {
@@ -81,9 +91,9 @@ interface FormStepProps {
   poolRate: PoolRateInfo | null;
   poolError: string | null;
   isLoadingPoolRate: boolean;
-  onSubmit: (e: FormEvent) => void;
+  onSubmit: (e: SyntheticEvent) => void;
   onCancel: () => void;
-  onFormValueChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onFormValueChange: (name: string, value: string) => void;
   onSelectFormValueChange: (e: SelectChangeEvent<unknown>) => void;
   onCheckboxFormValueChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onUseBadgeChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -154,7 +164,9 @@ export default function FormStep({
   const enteredAmountInBaseUnits = isNaNAmount ? 0n : parseAmountToBaseUnits(transferFormState.amount, divisibility);
   const hasInsufficientFunds = availableBalance !== undefined && enteredAmountInBaseUnits > BigInt(availableBalance);
   const poolHasNoLiquidity =
-    !!transferFormState.swapPoolAddress && poolRate !== null && (poolRate.balance_a === 0n || poolRate.balance_b === 0n);
+    !!transferFormState.swapPoolAddress &&
+    poolRate !== null &&
+    (poolRate.balance_a === 0n || poolRate.balance_b === 0n);
 
   const isFormValid =
     !isNaNAmount &&
@@ -231,14 +243,11 @@ export default function FormStep({
         )}
         <Stack direction="column" spacing={0.5}>
           <DisplayFormError forType="address" formError={formError} />
-          <TextField
-            name="address"
-            label="To Address"
+          <AddressAutocomplete
             value={transferFormState.address}
-            required
-            onChange={onFormValueChange}
-            style={{ flexGrow: 1 }}
+            onChange={(v) => onFormValueChange("address", v)}
             disabled={disabled}
+            required
           />
         </Stack>
 
@@ -269,7 +278,7 @@ export default function FormStep({
                   htmlInput: { maxLength: 253 },
                 }}
                 value={transferFormState.memo}
-                onChange={onFormValueChange}
+                onChange={(e) => onFormValueChange(e.target.name, e.target.value)}
                 style={{ flexGrow: 1 }}
                 disabled={disabled}
               />
@@ -297,7 +306,7 @@ export default function FormStep({
           value={formatAmountValue(transferFormState.amount)}
           type="text"
           required
-          onChange={onFormValueChange}
+          onChange={(e) => onFormValueChange(e.target.name, e.target.value)}
           onFocus={() => setIsFocusedAmount(true)}
           onBlur={() => setIsFocusedAmount(false)}
           style={{ flexGrow: 1 }}
@@ -323,7 +332,7 @@ export default function FormStep({
           label="Fee"
           value={transferFormState.fee}
           placeholder={isEstimatingFee ? "Estimating..." : "Auto-calculated"}
-          onChange={onFormValueChange}
+          onChange={(e) => onFormValueChange(e.target.name, e.target.value)}
           style={{ flexGrow: 1 }}
           slotProps={{
             input: {
@@ -413,7 +422,7 @@ export default function FormStep({
                 label="Swap Pool Address"
                 value={transferFormState.swapPoolAddress}
                 onChange={(e) => {
-                  onFormValueChange(e as React.ChangeEvent<HTMLInputElement>);
+                  onFormValueChange("swapPoolAddress", e.target.value);
                   // Fetch rate when user finishes typing (debounced via onBlur)
                 }}
                 onBlur={() => {

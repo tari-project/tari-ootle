@@ -4965,7 +4965,6 @@ name = "integration_tests"
 version = "0.29.1"
 dependencies = [
  "anyhow",
- "borsh",
  "config",
  "cucumber",
  "hex",
@@ -12386,7 +12385,6 @@ name = "tari_validator_admin_cli"
 version = "0.29.1"
 dependencies = [
  "anyhow",
- "borsh",
  "clap 3.2.25",
  "hex",
  "rand 0.8.5",
@@ -12407,7 +12405,6 @@ dependencies = [
  "anyhow",
  "axum 0.8.8",
  "axum-jrpc",
- "borsh",
  "clap 3.2.25",
  "config",
  "console-subscriber",

@@ -1702,9 +1702,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             tree_cf.delete(key, OPERATION)?;
         }
 
-        // 2. Delete stale-node records at versions > target for this shard. Range-scan the
-        //    (shard, version) half-open range directly rather than iterating every stale
-        //    record for the shard and filtering by version.
+        // 2. Delete stale-node records at versions > target for this shard. Range-scan the (shard, version) half-open
+        //    range directly rather than iterating every stale record for the shard and filtering by version.
         let mut stale_keys_to_delete = Vec::new();
         for result in
             stale_query.query_range_iterator(Ordering::Ascending, (shard, start_version)..(shard, Version::MAX))
@@ -1718,9 +1717,18 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             stale_cf.delete(key, OPERATION)?;
         }
 
-        // 3. Reset the latest-version pointer. If target_version is 0, we write 0 (the default for a shard with no
-        //    committed state).
-        versions_cf.put(&shard, &target_version, OPERATION)?;
+        // 3. Reset the latest-version pointer. State versions start at 1 (see
+        //    `put_substate_tree_changes` — `next_version = current_version.unwrap_or(0) + 1`),
+        //    so an entry with value 0 is never valid: a shard with no committed state has *no
+        //    entry*, and downstream readers (JMT root lookup, state-sync's
+        //    `calculate_state_root_for_shard`) distinguish None (empty tree → placeholder
+        //    hash) from Some(v) (load root at v). If we wrote 0 here, those readers would
+        //    try to load a v0 root node that never existed and error with JMT NotFound.
+        if target_version == 0 {
+            versions_cf.delete(&shard, OPERATION)?;
+        } else {
+            versions_cf.put(&shard, &target_version, OPERATION)?;
+        }
 
         debug!(
             target: LOG_TARGET,
@@ -1793,6 +1801,16 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             .collect::<Result<Vec<_>, _>>()?;
 
         for (epoch, height, block_id) in &to_delete {
+            // Load the block before deleting so we can walk its commands and clean up per-tx
+            // records that the block-id-keyed cascade below doesn't cover. Specifically,
+            // `transactions_finalize_all` prunes the (block_id, tx_id, height) index on
+            // finalize; that leaves `block_transaction_executions_remove_any_by_block_id`
+            // with nothing to scan for already-finalized transactions, so their
+            // `BlockTransactionExecutionCf` rows + `FinalizedTransactionLinkCf` link would
+            // otherwise survive the rollback and let `get_transaction_result` keep returning
+            // the committed execution.
+            let block = self.db().cf(BlockCf)?.get(block_id, OPERATION)?;
+
             // Per-block cascades via existing helpers. Keeps this list consistent with what
             // block insertion creates, so the cascade stays correct as new tables are added.
             self.block_diffs_remove(block_id)?;
@@ -1802,17 +1820,38 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             self.transaction_pool_state_updates_remove_any_by_block_id(block_id)?;
             self.lock_conflicts_remove_by_block_id(block_id)?;
 
-            // Delete the block record and its chain/epoch indexes.
+            // Clean up finalized execution records for transactions in this block. The
+            // `BlockTransactionExecutionCf` row is keyed by (tx_id, block_id, height) and is
+            // inserted at the block where the transaction was executed (Prepare for
+            // multi-stage, this block itself for LocalOnly). Attempting to delete at
+            // (tx_id, this_block_id, this_block_height) is correct for LocalOnly rows and a
+            // no-op otherwise — the Prepare block's own iteration will catch its own row.
+            let exec_cf = self.db().cf(BlockTransactionExecutionCf)?;
+            let finalized_link_cf = self.db().cf(FinalizedTransactionLinkCf)?;
+            for tx_id in block.all_transaction_ids() {
+                exec_cf.delete(&(*tx_id, *block_id, *height), OPERATION)?;
+            }
+            // Finalising commands mark this block as where the transaction's finalize QC
+            // committed, so `FinalizedTransactionLinkCf[tx_id]` was written here. Deleting it
+            // restores the "not-yet-finalized" state so `finalized_transaction_execution_get`
+            // returns NotFound post-rollback.
+            for tx_id in block.all_finalising_transactions_ids() {
+                finalized_link_cf.delete(tx_id, OPERATION)?;
+            }
+
+            // Delete the block record and its chain/epoch indexes. Use the idempotent
+            // `delete` throughout — a block is either in both chain indexes or neither (it
+            // was committed vs. still pending), so one of `CommittedParentChildChainIndex`
+            // / `PendingChainIndex` will always be a miss and the `delete_or_not_found`
+            // variant would panic on that miss.
             self.db().cf(BlockCf)?.delete(block_id, OPERATION)?;
             self.db()
                 .cf(block::EpochHeightIndex)?
                 .delete(&(*epoch, *height, *block_id), OPERATION)?;
             self.db()
                 .cf(CommittedParentChildChainIndex)?
-                .delete_or_not_found(block_id, OPERATION)?;
-            self.db()
-                .cf(chain::PendingChainIndex)?
-                .delete_or_not_found(block_id, OPERATION)?;
+                .delete(block_id, OPERATION)?;
+            self.db().cf(chain::PendingChainIndex)?.delete(block_id, OPERATION)?;
             // PendingParentChildIndex is keyed by (parent, child). Precise deletion needs the
             // block's parent, which itself may already be gone. Stale entries are benign —
             // all index consumers start from known block_ids and won't reach orphans.
@@ -1864,12 +1903,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             .query_range_iterator(Ordering::Ascending, start_epoch..Epoch::max())
             .collect::<Result<Vec<_>, _>>()?;
         for ((epoch, block_id), _) in &fp_epoch_keys {
-            // foreign_proposals_delete handles the main CF + secondary indexes; if the row is
-            // already gone (e.g. a prior deletion cascade), tolerate it.
-            self.db()
-                .cf(ForeignProposalCf)?
-                .delete_or_not_found(block_id, OPERATION)?;
-            fp_epoch_index_cf.delete_or_not_found(&(*epoch, *block_id), OPERATION)?;
+            // If the row is already gone (e.g. a prior deletion cascade), tolerate it.
+            // `delete` is a direct rocksdb delete_cf and is idempotent.
+            self.db().cf(ForeignProposalCf)?.delete(block_id, OPERATION)?;
+            fp_epoch_index_cf.delete(&(*epoch, *block_id), OPERATION)?;
         }
         stats.foreign_proposals_deleted = fp_epoch_keys.len();
 
@@ -1888,29 +1925,18 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         // 7. Clear bookkeeping singletons. These are all keyed by `ByteColumn`; deleting the single entry removes the
         //    pointer entirely. On consensus resume the genesis path in `create_genesis_block_if_required` repopulates
-        //    them for the fresh epoch.
-        self.db().cf(LeafBlockCf)?.delete_or_not_found(&ByteColumn, OPERATION)?;
-        self.db()
-            .cf(LockedBlockCf)?
-            .delete_or_not_found(&ByteColumn, OPERATION)?;
-        self.db()
-            .cf(HighestSeenBlockCf)?
-            .delete_or_not_found(&ByteColumn, OPERATION)?;
-        self.db()
-            .cf(LastExecutedCf)?
-            .delete_or_not_found(&ByteColumn, OPERATION)?;
-        self.db().cf(LastVotedCf)?.delete_or_not_found(&ByteColumn, OPERATION)?;
-        self.db()
-            .cf(LastProposedCf)?
-            .delete_or_not_found(&ByteColumn, OPERATION)?;
-        self.db()
-            .cf(LastSentVoteCf)?
-            .delete_or_not_found(&ByteColumn, OPERATION)?;
-        self.db()
-            .cf(LastSentNewViewCf)?
-            .delete_or_not_found(&ByteColumn, OPERATION)?;
-        self.db().cf(HighPcCf)?.delete_or_not_found(&ByteColumn, OPERATION)?;
-        self.db().cf(HighTcCf)?.delete_or_not_found(&ByteColumn, OPERATION)?;
+        //    them for the fresh epoch. Use idempotent `delete` — a freshly-joined node may not have every singleton
+        //    populated yet (e.g. `LastSentVote` before it has ever voted) and this step must not fail in that case.
+        self.db().cf(LeafBlockCf)?.delete(&ByteColumn, OPERATION)?;
+        self.db().cf(LockedBlockCf)?.delete(&ByteColumn, OPERATION)?;
+        self.db().cf(HighestSeenBlockCf)?.delete(&ByteColumn, OPERATION)?;
+        self.db().cf(LastExecutedCf)?.delete(&ByteColumn, OPERATION)?;
+        self.db().cf(LastVotedCf)?.delete(&ByteColumn, OPERATION)?;
+        self.db().cf(LastProposedCf)?.delete(&ByteColumn, OPERATION)?;
+        self.db().cf(LastSentVoteCf)?.delete(&ByteColumn, OPERATION)?;
+        self.db().cf(LastSentNewViewCf)?.delete(&ByteColumn, OPERATION)?;
+        self.db().cf(HighPcCf)?.delete(&ByteColumn, OPERATION)?;
+        self.db().cf(HighTcCf)?.delete(&ByteColumn, OPERATION)?;
         stats.bookkeeping_cleared = true;
 
         info!(

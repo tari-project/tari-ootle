@@ -270,8 +270,12 @@ pub async fn create_account_with_free_coins(world: &mut TariWorld, account_name:
         address: resp.address,
         account: resp.account,
     });
+    let transaction_id: tari_ootle_transaction::TransactionId = resp.result.transaction_hash.into_array().into();
+    // Record the tx id against the account name so subsequent cucumber steps (e.g. rollback
+    // assertions) can look up and inspect it on validators.
+    world.submitted_transactions.insert(account_name.clone(), transaction_id);
     let wait_req = TransactionWaitResultRequest {
-        transaction_id: resp.result.transaction_hash.into_array().into(),
+        transaction_id,
         timeout_secs: Some(120),
     };
     let _wait_resp = client.wait_transaction_result(wait_req).await.unwrap();

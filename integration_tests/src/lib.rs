@@ -46,6 +46,7 @@ use tari_crypto::{
 };
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::SubstateRequirement;
+use tari_ootle_transaction::TransactionId;
 use tari_ootle_wallet_sdk::models::AccountWithAddress;
 use tari_sidechain::EvictionProof;
 use tari_transaction_components::{
@@ -94,6 +95,10 @@ pub struct TariWorld {
     pub num_databases_saved: usize,
     pub key_manager: KeyManager,
     pub wallet_accounts: IndexMap<String, AccountWithAddress>,
+    /// Transaction ids submitted by helpers (e.g. account-creation flows) keyed by a
+    /// human-readable name (typically the account name). Used by cucumber steps that need
+    /// to assert a transaction was or is no longer committed — e.g. rollback scenarios.
+    pub submitted_transactions: IndexMap<String, TransactionId>,
     pub wallet_daemons: IndexMap<String, TariWalletDaemonProcess>,
     /// Used for all one-sided coinbase payments
     pub minotari_wallet_private_key: PrivateKey,
@@ -134,6 +139,7 @@ impl TariWorld {
             num_databases_saved: 0,
             key_manager: KeyManager::new_random().unwrap(),
             wallet_accounts: IndexMap::new(),
+            submitted_transactions: IndexMap::new(),
             wallet_daemons: IndexMap::new(),
             minotari_wallet_private_key: wallet_private_key,
             default_payment_address,

@@ -37,11 +37,14 @@ impl<TStore: StateStore + Send + Sync + Clone + 'static> PeriodicTask for EpochG
         .await;
 
         match result {
-            Ok(_) => {
+            Ok(Ok(())) => {
                 log::info!(target: LOG_TARGET, "🗑️ Epoch GC task completed successfully");
             },
+            Ok(Err(err)) => {
+                log::error!(target: LOG_TARGET, "Failed to run epoch GC: {}", err);
+            },
             Err(e) => {
-                log::error!(target: LOG_TARGET, "Failed to run epoch GC: {}", e);
+                log::error!(target: LOG_TARGET, "epoch GC panicked: {}", e);
             },
         }
     }

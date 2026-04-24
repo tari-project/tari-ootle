@@ -17,11 +17,8 @@ anyhow = { workspace = true }
 borsh = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 hex = { workspace = true }
-log = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
-serde = { workspace = true }
 serde_json = { workspace = true }
-thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

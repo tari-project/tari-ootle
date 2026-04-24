@@ -103,6 +103,7 @@ fn to_client_consensus_state(state: ConsensusCurrentState) -> ValidatorConsensus
         ConsensusCurrentState::CheckSync => ValidatorConsensusState::CheckSync,
         ConsensusCurrentState::Syncing => ValidatorConsensusState::Syncing,
         ConsensusCurrentState::Running => ValidatorConsensusState::Running,
+        ConsensusCurrentState::OnHold => ValidatorConsensusState::OnHold,
         ConsensusCurrentState::Sleeping => ValidatorConsensusState::Sleeping,
         ConsensusCurrentState::Shutdown => ValidatorConsensusState::Shutdown,
     }

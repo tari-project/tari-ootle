@@ -200,6 +200,7 @@ impl From<tari_consensus::hotstuff::ConsensusCurrentState> for proto::rpc::Conse
             CheckSync => proto::rpc::ConsensusState::CheckSync,
             Syncing => proto::rpc::ConsensusState::Syncing,
             Running => proto::rpc::ConsensusState::Running,
+            OnHold => proto::rpc::ConsensusState::OnHold,
             Sleeping => proto::rpc::ConsensusState::Sleeping,
             Shutdown => proto::rpc::ConsensusState::Shutdown,
         }
@@ -214,6 +215,7 @@ impl From<proto::rpc::ConsensusState> for tari_consensus::hotstuff::ConsensusCur
             proto::rpc::ConsensusState::CheckSync => CheckSync,
             proto::rpc::ConsensusState::Syncing => Syncing,
             proto::rpc::ConsensusState::Running => Running,
+            proto::rpc::ConsensusState::OnHold => OnHold,
             proto::rpc::ConsensusState::Sleeping => Sleeping,
             proto::rpc::ConsensusState::Shutdown => Shutdown,
         }

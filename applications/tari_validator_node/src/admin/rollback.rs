@@ -139,12 +139,16 @@ pub async fn apply_rollback_directive(
     // 1. Request on-hold. This guarantees the hotstuff worker has unwound its run loop before we touch storage.
     consensus_handle.request_on_hold(ON_HOLD_STATE_TIMEOUT).await?;
 
-    // 2. Single atomic write tx for all storage mutations.
+    // 2. Capture the pre-rollback chain tip for the audit log. `leaf_block_get` filters the
+    //    singleton leaf by epoch, so we have to ask for the current L1-driven epoch — asking
+    //    for `target_epoch` would return NotFound when the chain has advanced past it, which
+    //    is precisely the case we're in during a rollback.
+    let current_epoch = consensus_handle.current_epoch();
     let leaf_block_id_hex_before: Option<String> = state_store
-        .with_read_tx(|tx| tx.leaf_block_get(target_epoch).optional())?
+        .with_read_tx(|tx| tx.leaf_block_get(current_epoch).optional())?
         .map(|lb| hex::encode(lb.block_id.as_bytes()));
 
-    let current_epoch = consensus_handle.current_epoch();
+    // 3. Single atomic write tx for all storage mutations.
     let applied_at_unix_secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())

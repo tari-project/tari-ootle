@@ -1346,18 +1346,21 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let mut touched: HashSet<SubstateId> = HashSet::new();
         let mut stats = SubstateRewindStats::default();
 
-        // Collect transition records to process (we can't delete while iterating).
-        let mut records: Vec<(Version, StateTransitionModelDataV1)> = transitions_query
-            .query_range_iterator(Ordering::Descending, (shard, start_version)..(shard, Version::MAX))
+        // Collect only the versions we need to process — then load each record one at a time
+        // inside the loop. This caps memory at ~O(n_versions) rather than O(n_versions *
+        // avg_record_size), which matters for large rollbacks spanning many epochs.
+        let versions: Vec<Version> = transitions_query
+            .query_range_key_iterator(Ordering::Descending, (shard, start_version)..(shard, Version::MAX))
             .map(|res| {
-                let ((key_shard, version), data) = res?;
+                let (key_shard, version) = res?;
                 debug_assert_eq!(key_shard, shard);
-                Ok::<_, StorageError>((version, data))
+                Ok::<_, StorageError>(version)
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        // Iterator was Descending, so `records` is already in reverse state_version order.
-        for (state_version, record) in records.drain(..) {
+        // Iterator was Descending, so `versions` is already in reverse state_version order.
+        for state_version in versions {
+            let record = transitions_cf.get(&(shard, state_version), OPERATION)?;
             // Within a record, invert transitions in reverse index order so that the inverse
             // sequence is the exact time-reversed mirror of forward application.
             for transition in record.transitions.iter().rev() {
@@ -1676,7 +1679,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         let tree_cf = self.db().cf(StateTreeCf)?;
         let version_query = self.db().cf(state_tree::ByShardStateVersionQuery)?;
-        let stale_query = self.db().cf(state_tree::ByStateTreeStaleShardQuery)?;
+        let stale_query = self.db().cf(state_tree::ByStateTreeStaleShardVersionQuery)?;
         let stale_cf = self.db().cf(StateTreeStaleNodesCf)?;
         let versions_cf = self.db().cf(StateTreeShardVersionCf)?;
 
@@ -1699,14 +1702,16 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             tree_cf.delete(key, OPERATION)?;
         }
 
-        // 2. Delete stale-node records at versions > target for this shard.
+        // 2. Delete stale-node records at versions > target for this shard. Range-scan the
+        //    (shard, version) half-open range directly rather than iterating every stale
+        //    record for the shard and filtering by version.
         let mut stale_keys_to_delete = Vec::new();
-        for result in stale_query.query_prefix_range_iterator(Ordering::Ascending, &shard) {
+        for result in
+            stale_query.query_range_iterator(Ordering::Ascending, (shard, start_version)..(shard, Version::MAX))
+        {
             let ((stale_shard, version), _nodes) = result?;
             debug_assert_eq!(stale_shard, shard);
-            if version > target_version {
-                stale_keys_to_delete.push((stale_shard, version));
-            }
+            stale_keys_to_delete.push((stale_shard, version));
         }
         let stale_records_deleted = stale_keys_to_delete.len();
         for key in &stale_keys_to_delete {

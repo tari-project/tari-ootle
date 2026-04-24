@@ -37,13 +37,14 @@ use tari_crypto::{
     tari_utilities::ByteArray,
 };
 use tari_ootle_common_types::Epoch;
-use tari_validator_node_client::types::{
-    ApplyConsensusDirectiveRequest,
-    ApplyConsensusDirectiveResponse,
-};
+use tari_validator_node_client::types::{ApplyConsensusDirectiveRequest, ApplyConsensusDirectiveResponse};
 
 #[derive(Parser, Debug)]
-#[clap(author, version, about = "Issue break-glass consensus directives to Tari validator nodes")]
+#[clap(
+    author,
+    version,
+    about = "Issue break-glass consensus directives to Tari validator nodes"
+)]
 struct Cli {
     #[clap(subcommand)]
     command: AdminCommand,
@@ -98,12 +99,9 @@ async fn run_rollback(
     let gov_secret = load_secret_key(&governance_key_file)
         .with_context(|| format!("loading governance secret key from {}", governance_key_file.display()))?;
     let gov_public = RistrettoPublicKey::from_secret_key(&gov_secret);
-    eprintln!(
-        "Using governance public key: {}",
-        hex::encode(gov_public.as_bytes())
-    );
+    eprintln!("Using governance public key: {}", hex::encode(gov_public.as_bytes()));
 
-    let nonce = nonce.unwrap_or_else(|| rand::random::<u64>());
+    let nonce = nonce.unwrap_or_else(rand::random);
     let issued_at_unix_secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -114,8 +112,8 @@ async fn run_rollback(
         nonce,
         issued_at_unix_secs,
     };
-    let directive = ConsensusDirective::sign(body, &gov_secret, &mut OsRng)
-        .map_err(|e| anyhow!("signing directive: {e}"))?;
+    let directive =
+        ConsensusDirective::sign(body, &gov_secret, &mut OsRng).map_err(|e| anyhow!("signing directive: {e}"))?;
 
     let directive_id = directive.id();
     eprintln!("Directive ID: {}", directive_id);
@@ -133,8 +131,7 @@ async fn run_rollback(
             Ok(resp) => {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&resp)
-                        .unwrap_or_else(|_| format!("{:?}", resp)),
+                    serde_json::to_string_pretty(&resp).unwrap_or_else(|_| format!("{:?}", resp)),
                 );
             },
             Err(err) => {

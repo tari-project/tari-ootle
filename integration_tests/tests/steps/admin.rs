@@ -28,8 +28,8 @@ async fn rollback_all_validators(world: &mut TariWorld, step: &Step, target_epoc
             .map(|d| d.as_secs())
             .unwrap_or(0),
     };
-    let directive = ConsensusDirective::sign(body, &world.governance_secret_key, &mut OsRng)
-        .expect("signing directive");
+    let directive =
+        ConsensusDirective::sign(body, &world.governance_secret_key, &mut OsRng).expect("signing directive");
     let directive_hex = hex::encode(borsh::to_vec(&directive).expect("serialising directive"));
 
     let client = reqwest::Client::new();
@@ -56,11 +56,7 @@ async fn rollback_all_validators(world: &mut TariWorld, step: &Step, target_epoc
             .unwrap_or_else(|e| panic!("decoding JSON from {}: {e}", vn.name));
 
         assert!(status.is_success(), "HTTP {status} from {}: {value}", vn.name);
-        assert!(
-            value.get("error").is_none(),
-            "JSON-RPC error from {}: {value}",
-            vn.name,
-        );
+        assert!(value.get("error").is_none(), "JSON-RPC error from {}: {value}", vn.name,);
         cucumber_log!("[{}] rollback directive accepted: {}", vn.name, value);
     }
 }

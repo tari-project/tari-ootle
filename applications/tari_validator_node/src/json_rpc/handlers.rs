@@ -912,14 +912,14 @@ impl JsonRpcHandlers {
             })?;
 
         let directive_bytes = hex::decode(&params.directive_hex)
-            .map_err(|e| invalid_operation(answer_id.clone(), &format!("directive hex is not valid hex: {e}")))?;
+            .map_err(|e| invalid_operation(answer_id.clone(), format!("directive hex is not valid hex: {e}")))?;
         let directive: ConsensusDirective = borsh::from_slice(&directive_bytes)
-            .map_err(|e| invalid_operation(answer_id.clone(), &format!("directive bytes do not decode: {e}")))?;
+            .map_err(|e| invalid_operation(answer_id.clone(), format!("directive bytes do not decode: {e}")))?;
 
         if let Err(err) = directive.verify(gov_pk) {
             return Err(invalid_operation(
                 answer_id.clone(),
-                &format!("signature verification failed: {err}"),
+                format!("signature verification failed: {err}"),
             ));
         }
 
@@ -955,7 +955,7 @@ impl JsonRpcHandlers {
             gov_pk,
         )
         .await
-        .map_err(|err| invalid_operation(answer_id.clone(), &format!("rollback failed: {err}")))?;
+        .map_err(|err| invalid_operation(answer_id.clone(), format!("rollback failed: {err}")))?;
 
         Ok(JsonRpcResponse::success(
             answer_id,

@@ -1861,11 +1861,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         for ((epoch, block_id), _) in &fp_epoch_keys {
             // foreign_proposals_delete handles the main CF + secondary indexes; if the row is
             // already gone (e.g. a prior deletion cascade), tolerate it.
-            let _ = self
-                .db()
+            self.db()
                 .cf(ForeignProposalCf)?
                 .delete_or_not_found(block_id, OPERATION)?;
-            let _ = fp_epoch_index_cf.delete_or_not_found(&(*epoch, *block_id), OPERATION)?;
+            fp_epoch_index_cf.delete_or_not_found(&(*epoch, *block_id), OPERATION)?;
         }
         stats.foreign_proposals_deleted = fp_epoch_keys.len();
 

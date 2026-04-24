@@ -11,26 +11,20 @@
 //! ## Flow
 //!
 //! 1. Verify the directive signature against the configured governance public key.
-//! 2. Idempotency check: if the directive ID is already in `applied_directives`, return
-//!    the stored outcome without mutating state.
+//! 2. Idempotency check: if the directive ID is already in `applied_directives`, return the stored outcome without
+//!    mutating state.
 //! 3. Load the `EpochCheckpoint` for `target_epoch + local_shard_group`.
-//! 4. Request `ConsensusCurrentState::OnHold`. The hotstuff worker unwinds its run loop
-//!    cleanly; no consensus mutations are in flight while we hold.
-//! 5. Atomic write transaction:
-//!    a. Truncate the state tree for each shard in `shard_group ∪ {global}` to the
-//!       version recorded in the checkpoint.
-//!    b. Rewind substates for each shard to the same version — inverting every state
-//!       transition with version > target restores fee claims and any other
-//!       balance-bearing substate to its pre-rollback value.
-//!    c. Delete every epoch-indexed record with `epoch > target_epoch` (blocks, QCs,
-//!       checkpoints, foreign proposals, validator stats) and clear the singleton
-//!       bookkeeping pointers.
-//!    d. Persist an `AppliedDirective` record so a replay of the same directive ID is a
-//!       no-op.
-//! 6. Release the on-hold. The state machine transitions OnHold → Idle → CheckSync →
-//!    Running. The hotstuff `create_genesis_block_if_required` path recognises that no
-//!    block exists at `(current_epoch, height=0)` and creates a fresh genesis using
-//!    the truncated state merkle root, repopulating bookkeeping pointers from it.
+//! 4. Request `ConsensusCurrentState::OnHold`. The hotstuff worker unwinds its run loop cleanly; no consensus mutations
+//!    are in flight while we hold.
+//! 5. Atomic write transaction: a. Truncate the state tree for each shard in `shard_group ∪ {global}` to the version
+//!    recorded in the checkpoint. b. Rewind substates for each shard to the same version — inverting every state
+//!    transition with version > target restores fee claims and any other balance-bearing substate to its pre-rollback
+//!    value. c. Delete every epoch-indexed record with `epoch > target_epoch` (blocks, QCs, checkpoints, foreign
+//!    proposals, validator stats) and clear the singleton bookkeeping pointers. d. Persist an `AppliedDirective` record
+//!    so a replay of the same directive ID is a no-op.
+//! 6. Release the on-hold. The state machine transitions OnHold → Idle → CheckSync → Running. The hotstuff
+//!    `create_genesis_block_if_required` path recognises that no block exists at `(current_epoch, height=0)` and
+//!    creates a fresh genesis using the truncated state merkle root, repopulating bookkeeping pointers from it.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -112,11 +106,7 @@ pub async fn apply_rollback_directive(
         );
         return Ok(RollbackOutcome {
             already_applied: true,
-            target_epoch: record
-                .body
-                .kind
-                .target_epoch()
-                .unwrap_or(record.applied_at_epoch),
+            target_epoch: record.body.kind.target_epoch().unwrap_or(record.applied_at_epoch),
             applied_at_epoch: record.applied_at_epoch,
             applied_at_block_id: Some(hex::encode(record.applied_at_block_id.as_bytes())),
         });
@@ -146,8 +136,7 @@ pub async fn apply_rollback_directive(
         shard_group,
     );
 
-    // 1. Request on-hold. This guarantees the hotstuff worker has unwound its run loop
-    //    before we touch storage.
+    // 1. Request on-hold. This guarantees the hotstuff worker has unwound its run loop before we touch storage.
     consensus_handle.request_on_hold(ON_HOLD_STATE_TIMEOUT).await?;
 
     // 2. Single atomic write tx for all storage mutations.
@@ -194,10 +183,9 @@ pub async fn apply_rollback_directive(
         leaf_block_id_hex_before.as_deref().unwrap_or("<none>"),
     );
 
-    // 3. Release on-hold. State machine will transition through CheckSync and either reach
-    //    Running directly or (if the rollback left us behind L1) Syncing. Either way
-    //    hotstuff.start() goes through create_genesis_block_if_required which recreates
-    //    bookkeeping for the current L1 epoch using the truncated state tree.
+    // 3. Release on-hold. State machine will transition through CheckSync and either reach Running directly or (if the
+    //    rollback left us behind L1) Syncing. Either way hotstuff.start() goes through create_genesis_block_if_required
+    //    which recreates bookkeeping for the current L1 epoch using the truncated state tree.
     consensus_handle.release_on_hold(ON_HOLD_STATE_TIMEOUT).await?;
 
     Ok(RollbackOutcome {

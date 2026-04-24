@@ -10,5 +10,4 @@ export type ValidatorStatus = {
   height: number;
   state: ValidatorConsensusState;
   observed_at_unix_s: number;
-  age_seconds: number;
 };

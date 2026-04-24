@@ -1,10 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    ops::Deref,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{ops::Deref, time::UNIX_EPOCH};
 
 use axum::{Extension, Json, response::Response};
 use tari_consensus::hotstuff::ConsensusCurrentState;
@@ -58,7 +55,6 @@ pub async fn get_network_sync_stats(
         .optional()
         .map_err(ErrorResponse::anyhow)?;
 
-    let now = SystemTime::now();
     let validators = context
         .validator_status()
         .snapshots()
@@ -69,10 +65,6 @@ pub async fn get_network_sync_stats(
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or_default();
-            let age_seconds = now
-                .duration_since(snapshot.observed_at)
-                .map(|d| d.as_secs())
-                .unwrap_or_default();
             ValidatorStatus {
                 peer_id: peer.to_string(),
                 shard_group: snapshot.shard_group,
@@ -80,7 +72,6 @@ pub async fn get_network_sync_stats(
                 height: snapshot.height.as_u64(),
                 state: to_client_consensus_state(snapshot.state),
                 observed_at_unix_s,
-                age_seconds,
             }
         })
         .collect();

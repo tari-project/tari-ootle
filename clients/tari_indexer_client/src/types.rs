@@ -650,12 +650,10 @@ pub struct ValidatorStatus {
     #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
     pub height: u64,
     pub state: ValidatorConsensusState,
-    /// Unix timestamp (seconds) at which this snapshot was captured.
+    /// Unix timestamp (seconds) at which this snapshot was captured. Clients
+    /// can derive the freshness of the snapshot by comparing this to the
+    /// current wall-clock time.
     pub observed_at_unix_s: u64,
-    /// Seconds between the snapshot and when this response was produced. Large
-    /// values indicate that the indexer has not been able to refresh the
-    /// validator's state recently and it may be down.
-    pub age_seconds: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

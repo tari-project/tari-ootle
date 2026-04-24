@@ -164,8 +164,8 @@ function Validators() {
   const sorted = useMemo(() => {
     if (!validators) return null;
     return [...validators].sort((a, b) => {
-      const sgCmp = a.shard_group.start - b.shard_group.start;
-      if (sgCmp !== 0) return sgCmp;
+      const timeCmp = b.observed_at_unix_s - a.observed_at_unix_s;
+      if (timeCmp !== 0) return timeCmp;
       return a.peer_id.localeCompare(b.peer_id);
     });
   }, [validators]);

@@ -44,8 +44,11 @@ use tari_ootle_p2p::{
     PeerAddress,
     proto,
     proto::rpc::{
+        ConsensusState as ProtoConsensusState,
         GetCheckpointsRequest,
         GetCheckpointsResponse,
+        GetConsensusStateRequest,
+        GetConsensusStateResponse,
         GetSubstateRequest,
         GetSubstateResponse,
         GetSubstatesBatchRequest,
@@ -454,6 +457,21 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         );
 
         Ok(Streaming::new(receiver))
+    }
+
+    async fn get_consensus_state(
+        &self,
+        _req: Request<GetConsensusStateRequest>,
+    ) -> Result<Response<GetConsensusStateResponse>, RpcStatus> {
+        let view = self.consensus.current_view();
+        let epoch = self.consensus.current_epoch();
+        let state: ProtoConsensusState = self.consensus.get_current_state().into();
+
+        Ok(Response::new(GetConsensusStateResponse {
+            epoch: Some(epoch.into()),
+            height: view.get_height().as_u64(),
+            state: state as i32,
+        }))
     }
 
     async fn get_substate_batch(

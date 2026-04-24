@@ -1,9 +1,10 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::ops::Deref;
+use std::{ops::Deref, time::UNIX_EPOCH};
 
 use axum::{Extension, Json, response::Response};
+use tari_consensus::hotstuff::ConsensusCurrentState;
 use tari_indexer_client::{
     types,
     types::{
@@ -13,6 +14,8 @@ use tari_indexer_client::{
         GetNetworkSyncStateResponse,
         NetworkDescription,
         SyncProgress,
+        ValidatorConsensusState,
+        ValidatorStatus,
     },
 };
 use tari_ootle_common_types::optional::Optional;
@@ -52,6 +55,28 @@ pub async fn get_network_sync_stats(
         .optional()
         .map_err(ErrorResponse::anyhow)?;
 
+    let validators = context
+        .validator_status()
+        .snapshots()
+        .await
+        .into_iter()
+        .map(|(peer, snapshot)| {
+            let observed_at_unix_s = snapshot
+                .observed_at
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or_default();
+            ValidatorStatus {
+                peer_id: peer.to_string(),
+                shard_group: snapshot.shard_group,
+                epoch: snapshot.epoch,
+                height: snapshot.height.as_u64(),
+                state: to_client_consensus_state(snapshot.state),
+                observed_at_unix_s,
+            }
+        })
+        .collect();
+
     let response = GetNetworkSyncStateResponse {
         network_desc: NetworkDescription {
             epoch: network_desc.epoch,
@@ -67,8 +92,20 @@ pub async fn get_network_sync_stats(
             checkpoint_progress: p.checkpoint_progress.into_iter().collect(),
             last_state_versions: p.last_state_versions.into_iter().collect(),
         }),
+        validators,
     };
     Ok(Json(response))
+}
+
+fn to_client_consensus_state(state: ConsensusCurrentState) -> ValidatorConsensusState {
+    match state {
+        ConsensusCurrentState::Idle => ValidatorConsensusState::Idle,
+        ConsensusCurrentState::CheckSync => ValidatorConsensusState::CheckSync,
+        ConsensusCurrentState::Syncing => ValidatorConsensusState::Syncing,
+        ConsensusCurrentState::Running => ValidatorConsensusState::Running,
+        ConsensusCurrentState::Sleeping => ValidatorConsensusState::Sleeping,
+        ConsensusCurrentState::Shutdown => ValidatorConsensusState::Shutdown,
+    }
 }
 
 #[utoipa::path(get, path = "/network/connections", description = "Get active peer connections",

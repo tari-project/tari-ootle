@@ -18,10 +18,7 @@ tari_crypto = { workspace = true }
 ootle_serde = { workspace = true }
 
 borsh = { workspace = true }
-digest = { workspace = true }
-rand = { workspace = true }
 serde = { workspace = true }
-thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 
 [features]

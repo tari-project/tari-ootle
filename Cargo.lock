@@ -10997,9 +10997,7 @@ name = "tari_consensus_types"
 version = "0.29.1"
 dependencies = [
  "borsh",
- "digest 0.10.7",
  "ootle_serde",
- "rand 0.8.5",
  "serde",
  "tari_common_types",
  "tari_crypto",
@@ -11008,7 +11006,6 @@ dependencies = [
  "tari_ootle_common_types",
  "tari_sidechain",
  "tari_template_lib",
- "thiserror 2.0.18",
  "ts-rs",
 ]
 
@@ -12395,7 +12392,6 @@ dependencies = [
  "dashmap 5.5.3",
  "either",
  "futures 0.3.31",
- "hex",
  "include_dir",
  "indexmap 2.13.0",
  "lazy_static",

@@ -181,6 +181,7 @@ impl NetworkWideStateSync {
         Ok(())
     }
 
+    #[expect(clippy::too_many_lines)]
     async fn sync_checkpoints(&mut self, sync_plan_mut: &mut SyncPlan) -> Result<(), NetworkStateSyncError> {
         let prev_epoch = sync_plan_mut
             .network_description()

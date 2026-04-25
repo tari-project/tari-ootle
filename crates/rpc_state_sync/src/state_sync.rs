@@ -702,7 +702,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     &our_vn.address,
                     allow_committee_bootstrap,
                 )
-                    .await?;
+                .await?;
             }
         }
 

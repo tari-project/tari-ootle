@@ -143,7 +143,7 @@ Feature: Indexer node
     Then the indexer INDEXER catalogue name filter nonexistent_xyz returns 0 results
 
     # Non-existent template address should return 404
-    Then the indexer INDEXER catalogue entry for address "template_deadbeefcafef00d0badc0de0feedface1234567890abcdef0123456789abcd" is not found
+    Then the indexer INDEXER catalogue entry for address "template_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" is not found
 
   @catalogue_pagination
   Scenario: Indexer template catalogue pagination works

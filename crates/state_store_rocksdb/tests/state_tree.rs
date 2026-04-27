@@ -8,6 +8,7 @@ use tari_ootle_common_types::{ShardGroup, optional::Optional, shard::Shard};
 use tari_ootle_storage::{StateStore, StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 use tari_state_store_rocksdb::DatabaseOptions;
 use tari_state_tree::{NibblePath, Node, NodeKey, StaleTreeNode, StateTreePayload};
+use tari_validator_rollback::storage::state_tree_truncate_to_version;
 
 use crate::helpers::{create_rocksdb_with_opts, num_preshards};
 
@@ -126,7 +127,7 @@ fn truncate_to_version_removes_newer_versions_and_resets_pointer() {
     .unwrap();
 
     let stats = db
-        .with_write_tx(|tx| tx.state_tree_truncate_to_version(SHARD, 2))
+        .with_write_tx(|tx| state_tree_truncate_to_version(tx, SHARD, 2))
         .unwrap();
 
     // 3 versions × 10 nodes per version = 30 nodes deleted.
@@ -176,7 +177,7 @@ fn truncate_to_version_is_shard_scoped() {
     .unwrap();
 
     let stats = db
-        .with_write_tx(|tx| tx.state_tree_truncate_to_version(shard_a, 1))
+        .with_write_tx(|tx| state_tree_truncate_to_version(tx, shard_a, 1))
         .unwrap();
     assert_eq!(stats.nodes_deleted, 5);
 

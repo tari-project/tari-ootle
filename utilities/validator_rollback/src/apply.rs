@@ -14,7 +14,6 @@ use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
-    StateStoreWriteTransaction,
     consensus_models::{EpochCheckpoint, RollbackHistoryEntry},
 };
 use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
@@ -22,6 +21,14 @@ use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
 use crate::{
     audit::AuditWriter,
     audit_writer::{AuditCounters, write_block_plan, write_footer, write_header, write_substate_plan},
+    storage::{
+        rollback_delete_after_epoch,
+        rollback_history_insert,
+        rollback_plan_collect_blocks,
+        rollback_plan_collect_substates,
+        state_tree_truncate_to_version,
+        substates_rewind_to_state_version,
+    },
 };
 
 #[derive(Debug, ClapArgs)]
@@ -126,12 +133,12 @@ pub fn run_with_options(opts: ApplyOptions) -> anyhow::Result<ApplyOutcome> {
     let substate_rows = store.with_read_tx(|tx| -> anyhow::Result<_> {
         let mut rows = Vec::new();
         for (shard, version) in &state_versions {
-            let mut per_shard = tx.rollback_plan_collect_substates(*shard, *version)?;
+            let mut per_shard = rollback_plan_collect_substates(tx, *shard, *version)?;
             rows.append(&mut per_shard);
         }
         Ok(rows)
     })?;
-    let block_rows = store.with_read_tx(|tx| tx.rollback_plan_collect_blocks(target_epoch))?;
+    let block_rows = store.with_read_tx(|tx| rollback_plan_collect_blocks(tx, target_epoch))?;
 
     let audit_file =
         std::fs::File::create(&audit_path).with_context(|| format!("creating audit file at {:?}", audit_path))?;
@@ -191,14 +198,13 @@ pub fn run_with_options(opts: ApplyOptions) -> anyhow::Result<ApplyOutcome> {
         .to_string();
     store.with_write_tx(|tx| -> anyhow::Result<()> {
         for (shard, version) in &state_versions {
-            tx.state_tree_truncate_to_version(*shard, *version)
+            state_tree_truncate_to_version(tx, *shard, *version)
                 .with_context(|| format!("state_tree_truncate_to_version(shard={shard}, version={version})"))?;
-            tx.substates_rewind_to_state_version(*shard, *version)
+            substates_rewind_to_state_version(tx, *shard, *version)
                 .with_context(|| format!("substates_rewind_to_state_version(shard={shard}, version={version})"))?;
         }
-        tx.rollback_delete_after_epoch(target_epoch)
-            .context("rollback_delete_after_epoch")?;
-        tx.rollback_history_insert(&RollbackHistoryEntry {
+        rollback_delete_after_epoch(tx, target_epoch).context("rollback_delete_after_epoch")?;
+        rollback_history_insert(tx, &RollbackHistoryEntry {
             target_epoch,
             shard_group,
             applied_at_unix_secs: now_unix,

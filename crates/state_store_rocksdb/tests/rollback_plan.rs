@@ -4,21 +4,19 @@
 //! Read-only rollback-plan iterators: prove the dry-run collection matches what the
 //! mutating rewind walks. Seed a DB with known transitions spanning a few state
 //! versions, call the collector with target_version below the seeded data, and assert
-//! the row count + ordering. The equivalence test (dry-run vs apply) will live in the
-//! rollback binary's own test module; this one is a narrow unit test for the storage
-//! contract.
+//! the row count + ordering.
 
 pub mod helpers;
 
 use helpers::{create_rocksdb, create_substate_update_batch, gen_substates_for_shards};
 use tari_ootle_common_types::{Epoch, Network};
-use tari_ootle_storage::{
-    StateStore,
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
-    consensus_models::{Block, RewindTransitionKind},
-};
+use tari_ootle_storage::{StateStore, StateStoreWriteTransaction, consensus_models::Block};
 use tari_state_tree::Version;
+use tari_validator_rollback::storage::{
+    RewindTransitionKind,
+    rollback_plan_collect_blocks,
+    rollback_plan_collect_substates,
+};
 
 use crate::helpers::num_preshards;
 
@@ -39,7 +37,7 @@ fn collect_substates_yields_reverse_application_order() {
     tx.commit().unwrap();
 
     let rows = db
-        .with_read_tx(|tx| tx.rollback_plan_collect_substates(tari_ootle_common_types::shard::Shard::from_u32(1), 0))
+        .with_read_tx(|tx| rollback_plan_collect_substates(tx, tari_ootle_common_types::shard::Shard::from_u32(1), 0))
         .unwrap();
 
     // At minimum we expect some transitions; all on shard 1, epoch 0, and Up-reverted.
@@ -73,7 +71,7 @@ fn collect_substates_empty_when_target_version_above_everything() {
 
     let rows = db
         .with_read_tx(|tx| {
-            tx.rollback_plan_collect_substates(tari_ootle_common_types::shard::Shard::from_u32(1), Version::MAX)
+            rollback_plan_collect_substates(tx, tari_ootle_common_types::shard::Shard::from_u32(1), Version::MAX)
         })
         .unwrap();
     assert!(rows.is_empty());
@@ -89,7 +87,7 @@ fn collect_blocks_empty_when_no_blocks_after_target_epoch() {
 
     // Only the genesis / epoch-0 block exists — rolling back to epoch 0 yields no blocks.
     let rows = db
-        .with_read_tx(|tx| tx.rollback_plan_collect_blocks(Epoch::zero()))
+        .with_read_tx(|tx| rollback_plan_collect_blocks(tx, Epoch::zero()))
         .unwrap();
     assert!(rows.is_empty(), "unexpected rows: {rows:?}");
 }

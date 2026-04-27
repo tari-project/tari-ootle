@@ -49,7 +49,6 @@ use crate::{
         Block,
         BlockDiff,
         BlockTransactionExecution,
-        BlocksAfterEpochRow,
         EpochCheckpoint,
         Evidence,
         ForeignParkedProposal,
@@ -60,16 +59,11 @@ use crate::{
         LockedSubstateValue,
         NoVoteReason,
         PendingShardStateTreeDiff,
-        RollbackDeleteStats,
-        RollbackHistoryEntry,
-        StateTreeTruncateStats,
         StateVersionTransitions,
         SubstateChange,
         SubstateLock,
         SubstatePledges,
         SubstateRecord,
-        SubstateRewindPlanRow,
-        SubstateRewindStats,
         SubstateUpdateBatch,
         SubstateValueFilterFlags,
         TransactionExecution,
@@ -347,30 +341,6 @@ pub trait StateStoreReadTransaction: Sized {
 
     fn epoch_checkpoint_get_last(&self) -> Result<EpochCheckpoint, StorageError>;
 
-    // -------------------------------- Rollback history -------------------------------- //
-
-    /// List all rollback-history breadcrumbs in chronological order (oldest first).
-    /// Returns an empty vec if no rollback has ever been applied.
-    fn rollback_history_list(&self) -> Result<Vec<RollbackHistoryEntry>, StorageError>;
-
-    // -------------------------------- Rollback dry-run collection -------------------------------- //
-
-    /// Collect (read-only) every `(shard, state_version > target_version)` transition that
-    /// `substates_rewind_to_state_version` would revert. Rows are returned in the same
-    /// reverse-application order the mutating call processes them, so an audit trail
-    /// built from this collection mirrors what the rewind actually does.
-    fn rollback_plan_collect_substates(
-        &self,
-        shard: Shard,
-        target_version: Version,
-    ) -> Result<Vec<SubstateRewindPlanRow>, StorageError>;
-
-    /// Collect (read-only) every block with `epoch > target_epoch` — what
-    /// `rollback_delete_after_epoch` would remove. Each row carries the block's
-    /// finalising-transaction ids, the payload indexers/wallets need to decide what to
-    /// resync after a rollback.
-    fn rollback_plan_collect_blocks(&self, target_epoch: Epoch) -> Result<Vec<BlocksAfterEpochRow>, StorageError>;
-
     // -------------------------------- Foreign Substate Pledges -------------------------------- //
     fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(
         &self,
@@ -554,29 +524,6 @@ pub trait StateStoreWriteTransaction {
     fn substates_commit_batch(&mut self, update_batch: SubstateUpdateBatch) -> Result<(), StorageError>;
     fn substates_prune_downed_values(&mut self, epoch: Epoch) -> Result<usize, StorageError>;
 
-    /// Rewind substate state for `shard` back to `target_state_version` by inverting every
-    /// state transition recorded for versions > `target_state_version`.
-    ///
-    /// Inverse operations:
-    /// - An `Up` transition → delete the `SubstateRecord` it created.
-    /// - A `Down` transition → clear the `destroyed` field on the affected `SubstateRecord`.
-    ///
-    /// After the inverses are applied, the `HeadIndex` is rebuilt for every touched `SubstateId`
-    /// from the highest-version `SubstateRecord` that survives in storage.
-    ///
-    /// This is a destructive operation intended for break-glass recovery (rolling back to a
-    /// prior epoch checkpoint). Fee claims, validator-fee-pool balances, and any other
-    /// balance-bearing state ride along automatically — they are ordinary substates.
-    ///
-    /// Caller responsibilities:
-    /// - Must not rewind past the prune cut (`substates_prune_downed_values`); any downed substate whose
-    ///   `substate_value` has been pruned cannot be correctly restored.
-    fn substates_rewind_to_state_version(
-        &mut self,
-        shard: Shard,
-        target_state_version: Version,
-    ) -> Result<SubstateRewindStats, StorageError>;
-
     // -------------------------------- Foreign pledges -------------------------------- //
 
     fn foreign_substate_pledges_save(
@@ -621,54 +568,8 @@ pub trait StateStoreWriteTransaction {
     fn state_tree_nodes_clear_stale(&mut self, num_preshards: NumPreshards) -> Result<usize, StorageError>;
     fn state_tree_shard_versions_set(&mut self, shard: Shard, version: Version) -> Result<(), StorageError>;
 
-    /// Truncate the state tree for the given shard back to `target_version`.
-    ///
-    /// After this call:
-    /// - `state_tree_versions_get_latest(shard)` returns `target_version` (or `None` if the shard had no state at or
-    ///   below `target_version`).
-    /// - All nodes at versions > `target_version` are deleted from the tree store.
-    /// - All stale-node records at versions > `target_version` are deleted.
-    ///
-    /// This is a destructive operation intended for break-glass recovery (e.g. rolling back to a prior
-    /// epoch checkpoint). Versions <= `target_version` are untouched.
-    fn state_tree_truncate_to_version(
-        &mut self,
-        shard: Shard,
-        target_version: Version,
-    ) -> Result<StateTreeTruncateStats, StorageError>;
-
     // -------------------------------- Epoch checkpoint -------------------------------- //
     fn epoch_checkpoint_save(&mut self, checkpoint: &EpochCheckpoint) -> Result<(), StorageError>;
-
-    // -------------------------------- Rollback history -------------------------------- //
-
-    /// Append a rollback-history breadcrumb. Written by the offline rollback tool inside the
-    /// same write transaction as the state-tree truncate + substate rewind + epoch-after
-    /// deletion so either all four succeed or none do.
-    fn rollback_history_insert(&mut self, entry: &RollbackHistoryEntry) -> Result<(), StorageError>;
-
-    /// Delete every epoch-indexed record with `epoch > target_epoch`, and clear the
-    /// singleton bookkeeping pointers. Paired with `state_tree_truncate_to_version` and
-    /// `substates_rewind_to_state_version`, this is the storage side of a break-glass
-    /// rollback to the `target_epoch` checkpoint.
-    ///
-    /// The offline rollback tool calls this *inside the same write transaction*
-    /// as the state-tree truncate + substate rewind + `rollback_history_insert`.
-    ///
-    /// After commit, consensus resumes via the `create_genesis_block_if_required` path in
-    /// hotstuff: with no blocks at `(current_epoch, height=0)` the worker creates a fresh
-    /// genesis and repopulates all bookkeeping pointers from it.
-    ///
-    /// Deletes:
-    /// - Blocks (and cascades: block diffs, block transaction executions, pending state tree diffs, substate locks,
-    ///   lock conflicts, transaction pool state updates).
-    /// - Proposal certificates, timeout certificates.
-    /// - Epoch checkpoints.
-    /// - Foreign proposals.
-    /// - Validator epoch stats.
-    /// - All singleton bookkeeping pointers (LeafBlock, LockedBlock, HighestSeenBlock, LastExecuted, LastVoted,
-    ///   LastProposed, LastSentVote, LastSentNewView, HighPc, HighTc).
-    fn rollback_delete_after_epoch(&mut self, target_epoch: Epoch) -> Result<RollbackDeleteStats, StorageError>;
 
     // -------------------------------- Lock conflicts -------------------------------- //
     fn lock_conflicts_insert_all<'a, I: IntoIterator<Item = (&'a TransactionId, &'a Vec<LockConflict>)>>(

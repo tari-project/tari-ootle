@@ -19,10 +19,13 @@ use cucumber::{then, when};
 use integration_tests::{TariWorld, validator_node::respawn_validator_node};
 use multiaddr::multiaddr;
 use tari_ootle_common_types::Epoch;
-use tari_ootle_storage::{StateStore, StateStoreReadTransaction};
+use tari_ootle_storage::StateStore;
 use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
 use tari_validator_node_client::types::AddPeerRequest;
-use tari_validator_rollback::apply::{ApplyOptions, run_with_options};
+use tari_validator_rollback::{
+    apply::{ApplyOptions, run_with_options},
+    storage::rollback_history_list,
+};
 
 #[when(expr = "I shut down validator node {word}")]
 async fn shut_down_validator_node(world: &mut TariWorld, vn_name: String) {
@@ -149,11 +152,10 @@ async fn assert_rollback_history_has_entry_at_epoch(world: &mut TariWorld, vn_na
     let state_db_path: PathBuf = world.get_validator_node(&vn_name).state_db_path();
     // Re-open the (now-stopped) state store to read the rollback_history CF. The tool
     // released the lock on write-tx commit, so this open succeeds.
-    let store: RocksDbStateStore<tari_ootle_p2p::PeerAddress> =
-        RocksDbStateStore::open(&state_db_path, DatabaseOptions::default())
-            .expect("open state db to read rollback_history");
+    let store = RocksDbStateStore::open(&state_db_path, DatabaseOptions::default())
+        .expect("open state db to read rollback_history");
     let entries = store
-        .with_read_tx(|tx| tx.rollback_history_list())
+        .with_read_tx(rollback_history_list::<String>)
         .expect("list rollback_history");
     assert!(
         entries.iter().any(|e| e.target_epoch == Epoch(target_epoch)),

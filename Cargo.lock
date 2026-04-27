@@ -12080,6 +12080,7 @@ dependencies = [
  "tari_template_lib",
  "tari_template_lib_types",
  "tari_utilities",
+ "tari_validator_rollback",
  "tempfile",
  "thiserror 2.0.18",
 ]
@@ -12499,6 +12500,7 @@ dependencies = [
  "anyhow",
  "borsh",
  "clap 3.2.25",
+ "log",
  "serde",
  "serde_json",
  "tari_consensus_types",
@@ -12508,6 +12510,8 @@ dependencies = [
  "tari_ootle_storage",
  "tari_ootle_transaction",
  "tari_state_store_rocksdb",
+ "tari_state_tree",
+ "tari_template_lib_types",
  "thiserror 2.0.18",
 ]
 

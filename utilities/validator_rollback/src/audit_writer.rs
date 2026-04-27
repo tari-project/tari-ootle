@@ -8,21 +8,23 @@
 use tari_consensus_types::BlockId;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{Epoch, ShardGroup, shard::Shard};
-use tari_ootle_storage::consensus_models::{BlocksAfterEpochRow, RewindTransitionKind, SubstateRewindPlanRow};
 use tari_ootle_transaction::TransactionId;
 
-use crate::audit::{
-    AuditFooter,
-    AuditHeader,
-    AuditRecord,
-    AuditShard,
-    AuditShardGroup,
-    AuditWriter,
-    SubstateAction,
-    SubstateSummary,
-    SubstateTransition,
-    TransactionUnfinalised,
-    TransitionKind,
+use crate::{
+    audit::{
+        AuditFooter,
+        AuditHeader,
+        AuditRecord,
+        AuditShard,
+        AuditShardGroup,
+        AuditWriter,
+        SubstateAction,
+        SubstateSummary,
+        SubstateTransition,
+        TransactionUnfinalised,
+        TransitionKind,
+    },
+    storage::{BlocksAfterEpochRow, RewindTransitionKind, SubstateRewindPlanRow},
 };
 
 /// Structured counters accumulated while writing an audit file — become the footer.

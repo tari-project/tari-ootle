@@ -14,6 +14,7 @@ use tari_ootle_storage::{
 };
 use tari_state_tree::Version;
 use tari_template_lib::types::{ComponentAddress, ObjectKey};
+use tari_validator_rollback::storage::substates_rewind_to_state_version;
 
 use crate::helpers::num_preshards;
 
@@ -78,7 +79,7 @@ fn rewind_deletes_upped_records_and_restores_downed() {
 
     // Rewind to state_version 1.
     let stats = db
-        .with_write_tx(|tx| tx.substates_rewind_to_state_version(shard, 1))
+        .with_write_tx(|tx| substates_rewind_to_state_version(tx, shard, 1))
         .unwrap();
     assert_eq!(stats.transitions_processed, 1, "only sv=3 had a transition record");
     assert_eq!(stats.substates_created_deleted, 1, "a@v1 should be deleted");
@@ -124,7 +125,7 @@ fn rewind_past_creation_deletes_head() {
 
     // Rewind to state_version 1 — a was created at sv=2, so it should vanish.
     let stats = db
-        .with_write_tx(|tx| tx.substates_rewind_to_state_version(shard, 1))
+        .with_write_tx(|tx| substates_rewind_to_state_version(tx, shard, 1))
         .unwrap();
     assert_eq!(stats.substates_created_deleted, 1);
     assert_eq!(stats.heads_updated, 1);
@@ -155,7 +156,7 @@ fn rewind_noop_when_target_at_or_above_current() {
 
     // Target >= current: nothing to do.
     let stats = db
-        .with_write_tx(|tx| tx.substates_rewind_to_state_version(shard, 5))
+        .with_write_tx(|tx| substates_rewind_to_state_version(tx, shard, 5))
         .unwrap();
     assert_eq!(stats.transitions_processed, 0);
     assert_eq!(stats.substates_created_deleted, 0);
@@ -217,7 +218,7 @@ fn rewind_preserves_other_shards() {
 
     // Rewind only shard_a.
     let stats = db
-        .with_write_tx(|tx| tx.substates_rewind_to_state_version(shard_a, 1))
+        .with_write_tx(|tx| substates_rewind_to_state_version(tx, shard_a, 1))
         .unwrap();
     assert_eq!(stats.substates_created_deleted, 1);
 

@@ -6,12 +6,13 @@ use std::{net::SocketAddr, time::Duration};
 use axum::{
     Extension,
     Router,
+    middleware,
     routing::{get, post},
 };
 use log::*;
 use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
 use tari_shutdown::ShutdownSignal;
-use tower::{ServiceBuilder, buffer::BufferLayer, limit::RateLimitLayer};
+use tower::{ServiceBuilder, buffer::BufferLayer};
 use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer, trace::TraceLayer};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
@@ -20,7 +21,7 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::rest_api::metrics;
 use crate::{
     bootstrap::Services,
-    rest_api::{context::HandlerContext, handlers},
+    rest_api::{context::HandlerContext, handlers, rate_limit},
 };
 
 const LOG_TARGET: &str = "tari::ootle::indexer::rest_api::server";
@@ -84,6 +85,31 @@ impl Server {
         shutdown: ShutdownSignal,
     ) -> anyhow::Result<SocketAddr> {
         let context = HandlerContext::from_services(services);
+        let config = &services.config.indexer.rate_limit;
+
+        let submit_transaction_limiter = rate_limit::RateLimiter::new(
+            config.submit_transaction_per_minute,
+            Duration::from_secs(60),
+        );
+        let fetch_substates_limiter = rate_limit::RateLimiter::new(
+            config.fetch_substates_per_minute,
+            Duration::from_secs(60),
+        );
+        let fetch_utxos_limiter = rate_limit::RateLimiter::new(
+            config.fetch_utxos_per_minute,
+            Duration::from_secs(60),
+        );
+        let get_nfts_limiter = rate_limit::RateLimiter::new(
+            config.get_non_fungibles_per_minute,
+            Duration::from_secs(60),
+        );
+        let dry_run_limiter = rate_limit::RateLimiter::new(
+            config.submit_transaction_dry_run_per_5_seconds,
+            Duration::from_secs(5),
+        );
+        let sse_limiter = rate_limit::ConcurrentConnectionLimiter::new(
+            config.sse_max_concurrent_connections_per_ip,
+        );
 
         let router = Router::new()
             .route("/health", get(handlers::misc::health))
@@ -95,23 +121,34 @@ impl Server {
             .route("/network/stats", get(handlers::network::get_network_sync_stats))
             .route("/network/connections", get(handlers::network::get_connections))
             .nest("/substates", Router::new()
-                .route("/fetch", post(handlers::substates::fetch_substates))
+                .route("/fetch", post(handlers::substates::fetch_substates)
+                    .layer(middleware::from_fn({
+                        let limiter = fetch_substates_limiter.clone();
+                        move |req, next| {
+                            let limiter = limiter.clone();
+                            async move { limiter.middleware(req, next).await }
+                        }
+                    })))
                 .route("/watched", get(handlers::watched::list_watched_substates))
                 .route("/{substate_id}", get(handlers::substates::get_substate))
             )
             .nest("/transactions", Router::new()
-                .route("/", post(handlers::transactions::submit_transaction))
+                .route("/", post(handlers::transactions::submit_transaction)
+                    .layer(middleware::from_fn({
+                        let limiter = submit_transaction_limiter.clone();
+                        move |req, next| {
+                            let limiter = limiter.clone();
+                            async move { limiter.middleware(req, next).await }
+                        }
+                    })))
                 .route("/dry-run", post(handlers::transactions::submit_transaction_dry_run)
-                    .layer(ServiceBuilder::new()
-                        .layer(axum::error_handling::HandleErrorLayer::new(|err: axum::BoxError| async move {
-                            (
-                                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                                format!("Unhandled error: {}", err),
-                            )
-                        }))
-                        .layer(BufferLayer::new(1024))
-                        .layer(RateLimitLayer::new(10, Duration::from_secs(5)))
-                    ))
+                    .layer(middleware::from_fn({
+                        let limiter = dry_run_limiter.clone();
+                        move |req, next| {
+                            let limiter = limiter.clone();
+                            async move { limiter.middleware(req, next).await }
+                        }
+                    })))
                 .route(
                     "/recent",
                     get(handlers::transactions::list_recent_transactions),
@@ -121,7 +158,14 @@ impl Server {
                     get(handlers::transactions::get_transaction_result),
                 )
                 .route("/events", get(handlers::transactions::query_transaction_events))
-                .route("/events/stream", get(handlers::transaction_events::sse_transaction_events))
+                .route("/events/stream", get(handlers::transaction_events::sse_transaction_events)
+                    .layer(middleware::from_fn({
+                        let limiter = sse_limiter.clone();
+                        move |req, next| {
+                            let limiter = limiter.clone();
+                            async move { limiter.middleware(req, next).await }
+                        }
+                    })))
             )
             .nest("/templates", Router::new()
                 .route("/cached", get(handlers::templates::list_cached_templates))
@@ -136,11 +180,32 @@ impl Server {
                     get(handlers::templates::get_template_definition),
                 )
             )
-            .route("/non-fungibles", get(handlers::nfts::get_non_fungibles)) // Placeholder for future non-fungible endpoints
+            .route("/non-fungibles", get(handlers::nfts::get_non_fungibles)
+                .layer(middleware::from_fn({
+                    let limiter = get_nfts_limiter.clone();
+                    move |req, next| {
+                        let limiter = limiter.clone();
+                        async move { limiter.middleware(req, next).await }
+                    }
+                })))
             .nest("/utxos", Router::new()
                 .route("/", get(handlers::utxos::list_utxos))
-                .route("/fetch", post(handlers::utxos::fetch_utxos))
-                .route("/stream", post(handlers::utxos::stream_utxo_updates))
+                .route("/fetch", post(handlers::utxos::fetch_utxos)
+                    .layer(middleware::from_fn({
+                        let limiter = fetch_utxos_limiter.clone();
+                        move |req, next| {
+                            let limiter = limiter.clone();
+                            async move { limiter.middleware(req, next).await }
+                        }
+                    })))
+                .route("/stream", post(handlers::utxos::stream_utxo_updates)
+                    .layer(middleware::from_fn({
+                        let limiter = sse_limiter.clone();
+                        move |req, next| {
+                            let limiter = limiter.clone();
+                            async move { limiter.middleware(req, next).await }
+                        }
+                    })))
             )
             .nest(
                 "/transaction-receipts",
@@ -160,7 +225,14 @@ impl Server {
                 .route("/", get(handlers::epoch_checkpoints::list_epoch_checkpoints))
                 .route("/latest", get(handlers::epoch_checkpoints::get_latest_epoch_checkpoint))
             )
-            .route("/events", get(handlers::indexer_events::sse_events))
+            .route("/events", get(handlers::indexer_events::sse_events)
+                .layer(middleware::from_fn({
+                    let limiter = sse_limiter.clone();
+                    move |req, next| {
+                        let limiter = limiter.clone();
+                        async move { limiter.middleware(req, next).await }
+                    }
+                })))
             .layer(CorsLayer::permissive())
             .layer(RequestBodyLimitLayer::new(REQUEST_BODY_LIMIT))
             .merge(SwaggerUi::new("/swagger-ui").url("/openapi.json", ApiDoc::openapi()))

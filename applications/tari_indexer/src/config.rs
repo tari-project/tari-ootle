@@ -131,6 +131,39 @@ pub struct IndexerConfig {
     /// Defaults to the builtin liquidity pool template.
     #[serde(default = "default_watched_templates")]
     pub watched_templates: Vec<TemplateAddress>,
+    /// Rate limit configuration for the REST API
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct RateLimitConfig {
+    /// Max requests per minute for submitting transactions (POST /transactions)
+    pub submit_transaction_per_minute: u64,
+    /// Max requests per minute for fetching substates (POST /substates/fetch)
+    pub fetch_substates_per_minute: u64,
+    /// Max requests per minute for fetching utxos (POST /utxos/fetch)
+    pub fetch_utxos_per_minute: u64,
+    /// Max requests per minute for non-fungibles (GET /non-fungibles)
+    pub get_non_fungibles_per_minute: u64,
+    /// Max requests per 5 seconds for dry-run transactions (POST /transactions/dry-run)
+    pub submit_transaction_dry_run_per_5_seconds: u64,
+    /// Max concurrent connections per IP for SSE stream endpoints
+    pub sse_max_concurrent_connections_per_ip: usize,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            submit_transaction_per_minute: 20,
+            fetch_substates_per_minute: 30,
+            fetch_utxos_per_minute: 15,
+            get_non_fungibles_per_minute: 30,
+            submit_transaction_dry_run_per_5_seconds: 10,
+            sse_max_concurrent_connections_per_ip: 3,
+        }
+    }
 }
 
 fn default_watched_templates() -> Vec<TemplateAddress> {
@@ -157,6 +190,7 @@ impl Default for IndexerConfig {
             dry_run_cache_ttl: Duration::from_secs(10),
             event_filters: vec![],
             watched_templates: default_watched_templates(),
+            rate_limit: RateLimitConfig::default(),
         }
     }
 }

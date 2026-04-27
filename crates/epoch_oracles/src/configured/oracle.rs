@@ -112,7 +112,7 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
         }
 
         let done_for_now = epoch_ticker_data.done_for_now;
-        let prev_epoch = next_epoch - Epoch(1);
+        let current_epoch = next_epoch - Epoch(1);
         self.store
             .set(StoreKey::ConfiguredCurrentEpoch.as_key_bytes(), &next_epoch)?;
 
@@ -149,7 +149,7 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
             );
             self.pending_events
                 .push_back(EpochEvent::ActiveValidatorNodeSetChanged {
-                    epoch: prev_epoch,
+                    epoch: current_epoch,
                     node_changes: vns
                         .into_iter()
                         .map(|vn| ValidatorNodeChange::Add {

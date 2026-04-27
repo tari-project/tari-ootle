@@ -437,6 +437,10 @@ impl EpochManagerReader for TestEpochManager {
     async fn is_within_epoch_end_spread(&self, _current_epoch: Epoch) -> Result<bool, EpochManagerError> {
         Ok(false)
     }
+
+    async fn get_birthday_epoch(&self) -> Result<Option<Epoch>, EpochManagerError> {
+        Ok(Some(Epoch(0)))
+    }
 }
 
 #[derive(Debug, Clone)]

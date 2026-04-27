@@ -416,56 +416,15 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         Ok(())
     }
 
-    async fn should_treat_missing_prev_epoch_checkpoint_as_bootstrap(
-        &self,
-        current_epoch: Epoch,
-        our_start_epoch: Epoch,
-        prev_epoch_committees: &HashMap<ShardGroup, Committee<PeerAddress>>,
-    ) -> Result<bool, RpcStateSyncError> {
-        let Some(prev_epoch) = current_epoch.checked_sub(Epoch(1)) else {
-            return Ok(false);
-        };
-
-        if our_start_epoch != prev_epoch {
-            return Ok(false);
-        }
-
-        let local_epoch = self.state_store.with_read_tx(|tx| tx.current_epoch())?;
-        if local_epoch >= prev_epoch {
-            return Ok(false);
-        }
-
-        let previous_epoch_vns = self.epoch_manager.get_all_validator_nodes(prev_epoch).await?;
-        let start_epochs = previous_epoch_vns
-            .into_iter()
-            .map(|vn| (vn.public_key, vn.start_epoch))
-            .collect::<HashMap<_, _>>();
-
-        let all_members_started_in_prev_epoch = prev_epoch_committees
-            .values()
-            .flat_map(|committee| committee.iter())
-            .all(|member| start_epochs.get(&member.public_key) == Some(&prev_epoch));
-
-        if all_members_started_in_prev_epoch {
-            info!(
-                target: LOG_TARGET,
-                "🛜 Previous epoch {} consisted entirely of newly activated validators and local state is still at \
-                 epoch {}. Missing checkpoints will be treated as first-committee bootstrap.",
-                prev_epoch,
-                local_epoch
-            );
-        }
-
-        Ok(all_members_started_in_prev_epoch)
-    }
-
     fn is_checkpoint_temporarily_unavailable_error(err: &RpcStateSyncError, prev_epoch: Epoch) -> bool {
         match err {
             RpcStateSyncError::CheckpointNotAvailable { epoch } => *epoch == prev_epoch,
             RpcStateSyncError::RpcError(RpcError::RequestFailed(status)) => {
                 let details = status.details();
+                // Remote node count be behind in syncing the epoch oracle
                 (status.as_status_code() == RpcStatusCode::BadRequest &&
                     details.contains(&format!("Peer requested checkpoint with epoch {}", prev_epoch))) ||
+                    // Remote node is syncing
                     (status.as_status_code() == RpcStatusCode::General &&
                         (details.contains("Consensus is not running on this node") ||
                             details.contains("Node is still catching up to the epoch") ||
@@ -483,7 +442,6 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         epoch: Epoch,
         prev_committee: &Committee<PeerAddress>,
         our_vn_addr: &PeerAddress,
-        allow_committee_bootstrap: bool,
     ) -> Result<Option<Version>, RpcStateSyncError> {
         let prev_epoch = epoch
             .checked_sub(Epoch(1))
@@ -566,21 +524,12 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             }
         }
 
-        if allow_committee_bootstrap && saw_unavailable_checkpoint && last_hard_error.is_none() {
-            info!(
-                target: LOG_TARGET,
-                "🛜 No checkpoint for epoch {prev_epoch} is available yet from the freshly activated previous \
-                 committee. Treating this as first-committee bootstrap for shard {shard}."
-            );
-            return Ok(None);
-        }
-
-        if saw_unavailable_checkpoint && last_hard_error.is_none() {
-            return Err(RpcStateSyncError::CheckpointNotAvailable { epoch: prev_epoch });
-        }
-
         if let Some(err) = last_hard_error {
             return Err(err);
+        }
+
+        if saw_unavailable_checkpoint {
+            return Err(RpcStateSyncError::CheckpointNotAvailable { epoch: prev_epoch });
         }
 
         Err(RpcStateSyncError::SyncFailedAllPeers {
@@ -594,7 +543,6 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         shard_group: ShardGroup,
         prev_committees: &HashMap<ShardGroup, Committee<PeerAddress>>,
         our_vn_address: &PeerAddress,
-        allow_committee_bootstrap: bool,
     ) -> Result<Option<Version>, RpcStateSyncError> {
         let mut last_error = None;
 
@@ -609,7 +557,6 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     current_epoch,
                     prev_committee,
                     our_vn_address,
-                    allow_committee_bootstrap,
                 )
                 .await;
             match result {
@@ -664,14 +611,6 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             return Ok(());
         }
 
-        let allow_committee_bootstrap = self
-            .should_treat_missing_prev_epoch_checkpoint_as_bootstrap(
-                current_epoch,
-                our_vn.start_epoch,
-                &prev_epoch_committees,
-            )
-            .await?;
-
         let local_shard_group = local_info.shard_group();
 
         self.sync_global_shard(
@@ -679,7 +618,6 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             ShardGroup::all_shards(local_info.num_preshards()),
             &prev_epoch_committees,
             &our_vn.address,
-            allow_committee_bootstrap,
         )
         .await?;
 
@@ -694,15 +632,8 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                 continue;
             };
             for shard in intersect_shard_group.shard_iter() {
-                self.sync_shard(
-                    shard,
-                    shard_group,
-                    current_epoch,
-                    &committee,
-                    &our_vn.address,
-                    allow_committee_bootstrap,
-                )
-                .await?;
+                self.sync_shard(shard, shard_group, current_epoch, &committee, &our_vn.address)
+                    .await?;
             }
         }
 
@@ -723,8 +654,22 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
             .state_store
             .with_read_tx(|tx| LeafBlock::get(tx, current_epoch).optional())?;
 
-        // We only sync if we're behind by an epoch. The current epoch is replayed in consensus.
-        if current_epoch > leaf_block.map_or(Epoch::zero(), |b| b.epoch()) {
+        // We only sync if we're behind by at least one epoch. If consensus has never started, leaf_block will be none,
+        // and we'll only need to sync if the current epoch is past the birthday epoch (the start epoch for the
+        // network). The state for the current epoch is replayed in consensus via block catch up.
+        let last_epoch = match leaf_block {
+            Some(b) => b.epoch(),
+            None => {
+                let Some(birthday_epoch) = self.epoch_manager.get_birthday_epoch().await? else {
+                    return Err(RpcStateSyncError::InvariantError {
+                        details: "Check sync called before epoch birthday was determined".to_string(),
+                    });
+                };
+                birthday_epoch
+            },
+        };
+
+        if current_epoch > last_epoch {
             info!(target: LOG_TARGET, "🛜Our current leaf block {} is behind the current epoch {}. Syncing...", leaf_block.display(), current_epoch);
             return Ok(SyncStatus::Behind);
         }

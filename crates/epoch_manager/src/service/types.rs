@@ -129,4 +129,7 @@ pub enum EpochManagerRequest<TAddr> {
         current_epoch: Epoch,
         reply: Reply<bool>,
     },
+    GetBirthdayEpoch {
+        reply: Reply<Option<Epoch>>,
+    },
 }

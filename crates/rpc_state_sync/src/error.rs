@@ -38,6 +38,8 @@ pub enum RpcStateSyncError {
     CheckpointNotAvailable { epoch: Epoch },
     #[error("No committees found for epoch {0}")]
     NoCommittees(Epoch),
+    #[error("Invariant error: {details}")]
+    InvariantError { details: String },
 }
 
 impl RpcStateSyncError {

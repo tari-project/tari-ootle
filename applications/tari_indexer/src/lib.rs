@@ -136,7 +136,12 @@ where
         #[cfg(feature = "metrics")]
         let server = rest_api::Server::new(registry);
         let listen_address = server
-            .spawn(listen_addr, &services, &config.indexer.rate_limits, shutdown_signal.clone())
+            .spawn(
+                listen_addr,
+                &services,
+                &config.indexer.rate_limits,
+                shutdown_signal.clone(),
+            )
             .await
             .map_err(|e| ExitError::new(ExitCode::ConfigError, e))?;
         debug!(target: LOG_TARGET, "API address {}", listen_address);

@@ -24,40 +24,6 @@ use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use config::Config;
 use serde::{Deserialize, Serialize};
-
-/// Rate-limiting configuration for the indexer REST API.
-///
-/// All `*_per_min` values are **per IP address**. The defaults match the
-/// acceptance-criteria values agreed with the maintainers.
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct IndexerRateLimitsConfig {
-    /// POST /transactions – requests per minute per IP (default: 20)
-    pub transactions_per_min: u32,
-    /// POST /substates/fetch – requests per minute per IP (default: 30)
-    pub substates_fetch_per_min: u32,
-    /// POST /utxos/fetch – requests per minute per IP (default: 15)
-    pub utxos_fetch_per_min: u32,
-    /// GET /non-fungibles – requests per minute per IP (default: 30)
-    pub non_fungibles_per_min: u32,
-    /// Maximum concurrent SSE connections per IP (default: 3)
-    pub sse_max_connections_per_ip: usize,
-    /// Trust X-Forwarded-For / X-Real-IP proxy headers (default: false).
-    /// Only enable when the indexer is behind a trusted reverse proxy.
-    pub trust_proxy_headers: bool,
-}
-
-impl Default for IndexerRateLimitsConfig {
-    fn default() -> Self {
-        Self {
-            transactions_per_min: 20,
-            substates_fetch_per_min: 30,
-            utxos_fetch_per_min: 15,
-            non_fungibles_per_min: 30,
-            sse_max_connections_per_ip: 3,
-            trust_proxy_headers: false,
-        }
-    }
-}
 use tari_common::{
     ConfigurationError,
     DefaultConfigLoader,
@@ -72,7 +38,7 @@ use tari_ootle_app_utilities::{
 use tari_ootle_common_types::Network;
 use tari_template_lib_types::TemplateAddress;
 
-use crate::network_state_sync::EventFilter;
+use crate::{network_state_sync::EventFilter, rest_api::RefillRate};
 
 #[derive(Debug, Clone)]
 pub struct ApplicationConfig {
@@ -201,5 +167,51 @@ impl Default for IndexerConfig {
 impl SubConfigPath for IndexerConfig {
     fn main_key_prefix() -> &'static str {
         "indexer"
+    }
+}
+
+/// Rate-limiting configuration for the indexer REST API.
+///
+/// All `*_rate` values are **per IP address**. Each rate is a token-bucket
+/// `(capacity, window)` pair: `capacity` is the burst size, and the bucket
+/// refills at `capacity / window` tokens per second. A 10-second window keeps
+/// the per-minute throughput intact while letting clients recover from a burst
+/// in seconds rather than a full minute.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct IndexerRateLimitsConfig {
+    pub enabled: bool,
+    /// POST /transactions – default 20 req / 10s burst (~120/min sustained)
+    pub transactions_submit_rate: RefillRate,
+    /// POST /transactions/dry-run – default 20 req / 10s burst (~120/min sustained)
+    pub transactions_dry_run_submit_rate: RefillRate,
+    /// POST /substates/fetch – default 10 req / 10s burst (~60/min sustained)
+    pub substates_rate: RefillRate,
+    /// POST /utxos/fetch – default 20 req / 10s burst (~120/min sustained)
+    pub utxos_fetch_rate: RefillRate,
+    /// GET /non-fungibles – default 10 req / 10s burst (~60/min sustained)
+    pub non_fungibles_rate: RefillRate,
+    /// GET /transactions/* read endpoints – default 5 req / 10s burst (~30/min sustained)
+    pub transactions_rate: RefillRate,
+    /// Maximum concurrent SSE connections per IP (default: 5)
+    pub sse_max_connections_per_ip: usize,
+    /// Trust X-Forwarded-For / X-Real-IP proxy headers (default: false).
+    /// Only enable when the indexer is behind a trusted reverse proxy.
+    pub trust_proxy_headers: bool,
+}
+
+impl Default for IndexerRateLimitsConfig {
+    fn default() -> Self {
+        let window = Duration::from_secs(10);
+        Self {
+            enabled: false,
+            transactions_submit_rate: RefillRate::new(20.0, window).unwrap(),
+            transactions_dry_run_submit_rate: RefillRate::new(20.0, window).unwrap(),
+            substates_rate: RefillRate::new(10.0, window).unwrap(),
+            utxos_fetch_rate: RefillRate::new(20.0, window).unwrap(),
+            non_fungibles_rate: RefillRate::new(10.0, window).unwrap(),
+            transactions_rate: RefillRate::new(5.0, window).unwrap(),
+            sse_max_connections_per_ip: 5,
+            trust_proxy_headers: false,
+        }
     }
 }

@@ -33,6 +33,11 @@ impl ProcessDefinition for Indexer {
         let graphql_listener_address = format!("{listen_ip}:{graphql_port}");
         let web_ui_listener_address = format!("{listen_ip}:{web_ui_port}");
 
+        let rate_limit = context
+            .get_setting("enable_rate_limit")
+            .map(|s| s == "true")
+            .unwrap_or(false);
+
         let base_node = context
             .minotari_nodes()
             .next()
@@ -60,6 +65,7 @@ impl ProcessDefinition for Indexer {
             .arg(format!("-pindexer.web_ui_public_api_url={api_public_url}"))
             .arg(format!("-pindexer.web_ui_public_graphql_url={graphql_public_url}"))
             .arg("-pepoch_oracle.base_layer.scanning_interval=1")
+            .arg(format!("-pindexer.rate_limits.enabled={rate_limit}"))
             .env("API_DEBUG", "1"); // Enable detailed API error messages
 
         // mDNS is not guaranteed to work, so we'll explicitly set the seed peers for the indexer.

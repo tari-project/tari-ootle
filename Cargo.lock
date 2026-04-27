@@ -11283,7 +11283,6 @@ dependencies = [
  "time",
  "tokio",
  "tokio-stream",
- "tower 0.5.2",
  "tower-http",
  "tracing",
  "tracing-appender",

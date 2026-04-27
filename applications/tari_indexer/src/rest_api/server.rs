@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{net::SocketAddr, time::Duration};
+use std::net::SocketAddr;
 
 use axum::{
     Extension,
@@ -12,7 +12,6 @@ use axum::{
 use log::*;
 use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
 use tari_shutdown::ShutdownSignal;
-use tower::{ServiceBuilder, buffer::BufferLayer, limit::RateLimitLayer};
 use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer, trace::TraceLayer};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
@@ -26,8 +25,12 @@ use crate::{
         context::HandlerContext,
         handlers,
         rate_limit::{
-            IpRateLimiter, RateLimitConfig, SseConnectionLimiter, SseLimitConfig,
-            rate_limit_middleware, sse_limit_middleware,
+            IpRateLimiter,
+            RateLimitConfig,
+            SseConnectionLimiter,
+            SseLimitConfig,
+            rate_limit_middleware,
+            sse_limit_middleware,
         },
     },
 };
@@ -36,9 +39,6 @@ const LOG_TARGET: &str = "tari::ootle::indexer::rest_api::server";
 
 // Limit the body size to 4MB to allow for large transactions (wasm uploads)
 const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
-
-// Rate-limit window in seconds (all token-bucket limits use a 60-second window)
-const RATE_LIMIT_WINDOW_SECS: u64 = 60;
 
 #[derive(OpenApi)]
 #[openapi(paths(
@@ -89,6 +89,7 @@ impl Server {
         Self { registry }
     }
 
+    #[expect(clippy::too_many_lines)]
     pub async fn spawn(
         #[allow(unused_mut)] mut self,
         preferred_addr: SocketAddr,
@@ -102,26 +103,37 @@ impl Server {
         // `trust_proxy_headers` mirrors the value from config – enable only when
         // the indexer is behind a trusted reverse proxy.
         let tx_submit_limiter = RateLimitConfig {
-            limiter: IpRateLimiter::new(rate_limits.transactions_per_min, RATE_LIMIT_WINDOW_SECS),
+            enabled: rate_limits.enabled,
+            limiter: IpRateLimiter::new(rate_limits.transactions_submit_rate),
             trust_proxy_headers: rate_limits.trust_proxy_headers,
         };
         let tx_dry_run_limiter = RateLimitConfig {
-            limiter: IpRateLimiter::new(rate_limits.transactions_per_min, RATE_LIMIT_WINDOW_SECS),
+            enabled: rate_limits.enabled,
+            limiter: IpRateLimiter::new(rate_limits.transactions_dry_run_submit_rate),
+            trust_proxy_headers: rate_limits.trust_proxy_headers,
+        };
+        let transactions_fetch_limiter = RateLimitConfig {
+            enabled: rate_limits.enabled,
+            limiter: IpRateLimiter::new(rate_limits.transactions_rate),
             trust_proxy_headers: rate_limits.trust_proxy_headers,
         };
         let substates_fetch_limiter = RateLimitConfig {
-            limiter: IpRateLimiter::new(rate_limits.substates_fetch_per_min, RATE_LIMIT_WINDOW_SECS),
+            enabled: rate_limits.enabled,
+            limiter: IpRateLimiter::new(rate_limits.substates_rate),
             trust_proxy_headers: rate_limits.trust_proxy_headers,
         };
         let utxos_fetch_limiter = RateLimitConfig {
-            limiter: IpRateLimiter::new(rate_limits.utxos_fetch_per_min, RATE_LIMIT_WINDOW_SECS),
+            enabled: rate_limits.enabled,
+            limiter: IpRateLimiter::new(rate_limits.utxos_fetch_rate),
             trust_proxy_headers: rate_limits.trust_proxy_headers,
         };
         let non_fungibles_limiter = RateLimitConfig {
-            limiter: IpRateLimiter::new(rate_limits.non_fungibles_per_min, RATE_LIMIT_WINDOW_SECS),
+            enabled: rate_limits.enabled,
+            limiter: IpRateLimiter::new(rate_limits.non_fungibles_rate),
             trust_proxy_headers: rate_limits.trust_proxy_headers,
         };
         let sse_limiter = SseLimitConfig {
+            enabled: rate_limits.enabled,
             limiter: SseConnectionLimiter::new(rate_limits.sse_max_connections_per_ip),
             trust_proxy_headers: rate_limits.trust_proxy_headers,
         };
@@ -139,44 +151,38 @@ impl Server {
             .route("/network/stats", get(handlers::network::get_network_sync_stats))
             .route("/network/connections", get(handlers::network::get_connections))
             // ----------------------------------------------------------------
-            // POST /substates/fetch – 30 req/min per IP
-            // GET /substates/:id   – unrestricted
+            // /substates/* – per-IP rate limit (rate_limits.substates_rate)
             // ----------------------------------------------------------------
             .nest("/substates", Router::new()
                 .route("/fetch", post(handlers::substates::fetch_substates)
                     .route_layer(middleware::from_fn_with_state(substates_fetch_limiter.clone(), rate_limit_middleware)))
-                .route("/watched", get(handlers::watched::list_watched_substates))
-                .route("/{substate_id}", get(handlers::substates::get_substate))
+                .route("/watched", get(handlers::watched::list_watched_substates)
+                    .route_layer(middleware::from_fn_with_state(substates_fetch_limiter.clone(), rate_limit_middleware)))
+                .route("/{substate_id}", get(handlers::substates::get_substate)
+                .route_layer(middleware::from_fn_with_state(substates_fetch_limiter, rate_limit_middleware)))
             )
             // ----------------------------------------------------------------
             // Transactions
             // ----------------------------------------------------------------
             .nest("/transactions", Router::new()
-                // POST /transactions – 20 req/min per IP
+                // POST /transactions – per-IP rate limit (rate_limits.transactions_submit_rate)
                 .route("/", post(handlers::transactions::submit_transaction)
-                    .route_layer(middleware::from_fn_with_state(tx_submit_limiter.clone(), rate_limit_middleware)))
-                // POST /transactions/dry-run – global tower rate limit (existing) +
-                //   per-IP limit with separate limiter instance
+                    .route_layer(middleware::from_fn_with_state(tx_submit_limiter, rate_limit_middleware)))
+                // POST /transactions/dry-run – per-IP rate limit on a separate limiter instance so a
+                // burst of dry-runs doesn't starve the submit budget for the same IP
                 .route("/dry-run", post(handlers::transactions::submit_transaction_dry_run)
-                    .route_layer(middleware::from_fn_with_state(tx_dry_run_limiter.clone(), rate_limit_middleware))
-                    .layer(ServiceBuilder::new()
-                        .layer(axum::error_handling::HandleErrorLayer::new(|err: axum::BoxError| async move {
-                            (
-                                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                                format!("Unhandled error: {}", err),
-                            )
-                        }))
-                        .layer(BufferLayer::new(1024))
-                        .layer(RateLimitLayer::new(10, Duration::from_secs(5)))
-                    ))
-                // GET /transactions/recent – unrestricted read
+                    .route_layer(middleware::from_fn_with_state(tx_dry_run_limiter, rate_limit_middleware))
+                )
+                // GET /transactions/recent – per-IP rate limit (rate_limits.transactions_rate)
                 .route(
                     "/recent",
-                    get(handlers::transactions::list_recent_transactions),
+                    get(handlers::transactions::list_recent_transactions)
+                    .route_layer(middleware::from_fn_with_state(transactions_fetch_limiter.clone(), rate_limit_middleware))
                 )
                 .route(
                     "/{transaction_id}/result",
-                    get(handlers::transactions::get_transaction_result),
+                    get(handlers::transactions::get_transaction_result)
+                    .route_layer(middleware::from_fn_with_state(transactions_fetch_limiter.clone(), rate_limit_middleware))
                 )
                 .route("/events", get(handlers::transactions::query_transaction_events))
                 // SSE stream – per-IP concurrent connection limit
@@ -196,14 +202,16 @@ impl Server {
                     get(handlers::templates::get_template_definition),
                 )
             )
-            // GET /non-fungibles – 30 req/min per IP
+            // GET /non-fungibles – per-IP rate limit (rate_limits.non_fungibles_rate)
             .route("/non-fungibles", get(handlers::nfts::get_non_fungibles)
-                .route_layer(middleware::from_fn_with_state(non_fungibles_limiter.clone(), rate_limit_middleware)))
+                .route_layer(middleware::from_fn_with_state(non_fungibles_limiter, rate_limit_middleware)))
             .nest("/utxos", Router::new()
-                .route("/", get(handlers::utxos::list_utxos))
-                // POST /utxos/fetch – 15 req/min per IP
+                // GET /utxos – per-IP rate limit (rate_limits.utxos_fetch_rate)
+                .route("/", get(handlers::utxos::list_utxos)
+                .route_layer(middleware::from_fn_with_state(utxos_fetch_limiter.clone(), rate_limit_middleware)))
+                // POST /utxos/fetch – per-IP rate limit (rate_limits.utxos_fetch_rate)
                 .route("/fetch", post(handlers::utxos::fetch_utxos)
-                    .route_layer(middleware::from_fn_with_state(utxos_fetch_limiter.clone(), rate_limit_middleware)))
+                    .route_layer(middleware::from_fn_with_state(utxos_fetch_limiter, rate_limit_middleware)))
                 // POST /utxos/stream (SSE-like streaming) – per-IP concurrent connection limit
                 .route("/stream", post(handlers::utxos::stream_utxo_updates)
                     .route_layer(middleware::from_fn_with_state(sse_limiter.clone(), sse_limit_middleware)))
@@ -211,11 +219,12 @@ impl Server {
             .nest(
                 "/transaction-receipts",
                 Router::new()
-                    .route("/", get(handlers::transaction_receipts::list_transaction_receipts))
+                    .route("/", get(handlers::transaction_receipts::list_transaction_receipts)
+                        .route_layer(middleware::from_fn_with_state(transactions_fetch_limiter.clone(), rate_limit_middleware)))
                     .route(
                         "/{address}",
-                        get(handlers::transaction_receipts::get_transaction_receipt),
-                    ),
+                        get(handlers::transaction_receipts::get_transaction_receipt)
+                           .route_layer(middleware::from_fn_with_state(transactions_fetch_limiter, rate_limit_middleware)))
             )
             .nest("/resources/", Router::new()
                 // Convenience Shortcut
@@ -229,6 +238,11 @@ impl Server {
             )
             .route("/events", get(handlers::indexer_events::sse_events)
                 .route_layer(middleware::from_fn_with_state(sse_limiter.clone(), sse_limit_middleware)))
+            .nest("/epoch-checkpoints", Router::new()
+                .route("/", get(handlers::epoch_checkpoints::list_epoch_checkpoints))
+                .route("/latest", get(handlers::epoch_checkpoints::get_latest_epoch_checkpoint))
+            )
+            .route("/events", get(handlers::indexer_events::sse_events))
             .layer(CorsLayer::permissive())
             .layer(RequestBodyLimitLayer::new(REQUEST_BODY_LIMIT))
             .merge(SwaggerUi::new("/swagger-ui").url("/openapi.json", ApiDoc::openapi()))
@@ -252,12 +266,9 @@ impl Server {
             // `into_make_service_with_connect_info` populates `ConnectInfo<SocketAddr>`
             // for each connection, which the per-IP rate limiter middleware uses to
             // identify the remote peer when no proxy headers are present.
-            if let Err(error) = axum::serve(
-                listener,
-                router.into_make_service_with_connect_info::<SocketAddr>(),
-            )
-            .with_graceful_shutdown(shutdown)
-            .await
+            if let Err(error) = axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>())
+                .with_graceful_shutdown(shutdown)
+                .await
             {
                 error!(target: LOG_TARGET, "Wallet query HTTP server error: {error}");
             }

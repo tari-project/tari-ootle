@@ -85,7 +85,6 @@ tokio = { workspace = true, features = [
     "rt-multi-thread",
 ] }
 tokio-stream = { workspace = true }
-tower = { workspace = true, features = ["limit"] }
 tower-http = { workspace = true, features = ["default", "cors", "limit", "trace"] }
 url = { workspace = true, features = ["serde"] }
 cacache = { version = "13.1.0", default-features = false, features = ["mmap", "tokio-runtime"] }

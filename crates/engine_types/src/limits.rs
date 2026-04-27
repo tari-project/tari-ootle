@@ -31,6 +31,7 @@ pub struct EngineLimits {
     pub max_template_binary_size_bytes: usize,
     pub max_template_name_length: usize,
     pub max_call_depth: usize,
+    pub max_random_bytes_len: usize,
 }
 
 pub const ENGINE_LIMITS: EngineLimits = EngineLimits {
@@ -45,9 +46,12 @@ pub const ENGINE_LIMITS: EngineLimits = EngineLimits {
     max_template_binary_size_bytes: 2 * 1024 * 1024, // 2 MiB
     max_template_name_length: 64,
     max_call_depth: 10,
+    max_random_bytes_len: 1024, // 1 KiB per call
 };
 
 pub const MAX_DIVISIBILITY: u8 = 18;
+
+pub const MAX_TOKEN_SYMBOL_LEN: usize = 10;
 
 pub struct StealthLimits {
     pub max_inputs: usize,

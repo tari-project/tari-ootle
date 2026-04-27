@@ -2,4 +2,13 @@
 import type { ExecuteResult } from "../ExecuteResult";
 import type { TransactionId } from "../TransactionId";
 
-export type TransactionSubmitManifestResponse = { transaction_id: TransactionId; result: ExecuteResult | null };
+export type TransactionSubmitManifestResponse = {
+  transaction_id: TransactionId;
+  /**
+   * The minimum fee required to submit this transaction. Only present for dry runs.
+   * Includes a +1 buffer over `total_fees_charged` to account for storage fee rounding
+   * differences between the dry run and actual submission.
+   */
+  required_fees: number | null;
+  result: ExecuteResult | null;
+};

@@ -23,6 +23,7 @@
 use log::*;
 use tari_engine_types::{events::Event, substate::SubstateId};
 use tari_ootle_transaction::TransactionId;
+use tari_template_lib_types::ResourceAddress;
 
 use crate::{
     storage_sqlite::SqliteIndexerStore,
@@ -45,12 +46,13 @@ impl EventManager {
         &self,
         topic: Option<&str>,
         substate_id: Option<&SubstateId>,
+        resource_address: Option<&ResourceAddress>,
         offset: u32,
         limit: u32,
     ) -> Result<Vec<(TransactionId, Event)>, anyhow::Error> {
         let events = self
             .substate_store
-            .with_read_tx(|tx| tx.get_events(substate_id, topic, offset, limit))?;
+            .with_read_tx(|tx| tx.get_events(substate_id, topic, resource_address, offset, limit))?;
 
         debug!(target: LOG_TARGET, "Found {} events", events.len());
         Ok(events)

@@ -45,3 +45,8 @@
 ### Building
 
 - Standard cargo workspace. Use `-p <package_name>` to build/test specific crates
+
+### Formatting
+
+Use `cargo  +nightly-2025-06-25 fmt --all` to format all code with the specified nightly version before pushing commits
+involving rust code. 

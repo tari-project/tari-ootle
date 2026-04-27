@@ -231,8 +231,7 @@ export default function ClaimBurn() {
         throw new Error(rejectReasonToString(txResult.AcceptFeeRejectRest[1]));
       }
 
-      const feeReceipt = dryRunResult.finalize.fee_receipt;
-      const fee = feeReceipt.total_fees_paid - feeReceipt.total_fee_overcharge;
+      const fee = resp.required_fees!;
       setFormState((prev) => ({ ...prev, fee: String(fee), disabled: false }));
     } catch (e: any) {
       setFormState((prev) => ({ ...prev, disabled: false }));

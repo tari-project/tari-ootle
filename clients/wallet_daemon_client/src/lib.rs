@@ -90,6 +90,16 @@ use crate::{
         AccountsListResponse,
         AccountsRenameRequest,
         AccountsRenameResponse,
+        AddressBookAddRequest,
+        AddressBookAddResponse,
+        AddressBookDeleteRequest,
+        AddressBookDeleteResponse,
+        AddressBookGetRequest,
+        AddressBookGetResponse,
+        AddressBookListRequest,
+        AddressBookListResponse,
+        AddressBookUpdateRequest,
+        AddressBookUpdateResponse,
         AuthGetMethodRequest,
         AuthGetMethodResponse,
         AuthListSessionsRequest,
@@ -134,6 +144,10 @@ use crate::{
         SubstatesGetResponse,
         SubstatesListRequest,
         SubstatesListResponse,
+        SwapPoolGetExchangeRateRequest,
+        SwapPoolGetExchangeRateResponse,
+        SwapPoolsListRequest,
+        SwapPoolsListResponse,
         TemplatesGetRequest,
         TemplatesGetResponse,
         TemplatesListAuthoredRequest,
@@ -658,6 +672,22 @@ impl WalletDaemonClient {
         self.send_request("substates.list", req.borrow()).await
     }
 
+    /// Gets the exchange rate for a swap pool by fetching its vault balances.
+    pub async fn swap_pool_get_exchange_rate<T: Borrow<SwapPoolGetExchangeRateRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<SwapPoolGetExchangeRateResponse, WalletDaemonClientError> {
+        self.send_request("swap_pools.get_exchange_rate", req.borrow()).await
+    }
+
+    /// Lists swap pools known to the indexer with their current exchange rates.
+    pub async fn swap_pools_list<T: Borrow<SwapPoolsListRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<SwapPoolsListResponse, WalletDaemonClientError> {
+        self.send_request("swap_pools.list", req.borrow()).await
+    }
+
     /// Fetches a template by its address, including its function definitions.
     pub async fn get_template<T: Borrow<TemplatesGetRequest>>(
         &mut self,
@@ -704,6 +734,45 @@ impl WalletDaemonClient {
         req: T,
     ) -> Result<WebauthnStartAuthResponse, WalletDaemonClientError> {
         self.send_request("webauthn.auth_start", req.borrow()).await
+    }
+
+    // Address book
+
+    /// Adds a new entry to the address book.
+    pub async fn address_book_add<T: Borrow<AddressBookAddRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AddressBookAddResponse, WalletDaemonClientError> {
+        self.send_request("address_book.add", req.borrow()).await
+    }
+
+    /// Lists all address book entries.
+    pub async fn address_book_list(&mut self) -> Result<AddressBookListResponse, WalletDaemonClientError> {
+        self.send_request("address_book.list", &AddressBookListRequest {}).await
+    }
+
+    /// Gets a specific address book entry by name.
+    pub async fn address_book_get<T: Borrow<AddressBookGetRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AddressBookGetResponse, WalletDaemonClientError> {
+        self.send_request("address_book.get", req.borrow()).await
+    }
+
+    /// Updates an existing address book entry.
+    pub async fn address_book_update<T: Borrow<AddressBookUpdateRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AddressBookUpdateResponse, WalletDaemonClientError> {
+        self.send_request("address_book.update", req.borrow()).await
+    }
+
+    /// Deletes an address book entry by name.
+    pub async fn address_book_delete<T: Borrow<AddressBookDeleteRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AddressBookDeleteResponse, WalletDaemonClientError> {
+        self.send_request("address_book.delete", req.borrow()).await
     }
 
     fn next_request_id(&mut self) -> i64 {

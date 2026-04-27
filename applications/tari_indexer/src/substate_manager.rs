@@ -20,7 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{
@@ -85,6 +88,11 @@ impl SubstateManager {
             cache_manager: cached_substates,
             substate_store,
         }
+    }
+
+    pub fn with_cache_ttl(mut self, ttl: Duration) -> Self {
+        self.cache_manager = self.cache_manager.with_cache_ttl(ttl);
+        self
     }
 
     #[cfg(feature = "metrics")]

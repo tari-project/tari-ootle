@@ -4,7 +4,14 @@ import type { KeyId } from "./KeyId";
 export type TransactionSubmitManifestRequest = {
   manifest: string;
   variables: { [key in string]?: string };
-  signing_key_id: KeyId | null;
+  /**
+   * The key used for the seal (owner) signature. If not provided, defaults to the default account's owner key.
+   */
+  seal_signer_key_id: KeyId | null;
+  /**
+   * Additional signing keys for accounts involved in the transaction (e.g. for multi-account manifests).
+   */
+  signing_key_ids: Array<KeyId>;
   max_fee: number;
   dry_run: boolean;
 };

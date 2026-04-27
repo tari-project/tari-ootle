@@ -284,6 +284,12 @@ pub struct QueryTransactionEventsRequest {
     pub topic: Option<String>,
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     pub substate_id: Option<SubstateId>,
+    /// Filter by resource address. Matches when either the event's `substate_id` is the given
+    /// resource (std.resource.* events) or the event payload contains a `resource_address` entry
+    /// equal to the given address (std.vault.deposit / std.vault.withdraw).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub resource_address: Option<ResourceAddress>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
 }
@@ -306,6 +312,12 @@ pub struct StreamTransactionEventsRequest {
     pub substate_id: Option<SubstateId>,
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     pub template_address: Option<TemplateAddress>,
+    /// Filter by resource address. Matches when either the event's `substate_id` is the given
+    /// resource (std.resource.* events) or the event payload contains a `resource_address` entry
+    /// equal to the given address (std.vault.deposit / std.vault.withdraw).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub resource_address: Option<ResourceAddress>,
     /// Resume the event stream from this event ID (exclusive). Events with id > after_id will be
     /// replayed from the database before switching to the live stream.
     pub after_id: Option<i64>,
@@ -614,6 +626,46 @@ pub struct GetNetworkInfoResponse {
 pub struct GetNetworkSyncStateResponse {
     pub network_desc: NetworkDescription,
     pub sync_progress: Option<SyncProgress>,
+    /// Per-validator consensus state as last observed by this indexer while
+    /// syncing from the network. Populated lazily, so validators that have
+    /// never been contacted for a sync will not appear here. Each entry
+    /// carries an `observed_at_unix_s` timestamp so callers can judge whether
+    /// the reading is fresh.
+    #[serde(default)]
+    pub validators: Vec<ValidatorStatus>,
+}
+
+/// A snapshot of one validator's consensus pacemaker state as observed by the
+/// indexer during a recent sync round.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ValidatorStatus {
+    /// libp2p PeerId of the validator.
+    pub peer_id: String,
+    #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
+    pub shard_group: ShardGroup,
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    pub epoch: Epoch,
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    pub height: u64,
+    pub state: ValidatorConsensusState,
+    /// Unix timestamp (seconds) at which this snapshot was captured. Clients
+    /// can derive the freshness of the snapshot by comparing this to the
+    /// current wall-clock time.
+    pub observed_at_unix_s: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub enum ValidatorConsensusState {
+    Idle,
+    CheckSync,
+    Syncing,
+    Running,
+    Sleeping,
+    Shutdown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -689,4 +741,77 @@ pub struct GetResourceResponse {
     pub version: u32,
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     pub total_supply: Option<Amount>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListEpochCheckpointsRequest {
+    /// The epoch to start listing from (inclusive). Defaults to 0.
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<u64>))]
+    pub from_epoch: Option<Epoch>,
+    /// Maximum number of checkpoints to return (default: 20, max: 100).
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListEpochCheckpointsResponse {
+    #[cfg_attr(feature = "ts", ts(type = "Array<Record<string, unknown>>"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<Object>))]
+    pub checkpoints: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct GetLatestEpochCheckpointResponse {
+    #[cfg_attr(feature = "ts", ts(type = "Record<string, unknown>"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
+    pub checkpoint: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListWatchedSubstatesRequest {
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub template_address: Option<TemplateAddress>,
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListWatchedSubstatesResponse {
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<WatchedSubstateItem>))]
+    pub substates: Vec<WatchedSubstateItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct WatchedSubstateItem {
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub component_address: SubstateId,
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub template_address: TemplateAddress,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListWatchedTemplatesResponse {
+    pub templates: Vec<WatchedTemplateItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct WatchedTemplateItem {
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub template_address: TemplateAddress,
+    pub template_name: Option<String>,
 }

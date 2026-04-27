@@ -3,7 +3,7 @@
 
 use std::slice;
 
-use tari_engine::wasm::WasmExecutionError;
+use tari_engine::{runtime::LimitError, wasm::WasmExecutionError};
 use tari_engine_types::limits;
 use tari_ootle_transaction::{Transaction, args};
 use tari_template_abi::CallInfo;
@@ -47,6 +47,28 @@ fn max_call_size_limit() {
 
     assert_reject_reason(reason, WasmExecutionError::CallSizeLimitExceeded {
         limit: limits::ENGINE_LIMITS.max_call_size,
+    });
+}
+
+#[test]
+fn max_random_bytes_len_limit() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let template = test.get_template_address(TEMPLATE_NAME);
+
+    let max_len = limits::ENGINE_LIMITS.max_random_bytes_len as u32;
+
+    let bytes: Vec<u8> = test.call_function(TEMPLATE_NAME, "request_random_bytes", args!(max_len), vec![]);
+    assert_eq!(bytes.len(), max_len as usize);
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .call_function(template, "request_random_bytes", args!(max_len + 1))
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(reason, LimitError::MaxRandomBytesLenExceeded {
+        len: (max_len + 1) as usize,
     });
 }
 

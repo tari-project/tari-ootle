@@ -37,6 +37,9 @@ const REPLAY_PAGE_SIZE: u32 = 500;
         ("topic" = Option<String>, Query, description = "Filter by event topic"),
         ("substate_id" = Option<String>, Query, description = "Filter by substate ID"),
         ("template_address" = Option<String>, Query, description = "Filter by template address"),
+        ("resource_address" = Option<String>, Query, description = "Filter by resource address \
+            (derived from substate_id for std.resource.* events, or from the `resource_address` \
+            payload entry for std.vault.deposit / std.vault.withdraw)"),
         ("after_id" = Option<i64>, Query, description = "Resume from this event ID (exclusive)"),
     )
 )]
@@ -57,6 +60,7 @@ pub async fn sse_transaction_events(
         entity_id: None,
         substate_id: req.substate_id,
         template_address: req.template_address,
+        resource_address: req.resource_address,
     };
 
     if let Some(id) = after_id {
@@ -137,6 +141,7 @@ async fn run_replay_then_live(
             filter.topic.as_deref(),
             filter.substate_id.as_ref(),
             filter.template_address.as_ref(),
+            filter.resource_address.as_ref(),
             REPLAY_PAGE_SIZE,
         )?;
 
@@ -189,6 +194,7 @@ async fn run_replay_then_live(
                         filter.topic.as_deref(),
                         filter.substate_id.as_ref(),
                         filter.template_address.as_ref(),
+                        filter.resource_address.as_ref(),
                         REPLAY_PAGE_SIZE,
                     )?;
 

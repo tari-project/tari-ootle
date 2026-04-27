@@ -67,7 +67,9 @@ const RATE_LIMIT_WINDOW_SECS: u64 = 60;
     handlers::utxos::stream_utxo_updates,
     handlers::transaction_receipts::list_transaction_receipts,
     handlers::transaction_receipts::get_transaction_receipt,
-    handlers::transaction_events::sse_transaction_events
+    handlers::transaction_events::sse_transaction_events,
+    handlers::epoch_checkpoints::list_epoch_checkpoints,
+    handlers::epoch_checkpoints::get_latest_epoch_checkpoint
 ))]
 pub struct ApiDoc;
 
@@ -143,6 +145,7 @@ impl Server {
             .nest("/substates", Router::new()
                 .route("/fetch", post(handlers::substates::fetch_substates)
                     .route_layer(middleware::from_fn_with_state(substates_fetch_limiter.clone(), rate_limit_middleware)))
+                .route("/watched", get(handlers::watched::list_watched_substates))
                 .route("/{substate_id}", get(handlers::substates::get_substate))
             )
             // ----------------------------------------------------------------
@@ -182,6 +185,7 @@ impl Server {
             )
             .nest("/templates", Router::new()
                 .route("/cached", get(handlers::templates::list_cached_templates))
+                .route("/watched", get(handlers::watched::list_watched_templates))
                 .route("/catalogue", get(handlers::templates::list_template_catalogue))
                 .route(
                     "/catalogue/{template_address}",
@@ -219,6 +223,10 @@ impl Server {
                 .route("/tari" , get(handlers::resources::get_tari))
                 .route("/{resource_address}" , get(handlers::resources::get_resource)))
             // SSE /events – per-IP concurrent connection limit
+            .nest("/epoch-checkpoints", Router::new()
+                .route("/", get(handlers::epoch_checkpoints::list_epoch_checkpoints))
+                .route("/latest", get(handlers::epoch_checkpoints::get_latest_epoch_checkpoint))
+            )
             .route("/events", get(handlers::indexer_events::sse_events)
                 .route_layer(middleware::from_fn_with_state(sse_limiter.clone(), sse_limit_middleware)))
             .layer(CorsLayer::permissive())

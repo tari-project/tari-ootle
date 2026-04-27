@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 pub mod accounts;
+pub mod address_book;
 pub mod auth;
 pub mod burn_proofs;
 pub mod confidential;
@@ -13,6 +14,7 @@ pub mod nfts;
 pub mod settings;
 pub mod stealth_utxos;
 pub mod substates;
+pub mod swap_pools;
 pub mod templates;
 pub mod transaction;
 pub mod validator;

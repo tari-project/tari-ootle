@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 mod account;
+mod address_book_entry;
 
 mod config;
 
@@ -21,6 +22,7 @@ mod utxo_process_queue;
 mod webauthn_registrations;
 
 pub use account::*;
+pub use address_book_entry::*;
 pub use authored_template::*;
 pub use confidential_output::*;
 pub use config::*;

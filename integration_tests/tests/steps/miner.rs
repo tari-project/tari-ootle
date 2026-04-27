@@ -29,6 +29,7 @@ pub async fn miner_mines_new_blocks(world: &mut TariWorld, step: &Step, miner_na
 }
 
 #[then(expr = "miner {word} mines to the next epoch")]
+#[when(expr = "miner {word} mines to the next epoch")]
 pub async fn miner_mines_to_next_epoch(world: &mut TariWorld, step: &Step, miner_name: String) {
     integration_tests::cucumber_log!("==== Step: {}", step.value);
     let bn = world

@@ -36,6 +36,8 @@ pub const XTR_FAUCET_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::from_a
     1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ]);
 
+/// Address of the two-resource liquidity pool template
+/// 0000000000000000000000000000000000000000000000000000000000000002
 pub const LIQUIDITY_POOL_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::from_array([
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
 ]);

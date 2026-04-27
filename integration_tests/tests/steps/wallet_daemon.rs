@@ -373,7 +373,45 @@ async fn wait_account_balance_via_daemon(
     amount: i64,
 ) {
     cucumber_log!("==== Step: {}", step.value);
-    let op = match operator.as_str() {
+    wait_account_balance_impl(world, &account_name, &wallet_daemon_name, &operator, amount, 30).await;
+}
+
+#[when(expr = "I wait for {word} on wallet daemon {word} to have balance {word} {int} with timeout {int}s")]
+#[then(expr = "I wait for {word} on wallet daemon {word} to have balance {word} {int} with timeout {int}s")]
+async fn wait_account_balance_via_daemon_with_timeout(
+    world: &mut TariWorld,
+    step: &Step,
+    account_name: String,
+    wallet_daemon_name: String,
+    operator: String,
+    amount: i64,
+    timeout_secs: i64,
+) {
+    cucumber_log!("==== Step: {}", step.value);
+    let timeout_secs = u32::try_from(timeout_secs)
+        .ok()
+        .filter(|secs| *secs > 0)
+        .unwrap_or_else(|| panic!("Expected timeout to be a positive integer that fits into u32, got {timeout_secs}"));
+    wait_account_balance_impl(
+        world,
+        &account_name,
+        &wallet_daemon_name,
+        &operator,
+        amount,
+        timeout_secs,
+    )
+    .await;
+}
+
+async fn wait_account_balance_impl(
+    world: &mut TariWorld,
+    account_name: &str,
+    wallet_daemon_name: &str,
+    operator: &str,
+    amount: i64,
+    timeout_secs: u32,
+) {
+    let op = match operator {
         "gt" => |a, b| a > b,
         "gte" => |a, b| a >= b,
         "lt" => |a, b| a < b,
@@ -386,13 +424,13 @@ async fn wait_account_balance_via_daemon(
     loop {
         // This also refreshes the wallet vaults
         let current_balance =
-            wallet_daemon_client::get_balance(world, &account_name, &wallet_daemon_name, TARI_TOKEN).await;
+            wallet_daemon_client::get_balance(world, account_name, wallet_daemon_name, TARI_TOKEN).await;
         if op(current_balance, amount) {
             break;
         }
 
         i += 1;
-        if i == 30 {
+        if i == timeout_secs {
             panic!("Timeout waiting for balance. Current balance = {}", current_balance);
         }
         tokio::time::sleep(Duration::from_secs(1)).await;

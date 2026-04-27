@@ -8,9 +8,11 @@ mod event_filter;
 mod stats;
 mod sync_plan;
 mod sync_progress;
+mod validator_status;
 mod worker;
 
 pub use config::*;
 pub use event_filter::*;
 pub use sync_progress::*;
+pub use validator_status::ValidatorStatusMonitor;
 pub use worker::*;

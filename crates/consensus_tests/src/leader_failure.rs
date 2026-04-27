@@ -367,6 +367,43 @@ async fn multi_shard_node_goes_down() {
     test.assert_clean_shutdown_except(&[failure_node]).await;
 }
 
+/// Regression test: when the first leader in a new epoch fails before any block is committed,
+/// the HighQC still justifies the zero block. The proposer must use the epoch genesis block
+/// (not the global zero block) when calculating dummy blocks, otherwise the dummy chain
+/// diverges from what validators expect and all proposals are permanently rejected.
+///
+/// If the bug is present, no block will ever be committed and the test will timeout.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn first_leader_failure_at_epoch_start_recovers() {
+    setup_logger();
+    let mut test = Test::builder()
+        .with_test_timeout(Duration::from_secs(60))
+        .modify_consensus_constants(|config_mut| {
+            config_mut.missed_proposal_suspend_threshold = 10;
+            config_mut.missed_proposal_evict_threshold = 10;
+            config_mut.pacemaker_block_time = Duration::from_secs(5);
+        })
+        .add_committee(0, vec!["1", "2", "3", "4", "5"])
+        .start()
+        .await;
+
+    // Node "1" is at committee position 0, so it is the leader for view 0 (the first view in
+    // the epoch). Taking it offline ensures no blocks are committed before timeouts trigger,
+    // keeping the HighQC at the zero block QC.
+    let failure_node = TestAddress::new("1");
+    log::info!("😴 {failure_node} (first leader) is offline");
+    test.network().go_offline(failure_node.clone()).await;
+
+    test.start_epoch(Epoch(1)).await;
+
+    // Wait for at least one block to be committed. This proves that the remaining validators
+    // successfully proposed with dummy blocks from the epoch genesis.
+    test.on_block_committed().await;
+
+    test.stop();
+    test.assert_clean_shutdown_except(&[failure_node]).await;
+}
+
 /// Regression test for stale `pending_stage` after orphaned blocks.
 ///
 /// When a validator votes for a block that later ends up on a dead branch (no QC formed),

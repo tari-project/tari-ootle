@@ -16,6 +16,7 @@ use crate::{
     types::{
         GetConnectionsResponse,
         GetEpochManagerStatsResponse,
+        GetLatestEpochCheckpointResponse,
         GetNetworkInfoResponse,
         GetNetworkSyncStateResponse,
         GetNonFungiblesRequest,
@@ -33,6 +34,8 @@ use crate::{
         GetUtxosRequest,
         GetUtxosResponse,
         IndexerReadyResponse,
+        ListEpochCheckpointsRequest,
+        ListEpochCheckpointsResponse,
         ListRecentTransactionsRequest,
         ListRecentTransactionsResponse,
         ListTemplateCatalogueRequest,
@@ -43,6 +46,9 @@ use crate::{
         ListTransactionReceiptsResponse,
         ListUtxosRequest,
         ListUtxosResponse,
+        ListWatchedSubstatesRequest,
+        ListWatchedSubstatesResponse,
+        ListWatchedTemplatesResponse,
         QueryTransactionEventsRequest,
         QueryTransactionEventsResponse,
         StreamTransactionEventsRequest,
@@ -173,6 +179,17 @@ impl IndexerRestApiClient {
             .await
     }
 
+    pub async fn list_watched_templates(&self) -> Result<ListWatchedTemplatesResponse, IndexerRestClientError> {
+        self.send_get("templates/watched", ()).await
+    }
+
+    pub async fn list_watched_substates(
+        &self,
+        req: ListWatchedSubstatesRequest,
+    ) -> Result<ListWatchedSubstatesResponse, IndexerRestClientError> {
+        self.send_get("substates/watched", req).await
+    }
+
     pub async fn query_transaction_events(
         &self,
         req: QueryTransactionEventsRequest,
@@ -253,6 +270,19 @@ impl IndexerRestApiClient {
 
     pub async fn get_tari_resource(&self) -> Result<GetResourceResponse, IndexerRestClientError> {
         self.send_get("resources/tari", ()).await
+    }
+
+    pub async fn list_epoch_checkpoints(
+        &self,
+        req: ListEpochCheckpointsRequest,
+    ) -> Result<ListEpochCheckpointsResponse, IndexerRestClientError> {
+        self.send_get("epoch-checkpoints", req).await
+    }
+
+    pub async fn get_latest_epoch_checkpoint(
+        &self,
+    ) -> Result<GetLatestEpochCheckpointResponse, IndexerRestClientError> {
+        self.send_get("epoch-checkpoints/latest", ()).await
     }
 
     pub async fn sse_events(&self) -> Result<SseEventStream, IndexerRestClientError> {

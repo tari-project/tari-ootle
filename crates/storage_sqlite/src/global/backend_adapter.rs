@@ -884,6 +884,10 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
     ) -> Result<(), Self::Error> {
         use crate::global::schema::block_headers;
 
+        // Idempotent insert: the base-layer scanner may re-scan previously seen heights after a
+        // base-layer reorg (see base_layer/oracle.rs::scan_blockchain's Reorged branch), in which
+        // case this insert would otherwise fail the UNIQUE(block_hash, epoch) constraint and abort
+        // the scan. Swallowing duplicates is safe because (block_hash, epoch) identifies the row.
         diesel::insert_into(block_headers::table)
             .values((
                 block_headers::epoch.eq(header.epoch.as_u64() as i64),
@@ -892,6 +896,8 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 block_headers::kernel_merkle_root.eq(header.kernel_merkle_root.as_bytes()),
                 block_headers::validator_node_merkle_root.eq(header.validator_node_merkle_root.as_bytes()),
             ))
+            .on_conflict((block_headers::block_hash, block_headers::epoch))
+            .do_nothing()
             .execute(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
@@ -979,7 +985,7 @@ fn distinct_validators_sorted<TAddr: NodeAddressable>(
     sqlite_vns: Vec<DbValidatorNode>,
 ) -> Result<Vec<ValidatorNode<TAddr>>, SqliteStorageError> {
     let mut db_vns = distinct_validators(sqlite_vns)?;
-    db_vns.sort_by(|a, b| a.shard_key.cmp(&b.shard_key));
+    db_vns.sort_by_key(|a| a.shard_key);
     Ok(db_vns)
 }
 

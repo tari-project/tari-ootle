@@ -77,3 +77,14 @@ impl QueryCf for ByStateTreeStaleShardQuery {
     type Key = Shard;
     type KeyCodec = ShardCodec;
 }
+
+/// Range query variant over `StateTreeStaleNodesCf` keyed by `(Shard, Version)` — lets
+/// callers scan only the range `(shard, start_version)..(shard, end_version)` instead of
+/// iterating every stale record for the shard and filtering.
+pub struct ByStateTreeStaleShardVersionQuery;
+
+impl QueryCf for ByStateTreeStaleShardVersionQuery {
+    type Cf = StateTreeStaleNodesCf;
+    type Key = (Shard, Version);
+    type KeyCodec = (ShardCodec, NumberCodec<Version>);
+}

@@ -77,7 +77,6 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::ootle::storage";
-
 pub trait StateStore {
     type Addr: NodeAddressable;
     type ReadTransaction<'a>: StateStoreReadTransaction<Addr = Self::Addr>

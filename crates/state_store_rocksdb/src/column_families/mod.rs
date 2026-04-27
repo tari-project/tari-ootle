@@ -38,6 +38,7 @@ pub mod lock_conflict;
 pub mod missing_transactions;
 pub mod parked_block;
 pub mod pending_state_tree_diff;
+pub mod rollback_history;
 pub mod state_transition;
 pub mod state_tree;
 pub mod state_tree_shard_versions;

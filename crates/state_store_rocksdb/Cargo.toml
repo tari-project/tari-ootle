@@ -36,3 +36,7 @@ tari_utilities = { workspace = true }
 tari_template_lib = { workspace = true, features = ["bincode-compat"] }
 tari_bor = { workspace = true }
 tari_sidechain = { workspace = true }
+# Dev-dep cycle: rollback-only storage primitives moved out of this crate's lib into
+# `tari_validator_rollback::storage`, but the tests that exercise them stay here for
+# the helpers. Cargo permits this because dev-deps don't create a real build cycle.
+tari_validator_rollback = { path = "../../utilities/validator_rollback" }

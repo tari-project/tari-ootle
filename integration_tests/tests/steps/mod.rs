@@ -6,6 +6,7 @@ mod indexer;
 mod miner;
 mod network;
 mod outputs;
+mod rollback;
 mod validator_node;
 mod wallet;
 mod wallet_daemon;

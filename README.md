@@ -196,3 +196,11 @@ For other environments, the "manual" process is as follows:
 7. **Claim the burn**.  
    Use the Ootle wallet web UI or the `tari_ootle_wallet_cli` tool to claim the burn using the burn proof via the **"
    Claim Burn"** dialog.
+
+## 💰 Bounty Contribution
+
+- **Task:** Fix VN registration detection timeout in state sync test
+- **Reward:** $5
+- **Source:** GitHub-Bounty
+- **Date:** 2026-04-28
+

@@ -703,24 +703,53 @@ fn scan_for_eviction_proof(
 #[when(expr = "all validator nodes have started epoch {int}")]
 async fn all_validators_have_started_epoch(world: &mut TariWorld, step: &Step, epoch: u64) {
     cucumber_log!("==== Step: {}", step.value);
-    let mut remaining_attempts = 60;
-    for vn in world.all_running_validators_iter().cycle() {
-        let mut client = vn.create_client();
-        let status = client.get_consensus_status().await.unwrap();
-        if status.epoch.as_u64() >= epoch {
+    let validators = world.all_running_validators_iter().collect::<Vec<_>>();
+    if validators.is_empty() {
+        panic!("No running validator nodes found while waiting for epoch {epoch}");
+    }
+
+    let timeout_at = Instant::now() + Duration::from_secs(60);
+    loop {
+        let mut statuses = Vec::with_capacity(validators.len());
+        let mut pending = Vec::new();
+
+        for vn in &validators {
+            let mut client = vn.create_client();
+            match client.get_consensus_status().await {
+                Ok(status) => {
+                    statuses.push(format!(
+                        "{}: epoch {}, state {}, height {}",
+                        vn.name, status.epoch, status.state, status.height
+                    ));
+                    if status.epoch.as_u64() < epoch {
+                        pending.push(vn.name.as_str());
+                    }
+                },
+                Err(err) => {
+                    statuses.push(format!("{}: status unavailable ({err})", vn.name));
+                    pending.push(vn.name.as_str());
+                },
+            }
+        }
+
+        if pending.is_empty() {
             println!(
-                "Validator {} has started epoch {} (consensus state {}, height {})",
-                vn.name, epoch, status.state, status.height
+                "All validator nodes have started epoch {} ({})",
+                epoch,
+                statuses.join("; ")
             );
             return;
         }
-        if remaining_attempts == 0 {
+
+        if Instant::now() >= timeout_at {
             panic!(
-                "Validator {} did not start epoch {} (at epoch: {}, status: {})",
-                vn.name, epoch, status.epoch, status.state
+                "Validator nodes did not all start epoch {} within 60 seconds. Pending: {}. Last statuses: {}",
+                epoch,
+                pending.join(", "),
+                statuses.join("; ")
             );
         }
-        remaining_attempts -= 1;
+
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }

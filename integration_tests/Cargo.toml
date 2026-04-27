@@ -12,7 +12,6 @@ license.workspace = true
 tari_validator_node = { workspace = true, default-features = false }
 tari_validator_rollback = { workspace = true }
 tari_state_store_rocksdb = { workspace = true }
-tari_ootle_p2p = { workspace = true }
 tari_indexer = { workspace = true, default-features = false }
 tari_ootle_walletd = { workspace = true, default-features = false }
 tari_ootle_address = { workspace = true }

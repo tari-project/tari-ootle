@@ -645,6 +645,47 @@ fn blob_macro_resolves_to_indexed_arg() {
 }
 
 #[test]
+fn publish_template_macro_resolves_to_publish_template_instruction() {
+    let manifest = r#"
+        fn main() {
+            publish_template!(wasm);
+        }
+    "#;
+
+    let mut blob_inputs = HashMap::new();
+    blob_inputs.insert(
+        "wasm".to_string(),
+        tari_ootle_transaction::Blob::from(vec![1u8, 2, 3, 4]),
+    );
+
+    let ManifestInstructions {
+        instructions, blobs, ..
+    } = parse_manifest(manifest, HashMap::new(), Default::default(), blob_inputs).unwrap();
+
+    assert_eq!(blobs.len(), 1);
+    assert_eq!(blobs.get(0).unwrap().as_bytes(), &[1u8, 2, 3, 4]);
+    assert_eq!(instructions.len(), 1);
+    assert_eq!(instructions[0], Instruction::PublishTemplate {
+        binary: 0,
+        metadata_hash: None,
+    });
+}
+
+#[test]
+fn publish_template_macro_unknown_blob_errors() {
+    let manifest = r#"
+        fn main() {
+            publish_template!(missing);
+        }
+    "#;
+    let err = match parse_manifest(manifest, HashMap::new(), Default::default(), HashMap::new()) {
+        Ok(_) => panic!("expected an error"),
+        Err(e) => e.to_string(),
+    };
+    assert!(err.contains("blob!('missing')"), "unexpected error: {err}");
+}
+
+#[test]
 fn blob_macro_unknown_name_errors() {
     let manifest = r#"
         use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as MyTemplate;

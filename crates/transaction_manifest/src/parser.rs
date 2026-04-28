@@ -55,7 +55,17 @@ pub enum ManifestIntent {
     CreateAccount(CreateAccountIntent),
     Log(LogIntent),
     DropAllProofs,
+    PublishTemplate(PublishTemplateIntent),
     CallLocalFunction(Ident),
+}
+
+/// `publish_template!(blob!(name))` — publishes the WASM binary referenced by the named blob.
+#[derive(Debug, Clone)]
+pub struct PublishTemplateIntent {
+    /// Name of the blob containing the WASM binary. Must have been provided via `blob_inputs`.
+    pub blob_name: Ident,
+    /// Optional off-chain CBOR metadata multihash (hex-encoded literal).
+    pub metadata_hash_hex: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -472,8 +482,47 @@ fn macro_call(mac: &Ident, tokens: TokenStream) -> Result<ManifestIntent, syn::E
                 bucket: args.bucket,
             }))
         },
+        "publish_template" => parse_publish_template_args(tokens),
         _ => Err(syn::Error::new_spanned(mac, "Invalid macro name")),
     }
+}
+
+/// Parse `publish_template!(blob_name)` or `publish_template!(blob_name, metadata = "0x...")`.
+/// The blob name must have a payload supplied via `parse_manifest`'s `blob_inputs` map.
+fn parse_publish_template_args(tokens: TokenStream) -> Result<ManifestIntent, syn::Error> {
+    syn::parse::Parser::parse2(
+        |input: ParseStream| {
+            let blob_name: Ident = input.parse()?;
+            let mut metadata_hash_hex = None;
+
+            while input.peek(syn::Token![,]) {
+                input.parse::<syn::Token![,]>()?;
+                if input.is_empty() {
+                    break;
+                }
+                let key: Ident = input.parse()?;
+                input.parse::<syn::Token![=]>()?;
+                match key.to_string().as_str() {
+                    "metadata" => {
+                        let value: LitStr = input.parse()?;
+                        metadata_hash_hex = Some(value.value());
+                    },
+                    _ => {
+                        return Err(syn::Error::new_spanned(
+                            key,
+                            "Unknown publish_template argument, expected 'metadata'",
+                        ));
+                    },
+                }
+            }
+
+            Ok(ManifestIntent::PublishTemplate(PublishTemplateIntent {
+                blob_name,
+                metadata_hash_hex,
+            }))
+        },
+        tokens,
+    )
 }
 
 fn build_arguments(args: Punctuated<Expr, Comma>) -> Result<Vec<ManifestLiteral>, syn::Error> {

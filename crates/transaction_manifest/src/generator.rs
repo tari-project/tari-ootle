@@ -234,6 +234,23 @@ impl ManifestInstructionGenerator {
                 })?,
             }]),
             ManifestIntent::DropAllProofs => Ok(vec![Instruction::DropAllProofsInWorkspace]),
+            ManifestIntent::PublishTemplate(pt) => {
+                // Reuse the same blob-resolution path as `blob!(name)` — the binary is
+                // registered in the output Blobs on first reference and assigned the next
+                // BlobIndex.
+                let arg = self.resolve_blob_arg(&pt.blob_name.to_string())?;
+                let binary = arg.as_blob_index().ok_or_else(|| ManifestError::InvalidInstruction {
+                    reason: "publish_template! resolved to a non-Blob arg".to_string(),
+                })?;
+                let metadata_hash = pt
+                    .metadata_hash_hex
+                    .map(|hex| tari_ootle_template_metadata::MetadataHash::from_hex(&hex))
+                    .transpose()
+                    .map_err(|e| ManifestError::InvalidInstruction {
+                        reason: format!("Invalid metadata hash hex: {}", e),
+                    })?;
+                Ok(vec![Instruction::PublishTemplate { binary, metadata_hash }])
+            },
             ManifestIntent::CallLocalFunction(ident) => {
                 if self.call_depth >= MAX_CALL_DEPTH {
                     return Err(ManifestError::MaxCallDepthExceeded { max: MAX_CALL_DEPTH });

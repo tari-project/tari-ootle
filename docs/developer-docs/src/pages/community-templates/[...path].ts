@@ -1,3 +1,6 @@
+//   Copyright 2026 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
 import type { APIRoute } from "astro";
 
 export const prerender = false;

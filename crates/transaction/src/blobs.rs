@@ -91,6 +91,12 @@ impl<const N: usize> From<MaxBytes<N>> for Blob {
     }
 }
 
+impl From<Box<[u8]>> for Blob {
+    fn from(bytes: Box<[u8]>) -> Self {
+        Self(Bytes::from_vec(bytes.into_vec()))
+    }
+}
+
 /// Domain-separated per-blob hash. The `Blob` label keeps blob bytes in a distinct domain from
 /// any signature, id, or substate hashing context.
 pub fn hash_blob(blob: &Blob) -> Hash32 {

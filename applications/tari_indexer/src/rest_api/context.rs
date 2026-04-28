@@ -22,6 +22,7 @@ use tokio::sync::broadcast;
 use crate::{
     bootstrap::Services,
     dry_run::processor::DryRunTransactionProcessor,
+    network_state_sync::ValidatorStatusMonitor,
     notify::Subscriber,
     rest_api::cache::HttpCacheConfig,
     storage_sqlite::SqliteIndexerStore,
@@ -54,6 +55,7 @@ impl HandlerContext {
                 subscriber: services.event_notifier.to_subscriber(),
                 transaction_event_subscriber: services.transaction_event_notifier.to_subscriber(),
                 watched_templates: services.watched_templates.clone(),
+                validator_status: services.validator_status.clone(),
             }),
         }
     }
@@ -129,6 +131,10 @@ impl HandlerContext {
     pub fn subscribe_transaction_events(&self) -> broadcast::Receiver<TransactionEvent> {
         self.inner.transaction_event_subscriber.subscribe()
     }
+
+    pub fn validator_status(&self) -> &ValidatorStatusMonitor {
+        &self.inner.validator_status
+    }
 }
 
 struct InnerContext {
@@ -147,4 +153,5 @@ struct InnerContext {
     subscriber: Subscriber<IndexerEvent>,
     transaction_event_subscriber: Subscriber<TransactionEvent>,
     watched_templates: Arc<HashSet<TemplateAddress>>,
+    validator_status: ValidatorStatusMonitor,
 }

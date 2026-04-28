@@ -88,6 +88,12 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::worker";
 
+/// Reason the hotstuff worker loop exited cleanly (i.e. returned Ok).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkerExitReason {
+    Shutdown,
+}
+
 pub struct HotstuffWorker<TConsensusSpec: ConsensusSpec> {
     local_validator_addr: TConsensusSpec::Addr,
 
@@ -273,7 +279,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         Ok((current_epoch, epoch_hash))
     }
 
-    pub async fn start(&mut self) -> Result<(), HotStuffError> {
+    pub async fn start(&mut self) -> Result<WorkerExitReason, HotStuffError> {
         let (current_epoch, current_epoch_hash) = self.get_starting_epoch().await?;
         let local_committee_info = self.epoch_manager.get_local_committee_info(current_epoch).await?;
 
@@ -315,12 +321,15 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let _cancel_epoch_gc_task_on_drop =
             EpochGc::new(self.state_store.clone()).do_work_periodically(self.config.epoch_gc_interval);
 
-        self.run(epoch_state).await?;
-        Ok(())
+        let exit_reason = self.run(epoch_state).await?;
+        Ok(exit_reason)
     }
 
     #[allow(clippy::too_many_lines)]
-    async fn run(&mut self, mut epoch_state: EpochState<TConsensusSpec::Addr>) -> Result<(), HotStuffError> {
+    async fn run(
+        &mut self,
+        mut epoch_state: EpochState<TConsensusSpec::Addr>,
+    ) -> Result<WorkerExitReason, HotStuffError> {
         // Spawn pacemaker if not spawned already
         if let Some(pm) = self.pacemaker_worker.take() {
             pm.spawn();
@@ -346,6 +355,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let mut periodic_tasks = time::interval(Duration::from_secs(10));
         periodic_tasks.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
 
+        let exit_reason;
         loop {
             let current_height = self.pacemaker.current_view().get_height();
             let current_epoch = self.pacemaker.current_view().get_epoch();
@@ -449,18 +459,18 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
                 _ = self.shutdown.wait() => {
                     info!(target: LOG_TARGET, "💤 Consensus shutting down");
+                    exit_reason = WorkerExitReason::Shutdown;
                     break;
-                }
+                },
             }
         }
 
         self.on_inbound_message.clear_buffer();
-        // This only happens if we're shutting down.
         if let Err(err) = self.pacemaker.stop().await {
             debug!(target: LOG_TARGET, "Pacemaker channel dropped: {}", err);
         }
 
-        Ok(())
+        Ok(exit_reason)
     }
 
     async fn on_unvalidated_message(

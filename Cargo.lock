@@ -2665,7 +2665,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ab67060fc6b8ef687992d439ca0fa36e7ed17e9a0b16b25b601e8757df720de"
 dependencies = [
  "data-encoding",
- "syn 2.0.114",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -5011,6 +5011,7 @@ dependencies = [
  "tari_p2p",
  "tari_shutdown",
  "tari_sidechain",
+ "tari_state_store_rocksdb",
  "tari_template_builtin",
  "tari_template_lib_types",
  "tari_template_test_tooling",
@@ -5018,6 +5019,7 @@ dependencies = [
  "tari_transaction_manifest",
  "tari_validator_node",
  "tari_validator_node_client",
+ "tari_validator_rollback",
  "time",
  "tokio",
  "tonic 0.13.1",
@@ -7584,9 +7586,9 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "openssl"
-version = "0.10.75"
+version = "0.10.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08838db121398ad17ab8531ce9de97b244589089e290a384c900cb9ff7434328"
+checksum = "f38c4372413cdaaf3cc79dd92d29d7d9f5ab09b51b10dded508fb90bb70b9222"
 dependencies = [
  "bitflags 2.10.0",
  "cfg-if",
@@ -7631,9 +7633,9 @@ dependencies = [
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.111"
+version = "0.9.114"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82cab2d520aa75e3c58898289429321eb788c3106963d0dc886ec7a5f4adc321"
+checksum = "13ce1245cd07fcc4cfdb438f7507b0c7e4f3849a69fd84d52374c66d83741bb6"
 dependencies = [
  "cc",
  "libc",
@@ -9511,9 +9513,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.10"
+version = "0.103.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df33b2b81ac578cabaf06b89b0631153a3f416b0a886e8a7a1707fb51abbd1ef"
+checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -11292,7 +11294,7 @@ dependencies = [
 
 [[package]]
 name = "tari_indexer_client"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "anyhow",
  "bounded-vec",
@@ -12077,6 +12079,7 @@ dependencies = [
  "tari_template_lib",
  "tari_template_lib_types",
  "tari_utilities",
+ "tari_validator_rollback",
  "tempfile",
  "thiserror 2.0.18",
 ]
@@ -12487,6 +12490,28 @@ dependencies = [
  "tari_rpc_macros",
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "tari_validator_rollback"
+version = "0.29.1"
+dependencies = [
+ "anyhow",
+ "borsh",
+ "clap 3.2.25",
+ "log",
+ "serde",
+ "serde_json",
+ "tari_consensus_types",
+ "tari_engine_types",
+ "tari_ootle_common_types",
+ "tari_ootle_p2p",
+ "tari_ootle_storage",
+ "tari_ootle_transaction",
+ "tari_state_store_rocksdb",
+ "tari_state_tree",
+ "tari_template_lib_types",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

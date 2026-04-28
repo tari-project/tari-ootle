@@ -1,0 +1,28 @@
+[package]
+name = "tari_validator_rollback"
+description = "Offline break-glass rollback tool for Tari Ootle validator nodes"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_ootle_common_types = { workspace = true }
+tari_ootle_storage = { workspace = true }
+tari_ootle_transaction = { workspace = true }
+tari_state_store_rocksdb = { workspace = true }
+tari_state_tree = { workspace = true }
+tari_consensus_types = { workspace = true }
+tari_engine_types = { workspace = true }
+tari_ootle_p2p = { workspace = true }
+tari_template_lib_types = { workspace = true }
+
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+log = { workspace = true }
+serde_json = { workspace = true }
+borsh = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+

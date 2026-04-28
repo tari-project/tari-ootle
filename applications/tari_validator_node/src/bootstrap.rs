@@ -415,7 +415,12 @@ impl<TStore> Services<TStore> {
     }
 
     pub async fn join_all(self) -> Result<(), anyhow::Error> {
-        let results = future::try_join_all(self.handles).await?;
+        // Handles that have already been polled to completion by `on_any_exit` would
+        // panic tokio's JoinHandle invariant ("polled after completion") if we awaited
+        // them again. Filter them out — their result is either already surfaced via
+        // `on_any_exit` or we're in the shutdown path and don't care about replay.
+        let handles: Vec<_> = self.handles.into_iter().filter(|h| !h.is_finished()).collect();
+        let results = future::try_join_all(handles).await?;
         for res in results {
             res?;
         }

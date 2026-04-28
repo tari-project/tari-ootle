@@ -628,13 +628,18 @@ async fn then_i_wait_for_validator_node_to_be_evicted(
     let vn = world.get_validator_node(&vn_name);
     let evict_vn = world.get_validator_node(&evict_vn_name);
 
-    let (tx, mut rx) = mpsc::channel(1);
+    let (tx, mut rx) = mpsc::channel(10);
     let l1_tx_path = vn.layer_one_transaction_path();
     fs::create_dir_all(&l1_tx_path).unwrap();
 
+    if let Some(proof) = scan_for_eviction_proof(&l1_tx_path, evict_vn) {
+        world.add_eviction_proof(proof_name.clone(), proof);
+        return;
+    }
+
     let mut watcher = notify::RecommendedWatcher::new(
         move |res| {
-            tx.blocking_send(res).unwrap();
+            drop(tx.blocking_send(res));
         },
         notify::Config::default(),
     )
@@ -649,36 +654,50 @@ async fn then_i_wait_for_validator_node_to_be_evicted(
             .expect("unexpected channel close")
             .unwrap_or_else(|err| panic!("Error when watching files {err}"));
 
-        if let notify::Event {
-            kind: notify::EventKind::Access(notify::event::AccessKind::Close(notify::event::AccessMode::Write)),
-            paths,
-            ..
-        } = event &&
-            let Some(json_file) = paths
-                .into_iter()
-                .find(|p| p.extension().is_some_and(|ext| ext == "json") && p.is_file())
-        {
-            eprintln!("🗒️ Found file: {}", json_file.display());
-            let contents = fs::read(json_file).expect("Could not read file");
-            let transaction_def = match serde_json::from_slice::<LayerOneTransactionDef<EvictionProof>>(&contents) {
-                Ok(def) => def,
-                Err(err) => {
-                    eprintln!("Error deserializing eviction proof: {}", err);
-                    continue;
-                },
-            };
-            if transaction_def.payload.node_to_evict().as_bytes() != evict_vn.public_key.as_bytes() {
-                panic!(
-                    "Got an eviction proof for public key {}, however this did not match the public key of validator \
-                     {evict_vn_name}",
-                    transaction_def.payload.node_to_evict()
-                );
-            }
+        let is_relevant = matches!(
+            event.kind,
+            notify::EventKind::Access(notify::event::AccessKind::Close(notify::event::AccessMode::Write)) |
+                notify::EventKind::Create(_) |
+                notify::EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::To))
+        );
+        if !is_relevant {
+            continue;
+        }
+
+        // On Create the file may still be partially written, so scan the directory which
+        // gracefully skips incomplete files and retries on the next event.
+        if let Some(proof) = scan_for_eviction_proof(&l1_tx_path, evict_vn) {
             watcher.unwatch(&l1_tx_path).unwrap();
-            world.add_eviction_proof(proof_name.clone(), transaction_def.payload);
-            break;
+            world.add_eviction_proof(proof_name.clone(), proof);
+            return;
         }
     }
+}
+
+/// Scans the directory for an eviction proof file targeting the given validator.
+/// Returns `None` if no matching, fully-written file is found.
+fn scan_for_eviction_proof(
+    dir: &std::path::Path,
+    evict_vn: &integration_tests::validator_node::ValidatorNodeProcess,
+) -> Option<EvictionProof> {
+    for entry in fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if !path.is_file() || path.extension().is_none_or(|ext| ext != "json") {
+            continue;
+        }
+        let Ok(contents) = fs::read(&path) else {
+            continue;
+        };
+        let def = match serde_json::from_slice::<LayerOneTransactionDef<EvictionProof>>(&contents) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        if def.payload.node_to_evict().as_bytes() == evict_vn.public_key.as_bytes() {
+            eprintln!("Found eviction proof file: {}", path.display());
+            return Some(def.payload);
+        }
+    }
+    None
 }
 
 #[when(expr = "all validator nodes have started epoch {int}")]
@@ -712,14 +731,21 @@ async fn validator_not_member_of_network(world: &mut TariWorld, step: &Step, val
     let bn = world.get_base_node(&base_node);
     let vn = world.get_validator_node(&validator);
     let mut client = bn.create_client();
-    let tip = client.get_tip_info().await.unwrap();
-    let mut vns = client.get_validator_nodes(tip.height_of_longest_chain).await.unwrap();
-    let has_vn = vns.any(|v| v.unwrap().public_key == vn.public_key).await;
-    if has_vn {
-        // TODO: investigate why this is flaky
-        warn!(
-            "Validator {} is a member of the network but expected it not to be",
-            validator
-        );
+
+    let timeout_at = Instant::now() + Duration::from_secs(30);
+    loop {
+        let tip = client.get_tip_info().await.unwrap();
+        let mut vns = client.get_validator_nodes(tip.height_of_longest_chain).await.unwrap();
+        let has_vn = vns.any(|v| v.unwrap().public_key == vn.public_key).await;
+        if !has_vn {
+            return;
+        }
+        if Instant::now() >= timeout_at {
+            panic!(
+                "Validator {} is still a member of the network (height {}) but expected it not to be",
+                validator, tip.height_of_longest_chain
+            );
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
     }
 }

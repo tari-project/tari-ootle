@@ -122,7 +122,7 @@ pub async fn run_validator_node(
     let metrics_registry = create_metrics_registry(keypair.public_key(), &mut base_registry);
 
     let consensus_constants = ConsensusConstants::from(config.network);
-    let services = spawn_services(
+    let mut services = spawn_services(
         config.clone(),
         shutdown.to_signal(),
         keypair.clone(),
@@ -140,13 +140,20 @@ pub async fn run_validator_node(
     if let Some(jrpc_address) = jrpc_address.as_mut() {
         info!(target: LOG_TARGET, "🌐 Started JSON-RPC server on {}", jrpc_address);
         let handlers = JsonRpcHandlers::new(&services);
-        *jrpc_address = spawn_json_rpc(
+        let (bound_addr, jrpc_handle) = spawn_json_rpc(
             *jrpc_address,
             handlers,
+            shutdown.to_signal(),
             #[cfg(feature = "metrics")]
             base_registry,
         )
         .await?;
+        *jrpc_address = bound_addr;
+        // Track the axum handle so `Services::join_all` awaits it at shutdown — this is
+        // what guarantees the final `Arc<TransactionDB>` clone held by the handlers is
+        // dropped before `run_validator_node` returns.
+        services.handles.push(jrpc_handle);
+
         // Run the web ui
         #[cfg(feature = "web_ui")]
         if let Some(address) = config.validator_node.web_ui_listener_address {

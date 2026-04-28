@@ -881,36 +881,45 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         // if the block parent is not the justify parent, then we have experienced a leader failure
         // and should make dummy blocks to fill in the gaps.
         if candidate_block.timeout_certificate().is_some() {
-            let num_dummies = candidate_block.height().as_u64() - justify_block.height().as_u64() - 1;
-            info!(target: LOG_TARGET, "🔨 Creating {} dummy block(s) for block {}", num_dummies, candidate_block);
-            // On a leader failure we use the justify block (QC-certified block) as the starting point for dummy
-            // blocks. This is deterministic across all honest nodes since the QC is included in the candidate
-            // block and all nodes have the justified block stored.
-            let dummy_blocks = calculate_dummy_blocks_from_justify(
-                &candidate_block,
-                &justify_block,
-                &self.leader_strategy,
-                local_committee,
-            );
+            let num_dummies = candidate_block
+                .height()
+                .as_u64()
+                .saturating_sub(justify_block.height().as_u64())
+                .saturating_sub(1);
 
-            if let Some(last_dummy) = dummy_blocks.last() {
-                // TODO: timeout certificate with no dummy blocks?
-                if candidate_block.parent() != last_dummy.id() {
-                    warn!(target: LOG_TARGET, "❌ Bad proposal, unable to find dummy blocks (last dummy: {}) for candidate block {}", last_dummy, candidate_block);
-                    return Err(ProposalValidationError::CandidateBlockDoesNotExtendJustify {
-                        justify_block_height: justify_block.height(),
-                        candidate_block_height: candidate_block.height(),
+            if num_dummies > 0 {
+                info!(target: LOG_TARGET, "🔨 Creating {} dummy block(s) for block {}", num_dummies, candidate_block);
+                // On a leader failure we use the justify block (QC-certified block) as the starting point for dummy
+                // blocks. This is deterministic across all honest nodes since the QC is included in the candidate
+                // block and all nodes have the justified block stored.
+                let dummy_blocks = calculate_dummy_blocks_from_justify(
+                    &candidate_block,
+                    &justify_block,
+                    &self.leader_strategy,
+                    local_committee,
+                );
+
+                if let Some(last_dummy) = dummy_blocks.last() {
+                    if candidate_block.parent() != last_dummy.id() {
+                        warn!(target: LOG_TARGET, "❌ Bad proposal, unable to find dummy blocks (last dummy: {}) for candidate block {}", last_dummy, candidate_block);
+                        return Err(ProposalValidationError::CandidateBlockDoesNotExtendJustify {
+                            justify_block_height: justify_block.height(),
+                            candidate_block_height: candidate_block.height(),
+                        }
+                        .into());
                     }
-                    .into());
-                }
 
-                // The logic for not checking is_safe is as follows:
-                // We can't without adding the dummy blocks to the DB
-                // We know that justify_block is safe because we have added it to our chain
-                // We know that each dummy block is built in a chain from the justify block to the candidate block
-                // We know that last dummy block is the parent of candidate block
-                // Therefore we know that candidate block satisfies the safeNode predicate
-                return Ok(ValidBlock::with_dummy_blocks(candidate_block, dummy_blocks));
+                    // The logic for not checking is_safe is as follows:
+                    // We can't without adding the dummy blocks to the DB
+                    // We know that justify_block is safe because we have added it to our chain
+                    // We know that each dummy block is built in a chain from the justify block to the candidate block
+                    // We know that last dummy block is the parent of candidate block
+                    // Therefore we know that candidate block satisfies the safeNode predicate
+                    return Ok(ValidBlock::with_dummy_blocks(candidate_block, dummy_blocks));
+                }
+            } else {
+                // timeout certificate with no dummy blocks?
+                warn!(target: LOG_TARGET, "❓️ Candidate block {} has a timeout certificate but does not extend beyond the justify block, no dummy blocks will be created", candidate_block);
             }
         }
 

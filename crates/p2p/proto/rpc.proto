@@ -281,3 +281,23 @@ message GetSubstatesBatchRequest {
 message GetSubstatesBatchResponse {
   tari.ootle.consensus.Substate substate = 1;
 }
+
+message GetConsensusStateRequest {}
+
+message GetConsensusStateResponse {
+  // The epoch currently observed by the node's consensus pacemaker.
+  tari.ootle.common.Epoch epoch = 1;
+  // The height currently observed by the node's consensus pacemaker.
+  uint64 height = 2;
+  // The current state-machine state of the consensus worker.
+  ConsensusState state = 3;
+}
+
+enum ConsensusState {
+  Idle = 0;
+  CheckSync = 1;
+  Syncing = 2;
+  Running = 3;
+  Sleeping = 4;
+  Shutdown = 5;
+}

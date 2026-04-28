@@ -74,7 +74,7 @@ use crate::{
     dry_run::processor::DryRunTransactionProcessor,
     network_client::TariNetworkClient,
     network_state_sync,
-    network_state_sync::NetworkWideStateSyncConfig,
+    network_state_sync::{NetworkWideStateSyncConfig, ValidatorStatusMonitor},
     notify::Notify,
     storage_sqlite::{SqliteIndexerStore, models::Key},
     store::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreWriteTransaction},
@@ -213,6 +213,7 @@ pub async fn spawn_services(
 
     let event_notifier = Notify::new(1000);
     let transaction_event_notifier = Notify::new(1024);
+    let validator_status = ValidatorStatusMonitor::new();
 
     network_state_sync::NetworkWideStateSync::new(
         epoch_manager.clone(),
@@ -225,6 +226,7 @@ pub async fn spawn_services(
         },
         event_notifier.clone(),
         transaction_event_notifier.clone(),
+        validator_status.clone(),
     )
     .spawn(shutdown.clone());
 
@@ -278,6 +280,7 @@ pub async fn spawn_services(
         event_notifier,
         transaction_event_notifier,
         watched_templates,
+        validator_status,
     })
 }
 
@@ -297,6 +300,7 @@ pub struct Services {
     pub event_notifier: Notify<IndexerEvent>,
     pub transaction_event_notifier: Notify<TransactionEvent>,
     pub watched_templates: Arc<HashSet<TemplateAddress>>,
+    pub validator_status: ValidatorStatusMonitor,
 }
 
 fn ensure_directories_exist(config: &ApplicationConfig) -> io::Result<()> {

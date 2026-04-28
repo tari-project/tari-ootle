@@ -237,6 +237,7 @@ impl TemplateTest {
                 per_log_cost: 1,
                 per_signature_verification_cost: 1,
                 per_template_load_cost_unit: 1,
+                per_substate_create_cost: 1,
             },
             key_seed: 1,
             auto_add_proofs_from_signers: true,

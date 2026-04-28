@@ -5,7 +5,7 @@ ARG RUST_VERSION=1.90.0
 ARG OS_BASE=trixie
 
 # rust source compile with cross platform build support
-FROM --platform=$BUILDPLATFORM rust:${RUST_VERSION}-${OS_BASE} as builder-tari-ootle
+FROM --platform=$BUILDPLATFORM rust:${RUST_VERSION}-${OS_BASE} AS builder-tari-ootle
 
 # Declare to make available
 ARG BUILDPLATFORM
@@ -82,10 +82,19 @@ RUN if [ "${BUILDARCH}" != "${TARGETARCH}" ] ; then \
     cd /base/clients/javascript/indexer_client && \
     pnpm install && \
     pnpm run build && \
+    cd /base/applications/theming && \
+    pnpm install && \
+    pnpm run build && \
+    cd /base/clients/javascript/wallet_daemon_client && \
+    pnpm install && \
+    pnpm run build && \
     cd /base/applications/tari_indexer/web_ui && \
     pnpm install && \
     pnpm run build && \
     cd /base/applications/tari_validator_node/web_ui && \
+    pnpm install && \
+    pnpm run build && \
+    cd /base/applications/tari_walletd/web_ui && \
     pnpm install && \
     pnpm run build && \
     cd /base && \
@@ -98,18 +107,20 @@ RUN if [ "${BUILDARCH}" != "${TARGETARCH}" ] ; then \
       --release --locked \
       --bin tari_ootle_walletd \
       --bin tari_indexer \
-      --bin tari_validator_node && \
+      --bin tari_validator_node \
+      --bin tari_swarm_daemon && \
     # Copy executable out of the cache so it is available in the runtime image.
     ls -l /base/target/${RUST_TARGET:+$RUST_TARGET/}release/tari_* && \
     cp -v \
       /base/target/${RUST_TARGET:+$RUST_TARGET/}release/tari_ootle_walletd \
       /base/target/${RUST_TARGET:+$RUST_TARGET/}release/tari_indexer \
       /base/target/${RUST_TARGET:+$RUST_TARGET/}release/tari_validator_node \
+      /base/target/${RUST_TARGET:+$RUST_TARGET/}release/tari_swarm_daemon \
         /usr/local/bin/ && \
     echo "Tari Build Done"
 
 # Create runtime base minimal image for the target platform executables
-FROM --platform=$TARGETPLATFORM debian:${OS_BASE} as runtime
+FROM --platform=$TARGETPLATFORM debian:${OS_BASE} AS runtime
 
 ARG BUILDPLATFORM
 ARG TARGETPLATFORM

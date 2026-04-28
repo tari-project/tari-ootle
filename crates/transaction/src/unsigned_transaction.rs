@@ -224,6 +224,14 @@ impl UnsignedTransaction {
     pub fn add_blob(&mut self, blob: Blob) -> Result<BlobIndex, BlobIndexOverflow> {
         self.blobs_mut().push(blob)
     }
+
+    /// Validate blob index references and blob coverage. See
+    /// `UnsignedTransactionV1::validate_blob_references`.
+    pub fn validate_blob_references(&self) -> Result<(), crate::v1::BlobValidationError> {
+        match self {
+            Self::V1(tx) => tx.validate_blob_references(),
+        }
+    }
 }
 
 impl From<UnsignedTransactionV1> for UnsignedTransaction {

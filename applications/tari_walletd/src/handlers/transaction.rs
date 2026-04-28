@@ -106,6 +106,9 @@ pub async fn handle_submit(
     // TODO: fine-grained checks of individual addresses involved (resources, components, etc)
     context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
     let sdk = context.wallet_sdk();
+    req.transaction
+        .validate_blob_references()
+        .map_err(|e| invalid_params("transaction.blobs", Some(e.to_string())))?;
     let detected_inputs = if req.detect_inputs {
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
         let substates = req.transaction.to_referenced_substates()?;
@@ -205,6 +208,9 @@ pub async fn handle_submit_dry_run(
     // TODO: fine-grained checks of individual addresses involved (resources, components, etc)
     context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
     let sdk = context.wallet_sdk();
+    req.transaction
+        .validate_blob_references()
+        .map_err(|e| invalid_params("transaction.blobs", Some(e.to_string())))?;
     let key_api = sdk.key_manager_api();
     // Fetch the key to sign the transaction
     let key = key_api.get_public_key(req.seal_signer)?;

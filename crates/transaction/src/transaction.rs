@@ -243,6 +243,14 @@ impl Transaction {
         self.all_inputs_substate_ids_iter().count()
     }
 
+    /// Validate the blob side of the transaction: every `BlobIndex` is in bounds and every
+    /// blob is referenced. See `TransactionV1::validate_blob_references`.
+    pub fn validate_blob_references(&self) -> Result<(), crate::v1::BlobValidationError> {
+        match self {
+            Self::V1(tx) => tx.validate_blob_references(),
+        }
+    }
+
     pub fn min_epoch(&self) -> Option<Epoch> {
         match self {
             Self::V1(tx) => tx.min_epoch(),

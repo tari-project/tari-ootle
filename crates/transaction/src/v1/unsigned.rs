@@ -112,6 +112,32 @@ impl UnsignedTransactionV1 {
         &mut self.blobs
     }
 
+    /// Validate blob index references and blob coverage. Mirrors
+    /// `TransactionV1::validate_blob_references` but operates on the unsigned form so the
+    /// wallet daemon can reject malformed input before signing.
+    pub fn validate_blob_references(&self) -> Result<(), crate::v1::BlobValidationError> {
+        let blob_count = self.blobs.len();
+        let mut referenced = vec![false; blob_count];
+        for inst in self.instructions().iter().chain(self.fee_instructions()) {
+            for idx in inst.referenced_blob_ids() {
+                let i = idx as usize;
+                if i >= blob_count {
+                    return Err(crate::v1::BlobValidationError::IndexOutOfBounds {
+                        index: idx,
+                        count: blob_count,
+                    });
+                }
+                referenced[i] = true;
+            }
+        }
+        if let Some(unused) = referenced.iter().position(|&r| !r) {
+            return Err(crate::v1::BlobValidationError::UnreferencedBlob {
+                index: unused as crate::BlobIndex,
+            });
+        }
+        Ok(())
+    }
+
     /// Returns (fee instructions, instructions)
     pub fn into_instructions(self) -> (Vec<Instruction>, Vec<Instruction>) {
         (self.fee_instructions, self.instructions)

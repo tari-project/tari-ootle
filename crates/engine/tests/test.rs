@@ -55,35 +55,25 @@ fn test_hello_world() {
     assert_eq!(result, "Hello World!");
 }
 
-/// `InstructionArg::Blob(idx)` should be resolved by the runtime against the surrounding
+/// A `Blob`-typed argument should be resolved by the runtime against the surrounding
 /// transaction's `Blobs` and decoded as CBOR — semantically identical to `Literal` but with
-/// the bytes carried in the prunable side-channel rather than inline in the instruction.
+/// the bytes carried in the prunable side-channel.
 ///
-/// This test calls `HelloWorld::custom_greeting(&self, name: String)` with the `name` argument
-/// supplied as a blob containing the CBOR-encoded string `"World"`. The expected result is
-/// `"Hello World!"` — the same as if the arg had been `Literal(encode("World"))`.
+/// Calls `HelloWorld::custom_greeting(&self, name: String)` with the `name` argument supplied
+/// via a blob registered under the name `"name"`. Expected result: `"Hello World!"`.
 #[test]
 fn instruction_arg_blob_resolves_to_template_method_arg() {
     use tari_bor::encode;
-    use tari_ootle_transaction::{ComponentReference, Instruction, args, args::InstructionArg};
+    use tari_ootle_transaction::args;
 
     let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/hello_world"]);
     let component: ComponentAddress = test.call_function("HelloWorld", "new", args!["Hello".to_string()], vec![]);
 
-    // Build a transaction that calls custom_greeting with the `name` arg supplied via Blob.
     let name_bytes = encode(&"World".to_string()).expect("encode String");
-    let (builder, blob_idx) = test
-        .transaction()
-        .add_blob(name_bytes)
-        .expect("blob count within BlobIndex range");
-
     let result = test.execute_expect_success(
-        builder
-            .add_instruction(Instruction::CallMethod {
-                call: ComponentReference::Address(component),
-                method: "custom_greeting".try_into().unwrap(),
-                args: vec![InstructionArg::Blob(blob_idx)],
-            })
+        test.transaction()
+            .add_blob("name", name_bytes)
+            .call_method(component, "custom_greeting", args![Blob("name")])
             .build_and_seal(test.secret_key()),
         vec![],
     );
@@ -98,34 +88,21 @@ fn instruction_arg_blob_resolves_to_template_method_arg() {
     assert_eq!(greeting, "Hello World!");
 }
 
-/// A `Blob` arg referencing an index outside the transaction's blob list must produce an
-/// engine error rather than silently miscompiling.
+/// Referencing a blob name that hasn't been registered must surface a builder error at
+/// instruction construction time, not silently produce a malformed transaction.
 #[test]
-fn instruction_arg_blob_out_of_bounds_fails() {
-    use tari_ootle_transaction::{ComponentReference, Instruction, args, args::InstructionArg};
+#[should_panic(expected = "Invalid named arguments")]
+fn instruction_arg_blob_unknown_name_panics_in_builder() {
+    use tari_ootle_transaction::args;
 
     let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/hello_world"]);
     let component: ComponentAddress = test.call_function("HelloWorld", "new", args!["Hello".to_string()], vec![]);
 
-    // Reference blob index 0 without adding any blob to the transaction.
-    let reason = test.execute_expect_failure(
-        test.transaction()
-            .add_instruction(Instruction::CallMethod {
-                call: ComponentReference::Address(component),
-                method: "custom_greeting".try_into().unwrap(),
-                args: vec![InstructionArg::Blob(0)],
-            })
-            .build_and_seal(test.secret_key()),
-        vec![],
-    );
-
-    let RejectReason::ExecutionFailure(error) = reason else {
-        panic!("expected ExecutionFailure, got {:?}", reason);
-    };
-    assert!(
-        error.contains("Blob index 0 out of bounds"),
-        "unexpected error message: {error}",
-    );
+    // No `add_blob("name", ...)` call → builder must panic when resolving the args.
+    let _ = test
+        .transaction()
+        .call_method(component, "custom_greeting", args![Blob("name")])
+        .build_and_seal(test.secret_key());
 }
 
 #[test]

@@ -11,6 +11,8 @@ pub enum BuilderError {
     ParseWorkspaceKeyError(#[from] ParseWorkspaceKeyError),
     #[error("Workspace key not found: {0}")]
     WorkspaceKeyNotFound(String),
+    #[error("Blob key not found: {0}")]
+    BlobKeyNotFound(String),
     #[error("Indexed value error: {0}")]
     IndexedValueError(#[from] IndexedValueError),
 }

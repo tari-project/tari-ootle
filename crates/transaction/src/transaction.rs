@@ -24,6 +24,7 @@ use tari_ootle_common_types::{
 use tari_template_lib_types::{ClaimedOutputTombstoneAddress, ComponentAddress, TemplateAddress};
 
 use crate::{
+    Blobs,
     Instruction,
     TransactionSealSignature,
     TransactionSignature,
@@ -98,6 +99,12 @@ impl Transaction {
     pub fn instructions(&self) -> &[Instruction] {
         match self {
             Self::V1(tx) => tx.instructions(),
+        }
+    }
+
+    pub fn blobs(&self) -> &Blobs {
+        match self {
+            Self::V1(tx) => tx.blobs(),
         }
     }
 

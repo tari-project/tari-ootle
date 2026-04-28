@@ -99,7 +99,7 @@ fn instruction_arg_blob_unknown_name_panics_in_builder() {
     let component: ComponentAddress = test.call_function("HelloWorld", "new", args!["Hello".to_string()], vec![]);
 
     // No `add_blob("name", ...)` call → builder must panic when resolving the args.
-    let _ = test
+    let _unused = test
         .transaction()
         .call_method(component, "custom_greeting", args![Blob("name")])
         .build_and_seal(test.secret_key());

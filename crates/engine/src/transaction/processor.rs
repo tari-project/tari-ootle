@@ -365,13 +365,10 @@ where
                 Ok(InstructionResult::empty())
             },
             Instruction::PublishTemplate { binary, metadata_hash } => {
-                let bytes = blobs
-                    .get(binary)
-                    .ok_or(TransactionErrorKind::BlobIndexOutOfBounds {
-                        index: binary,
-                        count: blobs.len(),
-                    })?
-                    .as_bytes();
+                let bytes = blobs.get(binary).ok_or(TransactionErrorKind::BlobIndexOutOfBounds {
+                    index: binary,
+                    count: blobs.len(),
+                })?;
                 Self::publish_template(runtime, bytes, metadata_hash)
             },
             Instruction::AllocateAddress {
@@ -592,7 +589,7 @@ where
         // validate binary
         let template_def = WasmModule::validate_code(binary)?;
         // The size cap above is enforced; constructing TemplateBlob is therefore infallible.
-        let blob = TemplateBlob::new_checked(binary.to_vec()).expect("template binary size verified above");
+        let blob = TemplateBlob::new_checked(binary).expect("template binary size verified above");
         runtime
             .interface_mut()
             .publish_template(blob, metadata_hash, template_def)?;

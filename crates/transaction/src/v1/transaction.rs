@@ -16,6 +16,7 @@ use tari_ootle_common_types::{Epoch, SubstateRequirement, SubstateRequirementRef
 use tari_template_lib_types::{ComponentAddress, constants::TARI_TOKEN, stealth::StealthTransferStatement};
 
 use crate::{
+    Blobs,
     Instruction,
     TransactionId,
     TransactionSealSignature,
@@ -62,6 +63,10 @@ impl TransactionV1 {
 
     pub fn instructions(&self) -> &[Instruction] {
         self.body.instructions()
+    }
+
+    pub fn blobs(&self) -> &Blobs {
+        self.body.blobs()
     }
 
     pub fn signatures(&self) -> &[TransactionSignature] {

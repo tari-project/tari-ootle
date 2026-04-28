@@ -11,6 +11,7 @@ use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib_types::{ComponentAddress, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
+    Blobs,
     Instruction,
     IntoSigned,
     Transaction,
@@ -83,6 +84,10 @@ impl UnsealedTransactionV1 {
 
     pub fn instructions(&self) -> &[Instruction] {
         &self.transaction.instructions
+    }
+
+    pub fn blobs(&self) -> &Blobs {
+        self.transaction.blobs()
     }
 
     pub fn signatures(&self) -> &[TransactionSignature] {

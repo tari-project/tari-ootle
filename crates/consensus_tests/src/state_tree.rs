@@ -115,8 +115,7 @@ async fn check_state_transitions() {
                 let mut tree = tari_state_tree::StateTree::<_, SpreadPrefixKeyMapper>::new(&mut store);
                 let values = all_transitions
                     .iter()
-                    .flat_map(|t| &t.updates)
-                    .map(|transition| transition.to_tree_change());
+                    .flat_map(|t| t.updates.iter().map(move |u| u.to_tree_change(t.epoch)));
                 let root = tree.put_substate_changes(None, 1, values).unwrap();
                 assert_eq!(root, shard_root, "Shard {} root hash mismatch", shard);
             }

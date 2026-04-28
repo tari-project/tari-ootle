@@ -32,7 +32,7 @@ use tari_engine_types::{
     stealth,
     stealth::ValidatedStealthTransfer,
     substate::{Substate, SubstateDiff, SubstateId, SubstateValue},
-    transaction_receipt::{FinalizeOutcome, TransactionReceipt},
+    transaction_receipt::{DiffSummary, FinalizeOutcome, TransactionReceipt},
     vault::Vault,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
@@ -1048,7 +1048,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         let epoch = self.get_current_epoch()?;
         Ok(TransactionReceipt {
             outcome,
-            diff_summary: diff.into(),
+            diff_summary: DiffSummary::from_diff(diff, epoch.as_u64()),
             fee_withdrawals: diff.validator_fee_withdrawals().to_vec().into_boxed_slice(),
             events: self.events.clone().into_boxed_slice(),
             logs: self.logs.clone().into_boxed_slice(),

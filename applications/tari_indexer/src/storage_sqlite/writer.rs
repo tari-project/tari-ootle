@@ -113,7 +113,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                             substate_transitions::is_up.eq(proof.is_create()),
                             substate_transitions::value_hash.eq(proof
                                 .as_create()
-                                .map(|v| serialize_hex(v.substate.value.to_value_hash(proof.version())))),
+                                .map(|v| serialize_hex(v.substate.value.to_value_hash(proof.version(), epoch)))),
                         )
                     })
                     .collect::<Vec<_>>(),

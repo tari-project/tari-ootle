@@ -488,6 +488,7 @@ where TConsensusSpec: ConsensusSpec
                 .iter()
                 // Calculate for local shards only and the global shard
                 .filter(|ch| local_committee_info.shard_group().contains_or_global(&ch.shard())),
+            epoch,
         )?;
         timer.done();
 

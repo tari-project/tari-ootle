@@ -66,6 +66,7 @@ clients/validator_node_grpc_client/package-lock.json
 .moon/docker
 
 .pnpm-store/
+.wrangler
 
 
 # agents

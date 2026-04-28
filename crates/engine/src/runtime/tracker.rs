@@ -349,6 +349,23 @@ impl<TStore: StateReader> StateTracker<TStore> {
         self.write_with(|state| f(state.mutated_substates()))
     }
 
+    /// Counts substates in the to-persist set that did not previously exist in the state store.
+    /// Used by the fee module to charge a slot-allocation premium on top of per-byte storage.
+    pub fn count_newly_created_substates(&self) -> Result<usize, RuntimeError> {
+        self.read_with(|state| {
+            let store = state.store();
+            let mut count = 0;
+            for id in store.mutated_substates().keys() {
+                match store.get_unmodified_substate(id) {
+                    Ok(_) => {},
+                    Err(RuntimeError::SubstateNotFound { .. }) => count += 1,
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok(count)
+        })
+    }
+
     pub fn are_fees_paid_in_full(&self) -> bool {
         self.read_with(|state| {
             let total_payments = state.fee_state().total_payments();

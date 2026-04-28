@@ -53,7 +53,7 @@ impl SubstateRecord {
         Self {
             substate_id,
             version,
-            state_hash: value.to_value_hash(version),
+            state_hash: value.to_value_hash(version, created.at_epoch),
             substate_value: value.into_value(),
             created,
             destroyed: None,
@@ -336,9 +336,9 @@ impl SubstateValueOrHash {
         }
     }
 
-    pub fn to_value_hash(&self, version: u32) -> Hash32 {
+    pub fn to_value_hash(&self, version: u32, epoch: Epoch) -> Hash32 {
         match &self {
-            SubstateValueOrHash::Value(v) => hash_substate(v, version),
+            SubstateValueOrHash::Value(v) => hash_substate(v, version, epoch.as_u64()),
             SubstateValueOrHash::Hash(hash) => *hash,
         }
     }
@@ -374,8 +374,8 @@ impl SubstateData {
         VersionedSubstateIdRef::new(&self.substate_id, self.version)
     }
 
-    pub fn to_value_hash(&self) -> Hash32 {
-        self.value.to_value_hash(self.version)
+    pub fn to_value_hash(&self, epoch: Epoch) -> Hash32 {
+        self.value.to_value_hash(self.version, epoch)
     }
 
     pub fn substate_id(&self) -> &SubstateId {
@@ -437,13 +437,13 @@ impl SubstateUpdateProof {
         }
     }
 
-    pub fn to_tree_change(&self) -> SubstateTreeChange {
+    pub fn to_tree_change(&self, epoch: Epoch) -> SubstateTreeChange {
         match self {
             Self::Create(create) => {
                 let id = create.substate.as_versioned_substate_id_ref();
                 SubstateTreeChange::Up {
                     id: id.to_owned(),
-                    value_hash: create.substate.to_value_hash(),
+                    value_hash: create.substate.to_value_hash(epoch),
                 }
             },
             Self::Destroy(destroy) => SubstateTreeChange::Down {

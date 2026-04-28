@@ -146,6 +146,7 @@ pub enum FeeSource {
     TransactionWeight,
     SignatureVerification,
     TemplateLoad,
+    SubstateCreate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, borsh::BorshSerialize)]

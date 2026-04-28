@@ -78,15 +78,15 @@ pub struct DiffSummary {
     pub upped: Box<[UpSubstate]>,
 }
 
-impl From<&SubstateDiff> for DiffSummary {
-    fn from(diff: &SubstateDiff) -> Self {
+impl DiffSummary {
+    pub fn from_diff(diff: &SubstateDiff, epoch: u64) -> Self {
         Self {
             upped: diff
                 .up_iter()
                 .map(|(id, s)| UpSubstate {
                     substate_id: id.clone(),
                     version: s.version(),
-                    value_hash: hash_substate(s.substate_value(), s.version()),
+                    value_hash: hash_substate(s.substate_value(), s.version(), epoch),
                 })
                 .collect(),
         }

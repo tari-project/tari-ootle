@@ -1,11 +1,16 @@
 // @ts-check
 import { defineConfig } from "astro/config";
+import cloudflare from "@astrojs/cloudflare";
 import starlight from "@astrojs/starlight";
 import skills from 'astro-skills';
 
 // https://astro.build/config
 export default defineConfig({
   site: "https://ootle.tari.com",
+  output: "server",
+  adapter: cloudflare({
+    imageService: "passthrough",
+  }),
   base: '/',
   integrations: [
     skills(),

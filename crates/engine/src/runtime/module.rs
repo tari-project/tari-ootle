@@ -48,4 +48,6 @@ pub enum RuntimeModuleError {
     Bor(#[from] tari_bor::BorError),
     #[error("Overflow error: {0}")]
     Overflow(String),
+    #[error("Runtime error: {0}")]
+    Runtime(String),
 }

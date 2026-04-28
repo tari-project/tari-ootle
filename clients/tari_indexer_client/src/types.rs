@@ -16,7 +16,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{Epoch, Network, NumPreshards, ShardGroup, StateVersion, shard::Shard};
 use tari_ootle_template_metadata::MetadataHash;
-use tari_ootle_transaction::{PrunedTransaction, Transaction, TransactionEnvelope, TransactionId};
+use tari_ootle_transaction::{PrunedTransaction, TransactionEnvelope, TransactionId};
 use tari_template_abi::TemplateDef;
 use tari_template_lib_types::{
     Amount,

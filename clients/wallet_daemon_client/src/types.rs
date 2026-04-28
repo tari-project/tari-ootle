@@ -38,7 +38,7 @@ use tari_ootle_common_types::{
     substate_type::SubstateType,
 };
 use tari_ootle_template_metadata::{MetadataHash, TemplateMetadata};
-use tari_ootle_transaction::{Instruction, PrunedTransaction, Transaction, TransactionId, UnsignedTransaction};
+use tari_ootle_transaction::{Instruction, PrunedTransaction, TransactionId, UnsignedTransaction};
 use tari_ootle_wallet_sdk::{
     apis::{
         confidential_transfer::UtxoInputSelection,

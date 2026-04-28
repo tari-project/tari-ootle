@@ -17,7 +17,6 @@ use integration_tests::{
     validator_node::{ValidatorNodeProcess, spawn_validator_node},
 };
 use libp2p::Multiaddr;
-use log::warn;
 use minotari_app_grpc::tari_rpc::{RegisterValidatorNodeRequest, Signature};
 use notify::Watcher;
 use tari_base_node_client::{BaseNodeClient, grpc::GrpcBaseNodeClient};
@@ -411,27 +410,52 @@ async fn then_validator_node_has_state_at(
 #[then(expr = "I wait for {word} to have at least {int} blocks for the current epoch")]
 async fn vn_has_blocks_for_current_epoch(world: &mut TariWorld, step: &Step, vn_name: String, num_blocks: u64) {
     cucumber_log!("==== Step: {}", step.value);
+    const TIMEOUT_SECS: u64 = 60;
+
     let vn = world.get_validator_node(&vn_name);
     let mut client = vn.create_client();
-    for _ in 0..10 {
-        let status = client.get_consensus_status().await.unwrap();
+    let mut last_status = None;
+
+    for _ in 0..TIMEOUT_SECS {
+        let status = match client.get_consensus_status().await {
+            Ok(status) => status,
+            Err(err) => {
+                integration_tests::cucumber_log!(
+                    "Failed to get consensus status for validator node {} while waiting for at least {} blocks: {}",
+                    vn_name,
+                    num_blocks,
+                    err
+                );
+                panic!("Failed to get consensus status for validator node {vn_name}: {err}");
+            },
+        };
+        last_status = Some(format!(
+            "epoch={}, state={}, height={}",
+            status.epoch, status.state, status.height
+        ));
+
         if status.state != "Running" {
-            warn!("Validator node {} is not running yet", vn_name);
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
             continue;
         }
+
         if status.height.as_u64() >= num_blocks {
             return;
         }
-        integration_tests::cucumber_log!(
-            "Validator node {} has height {} ({}), waiting for at least {}",
-            vn_name,
-            status.height,
-            status.state,
-            num_blocks
-        );
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
+
+    let last_status = last_status.unwrap_or_else(|| "no consensus status was observed".to_string());
+    let message = format!(
+        "Validator node {} did not reach at least {} blocks for the current epoch within {}s. Last status: {}",
+        vn_name,
+        num_blocks,
+        TIMEOUT_SECS,
+        last_status
+    );
+    integration_tests::cucumber_log!("{}", message);
+    panic!("{}", message);
 }
 
 #[then(expr = "{word} is on epoch {int} within {int} seconds")]

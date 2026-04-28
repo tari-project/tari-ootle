@@ -815,6 +815,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         initial_evidence: &Evidence,
         is_ready: bool,
         is_global: bool,
+        max_epoch: Option<Epoch>,
     ) -> Result<(), StorageError> {
         let value = TransactionPoolRecord::load(
             tx_id,
@@ -828,6 +829,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             None,
             None,
             is_ready,
+            max_epoch,
             None,
             time::OffsetDateTime::now_utc(),
             None,
@@ -858,7 +860,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             stage: update.stage(),
             local_decision: update.decision(),
             remote_decision: update.remote_decision(),
-            locked_epoch: update.locked_epoch(),
+            locked_epoch: update.locked_epoch().cloned(),
             is_ready: update.is_ready(),
         };
 
@@ -875,13 +877,13 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             )?;
         }
 
-        // Set is_ready and pending_stage to the updated values. This allows has_uncommitted_transactions to return an
-        // accurate value without querying records in the updates table.
+        // Update the last_updated timestamp on the base record for informational purposes.
+        // NOTE: We intentionally do NOT eagerly write pending_stage or is_ready to the base record here.
+        // The pending state is resolved from the pending chain when needed (via get_for_blocks / get_many_ready).
+        // Eagerly writing these fields caused stale state when blocks ended up on dead branches (leader failures),
+        // leading to permanent "Stage disagreement" no-votes.
         let cf = self.db().cf(TransactionPoolCf)?;
         let mut tx_pool_value = cf.get(update.transaction_id(), OPERATION)?;
-
-        tx_pool_value.set_is_ready(update.is_ready_now());
-        tx_pool_value.set_pending_stage(Some(update.stage()));
         tx_pool_value.set_last_updated(*block.block_id(), time::OffsetDateTime::now_utc());
         cf.put(update.transaction_id(), &tx_pool_value, OPERATION)?;
 

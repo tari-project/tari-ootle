@@ -18,7 +18,7 @@ use tari_ootle_app_utilities::transaction_executor::TransactionExecutor;
 use tari_ootle_common_types::{Epoch, SubstateRequirement, VersionedSubstateId};
 use tari_ootle_storage::{
     StateStore,
-    consensus_models::{TransactionExecution, VersionedSubstateIdLockIntent},
+    consensus_models::{LockedEpoch, TransactionExecution, VersionedSubstateIdLockIntent},
 };
 use tari_ootle_transaction::Transaction;
 
@@ -27,13 +27,13 @@ use crate::{transaction_validators::TransactionValidationError, validator::Valid
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::block_transaction_executor";
 
 #[derive(Debug)]
-pub struct TarBlockTransactionExecutor<TExecutor, TValidator> {
+pub struct TariBlockTransactionExecutor<TExecutor, TValidator> {
     executor: TExecutor,
     validator: Arc<TValidator>,
 }
 
 impl<TExecutor: TransactionExecutor<ReadOnlyMemoryStateStore>, TValidator>
-    TarBlockTransactionExecutor<TExecutor, TValidator>
+    TariBlockTransactionExecutor<TExecutor, TValidator>
 {
     pub fn new(executor: TExecutor, validator: TValidator) -> Self {
         Self {
@@ -57,7 +57,7 @@ impl<TExecutor: TransactionExecutor<ReadOnlyMemoryStateStore>, TValidator>
 }
 
 impl<TExecutor, TStateStore, TValidator> BlockTransactionExecutor<TStateStore>
-    for TarBlockTransactionExecutor<TExecutor, TValidator>
+    for TariBlockTransactionExecutor<TExecutor, TValidator>
 where
     TStateStore: StateStore,
     TExecutor: TransactionExecutor<ReadOnlyMemoryStateStore>,
@@ -78,7 +78,7 @@ where
     fn execute(
         &self,
         transaction: &Transaction,
-        current_epoch: Epoch,
+        locked_epoch: LockedEpoch,
         resolved_inputs: &HashMap<SubstateRequirement, Substate>,
     ) -> Result<TransactionExecution, BlockTransactionExecutorError> {
         let id = transaction.calculate_id();
@@ -89,10 +89,17 @@ where
         let mut state_db = new_memory_store();
         Self::add_substates_to_memory_db(resolved_inputs, &mut state_db)?;
 
-        let virtual_substates = VirtualSubstates::from_iter([(
-            VirtualSubstateId::CurrentEpoch,
-            VirtualSubstate::CurrentEpoch(current_epoch.as_u64()),
-        )]);
+        let (execute_epoch, execute_epoch_hash) = locked_epoch.destructure();
+        let virtual_substates = VirtualSubstates::from_iter([
+            (
+                VirtualSubstateId::CurrentEpoch,
+                VirtualSubstate::CurrentEpoch(execute_epoch.as_u64()),
+            ),
+            (
+                VirtualSubstateId::CurrentEpochHash,
+                VirtualSubstate::CurrentEpochHash(execute_epoch_hash),
+            ),
+        ]);
 
         // Execute the transaction and get the result
         let exec_output = self
@@ -128,7 +135,7 @@ where
     }
 }
 
-impl<TExecutor: Clone, TValidator> Clone for TarBlockTransactionExecutor<TExecutor, TValidator> {
+impl<TExecutor: Clone, TValidator> Clone for TariBlockTransactionExecutor<TExecutor, TValidator> {
     fn clone(&self) -> Self {
         Self {
             executor: self.executor.clone(),

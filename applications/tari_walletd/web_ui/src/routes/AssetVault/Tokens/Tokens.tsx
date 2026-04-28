@@ -36,6 +36,7 @@ import Button from "@mui/material/Button";
 import { useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import TypeChip from "@routes/AssetVault/Components/ResourceTypeChip";
+import { TransferNftDialog } from "@routes/AssetVault/NFTs/components/SendNft";
 import useAccountStore from "@store/accountStore";
 import { Account, Amount, BalanceEntry, ResourceAddress, ResourceType, VaultId } from "@tari-project/ootle-ts-bindings";
 import { bigintToDecimalString, shortenString, substateIdToString } from "@utils/helpers";
@@ -151,6 +152,7 @@ function Tokens({ account }: { account: Account }) {
     address: ResourceAddress;
     resource_type: ResourceType;
   } | null>(null);
+  const [nftResourceToSend, setNftResourceToSend] = useState<ResourceAddress | null>(null);
 
   const {
     data: balancesData,
@@ -160,7 +162,11 @@ function Tokens({ account }: { account: Account }) {
   } = useAccountsGetBalances(substateIdToString(account.component_address));
 
   const handleSendResourceClicked = (address: ResourceAddress, resource_type: ResourceType) => {
-    setResourceToSend({ address, resource_type });
+    if (resource_type === "NonFungible") {
+      setNftResourceToSend(address);
+    } else {
+      setResourceToSend({ address, resource_type });
+    }
   };
 
   const hasBalances = balancesData?.balances && balancesData.balances.length > 0;
@@ -178,6 +184,14 @@ function Tokens({ account }: { account: Account }) {
             balancesData?.balances.find((b: BalanceEntry) => b.resource_address === resourceToSend?.address)
               ?.token_symbol || ""
           }
+        />
+      )}
+      {nftResourceToSend != null && (
+        <TransferNftDialog
+          open={true}
+          handleClose={() => setNftResourceToSend(null)}
+          onSendComplete={() => setNftResourceToSend(null)}
+          preSelectedResourceAddress={nftResourceToSend}
         />
       )}
       <FetchStatusCheck

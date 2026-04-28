@@ -85,9 +85,7 @@ fn deposit_from_faucet_then_pay() {
             .with_fee_instructions_builder(|builder| {
                 builder
                     // Faucet deposits free coins into the account
-                    .call_method(xtr_faucet_component(), "take", args![100000])
-                    .put_last_instruction_output_on_workspace("bucket")
-                    .call_method(account, "deposit", args![Workspace("bucket")])
+                    .call_method(xtr_faucet_component(), "take", args![account])
                     .call_method(account, "pay_fee", args![1000])
             })
             .call_function(test.get_template_address("State"), "new", args![])
@@ -103,7 +101,7 @@ fn deposit_from_faucet_then_pay() {
         .get(&STEALTH_TARI_RESOURCE_ADDRESS)
         .unwrap()
         .balance();
-    assert_eq!(new_balance, 100000 - payment.total_fees_paid());
+    assert_eq!(new_balance, 1_000_000_000 - payment.total_fees_paid());
 }
 
 #[test]
@@ -123,9 +121,7 @@ fn another_account_pays_partially_for_fees() {
             .pay_fee_from_component(account_fee, Amount::from(200u64))
             // Account pays the rest
             .pay_fee_from_component(account_fee2, Amount::from(1000u64))
-            .call_method(xtr_faucet_component(), "take", args![1000])
-            .put_last_instruction_output_on_workspace("bucket")
-            .call_method(account, "deposit", args![Workspace("bucket")])
+            .call_method(xtr_faucet_component(), "take", args![account])
             // NOTE: the test harness provides the virtual proofs as provided, so the transaction signer does not matter
             .build_and_seal(test.secret_key()),
         vec![owner_token_fee, owner_token_fee2],
@@ -156,7 +152,7 @@ fn another_account_pays_partially_for_fees() {
         .get(&STEALTH_TARI_RESOURCE_ADDRESS)
         .unwrap()
         .balance();
-    assert_eq!(balance, Amount::from(1000u64));
+    assert_eq!(balance, Amount::from(1_000_000_000u64));
 }
 
 #[test]

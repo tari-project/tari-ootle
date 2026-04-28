@@ -27,6 +27,7 @@ use super::handlers::{HandlerContext, HandlerWithCookie, auth, stealth_utxos, su
 use crate::handlers::{
     Handler,
     accounts,
+    address_book,
     auth::jwt::JwtApiError,
     burn_proofs,
     confidential,
@@ -34,6 +35,7 @@ use crate::handlers::{
     keys,
     nfts,
     settings,
+    swap_pools,
     transaction,
     validator,
     webrtc,
@@ -195,6 +197,7 @@ async fn handler(
         Some(("templates", method)) => match method {
             "get" => call_handler(context, value, token, templates::handle_get).await,
             "list_authored" => call_handler(context, value, token, templates::handle_list_owned).await,
+            "sign_metadata" => call_handler(context, value, token, templates::handle_sign_metadata).await,
             _ => value.method_not_found(&value.method).into_response(),
         },
         Some(("nfts", method)) => match method {
@@ -217,6 +220,19 @@ async fn handler(
         Some(("burn_proofs", method)) => match method {
             "list" => call_handler(context, value, token, burn_proofs::handle_list).await,
             "get" => call_handler(context, value, token, burn_proofs::handle_get).await,
+            _ => value.method_not_found(&value.method).into_response(),
+        },
+        Some(("swap_pools", method)) => match method {
+            "get_exchange_rate" => call_handler(context, value, token, swap_pools::handle_get_exchange_rate).await,
+            "list" => call_handler(context, value, token, swap_pools::handle_list).await,
+            _ => value.method_not_found(&value.method).into_response(),
+        },
+        Some(("address_book", method)) => match method {
+            "add" => call_handler(context, value, token, address_book::handle_add).await,
+            "list" => call_handler(context, value, token, address_book::handle_list).await,
+            "get" => call_handler(context, value, token, address_book::handle_get).await,
+            "update" => call_handler(context, value, token, address_book::handle_update).await,
+            "delete" => call_handler(context, value, token, address_book::handle_delete).await,
             _ => value.method_not_found(&value.method).into_response(),
         },
         Some(("wallet", "get_info")) => call_handler(context, value, token, wallet::handle_get_info).await,
@@ -346,5 +362,6 @@ pub enum ApplicationErrorCode {
     InvalidRequest = 400,
     Unauthorized = 401,
     TransactionRejected = 1000,
+    FaucetAlreadyClaimed = 1001,
     GeneralError = 500,
 }

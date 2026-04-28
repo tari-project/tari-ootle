@@ -21,7 +21,13 @@ pub mod _macro_exports {
     pub use crate::{
         builtin_templates::{
             UnsignedTransactionBuilder,
-            component::{ComponentInterface, ComponentInvokeBuilder, IntoBuildParts, OotleInvoke, TemplateInterface},
+            component::{
+                ComponentInterface,
+                ComponentInvokeBuilder,
+                IntoBuildParts,
+                TemplateInterface,
+                TransactionBuildable,
+            },
         },
         provider::{Provider, ProviderError, WantInput},
     };
@@ -37,7 +43,8 @@ pub mod _macro_exports {
 /// - `{Name}::for_component(addr, &provider)` → component interface
 /// - `{Name}::for_template(addr, &provider)` → template interface
 ///
-/// Each generated method returns a [`ComponentInvokeBuilder`] that you chain with
+/// Each generated method returns a
+/// [`ComponentInvokeBuilder`](crate::builtin_templates::component::ComponentInvokeBuilder) that you chain with
 /// `.pay_fee()`, `.want_vault_for()`, `.prepare()`, etc.
 ///
 /// # Syntax
@@ -194,7 +201,7 @@ macro_rules! __ootle_template_inner {
         }
 
         impl<'a, P: $crate::macros::_macro_exports::Provider>
-            $crate::macros::_macro_exports::OotleInvoke
+            $crate::macros::_macro_exports::TransactionBuildable
             for $name<'a, P, $crate::macros::_macro_exports::ComponentInterface>
         {
             $crate::__ootle_invoke_impl!();
@@ -257,7 +264,7 @@ macro_rules! __ootle_template_inner {
         }
 
         impl<'a, P: $crate::macros::_macro_exports::Provider>
-            $crate::macros::_macro_exports::OotleInvoke
+            $crate::macros::_macro_exports::TransactionBuildable
             for $name<'a, P, $crate::macros::_macro_exports::TemplateInterface>
         {
             $crate::__ootle_invoke_impl!();
@@ -280,7 +287,7 @@ macro_rules! __ootle_invoke_impl {
         fn pay_fee<A: Into<$crate::macros::_macro_exports::Amount>>(self, amount: A) -> Self {
             let Self { interface, builder } = self;
             Self {
-                builder: $crate::macros::_macro_exports::OotleInvoke::pay_fee(builder, amount),
+                builder: $crate::macros::_macro_exports::TransactionBuildable::pay_fee(builder, amount),
                 interface,
             }
         }
@@ -293,7 +300,7 @@ macro_rules! __ootle_invoke_impl {
         ) -> Self {
             let Self { interface, builder } = self;
             Self {
-                builder: $crate::macros::_macro_exports::OotleInvoke::want_vault_for(
+                builder: $crate::macros::_macro_exports::TransactionBuildable::want_vault_for(
                     builder,
                     component_address,
                     resource_address,
@@ -306,7 +313,11 @@ macro_rules! __ootle_invoke_impl {
         fn want_substate(self, substate_id: $crate::macros::_macro_exports::SubstateId, required: bool) -> Self {
             let Self { interface, builder } = self;
             Self {
-                builder: $crate::macros::_macro_exports::OotleInvoke::want_substate(builder, substate_id, required),
+                builder: $crate::macros::_macro_exports::TransactionBuildable::want_substate(
+                    builder,
+                    substate_id,
+                    required,
+                ),
                 interface,
             }
         }
@@ -314,7 +325,10 @@ macro_rules! __ootle_invoke_impl {
         fn want_all_vaults(self, component_address: $crate::macros::_macro_exports::ComponentAddress) -> Self {
             let Self { interface, builder } = self;
             Self {
-                builder: $crate::macros::_macro_exports::OotleInvoke::want_all_vaults(builder, component_address),
+                builder: $crate::macros::_macro_exports::TransactionBuildable::want_all_vaults(
+                    builder,
+                    component_address,
+                ),
                 interface,
             }
         }
@@ -322,7 +336,7 @@ macro_rules! __ootle_invoke_impl {
         fn put_last_instruction_output_on_workspace<T: Into<String>>(self, label: T) -> Self {
             let Self { interface, builder } = self;
             Self {
-                builder: $crate::macros::_macro_exports::OotleInvoke::put_last_instruction_output_on_workspace(
+                builder: $crate::macros::_macro_exports::TransactionBuildable::put_last_instruction_output_on_workspace(
                     builder, label,
                 ),
                 interface,
@@ -332,7 +346,7 @@ macro_rules! __ootle_invoke_impl {
         fn add_input<S: Into<$crate::macros::_macro_exports::SubstateRequirement>>(self, substate_id: S) -> Self {
             let Self { interface, builder } = self;
             Self {
-                builder: $crate::macros::_macro_exports::OotleInvoke::add_input(builder, substate_id),
+                builder: $crate::macros::_macro_exports::TransactionBuildable::add_input(builder, substate_id),
                 interface,
             }
         }
@@ -347,7 +361,7 @@ macro_rules! __ootle_invoke_impl {
         ) -> Self {
             let Self { interface, builder } = self;
             Self {
-                builder: $crate::macros::_macro_exports::OotleInvoke::then(builder, f),
+                builder: $crate::macros::_macro_exports::TransactionBuildable::then(builder, f),
                 interface,
             }
         }
@@ -355,7 +369,7 @@ macro_rules! __ootle_invoke_impl {
         fn chain<B: $crate::macros::_macro_exports::IntoBuildParts>(self, other: B) -> Self {
             let Self { interface, builder } = self;
             Self {
-                builder: $crate::macros::_macro_exports::OotleInvoke::chain(builder, other),
+                builder: $crate::macros::_macro_exports::TransactionBuildable::chain(builder, other),
                 interface,
             }
         }
@@ -372,7 +386,7 @@ macro_rules! __ootle_unsigned_tx_builder_impl {
         }
 
         fn add_input<S: Into<$crate::macros::_macro_exports::SubstateRequirement>>(self, substate_id: S) -> Self {
-            $crate::macros::_macro_exports::OotleInvoke::add_input(self, substate_id)
+            $crate::macros::_macro_exports::TransactionBuildable::add_input(self, substate_id)
         }
 
         async fn prepare(
@@ -398,7 +412,7 @@ macro_rules! const_nonzero_u64 {
 mod tests {
     use tari_template_lib_types::Amount;
 
-    use crate::builtin_templates::component::OotleInvoke;
+    use crate::builtin_templates::component::TransactionBuildable;
 
     #[test]
     fn it_generates_a_non_zero() {

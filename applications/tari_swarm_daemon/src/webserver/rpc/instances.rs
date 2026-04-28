@@ -148,6 +148,7 @@ pub struct InstanceInfo {
     pub base_path: PathBuf,
     pub instance_type: InstanceType,
     pub is_running: bool,
+    pub is_config_dirty: bool,
 }
 
 impl From<crate::process_manager::InstanceInfo> for InstanceInfo {
@@ -160,6 +161,7 @@ impl From<crate::process_manager::InstanceInfo> for InstanceInfo {
             base_path: value.base_path,
             instance_type: value.instance_type,
             is_running: value.is_running,
+            is_config_dirty: value.is_config_dirty,
         }
     }
 }

@@ -7,6 +7,11 @@ export type TransactionGetResponse = {
   transaction: Transaction;
   result: FinalizeResult | null;
   status: TransactionStatus;
+  /**
+   * The estimated fee required for the transaction. For dry runs, this is the minimum fee
+   * that should be used as `max_fee` for the actual submission.
+   */
+  final_fee: number | null;
   invalid_reason: string | null;
   last_update_time: string;
 };

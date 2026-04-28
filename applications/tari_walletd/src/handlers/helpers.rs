@@ -193,13 +193,20 @@ pub(super) fn transaction_rejected<T: Display>(details: T) -> anyhow::Error {
     )
 }
 
+pub(super) fn faucet_already_claimed() -> anyhow::Error {
+    application_error(
+        ApplicationErrorCode::FaucetAlreadyClaimed,
+        "This account has already claimed testnet funds",
+    )
+}
+
 pub(super) fn general_error<T: Display>(details: T) -> anyhow::Error {
     application_error(ApplicationErrorCode::GeneralError, details)
 }
 
 /// Converts a `CompleteClaimBurnProof` (the L1 burn proof file format) into the
 /// `ClaimBurnProofContents` used by the wallet daemon for claim transactions.
-pub(super) fn complete_burn_proof_to_contents(proof: CompleteClaimBurnProof) -> anyhow::Result<ClaimBurnProofContents> {
+pub(crate) fn complete_burn_proof_to_contents(proof: CompleteClaimBurnProof) -> anyhow::Result<ClaimBurnProofContents> {
     let encrypted_data = EncryptedData::try_from(proof.encrypted_data).map_err(|len| {
         anyhow!(
             "Invalid encrypted data length: {}. Expected max length: {}",

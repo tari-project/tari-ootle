@@ -1,11 +1,12 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, pin::pin, sync::Arc};
+use std::{collections::HashMap, pin::pin};
 
 use futures::StreamExt;
 use log::*;
 use tari_engine_types::{
+    published_template::PublishedTemplateMetadata,
     substate::{SubstateId, SubstateValue},
     transaction_receipt::TransactionReceipt,
 };
@@ -21,7 +22,7 @@ use tari_ootle_storage::{
 use tari_ootle_transaction::TransactionId;
 use tari_rpc_framework::__macro_reexports::future::Either;
 use tari_shutdown::ShutdownSignal;
-use tari_template_lib_types::{Amount, TransactionReceiptAddress};
+use tari_template_lib_types::{Amount, TemplateAddress, TransactionReceiptAddress};
 use tokio::{sync::broadcast, time};
 
 use crate::{
@@ -32,6 +33,7 @@ use crate::{
         stats::SyncStats,
         sync_plan::SyncPlan,
         sync_progress::SyncProgress,
+        validator_status::ValidatorStatusMonitor,
     },
     notify::Notify,
     storage_sqlite::{
@@ -39,7 +41,13 @@ use crate::{
         SqliteStoreWriteTransaction,
         models::{Key, UtxoSpent, UtxoUnspent, UtxoUpdateRecord},
     },
-    store::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreReader, IndexerStoreWriteTransaction},
+    store::{
+        IndexerStore,
+        IndexerStoreReadTransaction,
+        IndexerStoreReader,
+        IndexerStoreWriteTransaction,
+        InsertedEvent,
+    },
 };
 
 const LOG_TARGET: &str = "tari::indexer::network_state_sync::worker";
@@ -53,6 +61,7 @@ pub struct NetworkWideStateSync {
     config: NetworkWideStateSyncConfig,
     notify: Notify<IndexerEvent>,
     transaction_event_notify: Notify<TransactionEvent>,
+    validator_status: ValidatorStatusMonitor,
 }
 
 impl NetworkWideStateSync {
@@ -63,6 +72,7 @@ impl NetworkWideStateSync {
         config: NetworkWideStateSyncConfig,
         notify: Notify<IndexerEvent>,
         transaction_event_notify: Notify<TransactionEvent>,
+        validator_status: ValidatorStatusMonitor,
     ) -> Self {
         Self {
             epoch_manager,
@@ -72,6 +82,7 @@ impl NetworkWideStateSync {
             config,
             notify,
             transaction_event_notify,
+            validator_status,
         }
     }
 
@@ -170,6 +181,7 @@ impl NetworkWideStateSync {
         Ok(())
     }
 
+    #[expect(clippy::too_many_lines)]
     async fn sync_checkpoints(&mut self, sync_plan_mut: &mut SyncPlan) -> Result<(), NetworkStateSyncError> {
         let prev_epoch = sync_plan_mut
             .network_description()
@@ -193,25 +205,35 @@ impl NetworkWideStateSync {
             }
             info!(target: LOG_TARGET, "🌍️ Syncing checkpoints from {from_epoch} for shard group {shard_group}");
             // Perform sync operations using the pool and checkpoint
+            let validator_status = self.validator_status.clone();
             let checkpoints: Vec<_> = pool
-                .try_with_random_members(|mut session| async move {
-                    let resp = session
-                        .get_checkpoints(rpc::GetCheckpointsRequest {
-                            from_epoch: Some(from_epoch.into()),
-                            num_to_return: 100,
-                        })
-                        .await?;
-
-                    debug!(target: LOG_TARGET, "🌍️ Received {} checkpoints for shard group {} from peer {}", resp.checkpoints.len(), shard_group, session.peer_address());
-
-                    resp.checkpoints
-                        .into_iter()
-                        .map(|cp| {
-                            EpochCheckpoint::try_from(cp).map_err(|e| NetworkStateSyncError::InvalidCheckpoint {
-                                details: format!("Failed to convert checkpoint for shard group {}: {}", shard_group, e),
+                .try_with_random_members(|mut session| {
+                    let validator_status = validator_status.clone();
+                    async move {
+                        validator_status.probe(&mut session, shard_group).await;
+                        let resp = session
+                            .get_checkpoints(rpc::GetCheckpointsRequest {
+                                from_epoch: Some(from_epoch.into()),
+                                num_to_return: 100,
                             })
-                        })
-                        .collect()
+                            .await?;
+
+                        debug!(target: LOG_TARGET, "🌍️ Received {} checkpoints for shard group {} from peer {}", resp.checkpoints.len(), shard_group, session.peer_address());
+
+                        resp.checkpoints
+                            .into_iter()
+                            .map(|cp| {
+                                EpochCheckpoint::try_from(cp).map_err(|e| {
+                                    NetworkStateSyncError::InvalidCheckpoint {
+                                        details: format!(
+                                            "Failed to convert checkpoint for shard group {}: {}",
+                                            shard_group, e
+                                        ),
+                                    }
+                                })
+                            })
+                            .collect()
+                    }
                 })
                 .await?;
 
@@ -295,6 +317,7 @@ impl NetworkWideStateSync {
         let mut utxos_buf = Vec::new();
         let mut transactions_buf = Vec::new();
         let mut validator_fee_pools_buf = Vec::new();
+        let mut template_catalogue_buf: Vec<(TemplateAddress, PublishedTemplateMetadata)> = Vec::new();
 
         let mut has_synced_global_shard = false;
 
@@ -308,6 +331,7 @@ impl NetworkWideStateSync {
                     continue;
                 },
             };
+            self.validator_status.probe(&mut session, shard_group).await;
             if !has_synced_global_shard {
                 self.sync_shard_state(
                     Shard::global(),
@@ -316,6 +340,7 @@ impl NetworkWideStateSync {
                     &mut utxos_buf,
                     &mut transactions_buf,
                     &mut validator_fee_pools_buf,
+                    &mut template_catalogue_buf,
                     shard_group,
                     &mut session,
                 )
@@ -331,6 +356,7 @@ impl NetworkWideStateSync {
                     &mut utxos_buf,
                     &mut transactions_buf,
                     &mut validator_fee_pools_buf,
+                    &mut template_catalogue_buf,
                     shard_group,
                     &mut session,
                 )
@@ -349,6 +375,7 @@ impl NetworkWideStateSync {
         utxos_buf: &mut Vec<UtxoUpdateRecord>,
         transactions_buf: &mut Vec<(TransactionReceiptAddress, TransactionReceipt)>,
         validator_fee_pools_buf: &mut Vec<SubstateData>,
+        template_catalogue_buf: &mut Vec<(TemplateAddress, PublishedTemplateMetadata)>,
         shard_group: ShardGroup,
         session: &mut ValidatorRpcSession,
     ) -> Result<(), NetworkStateSyncError> {
@@ -363,7 +390,8 @@ impl NetworkWideStateSync {
         let mut value_filters = SubstateValueFilterFlags::UTXO |
             SubstateValueFilterFlags::VALIDATOR_FEE_POOL |
             SubstateValueFilterFlags::CLAIMED_OUTPUT_TOMBSTONE |
-            SubstateValueFilterFlags::TRANSACTION_RECEIPT;
+            SubstateValueFilterFlags::TRANSACTION_RECEIPT |
+            SubstateValueFilterFlags::TEMPLATE_METADATA;
 
         if prev_version == 0 {
             info!(target: LOG_TARGET, "🌍️ Syncing shard {shard} in shard group {shard_group} from scratch (starting from version 0). Only fetching the head state.");
@@ -414,6 +442,7 @@ impl NetworkWideStateSync {
                     utxos_buf,
                     transactions_buf,
                     validator_fee_pools_buf,
+                    template_catalogue_buf,
                     &mut xtr_claimed,
                 )?;
             }
@@ -428,7 +457,7 @@ impl NetworkWideStateSync {
 
             self.store.clone().with_write_tx(|tx| {
                 debug!(target: LOG_TARGET, "✅ Committing {} updates for shard {shard} (epoch: {msg_epoch}, state version: {state_version})", update_buf.len());
-                // TODO: this is not currently used. Consider removing. 
+                // TODO: this is not currently used. Consider removing.
                 tx.batch_insert_substate_transitions(shard, state_version, update_buf.drain(..))?;
                 debug!(target: LOG_TARGET, "✅ Committing {} UTXOs for shard {shard} (epoch: {msg_epoch})", utxos_buf.len());
                 tx.batch_insert_utxo_updates(msg_epoch, utxos_buf.drain(..))?;
@@ -440,6 +469,13 @@ impl NetworkWideStateSync {
                 debug!(target: LOG_TARGET, "✅ Committing {} transactions for shard {shard} (epoch: {msg_epoch})", transactions_buf.len());
                 self.stats.increase_events(transactions_buf.iter().map(|(_, t)| t.events.len()).sum());
                 self.persist_transaction_receipts(tx, transactions_buf.drain(..))?;
+
+                if !template_catalogue_buf.is_empty() {
+                    debug!(target: LOG_TARGET, "✅ Upserting {} template catalogue entries for shard {shard} (epoch: {msg_epoch})", template_catalogue_buf.len());
+                    for (template_addr, metadata) in template_catalogue_buf.drain(..) {
+                        tx.upsert_template_catalogue(&template_addr, &metadata)?;
+                    }
+                }
 
                 // All done - write the sync progress
                 sync_plan_mut.add_state_sync_progress(shard, state_version, msg_epoch);
@@ -457,24 +493,84 @@ impl NetworkWideStateSync {
         tx: &mut SqliteStoreWriteTransaction<'_>,
         receipts: I,
     ) -> Result<(), StorageError> {
-        let receipts: Vec<_> = receipts.into_iter().collect();
+        // Insert into DB first so events get assigned their auto-increment IDs,
+        // then broadcast with IDs attached. This ensures SSE clients can use
+        // the ID for catch-up/replay.
+        let inserted_events = tx.batch_insert_transaction_receipts(receipts, &self.config.event_filters)?;
 
-        // Broadcast filtered events to the transaction event channel
-        for (receipt_addr, receipt) in &receipts {
-            let transaction_id = TransactionId::from_receipt_address(*receipt_addr);
-            for event in &receipt.events {
-                if self.config.event_filters.is_empty() ||
-                    self.config.event_filters.iter().any(|filter| filter.matches(event))
-                {
-                    self.transaction_event_notify.notify(TransactionEvent {
-                        transaction_id,
-                        event: Arc::new(event.clone()),
-                    });
-                }
-            }
+        if !self.config.watched_templates.is_empty() {
+            self.process_watched_substate_events(tx, &inserted_events)?;
         }
 
-        tx.batch_insert_transaction_receipts(receipts, &self.config.event_filters)?;
+        for inserted in inserted_events {
+            self.transaction_event_notify.notify(TransactionEvent {
+                id: inserted.id,
+                transaction_id: inserted.transaction_id,
+                event: inserted.event,
+            });
+        }
+
+        Ok(())
+    }
+
+    fn process_watched_substate_events(
+        &self,
+        tx: &mut SqliteStoreWriteTransaction<'_>,
+        events: &[InsertedEvent],
+    ) -> Result<(), StorageError> {
+        use crate::store::IndexerStoreWriteTransaction;
+
+        for inserted in events {
+            let event = &inserted.event;
+            match event.topic() {
+                "std.component.created" => {
+                    if self.config.watched_templates.contains(&event.template_address()) &&
+                        let Some(substate_id) = event.substate_id()
+                    {
+                        debug!(
+                            target: LOG_TARGET,
+                            "📌 Watched component created: {} (template: {})",
+                            substate_id,
+                            event.template_address()
+                        );
+                        tx.insert_watched_substate(substate_id, &event.template_address())?;
+                    }
+                },
+                "std.component.template_update" => {
+                    if let Some(substate_id) = event.substate_id() {
+                        let prev_template = event
+                            .payload()
+                            .get("prev_template")
+                            .and_then(|v| TemplateAddress::from_hex(v).ok());
+
+                        let prev_was_watched = prev_template
+                            .as_ref()
+                            .is_some_and(|t| self.config.watched_templates.contains(t));
+                        let new_is_watched = self.config.watched_templates.contains(&event.template_address());
+
+                        if prev_was_watched && !new_is_watched {
+                            debug!(
+                                target: LOG_TARGET,
+                                "📌 Watched component removed (template update): {}",
+                                substate_id
+                            );
+                            tx.delete_watched_substate(substate_id)?;
+                        } else if new_is_watched {
+                            debug!(
+                                target: LOG_TARGET,
+                                "📌 Watched component updated: {} (template: {})",
+                                substate_id,
+                                event.template_address()
+                            );
+                            tx.insert_watched_substate(substate_id, &event.template_address())?;
+                        } else {
+                            // N/A
+                        }
+                    }
+                },
+                _ => {},
+            }
+        }
         Ok(())
     }
 }
@@ -489,60 +585,73 @@ fn extend_bufs_from_substate_update(
     utxos_buf: &mut Vec<UtxoUpdateRecord>,
     transactions_buf: &mut Vec<(TransactionReceiptAddress, TransactionReceipt)>,
     validator_fee_pools_buf: &mut Vec<SubstateData>,
+    template_catalogue_buf: &mut Vec<(TemplateAddress, PublishedTemplateMetadata)>,
     xtr_claimed_mut: &mut Amount,
 ) -> Result<(), NetworkStateSyncError> {
     match &update {
-        SubstateUpdateProof::Create(create) => match create.substate.value().value() {
-            Some(SubstateValue::Utxo(utxo)) => {
-                if let Some(address) = create.substate.substate_id().as_utxo_address() {
-                    let is_frozen = utxo.is_frozen();
-                    if let Some(ref output) = utxo.output {
-                        utxos_buf.push(UtxoUpdateRecord::Unspent(UtxoUnspent {
-                            address,
-                            version: update.version(),
-                            shard,
-                            state_version,
-                            utxo_output: output.clone(),
-                            is_frozen,
-                        }));
+        SubstateUpdateProof::Create(create) => {
+            if create.substate.substate_id().is_template() {
+                if let Some(metadata) = &create.substate.template_metadata &&
+                    let Some(template_addr) = create.substate.substate_id().as_template()
+                {
+                    template_catalogue_buf.push((template_addr.as_template_address(), metadata.clone()));
+                }
+                update_buf.push((msg_epoch, update));
+                return Ok(());
+            }
+            match create.substate.value().value() {
+                Some(SubstateValue::Utxo(utxo)) => {
+                    if let Some(address) = create.substate.substate_id().as_utxo_address() {
+                        let is_frozen = utxo.is_frozen();
+                        if let Some(ref output) = utxo.output {
+                            utxos_buf.push(UtxoUpdateRecord::Unspent(UtxoUnspent {
+                                address,
+                                version: update.version(),
+                                shard,
+                                state_version,
+                                utxo_output: output.clone(),
+                                is_frozen,
+                            }));
+                        }
+                    } else {
+                        warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received UTXO substate with invalid address: {}", create.substate.substate_id());
+                    };
+                },
+                Some(SubstateValue::TransactionReceipt(receipt)) => {
+                    if let Some(address) = update.substate_id().as_transaction_receipt_address() {
+                        notify.notify(TransactionFinalizedEvent {
+                            transaction_id: TransactionId::from_receipt_address(address),
+                            outcome: receipt.outcome,
+                        });
+                        transactions_buf.push((address, receipt.clone()));
+                    } else {
+                        warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received Transaction Receipt substate with invalid address: {}", create.substate.substate_id());
                     }
-                } else {
-                    warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received UTXO substate with invalid address: {}", create.substate.substate_id());
-                };
-            },
-            Some(SubstateValue::TransactionReceipt(receipt)) => {
-                if let Some(address) = update.substate_id().as_transaction_receipt_address() {
-                    notify.notify(TransactionFinalizedEvent {
-                        transaction_id: TransactionId::from_receipt_address(address),
-                        outcome: receipt.outcome,
+                },
+                Some(SubstateValue::ValidatorFeePool(_)) => {
+                    validator_fee_pools_buf.push(SubstateData {
+                        substate_id: create.substate.substate_id().clone(),
+                        version: create.substate.version,
+                        value: create.substate.value().clone(),
+                        template_metadata: None,
                     });
-                    transactions_buf.push((address, receipt.clone()));
-                } else {
-                    warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received Transaction Receipt substate with invalid address: {}", create.substate.substate_id());
-                }
-            },
-            Some(SubstateValue::ValidatorFeePool(_)) => {
-                validator_fee_pools_buf.push(SubstateData {
-                    substate_id: create.substate.substate_id().clone(),
-                    version: create.substate.version,
-                    value: create.substate.value().clone(),
-                });
-            },
-            Some(SubstateValue::ClaimedOutputTombstone(claim)) => {
-                *xtr_claimed_mut += Amount::from(claim.value);
-            },
-            Some(_) => {
-                warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received unexpected substate value for created substate: {}", create.substate.substate_id());
-            },
-            None => {
-                let id = create.substate.substate_id();
-                if id.is_template() || id.is_transaction_receipt() {
-                    warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received substate {id} update with no value");
-                }
-                if let Some(addr) = id.as_utxo_address() {
-                    debug!(target: LOG_TARGET, "🌍️ Received UTXO substate {addr} creation with no value. Ignoring as this means it is spent later.");
-                }
-            },
+                },
+                Some(SubstateValue::ClaimedOutputTombstone(claim)) => {
+                    *xtr_claimed_mut += Amount::from(claim.value);
+                },
+                Some(_) => {
+                    warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received unexpected substate value for created substate: {}", create.substate.substate_id());
+                },
+                None => {
+                    let id = create.substate.substate_id();
+                    if id.is_transaction_receipt() {
+                        warn!(target: LOG_TARGET, "⚠️ Received tx receipt {id} update with no value, it may have been pruned and so will not be indexed");
+                    }
+                    if let Some(addr) = id.as_utxo_address() {
+                        debug!(target: LOG_TARGET, "🌍️ Received UTXO substate {addr} creation with no value. Ignoring as this means it is spent later.");
+                    }
+                },
+            }
         },
         SubstateUpdateProof::Destroy(destroy) => match &destroy.substate_id {
             SubstateId::Utxo(address) => {

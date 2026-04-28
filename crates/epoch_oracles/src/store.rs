@@ -21,7 +21,7 @@ pub enum StoreKey {
 }
 
 impl StoreKey {
-    pub fn as_key_bytes(&self) -> &'static [u8] {
+    pub const fn as_key_bytes(&self) -> &'static [u8] {
         match self {
             Self::BaseLayerLastScannedTip => b"base_layer.last_scanned_tip",
             Self::BaseLayerLastScannedBlockHash => b"base_layer.last_scanned_block_hash",

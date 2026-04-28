@@ -109,30 +109,51 @@ async fn indexer_scans_network_events(
     let account = world.wallet_accounts.get(&account_name).unwrap_or_else(|| {
         panic!("No wallet account found with name {}", account_name);
     });
+    let account_addr = account.component_address().to_string();
+    let expected_topics = topics_str.split(',').map(|s| s.to_string()).collect::<Vec<_>>();
+
     let mut graphql_client = indexer.get_graphql_indexer_client().await;
-    let query = r#"{ getEvents { substateId, templateAddress, txHash, topic, payload } }"#.to_string();
-    let res = graphql_client
-        .send_request::<HashMap<String, Vec<tari_indexer::graphql::model::events::Event>>>(&query, None, None)
-        .await
-        .expect("Failed to obtain getEvents query result");
+    let query = format!(
+        r#"{{ getEvents(substateId: "{}") {{ substateId, templateAddress, txHash, topic, payload }} }}"#,
+        account_addr
+    );
 
-    let events = res.get("getEvents").unwrap();
-    let topics_for_component = events
-        .iter()
-        .filter(|e| e.substate_id == Some(account.component_address().to_string()))
-        .map(|e| e.topic.as_str())
-        .collect::<HashSet<_>>();
+    let mut remaining_attempts = 10;
+    loop {
+        let res = graphql_client
+            .send_request::<HashMap<String, Vec<tari_indexer::graphql::model::events::Event>>>(&query, None, None)
+            .await
+            .expect("Failed to obtain getEvents query result");
 
-    let expected_topics = topics_str.split(',');
-    for (ind, topic) in expected_topics.enumerate() {
-        assert!(
-            topics_for_component.contains(topic),
-            "Unexpected topic at index {}. Events emitted were {}. Expected topic {} (ALL {:?})",
-            ind,
-            topics_for_component.display(),
-            topic,
-            events
+        let events = res.get("getEvents").unwrap();
+        let topics_for_component = events.iter().map(|e| e.topic.as_str()).collect::<HashSet<_>>();
+
+        let is_all_topics_found = expected_topics
+            .iter()
+            .all(|t| topics_for_component.contains(t.as_str()));
+
+        if is_all_topics_found {
+            return;
+        }
+
+        remaining_attempts -= 1;
+        if remaining_attempts == 0 {
+            panic!(
+                "Timed out waiting for events. Events emitted for {} were {}. Expected topics: {:?} (ALL events: {:?})",
+                account_addr,
+                topics_for_component.display(),
+                expected_topics,
+                events
+            );
+        }
+
+        eprintln!(
+            "Waiting for events for {} ({} attempts remaining, found: {})",
+            account_addr,
+            remaining_attempts,
+            topics_for_component.display()
         );
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 }
 
@@ -184,12 +205,34 @@ async fn assert_indexer_substate_version(
 ) {
     let indexer = world.indexers.get(&indexer_name).unwrap();
     assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
-    let substate = indexer.get_substate(world, output_ref, version).await;
-    eprintln!(
-        "indexer.get_substate result: {}",
-        serde_json::to_string_pretty(&substate).unwrap()
-    );
-    assert_eq!(substate.version, version);
+
+    let mut remaining_attempts = 10;
+    loop {
+        match indexer.get_substate(world, output_ref.clone(), version).await {
+            Ok(substate) => {
+                eprintln!(
+                    "indexer.get_substate result: {}",
+                    serde_json::to_string_pretty(&substate).unwrap()
+                );
+                assert_eq!(substate.version, version);
+                return;
+            },
+            Err(e) => {
+                if remaining_attempts == 0 {
+                    panic!(
+                        "Indexer {} did not return version {} for substate {} in time. Last error: {}",
+                        indexer_name, version, output_ref, e
+                    );
+                }
+                remaining_attempts -= 1;
+                eprintln!(
+                    "Waiting for indexer {} to sync substate {} (version {}), {} attempts remaining. Error: {}",
+                    indexer_name, output_ref, version, remaining_attempts, e
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            },
+        }
+    }
 }
 
 #[then(expr = "the indexer {word} returns {int} non fungibles for resource {word}")]
@@ -209,6 +252,144 @@ async fn assert_indexer_non_fungible_list(
         "Unexpected number of NFTs returned. Expected: {}, Actual: {}",
         count,
         nfts.len()
+    );
+}
+
+#[then(expr = "the indexer {word} has at least {int} template(s) in the catalogue")]
+async fn assert_indexer_catalogue_count(world: &mut TariWorld, indexer_name: String, min_count: usize) {
+    let indexer = world.get_indexer(&indexer_name);
+    assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
+
+    let mut remaining = 30;
+    loop {
+        let resp = indexer.list_template_catalogue(None, Some(100), None).await;
+        if resp.entries.len() >= min_count {
+            return;
+        }
+        if remaining == 0 {
+            panic!(
+                "Indexer {} catalogue has {} entries, expected at least {}",
+                indexer_name,
+                resp.entries.len(),
+                min_count
+            );
+        }
+        remaining -= 1;
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+}
+
+#[then(expr = "the indexer {word} catalogue contains template {word}")]
+async fn assert_indexer_catalogue_contains_template(
+    world: &mut TariWorld,
+    indexer_name: String,
+    template_name: String,
+) {
+    let template = world
+        .templates
+        .get(&template_name)
+        .unwrap_or_else(|| panic!("Template {} not registered in world", template_name));
+    let template_address = template.address;
+
+    let indexer = world.get_indexer(&indexer_name);
+    assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
+
+    let mut remaining = 30;
+    loop {
+        let client = indexer.get_indexer_client();
+        match client.get_template_catalogue_entry(template_address).await {
+            Ok(entry) => {
+                assert_eq!(
+                    entry.template_address, template_address,
+                    "Template address mismatch in catalogue entry"
+                );
+                assert!(
+                    !entry.template_name.is_empty(),
+                    "template_name should not be empty for {} (address: {})",
+                    template_name,
+                    template_address
+                );
+                return;
+            },
+            Err(_) => {
+                if remaining == 0 {
+                    panic!(
+                        "Indexer {} catalogue does not contain template {} (address: {})",
+                        indexer_name, template_name, template_address
+                    );
+                }
+                remaining -= 1;
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            },
+        }
+    }
+}
+
+#[then(expr = "the indexer {word} catalogue name filter {word} returns {int} result(s)")]
+async fn assert_indexer_catalogue_name_filter(
+    world: &mut TariWorld,
+    indexer_name: String,
+    name_filter: String,
+    expected_count: usize,
+) {
+    let indexer = world.get_indexer(&indexer_name);
+    assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
+    let resp = indexer
+        .list_template_catalogue(Some(name_filter.clone()), Some(100), None)
+        .await;
+    assert_eq!(
+        resp.entries.len(),
+        expected_count,
+        "Catalogue name filter '{}' returned {} entries, expected {}",
+        name_filter,
+        resp.entries.len(),
+        expected_count
+    );
+}
+
+#[then(expr = "the indexer {word} catalogue with limit {int} returns {int} entries")]
+async fn assert_indexer_catalogue_page(world: &mut TariWorld, indexer_name: String, limit: u64, expected_count: usize) {
+    let indexer = world.get_indexer(&indexer_name);
+    assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
+    let resp = indexer.list_template_catalogue(None, Some(limit), None).await;
+    assert_eq!(
+        resp.entries.len(),
+        expected_count,
+        "Catalogue with limit={} returned {} entries, expected {}",
+        limit,
+        resp.entries.len(),
+        expected_count
+    );
+}
+
+#[then(expr = "the indexer {word} catalogue with limit {int} returns at least {int} entries")]
+async fn assert_indexer_catalogue_page_min(world: &mut TariWorld, indexer_name: String, limit: u64, min_count: usize) {
+    let indexer = world.get_indexer(&indexer_name);
+    assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
+    let resp = indexer.list_template_catalogue(None, Some(limit), None).await;
+    assert!(
+        resp.entries.len() >= min_count,
+        "Catalogue with limit={} returned {} entries, expected at least {}",
+        limit,
+        resp.entries.len(),
+        min_count
+    );
+}
+
+#[then(expr = "the indexer {word} catalogue entry for address {string} is not found")]
+async fn assert_catalogue_entry_not_found(world: &mut TariWorld, indexer_name: String, address_str: String) {
+    use tari_engine_types::published_template::PublishedTemplateAddress;
+    let address = PublishedTemplateAddress::from_str(&address_str)
+        .unwrap_or_else(|_| panic!("Invalid template address: {}", address_str))
+        .as_template_address();
+    let indexer = world.get_indexer(&indexer_name);
+    assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
+    let client = indexer.get_indexer_client();
+    let result = client.get_template_catalogue_entry(address).await;
+    assert!(
+        result.is_err(),
+        "Expected 404 for address {} but got a result",
+        address_str
     );
 }
 

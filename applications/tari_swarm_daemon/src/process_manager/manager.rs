@@ -5,7 +5,7 @@ use std::{
     collections::HashMap,
     path::PathBuf,
     pin::pin,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use anyhow::{Context, anyhow};
@@ -40,16 +40,21 @@ pub struct ProcessManager {
     skip_registration: bool,
     enable_manual_connect: bool,
     network: Network,
+    config_path: PathBuf,
+    config_last_modified: Option<SystemTime>,
 }
 
 impl ProcessManager {
-    pub fn new(config: &Config, shutdown_signal: ShutdownSignal) -> (Self, ProcessManagerHandle) {
+    pub fn new(config: &Config, config_path: PathBuf, shutdown_signal: ShutdownSignal) -> (Self, ProcessManagerHandle) {
         let (tx_request, rx_request) = mpsc::channel(1);
 
         let mut global_settings = config.settings.clone();
         if let Some(public_ip) = config.public_ip {
             global_settings.insert("public_ip".to_string(), public_ip.to_string());
         }
+
+        let config_last_modified = std::fs::metadata(&config_path).and_then(|m| m.modified()).ok();
+
         let this = Self {
             skip_registration: config.skip_registration,
             executable_manager: ExecutableManager::new(
@@ -67,6 +72,8 @@ impl ProcessManager {
             shutdown_signal,
             enable_manual_connect: config.enable_manual_validator_connect,
             network: config.network,
+            config_path,
+            config_last_modified,
         };
         (this, ProcessManagerHandle::new(tx_request))
     }
@@ -327,6 +334,7 @@ impl ProcessManager {
         layer_one_transaction_service: Option<&mut LayerOneTransactionService>,
     ) -> anyhow::Result<()> {
         self.clear_terminated_instances()?;
+        self.check_config_changed().await;
 
         let Some(layer_one_transaction_service) = layer_one_transaction_service else {
             debug!("🫙 No MinotariConsoleWallet available. Skipping layer one transaction processing");
@@ -347,6 +355,38 @@ impl ProcessManager {
         }
 
         Ok(())
+    }
+
+    async fn check_config_changed(&mut self) {
+        let current_mtime = match tokio::fs::metadata(&self.config_path).await.and_then(|m| m.modified()) {
+            Ok(mtime) => mtime,
+            Err(err) => {
+                debug!("Could not stat config file: {err}");
+                return;
+            },
+        };
+
+        if self.config_last_modified == Some(current_mtime) {
+            return;
+        }
+        self.config_last_modified = Some(current_mtime);
+
+        info!("📝 Config file changed, reloading...");
+        let config = match Config::load_from_file(&self.config_path).await {
+            Ok(config) => config,
+            Err(err) => {
+                log::error!("Failed to reload config file: {err}");
+                return;
+            },
+        };
+
+        let mut global_settings = config.settings.clone();
+        if let Some(public_ip) = config.public_ip {
+            global_settings.insert("public_ip".to_string(), public_ip.to_string());
+        }
+
+        self.instance_manager
+            .apply_config_update(global_settings, &config.processes.instances);
     }
 
     async fn create_layer_one_transaction_service(&self) -> anyhow::Result<Option<LayerOneTransactionService>> {

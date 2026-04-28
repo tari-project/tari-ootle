@@ -272,6 +272,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 url: t.url,
                 status: t.status.parse().expect("DB status corrupted"),
                 added_at: t.added_at,
+                metadata_hash: t.metadata_hash,
             })),
             None => Ok(None),
         }
@@ -352,6 +353,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                     status: t.status.parse().expect("DB status corrupted"),
                     added_at: t.added_at,
                     epoch: Epoch(t.epoch as u64),
+                    metadata_hash: t.metadata_hash,
                 })
             })
             .collect()
@@ -368,6 +370,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             code: item.code,
             epoch: item.epoch.as_u64() as i64,
             status: item.status.as_str().to_string(),
+            metadata_hash: item.metadata_hash,
         };
         diesel::insert_into(templates::table)
             .values(new_template)
@@ -396,6 +399,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             epoch: template.epoch.map(|epoch| epoch.as_u64() as i64),
             code: template.code.map(Some),
             status: template.status.map(|s| s.as_str().to_string()),
+            metadata_hash: template.metadata_hash,
         };
         diesel::update(templates::table)
             .filter(templates::template_address.eq(key))
@@ -880,6 +884,10 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
     ) -> Result<(), Self::Error> {
         use crate::global::schema::block_headers;
 
+        // Idempotent insert: the base-layer scanner may re-scan previously seen heights after a
+        // base-layer reorg (see base_layer/oracle.rs::scan_blockchain's Reorged branch), in which
+        // case this insert would otherwise fail the UNIQUE(block_hash, epoch) constraint and abort
+        // the scan. Swallowing duplicates is safe because (block_hash, epoch) identifies the row.
         diesel::insert_into(block_headers::table)
             .values((
                 block_headers::epoch.eq(header.epoch.as_u64() as i64),
@@ -888,6 +896,8 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 block_headers::kernel_merkle_root.eq(header.kernel_merkle_root.as_bytes()),
                 block_headers::validator_node_merkle_root.eq(header.validator_node_merkle_root.as_bytes()),
             ))
+            .on_conflict((block_headers::block_hash, block_headers::epoch))
+            .do_nothing()
             .execute(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
@@ -975,7 +985,7 @@ fn distinct_validators_sorted<TAddr: NodeAddressable>(
     sqlite_vns: Vec<DbValidatorNode>,
 ) -> Result<Vec<ValidatorNode<TAddr>>, SqliteStorageError> {
     let mut db_vns = distinct_validators(sqlite_vns)?;
-    db_vns.sort_by(|a, b| a.shard_key.cmp(&b.shard_key));
+    db_vns.sort_by_key(|a| a.shard_key);
     Ok(db_vns)
 }
 

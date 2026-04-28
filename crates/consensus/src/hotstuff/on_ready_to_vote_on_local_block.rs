@@ -7,7 +7,7 @@ use log::*;
 use tari_consensus_types::{Decision, LastVoted, LeafBlock, PcId};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::commit_result::{AbortReason, RejectReason};
-use tari_ootle_common_types::{Epoch, ShardGroup, committee::CommitteeInfo, optional::Optional};
+use tari_ootle_common_types::{ShardGroup, committee::CommitteeInfo, optional::Optional};
 use tari_ootle_storage::{
     StateStore,
     StateStoreWriteTransaction,
@@ -20,6 +20,7 @@ use tari_ootle_storage::{
         ForeignProposalAtom,
         ForeignProposalStatus,
         InvalidEvidenceReason,
+        LockedEpoch,
         NoVoteReason,
         PendingShardStateTreeDiff,
         SubstateRecord,
@@ -145,7 +146,7 @@ where TConsensusSpec: ConsensusSpec
         )?;
 
         // Process newly justified block
-        let mut justified_block = Block::get(&**tx, &valid_block.justify().calculate_block_id())?;
+        let mut justified_block = Block::get_justified_block(&**tx, valid_block.justify(), valid_block.epoch())?;
         // This comes before decide so that all evidence can be in place before LocalPrepare and LocalAccept
         if !justified_block.has_justify_qc() {
             // We need to process this before to ensure that we have the latest state when checking the new block
@@ -520,11 +521,10 @@ where TConsensusSpec: ConsensusSpec
                 expected: TransactionPoolStage::New,
             }));
         }
-
+        let locked_epoch = block.to_locked_epoch();
         // LocalOnly so we can lock the epoch here
-        pool_tx.update_locked_epoch(block.epoch());
+        pool_tx.update_locked_epoch(locked_epoch.clone());
 
-        // TODO(perf): proposer shouldn't have to do this twice, esp. executing the transaction and locking
         let prepared = self
             .transaction_manager
             .prepare(
@@ -704,7 +704,7 @@ where TConsensusSpec: ConsensusSpec
         }
 
         // Prepare phase, ensure we set a locked_epoch if not already done
-        tx_rec.update_locked_epoch(block.epoch());
+        tx_rec.update_locked_epoch(block.to_locked_epoch());
 
         // Foreign block could have already resulted in an ABORT execution
         let maybe_execution = proposed_block_change_set.take_transaction_execution(tx_rec.id());
@@ -994,14 +994,14 @@ where TConsensusSpec: ConsensusSpec
             let execution = self.execute_transaction(
                 tx,
                 block.as_leaf(),
-                locked_epoch,
+                locked_epoch.clone(),
                 transaction,
                 proposed_block_change_set,
             )?;
             let execution = execution.into_transaction_execution();
 
             // TODO: can we modify input locks at this point? For multi-shard input transactions, we locked all inputs
-            // as Read due to lack of information. We now know what locks are necessary, and this
+            // as Write due to lack of information. We now know what locks are necessary, and this
             // block has the correct evidence so this should be fine.
             tx_rec.update_from_execution(
                 local_committee_info.num_preshards(),
@@ -1480,7 +1480,7 @@ where TConsensusSpec: ConsensusSpec
         &self,
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         block: LeafBlock,
-        execution_epoch: Epoch,
+        locked_epoch: LockedEpoch,
         transaction: TransactionRecord,
         change_set: &ProposedBlockChangeSet,
     ) -> Result<BlockTransactionExecution, HotStuffError> {
@@ -1503,12 +1503,12 @@ where TConsensusSpec: ConsensusSpec
             .foreign_pledges
             .extend(change_set.get_foreign_pledges(&transaction_id).cloned());
 
-        let executed = self
+        let execution = self
             .transaction_manager
-            .execute(execution_epoch, pledged)
+            .execute(locked_epoch, pledged)
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
 
-        Ok(executed.for_block(block, transaction_id))
+        Ok(execution.for_block(block, transaction_id))
     }
 
     fn on_commit(

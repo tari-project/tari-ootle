@@ -152,6 +152,10 @@ fn check_restricted_access_rule<TStore: StateReader>(
             Ok(false)
         },
         RestrictedAccessRule::AllOf(rules) => {
+            // Empty AllOf is denied rather than vacuously true, to prevent accidental AllowAll
+            if rules.is_empty() {
+                return Ok(false);
+            }
             for rule in rules {
                 if !check_restricted_access_rule(state, scope, rule)? {
                     return Ok(false);
@@ -178,8 +182,12 @@ fn check_require_rule<TStore: StateReader>(
 
             Ok(false)
         },
-        RequireRule::AllOf(requirement) => {
-            for requirement in requirement {
+        RequireRule::AllOf(requirements) => {
+            // Empty AllOf is denied rather than vacuously true, to prevent accidental AllowAll
+            if requirements.is_empty() {
+                return Ok(false);
+            }
+            for requirement in requirements {
                 if !check_requirement(state, scope, requirement)? {
                     return Ok(false);
                 }
@@ -188,7 +196,11 @@ fn check_require_rule<TStore: StateReader>(
             Ok(true)
         },
         RequireRule::MOfN(n, requirements) => {
-            let mut satisfied = 0;
+            // 0-of-N is vacuously satisfied: no requirements need to be met
+            if *n == 0 {
+                return Ok(true);
+            }
+            let mut satisfied = 0u16;
             for requirement in requirements {
                 if check_requirement(state, scope, requirement)? {
                     satisfied += 1;

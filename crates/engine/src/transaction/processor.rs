@@ -35,6 +35,7 @@ use tari_engine_types::{
     virtual_substate::VirtualSubstates,
 };
 use tari_ootle_common_types::{optional::Optional, services::template_provider::TemplateProvider};
+use tari_ootle_template_metadata::MetadataHash;
 use tari_ootle_transaction::{
     AllocatableAddressType,
     ComponentReference,
@@ -124,7 +125,7 @@ where
         }
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub fn execute<E: Executable + WeightedExecutable>(self, executable: E) -> Result<ExecuteResult, TransactionError> {
         let id = executable.to_id();
         let timer = Instant::now();
@@ -146,13 +147,13 @@ where
         // Because XTR resource is immutable, we can make it available to every shard group (genesis state) and
         // transaction (payment of fees)
         initial_call_scope.add_substate_to_owned(STEALTH_TARI_RESOURCE_ADDRESS.into());
-        for input in executable.all_inputs_iter() {
+        for input_substate_id in executable.all_inputs_iter() {
             debug!(
                 target: LOG_TARGET,
                 "Adding substate to initial call scope: {}",
-                input.substate_id
+                input_substate_id
             );
-            initial_call_scope.add_substate_to_owned(input.substate_id.clone());
+            initial_call_scope.add_substate_to_owned(input_substate_id);
         }
 
         let transaction_weight = executable.calculate_weight();
@@ -358,7 +359,9 @@ where
                 runtime_mut.put_on_workspace(output_bucket, IndexedValue::from_value(bucket.into_value()?)?)?;
                 Ok(InstructionResult::empty())
             },
-            Instruction::PublishTemplate { binary } => Self::publish_template(runtime, binary),
+            Instruction::PublishTemplate { binary, metadata_hash } => {
+                Self::publish_template(runtime, binary, metadata_hash)
+            },
             Instruction::AllocateAddress {
                 allocatable_type: substate_type,
                 workspace_id,
@@ -561,9 +564,11 @@ where
     }
 
     /// Load, validate template binary and adds it to TemplateProvider.
+    /// Adds a template artifact if successful
     fn publish_template(
         runtime: &mut Runtime,
         binary: TemplateBlob,
+        metadata_hash: Option<MetadataHash>,
     ) -> Result<InstructionResult, TransactionErrorKind> {
         if binary.len() > limits::ENGINE_LIMITS.max_template_binary_size_bytes {
             // Technically, not possible, but this check is kept in to make a test pass, and potentially for additional
@@ -575,9 +580,11 @@ where
         }
 
         // validate binary
-        WasmModule::load_template_from_code(&binary)?;
+        let template_def = WasmModule::validate_code(&binary)?;
         // creating new substate
-        runtime.interface_mut().publish_template(binary)?;
+        runtime
+            .interface_mut()
+            .publish_template(binary, metadata_hash, template_def)?;
 
         Ok(InstructionResult::empty())
     }

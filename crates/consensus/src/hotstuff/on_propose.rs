@@ -9,7 +9,6 @@ use std::{
 
 use log::*;
 use ootle_byte_type::ToByteType;
-use tari_common_types::types::FixedHash;
 use tari_consensus_types::{Decision, HighPc, HighestSeenBlock, LeafBlock, ProposalCertificate, TimeoutCertificate};
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_engine_types::commit_result::RejectReason;
@@ -33,6 +32,7 @@ use tari_ootle_storage::{
         EvictNodeAtom,
         ForeignProposal,
         ForeignProposalRecord,
+        LockedEpoch,
         PendingShardStateTreeDiff,
         TransactionAtom,
         TransactionExecution,
@@ -134,7 +134,6 @@ where TConsensusSpec: ConsensusSpec
         let epoch = epoch_state.epoch();
         let local_committee_info = *epoch_state.local_committee_info();
         let local_committee = epoch_state.local_committee();
-        let epoch_hash = *epoch_state.epoch_hash();
         let _timer = TraceTimer::info(LOG_TARGET, "OnPropose");
 
         let on_propose = self.clone();
@@ -152,7 +151,6 @@ where TConsensusSpec: ConsensusSpec
                     high_qc_cert,
                     &local_committee_info,
                     &local_claim_public_key,
-                    epoch_hash,
                     propose_high_tc,
                     propose_epoch_end,
                 )?;
@@ -254,6 +252,7 @@ where TConsensusSpec: ConsensusSpec
     fn transaction_pool_record_to_command(
         &self,
         start_of_chain_id: &LeafBlock,
+        locked_epoch: &LockedEpoch,
         pool_tx: TransactionPoolRecord,
         local_committee_info: &CommitteeInfo,
         change_set: &ProposedBlockChangeSet,
@@ -264,6 +263,7 @@ where TConsensusSpec: ConsensusSpec
         match pool_tx.current_stage() {
             TransactionPoolStage::New => self.prepare_transaction(
                 start_of_chain_id,
+                locked_epoch,
                 pool_tx,
                 local_committee_info,
                 change_set,
@@ -312,12 +312,11 @@ where TConsensusSpec: ConsensusSpec
         high_qc_certificate: ProposalCertificate,
         local_committee_info: &CommitteeInfo,
         local_claim_public_key_bytes: &RistrettoPublicKeyBytes,
-        epoch_hash: FixedHash,
         propose_high_tc: Option<TimeoutCertificate>,
         can_propose_epoch_end: bool,
     ) -> Result<NextBlock, HotStuffError> {
         let high_qc_id = high_qc_certificate.calculate_id();
-        let justify_block = Block::get(tx, &high_qc_certificate.calculate_block_id())?;
+        let justify_block = Block::get_justified_block(tx, &high_qc_certificate, epoch)?;
         let start_of_chain_block = highest_seen_block;
         let parent_block = dummy_block.unwrap_or_else(|| highest_seen_block.as_leaf());
         let highest_seen_block = Block::get(tx, highest_seen_block.block_id())?;
@@ -412,6 +411,11 @@ where TConsensusSpec: ConsensusSpec
             }
         }
 
+        let locked_epoch = LockedEpoch::new(
+            highest_seen_block.epoch(),
+            highest_seen_block.epoch_hash().into_array().into(),
+        );
+
         // batch is empty for is_empty, is_epoch_end and is_epoch_start blocks
         let timer = TraceTimer::info(LOG_TARGET, "Generating commands").with_iterations(batch.transactions.len());
         let mut lock_conflicts = TransactionLockConflicts::new();
@@ -421,6 +425,8 @@ where TConsensusSpec: ConsensusSpec
             change_set.apply_transaction_update(&mut transaction);
             if let Some(command) = self.transaction_pool_record_to_command(
                 &start_of_chain_block.as_leaf(),
+                // This locked epoch is used to set the transaction LockedEpoch if necessary
+                &locked_epoch,
                 transaction,
                 local_committee_info,
                 &change_set,
@@ -497,7 +503,7 @@ where TConsensusSpec: ConsensusSpec
             &commands,
             total_leader_fee,
             EpochTime::now().as_u64(),
-            epoch_hash,
+            *highest_seen_block.epoch_hash(),
             accumulated_data,
             ExtraData::new(),
         )?;
@@ -597,6 +603,7 @@ where TConsensusSpec: ConsensusSpec
     fn prepare_transaction(
         &self,
         parent_block: &LeafBlock,
+        locked_epoch: &LockedEpoch,
         mut pool_tx: TransactionPoolRecord,
         local_committee_info: &CommitteeInfo,
         change_set: &ProposedBlockChangeSet,
@@ -609,6 +616,9 @@ where TConsensusSpec: ConsensusSpec
             "👨‍🔧 PROPOSE: PREPARE transaction {}",
             pool_tx.id(),
         );
+
+        // Update locked epoch if needed
+        pool_tx.update_locked_epoch(locked_epoch.clone());
 
         let prepared = self
             .transaction_manager
@@ -630,16 +640,6 @@ where TConsensusSpec: ConsensusSpec
 
             lock_conflicts.add(*pool_tx.id(), prepared.into_lock_status().into_lock_conflicts());
             return Ok(None);
-        }
-
-        // Update locked epoch if needed
-        if pool_tx.update_locked_epoch(parent_block.epoch()) {
-            info!(
-                target: LOG_TARGET,
-                "🔒 Updated locked epoch for transaction {} to {}",
-                pool_tx.id(),
-                parent_block.epoch(),
-            );
         }
 
         match prepared {
@@ -817,7 +817,7 @@ where TConsensusSpec: ConsensusSpec
 
         let tx = substate_store.read_transaction();
         let transaction = tx_rec.get_transaction(tx)?;
-        let execution = self.execute_transaction(tx, parent_block, transaction, change_set, locked_epoch)?;
+        let execution = self.execute_transaction(tx, parent_block, transaction, change_set, locked_epoch.clone())?;
 
         // Try to lock all local outputs
         let local_outputs = execution
@@ -925,7 +925,7 @@ where TConsensusSpec: ConsensusSpec
         parent_block: &LeafBlock,
         transaction: TransactionRecord,
         change_set: &ProposedBlockChangeSet,
-        execution_epoch: Epoch,
+        locked_epoch: LockedEpoch,
     ) -> Result<TransactionExecution, HotStuffError> {
         // Should have been executed already if all inputs are local
         if let Some(execution) =
@@ -951,12 +951,9 @@ where TConsensusSpec: ConsensusSpec
             pledged.id(), pledged.local_pledges.len(), pledged.foreign_pledges.len(),
         );
 
-        let executed = self
-            .transaction_manager
-            .execute(execution_epoch, pledged)
-            .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
-
-        Ok(executed)
+        self.transaction_manager
+            .execute(locked_epoch, pledged)
+            .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))
     }
 }
 

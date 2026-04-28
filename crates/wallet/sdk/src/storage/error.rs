@@ -36,6 +36,8 @@ pub enum WalletStorageError {
     EncryptionError { operation: &'static str, details: String },
     #[error("Decryption error {operation}: {details}")]
     DecryptionError { operation: &'static str, details: String },
+    #[error("DuplicateName: an entry named {name:?} already exists")]
+    DuplicateName { name: String },
 }
 
 impl IsNotFoundError for WalletStorageError {

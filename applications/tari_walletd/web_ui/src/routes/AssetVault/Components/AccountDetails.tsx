@@ -45,13 +45,15 @@ import Typography from "@mui/material/Typography";
 import useAccountStore, { setAccount } from "@store/accountStore";
 import {
   decodeOotleAddress,
+  decodeOotleAddressOrNull,
   encodeOotleAddress,
   OotleAddress,
   substateIdToString,
 } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 import { IoPaperPlaneOutline } from "react-icons/io5";
-import QRCode from "react-qr-code";
+// @ts-expect-error CJS interop: Vite 8 dev pre-bundler doesn't unwrap exports.default for this package
+import { QRCode } from "react-qr-code";
 
 function AccountDetails() {
   const [payRefDialogOpen, setPayRefDialogOpen] = useState(false);
@@ -65,6 +67,9 @@ function AccountDetails() {
     setAccount({ ...account, name: newName });
   };
 
+  const decodedAddress = address ? decodeOotleAddressOrNull(address) : null;
+  const accountPublicKey = decodedAddress?.accountPublicKey;
+
   return (
     <TableContainer>
       <PayRefDialog address={address} open={payRefDialogOpen} onClose={() => setPayRefDialogOpen(false)} />
@@ -74,6 +79,7 @@ function AccountDetails() {
             <TableCell>Name</TableCell>
             <TableCell>Component</TableCell>
             <TableCell>Address</TableCell>
+            <TableCell>Public Key</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -97,6 +103,9 @@ function AccountDetails() {
                   </IconButton>
                 </Tooltip>
               </Stack>
+            </DataTableCell>
+            <DataTableCell>
+              {accountPublicKey && <CopyAddress address={decodeOotleAddressOrNull(address)!.accountPublicKey} />}
             </DataTableCell>
           </TableRow>
         </TableBody>

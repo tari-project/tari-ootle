@@ -44,13 +44,7 @@ use tari_ootle_storage::{
     time::{OffsetDateTime, PrimitiveDateTime},
 };
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_template_builtin::{
-    ACCOUNT_TEMPLATE_ADDRESS,
-    NFT_FAUCET_TEMPLATE_ADDRESS,
-    XTR_FAUCET_TEMPLATE_ADDRESS,
-    get_template_builtin,
-    try_get_template_builtin,
-};
+use tari_template_builtin::{all_builtin_templates, try_get_template_builtin};
 use tari_template_lib_types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 use super::{Template, TemplateCode, TemplateMetadata};
@@ -72,12 +66,12 @@ impl TemplateManager {
 
         // Load them into the database if they do not already exist
         let mut tx = global_db.create_transaction()?;
-        for (address, template) in builtin_templates {
+        for template in builtin_templates {
             let mut templates_db = global_db.templates(&mut tx);
-            if !templates_db.template_exists(&address, None)? {
+            if !templates_db.template_exists(template.address(), None)? {
                 let db_template = DbTemplate {
                     author_public_key: template.metadata.author_public_key,
-                    template_address: address,
+                    template_address: *template.address(),
                     template_name: template.metadata.name.clone(),
                     binary_hash: template.metadata.binary_sha,
                     status: TemplateStatus::Active,
@@ -86,6 +80,7 @@ impl TemplateManager {
                     template_type: DbTemplateType::Wasm,
                     added_at: now(),
                     epoch: template.metadata.epoch,
+                    metadata_hash: None,
                 };
                 templates_db.insert_template(db_template)?;
             }
@@ -99,22 +94,10 @@ impl TemplateManager {
         })
     }
 
-    fn builtin_templates() -> impl Iterator<Item = (TemplateAddress, Template)> {
-        [
-            (
-                ACCOUNT_TEMPLATE_ADDRESS,
-                convert_builtin_template("Account", ACCOUNT_TEMPLATE_ADDRESS),
-            ),
-            (
-                XTR_FAUCET_TEMPLATE_ADDRESS,
-                convert_builtin_template("XtrFaucet", XTR_FAUCET_TEMPLATE_ADDRESS),
-            ),
-            (
-                NFT_FAUCET_TEMPLATE_ADDRESS,
-                convert_builtin_template("NftFaucet", NFT_FAUCET_TEMPLATE_ADDRESS),
-            ),
-        ]
-        .into_iter()
+    fn builtin_templates() -> impl Iterator<Item = Template> {
+        all_builtin_templates()
+            .iter()
+            .map(|(address, code)| convert_builtin_template_from_code(*address, code))
     }
 
     pub fn template_exists(
@@ -179,6 +162,7 @@ impl TemplateManager {
         code: TemplateCode,
         template_status: TemplateStatus,
         epoch: Epoch,
+        metadata_hash: Option<Vec<u8>>,
     ) -> Result<(), TemplateManagerError> {
         let mut tx = self.global_db.create_transaction()?;
         let mut templates_db = self.global_db.templates(&mut tx);
@@ -194,6 +178,7 @@ impl TemplateManager {
             template_type: DbTemplateType::Wasm,
             url: None,
             epoch,
+            metadata_hash,
         };
 
         templates_db.insert_template(template)?;
@@ -208,6 +193,7 @@ impl TemplateManager {
         code: TemplateCode,
         template_status: TemplateStatus,
         epoch: Epoch,
+        metadata_hash: Option<Vec<u8>>,
     ) -> Result<LoadedTemplate, TemplateManagerError> {
         let loaded_template = load_template_from_code(&code)?;
 
@@ -218,6 +204,7 @@ impl TemplateManager {
             code,
             template_status,
             epoch,
+            metadata_hash,
         )?;
 
         Ok(loaded_template)
@@ -273,12 +260,14 @@ impl TemplateManager {
                 .expect("fetched_templates are all templates")
                 .as_template_address();
 
+            let metadata_hash_bytes = template.metadata_hash.map(|h| h.to_bytes());
             let loaded = self.add_and_load_template(
                 template.author,
                 template_addr,
                 TemplateCode::CompiledWasm(template.binary.into_bytes()),
                 TemplateStatus::Active,
                 Epoch(template.at_epoch),
+                metadata_hash_bytes,
             )?;
             loaded_templates.insert(template_addr, loaded);
         }
@@ -316,17 +305,18 @@ fn now() -> PrimitiveDateTime {
     PrimitiveDateTime::new(now.date(), now.time())
 }
 
-fn convert_builtin_template(name: &str, address: TemplateAddress) -> Template {
-    let code = get_template_builtin(&address);
+fn convert_builtin_template_from_code(address: TemplateAddress, code: &'static [u8]) -> Template {
     let binary_sha = calculate_template_binary_hash(code);
+    let loaded = WasmModule::load_template_from_code(code).expect("Built-in template failed to load");
     Template {
         metadata: TemplateMetadata {
-            name: name.to_string(),
+            name: loaded.template_name().to_string(),
             address,
             binary_sha: binary_sha.into_array().into(),
             author_public_key: Default::default(),
             code_size: code.len(),
             epoch: Epoch::zero(),
+            metadata_hash: None,
         },
         code: TemplateCode::StaticWasm(code),
     }

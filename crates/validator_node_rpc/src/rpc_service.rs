@@ -48,4 +48,10 @@ pub trait ValidatorNodeRpcService: Send + Sync + 'static {
         &self,
         req: Request<proto::GetSubstatesBatchRequest>,
     ) -> Result<Streaming<proto::GetSubstatesBatchResponse>, RpcStatus>;
+
+    #[rpc(method = 8)]
+    async fn get_consensus_state(
+        &self,
+        req: Request<proto::GetConsensusStateRequest>,
+    ) -> Result<Response<proto::GetConsensusStateResponse>, RpcStatus>;
 }

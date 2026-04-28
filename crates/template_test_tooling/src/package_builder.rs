@@ -5,7 +5,7 @@ use std::{
     collections::HashMap,
     ffi::OsStr,
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{Arc, LazyLock, Mutex},
 };
 
 use tari_engine::{
@@ -20,6 +20,22 @@ use tari_template_lib::types::TemplateAddress;
 use thiserror::Error;
 
 use crate::compile::compile_template_with_envs;
+
+static BUILTIN_TEMPLATES: LazyLock<Vec<(TemplateAddress, LoadedTemplate)>> = LazyLock::new(|| {
+    all_builtin_templates()
+        .iter()
+        .map(|(addr, code)| {
+            let template = WasmModule::from_code(*code)
+                .load_template()
+                .expect("failed to load builtin template");
+            (*addr, template)
+        })
+        .collect()
+});
+
+fn cached_builtin_templates() -> &'static [(TemplateAddress, LoadedTemplate)] {
+    &BUILTIN_TEMPLATES
+}
 
 #[derive(Debug, Clone)]
 pub struct Package {
@@ -66,9 +82,8 @@ impl PackageBuilder {
     }
 
     pub fn add_all_builtin_templates(&mut self) -> &mut Self {
-        for (addr, code) in all_builtin_templates() {
-            self.add_template_from_code(*addr, *code)
-                .expect("failed to add builtin template");
+        for (addr, template) in cached_builtin_templates() {
+            self.add_loaded_template(*addr, template.clone());
         }
         self
     }
@@ -96,9 +111,10 @@ impl PackageBuilder {
         K: AsRef<OsStr>,
         V: AsRef<OsStr>,
     {
-        let wasm = compile_template_with_envs(path, features, envs).unwrap();
+        let wasm = compile_template_with_envs(path.as_ref(), features, envs)
+            .unwrap_or_else(|e| panic!("Failed to compile template {}: {}", path.as_ref().display(), e));
         let template_addr = hash_template_code(wasm.code());
-        let wasm = wasm.load_template().unwrap();
+        let wasm = wasm.load_template().expect("failed to load template");
         self.add_loaded_template(template_addr, wasm);
         template_addr
     }

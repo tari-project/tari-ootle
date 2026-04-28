@@ -18,6 +18,7 @@ use zeroize::Zeroizing;
 use crate::{
     apis::{
         accounts::AccountsApi,
+        address_book::AddressBookApi,
         confidential_crypto::ConfidentialCryptoApi,
         confidential_outputs::ConfidentialOutputsApi,
         confidential_transfer::ConfidentialTransferApi,
@@ -220,6 +221,10 @@ impl<TSpec: WalletSdkSpec> WalletSdk<TSpec> {
 
     pub fn non_fungible_api(&self) -> NonFungibleTokensApi<'_, TSpec::Store> {
         NonFungibleTokensApi::new(&self.store)
+    }
+
+    pub fn address_book_api(&self) -> AddressBookApi<'_, TSpec::Store> {
+        AddressBookApi::new(&self.store)
     }
 
     pub fn template_api(&self) -> TemplateApi<'_, TSpec::Store> {

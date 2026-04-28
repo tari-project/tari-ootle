@@ -116,7 +116,17 @@ impl FromStr for ManifestValue {
             })
             .or_else(|| {
                 let tokens = s.parse().ok()?;
-                let lit = parse2(tokens).ok()?;
+                let lit: Lit = parse2(tokens).ok()?;
+                // Reject literals that are not supported or have unrecognized suffixes (e.g. hex strings
+                // like "044bccd4..." that syn misinterprets as integer + suffix, or "1e23" as float).
+                match &lit {
+                    Lit::Str(_) | Lit::Bool(_) | Lit::ByteStr(_) | Lit::Byte(_) | Lit::Char(_) => {},
+                    Lit::Int(i) => match i.suffix() {
+                        "" | "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i64" | "i128" => {},
+                        _ => return None,
+                    },
+                    _ => return None,
+                }
                 Some(ManifestValue::Literal(lit))
             })
             .or_else(|| {
@@ -137,6 +147,18 @@ mod tests {
     use tari_template_lib_types::{ComponentAddress, ResourceAddress, VaultId};
 
     use super::*;
+
+    #[test]
+    fn it_parses_hex_bytes() {
+        let val = "044bccd4d01ceb41816bc9106a836806e6f9412646ecda4c2d726d8372b2c843"
+            .parse::<ManifestValue>()
+            .unwrap();
+        assert!(matches!(val, ManifestValue::Value(tari_bor::Value::Bytes(_))));
+
+        // Hex string that looks like a float literal (contains 'e')
+        let val = "1e2345".parse::<ManifestValue>().unwrap();
+        assert!(matches!(val, ManifestValue::Value(tari_bor::Value::Bytes(_))));
+    }
 
     #[test]
     fn it_parses_address_strings() {

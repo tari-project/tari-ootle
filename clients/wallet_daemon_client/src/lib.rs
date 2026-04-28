@@ -90,11 +90,24 @@ use crate::{
         AccountsListResponse,
         AccountsRenameRequest,
         AccountsRenameResponse,
+        AddressBookAddRequest,
+        AddressBookAddResponse,
+        AddressBookDeleteRequest,
+        AddressBookDeleteResponse,
+        AddressBookGetRequest,
+        AddressBookGetResponse,
+        AddressBookListRequest,
+        AddressBookListResponse,
+        AddressBookUpdateRequest,
+        AddressBookUpdateResponse,
+        AuthGetMethodRequest,
         AuthGetMethodResponse,
         AuthListSessionsRequest,
         AuthListSessionsResponse,
         AuthRevokeTokenRequest,
         AuthRevokeTokenResponse,
+        BurnProofsGetRequest,
+        BurnProofsGetResponse,
         BurnProofsListRequest,
         BurnProofsListResponse,
         ClaimValidatorFeesRequest,
@@ -119,6 +132,8 @@ use crate::{
         SettingsGetResponse,
         SettingsSetRequest,
         SettingsSetResponse,
+        SignTemplateMetadataRequest,
+        SignTemplateMetadataResponse,
         StealthTransferRequest,
         StealthTransferResponse,
         StealthUtxosDecryptValueRequest,
@@ -129,6 +144,10 @@ use crate::{
         SubstatesGetResponse,
         SubstatesListRequest,
         SubstatesListResponse,
+        SwapPoolGetExchangeRateRequest,
+        SwapPoolGetExchangeRateResponse,
+        SwapPoolsListRequest,
+        SwapPoolsListResponse,
         TemplatesGetRequest,
         TemplatesGetResponse,
         TemplatesListAuthoredRequest,
@@ -447,6 +466,14 @@ impl WalletDaemonClient {
         self.send_request("burn_proofs.list", req.borrow()).await
     }
 
+    /// Gets the full contents of a specific burn proof file.
+    pub async fn get_burn_proof<T: Borrow<BurnProofsGetRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<BurnProofsGetResponse, WalletDaemonClientError> {
+        self.send_request("burn_proofs.get", req.borrow()).await
+    }
+
     /// Claims a burn transaction, converting burned Minotari into Ootle funds.
     pub async fn claim_burn<T: Borrow<ClaimBurnRequest>>(
         &mut self,
@@ -541,7 +568,7 @@ impl WalletDaemonClient {
 
     /// Requests the current required authentication method to use when authenticating with the wallet daemon.
     pub async fn get_auth_method(&mut self) -> Result<AuthGetMethodResponse, WalletDaemonClientError> {
-        self.send_request("auth.method", &()).await
+        self.send_request("auth.method", &AuthGetMethodRequest {}).await
     }
 
     /// Requests a JWT authentication token with the specified permissions.
@@ -588,6 +615,14 @@ impl WalletDaemonClient {
     ) -> Result<PublishTemplateResponse, WalletDaemonClientError> {
         self.send_request("transactions.publish_template", request.borrow())
             .await
+    }
+
+    /// Signs template metadata with the specified key, returning the signature and CBOR-encoded metadata.
+    pub async fn sign_template_metadata<T: Borrow<SignTemplateMetadataRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<SignTemplateMetadataResponse, WalletDaemonClientError> {
+        self.send_request("templates.sign_metadata", request.borrow()).await
     }
 
     /// Lists stealth UTXOs for an account, with optional resource filtering.
@@ -637,6 +672,22 @@ impl WalletDaemonClient {
         self.send_request("substates.list", req.borrow()).await
     }
 
+    /// Gets the exchange rate for a swap pool by fetching its vault balances.
+    pub async fn swap_pool_get_exchange_rate<T: Borrow<SwapPoolGetExchangeRateRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<SwapPoolGetExchangeRateResponse, WalletDaemonClientError> {
+        self.send_request("swap_pools.get_exchange_rate", req.borrow()).await
+    }
+
+    /// Lists swap pools known to the indexer with their current exchange rates.
+    pub async fn swap_pools_list<T: Borrow<SwapPoolsListRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<SwapPoolsListResponse, WalletDaemonClientError> {
+        self.send_request("swap_pools.list", req.borrow()).await
+    }
+
     /// Fetches a template by its address, including its function definitions.
     pub async fn get_template<T: Borrow<TemplatesGetRequest>>(
         &mut self,
@@ -683,6 +734,45 @@ impl WalletDaemonClient {
         req: T,
     ) -> Result<WebauthnStartAuthResponse, WalletDaemonClientError> {
         self.send_request("webauthn.auth_start", req.borrow()).await
+    }
+
+    // Address book
+
+    /// Adds a new entry to the address book.
+    pub async fn address_book_add<T: Borrow<AddressBookAddRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AddressBookAddResponse, WalletDaemonClientError> {
+        self.send_request("address_book.add", req.borrow()).await
+    }
+
+    /// Lists all address book entries.
+    pub async fn address_book_list(&mut self) -> Result<AddressBookListResponse, WalletDaemonClientError> {
+        self.send_request("address_book.list", &AddressBookListRequest {}).await
+    }
+
+    /// Gets a specific address book entry by name.
+    pub async fn address_book_get<T: Borrow<AddressBookGetRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AddressBookGetResponse, WalletDaemonClientError> {
+        self.send_request("address_book.get", req.borrow()).await
+    }
+
+    /// Updates an existing address book entry.
+    pub async fn address_book_update<T: Borrow<AddressBookUpdateRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AddressBookUpdateResponse, WalletDaemonClientError> {
+        self.send_request("address_book.update", req.borrow()).await
+    }
+
+    /// Deletes an address book entry by name.
+    pub async fn address_book_delete<T: Borrow<AddressBookDeleteRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AddressBookDeleteResponse, WalletDaemonClientError> {
+        self.send_request("address_book.delete", req.borrow()).await
     }
 
     fn next_request_id(&mut self) -> i64 {

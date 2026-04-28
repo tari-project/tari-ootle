@@ -1,7 +1,7 @@
 //  Copyright 2022 The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
-use std::time::Duration;
+use std::{fs, time::Duration};
 
 use cucumber::{gherkin::Step, then, when};
 use integration_tests::{
@@ -207,16 +207,11 @@ async fn when_i_create_account_via_wallet_daemon_with_free_coins(
     step: &Step,
     account_name: String,
     wallet_daemon_name: String,
-    amount: u64,
+    // TODO: remove
+    _amount: u64,
 ) {
     cucumber_log!("==== Step: {}", step.value);
-    wallet_daemon_client::create_account_with_free_coins(
-        world,
-        account_name,
-        wallet_daemon_name,
-        amount * 1_000_000u64,
-    )
-    .await;
+    wallet_daemon_client::create_account_with_free_coins(world, account_name, wallet_daemon_name).await;
 }
 
 #[when(expr = "I burn {int}T on wallet {word} for wallet daemon {word} into proof {word}")]
@@ -378,7 +373,45 @@ async fn wait_account_balance_via_daemon(
     amount: i64,
 ) {
     cucumber_log!("==== Step: {}", step.value);
-    let op = match operator.as_str() {
+    wait_account_balance_impl(world, &account_name, &wallet_daemon_name, &operator, amount, 30).await;
+}
+
+#[when(expr = "I wait for {word} on wallet daemon {word} to have balance {word} {int} with timeout {int}s")]
+#[then(expr = "I wait for {word} on wallet daemon {word} to have balance {word} {int} with timeout {int}s")]
+async fn wait_account_balance_via_daemon_with_timeout(
+    world: &mut TariWorld,
+    step: &Step,
+    account_name: String,
+    wallet_daemon_name: String,
+    operator: String,
+    amount: i64,
+    timeout_secs: i64,
+) {
+    cucumber_log!("==== Step: {}", step.value);
+    let timeout_secs = u32::try_from(timeout_secs)
+        .ok()
+        .filter(|secs| *secs > 0)
+        .unwrap_or_else(|| panic!("Expected timeout to be a positive integer that fits into u32, got {timeout_secs}"));
+    wait_account_balance_impl(
+        world,
+        &account_name,
+        &wallet_daemon_name,
+        &operator,
+        amount,
+        timeout_secs,
+    )
+    .await;
+}
+
+async fn wait_account_balance_impl(
+    world: &mut TariWorld,
+    account_name: &str,
+    wallet_daemon_name: &str,
+    operator: &str,
+    amount: i64,
+    timeout_secs: u32,
+) {
+    let op = match operator {
         "gt" => |a, b| a > b,
         "gte" => |a, b| a >= b,
         "lt" => |a, b| a < b,
@@ -391,13 +424,13 @@ async fn wait_account_balance_via_daemon(
     loop {
         // This also refreshes the wallet vaults
         let current_balance =
-            wallet_daemon_client::get_balance(world, &account_name, &wallet_daemon_name, TARI_TOKEN).await;
+            wallet_daemon_client::get_balance(world, account_name, wallet_daemon_name, TARI_TOKEN).await;
         if op(current_balance, amount) {
             break;
         }
 
         i += 1;
-        if i == 30 {
+        if i == timeout_secs {
             panic!("Timeout waiting for balance. Current balance = {}", current_balance);
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -536,4 +569,36 @@ async fn when_i_set_the_default_account(world: &mut TariWorld, step: &Step, wall
         .accounts_set_default(ComponentAddressOrName::Name(account_name))
         .await
         .unwrap();
+}
+
+/// Writes a confirmed burn proof as a JSON file into the wallet daemon's `burn_proof_dir`.
+/// The auto-claim service watches that directory and will submit the claim transaction
+/// automatically, so the test does not need to call the RPC claim endpoint manually.
+#[when(expr = "I drop burn proof {word} as a file for wallet daemon {word}")]
+async fn when_i_drop_burn_proof_as_file(
+    world: &mut TariWorld,
+    step: &Step,
+    proof_name: String,
+    wallet_daemon_name: String,
+) {
+    cucumber_log!("==== Step: {}", step.value);
+    let complete_proof = world
+        .claim_proofs
+        .get(&proof_name)
+        .unwrap_or_else(|| panic!("Burn proof {} not found", proof_name))
+        .complete_proof()
+        .unwrap_or_else(|| panic!("Burn proof {} is not confirmed yet", proof_name))
+        .clone();
+
+    let walletd = world.get_wallet_daemon(&wallet_daemon_name);
+    let dir = walletd.burn_proof_dir.clone();
+    fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("Failed to create burn_proof_dir {}: {}", dir.display(), e));
+
+    let file_path = dir.join(format!("{}.json", proof_name));
+    let file = fs::File::create(&file_path)
+        .unwrap_or_else(|e| panic!("Failed to create proof file {}: {}", file_path.display(), e));
+    serde_json::to_writer_pretty(file, &complete_proof)
+        .unwrap_or_else(|e| panic!("Failed to write proof file {}: {}", file_path.display(), e));
+
+    cucumber_log!("Dropped burn proof {} as file {}", proof_name, file_path.display());
 }

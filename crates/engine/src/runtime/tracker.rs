@@ -97,10 +97,17 @@ impl<TStore: StateReader> StateTracker<TStore> {
         self.read_with(|state| state.get_current_epoch())
     }
 
+    pub fn get_current_epoch_hash(&self) -> Result<Hash32, RuntimeError> {
+        self.read_with(|state| state.get_current_epoch_hash())
+    }
+
     pub fn get_pseudorandom_bytes(&self, length: usize) -> Result<Vec<u8>, RuntimeError> {
         self.read_with(|state| {
             let id_provider = state.id_provider()?;
-            let bytes = id_provider.get_random_bytes(length)?;
+            // TODO: epoch_hash is a bad source of entropy. Agreeing on randomness at a consensus level is challenging
+            // in multi-sharded consensus.
+            let epoch_hash = state.get_current_epoch_hash()?;
+            let bytes = id_provider.get_random_bytes(&epoch_hash, length)?;
             Ok(bytes)
         })
     }
@@ -304,7 +311,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         }
 
         // Finalise will always reset the state
-        let mut state = self.take_working_state();
+        let mut state = self.take_working_state()?;
         // Resolve the transfers to the fee pool resource and vault refunds
         let mut substates_to_persist = state.take_mutated_substates();
         let fee_receipt = state.finalize_fees_and_refunds(&mut substates_to_persist)?;
@@ -318,23 +325,24 @@ impl<TStore: StateReader> StateTracker<TStore> {
             Substate::new(0, transaction_receipt),
         );
 
-        let finalized = FinalizeResult::new(
+        Ok(FinalizeResult::new(
             state.transaction_hash(),
             state.take_logs(),
             state.take_events(),
             TransactionResult::Accept(diff),
             fee_receipt,
-        );
-
-        Ok(finalized)
+        ))
     }
 
     fn take_fee_checkpoint(&mut self) -> Option<WorkingState<TStore>> {
         self.fee_checkpoint.take()
     }
 
-    fn take_working_state(&mut self) -> WorkingState<TStore> {
-        self.working_state.take().expect("Working state has been taken")
+    fn take_working_state(&mut self) -> Result<WorkingState<TStore>, RuntimeError> {
+        self.working_state.take().ok_or_else(|| RuntimeError::InvariantError {
+            function: "StateTracker::take_working_state",
+            details: "Working state has already been taken (double finalize?)".to_string(),
+        })
     }
 
     pub fn with_substates_to_persist<F: FnMut(&IndexMap<SubstateId, SubstateValue>) -> R, R>(&mut self, mut f: F) -> R {
@@ -358,11 +366,17 @@ impl<TStore: StateReader> StateTracker<TStore> {
     }
 
     pub(super) fn read_with<R, F: FnOnce(&WorkingState<TStore>) -> R>(&self, f: F) -> R {
-        f(self.working_state.as_ref().expect("Working state has been taken"))
+        f(self
+            .working_state
+            .as_ref()
+            .expect("BUG: read_with called after finalize consumed working state"))
     }
 
     pub(super) fn write_with<R, F: FnOnce(&mut WorkingState<TStore>) -> R>(&mut self, f: F) -> R {
-        f(self.working_state.as_mut().expect("Working state has been taken"))
+        f(self
+            .working_state
+            .as_mut()
+            .expect("BUG: write_with called after finalize consumed working state"))
     }
 
     pub(super) fn is_fee_intent_checkpointed(&self) -> bool {

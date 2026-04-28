@@ -1130,4 +1130,79 @@ mod resource_access_rules {
             });
         })
     }
+
+    #[test]
+    fn update_metadata_denied_for_non_owner() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+
+        let (_, owner_proof, owner_key) = test.create_empty_account();
+        let (user_proof, _, user_key) = test.create_owner_proof();
+
+        let access_rules_template = test.get_template_address("AccessRulesTest");
+
+        let result = test.execute_expect_success(
+            Transaction::builder_localnet()
+                .call_function(access_rules_template, "with_configured_rules", args![
+                    OwnerRule::OwnedBySigner,
+                    ComponentAccessRules::new().default(AccessRule::AllowAll),
+                    // default update_metadata is DenyAll -> only owner may update
+                    ResourceAccessRules::new(),
+                    AccessRule::DenyAll,
+                ])
+                .build_and_seal(&owner_key),
+            vec![owner_proof],
+        );
+
+        let component_address = result.finalize.execution_results[0]
+            .decode::<ComponentAddress>()
+            .unwrap();
+
+        let mut new_metadata = Metadata::new();
+        new_metadata.insert("description", "updated");
+
+        let reason = test.execute_expect_failure(
+            Transaction::builder_localnet()
+                .call_method(component_address, "set_tokens_metadata", args![new_metadata])
+                .build_and_seal(&user_key),
+            vec![user_proof],
+        );
+
+        assert_access_denied_for_action(reason, ResourceAuthAction::UpdateMetadata);
+    }
+
+    #[test]
+    fn update_metadata_allowed_by_custom_rule() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+
+        let (_, owner_proof, owner_key) = test.create_empty_account();
+        let (user_proof, _, user_key) = test.create_owner_proof();
+
+        let access_rules_template = test.get_template_address("AccessRulesTest");
+
+        let result = test.execute_expect_success(
+            Transaction::builder_localnet()
+                .call_function(access_rules_template, "with_configured_rules", args![
+                    OwnerRule::OwnedBySigner,
+                    ComponentAccessRules::new().default(AccessRule::AllowAll),
+                    ResourceAccessRules::new().update_metadata(rule!(non_fungible(user_proof.clone()))),
+                    AccessRule::DenyAll,
+                ])
+                .build_and_seal(&owner_key),
+            vec![owner_proof],
+        );
+
+        let component_address = result.finalize.execution_results[0]
+            .decode::<ComponentAddress>()
+            .unwrap();
+
+        let mut new_metadata = Metadata::new();
+        new_metadata.insert("description", "updated by user");
+
+        test.execute_expect_success(
+            Transaction::builder_localnet()
+                .call_method(component_address, "set_tokens_metadata", args![new_metadata])
+                .build_and_seal(&user_key),
+            vec![user_proof],
+        );
+    }
 }

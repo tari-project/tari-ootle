@@ -155,7 +155,7 @@ where
                                 .with_final_fee(
                                     execution_result
                                         .as_ref()
-                                        .map(|e| e.finalize.fee_receipt.total_fees_charged()),
+                                        .map(|e| e.finalize.fee_receipt.required_fees()),
                                 )
                                 .with_new_status(TransactionStatus::DryRun)
                                 .with_execution_time(*execution_time)

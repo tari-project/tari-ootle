@@ -10,8 +10,17 @@ use minotari_app_grpc::{
     tari_rpc,
     tari_rpc::{GetBalanceRequest, SubmitValidatorEvictionProofRequest, ValidateRequest},
 };
+use tari_common_types::{
+    burn_proof::EncodedMerkleProof as SidechainEncodedMerkleProof,
+    types::{CompressedCommitment, CompressedPublicKey},
+};
+use tari_crypto::{
+    ristretto::{CompressedRistrettoSchnorr, RistrettoSecretKey, pedersen::CompressedPedersenCommitment},
+    tari_utilities::ByteArray,
+};
 use tari_engine_types::confidential::{AbridgedTransactionKernel, EncodedMerkleProof, MinotariBurnClaimProof};
 use tari_ootle_walletd_client::types::{ClaimBurnProof, ClaimBurnProofContents};
+use tari_sidechain::{AbridgedTransactionKernel as SidechainKernel, BurnClaimProof, CompleteClaimBurnProof};
 use tari_template_lib_types::{
     EncryptedData,
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
@@ -30,6 +39,27 @@ async fn start_wallet(world: &mut TariWorld, step: &Step, wallet_name: String, b
     spawn_minotari_wallet(world, wallet_name, bn_name).await;
 }
 
+#[when(expr = "I burn {int}T on wallet {word} to proof {word} for account {word} using wallet daemon {word}")]
+async fn when_i_burn_on_wallet_for_account(
+    world: &mut TariWorld,
+    step: &Step,
+    amount: u64,
+    wallet_name: String,
+    proof_name: String,
+    account_name: String,
+    walletd_name: String,
+) {
+    cucumber_log!("==== Step: {}", step.value);
+    let walletd = world.get_wallet_daemon(&walletd_name);
+    let mut walletd_client = walletd.get_authed_client().await;
+    let account = walletd_client
+        .accounts_get(account_name.clone().into())
+        .await
+        .unwrap_or_else(|e| panic!("Account {} not found: {}", account_name, e));
+    let claim_public_key = account.account.owner_public_key().as_bytes().to_vec();
+    burn_and_store_proof(world, amount, &wallet_name, proof_name, claim_public_key).await;
+}
+
 #[when(expr = "I burn {int}T on wallet {word} to proof {word} for wallet daemon {word}")]
 async fn when_i_burn_on_wallet(
     world: &mut TariWorld,
@@ -40,25 +70,35 @@ async fn when_i_burn_on_wallet(
     walletd_name: String,
 ) {
     cucumber_log!("==== Step: {}", step.value);
+    let walletd = world.get_wallet_daemon(&walletd_name);
+    let mut walletd_client = walletd.get_authed_client().await;
+    let account = walletd_client.accounts_get_default().await.unwrap();
+    let claim_public_key = account.account.owner_public_key().as_bytes().to_vec();
+    burn_and_store_proof(world, amount, &wallet_name, proof_name, claim_public_key).await;
+}
+
+async fn burn_and_store_proof(
+    world: &mut TariWorld,
+    amount: u64,
+    wallet_name: &str,
+    proof_name: String,
+    claim_public_key: Vec<u8>,
+) {
     let wallet = world
         .wallets
-        .get(&wallet_name)
+        .get(wallet_name)
         .unwrap_or_else(|| panic!("Wallet {} not found", wallet_name));
 
-    let walletd = world.get_wallet_daemon(&walletd_name);
-    let mut client = walletd.get_authed_client().await;
-    let account = client.accounts_get_default().await.unwrap();
-
-    let amount = amount * T;
-    let mut client = wallet.create_client().await;
-    let resp = client
+    let burn_amount = amount * T;
+    let mut wallet_client = wallet.create_client().await;
+    let resp = wallet_client
         .create_burn_transaction(minotari_app_grpc::tari_rpc::CreateBurnTransactionRequest {
-            amount: amount.as_u64(),
+            amount: burn_amount.as_u64(),
             fee_per_gram: 1,
             payment_id: MemoField::new_open("Burn".as_bytes().to_vec(), TxType::Burn)
                 .unwrap()
                 .to_bytes(),
-            claim_public_key: account.account.owner_public_key().as_bytes().to_vec(),
+            claim_public_key,
             sidechain_deployment_key: vec![],
         })
         .await
@@ -67,7 +107,6 @@ async fn when_i_burn_on_wallet(
 
     assert!(resp.is_success);
 
-    // Extract kernel signature datai
     let kernel_excess_sig_nonce = resp.kernel_excess_nonce.clone();
     let kernel_excess_sig_signature = resp.kernel_excess_signature.clone();
 
@@ -201,6 +240,49 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
         .merkle_proof
         .ok_or_else(|| anyhow!("No merkle proof in claim proof"))?;
 
+    // Build the on-disk file format (CompleteClaimBurnProof) for auto-claim integration tests.
+    // This is done before building ClaimBurnProofContents to avoid moving the local variables.
+    let complete_proof = CompleteClaimBurnProof {
+        claim_proof: BurnClaimProof {
+            burn_public_key: CompressedPublicKey::from_canonical_bytes(reciprocal_claim_public_key.as_bytes())
+                .map_err(|e| anyhow!("burn_public_key parse error for complete proof: {e}"))?,
+            commitment: CompressedPedersenCommitment::from_canonical_bytes(commitment.as_bytes())
+                .map_err(|e| anyhow!("commitment parse error for complete proof: {e}"))?,
+            ownership_proof: CompressedRistrettoSchnorr::new(
+                CompressedPublicKey::from_canonical_bytes(ownership_proof.public_nonce().as_bytes())
+                    .map_err(|e| anyhow!("ownership nonce parse error for complete proof: {e}"))?,
+                RistrettoSecretKey::from_canonical_bytes(ownership_proof.signature().as_bytes())
+                    .map_err(|e| anyhow!("ownership sig parse error for complete proof: {e}"))?,
+            ),
+            encoded_merkle_proof: SidechainEncodedMerkleProof {
+                block_hash: merkle_proof
+                    .block_hash
+                    .as_slice()
+                    .try_into()
+                    .map_err(|e| anyhow!("block_hash parse error for complete proof: {e}"))?,
+                encoded_merkle_proof: merkle_proof.encoded_proof.clone(),
+                leaf_index: merkle_proof.leaf_index,
+            },
+            kernel: SidechainKernel {
+                version: kernel.version,
+                fee: kernel.fee,
+                lock_height: kernel.lock_height,
+                excess: CompressedCommitment::from_canonical_bytes(kernel.excess.as_bytes())
+                    .map_err(|e| anyhow!("kernel excess parse error for complete proof: {e}"))?,
+                excess_sig: CompressedRistrettoSchnorr::new(
+                    CompressedPublicKey::from_canonical_bytes(kernel.excess_sig.public_nonce().as_bytes())
+                        .map_err(|e| anyhow!("kernel excess_sig nonce parse error for complete proof: {e}"))?,
+                    RistrettoSecretKey::from_canonical_bytes(kernel.excess_sig.signature().as_bytes())
+                        .map_err(|e| anyhow!("kernel excess_sig parse error for complete proof: {e}"))?,
+                ),
+            },
+            value: proof_resp.value,
+            sender_offset_public_key: CompressedPublicKey::from_canonical_bytes(sender_offset_public_key.as_bytes())
+                .map_err(|e| anyhow!("sender_offset_public_key parse error for complete proof: {e}"))?,
+        },
+        encrypted_data: proof_resp.encrypted_data.clone(),
+    };
+
     let proof = ClaimBurnProofContents {
         claim_proof: MinotariBurnClaimProof {
             burn_public_key: reciprocal_claim_public_key,
@@ -228,6 +310,7 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
 
     world.claim_proofs.insert(proof_name, CucumberClaimProof::Confirmed {
         proof: ClaimBurnProof::Contents(Box::new(proof)),
+        complete_proof: Box::new(complete_proof),
     });
 
     Ok(())

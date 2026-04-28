@@ -48,12 +48,16 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
     handlers::transactions::get_transaction_result,
     handlers::templates::get_template_definition,
     handlers::templates::list_cached_templates,
+    handlers::templates::list_template_catalogue,
+    handlers::templates::get_template_catalogue_entry,
     handlers::utxos::fetch_utxos,
     handlers::utxos::list_utxos,
     handlers::utxos::stream_utxo_updates,
     handlers::transaction_receipts::list_transaction_receipts,
     handlers::transaction_receipts::get_transaction_receipt,
-    handlers::transaction_events::sse_transaction_events
+    handlers::transaction_events::sse_transaction_events,
+    handlers::epoch_checkpoints::list_epoch_checkpoints,
+    handlers::epoch_checkpoints::get_latest_epoch_checkpoint
 ))]
 pub struct ApiDoc;
 
@@ -92,6 +96,7 @@ impl Server {
             .route("/network/connections", get(handlers::network::get_connections))
             .nest("/substates", Router::new()
                 .route("/fetch", post(handlers::substates::fetch_substates))
+                .route("/watched", get(handlers::watched::list_watched_substates))
                 .route("/{substate_id}", get(handlers::substates::get_substate))
             )
             .nest("/transactions", Router::new()
@@ -120,6 +125,12 @@ impl Server {
             )
             .nest("/templates", Router::new()
                 .route("/cached", get(handlers::templates::list_cached_templates))
+                .route("/watched", get(handlers::watched::list_watched_templates))
+                .route("/catalogue", get(handlers::templates::list_template_catalogue))
+                .route(
+                    "/catalogue/{template_address}",
+                    get(handlers::templates::get_template_catalogue_entry),
+                )
                 .route(
                     "/{template_address}",
                     get(handlers::templates::get_template_definition),
@@ -145,6 +156,10 @@ impl Server {
                 .route("/xtr" , get(handlers::resources::get_tari))
                 .route("/tari" , get(handlers::resources::get_tari))
                 .route("/{resource_address}" , get(handlers::resources::get_resource)))
+            .nest("/epoch-checkpoints", Router::new()
+                .route("/", get(handlers::epoch_checkpoints::list_epoch_checkpoints))
+                .route("/latest", get(handlers::epoch_checkpoints::get_latest_epoch_checkpoint))
+            )
             .route("/events", get(handlers::indexer_events::sse_events))
             .layer(CorsLayer::permissive())
             .layer(RequestBodyLimitLayer::new(REQUEST_BODY_LIMIT))

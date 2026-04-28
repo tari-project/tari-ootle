@@ -61,6 +61,12 @@ impl WasmModule {
         Self { code: code.into() }
     }
 
+    pub fn validate_code(code: &[u8]) -> Result<TemplateDef, TemplateLoaderError> {
+        // TODO: evaluate if there are acceptable cheaper ways to fully validate
+        let loaded = Self::load_template_from_code(code)?;
+        Ok(loaded.into_template_def())
+    }
+
     pub fn load_template_from_code(code: &[u8]) -> Result<LoadedTemplate, TemplateLoaderError> {
         let engine = Self::create_engine();
         let module = wasmer::Module::new(&engine, code)?;
@@ -268,24 +274,20 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
                         .into());
                     }
                     match &arg.arg_type {
-                        Type::Tuple(tuple) => {
-                            if tuple.len() > limits::WASM_LIMITS.max_function_arguments {
-                                return Err(WasmValidationError::FunctionTooManyTupleReturn {
-                                    name: func.name.clone(),
-                                    max_tuple_size: limits::WASM_LIMITS.max_function_arguments,
-                                    tuple_size: tuple.len(),
-                                }
-                                .into());
+                        Type::Tuple(tuple) if tuple.len() > limits::WASM_LIMITS.max_function_arguments => {
+                            return Err(WasmValidationError::FunctionTooManyTupleReturn {
+                                name: func.name.clone(),
+                                max_tuple_size: limits::WASM_LIMITS.max_function_arguments,
+                                tuple_size: tuple.len(),
                             }
+                            .into());
                         },
-                        Type::Other { name } => {
-                            if name.len() > limits::WASM_LIMITS.max_function_name_length {
-                                return Err(WasmValidationError::FunctionNameTooLong {
-                                    name: name.clone(),
-                                    max_length: limits::WASM_LIMITS.max_function_name_length,
-                                }
-                                .into());
+                        Type::Other { name } if name.len() > limits::WASM_LIMITS.max_function_name_length => {
+                            return Err(WasmValidationError::FunctionNameTooLong {
+                                name: name.clone(),
+                                max_length: limits::WASM_LIMITS.max_function_name_length,
                             }
+                            .into());
                         },
                         _ => {},
                     }

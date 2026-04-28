@@ -125,12 +125,17 @@ impl ConfigOverrideProvider for CommonCliArgs {
 }
 
 mod defaults {
-    use tari_common::dir_utils;
+    use std::path::PathBuf;
 
     const DEFAULT_CONFIG: &str = "config/config.toml";
 
     pub(super) fn base_path() -> String {
-        dir_utils::default_path("", None).to_string_lossy().to_string()
+        dirs_next::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".tari")
+            .join("ootle")
+            .to_string_lossy()
+            .into_owned()
     }
 
     pub(super) fn config() -> String {

@@ -52,6 +52,9 @@ pub enum MetadataKey {
     EpochManagerLastEpochHash,
     EpochManagerLastSyncedEpoch,
     EpochManagerFeeClaimPublicKey,
+    /// Highest epoch whose hash has been locked in by a committed EndEpoch block.
+    /// Epochs <= this value can no longer have their hash corrected by the oracle.
+    EpochManagerHighestLockedEpoch,
 }
 
 impl MetadataKey {
@@ -62,6 +65,7 @@ impl MetadataKey {
             MetadataKey::EpochManagerLastSyncedEpoch => b"epoch_manager.last_synced_epoch",
             MetadataKey::EpochManagerFeeClaimPublicKey => b"epoch_manager.fee_claim_public_key",
             MetadataKey::EpochManagerLastEpochHash => b"epoch_manager.last_epoch_hash",
+            MetadataKey::EpochManagerHighestLockedEpoch => b"epoch_manager.highest_locked_epoch",
         }
     }
 }

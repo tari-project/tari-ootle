@@ -39,6 +39,7 @@ use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_ootle_wallet_sdk::{
     models::{
         AccountUpdate,
+        AddressBookEntry,
         AuthoredTemplateModel,
         ConfidentialOutputModel,
         ImportedKeyId,
@@ -77,7 +78,7 @@ use webauthn_rs::prelude::Passkey;
 use crate::{
     diesel::ExpressionMethods,
     models,
-    models::StealthOutputUpdate,
+    models::{AddressBookEntryChangeset, StealthOutputUpdate},
     reader::ReadTransaction,
     serialization::{deserialize_hex_try_from, deserialize_json, serialize_hex, serialize_json},
 };
@@ -1661,6 +1662,135 @@ impl WalletStoreWriter for WriteTransaction<'_> {
 
         Ok(())
     }
+
+    // Address book
+
+    fn address_book_insert(
+        &mut self,
+        name: &str,
+        address: &str,
+        note: Option<&str>,
+    ) -> Result<AddressBookEntry, WalletStorageError> {
+        const OPERATION: &str = "address_book_insert";
+        use crate::schema::address_book;
+
+        diesel::insert_into(address_book::table)
+            .values((
+                address_book::name.eq(name),
+                address_book::address.eq(address),
+                address_book::note.eq(note),
+            ))
+            .execute(self.connection())
+            .map_err(|e| map_address_book_error(OPERATION, name, e))?;
+
+        let row = address_book::table
+            .filter(address_book::name.eq(name))
+            .first::<models::AddressBookEntry>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(AddressBookEntry {
+            id: row.id,
+            name: row.name,
+            address: row.address,
+            note: row.note,
+        })
+    }
+
+    fn address_book_update(
+        &mut self,
+        name: &str,
+        new_name: Option<&str>,
+        address: Option<&str>,
+        note: Option<&str>,
+    ) -> Result<AddressBookEntry, WalletStorageError> {
+        const OPERATION: &str = "address_book_update";
+        use crate::schema::address_book;
+
+        // Build a single changeset so all mutated columns (plus the
+        // bookkeeping `updated_at`) are written in one UPDATE statement
+        // instead of one query per field. The previous implementation issued
+        // up to three separate UPDATEs, each with its own round-trip and its
+        // own `updated_at` bump, leaving the row timestamps inconsistent with
+        // the caller's intent.
+        //
+        // `note` is mapped `Some(s) -> Some(Some(s))` so the column is set to
+        // the supplied string (including the empty string used by the UI to
+        // clear a previously-stored note). `None` on any field means "leave
+        // the column untouched".
+        let changeset = AddressBookEntryChangeset {
+            name: new_name,
+            address,
+            note: note.map(Some),
+            updated_at: dsl::now,
+        };
+
+        let num_affected = diesel::update(address_book::table.filter(address_book::name.eq(name)))
+            .set(changeset)
+            .execute(self.connection())
+            .map_err(|e| map_address_book_error(OPERATION, new_name.unwrap_or(name), e))?;
+
+        if num_affected == 0 {
+            return Err(WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "address_book_entry".to_string(),
+                key: name.to_string(),
+            });
+        }
+
+        // After a successful rename the row now lives under `new_name`, so
+        // the re-read must query by the post-update name.
+        let lookup_name = new_name.unwrap_or(name);
+
+        let row = address_book::table
+            .filter(address_book::name.eq(lookup_name))
+            .first::<models::AddressBookEntry>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(AddressBookEntry {
+            id: row.id,
+            name: row.name,
+            address: row.address,
+            note: row.note,
+        })
+    }
+
+    fn address_book_delete(&mut self, name: &str) -> Result<(), WalletStorageError> {
+        use crate::schema::address_book;
+
+        let num_affected = diesel::delete(address_book::table.filter(address_book::name.eq(name)))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general("address_book_delete", e))?;
+
+        if num_affected == 0 {
+            return Err(WalletStorageError::NotFound {
+                operation: "address_book_delete",
+                entity: "address_book_entry".to_string(),
+                key: name.to_string(),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+/// Maps diesel errors from address_book writes into the typed
+/// [`WalletStorageError::DuplicateName`] variant when the failure is a
+/// SQLite `UNIQUE` constraint violation on the `address_book.name` column.
+/// Every other error falls through to the generic path.
+///
+/// Matching on the typed [`DatabaseErrorKind::UniqueViolation`] keeps the
+/// wallet SDK decoupled from the exact driver error text (e.g. sqlite's
+/// `"UNIQUE constraint failed: address_book.name"`), so the UI can reliably
+/// detect duplicate-name failures by matching on the `DuplicateName` token
+/// rather than grepping the underlying driver message.
+fn map_address_book_error(operation: &'static str, name: &str, err: diesel::result::Error) -> WalletStorageError {
+    use diesel::result::{DatabaseErrorKind, Error as DieselError};
+    match err {
+        DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _) => {
+            WalletStorageError::DuplicateName { name: name.to_string() }
+        },
+        other => WalletStorageError::general(operation, other),
+    }
 }
 
 impl WalletEventStoreWriter for WriteTransaction<'_> {
@@ -1670,7 +1800,11 @@ impl WalletEventStoreWriter for WriteTransaction<'_> {
 
         let (maybe_account, payload) = match event {
             WalletEvent::TransactionSubmitted(payload) => (
-                payload.new_account.as_ref().map(|a| a.address),
+                payload
+                    .context
+                    .as_ref()
+                    .and_then(|c| c.new_account_data())
+                    .map(|a| a.address),
                 serialize_json(payload)?,
             ),
             WalletEvent::TransactionFinalized(payload) => (None, serialize_json(payload)?),

@@ -46,6 +46,8 @@ import type {
   AuthListSessionsResponse,
   AuthRevokeTokenRequest,
   AuthRevokeTokenResponse,
+  BurnProofsGetRequest,
+  BurnProofsGetResponse,
   BurnProofsListRequest,
   BurnProofsListResponse,
   ClaimBurnRequest,
@@ -83,6 +85,10 @@ import type {
   SubstatesGetResponse,
   SubstatesListRequest,
   SubstatesListResponse,
+  SwapPoolGetExchangeRateRequest,
+  SwapPoolGetExchangeRateResponse,
+  SwapPoolsListRequest,
+  SwapPoolsListResponse,
   TemplatesGetRequest,
   TemplatesGetResponse,
   TemplatesListAuthoredRequest,
@@ -112,6 +118,15 @@ import type {
   WebauthnStartRegisterResponse,
   WebRtcStartRequest,
   WebRtcStartResponse,
+  AddressBookAddRequest,
+  AddressBookAddResponse,
+  AddressBookListResponse,
+  AddressBookGetRequest,
+  AddressBookGetResponse,
+  AddressBookUpdateRequest,
+  AddressBookUpdateResponse,
+  AddressBookDeleteRequest,
+  AddressBookDeleteResponse,
 } from "@tari-project/ootle-ts-bindings";
 import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
 import { jwtDecode } from "jwt-decode";
@@ -218,6 +233,8 @@ export const transactionsSubmitManifest = (
 // burn proofs
 export const burnProofsList = (request: BurnProofsListRequest): Promise<BurnProofsListResponse> =>
   client().then((c) => c.burnProofsList(request));
+export const burnProofsGet = (request: BurnProofsGetRequest): Promise<BurnProofsGetResponse> =>
+  client().then((c) => c.burnProofsGet(request));
 
 // accounts
 export const accountsClaimBurn = (request: ClaimBurnRequest): Promise<ClaimBurnResponse> =>
@@ -297,3 +314,26 @@ export const walletGetInfo = (): Promise<WalletGetInfoResponse> => client().then
 // utxos
 export const stealthUtxosList = (request: StealthUtxosListRequest): Promise<StealthUtxosListResponse> =>
   client().then((c) => c.stealthUtxosList(request));
+
+// swap pools
+export const swapPoolGetExchangeRate = (request: SwapPoolGetExchangeRateRequest): Promise<SwapPoolGetExchangeRateResponse> =>
+  client().then((c) => c.swapPoolGetExchangeRate(request));
+
+export const swapPoolsList = (request: SwapPoolsListRequest): Promise<SwapPoolsListResponse> =>
+  client().then((c) => c.swapPoolsList(request));
+
+// address book
+export const addressBookAdd = (request: AddressBookAddRequest): Promise<AddressBookAddResponse> =>
+  client().then((c) => c.addressBookAdd(request));
+
+export const addressBookList = (): Promise<AddressBookListResponse> =>
+  client().then((c) => c.addressBookList());
+
+export const addressBookGet = (request: AddressBookGetRequest): Promise<AddressBookGetResponse> =>
+  client().then((c) => c.addressBookGet(request));
+
+export const addressBookUpdate = (request: AddressBookUpdateRequest): Promise<AddressBookUpdateResponse> =>
+  client().then((c) => c.addressBookUpdate(request));
+
+export const addressBookDelete = (request: AddressBookDeleteRequest): Promise<AddressBookDeleteResponse> =>
+  client().then((c) => c.addressBookDelete(request));

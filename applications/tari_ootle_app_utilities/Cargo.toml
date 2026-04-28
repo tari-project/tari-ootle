@@ -19,10 +19,10 @@ tari_template_lib = { workspace = true }
 tari_ootle_transaction = { workspace = true }
 tari_bor = { workspace = true, default-features = true }
 tari_mmr = { workspace = true }
-tari_networking = { workspace = true }
+tari_networking = { workspace = true, optional = true }
 tari_transaction_components = { workspace = true }
 tari_hashing = { workspace = true }
-tari_ootle_p2p = { workspace = true }
+tari_ootle_p2p = { workspace = true, optional = true }
 ootle_serde = { workspace = true }
 ootle_byte_type = { workspace = true, features = ["crypto"] }
 
@@ -30,9 +30,10 @@ anyhow = { workspace = true }
 blake2 = { workspace = true }
 bincode = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive", "env"] }
-libp2p-identity = { workspace = true }
+dirs-next = { workspace = true }
+libp2p-identity = { workspace = true, optional = true }
 log = { workspace = true, features = ["std"] }
-multiaddr = { workspace = true }
+multiaddr = { workspace = true, optional = true }
 rand = { workspace = true }
 serde = { workspace = true, features = ["default", "derive", "rc"] }
 serde_json5 = { workspace = true }
@@ -43,4 +44,5 @@ toml = { workspace = true }
 config = { workspace = true }
 
 [features]
+p2p = ["tari_networking", "tari_ootle_p2p", "libp2p-identity", "multiaddr"]
 epoch_oracle = ["tari_epoch_oracles"]

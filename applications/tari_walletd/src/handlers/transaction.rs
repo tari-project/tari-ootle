@@ -256,8 +256,10 @@ pub async fn handle_submit_dry_run(
         .await
         .map_err(map_transaction_submission_error)?;
 
+    let required_fees = exec_result.finalize.fee_receipt.required_fees();
     Ok(TransactionSubmitDryRunResponse {
         transaction_id: exec_result.finalize.transaction_hash.into_array().into(),
+        required_fees,
         result: exec_result,
     })
 }
@@ -292,14 +294,14 @@ pub async fn handle_submit_manifest(
         .optional()?
         .ok_or_else(|| invalid_request("No default account found".to_string()))?;
 
-    let account_owner_key_id = default_account.owner_key_id().ok_or_else(|| {
+    let default_owner_key_id = default_account.owner_key_id().ok_or_else(|| {
         invalid_params(
-            "signing_key_id",
+            "seal_signer_key_id",
             Some("Default account does not have an owner key set".to_string()),
         )
     })?;
 
-    let signing_key_id = req.signing_key_id.unwrap_or(account_owner_key_id);
+    let seal_signer_key_id = req.seal_signer_key_id.unwrap_or(default_owner_key_id);
 
     let fee_amount = req.max_fee;
 
@@ -323,15 +325,20 @@ pub async fn handle_submit_manifest(
 
     let transaction = transaction.with_inputs(inputs);
 
-    let transaction = if signing_key_id == account_owner_key_id {
-        transaction.finish()
-    } else {
-        sdk.signer_api()
-            .with_context(default_account.owner_public_key())
-            .sign(signing_key_id, transaction)?
-    };
+    // Sign with each additional signing key (not the seal signer, which seals the transaction)
+    let mut transaction = transaction.finish();
+    if !req.signing_key_ids.is_empty() {
+        let seal_signer_pk = sdk.key_manager_api().get_public_key(seal_signer_key_id)?;
+        let seal_signer_pk_bytes = seal_signer_pk.public_key.to_byte_type();
+        let signer = sdk.signer_api().with_context(&seal_signer_pk_bytes);
+        for signing_key_id in &req.signing_key_ids {
+            if *signing_key_id != seal_signer_key_id {
+                transaction = signer.sign(*signing_key_id, transaction)?;
+            }
+        }
+    }
 
-    let transaction = sdk.signer_api().sign(account_owner_key_id, transaction)?;
+    let transaction = sdk.signer_api().sign(seal_signer_key_id, transaction)?;
 
     if req.dry_run {
         let exec_result = context
@@ -347,8 +354,10 @@ pub async fn handle_submit_manifest(
             )
             .into());
         }
+        let required_fees = exec_result.finalize.fee_receipt.required_fees();
         return Ok(TransactionSubmitManifestResponse {
             transaction_id: exec_result.finalize.transaction_hash.into_array().into(),
+            required_fees: Some(required_fees),
             result: Some(exec_result),
         });
     }
@@ -357,6 +366,7 @@ pub async fn handle_submit_manifest(
 
     Ok(TransactionSubmitManifestResponse {
         transaction_id,
+        required_fees: None,
         result: None,
     })
 }
@@ -378,6 +388,7 @@ pub async fn handle_get(
         transaction: transaction.transaction,
         result: transaction.finalize,
         status: transaction.status,
+        final_fee: transaction.final_fee,
         invalid_reason: transaction.invalid_reason,
         last_update_time: transaction.last_update_time,
     })
@@ -523,11 +534,16 @@ pub async fn handle_publish_template(
         .try_into()
         .map_err(|_| invalid_params("binary", Some("WASM binary too large".to_string())))?;
 
-    let transaction = context
+    let metadata_hash = req.metadata.map(resolve_metadata_hash).transpose()?;
+
+    let builder = context
         .transaction_builder()
-        .pay_fee_from_component(*fee_account.component_address(), req.max_fee)
-        .publish_template(wasm_binary)
-        .build_unsigned();
+        .pay_fee_from_component(*fee_account.component_address(), req.max_fee);
+    let builder = match metadata_hash {
+        Some(hash) => builder.publish_template_with_metadata(wasm_binary, hash),
+        None => builder.publish_template(wasm_binary),
+    };
+    let transaction = builder.build_unsigned();
 
     if req.dry_run {
         let request = TransactionSubmitDryRunRequest {
@@ -549,7 +565,7 @@ pub async fn handle_publish_template(
         }
         return Ok(PublishTemplateResponse {
             transaction_id: resp.transaction_id,
-            dry_run_fee: Some(resp.result.finalize.fee_receipt.total_fees_charged()),
+            dry_run_fee: Some(resp.result.finalize.fee_receipt.required_fees()),
         });
     }
     let request = TransactionSubmitRequest {
@@ -565,4 +581,20 @@ pub async fn handle_publish_template(
         transaction_id: resp.transaction_id,
         dry_run_fee: None,
     })
+}
+
+fn resolve_metadata_hash(
+    input: tari_ootle_walletd_client::types::PublishTemplateMetadata,
+) -> Result<tari_ootle_template_metadata::MetadataHash, anyhow::Error> {
+    use tari_ootle_template_metadata::TemplateMetadata;
+    use tari_ootle_walletd_client::types::PublishTemplateMetadata;
+
+    match input {
+        PublishTemplateMetadata::Hash(hash) => Ok(hash),
+        PublishTemplateMetadata::Literal(meta) => meta.hash().map_err(|e| anyhow!(e)),
+        PublishTemplateMetadata::RawCbor(bytes) => {
+            let meta = TemplateMetadata::from_cbor(&bytes).map_err(|e| anyhow!(e))?;
+            meta.hash().map_err(|e| anyhow!(e))
+        },
+    }
 }

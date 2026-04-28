@@ -20,6 +20,7 @@ use webauthn_rs::prelude::Passkey;
 use crate::{
     models::{
         Account,
+        AddressBookEntry,
         AuthoredTemplateModel,
         ConfidentialOutputModel,
         Config,
@@ -223,4 +224,8 @@ pub trait WalletStoreReader {
         &mut self,
         batch_size: usize,
     ) -> Result<HashMap<ResourceAddress, HashMap<TagAndPublicNoncePair, ComponentAddress>>, WalletStorageError>;
+
+    // Address book
+    fn address_book_get(&mut self, name: &str) -> Result<AddressBookEntry, WalletStorageError>;
+    fn address_book_get_all(&mut self) -> Result<Vec<AddressBookEntry>, WalletStorageError>;
 }

@@ -33,12 +33,13 @@ use crate::storage_sqlite::schema::*;
 #[derive(Debug, Identifiable, Queryable)]
 #[diesel(table_name = events)]
 pub struct EventRecord {
-    pub id: i32,
+    pub id: i64,
     pub template_address: String,
     pub tx_hash: String,
     pub topic: String,
     pub payload: String,
     pub substate_id: Option<String>,
+    pub resource_address: Option<String>,
     pub created_at: PrimitiveDateTime,
 }
 
@@ -51,6 +52,7 @@ pub struct NewEvent<'a> {
     pub topic: &'a str,
     pub payload: String,
     pub substate_id: Option<String>,
+    pub resource_address: Option<String>,
 }
 
 #[derive(Clone, Debug, QueryableByName, Deserialize, Serialize)]
@@ -65,6 +67,8 @@ pub struct EventData {
     pub payload: String,
     #[diesel(sql_type = Nullable<Text>)]
     pub substate_id: Option<String>,
+    #[diesel(sql_type = Nullable<Text>)]
+    pub resource_address: Option<String>,
 }
 
 impl TryFrom<EventData> for crate::graphql::model::events::Event {
@@ -85,6 +89,7 @@ impl TryFrom<EventData> for crate::graphql::model::events::Event {
             tx_hash,
             payload,
             topic: event_data.topic,
+            resource_address: event_data.resource_address,
         })
     }
 }

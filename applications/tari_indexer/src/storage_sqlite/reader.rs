@@ -4,6 +4,7 @@
 use std::{collections::HashMap, fmt::Write, str::FromStr};
 
 use diesel::{
+    EscapeExpressionMethods,
     ExpressionMethods,
     NullableExpressionMethods,
     OptionalExtension,
@@ -31,7 +32,7 @@ use tari_ootle_common_types::{
     shard::Shard,
     substate_type::SubstateType,
 };
-use tari_ootle_storage::{Ordering, StorageError, time::PrimitiveDateTime};
+use tari_ootle_storage::{Ordering, StorageError, consensus_models::EpochCheckpoint, time::PrimitiveDateTime};
 use tari_ootle_storage_sqlite::SqliteTransaction;
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_template_lib_types::{
@@ -44,9 +45,18 @@ use tari_template_lib_types::{
 };
 
 use crate::{
+    network_state_sync::EventFilter,
     storage_sqlite::{
         models,
-        models::{EventRecord, KeyValue, SubstateRecord},
+        models::{
+            EventRecord,
+            KeyValue,
+            SubstateRecord,
+            TemplateCatalogueEntry,
+            TemplateCatalogueRow,
+            WatchedSubstateEntry,
+            WatchedSubstateRow,
+        },
         serialization::{deserialize_hex_try_from, deserialize_json, serialize_hex},
     },
     store::IndexerStoreReadTransaction,
@@ -237,16 +247,17 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         &mut self,
         substate_id_filter: Option<&SubstateId>,
         topic_filter: Option<&str>,
+        resource_address_filter: Option<&ResourceAddress>,
         offset: u32,
         limit: u32,
     ) -> Result<Vec<(TransactionId, Event)>, StorageError> {
-        // TODO: allow to query by payload as well, unifying all event methods into one
         info!(
             target: LOG_TARGET,
-            "Querying substate scanner database: get_events with substate_id_filter = {:?} and \
-            topic_filter = {:?}",
+            "Querying substate scanner database: get_events with substate_id_filter = {:?}, \
+            topic_filter = {:?}, resource_address_filter = {:?}",
             substate_id_filter,
-            topic_filter
+            topic_filter,
+            resource_address_filter
         );
         use crate::storage_sqlite::schema::events;
 
@@ -257,7 +268,18 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         }
 
         if let Some(topic) = topic_filter {
-            query = query.filter(events::topic.eq(topic));
+            match EventFilter::topic_to_like_pattern(topic) {
+                Some(pattern) => {
+                    query = query.filter(events::topic.like(pattern));
+                },
+                None => {
+                    query = query.filter(events::topic.eq(topic));
+                },
+            }
+        }
+
+        if let Some(resource_address) = resource_address_filter {
+            query = query.filter(events::resource_address.eq(resource_address.to_string()));
         }
 
         let event_rows = query
@@ -300,6 +322,89 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                     let topic = row.topic;
                     let payload = deserialize_json(&row.payload)?;
                     Ok((
+                        TransactionId::from(tx_hash),
+                        Event::new(substate_id, template_address, topic, payload),
+                    ))
+                })
+            })
+            .collect()
+    }
+
+    fn get_events_after_id(
+        &mut self,
+        after_id: i64,
+        topic_filter: Option<&str>,
+        substate_id_filter: Option<&SubstateId>,
+        template_address_filter: Option<&TemplateAddress>,
+        resource_address_filter: Option<&ResourceAddress>,
+        limit: u32,
+    ) -> Result<Vec<(i64, TransactionId, Event)>, StorageError> {
+        use crate::storage_sqlite::schema::events;
+
+        let mut query = events::table.into_boxed();
+        query = query.filter(events::id.gt(after_id));
+
+        if let Some(topic) = topic_filter {
+            match EventFilter::topic_to_like_pattern(topic) {
+                Some(pattern) => {
+                    query = query.filter(events::topic.like(pattern));
+                },
+                None => {
+                    query = query.filter(events::topic.eq(topic));
+                },
+            }
+        }
+        if let Some(substate_id) = substate_id_filter {
+            query = query.filter(events::substate_id.eq(substate_id.to_string()));
+        }
+        if let Some(template_address) = template_address_filter {
+            query = query.filter(events::template_address.eq(template_address.to_string()));
+        }
+        if let Some(resource_address) = resource_address_filter {
+            query = query.filter(events::resource_address.eq(resource_address.to_string()));
+        }
+
+        let event_rows = query
+            .order(events::id.asc())
+            .limit(limit.into())
+            .load_iter::<EventRecord, _>(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("get_events_after_id: {}", e),
+            })?;
+
+        event_rows
+            .map(|res| {
+                res.map_err(|e| StorageError::QueryError {
+                    reason: format!("get_events_after_id: {}", e),
+                })
+                .and_then(|row| {
+                    let id = row.id;
+                    let substate_id = row
+                        .substate_id
+                        .as_ref()
+                        .map(|str| SubstateId::from_str(str))
+                        .transpose()
+                        .map_err(|e| StorageError::DataInconsistency {
+                            details: format!(
+                                "Invalid substate_id {} in events table: {}",
+                                row.substate_id.display(),
+                                e
+                            ),
+                        })?;
+                    let template_address =
+                        Hash32::from_hex(&row.template_address).map_err(|e| StorageError::DataInconsistency {
+                            details: format!(
+                                "Invalid template_address {} in events table: {}",
+                                row.template_address, e
+                            ),
+                        })?;
+                    let tx_hash = Hash32::from_hex(&row.tx_hash).map_err(|e| StorageError::DataInconsistency {
+                        details: format!("Invalid tx_hash {} in events table: {}", row.tx_hash, e),
+                    })?;
+                    let topic = row.topic;
+                    let payload = deserialize_json(&row.payload)?;
+                    Ok((
+                        id,
                         TransactionId::from(tx_hash),
                         Event::new(substate_id, template_address, topic, payload),
                     ))
@@ -472,6 +577,47 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         Ok(count > 0)
     }
 
+    fn epoch_checkpoint_get_all(
+        &mut self,
+        from_epoch: Epoch,
+        limit: u64,
+    ) -> Result<Vec<EpochCheckpoint>, StorageError> {
+        const OPERATION: &str = "epoch_checkpoint_get_all";
+        use crate::storage_sqlite::schema::epoch_checkpoints;
+
+        let rows: Vec<String> = epoch_checkpoints::table
+            .select(epoch_checkpoints::json_data)
+            .filter(epoch_checkpoints::epoch.ge(from_epoch.as_u64() as i64))
+            .order_by(epoch_checkpoints::epoch.asc())
+            .limit(limit as i64)
+            .load(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?;
+
+        rows.into_iter().map(|json_data| deserialize_json(&json_data)).collect()
+    }
+
+    fn epoch_checkpoint_get_latest(&mut self) -> Result<EpochCheckpoint, StorageError> {
+        const OPERATION: &str = "epoch_checkpoint_get_latest";
+        use crate::storage_sqlite::schema::epoch_checkpoints;
+
+        let json_data: String = epoch_checkpoints::table
+            .select(epoch_checkpoints::json_data)
+            .order_by(epoch_checkpoints::epoch.desc())
+            .first(self.connection())
+            .optional()
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?
+            .ok_or_else(|| StorageError::NotFound {
+                item: "EpochCheckpoint",
+                key: "latest".to_string(),
+            })?;
+
+        deserialize_json(&json_data)
+    }
+
     fn utxos_get_max_state_version(
         &mut self,
         resource_address: ResourceAddress,
@@ -639,5 +785,129 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         }
 
         Ok(utxos)
+    }
+
+    fn list_template_catalogue(
+        &mut self,
+        name_filter: Option<&str>,
+        after: Option<&TemplateAddress>,
+        limit: u64,
+    ) -> Result<Vec<TemplateCatalogueEntry>, StorageError> {
+        const OPERATION: &str = "list_template_catalogue";
+        use crate::storage_sqlite::schema::template_catalogue;
+
+        let mut query = template_catalogue::table
+            .order_by(template_catalogue::id.asc())
+            .into_boxed();
+
+        if let Some(name) = name_filter {
+            let escaped = name.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+            query = query.filter(
+                template_catalogue::template_name
+                    .like(format!("%{escaped}%"))
+                    .escape('\\'),
+            );
+        }
+
+        if let Some(after_address) = after {
+            let after_hex = hex::encode(after_address.as_slice());
+            let cursor_id = template_catalogue::table
+                .select(template_catalogue::id)
+                .filter(template_catalogue::template_address.eq(&after_hex))
+                .first::<i32>(self.connection())
+                .optional()
+                .map_err(|e| StorageError::QueryError {
+                    reason: format!("{OPERATION}: cursor lookup: {e}"),
+                })?
+                .ok_or_else(|| StorageError::QueryError {
+                    reason: format!("{OPERATION}: cursor template address {after_address} not found"),
+                })?;
+
+            query = query.filter(template_catalogue::id.gt(cursor_id));
+        }
+
+        let rows = query
+            .limit(limit as i64)
+            .load::<TemplateCatalogueRow>(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {e}"),
+            })?;
+
+        rows.into_iter()
+            .map(|row| {
+                TemplateCatalogueEntry::try_from(row).map_err(|e| StorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "TemplateCatalogueEntry",
+                    details: e.to_string(),
+                })
+            })
+            .collect()
+    }
+
+    fn get_template_catalogue_entry(
+        &mut self,
+        template_address: &TemplateAddress,
+    ) -> Result<Option<TemplateCatalogueEntry>, StorageError> {
+        const OPERATION: &str = "get_template_catalogue_entry";
+        use crate::storage_sqlite::schema::template_catalogue;
+
+        let addr_hex = hex::encode(template_address.as_slice());
+        let row = template_catalogue::table
+            .filter(template_catalogue::template_address.eq(&addr_hex))
+            .first::<TemplateCatalogueRow>(self.connection())
+            .optional()
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {e}"),
+            })?;
+
+        row.map(|r| {
+            TemplateCatalogueEntry::try_from(r).map_err(|e| StorageError::DecodingError {
+                operation: OPERATION,
+                item: "TemplateCatalogueEntry",
+                details: e.to_string(),
+            })
+        })
+        .transpose()
+    }
+
+    fn list_watched_substates(
+        &mut self,
+        template_address: Option<&TemplateAddress>,
+        limit: u64,
+        offset: u64,
+    ) -> Result<Vec<WatchedSubstateEntry>, StorageError> {
+        const OPERATION: &str = "list_watched_substates";
+        use crate::storage_sqlite::schema::watched_substates;
+
+        let mut query = watched_substates::table.into_boxed();
+
+        if let Some(template_address) = template_address {
+            query = query.filter(watched_substates::template_address.eq(template_address.to_string()));
+        }
+
+        let rows = query
+            .limit(limit as i64)
+            .offset(offset as i64)
+            .load::<WatchedSubstateRow>(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {e}"),
+            })?;
+
+        rows.into_iter()
+            .map(|row| {
+                let component_address =
+                    SubstateId::from_str(&row.component_address).map_err(|e| StorageError::DataInconsistency {
+                        details: format!("{OPERATION}: Invalid component address {}: {e}", row.component_address),
+                    })?;
+                let template_address =
+                    TemplateAddress::from_hex(&row.template_address).map_err(|e| StorageError::DataInconsistency {
+                        details: format!("{OPERATION}: Invalid template address {}: {e}", row.template_address),
+                    })?;
+                Ok(WatchedSubstateEntry {
+                    component_address,
+                    template_address,
+                })
+            })
+            .collect()
     }
 }

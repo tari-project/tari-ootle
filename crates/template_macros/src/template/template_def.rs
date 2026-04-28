@@ -35,8 +35,23 @@ use tari_template_abi::{
 
 use crate::template::ast::{TemplateAst, TypeAst};
 
+/// Maximum length of a template name in bytes.
+const MAX_TEMPLATE_NAME_LENGTH: usize = 64;
+
 pub fn generate_template_def(ast: &TemplateAst) -> Result<TokenStream> {
     let template_name_as_str = ast.template_name.to_string();
+
+    if template_name_as_str.len() > MAX_TEMPLATE_NAME_LENGTH {
+        return Err(syn::Error::new_spanned(
+            &ast.template_name,
+            format!(
+                "Template name '{}' exceeds the maximum length of {} bytes (got {} bytes)",
+                template_name_as_str,
+                MAX_TEMPLATE_NAME_LENGTH,
+                template_name_as_str.len()
+            ),
+        ));
+    }
 
     let template_def = TemplateDef::V1(TemplateDefV1 {
         template_name: template_name_as_str.clone(),

@@ -49,6 +49,12 @@ pub struct ConsensusConstants {
     pub max_number_commands_in_block: usize,
     /// The value that fees are divided by to determine the amount of fees to burn. 0 means no fees are burned.
     pub fee_exhaust_divisor: u64,
+    /// Number of base-layer blocks of leeway a voter is allowed when accepting `EndEpoch` proposals.
+    /// If the voter's oracle has not yet crossed the next epoch boundary but its lagged scan height
+    /// is within this many blocks of the boundary, the voter accepts `EndEpoch` from peers whose
+    /// oracle has already crossed. Must be uniform network-wide to avoid divergent voting.
+    /// Set to 0 to disable leeway.
+    pub epoch_end_spread_blocks: u64,
 }
 
 impl ConsensusConstants {
@@ -63,6 +69,22 @@ impl ConsensusConstants {
             missed_proposal_recovery_threshold: 5,
             max_number_commands_in_block: 500,
             fee_exhaust_divisor: 20, // 1/20 = 5%
+            epoch_end_spread_blocks: 1,
+        }
+    }
+
+    pub const fn esmeralda() -> Self {
+        Self {
+            base_layer_confirmations: 50,
+            committee_size_per_shard_group: 40,
+            num_preshards: NumPreshards::current(),
+            pacemaker_block_time: Duration::from_secs(10),
+            missed_proposal_suspend_threshold: 5,
+            missed_proposal_evict_threshold: 10,
+            missed_proposal_recovery_threshold: 5,
+            max_number_commands_in_block: 500,
+            fee_exhaust_divisor: 20, // 1/20 = 5%
+            epoch_end_spread_blocks: 5,
         }
     }
 
@@ -77,6 +99,7 @@ impl ConsensusConstants {
             missed_proposal_recovery_threshold: 5,
             max_number_commands_in_block: 500,
             fee_exhaust_divisor: 20, // 1/20 = 5%
+            epoch_end_spread_blocks: 5,
         }
     }
 }
@@ -92,7 +115,8 @@ impl From<Network> for ConsensusConstants {
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(7),
             ),
-            Network::StageNet | Network::NextNet | Network::Igor | Network::Esmeralda => Self::testnet(),
+            Network::Esmeralda => Self::esmeralda(),
+            Network::StageNet | Network::NextNet | Network::Igor => Self::testnet(),
         }
     }
 }

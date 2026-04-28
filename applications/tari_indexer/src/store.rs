@@ -4,12 +4,14 @@
 use std::{
     collections::HashMap,
     ops::{Deref, DerefMut},
+    sync::Arc,
 };
 
 use serde::{Serialize, de::DeserializeOwned};
 use tari_engine_types::{
     Utxo,
     events::Event,
+    published_template::PublishedTemplateMetadata,
     substate::{Substate, SubstateId},
     transaction_receipt::TransactionReceipt,
 };
@@ -39,7 +41,14 @@ use tari_template_lib_types::{
 
 use crate::{
     network_state_sync::{EventFilter, SyncProgress},
-    storage_sqlite::models::{Key, KeyValue, SubstateRecord, UtxoUpdateRecord},
+    storage_sqlite::models::{
+        Key,
+        KeyValue,
+        SubstateRecord,
+        TemplateCatalogueEntry,
+        UtxoUpdateRecord,
+        WatchedSubstateEntry,
+    },
 };
 
 const LOG_TARGET: &str = "tari::indexer::store";
@@ -109,9 +118,23 @@ pub trait IndexerStoreReadTransaction {
         &mut self,
         substate_id_filter: Option<&SubstateId>,
         topic_filter: Option<&str>,
+        resource_address_filter: Option<&ResourceAddress>,
         offset: u32,
         limit: u32,
     ) -> Result<Vec<(TransactionId, Event)>, StorageError>;
+
+    /// Get events with id > after_id, ordered ascending by id.
+    /// Used for SSE catch-up/replay.
+    fn get_events_after_id(
+        &mut self,
+        after_id: i64,
+        topic_filter: Option<&str>,
+        substate_id_filter: Option<&SubstateId>,
+        template_address_filter: Option<&TemplateAddress>,
+        resource_address_filter: Option<&ResourceAddress>,
+        limit: u32,
+    ) -> Result<Vec<(i64, TransactionId, Event)>, StorageError>;
+
     fn list_recent_transactions(
         &mut self,
         last_transaction_id: Option<TransactionId>,
@@ -137,6 +160,9 @@ pub trait IndexerStoreReadTransaction {
 
     // -------------------------------- Epoch Checkpoints -------------------------------- //
     fn epoch_checkpoint_exists(&mut self, shard_group: ShardGroup, epoch: Epoch) -> Result<bool, StorageError>;
+    fn epoch_checkpoint_get_all(&mut self, from_epoch: Epoch, limit: u64)
+    -> Result<Vec<EpochCheckpoint>, StorageError>;
+    fn epoch_checkpoint_get_latest(&mut self) -> Result<EpochCheckpoint, StorageError>;
 
     // -------------------------------- UTXOs -------------------------------- //
 
@@ -169,6 +195,29 @@ pub trait IndexerStoreReadTransaction {
         resource_address: &ResourceAddress,
         public_nonce_and_tag: &[(UtxoTag, RistrettoPublicKeyBytes)],
     ) -> Result<Vec<(UtxoId, Utxo)>, StorageError>;
+
+    // -------------------------------- Template Catalogue -------------------------------- //
+
+    fn list_template_catalogue(
+        &mut self,
+        name_filter: Option<&str>,
+        after: Option<&TemplateAddress>,
+        limit: u64,
+    ) -> Result<Vec<TemplateCatalogueEntry>, StorageError>;
+
+    fn get_template_catalogue_entry(
+        &mut self,
+        template_address: &TemplateAddress,
+    ) -> Result<Option<TemplateCatalogueEntry>, StorageError>;
+
+    // -------------------------------- Watched Substates -------------------------------- //
+
+    fn list_watched_substates(
+        &mut self,
+        template_address: Option<&TemplateAddress>,
+        limit: u64,
+        offset: u64,
+    ) -> Result<Vec<WatchedSubstateEntry>, StorageError>;
 }
 
 pub trait IndexerStoreWriteTransaction {
@@ -191,13 +240,42 @@ pub trait IndexerStoreWriteTransaction {
         &mut self,
         receipts: I,
         event_filters: &[EventFilter],
-    ) -> Result<(), StorageError>;
+    ) -> Result<Vec<InsertedEvent>, StorageError>;
     fn insert_or_ignore_transaction(&mut self, transaction: &Transaction) -> Result<(), StorageError>;
     fn insert_or_ignore_epoch_checkpoint(&mut self, epoch_checkpoint: &EpochCheckpoint) -> Result<(), StorageError>;
+    fn upsert_template_catalogue(
+        &mut self,
+        template_address: &TemplateAddress,
+        metadata: &PublishedTemplateMetadata,
+    ) -> Result<(), StorageError>;
+
+    fn insert_watched_substate(
+        &mut self,
+        component_address: &SubstateId,
+        template_address: &TemplateAddress,
+    ) -> Result<(), StorageError>;
+
+    fn delete_watched_substate(&mut self, component_address: &SubstateId) -> Result<(), StorageError>;
+}
+
+/// An event that was inserted into the database, with its assigned auto-increment ID.
+#[derive(Debug, Clone)]
+pub struct InsertedEvent {
+    pub id: i64,
+    pub transaction_id: TransactionId,
+    pub event: Arc<Event>,
 }
 
 pub struct ReadOnlyStore<T: IndexerStoreReader> {
     inner: T,
+}
+
+impl<T: IndexerStoreReader + Clone> Clone for ReadOnlyStore<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 impl<T: IndexerStoreReader> ReadOnlyStore<T> {
@@ -255,10 +333,73 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
         &self,
         substate_id_filter: Option<&SubstateId>,
         topic_filter: Option<&str>,
+        resource_address_filter: Option<&ResourceAddress>,
         offset: u32,
         limit: u32,
     ) -> Result<Vec<(TransactionId, Event)>, StorageError> {
         self.inner
-            .with_read_tx(|tx| tx.get_events(substate_id_filter, topic_filter, offset, limit))
+            .with_read_tx(|tx| tx.get_events(substate_id_filter, topic_filter, resource_address_filter, offset, limit))
+    }
+
+    pub fn get_events_after_id(
+        &self,
+        after_id: i64,
+        topic_filter: Option<&str>,
+        substate_id_filter: Option<&SubstateId>,
+        template_address_filter: Option<&TemplateAddress>,
+        resource_address_filter: Option<&ResourceAddress>,
+        limit: u32,
+    ) -> Result<Vec<(i64, TransactionId, Event)>, StorageError> {
+        self.inner.with_read_tx(|tx| {
+            tx.get_events_after_id(
+                after_id,
+                topic_filter,
+                substate_id_filter,
+                template_address_filter,
+                resource_address_filter,
+                limit,
+            )
+        })
+    }
+
+    pub fn list_template_catalogue(
+        &self,
+        name_filter: Option<&str>,
+        after: Option<&TemplateAddress>,
+        limit: u64,
+    ) -> Result<Vec<crate::storage_sqlite::models::TemplateCatalogueEntry>, StorageError> {
+        self.inner
+            .with_read_tx(|tx| tx.list_template_catalogue(name_filter, after, limit))
+    }
+
+    pub fn get_template_catalogue_entry(
+        &self,
+        template_address: &TemplateAddress,
+    ) -> Result<Option<crate::storage_sqlite::models::TemplateCatalogueEntry>, StorageError> {
+        self.inner
+            .with_read_tx(|tx| tx.get_template_catalogue_entry(template_address))
+    }
+
+    pub fn epoch_checkpoint_get_all(
+        &self,
+        from_epoch: Epoch,
+        limit: u64,
+    ) -> Result<Vec<EpochCheckpoint>, StorageError> {
+        self.inner
+            .with_read_tx(|tx| tx.epoch_checkpoint_get_all(from_epoch, limit))
+    }
+
+    pub fn epoch_checkpoint_get_latest(&self) -> Result<EpochCheckpoint, StorageError> {
+        self.inner.with_read_tx(|tx| tx.epoch_checkpoint_get_latest())
+    }
+
+    pub fn list_watched_substates(
+        &self,
+        template_address: Option<&TemplateAddress>,
+        limit: u64,
+        offset: u64,
+    ) -> Result<Vec<WatchedSubstateEntry>, StorageError> {
+        self.inner
+            .with_read_tx(|tx| tx.list_watched_substates(template_address, limit, offset))
     }
 }

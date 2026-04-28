@@ -42,7 +42,7 @@ pub struct WriteArgs {
     pub manifest_args_file: Option<PathBuf>,
     #[clap(long, short = 'k', alias = "signer")]
     pub signer_secret_key: Option<String>,
-    #[clap(long, short = 'n')]
+    #[clap(long, short = 't')]
     pub network: Option<Network>,
 }
 #[derive(Args, Debug)]

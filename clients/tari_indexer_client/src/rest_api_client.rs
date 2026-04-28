@@ -16,6 +16,7 @@ use crate::{
     types::{
         GetConnectionsResponse,
         GetEpochManagerStatsResponse,
+        GetLatestEpochCheckpointResponse,
         GetNetworkInfoResponse,
         GetNetworkSyncStateResponse,
         GetNonFungiblesRequest,
@@ -33,20 +34,28 @@ use crate::{
         GetUtxosRequest,
         GetUtxosResponse,
         IndexerReadyResponse,
+        ListEpochCheckpointsRequest,
+        ListEpochCheckpointsResponse,
         ListRecentTransactionsRequest,
         ListRecentTransactionsResponse,
+        ListTemplateCatalogueRequest,
+        ListTemplateCatalogueResponse,
         ListTemplatesRequest,
         ListTemplatesResponse,
         ListTransactionReceiptsRequest,
         ListTransactionReceiptsResponse,
         ListUtxosRequest,
         ListUtxosResponse,
+        ListWatchedSubstatesRequest,
+        ListWatchedSubstatesResponse,
+        ListWatchedTemplatesResponse,
         QueryTransactionEventsRequest,
         QueryTransactionEventsResponse,
         StreamTransactionEventsRequest,
         SubmitTransactionDryRunResponse,
         SubmitTransactionRequest,
         SubmitTransactionResponse,
+        TemplateCatalogueItem,
     },
 };
 
@@ -155,6 +164,32 @@ impl IndexerRestApiClient {
         self.send_get(format!("templates/{template_address}"), ()).await
     }
 
+    pub async fn list_template_catalogue(
+        &self,
+        req: ListTemplateCatalogueRequest,
+    ) -> Result<ListTemplateCatalogueResponse, IndexerRestClientError> {
+        self.send_get("templates/catalogue", req).await
+    }
+
+    pub async fn get_template_catalogue_entry(
+        &self,
+        template_address: TemplateAddress,
+    ) -> Result<TemplateCatalogueItem, IndexerRestClientError> {
+        self.send_get(format!("templates/catalogue/{template_address}"), ())
+            .await
+    }
+
+    pub async fn list_watched_templates(&self) -> Result<ListWatchedTemplatesResponse, IndexerRestClientError> {
+        self.send_get("templates/watched", ()).await
+    }
+
+    pub async fn list_watched_substates(
+        &self,
+        req: ListWatchedSubstatesRequest,
+    ) -> Result<ListWatchedSubstatesResponse, IndexerRestClientError> {
+        self.send_get("substates/watched", req).await
+    }
+
     pub async fn query_transaction_events(
         &self,
         req: QueryTransactionEventsRequest,
@@ -235,6 +270,19 @@ impl IndexerRestApiClient {
 
     pub async fn get_tari_resource(&self) -> Result<GetResourceResponse, IndexerRestClientError> {
         self.send_get("resources/tari", ()).await
+    }
+
+    pub async fn list_epoch_checkpoints(
+        &self,
+        req: ListEpochCheckpointsRequest,
+    ) -> Result<ListEpochCheckpointsResponse, IndexerRestClientError> {
+        self.send_get("epoch-checkpoints", req).await
+    }
+
+    pub async fn get_latest_epoch_checkpoint(
+        &self,
+    ) -> Result<GetLatestEpochCheckpointResponse, IndexerRestClientError> {
+        self.send_get("epoch-checkpoints/latest", ()).await
     }
 
     pub async fn sse_events(&self) -> Result<SseEventStream, IndexerRestClientError> {

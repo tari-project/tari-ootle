@@ -49,7 +49,7 @@ use tari_epoch_oracles::{
         BaseLayerOracle,
     },
     configured::{ConfiguredEpochOracle, RealTimeEpochTicker},
-    hybrid::{HybridEpochOracle, watch_ticker},
+    hybrid::{HybridEpochOracle, mpsc_ticker},
     store::EpochOracleStore,
 };
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
@@ -84,7 +84,7 @@ use crate::{
     ValidatorNodeEpochManagerSpec,
     ValidatorNodeStateStore,
     base_layer::verify_correct_network,
-    consensus::{self, ConsensusHandle, TarBlockTransactionExecutor, ValidationContext},
+    consensus::{self, ConsensusHandle, TariBlockTransactionExecutor, ValidationContext},
     file_l1_submitter::FileLayerOneSubmitter,
     migrations,
     p2p::{
@@ -300,7 +300,7 @@ pub async fn spawn_services(
         fee_table.clone(),
         Arc::new(TariClaimBurnProofVerifier::new(config.network, global_db.clone())),
     );
-    let transaction_executor = TarBlockTransactionExecutor::new(
+    let transaction_executor = TariBlockTransactionExecutor::new(
         transaction_processor,
         create_consensus_transaction_validator(config.network, template_provider.clone()).boxed(),
     );
@@ -415,7 +415,12 @@ impl<TStore> Services<TStore> {
     }
 
     pub async fn join_all(self) -> Result<(), anyhow::Error> {
-        let results = future::try_join_all(self.handles).await?;
+        // Handles that have already been polled to completion by `on_any_exit` would
+        // panic tokio's JoinHandle invariant ("polled after completion") if we awaited
+        // them again. Filter them out — their result is either already surfaced via
+        // `on_any_exit` or we're in the shutdown path and don't care about replay.
+        let handles: Vec<_> = self.handles.into_iter().filter(|h| !h.is_finished()).collect();
+        let results = future::try_join_all(handles).await?;
         for res in results {
             res?;
         }
@@ -543,6 +548,7 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + BaseLayerBloc
                 .as_ref()
                 .map(|p| p.to_byte_type()),
             features,
+            epoch_end_spread_blocks: consensus_constants.epoch_end_spread_blocks,
         },
         config.network,
     ))
@@ -573,7 +579,7 @@ async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHea
     let oracle_config = config.epoch_oracle.configured.load().await?;
 
     info!(target: LOG_TARGET, "🔮Hybrid epoch oracle initializing: {}", oracle_config);
-    let (ticker, trigger) = watch_ticker();
+    let (ticker, trigger) = mpsc_ticker();
     let configured_oracle = ConfiguredEpochOracle::with_custom_ticker(oracle_config, store, ticker);
     Ok(HybridEpochOracle::new(configured_oracle, base_layer_oracle, trigger))
 }

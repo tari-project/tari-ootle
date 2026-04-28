@@ -52,12 +52,16 @@ import Grid from "@mui/material/Grid";
 import TextField from "@mui/material/TextField";
 import useManifestCodeStore from "@store/manifestStore";
 import type { ManifestTab } from "@store/manifestStore";
-import { FormatAlignLeft, LibraryAdd } from "@mui/icons-material";
+import { FileDownload, FileUpload, FormatAlignLeft, LibraryAdd } from "@mui/icons-material";
+import type { KeyId } from "@tari-project/ootle-ts-bindings";
 import { rejectReasonToString, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
 import { Highlight, themes } from "prism-react-renderer";
-import { useRef, useState } from "react";
-import Editor from "react-simple-code-editor";
+import { useCallback, useRef, useState } from "react";
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+import EditorImport from "react-simple-code-editor";
+// Vite 8 dev pre-bundler doesn't unwrap exports.default for CJS packages
+const Editor = (EditorImport as any).default ?? EditorImport;
 
 function formatManifestCode(code: string): string {
   const lines = code.split("\n");
@@ -109,8 +113,59 @@ function ManifestEditor() {
   const theme = useTheme();
 
   const { mutateAsync: submitManifest, isPending: isSubmittingManifest, error } = useSubmitManifest();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isDryRun = !fee;
+
+  const handleSave = useCallback(() => {
+    const data = manifest.tabs.map(({ name, code, variables, signingKeys }) => ({
+      name,
+      code,
+      variables,
+      signingKeys,
+    }));
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "manifest.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [manifest.tabs]);
+
+  const handleLoad = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(reader.result as string);
+          if (!Array.isArray(parsed) || parsed.length === 0) {
+            alert("Invalid manifest file: expected a non-empty array of tabs.");
+            return;
+          }
+          for (const tab of parsed) {
+            if (typeof tab.code !== "string" || typeof tab.name !== "string") {
+              alert("Invalid manifest file: each tab must have a name and code.");
+              return;
+            }
+          }
+          manifest.loadTabs(parsed);
+        } catch {
+          alert("Failed to parse manifest file.");
+        }
+      };
+      reader.readAsText(file);
+      // Reset so the same file can be loaded again
+      e.target.value = "";
+    },
+    [manifest.loadTabs],
+  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -120,7 +175,8 @@ function ManifestEditor() {
       manifest: manifest.code,
       variables: manifest.variables,
       max_fee: isDryRun ? 3000 : Number(fee),
-      signing_key_id: null,
+      seal_signer_key_id: null,
+      signing_key_ids: manifest.signingKeys,
       dry_run: isDryRun,
     })
       .then((response) => {
@@ -133,7 +189,7 @@ function ManifestEditor() {
           throw new Error("No result returned for dry run");
         }
         if ("Accept" in finalize!.result) {
-          setFee(BigInt(finalize!.fee_receipt.total_fees_paid));
+          setFee(BigInt(response.required_fees!));
           setFinalizeError(null);
           console.log("Dry run successful:", finalize);
         } else if ("Reject" in finalize!.result) {
@@ -150,6 +206,13 @@ function ManifestEditor() {
   return (
     <>
       <Grid size={12}>
+        <input
+          type="file"
+          accept=".json"
+          ref={fileInputRef}
+          onChange={handleFileChange}
+          style={{ display: "none" }}
+        />
         <form onSubmit={handleSubmit}>
           <ManifestTabBar
             tabs={manifest.tabs}
@@ -159,6 +222,8 @@ function ManifestEditor() {
             onRemove={manifest.removeTab}
             onRename={manifest.renameTab}
             onFormat={() => manifest.setCode(formatManifestCode(manifest.code))}
+            onSave={handleSave}
+            onLoad={handleLoad}
             onImportTemplate={(address, name) => {
               const importLine = `use template_${address} as ${name};`;
               if (manifest.code.includes(importLine)) return;
@@ -175,7 +240,7 @@ function ManifestEditor() {
           <Editor
             value={manifest.code}
             onValueChange={manifest.setCode}
-            highlight={(code) => (
+            highlight={(code: string) => (
               <Highlight
                 theme={theme.palette.mode === "dark" ? themes.vsDark : themes.vsLight}
                 code={code}
@@ -211,6 +276,14 @@ function ManifestEditor() {
               onAdd={manifest.addVariable}
               onRemove={manifest.removeVariable}
               onRename={manifest.renameVariable}
+              onAddSigningKey={manifest.addSigningKey}
+            />
+          </Box>
+          <Box className="flex-container" style={{ justifyContent: "flex-start" }}>
+            <SigningKeysEditor
+              signingKeys={manifest.signingKeys}
+              onAdd={manifest.addSigningKey}
+              onRemove={manifest.removeSigningKey}
             />
           </Box>
           <Box className="flex-container" style={{ justifyContent: "flex-end" }}>
@@ -249,6 +322,8 @@ function ManifestTabBar({
   onRemove,
   onRename,
   onFormat,
+  onSave,
+  onLoad,
   onImportTemplate,
 }: {
   tabs: ManifestTab[];
@@ -258,6 +333,8 @@ function ManifestTabBar({
   onRemove: (id: string) => void;
   onRename: (id: string, name: string) => void;
   onFormat: () => void;
+  onSave: () => void;
+  onLoad: () => void;
   onImportTemplate: (address: string, name: string) => void;
 }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -296,8 +373,14 @@ function ManifestTabBar({
       <IconButton size="small" onClick={onFormat} title="Format code">
         <FormatAlignLeft fontSize="small" />
       </IconButton>
-      <IconButton size="small" onClick={() => setImportOpen(true)} title="Import template" sx={{ mr: 1 }}>
+      <IconButton size="small" onClick={() => setImportOpen(true)} title="Import template">
         <LibraryAdd fontSize="small" />
+      </IconButton>
+      <IconButton size="small" onClick={onSave} title="Save manifests to file">
+        <FileDownload fontSize="small" />
+      </IconButton>
+      <IconButton size="small" onClick={onLoad} title="Load manifests from file" sx={{ mr: 1 }}>
+        <FileUpload fontSize="small" />
       </IconButton>
 
       <ImportTemplateDialog
@@ -528,16 +611,58 @@ function EditableKeyCell({ varKey, onRename }: { varKey: string; onRename: (oldK
   );
 }
 
+function EditableValueCell({ varKey, value, onUpdate }: { varKey: string; value: string; onUpdate: (key: string, value: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+
+  const commit = () => {
+    setEditing(false);
+    if (draft !== value) {
+      onUpdate(varKey, draft);
+    }
+  };
+
+  if (editing) {
+    return (
+      <TextField
+        size="small"
+        variant="standard"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") {
+            setDraft(value);
+            setEditing(false);
+          }
+        }}
+        autoFocus
+        fullWidth
+        sx={{ minWidth: 120 }}
+      />
+    );
+  }
+
+  return (
+    <Box onClick={() => { setDraft(value); setEditing(true); }} sx={{ cursor: "pointer", "&:hover": { textDecoration: "underline" } }}>
+      {value}
+    </Box>
+  );
+}
+
 function VariableEditor({
   variables,
   onAdd,
   onRemove,
   onRename,
+  onAddSigningKey,
 }: {
   variables: Record<string, string>;
   onAdd: (key: string, value: string) => void;
   onRemove: (key: string) => void;
   onRename: (oldKey: string, newKey: string) => void;
+  onAddSigningKey: (key: KeyId) => void;
 }) {
   const [showInputs, setShowInputs] = useState(false);
   const [key, setKey] = useState("");
@@ -550,6 +675,13 @@ function VariableEditor({
     if (!address) return;
     const varName = nextAccountVarName(variables);
     onAdd(varName, address);
+    // Auto-add the account's signing key
+    const accountInfo = accountsData?.accounts.find(
+      (a) => substateIdToString(a.account.component_address) === address,
+    );
+    if (accountInfo?.account.owner_key_id) {
+      onAddSigningKey(accountInfo.account.owner_key_id);
+    }
   };
 
   const handleAdd = () => {
@@ -581,7 +713,9 @@ function VariableEditor({
                 <DataTableCell>
                   <EditableKeyCell varKey={k} onRename={onRename} />
                 </DataTableCell>
-                <DataTableCell>{v}</DataTableCell>
+                <DataTableCell>
+                  <EditableValueCell varKey={k} value={v} onUpdate={onAdd} />
+                </DataTableCell>
                 <DataTableCell>
                   <IconButton size="small" onClick={() => onRemove(k)} title="Remove variable">
                     &times;
@@ -667,6 +801,99 @@ function VariableEditor({
           )}
         </Stack>
       )}
+    </Grid>
+  );
+}
+
+function formatKeyId(key: KeyId): string {
+  if ("Derived" in key) {
+    return `${key.Derived.key_branch}/${key.Derived.index}`;
+  }
+  return `imported/${key.Imported.local_key_id}`;
+}
+
+function findAccountNameForKey(key: KeyId, accounts: { account: { name: string | null; owner_key_id: KeyId | null } }[]): string | null {
+  const match = accounts.find(
+    (a) => a.account.owner_key_id && JSON.stringify(a.account.owner_key_id) === JSON.stringify(key),
+  );
+  return match?.account.name || null;
+}
+
+function SigningKeysEditor({
+  signingKeys,
+  onAdd,
+  onRemove,
+}: {
+  signingKeys: KeyId[];
+  onAdd: (key: KeyId) => void;
+  onRemove: (index: number) => void;
+}) {
+  const { data: accountsData } = useAccountsList(0, 100);
+  const accounts = accountsData?.accounts || [];
+
+  const handleAddAccountKey = (e: SelectChangeEvent) => {
+    const address = e.target.value;
+    if (!address) return;
+    const accountInfo = accounts.find(
+      (a) => substateIdToString(a.account.component_address) === address,
+    );
+    if (accountInfo?.account.owner_key_id) {
+      onAdd(accountInfo.account.owner_key_id);
+    }
+  };
+
+  return (
+    <Grid size={12} mt={1}>
+      {signingKeys.length > 0 && (
+        <Table sx={{ marginBottom: 2 }}>
+          <TableHead>
+            <TableRow>
+              <TableCell>Signing Keys</TableCell>
+              <TableCell>Account</TableCell>
+              <TableCell />
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {signingKeys.map((key, index) => {
+              const accountName = findAccountNameForKey(key, accounts);
+              return (
+                <TableRow key={JSON.stringify(key)}>
+                  <DataTableCell sx={{ fontFamily: "monospace", fontSize: "0.8rem" }}>
+                    {formatKeyId(key)}
+                  </DataTableCell>
+                  <DataTableCell>
+                    {accountName || "-"}
+                  </DataTableCell>
+                  <DataTableCell>
+                    <IconButton size="small" onClick={() => onRemove(index)} title="Remove signing key">
+                      &times;
+                    </IconButton>
+                  </DataTableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
+      <Stack direction="row" spacing={1} alignItems="center" marginBottom={2}>
+        {accounts.length > 0 && (
+          <FormControl style={{ minWidth: "200px" }}>
+            <InputLabel id="add-signing-key-label">Add Signing Key</InputLabel>
+            <Select labelId="add-signing-key-label" label="Add Signing Key" value="" onChange={handleAddAccountKey}>
+              {accounts
+                .filter((a) => a.account.owner_key_id)
+                .map(({ account }) => {
+                  const address = substateIdToString(account.component_address);
+                  return (
+                    <MenuItem key={address} value={address}>
+                      {account.name || address}
+                    </MenuItem>
+                  );
+                })}
+            </Select>
+          </FormControl>
+        )}
+      </Stack>
     </Grid>
   );
 }

@@ -10,22 +10,20 @@ use tari_template_abi::rust::{
 
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
-pub struct MaxString<const N: usize> {
-    s: Box<str>,
-}
+pub struct MaxString<const N: usize>(Box<str>);
 
 impl<const N: usize> Deref for MaxString<N> {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
-        &self.s
+        &self.0
     }
 }
 
 impl<const N: usize> MaxString<N> {
     pub fn new_checked(s: impl Into<Box<str>>) -> Option<Self> {
         let s = s.into();
-        if s.len() <= N { Some(Self { s }) } else { None }
+        if s.len() <= N { Some(Self(s)) } else { None }
     }
 
     /// Creates a new `MaxString` without checking the length.
@@ -35,31 +33,37 @@ impl<const N: usize> MaxString<N> {
     pub unsafe fn new_unchecked(s: impl Into<Box<str>>) -> Self {
         let s = s.into();
         debug_assert!(s.len() <= N, "string length exceeds maximum of {}: got {}", N, s.len());
-        Self { s }
+        Self(s)
     }
 
     pub fn into_string(self) -> String {
-        self.s.into_string()
+        self.0.into_string()
     }
 }
 
 impl<const N: usize> AsRef<str> for MaxString<N> {
     fn as_ref(&self) -> &str {
-        &self.s
+        &self.0
     }
 }
 
 impl<const N: usize> DerefMut for MaxString<N> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         // Mutable but not resizeable
-        &mut self.s
+        &mut self.0
+    }
+}
+
+impl<const N: usize> Default for MaxString<N> {
+    fn default() -> Self {
+        Self("".into())
     }
 }
 
 impl<const N: usize> serde::Serialize for MaxString<N> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where S: serde::Serializer {
-        serializer.serialize_str(&self.s)
+        serializer.serialize_str(&self.0)
     }
 }
 
@@ -107,7 +111,7 @@ impl<const N: usize> TryFrom<Box<str>> for MaxString<N> {
 
 impl<const N: usize> Display for MaxString<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.s.as_ref().fmt(f)
+        self.0.as_ref().fmt(f)
     }
 }
 
@@ -174,7 +178,7 @@ mod tests {
             let err: serde_json::Error = serde_json::from_str::<MaxString<5>>(json).unwrap_err();
             assert!(err.to_string().contains("string length exceeds maximum"));
 
-            let bytes = MaxString::<5> { s: "123456".into() };
+            let bytes = MaxString::<5>(Box::from("123456"));
             let serialized = tari_bor::encode(&bytes).unwrap();
             let err = tari_bor::decode::<MaxString<5>>(&serialized).unwrap_err();
             assert!(err.to_string().contains("string length exceeds maximum"));

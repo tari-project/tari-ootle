@@ -10,9 +10,105 @@
       "name": "BSD-3-Clause",
       "identifier": "BSD-3-Clause"
     },
-    "version": "0.27.0"
+    "version": "0.29.1"
   },
   "paths": {
+    "/epoch-checkpoints": {
+      "get": {
+        "tags": [
+          "handlers::epoch_checkpoints"
+        ],
+        "description": "List epoch checkpoints from storage",
+        "operationId": "list_epoch_checkpoints",
+        "parameters": [
+          {
+            "name": "from_epoch",
+            "in": "query",
+            "description": "Epoch to start listing from (inclusive). Defaults to 0",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of checkpoints to return (default: 20, max: 100)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of epoch checkpoints",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListEpochCheckpointsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/epoch-checkpoints/latest": {
+      "get": {
+        "tags": [
+          "handlers::epoch_checkpoints"
+        ],
+        "description": "Get the latest epoch checkpoint",
+        "operationId": "get_latest_epoch_checkpoint",
+        "responses": {
+          "200": {
+            "description": "The latest epoch checkpoint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetLatestEpochCheckpointResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No epoch checkpoints found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/epoch-manager/stats": {
       "get": {
         "tags": [
@@ -487,6 +583,119 @@
         }
       }
     },
+    "/templates/catalogue": {
+      "get": {
+        "tags": [
+          "handlers::templates"
+        ],
+        "description": "List templates discovered on the network via the template catalogue",
+        "operationId": "list_template_catalogue",
+        "parameters": [
+          {
+            "name": "name_filter",
+            "in": "query",
+            "description": "Substring filter on template name",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum entries to return (default: 20, max: 100)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Cursor: return entries inserted after the row with this template address. Omit to start from the beginning",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Template catalogue entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTemplateCatalogueResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to list template catalogue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/templates/catalogue/{template_address}": {
+      "get": {
+        "tags": [
+          "handlers::templates"
+        ],
+        "description": "Get a single template catalogue entry by its address",
+        "operationId": "get_template_catalogue_entry",
+        "responses": {
+          "200": {
+            "description": "Template catalogue entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateCatalogueItem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Template not found in catalogue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to fetch template catalogue entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/templates/{template_id}": {
       "get": {
         "tags": [
@@ -707,7 +916,7 @@
         "tags": [
           "handlers::transaction_events"
         ],
-        "description": "SSE stream of template-emitted transaction events",
+        "description": "SSE stream of template-emitted transaction events. Supports catch-up via the `after_id` query parameter or `Last-Event-ID` header.",
         "operationId": "sse_transaction_events",
         "parameters": [
           {
@@ -735,6 +944,25 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "resource_address",
+            "in": "query",
+            "description": "Filter by resource address (derived from substate_id for std.resource.* events, or from the `resource_address` payload entry for std.vault.deposit / std.vault.withdraw)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "after_id",
+            "in": "query",
+            "description": "Resume from this event ID (exclusive)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
             }
           }
         ],
@@ -1082,6 +1310,17 @@
           }
         }
       },
+      "GetLatestEpochCheckpointResponse": {
+        "type": "object",
+        "required": [
+          "checkpoint"
+        ],
+        "properties": {
+          "checkpoint": {
+            "type": "object"
+          }
+        }
+      },
       "GetNetworkSyncStateResponse": {
         "type": "object",
         "required": [
@@ -1100,6 +1339,13 @@
                 "$ref": "#/components/schemas/SyncProgress"
               }
             ]
+          },
+          "validators": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ValidatorStatus"
+            },
+            "description": "Per-validator consensus state as last observed by this indexer while\nsyncing from the network. Populated lazily, so validators that have\nnever been contacted for a sync will not appear here. Each entry\ncarries an `observed_at_unix_s` timestamp so callers can judge whether\nthe reading is fresh."
           }
         }
       },
@@ -1334,6 +1580,20 @@
           }
         }
       },
+      "ListEpochCheckpointsResponse": {
+        "type": "object",
+        "required": [
+          "checkpoints"
+        ],
+        "properties": {
+          "checkpoints": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
       "ListRecentTransactionsResponse": {
         "type": "object",
         "required": [
@@ -1348,6 +1608,20 @@
           }
         }
       },
+      "ListTemplateCatalogueResponse": {
+        "type": "object",
+        "required": [
+          "entries"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TemplateCatalogueItem"
+            }
+          }
+        }
+      },
       "ListTemplatesResponse": {
         "type": "object",
         "required": [
@@ -1357,7 +1631,7 @@
           "templates": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TemplateMetadata"
+              "$ref": "#/components/schemas/TemplateMeta"
             }
           }
         }
@@ -1555,7 +1829,42 @@
           }
         }
       },
-      "TemplateMetadata": {
+      "TemplateCatalogueItem": {
+        "type": "object",
+        "required": [
+          "template_address",
+          "template_name",
+          "author_public_key",
+          "binary_hash",
+          "at_epoch"
+        ],
+        "properties": {
+          "at_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "author_public_key": {
+            "type": "string"
+          },
+          "binary_hash": {
+            "type": "string"
+          },
+          "metadata_hash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "template_address": {
+            "type": "string"
+          },
+          "template_name": {
+            "type": "string"
+          }
+        }
+      },
+      "TemplateMeta": {
         "type": "object",
         "required": [
           "name",
@@ -1584,6 +1893,13 @@
             "format": "int64",
             "minimum": 0
           },
+          "metadata_hash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional multihash of off-chain CBOR metadata"
+          },
           "name": {
             "type": "string"
           }
@@ -1606,6 +1922,57 @@
           },
           "transaction_id": {
             "type": "string"
+          }
+        }
+      },
+      "ValidatorConsensusState": {
+        "type": "string",
+        "enum": [
+          "Idle",
+          "CheckSync",
+          "Syncing",
+          "Running",
+          "Sleeping",
+          "Shutdown"
+        ]
+      },
+      "ValidatorStatus": {
+        "type": "object",
+        "description": "A snapshot of one validator's consensus pacemaker state as observed by the\nindexer during a recent sync round.",
+        "required": [
+          "peer_id",
+          "shard_group",
+          "epoch",
+          "height",
+          "state",
+          "observed_at_unix_s"
+        ],
+        "properties": {
+          "epoch": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "height": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "observed_at_unix_s": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix timestamp (seconds) at which this snapshot was captured. Clients\ncan derive the freshness of the snapshot by comparing this to the\ncurrent wall-clock time.",
+            "minimum": 0
+          },
+          "peer_id": {
+            "type": "string",
+            "description": "libp2p PeerId of the validator."
+          },
+          "shard_group": {
+            "type": "object"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ValidatorConsensusState"
           }
         }
       }

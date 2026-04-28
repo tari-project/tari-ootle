@@ -55,6 +55,7 @@ use super::{
     EvictNodeAtom,
     ForeignProposalAtom,
     ForeignProposalRecord,
+    LockedEpoch,
     PendingShardStateTreeDiff,
     SubstateDestroy,
     SubstateRecord,
@@ -355,6 +356,14 @@ impl Block {
         self.header.epoch()
     }
 
+    pub fn epoch_hash(&self) -> &FixedHash {
+        self.header.epoch_hash()
+    }
+
+    pub fn to_locked_epoch(&self) -> LockedEpoch {
+        LockedEpoch::new(self.epoch(), self.epoch_hash().into_array().into())
+    }
+
     pub fn shard_group(&self) -> ShardGroup {
         self.header.shard_group()
     }
@@ -423,10 +432,6 @@ impl Block {
         self.header.signature()
     }
 
-    pub fn epoch_hash(&self) -> &FixedHash {
-        self.header.epoch_hash()
-    }
-
     pub fn extra_data(&self) -> &ExtraData {
         self.header.extra_data()
     }
@@ -472,6 +477,24 @@ impl Block {
         height: NodeHeight,
     ) -> Result<Vec<BlockId>, StorageError> {
         tx.blocks_get_all_ids_by_height(epoch, height)
+    }
+
+    /// Returns the block justified by the given proposal certificate.
+    ///
+    /// When the QC justifies the zero block, `calculate_block_id()` returns `BlockId::zero()` which
+    /// is the global zero block (epoch 0, all-zero fields). However, the epoch-specific genesis block
+    /// has non-trivial fields (state_merkle_root, epoch_hash, etc.) that are needed for deterministic
+    /// dummy block computation. This method correctly resolves to the epoch genesis in that case.
+    pub fn get_justified_block<TTx: StateStoreReadTransaction>(
+        tx: &TTx,
+        justify: &ProposalCertificate,
+        epoch: Epoch,
+    ) -> Result<Self, StorageError> {
+        if justify.justifies_zero_block() {
+            Self::get_genesis_for_epoch(tx, epoch)
+        } else {
+            Self::get(tx, &justify.calculate_block_id())
+        }
     }
 
     pub fn get_genesis_for_epoch<TTx: StateStoreReadTransaction>(tx: &TTx, epoch: Epoch) -> Result<Self, StorageError> {
@@ -815,10 +838,10 @@ impl Block {
                         // justify: ProposalCertificate::get(tx, &destroyed.justify)?,
                     }));
                 } else {
-                    updates.push(SubstateUpdateProof::Create(SubstateCreate {
+                    updates.push(SubstateUpdateProof::Create(Box::new(SubstateCreate {
                         // created_qc: substate.get_created_quorum_certificate(tx)?,
                         substate: substate.into(),
-                    }));
+                    })));
                 };
             }
         }

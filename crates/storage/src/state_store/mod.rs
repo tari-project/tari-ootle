@@ -77,7 +77,6 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::ootle::storage";
-
 pub trait StateStore {
     type Addr: NodeAddressable;
     type ReadTransaction<'a>: StateStoreReadTransaction<Addr = Self::Addr>
@@ -461,6 +460,7 @@ pub trait StateStoreWriteTransaction {
         initial_evidence: &Evidence,
         is_ready: bool,
         is_global: bool,
+        max_epoch: Option<Epoch>,
     ) -> Result<(), StorageError>;
     fn transaction_pool_add_pending_update(
         &mut self,

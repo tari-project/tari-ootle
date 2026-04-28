@@ -35,6 +35,8 @@ export default defineConfig({
             { label: "Tari Cli", link: "/guides/cli/" },
             { label: "Resources", link: "/guides/resources/" },
             { label: "Authorization and Access", link: "/guides/authorization-and-access/" },
+            { label: "Stealth Transfers", link: "/guides/stealth-resources/" },
+            { label: "Randomness in Templates", link: "/guides/randomness/" },
           ],
         },
         {

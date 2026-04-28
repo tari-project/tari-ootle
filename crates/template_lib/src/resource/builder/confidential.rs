@@ -4,6 +4,7 @@ use tari_template_abi::rust::prelude::*;
 use tari_template_lib_types::{
     AuthHook,
     ComponentAddress,
+    FunctionName,
     Metadata,
     OwnerRule,
     ResourceAddress,
@@ -14,6 +15,7 @@ use tari_template_lib_types::{
 
 use crate::{
     args::MintArg,
+    error_variants::ERR_AUTH_HOOK_FN_NAME_LEN,
     models::{Bucket, ResourceAddressAllocation},
     resource::ResourceManager,
     types::{ResourceType, crypto::RistrettoPublicKeyBytes},
@@ -170,6 +172,13 @@ impl ConfidentialResourceBuilder {
         self
     }
 
+    /// Sets up who (apart from the owner) can update the resource's metadata. The token symbol
+    /// remains immutable once set.
+    pub fn update_metadata(mut self, rule: AccessRule) -> Self {
+        self.access_rules = self.access_rules.update_metadata(rule);
+        self
+    }
+
     /// Sets up the specified `symbol` as the token symbol in the metadata of the resource
     pub fn with_token_symbol<S: Into<String>>(mut self, symbol: S) -> Self {
         self.token_symbol = Some(symbol.into());
@@ -250,8 +259,17 @@ impl ConfidentialResourceBuilder {
     ///     .with_authorization_hook(*alloc.address(), "my_hook")
     ///     .build();
     /// ```
-    pub fn with_authorization_hook<T: Into<String>>(mut self, address: ComponentAddress, auth_callback: T) -> Self {
-        self.authorize_hook = Some(AuthHook::new(address, auth_callback.into()));
+    pub fn with_authorization_hook<T: TryInto<FunctionName>>(
+        mut self,
+        address: ComponentAddress,
+        auth_callback: T,
+    ) -> Self {
+        self.authorize_hook = Some(AuthHook::new(
+            address,
+            auth_callback
+                .try_into()
+                .unwrap_or_else(|_| panic!("{}", ERR_AUTH_HOOK_FN_NAME_LEN)),
+        ));
         self
     }
 

@@ -30,7 +30,6 @@ use tari_ootle_storage::{
     StorageError,
     consensus_models::{SubstateRecord, SubstateTransition, SubstateUpdateBatch},
 };
-use tari_state_tree::Version;
 use tari_template_lib::types::{
     EntityId,
     Metadata,
@@ -43,13 +42,12 @@ use tari_template_lib::types::{
         PUBLIC_IDENTITY_RESOURCE_ADDRESS,
         STEALTH_TARI_RESOURCE_ADDRESS,
         TOKEN_SYMBOL,
+        XTR_FAUCET_CLAIM_RESOURCE_ADDRESS,
         XTR_FAUCET_COMPONENT_ADDRESS,
         XTR_FAUCET_VAULT_ADDRESS,
     },
     rule,
 };
-
-const INITIAL_STATE_VERSION: Version = 0;
 
 pub fn has_bootstrapped<TTx: StateStoreReadTransaction>(tx: &TTx) -> Result<bool, StorageError> {
     // Assume that if the public identity resource exists, then the rest of the state has been bootstrapped
@@ -60,20 +58,6 @@ pub fn has_bootstrapped<TTx: StateStoreReadTransaction>(tx: &TTx) -> Result<bool
 }
 
 pub fn create_genesis_state<TTx>(
-    tx: &mut TTx,
-    network: Network,
-    num_preshards: NumPreshards,
-) -> Result<(), StorageError>
-where
-    TTx: StateStoreWriteTransaction + Deref,
-    TTx::Target: StateStoreReadTransaction,
-    TTx::Addr: NodeAddressable + Serialize,
-{
-    migrate_genesis_state_v1(tx, network, num_preshards)?;
-    Ok(())
-}
-
-pub fn migrate_genesis_state_v1<TTx>(
     tx: &mut TTx,
     network: Network,
     num_preshards: NumPreshards,
@@ -132,6 +116,22 @@ where
     };
     create_substate(tx, num_preshards, XTR_FAUCET_COMPONENT_ADDRESS, value)?;
 
+    // Create the claim receipt resource: one NFT per claimant public key, immediately burned after minting.
+    // The burned substate key persists on-chain, preventing duplicate claims.
+    let claim_resource = Resource::new(
+        ResourceType::NonFungible,
+        SubstateOwnerRule::None,
+        ResourceAccessRules::new()
+            .mintable(rule!(component(XTR_FAUCET_COMPONENT_ADDRESS)))
+            .burnable(rule!(component(XTR_FAUCET_COMPONENT_ADDRESS))),
+        Metadata::new(),
+        None,
+        None,
+        0,
+        false,
+    );
+    create_substate(tx, num_preshards, XTR_FAUCET_CLAIM_RESOURCE_ADDRESS, claim_resource)?;
+
     Ok(())
 }
 
@@ -187,13 +187,11 @@ where
     let substate_id = substate_id.into();
     let shard = VersionedSubstateIdRef::new(&substate_id, 0).to_shard(num_preshards);
     let mut batch = SubstateUpdateBatch::new(Epoch::zero());
-    batch
-        .with_transition(shard, INITIAL_STATE_VERSION)
-        .push(SubstateTransition::Up {
-            id: substate_id,
-            version: 0,
-            substate_or_hash: value.into().into(),
-        });
+    batch.with_transition(shard, 0).push(SubstateTransition::Up {
+        id: substate_id,
+        version: 0,
+        substate_or_hash: value.into().into(),
+    });
 
     SubstateRecord::commit_batch(tx, batch)?;
 

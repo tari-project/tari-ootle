@@ -17,7 +17,7 @@ pub(super) enum ConsensusState<TSpec> {
     Shutdown,
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ConsensusCurrentState {
     #[default]
     Idle,

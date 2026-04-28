@@ -49,6 +49,7 @@ use tari_engine_types::{
     vault::Vault,
 };
 use tari_ootle_common_types::{GetVerifier, services::template_provider::TemplateProvider};
+use tari_ootle_template_metadata::MetadataHash;
 use tari_ootle_transaction::{
     AllocatableAddressType,
     Assertion,
@@ -134,7 +135,7 @@ use crate::{
         RuntimeError,
         RuntimeInterface,
         engine_args::EngineArgs,
-        error::ArgumentValidationError,
+        error::{ArgumentValidationError, LimitError},
         locking::{LockError, LockedSubstate},
         pay_fee::PayFee,
         scope::PushCallFrame,
@@ -250,6 +251,22 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
 
             Ok(())
         })
+    }
+
+    fn check_token_symbol_length(metadata: &Metadata) -> Result<(), RuntimeError> {
+        if let Some(symbol) = metadata.get(TOKEN_SYMBOL) &&
+            symbol.len() > limits::MAX_TOKEN_SYMBOL_LEN
+        {
+            return Err(RuntimeError::InvalidArgument {
+                argument: "metadata",
+                reason: format!(
+                    "token symbol exceeds {} bytes (got {})",
+                    limits::MAX_TOKEN_SYMBOL_LEN,
+                    symbol.len()
+                ),
+            });
+        }
+        Ok(())
     }
 
     fn emit_std_event<T: Into<SubstateId>>(
@@ -613,8 +630,7 @@ where
                         .as_component_address()
                         .ok_or_else(|| RuntimeError::InvalidArgument {
                             argument: "component_ref",
-                            reason: "GetState component action should not define a specific component address"
-                                .to_string(),
+                            reason: "GetState component action requires a component address".to_string(),
                         })?;
                 args.assert_no_args("ComponentAction::GetState")?;
                 self.tracker.write_with(|state| {
@@ -745,23 +761,17 @@ where
                         .as_component_address()
                         .ok_or_else(|| RuntimeError::InvalidArgument {
                             argument: "component_ref",
-                            reason: "SetAccessRules component action requires a component address".to_string(),
+                            reason: "GetTemplateAddress component action requires a component address".to_string(),
                         })?;
 
                 args.assert_no_args("Component::GetTemplateAddress")?;
 
-                // The template can never change so we'll just fetch the component
-                self.tracker.read_with(|state| {
-                    let substate = state.store().get_unmodified_substate(&component_address.into())?;
-                    let component = substate
-                        .substate_value()
-                        .component()
-                        .ok_or(RuntimeError::InvariantError {
-                            function: "GetTemplateAddress",
-                            details: format!("Substate at {} is not a component", component_address),
-                        })?;
-
-                    Ok(InvokeResult::encode(&component.template_address)?)
+                self.tracker.write_with(|state| {
+                    let locked = state.read_lock_substate(SubstateId::Component(component_address))?;
+                    let component = state.get_component(&locked)?;
+                    let template_address = component.template_address;
+                    state.unlock_substate(locked)?;
+                    Ok(InvokeResult::encode(&template_address)?)
                 })
             },
             ComponentAction::GetOwnerProof => {
@@ -861,6 +871,8 @@ where
                         reason: "Non-fungible resources cannot have divisibility".to_string(),
                     });
                 }
+
+                Self::check_token_symbol_length(&arg.metadata)?;
 
                 let owner_rule = match arg.owner_rule {
                     OwnerRule::OwnedBySigner => SubstateOwnerRule::ByPublicKey(self.seal_signer_public_key),
@@ -1197,6 +1209,62 @@ where
                     resource_mut.set_access_rules(access_rules);
                     let payload = Metadata::from_iter([("resource_type", resource_mut.resource_type().to_string())]);
                     Self::emit_std_event("resource", "update_access_rules", resource_address, payload, state_mut)?;
+
+                    state_mut.unlock_substate(resource_lock)?;
+
+                    Ok(InvokeResult::unit())
+                })
+            },
+            ResourceAction::UpdateMetadata => {
+                let resource_address =
+                    resource_ref
+                        .as_resource_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "UpdateMetadata resource action requires a resource address".to_string(),
+                        })?;
+                let new_metadata: Metadata = args.assert_one_arg()?;
+
+                Self::check_token_symbol_length(&new_metadata)?;
+
+                let (resource_lock, maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                    let resource_lock = state_mut.write_lock_substate(SubstateId::Resource(resource_address))?;
+
+                    let resource = state_mut.get_resource(&resource_lock)?;
+
+                    state_mut.authorization().check_resource_access_rules(
+                        ResourceAuthAction::UpdateMetadata,
+                        resource.as_ownership(),
+                        resource.access_rules(),
+                    )?;
+
+                    // The token symbol is immutable once set.
+                    if let Some(existing_symbol) = resource.token_symbol() &&
+                        new_metadata.get(TOKEN_SYMBOL) != Some(existing_symbol)
+                    {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "metadata",
+                            reason: "cannot update an existing token symbol".to_string(),
+                        });
+                    }
+
+                    let auth_caller = state_mut.get_auth_caller()?;
+                    Ok::<_, RuntimeError>((resource_lock, resource.auth_hook().cloned(), auth_caller))
+                })?;
+
+                if let Some(auth_hook) = maybe_auth_hook {
+                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::UpdateMetadata)?;
+                }
+
+                self.tracker.write_with(|state_mut| {
+                    let resource_mut = state_mut.get_resource_mut(&resource_lock)?;
+                    resource_mut.set_metadata(new_metadata);
+                    let mut payload =
+                        Metadata::from_iter([("resource_type", resource_mut.resource_type().to_string())]);
+                    if let Some(symbol) = resource_mut.token_symbol() {
+                        payload.insert(TOKEN_SYMBOL, symbol);
+                    }
+                    Self::emit_std_event("resource", "update_metadata", resource_address, payload, state_mut)?;
 
                     state_mut.unlock_substate(resource_lock)?;
 
@@ -2143,6 +2211,13 @@ where
 
                 self.tracker.write_with(|state| {
                     let bucket = state.take_bucket(bucket_id)?;
+                    // It is invalid to burn a bucket that has locked funds (e.g. via a proof)
+                    if !bucket.locked_amount().is_zero() {
+                        return Err(RuntimeError::InvalidOpDepositLockedBucket {
+                            bucket_id,
+                            locked_amount: bucket.locked_amount(),
+                        });
+                    }
                     let burnt_amount = bucket.unlocked_amount();
                     state.burn_bucket(bucket)?;
 
@@ -2512,6 +2587,10 @@ where
                 let epoch = self.tracker.get_current_epoch()?;
                 Ok(InvokeResult::encode(&epoch)?)
             },
+            ConsensusAction::GetCurrentEpochHash => {
+                let hash = self.tracker.get_current_epoch_hash()?;
+                Ok(InvokeResult::encode(&hash)?)
+            },
         }
     }
 
@@ -2519,7 +2598,11 @@ where
         self.invoke_modules_on_runtime_call("generate_random_invoke")?;
         match action {
             GenerateRandomAction::GetRandomBytes { len } => {
-                let random = self.tracker.get_pseudorandom_bytes(len as usize)?;
+                let len = len as usize;
+                if len > limits::ENGINE_LIMITS.max_random_bytes_len {
+                    return Err(LimitError::MaxRandomBytesLenExceeded { len }.into());
+                }
+                let random = self.tracker.get_pseudorandom_bytes(len)?;
                 Ok(InvokeResult::encode(&random)?)
             },
         }
@@ -2528,8 +2611,9 @@ where
     fn generate_uuid(&mut self) -> Result<[u8; 32], RuntimeError> {
         self.invoke_modules_on_runtime_call("generate_uuid")?;
         self.tracker.read_with(|state| {
+            let epoch_hash = state.get_current_epoch_hash()?;
             let id_provider = state.id_provider()?;
-            Ok(id_provider.new_uuid()?)
+            Ok(id_provider.new_uuid(&epoch_hash)?)
         })
     }
 
@@ -2604,16 +2688,14 @@ where
         self.invoke_modules_on_runtime_call("finalize")?;
         // If the fee module is present, this will add substate storage fees
         self.invoke_modules_on_before_finalize()?;
-        let finalized = self.tracker.finalize(None)?;
-        Ok(finalized)
+        self.tracker.finalize(None)
     }
 
     fn finalize_failure(&mut self, reason: RejectReason) -> Result<FinalizeResult, RuntimeError> {
         self.invoke_modules_on_runtime_call("finalize_failure")?;
         // If the fee module is present, this will add substate storage fees
         self.invoke_modules_on_before_finalize()?;
-        let finalized = self.tracker.finalize(Some(reason))?;
-        Ok(finalized)
+        self.tracker.finalize(Some(reason))
     }
 
     fn validate_finalized(&self) -> Result<(), RuntimeError> {
@@ -2829,7 +2911,12 @@ where
         Ok(())
     }
 
-    fn publish_template(&mut self, template: TemplateBlob) -> Result<(), RuntimeError> {
+    fn publish_template(
+        &mut self,
+        template: TemplateBlob,
+        metadata_hash: Option<MetadataHash>,
+        template_def: TemplateDef,
+    ) -> Result<(), RuntimeError> {
         self.invoke_modules_on_runtime_call("publish_template")?;
         self.tracker.write_with(|state_mut| {
             let template_byte_size = template.len();
@@ -2837,12 +2924,24 @@ where
             let template_address =
                 PublishedTemplateAddress::from_author_and_binary_hash(&self.seal_signer_public_key, &code_hash);
             let epoch = state_mut.get_current_epoch()?;
+            let template_name = template_def
+                .template_name()
+                .try_into()
+                .map_err(|_| RuntimeError::InvalidArgument {
+                    argument: "template_name",
+                    reason: format!(
+                        "Template name exceeds maximum length of {} bytes",
+                        limits::ENGINE_LIMITS.max_template_name_length
+                    ),
+                })?;
             state_mut.new_substate(
                 template_address,
                 SubstateValue::Template(PublishedTemplate {
+                    template_name,
                     binary: template,
                     author: self.seal_signer_public_key,
                     at_epoch: epoch.as_u64(),
+                    metadata_hash: metadata_hash.clone(),
                 }),
             )?;
             // Mark template substate as owned by current call stack

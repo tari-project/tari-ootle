@@ -32,8 +32,10 @@ import { useNftTransferStore } from "@store/nftTransferStore";
 import {
   Account,
   ComponentAddressOrName,
+  getRejectReasonFromTransactionResult,
   NonFungibleId,
   NonFungibleToken,
+  rejectReasonToString,
   ResourceAddress,
 } from "@tari-project/ootle-ts-bindings";
 import { substateIdToString } from "@utils/helpers";
@@ -73,6 +75,7 @@ export interface TransferNftDialogProps {
   handleClose: () => void;
   preSelectedNftId?: NonFungibleId;
   preSelectedResourceAddress?: ResourceAddress;
+  preSelectedNfts?: NonFungibleToken[];
 }
 
 function getAccountSelector(account: Account): ComponentAddressOrName {
@@ -106,19 +109,20 @@ function getNftIdTypeAsName(nftId: NonFungibleId): string {
 }
 
 export function TransferNftDialog(props: TransferNftDialogProps) {
-  const { preSelectedNftId, preSelectedResourceAddress } = props;
+  const { preSelectedNftId, preSelectedResourceAddress, preSelectedNfts } = props;
   const { account, setPopup } = useAccountStore();
+  const hasBatchSelection = preSelectedNfts && preSelectedNfts.length > 0;
 
   const {
     currentStep,
     transferFormState,
+    transferResult,
     setCurrentStep,
     setDisabled,
     setTransferFormState,
     setValidity,
     setTransferResult,
     setAutoCloseTimeoutId,
-    initializeFormState,
     resetState,
   } = useNftTransferStore();
 
@@ -204,7 +208,8 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
         return result.fee;
       } else {
         console.error("Fee estimation rejected:", result);
-        throw new Error("Could not estimate transfer fee");
+        const reason = result ? getRejectReasonFromTransactionResult(result.result.result) : undefined;
+        throw new Error(reason ? rejectReasonToString(reason) : "Transaction was rejected");
       }
     } catch (e: any) {
       console.error("Fee estimation error:", e);
@@ -225,7 +230,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     }
 
     // Check if NFTs are selected (if not pre-selected)
-    if (!preSelectedNftId && transferFormState.nfts.length === 0) {
+    if (!preSelectedNftId && !hasBatchSelection && transferFormState.nfts.length === 0) {
       setPopup({ title: "Missing NFTs", error: true, message: "Please select at least one NFT to transfer" });
       return;
     }
@@ -239,7 +244,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
         setPopup({
           title: "Fee estimation failed",
           error: true,
-          message: "Unable to estimate transaction fee. Please try again or check if you have sufficient funds.",
+          message: error instanceof Error ? error.message : String(error),
         });
         return;
       }
@@ -287,8 +292,11 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
 
   const handleClose = () => {
     resetState(preSelectedNftId, preSelectedResourceAddress);
-    setCurrentStep("form");
-    props.handleClose?.();
+    if (transferResult?.success) {
+      props.onSendComplete?.();
+    } else {
+      props.handleClose?.();
+    }
   };
 
   const handleAutoCloseAfterSuccess = () => {
@@ -337,6 +345,13 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     }
   };
 
+  const filteredNfts = useMemo(() => {
+    if (preSelectedResourceAddress && !preSelectedNftId) {
+      return availableNfts.filter((nft) => nft.resource_address === preSelectedResourceAddress);
+    }
+    return availableNfts;
+  }, [availableNfts, preSelectedResourceAddress, preSelectedNftId]);
+
   useEffect(() => {
     if (loadedNfts !== undefined) {
       setAvailableNfts(loadedNfts);
@@ -346,14 +361,25 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   useEffect(() => {
     if (props.open && account) {
       // When dialog opens, always reset to ensure clean state
-      resetState(preSelectedNftId, preSelectedResourceAddress);
-      initializeFormState(preSelectedNftId, preSelectedResourceAddress, substateIdToString(account.component_address));
+      resetState(preSelectedNftId, preSelectedResourceAddress, substateIdToString(account.component_address));
+
+      // If batch-selected NFTs are provided, pre-fill the form
+      if (hasBatchSelection) {
+        setTransferFormState({
+          nfts: preSelectedNfts.map((nft) => nft.nft_id),
+          resourceAddress: preSelectedNfts[0].resource_address,
+        });
+        setValidity({ nfts: true });
+      }
     }
-  }, [props.open, preSelectedNftId, preSelectedResourceAddress, account?.component_address]);
+  }, [props.open, preSelectedNftId, preSelectedResourceAddress, account?.component_address, hasBatchSelection, preSelectedNfts]);
 
   return (
     <Dialog open={props.open} onClose={handleClose} maxWidth="sm" fullWidth>
-      <PopupTitle onClose={handleClose} title="Transfer NFT" />
+      <PopupTitle
+        onClose={handleClose}
+        title={preSelectedNftId ? "Transfer NFT" : `Transfer NFTs${hasBatchSelection ? ` (${preSelectedNfts.length})` : ""}`}
+      />
       <DialogContent>
         {!account ? (
           <div style={{ padding: "20px", textAlign: "center" }}>
@@ -365,8 +391,9 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
               <FormStep
                 account={account}
                 accounts={accounts}
-                availableNfts={availableNfts}
+                availableNfts={filteredNfts}
                 preSelectedNftId={preSelectedNftId}
+                preSelectedNfts={preSelectedNfts}
                 isEstimatingFee={isEstimatingFee}
                 onSubmit={handleFormSubmit}
                 onCancel={handleClose}
@@ -379,7 +406,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
               <ConfirmationStep
                 accounts={accounts}
                 preSelectedNftId={preSelectedNftId}
-                availableNfts={availableNfts}
+                availableNfts={filteredNfts}
                 onBack={() => setCurrentStep("form")}
                 onConfirm={onTransfer}
               />

@@ -130,6 +130,8 @@ export interface TransferParams {
   badge_usage: BadgeUsage;
   dry_run: boolean;
   output_memo?: Memo;
+  swap_pool_address?: string | null;
+  swap_input_amount?: bigint | null;
 }
 
 export const useAccountsTransfer = () => {
@@ -162,8 +164,16 @@ export const useAccountsTransfer = () => {
           fee_params: {
             // For simplicity, we'll use prefer revealed for fees whenever a non-TARI_TOKEN stealth transfer is made
             input_selection: params.resource_address === TARI_TOKEN ? params.input_selection : "PreferRevealed",
-            // TODO: UI support for pay fee with swap for stealth transfers
-            pay_fee_with_swap: null,
+            pay_fee_with_swap: params.swap_pool_address
+              ? {
+                  pool_address: params.swap_pool_address,
+                  input_resource: params.resource_address,
+                  input_amount: params.swap_input_amount || 0n,
+                  // Set min output to max_fee so the swap must produce enough TARI to cover the fee.
+                  // Any excess TARI from the swap is deposited back to the user's account.
+                  min_xtr_output_amount: max_fee,
+                }
+              : null,
           },
           input_selection: params.input_selection,
           resource_address: params.resource_address,
@@ -213,16 +223,13 @@ export const useAccountsTransfer = () => {
 export const useAccountsCreateFreeTestCoins = () => {
   const createFreeTestCoins = async ({
     account,
-    amount,
     fee,
   }: {
     account: ComponentAddressOrName;
-    amount: number;
     fee: number | null;
   }) =>
     accountsCreateFreeTestCoins({
       account,
-      amount,
       max_fee: fee,
     });
 

@@ -31,12 +31,16 @@ import { PiPuzzlePiece } from "react-icons/pi";
 import {
   IoBarChart,
   IoBarChartOutline,
+  IoEye,
+  IoEyeOutline,
   IoGitNetwork,
   IoGitNetworkOutline,
   IoHome,
   IoHomeOutline,
   IoReceipt,
   IoReceiptOutline,
+  IoServer,
+  IoServerOutline,
 } from "react-icons/io5";
 import { TbTimelineEventText, TbTemplate } from "react-icons/tb";
 
@@ -91,6 +95,18 @@ const mainItems = [
     link: "templates",
   },
   {
+    title: "Watched",
+    icon: <IoEyeOutline style={iconStyle} />,
+    activeIcon: <IoEye style={activeIconStyle} />,
+    link: "watched",
+  },
+  {
+    title: "Validators",
+    icon: <IoServerOutline style={iconStyle} />,
+    activeIcon: <IoServer style={activeIconStyle} />,
+    link: "validators",
+  },
+  {
     title: "Connections",
     icon: <IoGitNetworkOutline style={iconStyle} />,
     activeIcon: <IoGitNetwork style={activeIconStyle} />,
@@ -110,19 +126,10 @@ const MainMenu = mainItems.map(({ title, icon, activeIcon, link }) => (
         }}
         disableRipple
       >
-        <Tooltip
-          TransitionComponent={Fade}
-          TransitionProps={{ timeout: 300 }}
-          title={title}
-          placement="right"
-          arrow
-        >
+        <Tooltip TransitionComponent={Fade} TransitionProps={{ timeout: 300 }} title={title} placement="right" arrow>
           <ListItemIcon>{isActive ? activeIcon : icon}</ListItemIcon>
         </Tooltip>
-        <Typography
-          variant="body1"
-          color={isActive ? "primary" : "textSecondary"}
-        >
+        <Typography variant="body1" color={isActive ? "primary" : "textSecondary"}>
           {title}
         </Typography>
       </ListItemButton>
@@ -131,12 +138,7 @@ const MainMenu = mainItems.map(({ title, icon, activeIcon, link }) => (
 ));
 
 export const mainListItems = (
-  <Stack
-    direction="column"
-    justifyContent="space-between"
-    spacing={1}
-    height={"100%"}
-  >
+  <Stack direction="column" justifyContent="space-between" spacing={1} height={"100%"}>
     <Stack direction="column" justifyContent="flex-start">
       {MainMenu}
     </Stack>

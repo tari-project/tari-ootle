@@ -1,13 +1,687 @@
 ---
-title: Stealth Resources
-description: Learn how stealth resources enable privacy-preserving asset transfers in Tari Ootle templates, hiding sender and receiver details on-chain.
+title: Stealth Transfers
+description: Learn how stealth transfers enable privacy-preserving asset transfers in Tari Ootle, hiding transaction amounts and UTXO ownership on-chain.
 ---
+
+import { basePath } from '../../../helpers/path';
+import { Aside } from "@astrojs/starlight/components";
 
 ### Covered in this guide
 
 In this guide, you will:
-- Understand the concepts and benefits of stealth resources in Tari Ootle.
-- Learn how stealth resources provide enhanced privacy through confidential UTXOs.
-- Discover how to implement and manage stealth assets in your templates.
+- Understand the privacy properties of stealth transfers: what is hidden and what is not.
+- Learn the structure of a stealth transfer: inputs, outputs, revealed vs confidential funds.
+- Understand how stealth addresses protect receiver identity.
+- Learn about spend conditions: `Signed` (public key) vs `AccessRule` (multisig, component-scoped, etc.).
+- Learn about encrypted data and memos attached to outputs.
+- See how to execute stealth transfers programmatically in WASM templates.
+- Walk through a complete stealth transfer example using `ootle-rs`.
 
-TODO: Add content about stealth resources.
+---
+
+## What is a Stealth Transfer?
+
+A stealth transfer moves funds between parties while hiding **who owns what** and **how much** is being transferred.
+Unlike public transfers where amounts and addresses are visible on-chain, stealth transfers use
+cryptographic commitments and one-time addresses to keep transaction details private.
+
+The native tTARI (testnet) / $TARI (mainnet) token is a stealth resource. Any custom resource can also be created as stealth.
+
+### Privacy Properties
+
+| Property | Hidden? | How |
+|---|---|---|
+| **Transfer amount** | Yes | Pedersen commitments hide the value; range proofs verify a valid value range (non-negative), balance proof signature ensures no inflation |
+| **UTXO owner** | Yes | One-time stealth addresses derived via Diffie-Hellman; no on-chain link to the recipient's public key |
+| **Sender/Receiver identity** | Yes | See <a href="#privacy-gotchas">Privacy Gotchas</a> below |
+| **Memo content** | Yes | Encrypted with XChaCha20-Poly1305; only the recipient can decrypt |
+| **Revealed amounts** | **No** | Revealed inputs/outputs are public by design |
+
+---
+
+## Anatomy of a Stealth Transfer
+
+A stealth transfer consists of **inputs** (funds being spent) and **outputs** (funds being created).
+Each side can contain both _confidential_ and _revealed_ components.
+
+<svg viewBox="0 0 820 520" xmlns="http://www.w3.org/2000/svg" style="max-width:820px;width:100%;font-family:system-ui,sans-serif">
+  {/* Background */}
+  <rect width="820" height="520" rx="12" fill="#0d1117"/>
+
+  {/* Title */}
+  <text x="410" y="36" text-anchor="middle" fill="#e6edf3" font-size="16" font-weight="bold">Structure of a Stealth Transfer</text>
+
+  {/* Inputs Section */}
+  <rect x="20" y="56" width="370" height="410" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="205" y="82" text-anchor="middle" fill="#8b949e" font-size="13" font-weight="bold">INPUTS</text>
+
+  {/* Stealth Input 1 */}
+  <rect x="40" y="100" width="330" height="80" rx="6" fill="#1c2333" stroke="#388bfd" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="55" y="122" fill="#388bfd" font-size="12" font-weight="bold">Stealth Input (UTXO)</text>
+  <text x="55" y="142" fill="#8b949e" font-size="11">Commitment: C = mask.G + value.H</text>
+  <text x="55" y="160" fill="#8b949e" font-size="11">Requires signature from UTXO owner</text>
+  <circle cx="350" cy="140" r="8" fill="#388bfd" opacity="0.3"/>
+  <text x="350" y="144" text-anchor="middle" fill="#388bfd" font-size="9">&#x1f512;</text>
+
+  {/* Stealth Input 2 */}
+  <rect x="40" y="192" width="330" height="80" rx="6" fill="#1c2333" stroke="#388bfd" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="55" y="214" fill="#388bfd" font-size="12" font-weight="bold">Stealth Input (UTXO)</text>
+  <text x="55" y="234" fill="#8b949e" font-size="11">Commitment: C = mask.G + value.H</text>
+  <text x="55" y="252" fill="#8b949e" font-size="11">Requires signature from UTXO owner</text>
+  <circle cx="350" cy="232" r="8" fill="#388bfd" opacity="0.3"/>
+  <text x="350" y="236" text-anchor="middle" fill="#388bfd" font-size="9">&#x1f512;</text>
+
+  {/* Revealed Input */}
+  <rect x="40" y="284" width="330" height="70" rx="6" fill="#1c2333" stroke="#f0883e" stroke-width="1"/>
+  <text x="55" y="306" fill="#f0883e" font-size="12" font-weight="bold">Revealed Input (from Bucket) — optional</text>
+  <text x="55" y="326" fill="#8b949e" font-size="11">Public amount (e.g. from vault withdrawal)</text>
+  <circle cx="350" cy="316" r="8" fill="#f0883e" opacity="0.3"/>
+  <text x="350" y="320" text-anchor="middle" fill="#f0883e" font-size="9">&#x1f441;</text>
+
+  {/* Balance Proof */}
+  <rect x="40" y="368" width="330" height="46" rx="6" fill="#1c2333" stroke="#a371f7" stroke-width="1"/>
+  <text x="205" y="396" text-anchor="middle" fill="#a371f7" font-size="12" font-weight="bold">Balance Proof: &#x2211;inputs == &#x2211;outputs</text>
+
+  {/* Arrow */}
+  <line x1="400" y1="260" x2="430" y2="260" stroke="#484f58" stroke-width="2" marker-end="url(#arrow)"/>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#484f58"/></marker></defs>
+
+  {/* Outputs Section */}
+  <rect x="440" y="56" width="360" height="410" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="620" y="82" text-anchor="middle" fill="#8b949e" font-size="13" font-weight="bold">OUTPUTS</text>
+
+  {/* Stealth Output 1 */}
+  <rect x="460" y="100" width="320" height="100" rx="6" fill="#1c2333" stroke="#388bfd" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="475" y="122" fill="#388bfd" font-size="12" font-weight="bold">Stealth Output (new UTXO)</text>
+  <text x="475" y="142" fill="#8b949e" font-size="11">Commitment: C = mask.G + value.H</text>
+  <text x="475" y="159" fill="#8b949e" font-size="11">Stealth address (one-time key)</text>
+  <text x="475" y="176" fill="#8b949e" font-size="11">Encrypted data: value + mask + memo</text>
+  <circle cx="760" cy="140" r="8" fill="#388bfd" opacity="0.3"/>
+  <text x="760" y="144" text-anchor="middle" fill="#388bfd" font-size="9">&#x1f512;</text>
+
+  {/* Stealth Output 2 (change) */}
+  <rect x="460" y="212" width="320" height="100" rx="6" fill="#1c2333" stroke="#388bfd" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="475" y="234" fill="#388bfd" font-size="12" font-weight="bold">Stealth Output (change)</text>
+  <text x="475" y="254" fill="#8b949e" font-size="11">Commitment: C = mask.G + value.H</text>
+  <text x="475" y="271" fill="#8b949e" font-size="11">Stealth address (back to sender)</text>
+  <text x="475" y="288" fill="#8b949e" font-size="11">Encrypted data: value + mask</text>
+  <circle cx="760" cy="252" r="8" fill="#388bfd" opacity="0.3"/>
+  <text x="760" y="256" text-anchor="middle" fill="#388bfd" font-size="9">&#x1f512;</text>
+
+  {/* Revealed Output */}
+  <rect x="460" y="324" width="320" height="70" rx="6" fill="#1c2333" stroke="#f0883e" stroke-width="1"/>
+  <text x="475" y="346" fill="#f0883e" font-size="12" font-weight="bold">Revealed Output &#x2192; Bucket — optional</text>
+  <text x="475" y="366" fill="#8b949e" font-size="11">Public amount returned as a Bucket</text>
+  <circle cx="760" cy="356" r="8" fill="#f0883e" opacity="0.3"/>
+  <text x="760" y="360" text-anchor="middle" fill="#f0883e" font-size="9">&#x1f441;</text>
+
+  {/* Range Proof */}
+  <rect x="460" y="406" width="320" height="46" rx="6" fill="#1c2333" stroke="#a371f7" stroke-width="1"/>
+  <text x="620" y="434" text-anchor="middle" fill="#a371f7" font-size="12" font-weight="bold">Aggregated Range Proof (Bulletproofs)</text>
+
+  {/* Legend */}
+  <rect x="20" y="480" width="780" height="30" rx="6" fill="#161b22"/>
+  <rect x="36" y="489" width="12" height="12" rx="2" fill="none" stroke="#388bfd" stroke-width="1" stroke-dasharray="3,2"/>
+  <text x="54" y="500" fill="#8b949e" font-size="11">Confidential (hidden)</text>
+  <rect x="196" y="489" width="12" height="12" rx="2" fill="none" stroke="#f0883e" stroke-width="1"/>
+  <text x="214" y="500" fill="#8b949e" font-size="11">Revealed (public)</text>
+  <rect x="340" y="489" width="12" height="12" rx="2" fill="none" stroke="#a371f7" stroke-width="1"/>
+  <text x="358" y="500" fill="#8b949e" font-size="11">Zero-knowledge proof</text>
+</svg>
+
+The engine enforces that the sum of all inputs (confidential + revealed) equals the sum of all outputs (confidential + revealed).
+This is proven cryptographically via a **balance proof** without revealing any individual amounts.
+
+---
+
+## Revealed Funds
+
+Not all parts of a stealth transfer need to be private. **Revealed** inputs and outputs carry a public, plaintext amount.
+Both are **optional** &mdash; a transfer can be fully confidential (no revealed amounts at all), fully revealed, or a mix of both.
+
+### Why Use Revealed Funds?
+
+The primary use case is **paying transaction fees**. Fees must be paid in a known amount so that validators can
+verify them, making revealed outputs essential.
+
+Other use cases include:
+- **Depositing into a component vault** &mdash; if a component method expects a `Bucket` with a specific amount, the revealed
+  output provides that bucket.
+- **Interacting with public components** &mdash; bridging confidential funds into the public smart contract layer.
+
+<Aside type="caution">
+Revealed amounts are **not private**. Anyone inspecting the transaction can see the exact value of revealed
+inputs and outputs. Keep revealed amounts to the minimum needed (typically just the TARI fee).
+</Aside>
+
+### Revealed Inputs
+
+A revealed input is a public amount sourced from a `Bucket`. In practice, this usually comes from
+a vault withdrawal or a faucet.
+
+When building a stealth transfer, you declare how much revealed funding you expect:
+
+```rust
+StealthTransfer::new(tari_token, &provider)
+    // The transfer expects 10 TARI + 1000 microtari
+    // from a bucket (e.g. a faucet).
+    .spend_revealed_input(10 * TARI + 1000)
+    // ...
+```
+
+Inside a template, the revealed input bucket is passed to the stealth transfer:
+
+```rust
+let input_bucket = self.vault.withdraw(transfer.inputs_statement.revealed_amount);
+self.manager
+    .stealth_transfer_with_opt_input_bucket(transfer, Some(input_bucket));
+```
+
+### Revealed Outputs
+
+When a stealth transfer includes a revealed output amount, the engine returns a **`Bucket`** containing
+that amount. This bucket can then be used like any other bucket &mdash; deposited into a vault, used to pay fees, or
+passed to another instruction.
+
+```rust
+StealthTransfer::new(tari_token, &provider)
+    // ...
+    // Output 500 microtari as a revealed (public) bucket for fees.
+    .to_revealed_output(500u64)
+    // ...
+```
+
+A common pattern is to place the revealed output bucket on the workspace and use it to pay fees:
+
+```rust
+let unsigned_tx = Transaction::builder(network)
+    .with_fee_instructions_builder(|builder| {
+        builder
+            .stealth_transfer(tari_token, transfer)
+            .put_last_instruction_output_on_workspace("fees")
+            .pay_fee_from_bucket("fees")
+    })
+    .build_unsigned();
+```
+
+---
+
+## Stealth Addresses
+
+When you send funds to another party, you never put their real public key in the output. Instead, a **one-time
+stealth address** is derived for each output using a Diffie-Hellman key exchange:
+
+1. The sender generates a random ephemeral nonce **r**.
+2. The sender computes the shared secret: **c = H(r &middot; K)** where **K** is the recipient's public key.
+3. The stealth public key is: **P = c&middot;G + K**
+4. The corresponding private key is: **p = c + k** (only the recipient can compute this, since only they know **k**).
+
+The ephemeral public nonce **R = r&middot;G** is stored alongside the output so that the recipient can recompute the shared
+secret and derive the spending key.
+
+This means:
+- Each output has a **unique** address that cannot be linked to the recipient's real public key by an outside observer.
+- The recipient scans new outputs by trying to derive the stealth key using their private key. If it matches the
+  output's spend condition, the output belongs to them.
+- The sender cannot spend the output after sending it (they don't know **k**).
+
+---
+
+## Spend Conditions
+
+Every stealth UTXO has a **spend condition** that determines what authorization is required to spend it.
+When a stealth input is consumed in a transfer, the engine validates the spend condition before allowing the spend.
+
+There are two variants:
+
+### `Signed` — Public Key Authorization
+
+The default and most common spend condition. The UTXO can only be spent by proving ownership of a specific
+public key via a transaction signature:
+
+```rust
+SpendCondition::Signed(public_key)
+```
+
+This is typically the **one-time stealth public key** derived during the stealth address exchange (see above).
+Only the recipient — who can derive the corresponding private key — can produce a valid signature.
+
+At validation time, the engine checks that the transaction's authorization scope contains a proof (badge) matching
+`NonFungibleAddress::from_public_key(pk)`. If the signature is missing, the transaction fails with
+`RequiredSignatureMissingForStealthUtxo`.
+
+### `AccessRule` — Rule-Based Authorization
+
+Instead of requiring a specific signature, the UTXO can be gated by an **access rule**. This enables
+advanced spending policies such as multisig, component-scoped access, or resource-gated spending:
+
+```rust
+SpendCondition::AccessRule(rule)
+```
+
+Access rules support the same constructs used elsewhere in Ootle:
+
+| Rule | Description |
+|---|---|
+| `allow_all` | Anyone can spend the UTXO (no authorization required) |
+| `deny_all` | The UTXO can never be spent |
+| `public_key(pk)` | Equivalent to `Signed(pk)` but expressed as an access rule |
+| `resource(addr)` | Requires a proof of a specific resource token |
+| `non_fungible(nf)` | Requires a proof of a specific non-fungible token |
+| `component(addr)` | Only spendable within a call to a specific component |
+| `template(addr)` | Only spendable within a call to a specific template |
+| `any_of(...)` | Any one of the listed rules must be satisfied |
+| `all_of(...)` | All of the listed rules must be satisfied |
+| `m_of_n(m, ...)` | At least **m** of **n** listed requirements must be satisfied |
+
+For example, a 2-of-3 multisig spend condition:
+
+```rust
+use tari_template_lib::rule;
+
+let spend_condition = SpendCondition::AccessRule(
+    rule!(m_of_n(2, public_key(pk1), public_key(pk2), public_key(pk3)))
+);
+```
+
+Or a UTXO that can only be spent by a specific component:
+
+```rust
+let spend_condition = SpendCondition::AccessRule(
+    rule!(component(my_component_address))
+);
+```
+
+<Aside type="note">
+When using `AccessRule` spend conditions, the UTXO owner is no longer hidden behind a one-time stealth key.
+The access rule itself is stored on-chain and may reveal information about who can spend the output.
+Consider the privacy trade-off when choosing between `Signed` and `AccessRule`.
+</Aside>
+
+### Setting the Spend Condition with `ootle-rs`
+
+By default, stealth outputs use `Signed` with the one-time stealth public key derived for the recipient.
+To use an access rule instead, set `pay_to` on the output:
+
+```rust
+use ootle_rs::{crypto::pay_to::PayTo, stealth::Output};
+use tari_template_lib::rule;
+
+let output = Output::new(recipient, tari_token, amount)
+    .with_pay_to(PayTo::AccessRule(
+        rule!(m_of_n(2, public_key(pk1), public_key(pk2), public_key(pk3)))
+    ));
+```
+
+---
+
+## Encrypted Data and Memos
+
+Each stealth output carries an `EncryptedData` payload encrypted with XChaCha20-Poly1305. The encryption key
+is derived from the same Diffie-Hellman exchange used for the stealth address.
+
+The encrypted payload contains:
+- **Value** (8 bytes) &mdash; the amount in this output.
+- **Mask** (32 bytes) &mdash; the Pedersen commitment blinding factor, needed to spend the output later.
+- **Memo** (0&ndash;255 bytes, optional) &mdash; an arbitrary message for the recipient.
+
+Only the recipient (who knows the secret key corresponding to the stealth address) can decrypt this data.
+
+### Memos
+
+Memos allow the sender to attach a message to an output that only the recipient can read:
+
+```rust
+.to_stealth_output(
+    Output::new(recipient, tari_token, amount)
+        .with_memo_message("Payment for invoice #42")
+)
+```
+
+Memos support several formats:
+- **Message** &mdash; a UTF-8 string (up to 253 bytes).
+- **Bytes** &mdash; arbitrary binary data.
+- **PayRefAndBytes** &mdash; a payment reference combined with arbitrary data.
+
+<Aside type="note">
+Memos are stored on-chain (encrypted) and increase transaction size, which increases fees.
+Keep memos short when possible.
+</Aside>
+
+---
+
+## Programmatic Stealth Transfers in Templates
+
+WASM templates can execute stealth transfers using the `ResourceManager` and `Bucket` APIs.
+This is useful for templates that manage stealth resources on behalf of users.
+
+### StealthTransferStatement Helpers
+
+The `StealthTransferStatement` provides helper methods to extract revealed amounts:
+
+```rust
+// Get the revealed input amount (the public amount expected from a bucket).
+let revealed_in: Amount = statement.revealed_input_amount();
+
+// Get the revealed output amount (the public amount returned as a bucket).
+let revealed_out: Amount = statement.revealed_output_amount();
+```
+
+### Executing a Transfer via ResourceManager
+
+The `ResourceManager` provides two methods for stealth transfers:
+
+```rust
+// Execute a stealth transfer (no revealed input bucket needed).
+// Returns Some(Bucket) if there are revealed outputs, None otherwise.
+let maybe_bucket: Option<Bucket> = resource_manager.stealth_transfer(statement);
+
+// Execute a stealth transfer with a revealed input bucket.
+let maybe_bucket: Option<Bucket> = resource_manager
+    .stealth_transfer_with_opt_input_bucket(statement, Some(input_bucket));
+```
+
+### Executing a Transfer via Bucket
+
+If you already have a `Bucket` from minting or a vault withdrawal, you can call `stealth_transfer` directly on it:
+
+```rust
+let bucket = ResourceBuilder::stealth()
+    .with_token_symbol("TKN")
+    .initial_supply(1_000_000);
+
+// Convert the minted supply into stealth UTXOs.
+// The returned bucket contains any revealed output amount.
+let revealed_bucket = bucket.stealth_transfer(mint_statement);
+```
+
+### Paying Fees from a Vault
+
+Vaults holding stealth resources can pay transaction fees directly:
+
+```rust
+// Pay fees using a stealth transfer from the vault.
+// The transfer statement must produce a positive revealed output.
+self.vault.pay_fee_stealth(transfer_statement);
+```
+
+### Full Template Example
+
+Here is a template that manages a stealth faucet, demonstrating minting, programmatic transfers,
+and revealed output handling:
+
+```rust
+use tari_template_lib::prelude::*;
+
+#[template]
+mod template {
+    use super::*;
+
+    pub struct StealthFaucet {
+        manager: ResourceManager,
+        supply_vault: Vault,
+    }
+
+    impl StealthFaucet {
+        pub fn new(initial_supply: Amount, mint: StealthTransferStatement) -> Component<Self> {
+            let bucket = ResourceBuilder::stealth()
+                .mintable(rule!(allow_all))
+                .initial_supply(initial_supply);
+
+            let resource_address = bucket.resource_address();
+            // Convert the minted funds into stealth UTXOs.
+            // Any revealed output is returned as a bucket.
+            let revealed_output_bucket = bucket.stealth_transfer(mint);
+            let supply_vault = Vault::from_bucket(revealed_output_bucket);
+
+            Component::new(Self {
+                manager: resource_address.into(),
+                supply_vault,
+            })
+            .with_access_rules(AccessRules::allow_all())
+            .create()
+        }
+
+        pub fn programmatic_transfer(&self, transfer: StealthTransferStatement) {
+            // Use helper methods to extract revealed amounts from the statement.
+            let revealed_input = transfer.revealed_input_amount();
+            let revealed_output = transfer.revealed_output_amount();
+
+            // If there are revealed inputs required, take them from the supply vault.
+            let maybe_input_bucket = if revealed_input.is_positive() {
+                Some(self.supply_vault.withdraw(revealed_input))
+            } else {
+                None
+            };
+
+            let bucket = self
+                .manager
+                .stealth_transfer_with_opt_input_bucket(transfer, maybe_input_bucket)
+                .expect("Transfer must have revealed outputs");
+
+            // The returned bucket contains `revealed_output` amount of funds.
+            // Deposit them back into the vault.
+            assert!(revealed_output.is_positive(), "Expected revealed output");
+            self.supply_vault.deposit(bucket);
+        }
+    }
+}
+```
+
+---
+
+## Creating Stealth Resources
+
+Creating a stealth resource uses `ResourceBuilder::stealth()`. This is covered in the
+<a href={basePath("/guides/resources/")}>Resources guide</a>, but here is a quick example:
+
+```rust
+let bucket = ResourceBuilder::stealth()
+    .with_token_symbol("PRIV")
+    .with_divisibility(6)
+    .mintable(rule!(allow_all))
+    .initial_supply(1_000_000);
+```
+
+A stealth resource can optionally have a **view key**. When set, every output must include a `ViewableBalanceProof`
+that allows the view key holder to decrypt balances without being able to spend them. This is useful for auditing
+or regulatory compliance while preserving spending privacy.
+
+```rust
+ResourceBuilder::stealth()
+    .with_view_key(auditor_public_key)
+    .initial_supply(1_000_000);
+```
+
+### Total Supply Tracking
+
+By default, stealth resources track their total supply. Since individual UTXO amounts are hidden,
+there is no way to derive the total supply by summing balances. The engine maintains the total supply amount
+in the resource substate that is incremented on mint and decremented on burn. This gives token issuers
+and users a way to view the circulating supply.
+
+This has implications for minting and burning:
+
+- **Minting** always produces a revealed amount returned as a `Bucket`. The minted value is public because the
+  engine needs to update the total supply. You then use a stealth transfer to convert the bucket into
+  stealth UTXOs.
+- **Burning** a stealth UTXO requires a `StealthValueProof` when supply tracking is enabled. This proof reveals
+  the value of the UTXO being burnt so that the total supply can be decremented. This effectively limits burns to
+  the UTXO owner or the holder of the secret view key, since only they can construct the proof.
+
+If your resource does not need total supply tracking, you can disable it to save on fees and avoid
+revealing values during burns:
+
+```rust
+ResourceBuilder::stealth()
+    .with_token_symbol("PRIV")
+    .disable_total_supply_tracking()
+    .initial_supply(1_000_000);
+```
+
+<Aside type="note">
+When total supply tracking is disabled, `burn_utxo` can be called without a `StealthValueProof`
+(pass `None`), and the burnt value remains hidden.
+</Aside>
+
+---
+
+## Privacy Gotchas
+
+Stealth transfers provide strong privacy for amounts and UTXO ownership, but there are scenarios where
+privacy can be weakened or lost.
+
+### Signing with Your Public Key
+
+If a transaction calls a component method that checks the caller's identity (e.g. `withdraw` on your account),
+the transaction must be signed with your public key. This **links the transaction to your identity**, even
+though the stealth outputs themselves hide who received the funds.
+
+For example, if you withdraw revealed funds from your account to use as a stealth transfer input:
+- Your account address (and therefore your public key) is visible in the transaction.
+- The stealth outputs hide the destination, but an observer knows _you_ initiated the transfer.
+
+To maximize privacy, prefer spending **stealth inputs only**. When a transaction has only stealth inputs and no
+component method calls that require identity, an ephemeral key can be used to sign, revealing nothing about the sender.
+
+### Revealed Amounts Leak Information
+
+Any revealed input or output amount is public. If you withdraw exactly 100 TARI from your account and the
+stealth transfer has a revealed input of 100 TARI, the amounts are linkable even though the stealth outputs are private.
+
+### Transaction Graph Analysis
+
+While individual UTXOs hide their owner, the _structure_ of transactions is public: an observer can see which inputs
+were spent and which outputs were created, allowing them to form a UTXO graph.
+
+---
+
+## Example: Stealth Transfer with ootle-rs
+
+The [`ootle-rs`](https://crates.io/crates/ootle-rs) crate provides a high-level builder for stealth transfers. Here is a complete example showing
+how to receive funds from a faucet and then send them to another address.
+
+### Step 1: Setup
+
+```rust
+use ootle_rs::{
+    Network, ToAccountAddress, TransactionRequest,
+    builtin_templates::{UnsignedTransactionBuilder, faucet::IFaucet},
+    const_nonzero_u64, default_indexer_url,
+    key_provider::PrivateKeyProvider,
+    provider::{ProviderBuilder, WalletProvider},
+    stealth::{Output, StealthTransfer},
+    template_types::{UtxoAddress, constants::{TARI, TARI_TOKEN}},
+    wallet::OotleWallet,
+};
+use tari_ootle_transaction::Transaction;
+
+const NETWORK: Network = Network::LocalNet;
+
+let sender_secret = PrivateKeyProvider::random(NETWORK);
+let sender_address = sender_secret.address().clone();
+
+let wallet = OotleWallet::from(sender_secret.clone());
+let mut provider = ProviderBuilder::new()
+    .wallet(wallet)
+    .connect(default_indexer_url(NETWORK))
+    .await?;
+```
+
+### Step 2: Receive Funds from a Faucet (revealed input -> stealth output)
+
+```rust
+let tari_token = TARI_TOKEN;
+
+// Build a stealth transfer: take revealed funds from the faucet,
+// output a small revealed amount for fees, and the rest as a stealth UTXO.
+let (faucet_transfer, required_signers) = StealthTransfer::new(tari_token, &provider)
+    .spend_revealed_input(10 * TARI + 1000)
+    .to_revealed_output(500u64)
+    .to_stealth_output(
+        Output::new(sender_address.clone(), tari_token, const_nonzero_u64!(10 * TARI + 500))
+    )
+    .prepare()
+    .await?;
+
+// Keep track of outputs so we can spend them later.
+let my_utxos = faucet_transfer.stealth_outputs().to_vec();
+
+// Build the transaction using the faucet template helper.
+let unsigned_tx = IFaucet::new(&provider)
+    .take_faucet_funds_stealth(faucet_transfer, true)
+    .prepare()
+    .await?;
+
+// Sign and send.
+let authorizer = provider.wallet().stealth_authorizer(required_signers);
+let transaction = TransactionRequest::default()
+    .with_transaction(unsigned_tx)
+    .build(&authorizer)
+    .await?;
+
+provider.send_transaction(transaction).await?;
+```
+
+### Step 3: Send to Another Party (stealth input -> stealth outputs)
+
+```rust
+let recipient = address!("otl_loc_1xfack4y...");
+
+let (transfer, required_signers) = StealthTransfer::new(tari_token, &provider)
+    // Spend an existing stealth UTXO.
+    .spend_stealth_input(sender_address.clone(), my_utxos[0].commitment())
+    // Revealed output for fees.
+    .to_revealed_output(500u64)
+    // 8 TARI to the recipient with an encrypted memo.
+    .to_stealth_output(
+        Output::new(recipient, tari_token, const_nonzero_u64!(8 * TARI))
+            .with_memo_message("Payment for services")
+    )
+    // Change back to sender.
+    .to_stealth_output(
+        Output::new(sender_address, tari_token, const_nonzero_u64!(2 * TARI))
+    )
+    .prepare()
+    .await?;
+
+// Build the transaction, placing the revealed output on the workspace for fees.
+let unsigned_tx = Transaction::builder(provider.network())
+    .with_fee_instructions_builder(|builder| {
+        builder
+            .stealth_transfer(tari_token, transfer)
+            .put_last_instruction_output_on_workspace("fees")
+            .pay_fee_from_bucket("fees")
+    })
+    .add_input(tari_token)
+    .add_input(UtxoAddress::new(tari_token, my_utxos[0].commitment().into()))
+    .build_unsigned();
+
+let authorizer = provider.wallet().stealth_authorizer(required_signers);
+let transaction = TransactionRequest::default()
+    .with_transaction(unsigned_tx)
+    .build(&authorizer)
+    .await?;
+
+provider.send_transaction(transaction).await?;
+```
+
+<Aside type="note">
+The full runnable example is available at `crates/wallet/ootle-rs/examples/stealth_transfer.rs` in the repository.
+</Aside>
+
+---
+
+## Summary
+
+Stealth transfers are the foundation of privacy in Tari Ootle. They combine Pedersen commitments, Bulletproof range proofs,
+one-time stealth addresses, and encrypted payloads to hide transaction amounts and UTXO ownership.
+
+Key takeaways:
+- **Confidential amounts** are hidden in Pedersen commitments; only the sender and recipient know the value.
+- **Stealth addresses** are unique per output, unlinkable to the recipient's real public key.
+- **Revealed funds** are public and primarily used for fees; they bridge between the confidential and public layers.
+- **Revealed outputs produce a `Bucket`** that can be used in subsequent instructions (e.g. fee payment).
+- **Encrypted memos** allow private communication between sender and recipient.
+- **Privacy is not absolute**: signing transactions, revealed amounts, change patterns, and component interactions
+  can all leak information. Design transactions carefully to minimize exposure.

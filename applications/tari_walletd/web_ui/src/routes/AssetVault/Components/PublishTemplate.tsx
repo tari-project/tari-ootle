@@ -23,6 +23,7 @@
 import PopupTitle from "@/components/PopupTitle";
 import { useAccountsList } from "@api/hooks/useAccounts";
 import { usePublishTemplate } from "@api/hooks/useTransactions";
+import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -34,6 +35,7 @@ import MenuItem from "@mui/material/MenuItem";
 import Select, { SelectChangeEvent } from "@mui/material/Select";
 import { useTheme } from "@mui/material/styles";
 import TextField from "@mui/material/TextField";
+import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import useAccountStore from "@store/accountStore";
 import {
@@ -85,6 +87,8 @@ interface FormState {
   binary: ArrayBuffer | null;
   fileName: string | null;
   fileSize: number | null;
+  metadata: ArrayBuffer | null;
+  metadataFileName: string | null;
   account: string | null;
   maxFee: string;
 }
@@ -94,6 +98,8 @@ function PublishTemplateDialog(props: DialogProps) {
     binary: null,
     fileName: null,
     fileSize: null,
+    metadata: null,
+    metadataFileName: null,
     account: null,
     maxFee: "",
   };
@@ -106,6 +112,7 @@ function PublishTemplateDialog(props: DialogProps) {
   const [isEstimating, setIsEstimating] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const metadataInputRef = useRef<HTMLInputElement>(null);
   const dragCounterRef = useRef(0);
 
   const { account, setPopup } = useAccountStore();
@@ -250,6 +257,52 @@ function PublishTemplateDialog(props: DialogProps) {
     setFileError(null);
   };
 
+  const handleMetadataFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      const nameLower = file.name.toLowerCase();
+      if (!nameLower.endsWith(".json") && !nameLower.endsWith(".cbor")) {
+        setFileError("Metadata must be a .json or .cbor file");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as ArrayBuffer;
+        if (nameLower.endsWith(".json")) {
+          try {
+            JSON.parse(new TextDecoder().decode(result));
+          } catch {
+            setFileError("Invalid JSON in metadata file");
+            return;
+          }
+        }
+        setFormState((prev) => ({
+          ...prev,
+          metadata: result,
+          metadataFileName: file.name,
+        }));
+      };
+      reader.onerror = () => setFileError("Failed to read metadata file");
+      reader.readAsArrayBuffer(file);
+    }
+    e.target.value = "";
+  };
+
+  const handleRemoveMetadata = () => {
+    setFormState((prev) => ({ ...prev, metadata: null, metadataFileName: null }));
+  };
+
+  const buildMetadataPayload = () => {
+    if (!formState.metadata) return null;
+    if (formState.metadataFileName?.endsWith(".cbor")) {
+      return { type: "RawCbor" as const, data: base64FromArrayBuffer(formState.metadata) };
+    }
+    // JSON file: parse and send as Literal
+    const text = new TextDecoder().decode(formState.metadata);
+    return { type: "Literal" as const, data: JSON.parse(text) };
+  };
+
   const handleEstimateFee = async () => {
     if (!formState.binary || !formState.account) return;
 
@@ -261,6 +314,7 @@ function PublishTemplateDialog(props: DialogProps) {
         max_fee: 1_000_000,
         detect_inputs: true,
         dry_run: true,
+        metadata: buildMetadataPayload(),
       });
       const fee = resp.dry_run_fee!;
       setEstimatedFee(fee);
@@ -285,6 +339,7 @@ function PublishTemplateDialog(props: DialogProps) {
         max_fee: maxFeeNum,
         detect_inputs: true,
         dry_run: false,
+        metadata: buildMetadataPayload(),
       });
       setFormState(INITIAL_VALUES);
       setEstimatedFee(null);
@@ -415,6 +470,79 @@ function PublishTemplateDialog(props: DialogProps) {
                 {fileError}
               </Typography>
             )}
+          </Box>
+
+          {/* Optional metadata file */}
+          <Box>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mb: 0.5 }}>
+              <InputLabel>Template Metadata (optional)</InputLabel>
+              <Tooltip
+                title={
+                  <>
+                    Optionally attach a JSON or CBOR metadata file describing your template (name, version,
+                    description, tags, etc.). A cryptographic hash of this metadata will be published on-chain alongside
+                    the template, allowing clients to verify the authenticity of off-chain metadata. This cannot be
+                    changed after publishing.
+                    <br />
+                    <br />
+                    When publishing with{" "}
+                    <a
+                      href="https://crates.io/crates/tari-ootle-cli"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: "inherit" }}
+                    >
+                      tari-ootle-cli
+                    </a>
+                    , this metadata is built automatically from your Cargo.toml.
+                  </>
+                }
+                arrow
+                placement="right"
+              >
+                <HelpOutlineIcon sx={{ fontSize: 16, color: "text.secondary", cursor: "help" }} />
+              </Tooltip>
+            </Box>
+            {formState.metadataFileName ? (
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                  p: 1,
+                  border: `1px solid ${theme.palette.success.main}`,
+                  borderRadius: 1,
+                }}
+              >
+                <Typography variant="body2" sx={{ flex: 1 }}>
+                  {formState.metadataFileName}
+                </Typography>
+                <Button
+                  size="small"
+                  color="error"
+                  onClick={handleRemoveMetadata}
+                  disabled={disabled || isEstimating}
+                >
+                  Remove
+                </Button>
+              </Box>
+            ) : (
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => metadataInputRef.current?.click()}
+                disabled={disabled || isEstimating}
+              >
+                Attach .json or .cbor metadata
+              </Button>
+            )}
+            <input
+              ref={metadataInputRef}
+              type="file"
+              accept=".json,.cbor"
+              onChange={handleMetadataFileChange}
+              style={{ display: "none" }}
+            />
           </Box>
 
           {/* Fee section */}

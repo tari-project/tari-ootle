@@ -19,6 +19,10 @@ export type TransactionPoolRecord = {
   remote_decision: Decision | null;
   is_ready: boolean;
   /**
+   * The maximum epoch for which this transaction is valid.
+   */
+  max_epoch: Epoch | null;
+  /**
    * Epoch to use when executing the transaction. This updates as foreign proposals are received
    * until the transaction is executed.
    */

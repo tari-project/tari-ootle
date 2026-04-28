@@ -325,6 +325,106 @@ impl Display for Transaction {
     }
 }
 
+/// Pruned, archive-only counterpart of `Transaction`. Carries blob commitments instead of
+/// blob payloads, so API responses can omit the raw bytes while preserving the `TransactionId`,
+/// signature verifiability, and the structural shape the UI needs to display.
+///
+/// Constructed only via `From<Transaction>` (which derives commitments from the full blobs and
+/// drops the payloads) or via deserialization of bytes previously written by the storage layer.
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum PrunedTransaction {
+    V1(crate::v1::PrunedTransactionV1),
+}
+
+impl PrunedTransaction {
+    pub fn calculate_id(&self) -> TransactionId {
+        match self {
+            Self::V1(tx) => tx.calculate_id(),
+        }
+    }
+
+    pub fn schema_version(&self) -> u16 {
+        match self {
+            Self::V1(tx) => tx.schema_version(),
+        }
+    }
+
+    pub fn fee_instructions(&self) -> &[Instruction] {
+        match self {
+            Self::V1(tx) => tx.fee_instructions(),
+        }
+    }
+
+    pub fn instructions(&self) -> &[Instruction] {
+        match self {
+            Self::V1(tx) => tx.instructions(),
+        }
+    }
+
+    pub fn blob_hashes(&self) -> &crate::BlobHashes {
+        match self {
+            Self::V1(tx) => tx.blob_hashes(),
+        }
+    }
+
+    pub fn signatures(&self) -> &[TransactionSignature] {
+        match self {
+            Self::V1(tx) => tx.signatures(),
+        }
+    }
+
+    pub fn seal_signature(&self) -> &TransactionSealSignature {
+        match self {
+            Self::V1(tx) => tx.seal_signature(),
+        }
+    }
+
+    pub fn verify_all_signatures(&self) -> bool {
+        match self {
+            Self::V1(tx) => tx.verify_all_signatures(),
+        }
+    }
+
+    pub fn network(&self) -> u8 {
+        match self {
+            Self::V1(tx) => tx.network(),
+        }
+    }
+
+    pub fn min_epoch(&self) -> Option<Epoch> {
+        match self {
+            Self::V1(tx) => tx.min_epoch(),
+        }
+    }
+
+    pub fn max_epoch(&self) -> Option<Epoch> {
+        match self {
+            Self::V1(tx) => tx.max_epoch(),
+        }
+    }
+
+    pub fn is_seal_signer_authorized(&self) -> bool {
+        match self {
+            Self::V1(tx) => tx.is_seal_signer_authorized(),
+        }
+    }
+
+    pub fn is_dry_run(&self) -> bool {
+        match self {
+            Self::V1(tx) => tx.is_dry_run(),
+        }
+    }
+}
+
+impl From<Transaction> for PrunedTransaction {
+    fn from(tx: Transaction) -> Self {
+        match tx {
+            Transaction::V1(tx) => Self::V1(tx.into()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use ootle_byte_type::ToByteType;

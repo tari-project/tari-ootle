@@ -38,7 +38,7 @@ use tari_ootle_common_types::{
     substate_type::SubstateType,
 };
 use tari_ootle_template_metadata::{MetadataHash, TemplateMetadata};
-use tari_ootle_transaction::{Instruction, Transaction, TransactionId, UnsignedTransaction};
+use tari_ootle_transaction::{Instruction, PrunedTransaction, Transaction, TransactionId, UnsignedTransaction};
 use tari_ootle_wallet_sdk::{
     apis::{
         confidential_transfer::UtxoInputSelection,
@@ -249,7 +249,9 @@ pub struct TransactionGetRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct TransactionGetResponse {
-    pub transaction: Transaction,
+    /// Pruned transaction — blob commitments are present but raw blob bytes are omitted to
+    /// keep API responses small. Use a separate endpoint to fetch blob payloads if required.
+    pub transaction: PrunedTransaction,
     pub result: Option<FinalizeResult>,
     pub status: TransactionStatus,
     /// The estimated fee required for the transaction. For dry runs, this is the minimum fee

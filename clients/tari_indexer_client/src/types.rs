@@ -16,7 +16,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{Epoch, Network, NumPreshards, ShardGroup, StateVersion, shard::Shard};
 use tari_ootle_template_metadata::MetadataHash;
-use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
+use tari_ootle_transaction::{PrunedTransaction, Transaction, TransactionEnvelope, TransactionId};
 use tari_template_abi::TemplateDef;
 use tari_template_lib_types::{
     Amount,
@@ -346,8 +346,10 @@ pub struct ListRecentTransactionsResponse {
 pub struct TransactionEntry {
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub transaction_id: TransactionId,
+    /// Pruned transaction — blob commitments retained, raw blob bytes omitted to keep the
+    /// response size bounded. The transaction id and signatures remain verifiable.
     #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
-    pub transaction: Transaction,
+    pub transaction: PrunedTransaction,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub created_at: PrimitiveDateTime,
 }

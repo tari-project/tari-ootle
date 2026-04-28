@@ -49,6 +49,13 @@ pub struct PrunedUnsignedTransactionV1 {
     pub dry_run: bool,
     /// Per-blob commitments. Mirrors `UnsignedTransactionV1::blobs.hashes()` of the full form.
     pub blob_hashes: BlobHashes,
+    /// Byte size of each blob, parallel to `blob_hashes`. **Not part of the signing/id domain**
+    /// — populated at conversion time from `Blobs` so that API consumers and UIs can show
+    /// blob sizes without downloading payloads. May be empty when deserialised from older
+    /// archives that didn't record sizes.
+    #[serde(default)]
+    #[borsh(skip)]
+    pub blob_sizes: Vec<u32>,
 }
 
 impl PrunedUnsignedTransactionV1 {
@@ -76,6 +83,7 @@ impl PrunedUnsignedTransactionV1 {
 impl From<UnsignedTransactionV1> for PrunedUnsignedTransactionV1 {
     fn from(t: UnsignedTransactionV1) -> Self {
         let blob_hashes = t.blobs.hashes();
+        let blob_sizes = t.blobs.iter().map(|b| b.len() as u32).collect();
         Self {
             network: t.network,
             fee_instructions: t.fee_instructions,
@@ -86,6 +94,7 @@ impl From<UnsignedTransactionV1> for PrunedUnsignedTransactionV1 {
             is_seal_signer_authorized: t.is_seal_signer_authorized,
             dry_run: t.dry_run,
             blob_hashes,
+            blob_sizes,
         }
     }
 }
@@ -280,6 +289,7 @@ impl PrunedTransactionV1 {
             is_seal_signer_authorized,
             dry_run,
             blob_hashes: _,
+            blob_sizes: _,
         } = transaction;
 
         let unsigned = UnsignedTransactionV1 {

@@ -97,6 +97,7 @@ export * from "./types/PeerAddress";
 export * from "./types/PrecisionAmount";
 export * from "./types/ProofId";
 export * from "./types/ProposalCertificate";
+export * from "./types/PrunedTransaction";
 export * from "./types/PrunedTransactionV1";
 export * from "./types/PrunedUnsealedTransactionV1";
 export * from "./types/PrunedUnsignedTransactionV1";

@@ -23,4 +23,10 @@ export type PrunedUnsignedTransactionV1 = {
    * Per-blob commitments. Mirrors `UnsignedTransactionV1.blobs.hashes()` of the full form.
    */
   blob_hashes: BlobHashes;
+  /**
+   * Byte size of each blob, parallel to `blob_hashes`. Not part of the signing/id digest;
+   * populated at conversion time so UIs can display blob sizes without downloading payloads.
+   * May be empty when deserialised from older archives that didn't record sizes.
+   */
+  blob_sizes: Array<number>;
 };

@@ -101,7 +101,7 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
   };
 
   const expandAll = () =>
-    setExpandedPanels(["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9"]);
+    setExpandedPanels(["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10"]);
 
   const collapseAll = () => setExpandedPanels([]);
 
@@ -231,6 +231,21 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
                 </AccordionDetails>
               </Accordion>
 
+              {/* Blobs */}
+              <Accordion expanded={expandedPanels.includes("p10")} onChange={handleChange("p10")}>
+                <AccordionSummary>
+                  <Typography variant="h5">
+                    Blobs ({transaction?.blob_hashes?.length ?? 0})
+                  </Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <BlobsContent
+                    hashes={transaction?.blob_hashes || []}
+                    sizes={transaction?.blob_sizes || []}
+                  />
+                </AccordionDetails>
+              </Accordion>
+
               {/* Events */}
               {data.result.Finalized.execution_result?.finalize?.events?.length ? (
                 <Accordion expanded={expandedPanels.includes("p3")} onChange={handleChange("p3")}>
@@ -337,6 +352,41 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
         </Box>
       </Fade>
     </FetchStatusCheck>
+  );
+}
+
+function formatBlobSize(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MiB`;
+}
+
+function BlobsContent({ hashes, sizes }: { hashes: string[]; sizes: number[] }) {
+  if (hashes.length === 0) {
+    return <Empty message="This transaction has no blobs." />;
+  }
+  return (
+    <Table size="small">
+      <TableBody>
+        <TableRow>
+          <TableCell sx={{ fontWeight: 600 }}>Index</TableCell>
+          <TableCell sx={{ fontWeight: 600 }}>Hash</TableCell>
+          <TableCell sx={{ fontWeight: 600 }}>Size</TableCell>
+        </TableRow>
+        {hashes.map((hash, i) => {
+          const size = sizes[i];
+          return (
+            <TableRow key={`${i}-${hash}`}>
+              <DataTableCell sx={{ width: "10%" }}>{i}</DataTableCell>
+              <DataTableCell sx={{ fontFamily: "monospace", fontSize: "0.8rem", wordBreak: "break-all" }}>
+                {hash}
+              </DataTableCell>
+              <DataTableCell sx={{ width: "15%" }}>{size != null ? formatBlobSize(size) : "—"}</DataTableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
   );
 }
 

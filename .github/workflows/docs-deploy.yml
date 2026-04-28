@@ -40,4 +40,4 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: docs/developer-docs
-          command: deploy dist --project-name=tari-ootle-docs
+          command: deploy dist

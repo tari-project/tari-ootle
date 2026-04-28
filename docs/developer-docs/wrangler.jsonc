@@ -1,0 +1,13 @@
+{
+	"name": "tari-ootle-docs",
+	"compatibility_date": "2026-04-15",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"assets": {
+		"run_worker_first": ["/community-templates", "/community-templates/*"]
+	},
+	"observability": {
+		"enabled": true
+	}
+}

@@ -8,7 +8,9 @@ mod error;
 mod handlers;
 #[cfg(feature = "metrics")]
 mod metrics;
+mod rate_limit;
 mod server;
 mod streaming;
 
+pub use rate_limit::RefillRate;
 pub use server::*;

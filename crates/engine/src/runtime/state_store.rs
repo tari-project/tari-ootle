@@ -6,7 +6,7 @@ use std::{collections::HashMap, mem};
 use indexmap::{IndexMap, IndexSet};
 use tari_engine_types::{
     Utxo,
-    component::ComponentHeader,
+    component::Component,
     lock::{LockFlag, LockId},
     substate::{Substate, SubstateId, SubstateValue},
     vault::Vault,
@@ -217,7 +217,7 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
     }
 
     /// Loads and caches the component address. No lock is required for this operation.
-    pub fn load_and_cache_component(&mut self, address: ComponentAddress) -> Result<&ComponentHeader, RuntimeError> {
+    pub fn load_and_cache_component(&mut self, address: ComponentAddress) -> Result<&Component, RuntimeError> {
         let addr = SubstateId::Component(address);
         let component = self.load_and_cache(addr)?;
         component.component().ok_or_else(|| RuntimeError::InvariantError {

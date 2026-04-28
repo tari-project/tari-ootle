@@ -365,8 +365,9 @@ where
             tx.substates_upsert_root(
                 VersionedSubstateIdRef::new(component_addr, substate.version()),
                 indexed.referenced_substates().collect(),
-                Some(component.module_name.clone()),
-                Some(component.template_address),
+                // TODO: we can clean out module name, this is never populated
+                None,
+                Some(*component.template_address()),
             )?;
 
             for owned_id in indexed.referenced_substates() {

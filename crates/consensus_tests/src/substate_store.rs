@@ -7,7 +7,7 @@ use tari_consensus::{
 };
 use tari_consensus_types::{BlockId, LeafBlock};
 use tari_engine_types::{
-    component::{ComponentBody, ComponentHeader},
+    component::{Component, ComponentBody, ComponentHeader},
     substate::{Substate, SubstateId, SubstateValue},
 };
 use tari_ootle_common_types::{
@@ -262,12 +262,13 @@ fn new_substate(seed: u8, version: u32) -> Substate {
 }
 
 fn new_substate_value(seed: u8) -> SubstateValue {
-    ComponentHeader {
-        template_address: Default::default(),
-        module_name: "".to_string(),
-        owner_rule: SubstateOwnerRule::None,
-        access_rules: Default::default(),
-        entity_id: [seed; EntityId::LENGTH].into(),
+    Component {
+        header: ComponentHeader {
+            template_address: Default::default(),
+            owner_rule: SubstateOwnerRule::None,
+            access_rules: Default::default(),
+            entity_id: [seed; EntityId::LENGTH].into(),
+        },
         body: ComponentBody {
             state: tari_bor::Value::Null,
         },
@@ -282,7 +283,7 @@ fn tx_id(seed: u8) -> tari_ootle_transaction::TransactionId {
 fn assert_substate_eq(a: Substate, b: Substate) {
     assert_eq!(a.version(), b.version());
     assert_eq!(
-        a.substate_value().as_component().unwrap().entity_id,
-        b.substate_value().as_component().unwrap().entity_id
+        a.substate_value().as_component().unwrap().entity_id(),
+        b.substate_value().as_component().unwrap().entity_id()
     );
 }

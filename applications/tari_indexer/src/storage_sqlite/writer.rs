@@ -191,12 +191,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             .value
             .value()
             .and_then(|s| s.component())
-            .map(|c| c.template_address.to_string());
-        let module_name = substate
-            .value
-            .value()
-            .and_then(|s| s.component())
-            .map(|c| c.module_name.clone());
+            .map(|c| c.template_address().to_string());
         let new_substate = NewSubstate {
             address: substate.substate_id.to_string(),
             version: substate.version as i32,
@@ -207,7 +202,8 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                 .transpose()?
                 .unwrap_or_default(),
             template_address,
-            module_name,
+            // Never set
+            module_name: None,
         };
 
         let address = &new_substate.address;

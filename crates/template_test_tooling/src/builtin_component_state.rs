@@ -4,7 +4,7 @@
 use tari_bor::cbor;
 use tari_engine::state_store::{StateStoreError, StateWriter};
 use tari_engine_types::{
-    component::{ComponentBody, ComponentHeader},
+    component::{Component, ComponentBody, ComponentHeader},
     resource::Resource,
     resource_container::ResourceContainer,
     substate::{Substate, SubstateId},
@@ -97,12 +97,13 @@ pub fn initialize_builtin_faucet_state<TStore: StateWriter>(store: &mut TStore) 
     store
         .set_state(
             SubstateId::Component(xtr_faucet_component()),
-            Substate::new(0, ComponentHeader {
-                template_address: XTR_FAUCET_TEMPLATE_ADDRESS,
-                module_name: "XtrFaucet".to_string(),
-                owner_rule: SubstateOwnerRule::None,
-                access_rules: ComponentAccessRules::allow_all(),
-                entity_id,
+            Substate::new(0, Component {
+                header: ComponentHeader {
+                    template_address: XTR_FAUCET_TEMPLATE_ADDRESS,
+                    owner_rule: SubstateOwnerRule::None,
+                    access_rules: ComponentAccessRules::allow_all(),
+                    entity_id,
+                },
                 body: ComponentBody { state },
             }),
         )
@@ -155,12 +156,13 @@ pub fn initialize_builtin_nft_faucet_state<TStore: StateWriter>(store: &mut TSto
     store
         .set_state(
             SubstateId::Component(test_nft_faucet_component()),
-            Substate::new(0, ComponentHeader {
-                template_address: NFT_FAUCET_TEMPLATE_ADDRESS,
-                module_name: "TestFaucet".to_string(),
-                owner_rule: SubstateOwnerRule::None,
-                access_rules: ComponentAccessRules::allow_all(),
-                entity_id: EntityId::default(),
+            Substate::new(0, Component {
+                header: ComponentHeader {
+                    template_address: NFT_FAUCET_TEMPLATE_ADDRESS,
+                    owner_rule: SubstateOwnerRule::None,
+                    access_rules: ComponentAccessRules::allow_all(),
+                    entity_id: EntityId::default(),
+                },
                 body: ComponentBody { state },
             }),
         )

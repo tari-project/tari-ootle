@@ -39,7 +39,7 @@ impl From<SubstateRecord> for VersionedSubstateRecord {
 mod tests {
     use tari_bor::Value;
     use tari_engine_types::{
-        component::{ComponentBody, ComponentHeader},
+        component::{Component, ComponentBody, ComponentHeader},
         substate::SubstateValue,
     };
     use tari_ootle_common_types::{Epoch, shard::Shard};
@@ -57,14 +57,15 @@ mod tests {
                 .parse()
                 .unwrap(),
             version: 0,
-            substate_value: Some(SubstateValue::Component(ComponentHeader {
-                template_address: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-                    .parse()
-                    .unwrap(),
-                module_name: "blah".to_string(),
-                owner_rule: SubstateOwnerRule::None,
-                access_rules: Default::default(),
-                entity_id: Default::default(),
+            substate_value: Some(SubstateValue::Component(Component {
+                header: ComponentHeader {
+                    template_address: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                        .parse()
+                        .unwrap(),
+                    owner_rule: SubstateOwnerRule::None,
+                    access_rules: Default::default(),
+                    entity_id: Default::default(),
+                },
                 body: ComponentBody { state: Value::Null },
             })),
             state_hash: Hash32::from_hex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef").unwrap(),

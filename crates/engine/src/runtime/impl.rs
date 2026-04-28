@@ -29,7 +29,7 @@ use tari_engine_types::{
     Utxo,
     UtxoOutput,
     commit_result::{FinalizeResult, RejectReason},
-    component::ComponentHeader,
+    component::Component,
     confidential::{ClaimBurnOutputData, ClaimedOutputTombstone, MinotariBurnClaimProof},
     crypto::OutputBody,
     entity_id_provider::EntityIdProvider,
@@ -505,10 +505,7 @@ where
         Ok(())
     }
 
-    fn load_component(
-        &mut self,
-        call: ComponentReference,
-    ) -> Result<(ComponentAddress, ComponentHeader), RuntimeError> {
+    fn load_component(&mut self, call: ComponentReference) -> Result<(ComponentAddress, Component), RuntimeError> {
         self.invoke_modules_on_runtime_call("load_component")?;
         match call {
             ComponentReference::Address(address) => self.tracker.write_with(|state_mut| {
@@ -743,7 +740,7 @@ where
                         .require_ownership(ComponentAction::SetAccessRules, component.as_ownership())?;
 
                     state.modify_component_with(&component_lock, |component| {
-                        if access_rules == component.access_rules {
+                        if access_rules == *component.access_rules() {
                             return false;
                         }
                         component.set_access_rules(access_rules);
@@ -769,7 +766,7 @@ where
                 self.tracker.write_with(|state| {
                     let locked = state.read_lock_substate(SubstateId::Component(component_address))?;
                     let component = state.get_component(&locked)?;
-                    let template_address = component.template_address;
+                    let template_address = *component.template_address();
                     state.unlock_substate(locked)?;
                     Ok(InvokeResult::encode(&template_address)?)
                 })
@@ -796,7 +793,7 @@ where
                             details: format!("Substate at {} is not a component", component_address),
                         })?;
 
-                    let Some(owner) = component.owner_rule.owned_by_public_key().copied() else {
+                    let Some(owner) = component.owner_rule().owned_by_public_key().copied() else {
                         return Ok(InvokeResult::encode(&None::<tari_template_lib::models::Proof>)?);
                     };
 
@@ -2882,7 +2879,7 @@ where
                 })?;
 
             let component_mut = state_mut.get_component_mut(&locked)?;
-            let prev_template = component_mut.template_address;
+            let prev_template = *component_mut.template_address();
             component_mut.set_template_address(new_template);
 
             state_mut.push_event(Event::std(

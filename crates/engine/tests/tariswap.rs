@@ -77,7 +77,8 @@ fn create_tariswap_component(
         .expect_success()
         .up_iter()
         .find(|(address, substate)| {
-            address.is_component() && substate.substate_value().component().unwrap().module_name == module_name
+            address.is_component() &&
+                *substate.substate_value().component().unwrap().template_address() == tariswap_template
         })
         .unwrap();
     let component_address = substate_addr.as_component_address().unwrap();

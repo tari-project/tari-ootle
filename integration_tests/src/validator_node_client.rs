@@ -70,6 +70,7 @@ pub async fn create_component(
 }
 
 /// Extracts outputs from a substate diff and stores them in the world for later reference
+#[expect(clippy::too_many_lines)]
 pub(crate) fn add_outputs_from_diff(world: &mut TariWorld, outputs_name: String, diff: &SubstateDiff) {
     let outputs = world.outputs.entry(outputs_name).or_default();
     let mut counters = [0usize; 10];
@@ -77,7 +78,7 @@ pub(crate) fn add_outputs_from_diff(world: &mut TariWorld, outputs_name: String,
         match addr {
             SubstateId::Component(component_addr) => {
                 let component = data.substate_value().component().unwrap();
-                if component.template_address == ACCOUNT_TEMPLATE_ADDRESS {
+                if *component.template_address() == ACCOUNT_TEMPLATE_ADDRESS {
                     let account = world
                         .wallet_accounts
                         .values()
@@ -93,7 +94,17 @@ pub(crate) fn add_outputs_from_diff(world: &mut TariWorld, outputs_name: String,
 
                     counters[9] += 1;
                 } else {
-                    outputs.insert(format!("components/{}", component.module_name), SubstateRequirement {
+                    let template = world
+                        .templates
+                        .values()
+                        .find(|a| a.address == *component.template_address())
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "Template not found for component with template address {}",
+                                component.template_address()
+                            )
+                        });
+                    outputs.insert(format!("components/{}", template.name), SubstateRequirement {
                         substate_id: addr.clone(),
                         version: Some(data.version()),
                     });

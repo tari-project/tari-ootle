@@ -10,7 +10,7 @@ use tari_crypto::{
     ristretto::RistrettoPublicKey,
 };
 use tari_engine_types::{
-    component::{ComponentBody, ComponentHeader},
+    component::{Component, ComponentBody, ComponentHeader},
     substate::{SubstateId, SubstateValue},
 };
 use tari_ootle_common_types::{NumPreshards, ShardGroup, SubstateAddress};
@@ -54,12 +54,13 @@ pub fn derive_keypair_from_address(addr: &TestAddress) -> (PrivateKey, Ristretto
 }
 
 pub fn make_test_component(entity_id: EntityId) -> SubstateValue {
-    SubstateValue::Component(ComponentHeader {
-        template_address: Default::default(),
-        module_name: "Test".to_string(),
-        owner_rule: SubstateOwnerRule::None,
-        access_rules: Default::default(),
-        entity_id,
+    SubstateValue::Component(Component {
+        header: ComponentHeader {
+            template_address: Default::default(),
+            owner_rule: SubstateOwnerRule::None,
+            access_rules: Default::default(),
+            entity_id,
+        },
         body: ComponentBody {
             state: tari_bor::Value::Null,
         },

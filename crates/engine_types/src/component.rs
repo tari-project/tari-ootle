@@ -58,17 +58,21 @@ pub fn derive_component_address_from_public_key(
 
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct ComponentHeader {
-    pub template_address: TemplateAddress,
-    pub module_name: String,
-    pub owner_rule: SubstateOwnerRule,
-    pub access_rules: ComponentAccessRules,
-    pub entity_id: EntityId,
-    // TODO: Split the state from the header
+pub struct Component {
+    pub header: ComponentHeader,
     pub body: ComponentBody,
 }
 
-impl ComponentHeader {
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct ComponentHeader {
+    pub template_address: TemplateAddress,
+    pub owner_rule: SubstateOwnerRule,
+    pub access_rules: ComponentAccessRules,
+    pub entity_id: EntityId,
+}
+
+impl Component {
     pub fn into_component(self) -> ComponentBody {
         self.body
     }
@@ -83,25 +87,45 @@ impl ComponentHeader {
 
     pub fn as_ownership(&self) -> Ownership<'_> {
         Ownership {
-            owner_rule: Cow::Borrowed(&self.owner_rule),
+            owner_rule: Cow::Borrowed(&self.header.owner_rule),
         }
     }
 
+    pub fn header(&self) -> &ComponentHeader {
+        &self.header
+    }
+
+    pub fn body(&self) -> &ComponentBody {
+        &self.body
+    }
+
+    pub fn owner_rule(&self) -> &SubstateOwnerRule {
+        &self.header.owner_rule
+    }
+
+    pub fn entity_id(&self) -> &EntityId {
+        &self.header.entity_id
+    }
+
     pub fn owner_public_key(&self) -> Option<&RistrettoPublicKeyBytes> {
-        self.owner_rule.owned_by_public_key()
+        self.header.owner_rule.owned_by_public_key()
     }
 
     pub fn access_rules(&self) -> &ComponentAccessRules {
-        &self.access_rules
+        &self.header.access_rules
+    }
+
+    pub fn template_address(&self) -> &TemplateAddress {
+        &self.header.template_address
     }
 
     pub fn set_access_rules(&mut self, access_rules: ComponentAccessRules) -> &mut Self {
-        self.access_rules = access_rules;
+        self.header.access_rules = access_rules;
         self
     }
 
     pub fn set_template_address(&mut self, template_address: TemplateAddress) -> &mut Self {
-        self.template_address = template_address;
+        self.header.template_address = template_address;
         self
     }
 

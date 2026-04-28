@@ -69,9 +69,9 @@ impl Runner {
         Ok(diff
             .up_iter()
             .filter_map(|(addr, value)| {
-                let addr = addr
-                    .as_component_address()
-                    .filter(|_| value.substate_value().component().unwrap().module_name == "TariSwapPool")?;
+                let addr = addr.as_component_address().filter(|_| {
+                    *value.substate_value().component().unwrap().template_address() == self.tariswap_template
+                })?;
                 let vaults = decode_value_at_path(value.substate_value().component().unwrap().state(), "$.pools")
                     .unwrap()
                     .unwrap();

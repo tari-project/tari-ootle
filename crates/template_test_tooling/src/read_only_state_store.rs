@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use tari_engine::state_store::{StateReader, StateStoreError, memory::MemoryStateStore};
 use tari_engine_types::{
     Utxo,
-    component::ComponentHeader,
+    component::Component,
     indexed_value::IndexedValue,
     resource::Resource,
     substate::{Substate, SubstateId},
@@ -27,7 +27,7 @@ impl<'a> ReadOnlyStateStore<'a> {
         Self { store }
     }
 
-    pub fn get_component(&self, component_address: ComponentAddress) -> Result<ComponentHeader, StateStoreError> {
+    pub fn get_component(&self, component_address: ComponentAddress) -> Result<Component, StateStoreError> {
         let substate = self.get_substate(&SubstateId::Component(component_address))?;
         Ok(substate.into_substate_value().into_component().unwrap())
     }
@@ -35,12 +35,12 @@ impl<'a> ReadOnlyStateStore<'a> {
     pub fn get_components_by_template_address(
         &self,
         template_address: TemplateAddress,
-    ) -> Result<Vec<(ComponentAddress, ComponentHeader)>, StateStoreError> {
+    ) -> Result<Vec<(ComponentAddress, Component)>, StateStoreError> {
         let mut components = Vec::new();
         self.with_substates(|id, substate| {
             if let SubstateId::Component(component_address) = id &&
                 let Some(component) = substate.substate_value().as_component() &&
-                component.template_address == template_address
+                *component.template_address() == template_address
             {
                 components.push((*component_address, component.clone()));
             }
@@ -58,7 +58,7 @@ impl<'a> ReadOnlyStateStore<'a> {
         self.with_substates(|id, substate| {
             if let SubstateId::Component(component_address) = id &&
                 let Some(component) = substate.substate_value().as_component() &&
-                component.template_address == ACCOUNT_TEMPLATE_ADDRESS &&
+                *component.template_address() == ACCOUNT_TEMPLATE_ADDRESS &&
                 let Ok(account) = Account::from_value(component.state())
             {
                 accounts.insert(*component_address, account);

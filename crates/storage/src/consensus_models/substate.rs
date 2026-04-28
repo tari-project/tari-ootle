@@ -338,7 +338,7 @@ impl SubstateValueOrHash {
 
     pub fn to_value_hash(&self, version: u32, epoch: Epoch) -> Hash32 {
         match &self {
-            SubstateValueOrHash::Value(v) => hash_substate(v, version, epoch.as_u64()),
+            SubstateValueOrHash::Value(v) => hash_substate(v, version, epoch),
             SubstateValueOrHash::Hash(hash) => *hash,
         }
     }

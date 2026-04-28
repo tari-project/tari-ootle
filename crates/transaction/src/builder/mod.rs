@@ -307,32 +307,75 @@ impl<D> TransactionBuilder<D> {
         f(self)
     }
 
-    /// Merge another builder's instructions and inputs into this builder.
+    /// Merge another builder's instructions, inputs and blobs into this builder.
     ///
-    /// Workspace IDs from `other` are remapped to avoid collisions with this builder's
-    /// workspace IDs. Fee instructions from `other` are NOT merged — fees should be
-    /// managed on the outer builder.
+    /// Workspace IDs and blob indices from `other` are remapped to avoid collisions with this
+    /// builder's. Fee instructions from `other` are NOT merged — fees should be managed on the
+    /// outer builder.
     ///
     /// This is the low-level primitive behind the higher-level `chain` method on
     /// `OotleInvoke`.
+    ///
+    /// # Panics
+    ///
+    /// - If the combined blob count would exceed the `BlobIndex` range (256 blobs total).
+    /// - If a named blob in `other` collides with one already registered on `self`.
     pub fn merge(mut self, other: TransactionBuilder<D>) -> Self {
-        let id_offset = self.workspace_ids.next_id();
-        let other_next_id = other.workspace_ids.next_id();
-        let other_tx = other.unsigned_transaction;
+        let workspace_id_offset = self.workspace_ids.next_id();
+        let other_next_workspace_id = other.workspace_ids.next_id();
+        let blob_id_offset: BlobIndex = self
+            .unsigned_transaction
+            .blobs()
+            .len()
+            .try_into()
+            .expect("self blob count exceeds BlobIndex range");
+        let other_blob_count = other.unsigned_transaction.blobs().len();
+        let combined = (blob_id_offset as usize) + other_blob_count;
+        assert!(
+            combined <= BlobIndex::MAX as usize + 1,
+            "merged blob count {combined} exceeds BlobIndex range",
+        );
+
+        let TransactionBuilder {
+            unsigned_transaction: mut other_tx,
+            blob_ids: other_blob_ids,
+            ..
+        } = other;
 
         // Merge inputs first (before consuming the transaction)
         self.unsigned_transaction
             .inputs_mut()
             .extend(other_tx.inputs().iter().cloned());
 
-        // Remap workspace IDs in other's instructions and append them
+        // Move other's blobs over, appending in order so existing indices on `other`'s
+        // instructions just shift by `blob_id_offset` after remapping.
+        let other_blobs = std::mem::take(other_tx.blobs_mut());
+        for blob in other_blobs.as_slice().iter().cloned() {
+            self.unsigned_transaction
+                .add_blob(blob)
+                .expect("blob count checked above");
+        }
+
+        // Merge other's blob name map with the offset applied. Duplicate names panic since
+        // silently overriding would be a footgun for callers.
+        for (name, idx) in other_blob_ids.iter() {
+            assert!(
+                self.blob_ids.get(name).is_none(),
+                "blob name '{name}' collides during merge",
+            );
+            self.blob_ids.insert(name.clone(), idx + blob_id_offset);
+        }
+
+        // Remap workspace IDs and blob indices in other's instructions, then append.
         for mut instruction in other_tx.into_instructions() {
-            instruction.remap_workspace_ids(id_offset);
+            instruction.remap_workspace_ids(workspace_id_offset);
+            instruction.remap_blob_ids(blob_id_offset);
             self.unsigned_transaction.instructions_mut().push(instruction);
         }
 
         // Advance workspace ID counter past merged IDs
-        self.workspace_ids.set_next_id(id_offset + other_next_id);
+        self.workspace_ids
+            .set_next_id(workspace_id_offset + other_next_workspace_id);
 
         self
     }

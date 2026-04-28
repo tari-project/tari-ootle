@@ -24,4 +24,8 @@ impl BlobIds {
     pub fn get(&self, key: &str) -> Option<BlobIndex> {
         self.ids.get(key).copied()
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, BlobIndex)> + '_ {
+        self.ids.iter().map(|(k, v)| (k, *v))
+    }
 }

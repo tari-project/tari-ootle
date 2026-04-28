@@ -6,6 +6,9 @@ use std::collections::HashMap;
 use proc_macro2::Ident;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_transaction::{
+    Blob,
+    BlobIndex,
+    Blobs,
     ComponentReference,
     Instruction,
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
@@ -31,12 +34,22 @@ pub struct ManifestInstructionGenerator {
     current_workspace_id: WorkspaceId,
     workspace_ids: HashMap<String, WorkspaceOffsetId>,
     templates: HashMap<String, TemplateAddress>,
+    /// Caller-supplied blob payloads keyed by name. Used to resolve `blob!(name)` references.
+    blob_inputs: HashMap<String, Blob>,
+    /// Output blob list — populated lazily as `blob!(name)` is encountered. The order matches
+    /// the order of first reference, so emitted `BlobIndex`es match the returned `Blobs`.
+    blob_indices: HashMap<String, BlobIndex>,
+    output_blobs: Blobs,
     functions: HashMap<String, Vec<ManifestIntent>>,
     call_depth: usize,
 }
 
 impl ManifestInstructionGenerator {
-    pub fn new(globals: HashMap<String, ManifestValue>, templates: HashMap<String, TemplateAddress>) -> Self {
+    pub fn new(
+        globals: HashMap<String, ManifestValue>,
+        templates: HashMap<String, TemplateAddress>,
+        blob_inputs: HashMap<String, Blob>,
+    ) -> Self {
         Self {
             imported_templates: HashMap::new(),
             global_aliases: HashMap::new(),
@@ -44,6 +57,9 @@ impl ManifestInstructionGenerator {
             current_workspace_id: WorkspaceId::default(),
             workspace_ids: HashMap::new(),
             templates,
+            blob_inputs,
+            blob_indices: HashMap::new(),
+            output_blobs: Blobs::empty(),
             functions: HashMap::new(),
             call_depth: 0,
         }
@@ -82,6 +98,7 @@ impl ManifestInstructionGenerator {
         Ok(ManifestInstructions {
             instructions,
             fee_instructions,
+            blobs: std::mem::take(&mut self.output_blobs),
         })
     }
 
@@ -265,11 +282,12 @@ impl ManifestInstructionGenerator {
         }
     }
 
-    fn process_args(&self, args: Vec<ManifestLiteral>) -> Result<Vec<InstructionArg>, ManifestError> {
+    fn process_args(&mut self, args: Vec<ManifestLiteral>) -> Result<Vec<InstructionArg>, ManifestError> {
         args.into_iter()
             .map(|arg| match arg {
                 ManifestLiteral::Lit(lit) => lit_to_arg(&lit),
                 ManifestLiteral::Workspace(ident) => self.get_ident(&ident.to_string()),
+                ManifestLiteral::Blob(ident) => self.resolve_blob_arg(&ident.to_string()),
                 ManifestLiteral::Special(SpecialLiteral::Null) => {
                     Ok(InstructionArg::literal(tari_bor::Value::Null)
                         .expect("Null literal serialization should not fail"))
@@ -298,6 +316,27 @@ impl ManifestInstructionGenerator {
                 },
             })
             .collect()
+    }
+
+    /// Resolve `blob!(name)` to an `InstructionArg::Blob(idx)`. The name must have a payload
+    /// in the `blob_inputs` map (supplied to `parse_manifest`); the blob is appended to the
+    /// output `Blobs` on first reference and assigned the next free `BlobIndex`. Repeated
+    /// references to the same name reuse the same index.
+    fn resolve_blob_arg(&mut self, name: &str) -> Result<InstructionArg, ManifestError> {
+        if let Some(idx) = self.blob_indices.get(name) {
+            return Ok(InstructionArg::Blob(*idx));
+        }
+        let blob = self
+            .blob_inputs
+            .get(name)
+            .ok_or_else(|| ManifestError::BlobNotProvided { name: name.to_string() })?
+            .clone();
+        let idx = self
+            .output_blobs
+            .push(blob)
+            .map_err(|e| ManifestError::BlobIndexOverflow { max: e.max })?;
+        self.blob_indices.insert(name.to_string(), idx);
+        Ok(InstructionArg::Blob(idx))
     }
 
     fn get_imported_template(&self, name: &Ident) -> Result<TemplateAddress, ManifestError> {

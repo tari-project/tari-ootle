@@ -176,6 +176,10 @@ pub struct TransactionSubmitManifestRequest {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub max_fee: u64,
     pub dry_run: bool,
+    /// Blob payloads referenced from the manifest via `blob!(name)`. Keys are the names used
+    /// in the manifest text; values are base64-encoded byte payloads in JSON.
+    #[serde(default)]
+    pub blobs: HashMap<String, tari_ootle_transaction::Blob>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

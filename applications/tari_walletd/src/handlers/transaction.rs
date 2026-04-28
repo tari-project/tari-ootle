@@ -291,7 +291,12 @@ pub async fn handle_submit_manifest(
         })
         .collect::<Result<_, _>>()?;
 
-    let instructions = parse_manifest(&req.manifest, variables, Default::default())
+    let blob_inputs = req
+        .blobs
+        .iter()
+        .map(|(name, blob)| (name.clone(), blob.clone()))
+        .collect();
+    let instructions = parse_manifest(&req.manifest, variables, Default::default(), blob_inputs)
         .map_err(|e| invalid_params("manifest", Some(format!("Failed to parse manifest: {}", e))))?;
 
     let default_account = sdk
@@ -311,7 +316,7 @@ pub async fn handle_submit_manifest(
 
     let fee_amount = req.max_fee;
 
-    let transaction = context
+    let mut transaction = context
         .transaction_builder()
         .with_dry_run(req.dry_run)
         .with_fee_instructions_builder(|builder| {
@@ -323,6 +328,15 @@ pub async fn handle_submit_manifest(
         })
         .with_instructions(instructions.instructions)
         .build_unsigned();
+
+    // Attach blobs from the manifest (in the order they were first referenced) to the
+    // unsigned transaction. The manifest generator already assigned `BlobIndex`es matching
+    // this ordering, so the indices in instructions resolve correctly.
+    for blob in instructions.blobs.iter().cloned() {
+        transaction
+            .add_blob(blob)
+            .map_err(|e| invalid_params("blobs", Some(e.to_string())))?;
+    }
 
     // Detect inputs
     let substates = transaction.to_referenced_substates()?.into_iter().collect::<Vec<_>>();

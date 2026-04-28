@@ -110,6 +110,9 @@ pub struct LogIntent {
 pub enum ManifestLiteral {
     Lit(Lit),
     Workspace(Ident),
+    /// A reference to a transaction blob by caller-supplied name. The generator resolves the
+    /// name to a `BlobIndex` against the blobs map passed to `parse_manifest`.
+    Blob(Ident),
     Special(SpecialLiteral),
 }
 
@@ -745,11 +748,24 @@ fn handle_macro_argument(mac: Macro) -> Result<ManifestLiteral, syn::Error> {
                 .map_err(|e| syn::Error::new_spanned(&lit, format!("Failed to parse NonFungibleId: {}", e)))?;
             Ok(ManifestLiteral::Special(SpecialLiteral::NonFungibleId(id)))
         },
+        "blob" => {
+            // Accept either an identifier (`blob!(my_data)`) or a string literal
+            // (`blob!("my_data")`). Both resolve the same name against the blobs map supplied
+            // to `parse_manifest`.
+            let blob_name = if let Ok(lit_str) = parse2::<LitStr>(mac.tokens.clone()) {
+                Ident::new(&lit_str.value(), lit_str.span())
+            } else {
+                parse2::<Ident>(mac.tokens).map_err(|e| {
+                    syn::Error::new_spanned(name, format!("Expected identifier or string literal in blob!: {}", e))
+                })?
+            };
+            Ok(ManifestLiteral::Blob(blob_name))
+        },
         _ => Err(syn::Error::new_spanned(
             name,
             format!(
                 "Invalid argument macro '{name}', supported macros: cbor!, metadata!, amount!, hex_bytes!, bytes!, \
-                 public_key!, address!, substate_id!, non_fungible_id!"
+                 public_key!, address!, substate_id!, non_fungible_id!, blob!"
             ),
         )),
     }

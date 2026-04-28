@@ -101,7 +101,7 @@ fn merge_remaps_blob_ids_and_appends_blobs() {
 fn merge_rejects_colliding_blob_names() {
     let a = Transaction::builder_localnet().add_blob("a", vec![1u8]);
     let b = Transaction::builder_localnet().add_blob("a", vec![2u8]);
-    let _ = a.merge(b);
+    let _unused = a.merge(b);
 }
 
 #[test]

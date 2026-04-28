@@ -59,7 +59,8 @@ fn manifest_smoke_test() {
     let ManifestInstructions {
         instructions,
         fee_instructions,
-    } = parse_manifest(&input, globals, Default::default()).unwrap();
+        ..
+    } = parse_manifest(&input, globals, Default::default(), Default::default()).unwrap();
 
     let expected = vec![
         Instruction::CallFunction {
@@ -132,7 +133,8 @@ fn workspace_component_reference() {
     let ManifestInstructions {
         instructions,
         fee_instructions,
-    } = parse_manifest(manifest, HashMap::new(), Default::default()).unwrap();
+        ..
+    } = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default()).unwrap();
 
     let expected = vec![
         Instruction::CallFunction {
@@ -171,7 +173,8 @@ fn allocate_address_macros() {
     let ManifestInstructions {
         instructions,
         fee_instructions,
-    } = parse_manifest(manifest, HashMap::new(), Default::default()).unwrap();
+        ..
+    } = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default()).unwrap();
 
     let expected = vec![
         Instruction::AllocateAddress {
@@ -216,7 +219,8 @@ fn local_function_inlining() {
     let ManifestInstructions {
         instructions,
         fee_instructions,
-    } = parse_manifest(manifest, HashMap::new(), Default::default()).unwrap();
+        ..
+    } = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default()).unwrap();
 
     // setup() should be inlined: its instructions appear first, then final_step()
     let expected = vec![
@@ -259,7 +263,7 @@ fn recursive_function_exceeds_call_depth() {
         }
     "#;
 
-    let result = parse_manifest(manifest, HashMap::new(), Default::default());
+    let result = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default());
     let err = match result {
         Ok(_) => panic!("Expected MaxCallDepthExceeded error, but got Ok"),
         Err(e) => e,
@@ -288,7 +292,8 @@ fn create_account_simple() {
     let ManifestInstructions {
         instructions,
         fee_instructions,
-    } = parse_manifest(manifest, globals, Default::default()).unwrap();
+        ..
+    } = parse_manifest(manifest, globals, Default::default(), Default::default()).unwrap();
 
     let expected = vec![
         Instruction::CreateAccount {
@@ -328,7 +333,8 @@ fn create_account_with_bucket() {
     let ManifestInstructions {
         instructions,
         fee_instructions,
-    } = parse_manifest(manifest, globals, Default::default()).unwrap();
+        ..
+    } = parse_manifest(manifest, globals, Default::default(), Default::default()).unwrap();
 
     let expected = vec![
         Instruction::CallMethod {
@@ -368,7 +374,8 @@ fn create_account_without_assignment() {
     let ManifestInstructions {
         instructions,
         fee_instructions,
-    } = parse_manifest(manifest, globals, Default::default()).unwrap();
+        ..
+    } = parse_manifest(manifest, globals, Default::default(), Default::default()).unwrap();
 
     let expected = vec![Instruction::CreateAccount {
         owner_public_key: RistrettoPublicKeyBytes::from(pk_bytes),
@@ -394,7 +401,8 @@ fn none_literal() {
     let ManifestInstructions {
         instructions,
         fee_instructions,
-    } = parse_manifest(manifest, HashMap::new(), Default::default()).unwrap();
+        ..
+    } = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default()).unwrap();
 
     let template_addr =
         TemplateAddress::from_hex("c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7").unwrap();
@@ -422,7 +430,8 @@ fn metadata_macro_empty() {
     let ManifestInstructions {
         instructions,
         fee_instructions,
-    } = parse_manifest(manifest, HashMap::new(), Default::default()).unwrap();
+        ..
+    } = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default()).unwrap();
 
     let template_addr =
         TemplateAddress::from_hex("c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7").unwrap();
@@ -451,7 +460,8 @@ fn metadata_macro_with_values() {
     let ManifestInstructions {
         instructions,
         fee_instructions,
-    } = parse_manifest(manifest, HashMap::new(), Default::default()).unwrap();
+        ..
+    } = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default()).unwrap();
 
     let template_addr =
         TemplateAddress::from_hex("c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7").unwrap();
@@ -482,7 +492,8 @@ fn empty_metadata_function_call_syntax() {
     let ManifestInstructions {
         instructions,
         fee_instructions,
-    } = parse_manifest(manifest, HashMap::new(), Default::default()).unwrap();
+        ..
+    } = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default()).unwrap();
 
     let template_addr =
         TemplateAddress::from_hex("c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7").unwrap();
@@ -517,7 +528,8 @@ fn tuple_destructuring() {
     let ManifestInstructions {
         instructions,
         fee_instructions,
-    } = parse_manifest(manifest, globals, Default::default()).unwrap();
+        ..
+    } = parse_manifest(manifest, globals, Default::default(), Default::default()).unwrap();
 
     use tari_ootle_transaction::args::InstructionArg;
 
@@ -563,7 +575,8 @@ fn tuple_destructuring_template_call() {
     let ManifestInstructions {
         instructions,
         fee_instructions,
-    } = parse_manifest(manifest, HashMap::new(), Default::default()).unwrap();
+        ..
+    } = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default()).unwrap();
 
     let expected = vec![
         Instruction::CallFunction {
@@ -576,4 +589,74 @@ fn tuple_destructuring_template_call() {
 
     assert_eq!(instructions, expected);
     assert_eq!(fee_instructions, vec![]);
+}
+
+/// `blob!(name)` should resolve to `InstructionArg::Blob(idx)` against the supplied blob map,
+/// with the `Blobs` output ordered by first reference. Repeated references reuse the same
+/// index.
+#[test]
+fn blob_macro_resolves_to_indexed_arg() {
+    let manifest = r#"
+        use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as MyTemplate;
+
+        fn main() {
+            let comp = MyTemplate::new(blob!(payload_a));
+            comp.update(blob!("payload_b"), blob!(payload_a));
+        }
+    "#;
+
+    let template_addr =
+        TemplateAddress::from_hex("c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7").unwrap();
+
+    let mut blob_inputs = HashMap::new();
+    blob_inputs.insert(
+        "payload_a".to_string(),
+        tari_ootle_transaction::Blob::from(vec![1u8, 2, 3]),
+    );
+    blob_inputs.insert(
+        "payload_b".to_string(),
+        tari_ootle_transaction::Blob::from(vec![9u8, 8]),
+    );
+
+    let ManifestInstructions {
+        instructions,
+        fee_instructions,
+        blobs,
+    } = parse_manifest(manifest, HashMap::new(), Default::default(), blob_inputs).unwrap();
+
+    // payload_a was referenced first so it gets index 0; payload_b is index 1.
+    assert_eq!(blobs.len(), 2);
+    assert_eq!(blobs.get(0).unwrap().as_bytes(), &[1u8, 2, 3]);
+    assert_eq!(blobs.get(1).unwrap().as_bytes(), &[9u8, 8]);
+
+    use tari_ootle_transaction::args::InstructionArg;
+    assert_eq!(instructions[0], Instruction::CallFunction {
+        address: template_addr,
+        function: "new".try_into().unwrap(),
+        args: vec![InstructionArg::Blob(0)],
+    });
+    // The second method call reuses payload_a — same index 0 — and adds payload_b at 1.
+    assert_eq!(instructions[2], Instruction::CallMethod {
+        call: ComponentReference::Workspace(0),
+        method: "update".try_into().unwrap(),
+        args: vec![InstructionArg::Blob(1), InstructionArg::Blob(0)],
+    });
+    assert_eq!(fee_instructions, vec![]);
+}
+
+#[test]
+fn blob_macro_unknown_name_errors() {
+    let manifest = r#"
+        use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as MyTemplate;
+
+        fn main() {
+            let comp = MyTemplate::new(blob!(missing));
+        }
+    "#;
+
+    let err = match parse_manifest(manifest, HashMap::new(), Default::default(), HashMap::new()) {
+        Ok(_) => panic!("expected an error"),
+        Err(e) => e.to_string(),
+    };
+    assert!(err.contains("blob!('missing')"), "unexpected error: {err}");
 }

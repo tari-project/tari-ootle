@@ -118,11 +118,12 @@ function ManifestEditor() {
   const isDryRun = !fee;
 
   const handleSave = useCallback(() => {
-    const data = manifest.tabs.map(({ name, code, variables, signingKeys }) => ({
+    const data = manifest.tabs.map(({ name, code, variables, signingKeys, blobs }) => ({
       name,
       code,
       variables,
       signingKeys,
+      blobs,
     }));
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);

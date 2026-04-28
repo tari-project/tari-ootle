@@ -14,7 +14,6 @@ use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::{
     confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
     indexed_value::IndexedValue,
-    published_template::TemplateBlob,
     substate::SubstateId,
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
@@ -35,6 +34,8 @@ use tari_template_lib_types::{
 use crate::{
     AllocatableAddressType,
     Assertion,
+    Blob,
+    BlobIndex,
     CheckOrd,
     ComponentReference,
     Instruction,
@@ -48,6 +49,7 @@ use crate::{
     TransactionSignature,
     args,
     args::{InstructionArg, WorkspaceOffsetId},
+    blobs::BlobIndexOverflow,
     builder::{
         error::BuilderError,
         named_args::{BuilderWorkspaceKey, NamedArg, parse_workspace_key},
@@ -598,18 +600,42 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
-    /// Publishing a WASM template.
-    pub fn publish_template(self, binary: TemplateBlob) -> Self {
+    /// Append a blob and return its assigned index. Use the returned `BlobIndex` to reference
+    /// the blob from `Instruction::PublishTemplate.binary` or `InstructionArg::Blob`.
+    pub fn add_blob<B: Into<Blob>>(mut self, blob: B) -> Result<(Self, BlobIndex), BlobIndexOverflow> {
+        let idx = self.unsigned_transaction.add_blob(blob.into())?;
+        Ok((self, idx))
+    }
+
+    /// Publishing a WASM template. Auto-adds the binary as a blob and references it by index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the transaction's blob count would overflow `BlobIndex` (256 blobs maximum).
+    pub fn publish_template<B: Into<Blob>>(mut self, binary: B) -> Self {
+        let idx = self
+            .unsigned_transaction
+            .add_blob(binary.into())
+            .expect("transaction blob count exceeds BlobIndex range");
         self.add_instruction(Instruction::PublishTemplate {
-            binary,
+            binary: idx,
             metadata_hash: None,
         })
     }
 
-    /// Publishing a WASM template with an off-chain metadata hash.
-    pub fn publish_template_with_metadata(self, binary: TemplateBlob, metadata_hash: MetadataHash) -> Self {
+    /// Publishing a WASM template with an off-chain metadata hash. Auto-adds the binary as a
+    /// blob and references it by index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the transaction's blob count would overflow `BlobIndex`.
+    pub fn publish_template_with_metadata<B: Into<Blob>>(mut self, binary: B, metadata_hash: MetadataHash) -> Self {
+        let idx = self
+            .unsigned_transaction
+            .add_blob(binary.into())
+            .expect("transaction blob count exceeds BlobIndex range");
         self.add_instruction(Instruction::PublishTemplate {
-            binary,
+            binary: idx,
             metadata_hash: Some(metadata_hash),
         })
     }

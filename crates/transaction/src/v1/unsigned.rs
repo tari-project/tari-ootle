@@ -12,7 +12,7 @@ use tari_engine_types::{
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib_types::{ComponentAddress, UtxoAddress, crypto::RistrettoPublicKeyBytes};
 
-use crate::{ComponentReference, Instruction, ResourceAddressRef, Signable, TransactionSignature};
+use crate::{Blobs, ComponentReference, Instruction, ResourceAddressRef, Signable, TransactionSignature};
 
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -27,6 +27,13 @@ pub struct UnsignedTransactionV1 {
     pub max_epoch: Option<Epoch>,
     pub is_seal_signer_authorized: bool,
     pub dry_run: bool,
+
+    /// Prunable side-channel of opaque payloads referenced by instructions via `BlobIndex`.
+    /// Only the per-blob commitments (`blobs.hashes()`) participate in the signing domain —
+    /// raw blob bytes are excluded so that storage layers can drop them without affecting
+    /// signature verifiability or transaction id.
+    #[serde(default)]
+    pub blobs: Blobs,
 }
 
 impl UnsignedTransactionV1 {
@@ -40,6 +47,7 @@ impl UnsignedTransactionV1 {
             max_epoch: None,
             is_seal_signer_authorized: true,
             dry_run: false,
+            blobs: Blobs::empty(),
         }
     }
 
@@ -61,6 +69,7 @@ impl UnsignedTransactionV1 {
             max_epoch,
             is_seal_signer_authorized: true,
             dry_run,
+            blobs: Blobs::empty(),
         }
     }
 
@@ -93,6 +102,14 @@ impl UnsignedTransactionV1 {
     pub fn add_input(&mut self, input: SubstateRequirement) -> &mut Self {
         self.inputs.insert(input);
         self
+    }
+
+    pub fn blobs(&self) -> &Blobs {
+        &self.blobs
+    }
+
+    pub fn blobs_mut(&mut self) -> &mut Blobs {
+        &mut self.blobs
     }
 
     /// Returns (fee instructions, instructions)

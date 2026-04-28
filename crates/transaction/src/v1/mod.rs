@@ -4,6 +4,7 @@
 mod assertion;
 mod component_reference;
 mod instruction;
+pub(crate) mod pruned;
 mod resource_address_ref;
 mod signature;
 mod transaction;
@@ -14,6 +15,7 @@ mod unsigned;
 pub use assertion::*;
 pub use component_reference::*;
 pub use instruction::*;
+pub use pruned::*;
 pub use resource_address_ref::*;
 pub use signature::*;
 pub use transaction::*;

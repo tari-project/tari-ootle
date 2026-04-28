@@ -172,6 +172,9 @@ where
                     details: "Transaction must have at least one authorized signature".to_string(),
                 })?;
 
+        let instructions = executable.into_instructions();
+        let blobs = std::sync::Arc::new(instructions.blobs);
+
         let mut runtime_interface = Box::new(RuntimeInterfaceImpl::initialize(
             tracker,
             template_provider.clone(),
@@ -179,6 +182,7 @@ where
             entity_id_provider,
             modules,
             claim_burn_proof_verifier,
+            std::sync::Arc::clone(&blobs),
         )?) as Box<dyn RuntimeInterface>;
 
         let runtime = Runtime::from_mut(&mut runtime_interface);
@@ -186,9 +190,8 @@ where
 
         let transaction_hash = id.as_hash();
 
-        let instructions = executable.into_instructions();
-
-        let (mut runtime, fee_exec_results) = Self::process_instructions(&template_provider, runtime, instructions.fee);
+        let (mut runtime, fee_exec_results) =
+            Self::process_instructions(&template_provider, runtime, instructions.fee, &blobs);
 
         let fee_exec_result = match fee_exec_results {
             Ok(execution_results) => {
@@ -226,7 +229,7 @@ where
             .workspace_invoke(WorkspaceAction::DropAll, invoke_args![].into())?;
 
         let (mut runtime, instruction_result) =
-            Self::process_instructions(&template_provider, runtime, instructions.main);
+            Self::process_instructions(&template_provider, runtime, instructions.main, &blobs);
 
         match instruction_result {
             Ok(execution_results) => {
@@ -258,12 +261,13 @@ where
         template_provider: &TTemplateProvider,
         mut runtime: Runtime,
         instructions: Vec<Instruction>,
+        blobs: &tari_ootle_transaction::Blobs,
     ) -> (Runtime, Result<Vec<InstructionResult>, TransactionError>) {
         let result: Result<_, _> = instructions
             .into_iter()
             .enumerate()
             .map(|(idx, instruction)| {
-                Self::process_instruction(template_provider, &mut runtime, instruction)
+                Self::process_instruction(template_provider, &mut runtime, instruction, blobs)
                     .map_err(|e| TransactionError::new(idx + 1, e))
             })
             .collect();
@@ -282,6 +286,7 @@ where
         template_provider: &TTemplateProvider,
         runtime: &mut Runtime,
         instruction: Instruction,
+        blobs: &tari_ootle_transaction::Blobs,
     ) -> Result<InstructionResult, TransactionErrorKind> {
         debug!(target: LOG_TARGET, "instruction = {:?}", instruction);
         match instruction {
@@ -360,7 +365,14 @@ where
                 Ok(InstructionResult::empty())
             },
             Instruction::PublishTemplate { binary, metadata_hash } => {
-                Self::publish_template(runtime, binary, metadata_hash)
+                let bytes = blobs
+                    .get(binary)
+                    .ok_or(TransactionErrorKind::BlobIndexOutOfBounds {
+                        index: binary,
+                        count: blobs.len(),
+                    })?
+                    .as_bytes();
+                Self::publish_template(runtime, bytes, metadata_hash)
             },
             Instruction::AllocateAddress {
                 allocatable_type: substate_type,
@@ -567,12 +579,10 @@ where
     /// Adds a template artifact if successful
     fn publish_template(
         runtime: &mut Runtime,
-        binary: TemplateBlob,
+        binary: &[u8],
         metadata_hash: Option<MetadataHash>,
     ) -> Result<InstructionResult, TransactionErrorKind> {
         if binary.len() > limits::ENGINE_LIMITS.max_template_binary_size_bytes {
-            // Technically, not possible, but this check is kept in to make a test pass, and potentially for additional
-            // safety.
             return Err(TransactionErrorKind::WasmBinaryTooBig {
                 size: binary.len(),
                 max: limits::ENGINE_LIMITS.max_template_binary_size_bytes,
@@ -580,11 +590,12 @@ where
         }
 
         // validate binary
-        let template_def = WasmModule::validate_code(&binary)?;
-        // creating new substate
+        let template_def = WasmModule::validate_code(binary)?;
+        // The size cap above is enforced; constructing TemplateBlob is therefore infallible.
+        let blob = TemplateBlob::new_checked(binary.to_vec()).expect("template binary size verified above");
         runtime
             .interface_mut()
-            .publish_template(binary, metadata_hash, template_def)?;
+            .publish_template(blob, metadata_hash, template_def)?;
 
         Ok(InstructionResult::empty())
     }

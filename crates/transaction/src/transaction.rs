@@ -7,7 +7,6 @@ use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{
     confidential::MinotariBurnClaimProof,
-    hashing::{EngineHashDomainLabel, hasher32},
     indexed_value::IndexedValueError,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
@@ -61,11 +60,9 @@ impl Transaction {
     }
 
     pub fn calculate_id(&self) -> TransactionId {
-        hasher32(EngineHashDomainLabel::Transaction)
-            .chain(&self)
-            .result()
-            .into_array()
-            .into()
+        match self {
+            Self::V1(tx) => tx.calculate_id(),
+        }
     }
 
     pub fn calculate_transaction_weight(&self) -> TransactionWeight {
@@ -138,6 +135,17 @@ impl Transaction {
     pub fn into_instruction_parts(self) -> (Vec<Instruction>, Vec<Instruction>) {
         match self {
             Self::V1(tx) => tx.into_unsealed_transaction().into_instruction_parts(),
+        }
+    }
+
+    /// Returns (fee instructions, main instructions, blobs).
+    pub fn into_instructions_and_blobs(self) -> (Vec<Instruction>, Vec<Instruction>, crate::Blobs) {
+        match self {
+            Self::V1(tx) => {
+                let unsealed = tx.into_unsealed_transaction();
+                let (unsigned, _signatures) = unsealed.into_parts();
+                (unsigned.fee_instructions, unsigned.instructions, unsigned.blobs)
+            },
         }
     }
 
@@ -224,8 +232,9 @@ impl Transaction {
     }
 
     pub fn publish_templates_iter(&self) -> impl Iterator<Item = &[u8]> + '_ {
-        self.instructions().iter().filter_map(|i| match i {
-            Instruction::PublishTemplate { binary, .. } => Some(binary.as_slice()),
+        let blobs = self.unsealed_transaction().unsigned_transaction().blobs();
+        self.instructions().iter().filter_map(move |i| match i {
+            Instruction::PublishTemplate { binary, .. } => blobs.get(*binary).map(|b| b.as_bytes()),
             _ => None,
         })
     }
@@ -333,7 +342,7 @@ mod tests {
                 ComponentAddress::from_array([1; 32])
             ])
             .put_last_instruction_output_on_workspace("workspace")
-            .publish_template(b"template".to_vec().try_into().unwrap())
+            .publish_template(b"template".to_vec())
             .add_input(SubstateRequirement::versioned(
                 SubstateId::Component(ComponentAddress::from_array([1; 32])),
                 1,

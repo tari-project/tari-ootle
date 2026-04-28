@@ -11,12 +11,15 @@ use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib_types::{ComponentAddress, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
+    BlobIndex,
+    Blobs,
     Instruction,
     IntoSigned,
     Signable,
     TransactionSignature,
     UnsealedTransactionV1,
     UnsignedTransactionV1,
+    blobs::{Blob, BlobIndexOverflow},
     unsealed::UnsealedTransaction,
 };
 
@@ -202,6 +205,24 @@ impl UnsignedTransaction {
         match self {
             Self::V1(tx) => &mut tx.inputs,
         }
+    }
+
+    pub fn blobs(&self) -> &Blobs {
+        match self {
+            Self::V1(tx) => tx.blobs(),
+        }
+    }
+
+    pub(crate) fn blobs_mut(&mut self) -> &mut Blobs {
+        match self {
+            Self::V1(tx) => tx.blobs_mut(),
+        }
+    }
+
+    /// Append a blob and return its assigned index. Errors if blob count would overflow
+    /// `BlobIndex` capacity.
+    pub fn add_blob(&mut self, blob: Blob) -> Result<BlobIndex, BlobIndexOverflow> {
+        self.blobs_mut().push(blob)
     }
 }
 

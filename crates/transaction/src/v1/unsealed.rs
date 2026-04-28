@@ -113,6 +113,11 @@ impl UnsealedTransactionV1 {
         (self.transaction.fee_instructions, self.transaction.instructions)
     }
 
+    /// Returns (unsigned, signatures)
+    pub fn into_parts(self) -> (UnsignedTransactionV1, Vec<TransactionSignature>) {
+        (self.transaction, self.signatures)
+    }
+
     pub fn min_epoch(&self) -> Option<Epoch> {
         self.transaction.min_epoch
     }

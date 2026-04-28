@@ -3,7 +3,7 @@
 
 use std::{iter::Sum, ops::Add};
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TransactionWeight(u64);
 
 impl TransactionWeight {

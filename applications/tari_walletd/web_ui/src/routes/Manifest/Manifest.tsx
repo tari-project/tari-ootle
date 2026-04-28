@@ -837,56 +837,91 @@ function SigningKeysEditor({
   onAdd: (key: KeyId) => void;
   onRemove: (index: number) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Grid size={12} mt={1}>
+      <Stack direction="row" spacing={1} alignItems="center" marginBottom={2}>
+        <Button variant="outlined" size="small" onClick={() => setOpen(true)}>
+          Signing Keys ({signingKeys.length})
+        </Button>
+      </Stack>
+      <SigningKeysDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        signingKeys={signingKeys}
+        onAdd={onAdd}
+        onRemove={onRemove}
+      />
+    </Grid>
+  );
+}
+
+function SigningKeysDialog({
+  open,
+  onClose,
+  signingKeys,
+  onAdd,
+  onRemove,
+}: {
+  open: boolean;
+  onClose: () => void;
+  signingKeys: KeyId[];
+  onAdd: (key: KeyId) => void;
+  onRemove: (index: number) => void;
+}) {
   const { data: accountsData } = useAccountsList(0, 100);
   const accounts = accountsData?.accounts || [];
 
   const handleAddAccountKey = (e: SelectChangeEvent) => {
     const address = e.target.value;
     if (!address) return;
-    const accountInfo = accounts.find(
-      (a) => substateIdToString(a.account.component_address) === address,
-    );
+    const accountInfo = accounts.find((a) => substateIdToString(a.account.component_address) === address);
     if (accountInfo?.account.owner_key_id) {
       onAdd(accountInfo.account.owner_key_id);
     }
   };
 
   return (
-    <Grid size={12} mt={1}>
-      {signingKeys.length > 0 && (
-        <Table sx={{ marginBottom: 2 }}>
-          <TableHead>
-            <TableRow>
-              <TableCell>Signing Keys</TableCell>
-              <TableCell>Account</TableCell>
-              <TableCell />
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {signingKeys.map((key, index) => {
-              const accountName = findAccountNameForKey(key, accounts);
-              return (
-                <TableRow key={JSON.stringify(key)}>
-                  <DataTableCell sx={{ fontFamily: "monospace", fontSize: "0.8rem" }}>
-                    {formatKeyId(key)}
-                  </DataTableCell>
-                  <DataTableCell>
-                    {accountName || "-"}
-                  </DataTableCell>
-                  <DataTableCell>
-                    <IconButton size="small" onClick={() => onRemove(index)} title="Remove signing key">
-                      &times;
-                    </IconButton>
-                  </DataTableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      )}
-      <Stack direction="row" spacing={1} alignItems="center" marginBottom={2}>
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>Signing Keys</DialogTitle>
+      <DialogContent>
+        <DialogContentText sx={{ mb: 2 }}>
+          Extra signers attached to this transaction (in addition to the seal signer). Each
+          signer commits to the unsigned transaction including its blob commitments.
+        </DialogContentText>
+        {signingKeys.length > 0 ? (
+          <Table size="small" sx={{ marginBottom: 2 }}>
+            <TableHead>
+              <TableRow>
+                <TableCell>Key</TableCell>
+                <TableCell>Account</TableCell>
+                <TableCell />
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {signingKeys.map((key, index) => {
+                const accountName = findAccountNameForKey(key, accounts);
+                return (
+                  <TableRow key={JSON.stringify(key)}>
+                    <DataTableCell sx={{ fontFamily: "monospace", fontSize: "0.8rem" }}>
+                      {formatKeyId(key)}
+                    </DataTableCell>
+                    <DataTableCell>{accountName || "-"}</DataTableCell>
+                    <DataTableCell>
+                      <IconButton size="small" onClick={() => onRemove(index)} title="Remove signing key">
+                        &times;
+                      </IconButton>
+                    </DataTableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        ) : (
+          <DialogContentText sx={{ mb: 2, fontStyle: "italic" }}>No signing keys added.</DialogContentText>
+        )}
         {accounts.length > 0 && (
-          <FormControl style={{ minWidth: "200px" }}>
+          <FormControl fullWidth>
             <InputLabel id="add-signing-key-label">Add Signing Key</InputLabel>
             <Select labelId="add-signing-key-label" label="Add Signing Key" value="" onChange={handleAddAccountKey}>
               {accounts
@@ -902,8 +937,11 @@ function SigningKeysEditor({
             </Select>
           </FormControl>
         )}
-      </Stack>
-    </Grid>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Close</Button>
+      </DialogActions>
+    </Dialog>
   );
 }
 
@@ -1006,7 +1044,7 @@ function BlobsEditor({
           startIcon={<DescriptionIcon fontSize="small" />}
           onClick={openAdd}
         >
-          Add Blob
+          Add Blob ({entries.length})
         </Button>
       </Stack>
 

@@ -1,6 +1,6 @@
 [package]
 name = "ootle-network"
-version = "0.1.0"
+version = "0.1.2"
 description = "The Tari Ootle Network enum, identifying which Tari network (MainNet, StageNet, NextNet, LocalNet, Igor, Esmeralda) a node, wallet, or transaction belongs to"
 edition.workspace = true
 authors.workspace = true
@@ -8,12 +8,12 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-serde = { workspace = true, features = ["derive"], optional = true }
-thiserror = { workspace = true }
+serde = { workspace = true, features = ["derive"], default-features = false, optional = true }
+thiserror = { workspace = true, optional = true }
 ts-rs = { workspace = true, optional = true }
 
 [features]
 default = ["std"]
-std = []
-ts = ["ts-rs"]
+std = ["serde/std", "dep:thiserror"]
+ts = ["std", "ts-rs"]
 serde = ["dep:serde"]

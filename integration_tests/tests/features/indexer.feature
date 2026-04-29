@@ -16,15 +16,15 @@ Feature: Indexer node
     When wallet daemon WALLET_D publishes the template "basic_nft" using account ACC
 
     ##### Scenario
-    # Create a new Counter component and increase it to have version 1
+    # Create a new counter component and increase it to have version 1
     When I call function "new" on template "counter" using account ACC to pay fees via wallet daemon WALLET_D named "COUNTER"
-    When I invoke on wallet daemon WALLET_D on account ACC on component COUNTER/components/Counter the method call "increase"
+    When I invoke on wallet daemon WALLET_D on account ACC on component COUNTER/components/counter the method call "increase"
 
     # Create a new SparkleNft component and mint an NFT
     When I call function "new" on template "basic_nft" using account ACC to pay fees via wallet daemon WALLET_D named "NFT"
     When I submit a transaction manifest via wallet daemon WALLET_D signed by the key of ACC with inputs "NFT, ACC" named "TX1"
   """
-  let sparkle_nft = global!["NFT/components/SparkleNft"];
+  let sparkle_nft = global!["NFT/components/basic_nft"];
   let mut acc = global!["ACC/accounts/ACC"];
 
   // mint a couple of nfts with random ids
@@ -43,7 +43,7 @@ Feature: Indexer node
   """
 
     # Get substate of a component (the counter has been increased, so the version is 1)
-    Then the indexer INDEXER returns version 1 for substate COUNTER/components/Counter
+    Then the indexer INDEXER returns version 1 for substate COUNTER/components/counter
 
     # Get substate of a resource (the nft resource has been mutated by the minting, so the version is 1)
     Then the indexer INDEXER returns version 1 for substate NFT/resources/SPKL
@@ -97,7 +97,7 @@ Feature: Indexer node
     # Generate some events by doing vault operations with the faucet and the acounts
     When I submit a transaction manifest via wallet daemon WALLET_D signed by the key of ACC_1 with inputs "FAUCET, ACC_1, ACC_2" named "TX1"
   """
-  let faucet = global!["FAUCET/components/TestFaucet"];
+  let faucet = global!["FAUCET/components/faucet"];
   let faucet_resource = global!["FAUCET/resources/FAUCET"];
   let mut acc1 = global!["ACC_1/accounts/ACC_1"];
   let mut acc2 = global!["ACC_2/accounts/ACC_2"];

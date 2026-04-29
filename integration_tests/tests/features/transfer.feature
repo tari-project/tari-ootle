@@ -15,7 +15,7 @@ Feature: Account transfers
     # Create the sender account
     When I create an account ACCOUNT via the wallet daemon WALLET_D with 10000 XTR
 
-    # Create a new Faucet component
+    # Create a new faucet component
     When I call function "mint" on template "faucet" using account ACCOUNT to pay fees via wallet daemon WALLET_D with args "amount_10000" named "FAUCET"
 
     # Burn some tari in the base layer to have funds for fees in the sender account
@@ -33,7 +33,7 @@ Feature: Account transfers
     When I print the cucumber world
     When I submit a transaction manifest via wallet daemon WALLET_D with inputs "FAUCET, ACCOUNT" named "TX1"
   """
-  let faucet = global!["FAUCET/components/TestFaucet"];
+  let faucet = global!["FAUCET/components/faucet"];
   let mut acc = global!["ACCOUNT/accounts/ACCOUNT"];
 
   // get tokens from the faucet
@@ -70,7 +70,7 @@ Feature: Account transfers
     When I create an account ACCOUNT_1 via the wallet daemon WALLET_D with 10000 XTR
     When I create an account ACCOUNT_2 via the wallet daemon WALLET_D
 
-    # Create a new Faucet component
+    # Create a new faucet component
     When I call function "mint" on template "faucet" using account ACCOUNT_1 to pay fees via wallet daemon WALLET_D with args "amount_10000" named "FAUCET"
 
     # Burn some tari in the base layer to have funds for fees in the sender account
@@ -86,7 +86,7 @@ Feature: Account transfers
     When I print the cucumber world
     When I submit a transaction manifest via wallet daemon WALLET_D with inputs "FAUCET, ACCOUNT_1" named "TX1"
   """
-  let faucet = global!["FAUCET/components/TestFaucet"];
+  let faucet = global!["FAUCET/components/faucet"];
   let mut acc1 = global!["ACCOUNT_1/accounts/ACCOUNT_1"];
 
   // get tokens from the faucet

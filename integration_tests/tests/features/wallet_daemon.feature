@@ -17,14 +17,14 @@ Feature: Wallet Daemon
     When I create an account ACC_2 via the wallet daemon WALLET_D with 100000 XTR
     When I check the balance of ACC_2 on wallet daemon WALLET_D the amount is at least 10000
 
-        # Create a new Faucet component
+        # Create a new faucet component
     When I call function "mint" on template "faucet" using account ACC_1 to pay fees via wallet daemon WALLET_D with args "10000" named "FAUCET"
 
         # Submit a transaction manifest
     When I print the cucumber world
     When I submit a transaction manifest via wallet daemon WALLET_D with inputs "FAUCET, ACC_1" named "TX1"
   """
-  let faucet = global!["FAUCET/components/TestFaucet"];
+  let faucet = global!["FAUCET/components/faucet"];
   let mut acc1 = global!["ACC_1/accounts/ACC_1"];
 
   // get tokens from the faucet

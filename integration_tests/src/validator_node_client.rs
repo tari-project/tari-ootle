@@ -11,7 +11,12 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{SubstateRequirement, optional::Optional};
 use tari_ootle_transaction::{Transaction, builder::TransactionBuilder};
-use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
+use tari_template_builtin::{
+    ACCOUNT_TEMPLATE_ADDRESS,
+    LIQUIDITY_POOL_TEMPLATE_ADDRESS,
+    NFT_FAUCET_TEMPLATE_ADDRESS,
+    XTR_FAUCET_TEMPLATE_ADDRESS,
+};
 use tari_template_lib_types::{NonFungibleId, TemplateAddress};
 use tari_transaction_components::key_manager::{SecretTransactionKeyManagerInterface, TariKeyId};
 use tari_validator_node_client::{
@@ -20,7 +25,7 @@ use tari_validator_node_client::{
 };
 use tokio::time::{MissedTickBehavior, interval};
 
-use crate::{TariWorld, helpers::get_component_from_namespace};
+use crate::{TariWorld, cucumber_log, helpers::get_component_from_namespace, template::RegisteredTemplate};
 
 /// Creates a component by calling a template function
 pub async fn create_component(
@@ -94,16 +99,25 @@ pub(crate) fn add_outputs_from_diff(world: &mut TariWorld, outputs_name: String,
 
                     counters[9] += 1;
                 } else {
-                    let template = world
-                        .templates
-                        .values()
-                        .find(|a| a.address == *component.template_address())
+                    let template = get_builtin_template(*component.template_address())
+                        .or_else(|| {
+                            world
+                                .templates
+                                .values()
+                                .find(|a| a.address == *component.template_address())
+                                .cloned()
+                        })
                         .unwrap_or_else(|| {
                             panic!(
                                 "Template not found for component with template address {}",
                                 component.template_address()
                             )
                         });
+                    cucumber_log!(
+                        "Found component template with address {} and name {}",
+                        component.template_address(),
+                        template.name
+                    );
                     outputs.insert(format!("components/{}", template.name), SubstateRequirement {
                         substate_id: addr.clone(),
                         version: Some(data.version()),
@@ -263,7 +277,7 @@ async fn call_method_inner(
     component: SubstateRequirement,
     method_call: String,
 ) -> Result<SubmitTransactionResponse, RejectReason> {
-    println!("Inputs: {}", component);
+    cucumber_log!("Inputs: {}", component);
 
     let component_address = component.substate_id.as_component_address().ok_or_else(|| {
         RejectReason::ExecutionFailure(format!("Invalid component address: {}", component.substate_id))
@@ -305,7 +319,7 @@ async fn submit_and_wait_for_result(
     let mut resp = client.submit_transaction(request).await?;
     let transaction_id = resp.transaction_id;
 
-    println!("✅ Transaction {} submitted.", transaction_id);
+    cucumber_log!("✅ Transaction {} submitted.", transaction_id);
 
     // Wait for transaction result
     let mut poll_interval = interval(Duration::from_secs(1));
@@ -414,4 +428,30 @@ pub fn parse_arg(s: &str) -> Result<tari_ootle_transaction::builder::named_args:
 
     // Default to string
     Ok(arg!(s.to_string()))
+}
+
+fn get_builtin_template(address: TemplateAddress) -> Option<RegisteredTemplate> {
+    if address == ACCOUNT_TEMPLATE_ADDRESS {
+        Some(RegisteredTemplate {
+            name: "account".to_string(),
+            address,
+        })
+    } else if address == NFT_FAUCET_TEMPLATE_ADDRESS {
+        Some(RegisteredTemplate {
+            name: "nft_facuet".to_string(),
+            address,
+        })
+    } else if address == XTR_FAUCET_TEMPLATE_ADDRESS {
+        Some(RegisteredTemplate {
+            name: "tari_faucet".to_string(),
+            address,
+        })
+    } else if address == LIQUIDITY_POOL_TEMPLATE_ADDRESS {
+        Some(RegisteredTemplate {
+            name: "liquidity_pool".to_string(),
+            address,
+        })
+    } else {
+        None
+    }
 }

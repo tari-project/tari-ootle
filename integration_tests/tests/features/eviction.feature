@@ -5,7 +5,6 @@
 @eviction
 Feature: Eviction scenarios
 
-  @doit
   Scenario: Offline validator gets evicted
     Given a network with spec
     """

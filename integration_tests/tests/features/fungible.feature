@@ -17,13 +17,13 @@ Feature: Fungible tokens
     When I create an account ACC1 via the wallet daemon WALLET_D with 1 XTR
     When I create an account ACC2 via the wallet daemon WALLET_D with 1 XTR
 
-    # Create a new Faucet component
+    # Create a new faucet component
     When I call function "mint" on template "faucet" using account ACC1 to pay fees via wallet daemon WALLET_D with args "amount_10000" named "FAUCET"
 
     # Deposit tokens in first account
     When I submit a transaction manifest via wallet daemon WALLET_D with inputs "FAUCET, ACC1" named "TX1"
   """
-  let faucet = global!["FAUCET/components/TestFaucet"];
+  let faucet = global!["FAUCET/components/faucet"];
   let mut acc1 = global!["ACC1/accounts/ACC1"];
 
   // get tokens from the faucet

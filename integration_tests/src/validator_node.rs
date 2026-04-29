@@ -51,6 +51,7 @@ use tokio::task;
 
 use crate::{
     TariWorld,
+    cucumber_log,
     helpers::{check_join_handle, get_os_assigned_port, get_os_assigned_ports, wait_listener_on_local_port},
     logging::get_base_dir_for_scenario,
 };
@@ -222,7 +223,7 @@ async fn spawn_validator_node_process(spawn: ValidatorSpawn) -> ValidatorNodePro
                 peer_seeds: PeerSeedsConfig::default(),
                 network: Network::LocalNet,
             };
-            println!("Using validator_node temp_dir: {}", temp_dir.display());
+            cucumber_log!("Using validator_node temp_dir: {}", temp_dir.display());
             config.common.base_path.clone_from(&temp_dir);
             config.network = Network::LocalNet;
             config.validator_node.set_base_path(&temp_dir);

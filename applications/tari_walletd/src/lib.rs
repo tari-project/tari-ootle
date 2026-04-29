@@ -33,8 +33,9 @@ use jsonwebtoken::signature::rand_core::OsRng;
 use log::*;
 use tari_common_types::seeds::seed_words::SeedWords;
 use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
+use tari_ootle_address::Network;
 use tari_ootle_app_utilities::genesis_resources::{get_public_identity_resource, get_stealth_tari_resource};
-use tari_ootle_common_types::{Network, NumPreshards, optional::Optional};
+use tari_ootle_common_types::{NumPreshards, optional::Optional};
 use tari_ootle_wallet_sdk::{
     WalletSdk as Sdk,
     WalletSdkConfig,

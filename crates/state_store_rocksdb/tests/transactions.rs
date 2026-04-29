@@ -12,7 +12,7 @@ use tari_engine_types::{
     fees::FeeBreakdown,
     substate::SubstateDiff,
 };
-use tari_ootle_common_types::{Epoch, ExtraData, Network, NodeHeight, SubstateRequirement};
+use tari_ootle_common_types::{Epoch, ExtraData, NodeHeight, SubstateRequirement};
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
@@ -33,6 +33,7 @@ use tari_template_lib::types::Hash32;
 use tari_utilities::epoch_time::EpochTime;
 
 mod confirm_all_transitions {
+    use tari_ootle_transaction::Network;
     use tari_template_lib_types::crypto::SchnorrSignatureBytes;
 
     use super::*;

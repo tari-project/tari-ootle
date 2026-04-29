@@ -10,12 +10,13 @@ use tari_crypto::{
     tari_utilities::ByteArray,
 };
 use tari_engine_types::crypto::get_commitment_factory;
-use tari_ootle_common_types::Network;
 use tari_ootle_wallet_crypto::{StealthCryptoApi, memo::Memo};
 
 use crate::support::{random_key, random_keypair, resource_address_from_seed};
 
 mod utxo_tag {
+    use tari_ootle_address::Network;
+
     use super::*;
 
     #[test]
@@ -32,6 +33,8 @@ mod utxo_tag {
 }
 
 mod stealth_address {
+    use tari_ootle_address::Network;
+
     use super::*;
 
     #[test]

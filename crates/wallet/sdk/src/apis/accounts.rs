@@ -5,10 +5,9 @@ use std::collections::HashSet;
 
 use ootle_byte_type::{FromByteType, ToByteType};
 use tari_engine_types::{component::derive_component_address_from_public_key, indexed_value::IndexedWellKnownTypes};
-use tari_ootle_address::RistrettoOotleAddress;
+use tari_ootle_address::{Network, RistrettoOotleAddress};
 use tari_ootle_common_types::{
     Epoch,
-    Network,
     optional::{IsNotFoundError, Optional},
     substate_type::SubstateType,
 };

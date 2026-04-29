@@ -17,13 +17,14 @@ use tari_consensus_types::{
     ProposalVote,
     ValidatorSignatureBytes,
 };
-use tari_ootle_common_types::{Epoch, Network, NodeHeight, ShardGroup, optional::Optional};
+use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, optional::Optional};
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     consensus_models::{Block, EndOfEpochCommand, EpochCheckpoint, TreeRootSummary},
 };
+use tari_ootle_transaction::Network;
 use tari_sidechain::{CommandCommitProof, QuorumDecision, SidechainBlockCommitProof, SidechainBlockHeader};
 use tari_state_tree::{TreeHash, compute_proof_for_hashes};
 use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};

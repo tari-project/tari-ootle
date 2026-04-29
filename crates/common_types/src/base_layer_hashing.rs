@@ -3,10 +3,9 @@
 
 use blake2::Blake2b;
 use digest::consts::{U32, U64};
+use ootle_network::Network;
 use tari_crypto::hashing::DomainSeparatedHasher;
 use tari_hashing::{ConfidentialOutputHashDomain, DomainSeparatedBorshHasher, WalletOutputEncryptionKeysDomain};
-
-use crate::Network;
 
 pub type TariBaseLayerHasher64<M> = DomainSeparatedBorshHasher<M, Blake2b<U64>>;
 pub type TariBaseLayerHasher32<M> = DomainSeparatedBorshHasher<M, Blake2b<U32>>;

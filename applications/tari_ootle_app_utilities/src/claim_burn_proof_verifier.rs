@@ -18,11 +18,11 @@ use tari_hashing::{TransactionHashDomain, hashers::KernelMmrHasherBlake256};
 use tari_mmr::common::LeafIndex;
 use tari_ootle_common_types::{
     Epoch,
-    Network,
     base_layer_hashing::ownership_proof_hasher64,
     optional::{IsNotFoundError, Optional},
 };
 use tari_ootle_storage::global::{GlobalDb, GlobalDbAdapter};
+use tari_ootle_transaction::Network;
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction_components::{
     consensus::DomainSeparatedConsensusHasher,

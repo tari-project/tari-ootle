@@ -26,8 +26,8 @@ use clap::{Args, Parser};
 use tari_common::configuration::{ConfigOverrideProvider, Network as L1Network};
 use tari_common_types::seeds::seed_words::SeedWords;
 use tari_crypto::tari_utilities::SafePassword;
+use tari_ootle_address::Network;
 use tari_ootle_app_utilities::common_cli_args::CommonCliArgs;
-use tari_ootle_common_types::Network;
 use url::Url;
 
 use crate::config::WalletDaemonAuth;

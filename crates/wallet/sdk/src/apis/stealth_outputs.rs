@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use digest::crypto_common::rand_core::OsRng;
 use log::*;
 use ootle_byte_type::{FromByteType, ToByteType};
+use ootle_network::Network;
 use tari_crypto::{
     keys::PublicKey,
     ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment},
@@ -13,7 +14,6 @@ use tari_crypto::{
 use tari_engine_types::{Utxo, UtxoOutput, component::derive_component_address_from_public_key, limits};
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::{
-    Network,
     displayable::Displayable,
     optional::{IsNotFoundError, Optional},
 };

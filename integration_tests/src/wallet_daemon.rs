@@ -27,7 +27,7 @@ use std::{
 
 use reqwest::Url;
 use tari_common::configuration::CommonConfig;
-use tari_ootle_common_types::Network;
+use tari_ootle_address::Network;
 use tari_ootle_transaction::TransactionId;
 use tari_ootle_walletd::{
     config::{ApplicationConfig, WalletDaemonAuth, WalletDaemonConfig},

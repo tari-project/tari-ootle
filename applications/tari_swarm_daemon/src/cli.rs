@@ -5,7 +5,7 @@ use std::{fmt::Display, net::SocketAddr, path::PathBuf, str::FromStr};
 
 use anyhow::{Context, anyhow};
 use clap::{Parser, ValueEnum};
-use tari_ootle_common_types::Network;
+use tari_ootle_wallet_sdk::Network;
 
 use crate::{
     config::{Config, InstanceType},

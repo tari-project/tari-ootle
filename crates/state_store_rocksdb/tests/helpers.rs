@@ -14,7 +14,6 @@ use tari_engine_types::{
 use tari_ootle_common_types::{
     Epoch,
     ExtraData,
-    Network,
     NodeHeight,
     NumPreshards,
     ShardGroup,
@@ -41,7 +40,7 @@ use tari_ootle_storage::{
         TransactionAtom,
     },
 };
-use tari_ootle_transaction::TransactionId;
+use tari_ootle_transaction::{Network, TransactionId};
 use tari_sidechain::{CommitProofElement, QuorumDecision, SidechainBlockCommitProof, SidechainBlockHeader};
 use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
 use tari_state_tree::Version;

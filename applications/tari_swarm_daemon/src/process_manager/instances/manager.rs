@@ -14,7 +14,7 @@ use anyhow::{Context, anyhow};
 use indexmap::IndexMap;
 use log::info;
 use slug::slugify;
-use tari_ootle_common_types::Network;
+use tari_ootle_wallet_sdk::Network;
 use tokio::{
     fs,
     fs::File,

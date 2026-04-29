@@ -10,7 +10,6 @@ use tari_ootle_common_types::{
     Epoch,
     ExtraData,
     ExtraFieldKey,
-    Network,
     NodeHeight,
     NumPreshards,
     ShardGroup,
@@ -23,6 +22,7 @@ use tari_ootle_storage::{
     StateStoreWriteTransaction,
     consensus_models::{Block, BookkeepingModel, Command},
 };
+use tari_ootle_transaction::Network;
 use tari_template_lib_types::crypto::SchnorrSignatureBytes;
 use tari_utilities::epoch_time::EpochTime;
 
@@ -216,6 +216,7 @@ mod block_parent_operations {
 }
 
 mod block_query_operations {
+    use tari_ootle_transaction::Network;
     use tari_template_lib_types::crypto::SchnorrSignatureBytes;
 
     use super::*;

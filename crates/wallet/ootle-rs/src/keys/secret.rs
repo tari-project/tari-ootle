@@ -9,8 +9,7 @@ use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
-use tari_ootle_address::OotleAddress;
-use tari_ootle_common_types::Network;
+use tari_ootle_address::{Network, OotleAddress};
 use tari_ootle_wallet_crypto::kdfs;
 
 use crate::{

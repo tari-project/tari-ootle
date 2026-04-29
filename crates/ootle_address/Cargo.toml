@@ -1,7 +1,7 @@
 [package]
 name = "tari_ootle_address"
 description = "Tari Ootle address using bech32 encoding"
-version = "0.4.2"
+version = "0.4.3"
 edition.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -9,7 +9,7 @@ license.workspace = true
 
 [dependencies]
 tari_crypto = { workspace = true }
-tari_ootle_common_types = { workspace = true }
+ootle-network = { workspace = true }
 tari_template_lib_types = { workspace = true }
 ootle_byte_type = { workspace = true, features = ["crypto"] }
 

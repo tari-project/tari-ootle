@@ -1,7 +1,8 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_ootle_common_types::{Network, ToSubstateAddress, VersionedSubstateId};
+use tari_ootle_common_types::{ToSubstateAddress, VersionedSubstateId};
+use tari_ootle_transaction::Network;
 use tari_state_store_rocksdb::{column_families::substate::SubstateCf, writer::DbWriteContext};
 use tari_template_lib::types::constants::{TARI_TOKEN, TOKEN_SYMBOL};
 

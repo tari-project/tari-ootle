@@ -13,7 +13,7 @@ use futures::future::Either;
 use log::{debug, info};
 use minotari_wallet_grpc_client::grpc;
 use tari_ootle_app_utilities::configuration::convert_network_to_l1_network;
-use tari_ootle_common_types::Network;
+use tari_ootle_wallet_sdk::Network;
 use tari_shutdown::ShutdownSignal;
 use tari_transaction_components::consensus::NetworkConsensus;
 use tari_validator_node_client::types::AddPeerRequest;

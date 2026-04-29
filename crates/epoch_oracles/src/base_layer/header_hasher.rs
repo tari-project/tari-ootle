@@ -2,10 +2,10 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use blake2::{Blake2b, digest::consts::U32};
+use ootle_network::Network;
 use tari_common_types::types::FixedHash;
 use tari_hashing::BlocksHashDomain;
 use tari_node_components::blocks::BlockHeader;
-use tari_ootle_common_types::Network;
 use tari_transaction_components::consensus::DomainSeparatedConsensusHasher;
 
 // TODO: we duplicate the hashing here because of the CURRENT_NETWORK global that is used in L1. This should not be used

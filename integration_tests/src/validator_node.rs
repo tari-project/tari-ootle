@@ -31,15 +31,13 @@ use ootle_byte_type::FromByteType;
 use reqwest::Url;
 use tari_common::configuration::{CommonConfig, StringList};
 use tari_crypto::ristretto::RistrettoPublicKey;
+use tari_ootle_address::Network;
 use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleConfig,
     keypair::create_new_keypair,
     p2p_config::PeerSeedsConfig,
 };
-use tari_ootle_common_types::{
-    Network,
-    layer_one_transaction::{LayerOneTransactionDef, ValidatorRegistrationParams},
-};
+use tari_ootle_common_types::layer_one_transaction::{LayerOneTransactionDef, ValidatorRegistrationParams};
 use tari_shutdown::Shutdown;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_validator_node::{ApplicationConfig, ValidatorNodeConfig, run_validator_node};

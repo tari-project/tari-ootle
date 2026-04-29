@@ -23,6 +23,7 @@ tari_ootle_address = { workspace = true, features = ["serde"] }
 tari_indexer_client = { workspace = true, default-features = false }
 ootle_serde = { workspace = true }
 ootle_byte_type = { workspace = true }
+ootle-network = { workspace = true }
 
 anyhow = { workspace = true }
 digest = { workspace = true }

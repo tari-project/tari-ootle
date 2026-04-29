@@ -165,9 +165,9 @@ mod tests {
         keys::{PublicKey, SecretKey},
         ristretto::RistrettoSecretKey,
     };
-    use tari_ootle_common_types::Network;
 
     use super::*;
+    use crate::Network;
 
     fn signer_from_seed(seed: u8) -> StealthSignerRequirement {
         let secret = RistrettoSecretKey::from_uniform_bytes(&[seed; 64]).unwrap();

@@ -2,10 +2,10 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use ootle_byte_type::FromByteType;
+use ootle_network::Network;
 use tari_bor::{Deserialize, Serialize};
 use tari_engine_types::crypto::MAX_LAZY_BP_AGG_FACTORS;
 use tari_ootle_address::OotleAddress;
-use tari_ootle_common_types::Network;
 use tari_ootle_wallet_crypto::{memo::Memo, pay_to::PayTo};
 use tari_template_lib::types::{Amount, ComponentAddress, NonFungibleAddress, ResourceAddress};
 

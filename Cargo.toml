@@ -1,5 +1,5 @@
 [workspace.package]
-version = "0.30.0"
+version = "0.30.1"
 edition = "2024"
 authors = ["The Tari Development Community"]
 repository = "https://github.com/tari-project/tari-ootle"
@@ -53,6 +53,7 @@ members = [
     "crates/wallet/storage_sqlite",
     "crates/wallet/ledger/client",
     "crates/wallet/ledger/common",
+    "crates/ootle_network",
     "crates/ootle_wasm/core",
     "crates/ootle_wasm/wasm",
     "crates/ootle_address",
@@ -88,6 +89,7 @@ tari_ootle_app_utilities = { path = "applications/tari_ootle_app_utilities" }
 # core crates
 tari_consensus = { path = "crates/consensus" }
 tari_ootle_address = { path = "crates/ootle_address", version = "0.4" }
+ootle-network = { path = "crates/ootle_network", version = "0.1" }
 tari_engine = { path = "crates/engine", version = "0.30" }
 tari_ootle_p2p = { path = "crates/p2p" }
 tari_ootle_storage = { path = "crates/storage" }

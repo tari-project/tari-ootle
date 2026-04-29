@@ -32,7 +32,7 @@ use tari_ootle_app_utilities::{
     common_cli_args::CommonCliArgs,
     p2p_config::{PeerSeedsConfig, ReachabilityMode},
 };
-use tari_ootle_common_types::Network;
+use tari_ootle_transaction::Network;
 use url::Url;
 
 #[derive(Parser, Debug)]

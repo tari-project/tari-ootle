@@ -2,15 +2,13 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use digest::crypto_common::rand_core::{OsRng, RngCore};
+use ootle_network::NetworkParseError;
 use passwords::PasswordGenerator;
 use tari_crypto::tari_utilities::SafePassword;
-use tari_ootle_common_types::{
-    Network,
-    NetworkParseError,
-    optional::{IsNotFoundError, Optional},
-};
+use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 
 use crate::{
+    Network,
     WalletSdkConfig,
     apis::config::{ConfigApi, ConfigApiError, ConfigKey},
     storage::WalletStore,

@@ -59,7 +59,7 @@
 //! 3. **Before Finalize**: Storage costs, event costs, log costs
 
 use tari_engine::fees::FeeTable;
-use tari_ootle_common_types::Network;
+use tari_ootle_transaction::Network;
 
 /// Testnet fee table with low, development-friendly fees.
 ///

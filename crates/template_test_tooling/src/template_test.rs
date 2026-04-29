@@ -36,14 +36,10 @@ use tari_engine_types::{
     substate::{SubstateDiff, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId},
 };
-use tari_ootle_common_types::{
-    Network,
-    SubstateRequirement,
-    crypto::create_key_pair_from_seed,
-    substate_type::SubstateType,
-};
+use tari_ootle_common_types::{SubstateRequirement, crypto::create_key_pair_from_seed, substate_type::SubstateType};
 use tari_ootle_transaction::{
     Instruction,
+    Network,
     Transaction,
     TransactionBuilder,
     args,

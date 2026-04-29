@@ -18,6 +18,7 @@ tari_epoch_manager = { workspace = true }
 tari_template_lib = { workspace = true }
 tari_hashing = { workspace = true }
 ootle_serde = { workspace = true }
+ootle-network = { workspace = true }
 
 anyhow = { workspace = true }
 blake2 = { workspace = true }

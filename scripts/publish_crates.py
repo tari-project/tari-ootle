@@ -30,6 +30,7 @@ import urllib.error
 # (crate_name, crate_directory, tier)
 CRATES = [
     ("tari_bor", "crates/tari_bor", 1),
+    ("ootle-network", "crates/ootle_network", 1),
     ("ootle_serde", "crates/ootle_serde", 1),
     ("tari_template_abi", "crates/template_abi", 2),
     ("tari_template_lib_types", "crates/template_lib_types", 2),
@@ -238,7 +239,8 @@ def main():
 
     print()
     if args.dry_run:
-        print(f"{GREEN}Done.{NC} Would publish: {len(published_crates)}, Failed: {len(failed_crates)}, Skipped: {skipped}")
+        print(
+            f"{GREEN}Done.{NC} Would publish: {len(published_crates)}, Failed: {len(failed_crates)}, Skipped: {skipped}")
     else:
         print(f"{GREEN}Done.{NC} Published: {len(published_crates)}, Skipped: {skipped}")
     if published_crates:

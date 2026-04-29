@@ -57,10 +57,11 @@ use tari_ootle_app_utilities::{
     seed_peer::SeedPeer,
     shared_consts::TXTR_FAUCET_INITIAL_SUPPLY,
 };
-use tari_ootle_common_types::{Network, optional::Optional};
+use tari_ootle_common_types::optional::Optional;
 use tari_ootle_p2p::{PeerAddress, TariMessagingSpec};
 use tari_ootle_storage::global::GlobalDb;
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
+use tari_ootle_transaction::Network;
 use tari_shutdown::ShutdownSignal;
 use tari_template_builtin::all_builtin_templates;
 use tari_template_lib_types::{Amount, TemplateAddress, crypto::RistrettoPublicKeyBytes};

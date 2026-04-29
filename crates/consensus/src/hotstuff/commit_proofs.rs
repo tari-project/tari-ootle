@@ -280,7 +280,8 @@ mod tests {
     use tari_common_types::types::FixedHash;
     use tari_consensus_types::{ProposalCertificate, ShardGroupAccumulatedData};
     use tari_crypto::tari_utilities::epoch_time::EpochTime;
-    use tari_ootle_common_types::{Epoch, ExtraData, Network, NodeHeight, NumPreshards, ShardGroup};
+    use tari_ootle_common_types::{Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
+    use tari_ootle_transaction::Network;
     use tari_sidechain::QuorumDecision;
 
     use super::*;

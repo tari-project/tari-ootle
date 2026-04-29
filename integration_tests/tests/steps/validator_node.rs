@@ -449,10 +449,7 @@ async fn vn_has_blocks_for_current_epoch(world: &mut TariWorld, step: &Step, vn_
     let last_status = last_status.unwrap_or_else(|| "no consensus status was observed".to_string());
     let message = format!(
         "Validator node {} did not reach at least {} blocks for the current epoch within {}s. Last status: {}",
-        vn_name,
-        num_blocks,
-        TIMEOUT_SECS,
-        last_status
+        vn_name, num_blocks, TIMEOUT_SECS, last_status
     );
     integration_tests::cucumber_log!("{}", message);
     panic!("{}", message);
@@ -728,7 +725,7 @@ fn scan_for_eviction_proof(
 }
 
 #[when(expr = "all validator nodes have started epoch {int}")]
-async fn all_validators_have_started_epoch(world: &mut TariWorld, step: &Step, epoch: u64) {
+pub async fn all_validators_have_started_epoch(world: &mut TariWorld, step: &Step, epoch: u64) {
     cucumber_log!("==== Step: {}", step.value);
     let validators = world.all_running_validators_iter().collect::<Vec<_>>();
     if validators.is_empty() {

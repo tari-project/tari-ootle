@@ -17,6 +17,7 @@ use crate::{
     constants::LEDGER_APP_NAME,
     handlers,
     request::{Instruction, Request},
+    state::State,
     status::AppStatus,
 };
 
@@ -53,28 +54,29 @@ pub fn next_command(comm: &mut Comm) -> Option<(&mut Comm, Request)> {
     }
 }
 
-fn handle<T, R, F>(comm: &mut Comm, handler: F) -> Result<(), AppStatus>
+fn handle<T, R, F>(state_mut: &mut State, comm: &mut Comm, handler: F) -> Result<(), AppStatus>
 where
     T: BorshDeserialize,
     R: BorshSerialize,
-    F: FnOnce(T) -> Result<R, AppStatus>,
+    F: FnOnce(&mut State, T) -> Result<R, AppStatus>,
 {
     let data = comm.get_data().map_err(|_| OotleStatusWord::BadRequest)?;
 
     let payload = T::try_from_slice(&data).map_err(|_| OotleStatusWord::BadRequest)?;
 
-    let response = handler(payload)?;
+    let response = handler(state_mut, payload)?;
     let data = borsh::to_vec(&response).map_err(|_| OotleStatusWord::EncodeResponseFail)?;
     comm.append(&data);
     comm.reply_ok();
     Ok(())
 }
 
-pub fn handle_apdu_request((comm, req): (&mut Comm, Request)) {
+pub fn handle_apdu_request(state_mut: &mut State, (comm, req): (&mut Comm, Request)) {
     let res = match req.instruction {
-        Instruction::GetVersion => handle(comm, handlers::get_version),
-        Instruction::GetAppName => handle(comm, handlers::get_app_name),
-        Instruction::GetPublicKey => handle(comm, handlers::get_public_key),
+        Instruction::GetVersion => handle(state_mut, comm, handlers::get_version),
+        Instruction::GetAppName => handle(state_mut, comm, handlers::get_app_name),
+        Instruction::GetPublicKey => handle(state_mut, comm, handlers::get_public_key),
+        Instruction::SignTransaction => handle(state_mut, comm, handlers::sign_transaction),
     };
 
     match res {

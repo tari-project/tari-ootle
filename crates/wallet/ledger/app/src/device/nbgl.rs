@@ -48,13 +48,13 @@ pub fn next_command<const N: usize>(comm: &mut Comm<N>) -> Option<Command<'_, N>
     Some(comm.next_command())
 }
 
-pub fn handle<T, R, F, const N: usize>(mut command: Command<N>, handler: F)
+pub fn handle<T, R, F, const N: usize>(state_mut: &mut State, mut command: Command<N>, handler: F)
 where
     T: BorshDeserialize,
     R: BorshSerialize,
     F: FnOnce(T) -> Result<R, AppStatus>,
 {
-    match handle_inner(&mut command, handler) {
+    match handle_inner(state_mut, &mut command, handler) {
         Ok(data) => {
             command.reply(&data, StatusWords::Ok).unwrap_or_else(|e| {
                 panic!("Failed to send response: {:?}", e);
@@ -65,11 +65,15 @@ where
         },
     }
 }
-fn handle_inner<T, R, F, const N: usize>(command: &mut Command<N>, handler: F) -> Result<Vec<u8>, AppStatus>
+fn handle_inner<T, R, F, const N: usize>(
+    state_mut: &mut State,
+    command: &mut Command<N>,
+    handler: F,
+) -> Result<Vec<u8>, AppStatus>
 where
     T: BorshDeserialize,
     R: BorshSerialize,
-    F: FnOnce(T) -> Result<R, AppStatus>,
+    F: FnOnce(&mut State, T) -> Result<R, AppStatus>,
 {
     let data = command.get_data();
     let payload = match T::try_from_slice(&data) {
@@ -77,17 +81,18 @@ where
         Err(_) => return Err(AppStatus::OotleStatusWord(OotleStatusWord::BadRequest)),
     };
 
-    let response = handler(payload)?;
+    let response = handler(state_mut, payload)?;
     let data = borsh::to_vec(&response).map_err(|_| OotleStatusWord::EncodeResponseFail)?;
     Ok(data)
 }
 
-pub fn handle_apdu_request<const N: usize>(command: Command<'_, N>) {
+pub fn handle_apdu_request<const N: usize>(state_mut: &mut State, command: Command<'_, N>) {
     match command.decode::<Request>() {
         Ok(request) => match request.instruction {
-            Instruction::GetVersion => handle(command, handlers::get_version),
-            Instruction::GetAppName => handle(command, handlers::get_app_name),
-            Instruction::GetPublicKey => handle(command, handlers::get_public_key),
+            Instruction::GetVersion => handle(state_mut, command, handlers::get_version),
+            Instruction::GetAppName => handle(state_mut, command, handlers::get_app_name),
+            Instruction::GetPublicKey => handle(state_mut, command, handlers::get_public_key),
+            Instruction::SignTransaction => handle(state_mut, comm, handlers::sign_transaction),
         },
         Err(e) => {
             command.into_response().send(e).unwrap();

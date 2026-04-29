@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use async_trait::async_trait;
-use ootle_byte_type::ToByteType;
+use ootle_byte_type::{FromByteType, ToByteType};
 use rand::thread_rng;
 use signature::{Keypair, hazmat::PrehashSigner};
 use tari_crypto::{
@@ -10,14 +10,16 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
 use tari_ootle_address::{Network, OotleAddress};
-use tari_ootle_wallet_crypto::kdfs;
+use tari_ootle_common_types::{base_layer_hashing::encrypted_data_hasher, engine_types::crypto::OutputBody};
+use tari_ootle_wallet_crypto::{DecryptedData, encrypted_data, kdfs};
+use tari_template_lib_types::crypto::PedersenCommitmentBytes;
 
 use crate::{
     key_provider,
-    key_provider::OutputMaskProvider,
-    keys::traits::HasViewOnlyKeySecret,
+    key_provider::{DiffieHellmanKdfKeyProvider, LocalKeyProvider, OutputMaskProvider},
     signer,
     signer::StealthKeyPrehashSigner,
+    stealth::{InputDecryptor, StealthProviderError, StealthResult},
 };
 
 #[derive(Clone)]
@@ -65,6 +67,10 @@ impl OotleSecretKey {
         let view_only_pk = RistrettoPublicKey::from_secret_key(&self.view_only_secret);
         OotleAddress::new(self.network, view_only_pk.to_byte_type(), account_pk.to_byte_type())
     }
+
+    pub fn view_only_secret(&self) -> &RistrettoSecretKey {
+        &self.view_only_secret
+    }
 }
 
 impl PrehashSigner<(RistrettoSchnorr, RistrettoPublicKey)> for OotleSecretKey {
@@ -90,9 +96,57 @@ impl StealthKeyPrehashSigner<(RistrettoSchnorr, RistrettoPublicKey)> for OotleSe
     }
 }
 
-impl HasViewOnlyKeySecret for OotleSecretKey {
-    fn view_only_secret(&self) -> &RistrettoSecretKey {
-        &self.view_only_secret
+#[async_trait]
+impl DiffieHellmanKdfKeyProvider for LocalKeyProvider<OotleSecretKey> {
+    async fn create_kdf_dh_encrypted_data_key(
+        &self,
+        public_key: &RistrettoPublicKey,
+    ) -> key_provider::Result<RistrettoSecretKey> {
+        Ok(kdfs::dh_kdf_aead(
+            encrypted_data_hasher(),
+            self.credentials().view_only_secret(),
+            public_key,
+        ))
+    }
+}
+
+#[async_trait]
+impl InputDecryptor for LocalKeyProvider<OotleSecretKey>
+where Self: DiffieHellmanKdfKeyProvider
+{
+    async fn decrypt_input_data(
+        &self,
+        commitment: &PedersenCommitmentBytes,
+        input: &OutputBody,
+        skip_memo: bool,
+    ) -> StealthResult<DecryptedData> {
+        let sender_nonce_pk =
+            input
+                .public_nonce
+                .try_from_byte_type()
+                .map_err(|e| StealthProviderError::DecryptionFailed {
+                    commitment: *commitment,
+                    details: format!(
+                        "Malformed public nonce in output ({e}). This should not happen because this is verified by \
+                         the validators."
+                    ),
+                })?;
+
+        let encryption_key = self
+            .create_kdf_dh_encrypted_data_key(&sender_nonce_pk)
+            .await
+            .map_err(|e| StealthProviderError::DecryptionFailed {
+                commitment: *commitment,
+                details: format!("Failed to derive encryption key: {}", e),
+            })?;
+
+        let decrypted = encrypted_data::unblind_output(commitment, &input.encrypted_data, &encryption_key, skip_memo)
+            .map_err(|e| StealthProviderError::DecryptionFailed {
+            commitment: *commitment,
+            details: e.to_string(),
+        })?;
+
+        Ok(decrypted)
     }
 }
 

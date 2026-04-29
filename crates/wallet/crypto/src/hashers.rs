@@ -38,6 +38,16 @@ pub trait KdfHasher<T: ?Sized> {
     fn kdf_digest(self, data: &T) -> Self::HashOutput;
 }
 
+impl<F, T, O> KdfHasher<T> for F
+where F: Fn(&T) -> O
+{
+    type HashOutput = O;
+
+    fn kdf_digest(self, data: &T) -> Self::HashOutput {
+        self(data)
+    }
+}
+
 impl<M: DomainSeparation, T: BorshSerialize + ?Sized> KdfHasher<T> for OotleWalletHasher64<M> {
     type HashOutput = SafeKey64;
 

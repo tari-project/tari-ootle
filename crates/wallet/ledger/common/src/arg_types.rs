@@ -42,3 +42,22 @@ pub struct GetPublicKeyRequest {
 pub struct GetPublicKeyResponse {
     pub public_key: [u8; 32],
 }
+
+/// P1 parameter values for APDU commands with large payloads.
+pub enum PayloadChunk {
+    /// First chunk (header)
+    First = 0x00,
+    /// Complete instruction (fits in one APDU)
+    Instruction = 0x01,
+    /// Start of large instruction payload
+    PayloadStart = 0x02,
+    /// Continuation of large payload
+    PayloadContinuation = 0x03,
+    /// OR'd with any above to signal final chunk
+    Last = 0x80,
+}
+
+// pub struct SignTransactionHeader {
+//     tx_schema_version: u16,
+//     num_inputs: u16,
+// }

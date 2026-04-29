@@ -2,12 +2,13 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use chacha20poly1305::Key;
+use ootle_network::Network;
 use tari_crypto::{
     dhke::DiffieHellmanSharedSecret,
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_ootle_common_types::{Network, base_layer_hashing::encrypted_data_hasher};
+use tari_ootle_common_types::base_layer_hashing::encrypted_data_hasher;
 use tari_template_lib_types::{ResourceAddress, crypto::UtxoTag};
 use tari_utilities::{Hidden, hidden_type, safe_array::SafeArray};
 use zeroize::Zeroize;

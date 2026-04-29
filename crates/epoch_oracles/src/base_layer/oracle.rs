@@ -9,6 +9,7 @@ use std::{
 };
 
 use log::*;
+use ootle_network::Network;
 use tari_base_node_client::{
     BaseNodeClient,
     BaseNodeClientError,
@@ -19,7 +20,7 @@ use tari_base_node_client::{
 use tari_common_types::types::FixedHash;
 use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle};
 use tari_node_components::blocks::BlockHeader;
-use tari_ootle_common_types::{Epoch, Network, displayable::Displayable, optional::Optional};
+use tari_ootle_common_types::{Epoch, displayable::Displayable, optional::Optional};
 use tokio::time;
 
 use crate::{

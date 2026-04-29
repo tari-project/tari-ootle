@@ -3,7 +3,7 @@
 
 use anyhow::{Context, bail};
 use tari_base_node_client::BaseNodeClient;
-use tari_ootle_common_types::Network;
+use tari_ootle_transaction::Network;
 
 pub async fn verify_correct_network<TClient: BaseNodeClient>(
     base_node_client: &mut TClient,

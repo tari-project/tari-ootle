@@ -17,6 +17,7 @@ tari_bor = { workspace = true }
 tari_hashing = { workspace = true }
 ootle_serde = { workspace = true, features = ["base64"] }
 ootle_byte_type = { workspace = true, features = ["crypto"] }
+ootle-network = { workspace = true }
 
 borsh = { workspace = true }
 log = { workspace = true }

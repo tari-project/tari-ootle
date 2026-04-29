@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use tari_ootle_common_types::Network;
+use tari_ootle_wallet_sdk::Network;
 use tokio::{
     fs::File,
     io,

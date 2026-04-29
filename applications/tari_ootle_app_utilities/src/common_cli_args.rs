@@ -23,7 +23,7 @@ use std::{error::Error, path::PathBuf};
 
 use clap::Args;
 use tari_common::configuration::{ConfigOverrideProvider, Network as L1Network};
-use tari_ootle_common_types::Network;
+use tari_ootle_transaction::Network;
 
 #[derive(Args, Debug)]
 pub struct CommonCliArgs {

@@ -12,7 +12,6 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{
     Epoch,
-    Network,
     NodeHeight,
     NumPreshards,
     ShardGroup,
@@ -32,6 +31,7 @@ use tari_ootle_storage::{
         SubstateUpdateBatch,
     },
 };
+use tari_ootle_transaction::Network;
 use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
 use tari_template_lib_types::{ComponentAddress, EntityId, ObjectKey, SubstateOwnerRule};
 use tempfile::TempDir;

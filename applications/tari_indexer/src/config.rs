@@ -35,7 +35,7 @@ use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleConfig,
     p2p_config::{P2pConfig, PeerSeedsConfig},
 };
-use tari_ootle_common_types::Network;
+use tari_ootle_transaction::Network;
 use tari_template_lib_types::TemplateAddress;
 
 use crate::{network_state_sync::EventFilter, rest_api::RefillRate};

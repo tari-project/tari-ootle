@@ -33,7 +33,7 @@ use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleConfig,
     p2p_config::{P2pConfig, PeerSeedsConfig, RpcConfig},
 };
-use tari_ootle_common_types::Network;
+use tari_ootle_transaction::Network;
 
 use crate::state_store_template_provider::TemplateConfig;
 

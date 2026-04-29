@@ -5,8 +5,7 @@ use std::str::FromStr;
 
 use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
-use tari_ootle_address::OotleAddress;
-use tari_ootle_common_types::Network;
+use tari_ootle_address::{Network, OotleAddress};
 use tari_ootle_walletd_client::{
     permissions::{AddressBookPermission, JrpcPermission},
     types::{

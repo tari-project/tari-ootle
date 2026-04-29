@@ -6,13 +6,13 @@ use std::fmt::Display;
 use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::{
     Epoch,
-    Network,
     NodeAddressable,
     SubstateAddress,
     VotePower,
     displayable::Displayable,
     vn_node_hash,
 };
+use tari_ootle_transaction::Network;
 use tari_template_lib_types::{Hash32, crypto::RistrettoPublicKeyBytes};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

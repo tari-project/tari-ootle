@@ -5,8 +5,9 @@ use std::ops::Deref;
 
 use serde::Serialize;
 use tari_engine_types::resource::Resource;
-use tari_ootle_common_types::{Network, NodeAddressable, NumPreshards};
+use tari_ootle_common_types::{NodeAddressable, NumPreshards};
 use tari_ootle_storage::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
+use tari_ootle_transaction::Network;
 use tari_template_lib::{
     prelude::{Metadata, ResourceAccessRules, ResourceType, rule},
     types::{

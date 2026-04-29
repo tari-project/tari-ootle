@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::resource::Resource;
-use tari_ootle_common_types::Network;
+use tari_ootle_transaction::Network;
 use tari_template_lib::types::{
     Metadata,
     ResourceAddress,

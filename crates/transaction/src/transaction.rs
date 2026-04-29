@@ -4,6 +4,7 @@
 use std::{collections::HashSet, fmt::Display};
 
 use indexmap::IndexSet;
+use ootle_network::Network;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{
     confidential::MinotariBurnClaimProof,
@@ -13,7 +14,6 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{
     Epoch,
-    Network,
     SubstateAddress,
     SubstateRequirement,
     SubstateRequirementRef,

@@ -9,7 +9,6 @@ use tari_ootle_common_types::{
     DerivableFromPublicKey,
     Epoch,
     ExtraFieldKey,
-    Network,
     NodeHeight,
     NumPreshards,
     ShardGroup,
@@ -17,6 +16,7 @@ use tari_ootle_common_types::{
     committee::Committee,
 };
 use tari_ootle_storage::consensus_models::{Block, BlockHeader};
+use tari_ootle_transaction::Network;
 use tari_sidechain::ProposalCertificateSignatureFields;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 

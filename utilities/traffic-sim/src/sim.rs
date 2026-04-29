@@ -12,12 +12,11 @@ use reqwest::Client;
 use serde_json::json;
 use tari_indexer_client::types::{GetSubstateRequest, ListUtxosRequest};
 use tari_ootle_common_types::{
-    Network,
     displayable::Displayable,
     engine_types::published_template::PublishedTemplateAddress,
     optional::Optional,
 };
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Network, Transaction, args};
 use tari_ootle_wallet_sdk::{
     apis::{
         confidential_transfer::UtxoInputSelection,

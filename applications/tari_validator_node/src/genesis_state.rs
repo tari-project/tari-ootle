@@ -16,20 +16,14 @@ use tari_ootle_app_utilities::{
     genesis_resources::{get_public_identity_resource, get_stealth_tari_resource},
     shared_consts::TXTR_FAUCET_INITIAL_SUPPLY,
 };
-use tari_ootle_common_types::{
-    Epoch,
-    Network,
-    NodeAddressable,
-    NumPreshards,
-    VersionedSubstateId,
-    VersionedSubstateIdRef,
-};
+use tari_ootle_common_types::{Epoch, NodeAddressable, NumPreshards, VersionedSubstateId, VersionedSubstateIdRef};
 use tari_ootle_storage::{
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
     consensus_models::{SubstateRecord, SubstateTransition, SubstateUpdateBatch},
 };
+use tari_ootle_transaction::Network;
 use tari_template_lib::types::{
     EntityId,
     Metadata,

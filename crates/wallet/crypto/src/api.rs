@@ -3,12 +3,13 @@
 
 use log::*;
 use ootle_byte_type::ConvertFromByteType;
+use ootle_network::Network;
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey, pedersen::PedersenCommitment},
 };
 use tari_engine_types::crypto::get_commitment_factory;
-use tari_ootle_common_types::{Network, base_layer_hashing::ownership_proof_hasher64};
+use tari_ootle_common_types::base_layer_hashing::ownership_proof_hasher64;
 use tari_template_lib_types::{
     Amount,
     EncryptedData,

@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use ootle_byte_type::FromByteType;
+use ootle_network::Network;
 use rand::rngs::OsRng;
 use tari_common_types::seeds::cipher_seed;
 use tari_crypto::{
@@ -12,7 +13,6 @@ use tari_crypto::{
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::{
     Epoch,
-    Network,
     optional::{IsNotFoundError, Optional},
     signature::SignatureOutput,
 };

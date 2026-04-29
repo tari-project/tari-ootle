@@ -22,7 +22,6 @@ use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     Epoch,
-    Network,
     NodeHeight,
     NumPreshards,
     ShardGroup,
@@ -40,7 +39,7 @@ use tari_ootle_storage::{
     StateStoreReadTransaction,
     consensus_models::{SubstateCreated, SubstateRecord, SubstateUpdateBatch, TransactionExecution, TransactionRecord},
 };
-use tari_ootle_transaction::TransactionId;
+use tari_ootle_transaction::{Network, TransactionId};
 use tari_shutdown::{Shutdown, ShutdownSignal};
 use tari_state_store_rocksdb::column_families::{
     finalized_transaction::FinalizedTransactionLinkCf,

@@ -13,7 +13,6 @@ use tari_indexer_client::{
 };
 use tari_ootle_common_types::{
     Epoch,
-    Network,
     engine_types::{
         commit_result::ExecuteResult,
         substate::{Substate, SubstateId},
@@ -25,6 +24,7 @@ use tracing::debug;
 
 use crate::{
     Address,
+    Network,
     provider::{
         PendingTransaction,
         Provider,

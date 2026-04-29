@@ -6,13 +6,14 @@ pub mod helpers;
 use std::collections::{HashMap, HashSet};
 
 use helpers::{create_rocksdb, create_substate_update_batch, gen_substates_for_shards};
-use tari_ootle_common_types::{Epoch, Network};
+use tari_ootle_common_types::Epoch;
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     consensus_models::{Block, SubstateValueFilterFlags},
 };
+use tari_ootle_transaction::Network;
 use tari_state_tree::Version;
 
 use crate::helpers::num_preshards;

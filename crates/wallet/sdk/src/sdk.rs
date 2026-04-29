@@ -4,6 +4,7 @@
 use std::{fmt::Debug, sync::Arc};
 
 use log::{info, warn};
+use ootle_network::{Network, NetworkParseError};
 use tari_common_types::seeds::{
     cipher_seed::CipherSeed,
     error::CipherError,
@@ -11,7 +12,7 @@ use tari_common_types::seeds::{
     seed_words::SeedWords,
 };
 use tari_crypto::tari_utilities::SafePassword;
-use tari_ootle_common_types::{Epoch, Network, NetworkParseError, optional::Optional};
+use tari_ootle_common_types::{Epoch, optional::Optional};
 use tari_ootle_wallet_crypto::StealthCryptoApi;
 use zeroize::Zeroizing;
 

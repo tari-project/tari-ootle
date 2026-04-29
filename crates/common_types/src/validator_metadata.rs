@@ -1,6 +1,7 @@
 //   Copyright 2022 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use ootle_network::Network;
 use serde::{Deserialize, Serialize};
 use tari_hashing::TransactionHashDomain;
 use tari_template_lib_types::{
@@ -8,7 +9,7 @@ use tari_template_lib_types::{
     crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes},
 };
 
-use crate::{Network, SubstateAddress, base_layer_hashing::TariBaseLayerHasher32};
+use crate::{SubstateAddress, base_layer_hashing::TariBaseLayerHasher32};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ValidatorMetadata {

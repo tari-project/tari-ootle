@@ -13,7 +13,7 @@ use std::{
 use config::Config;
 use log::*;
 use tari_common::configuration::{ConfigOverrideProvider, Network as L1Network};
-use tari_ootle_common_types::Network;
+use tari_ootle_transaction::Network;
 
 const LOG_TARGET: &str = "tari::application::configuration";
 

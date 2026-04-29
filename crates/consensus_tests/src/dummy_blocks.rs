@@ -13,7 +13,6 @@ use tari_crypto::tari_utilities::hex::Hex;
 use tari_ootle_common_types::{
     DerivableFromPublicKey,
     Epoch,
-    Network,
     NodeHeight,
     NumPreshards,
     ShardGroup,
@@ -23,6 +22,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::consensus_models::Block;
+use tari_ootle_transaction::Network;
 
 use crate::support::{RoundRobinLeaderStrategy, load_json_fixture};
 

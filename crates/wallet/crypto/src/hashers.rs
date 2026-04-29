@@ -8,12 +8,12 @@ use digest::{
     Digest,
     consts::{U32, U64},
 };
+use ootle_network::Network;
 use tari_crypto::{
     hash_domain,
     hashing::{DomainSeparatedHasher, DomainSeparation},
 };
 use tari_hashing::DomainSeparatedBorshHasher;
-use tari_ootle_common_types::Network;
 
 use crate::kdfs::SafeKey64;
 

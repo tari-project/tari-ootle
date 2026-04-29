@@ -2,9 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use rand::{CryptoRng, Rng, thread_rng};
-use tari_ootle_common_types::Network;
 
-use crate::{key_provider::local::LocalKeyProvider, keys::OotleSecretKey};
+use crate::{Network, key_provider::local::LocalKeyProvider, keys::OotleSecretKey};
 
 /// A key provider that uses a local OotleSecretKey to sign transactions, decrypt inputs, and derive various stealth
 /// secrets.

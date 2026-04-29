@@ -6,12 +6,13 @@ pub mod helpers;
 use helpers::{create_block, create_rocksdb, create_tx_atom};
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::ShardGroupAccumulatedData;
-use tari_ootle_common_types::{Epoch, ExtraData, Network, NodeHeight};
+use tari_ootle_common_types::{Epoch, ExtraData, NodeHeight};
 use tari_ootle_storage::{
     StateStore,
     StateStoreWriteTransaction,
     consensus_models::{Block, Command},
 };
+use tari_ootle_transaction::Network;
 use tari_template_lib_types::crypto::SchnorrSignatureBytes;
 use tari_utilities::epoch_time::EpochTime;
 

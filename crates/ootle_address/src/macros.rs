@@ -10,7 +10,7 @@ macro_rules! address {
 
 #[cfg(test)]
 mod tests {
-    use tari_ootle_common_types::Network;
+    use ootle_network::Network;
 
     #[test]
     fn it_produces_a_address_from_string() {

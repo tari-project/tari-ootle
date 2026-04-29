@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use tari_ootle_common_types::Network;
+use ootle_network::Network;
 use tokio::io::{self, AsyncWriteExt};
 use url::Url;
 

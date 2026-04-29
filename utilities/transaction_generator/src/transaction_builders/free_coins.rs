@@ -4,8 +4,8 @@
 use ootle_byte_type::ToByteType;
 use rand::rngs::OsRng;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-use tari_ootle_common_types::{Network, SubstateRequirement};
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_common_types::SubstateRequirement;
+use tari_ootle_transaction::{Network, Transaction, args};
 use tari_template_lib_types::constants::{
     TARI_TOKEN,
     XTR_FAUCET_CLAIM_RESOURCE_ADDRESS,

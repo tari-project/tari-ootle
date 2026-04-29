@@ -5,8 +5,8 @@ use std::{fmt, fmt::Display, io, str::FromStr};
 
 use bech32::{Bech32m, Hrp};
 use ootle_byte_type::{ConvertFromByteType, FromByteType, ToByteType};
+use ootle_network::{Network, NetworkParseError};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_ootle_common_types::{Network, NetworkParseError};
 use tari_template_lib_types::{InvalidByteLengthError, crypto::RistrettoPublicKeyBytes};
 
 use crate::{

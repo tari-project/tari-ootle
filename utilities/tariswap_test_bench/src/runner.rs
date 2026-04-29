@@ -6,8 +6,7 @@ use std::{path::Path, str::FromStr, time::Duration};
 use log::info;
 use tari_crypto::tari_utilities::SafePassword;
 use tari_engine_types::commit_result::FinalizeResult;
-use tari_ootle_common_types::Network;
-use tari_ootle_transaction::{Transaction, TransactionBuilder, TransactionId};
+use tari_ootle_transaction::{Network, Transaction, TransactionBuilder, TransactionId};
 use tari_ootle_wallet_sdk::{
     WalletSdk as Sdk,
     WalletSdkConfig,

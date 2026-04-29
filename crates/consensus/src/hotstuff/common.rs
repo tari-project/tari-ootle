@@ -10,7 +10,6 @@ use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock, PcId, ProposalCer
 use tari_engine_types::{ValidatorFeePool, substate::SubstateDiff};
 use tari_ootle_common_types::{
     Epoch,
-    Network,
     NodeAddressable,
     NodeHeight,
     NumPreshards,
@@ -36,6 +35,7 @@ use tari_ootle_storage::{
         ValidatorConsensusStats,
     },
 };
+use tari_ootle_transaction::Network;
 use tari_state_tree::{JellyfishMerkleTree, SPARSE_MERKLE_PLACEHOLDER_HASH, StateTreeError};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 

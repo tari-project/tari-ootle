@@ -7,10 +7,8 @@ use std::{
     sync::{Arc, Weak},
 };
 
-use tari_ootle_common_types::{
-    Network,
-    engine_types::substate::{Substate, SubstateId},
-};
+use tari_ootle_address::Network;
+use tari_ootle_common_types::engine_types::substate::{Substate, SubstateId};
 use tari_ootle_transaction::UnsignedTransaction;
 
 use crate::{

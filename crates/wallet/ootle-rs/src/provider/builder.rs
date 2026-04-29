@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use tari_indexer_client::error::IndexerRestClientError;
-use tari_ootle_common_types::Network;
+use tari_ootle_address::Network;
 
 use crate::{
     provider::indexer::IndexerProvider,

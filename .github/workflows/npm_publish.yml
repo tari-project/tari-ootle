@@ -66,7 +66,10 @@ jobs:
           fi
 
           echo "== Publishing =="
-          pnpm publish --provenance
+          # --no-git-checks: the `release: published` trigger checks out the
+          # release tag's commit, leaving HEAD detached. pnpm would otherwise
+          # abort because HEAD isn't on the configured publish-branch.
+          pnpm publish --provenance --no-git-checks
 
   # Publish the Tari Wallet Daemon client to the NPM registry
   publish-wallet-daemon-client:
@@ -117,7 +120,10 @@ jobs:
           fi
 
           echo "== Publishing =="
-          pnpm publish --provenance
+          # --no-git-checks: the `release: published` trigger checks out the
+          # release tag's commit, leaving HEAD detached. pnpm would otherwise
+          # abort because HEAD isn't on the configured publish-branch.
+          pnpm publish --provenance --no-git-checks
 
   # Publish the Tari Indexer client to the NPM registry
   publish-indexer-client:
@@ -168,4 +174,7 @@ jobs:
           fi
 
           echo "== Publishing =="
-          pnpm publish --provenance
+          # --no-git-checks: the `release: published` trigger checks out the
+          # release tag's commit, leaving HEAD detached. pnpm would otherwise
+          # abort because HEAD isn't on the configured publish-branch.
+          pnpm publish --provenance --no-git-checks

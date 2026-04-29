@@ -163,7 +163,7 @@ tari_utilities = "0.8"
 tari_hashing = "5.3.0-rc.0"
 
 ## Ledger
-minotari_ledger_wallet_common = { git = "https://github.com/tari-project/tari.git", rev = "11dc8d2d976e0078f324a4240b20b187818f5849" }
+minotari_ledger_wallet_common = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.0-rc.0" }
 ootle_ledger_common = { path = "crates/wallet/ledger/common", version = "0.1.0" }
 
 # networking crates

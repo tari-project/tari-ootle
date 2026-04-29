@@ -50,8 +50,9 @@ impl Network {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to parse network: {0}")]
+#[derive(Debug)]
+#[cfg_attr(feature = "std", derive(thiserror::Error))]
+#[cfg_attr(feature = "std", error("Failed to parse network: {0}"))]
 pub struct NetworkParseError(String);
 
 impl NetworkParseError {

@@ -13,6 +13,9 @@ pub struct ParsedBuilderWorkspaceKey {
     pub offset: Option<usize>,
 }
 
+/// Caller-supplied blob name that the builder will resolve to a `BlobIndex`.
+pub type BuilderBlobKey = String;
+
 /// The possible ways to represent an instruction's argument
 #[derive(Debug, Clone, PartialEq)]
 pub enum NamedArg {
@@ -21,6 +24,9 @@ pub enum NamedArg {
     Workspace(BuilderWorkspaceKey),
     /// The argument is a value specified in the transaction
     Literal(Vec<u8>),
+    /// The argument is the contents of a transaction blob, referenced by name (which the
+    /// builder resolves to a `BlobIndex` against blobs added via `add_blob`).
+    Blob(BuilderBlobKey),
 }
 
 impl NamedArg {
@@ -34,6 +40,10 @@ impl NamedArg {
 
     pub fn workspace<T: Into<BuilderWorkspaceKey>>(key: T) -> Self {
         Self::Workspace(key.into())
+    }
+
+    pub fn blob<T: Into<BuilderBlobKey>>(key: T) -> Self {
+        Self::Blob(key.into())
     }
 
     pub fn as_literal(&self) -> Option<&[u8]> {
@@ -94,6 +104,9 @@ macro_rules! arg {
     (Workspace($arg:expr)) => {
         $crate::builder::named_args::NamedArg::workspace($arg)
     };
+    (Blob($arg:expr)) => {
+        $crate::builder::named_args::NamedArg::blob($arg)
+    };
     (Literal($arg:expr)) => {
         $crate::builder::named_args::NamedArg::from_type(&$arg).unwrap()
     };
@@ -114,6 +127,15 @@ macro_rules! __args_inner {
 
     (@ { $this:ident } Workspace($e:expr) $(,)?) => {
         $crate::builder::named_args::__push(&mut $this, $crate::arg!(Workspace($e)));
+    };
+
+    (@ { $this:ident } Blob($e:expr), $($tail:tt)*) => {
+        $crate::builder::named_args::__push(&mut $this, $crate::arg!(Blob($e)));
+        $crate::__args_inner!(@ { $this } $($tail)*);
+    };
+
+    (@ { $this:ident } Blob($e:expr) $(,)?) => {
+        $crate::builder::named_args::__push(&mut $this, $crate::arg!(Blob($e)));
     };
 
     (@ { $this:ident } Literal($e:expr), $($tail:tt)*) => {
@@ -267,5 +289,16 @@ mod tests {
             args[2],
             NamedArg::literal(tari_bor::to_value(&123u64).unwrap()).unwrap()
         );
+    }
+
+    #[test]
+    fn args_macro_blob() {
+        let args = args![Blob("template")];
+        assert_eq!(args[0], NamedArg::blob("template"));
+
+        let args = args![Workspace("ws"), Blob("data"), 42u64];
+        assert_eq!(args[0], NamedArg::workspace("ws"));
+        assert_eq!(args[1], NamedArg::blob("data"));
+        assert_eq!(args[2], NamedArg::literal(tari_bor::to_value(&42u64).unwrap()).unwrap());
     }
 }

@@ -48,4 +48,8 @@ pub enum ManifestError {
     MaxCallDepthExceeded { max: usize },
     #[error("Failed to serialize CBOR literal: {0}")]
     CborSerializationError(#[from] tari_bor::BorError),
+    #[error("blob!('{name}') referenced but no payload supplied for that name")]
+    BlobNotProvided { name: String },
+    #[error("Manifest references more than {max} distinct blobs")]
+    BlobIndexOverflow { max: usize },
 }

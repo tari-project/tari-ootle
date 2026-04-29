@@ -43,8 +43,12 @@ pub struct TransactionRecord {
 
 impl TransactionRecord {
     pub fn try_into_wallet_transaction(self) -> Result<WalletTransaction, WalletStorageError> {
-        let transaction = deserialize_json::<Transaction, _>(&self.transaction_json)?;
-        let is_dry_run = transaction.is_dry_run();
+        let full = deserialize_json::<Transaction, _>(&self.transaction_json)?;
+        let is_dry_run = full.is_dry_run();
+        // The DB row holds the full transaction (so we can re-submit if needed). The
+        // SDK-facing `WalletTransaction` exposes the pruned form — blob commitments are still
+        // present, but the raw payloads are dropped to keep API responses small.
+        let transaction = full.into();
 
         Ok(WalletTransaction {
             id: deserialize_hex_try_from(&self.transaction_id)?,

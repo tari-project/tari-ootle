@@ -317,7 +317,12 @@ async fn handle_submit_manifest(
 ) -> Result<(), anyhow::Error> {
     let timer = Instant::now();
     let contents = fs::read_to_string(&args.manifest).map_err(|e| anyhow!("Failed to read manifest: {}", e))?;
-    let instructions = parse_manifest(&contents, parse_globals(args.input_variables)?, Default::default())?;
+    let instructions = parse_manifest(
+        &contents,
+        parse_globals(args.input_variables)?,
+        Default::default(),
+        Default::default(),
+    )?;
     let common = args.common;
 
     let fee_account;

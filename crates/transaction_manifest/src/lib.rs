@@ -24,7 +24,7 @@ use std::{collections::HashMap, str::FromStr};
 
 use proc_macro2::TokenStream;
 use syn::parse2;
-use tari_ootle_transaction::Instruction;
+use tari_ootle_transaction::{Blob, Blobs, Instruction};
 use tari_template_lib_types::TemplateAddress;
 
 use self::ast::ManifestAst;
@@ -37,18 +37,29 @@ mod generator;
 mod parser;
 mod value;
 
+/// Parse a manifest into a set of instructions plus the ordered `Blobs` they reference.
+///
+/// `globals` maps variable names to typed manifest values (e.g. component addresses).
+/// `templates` maps imported template aliases to their on-chain addresses.
+/// `blob_inputs` maps `blob!(name)` references to their byte payloads. The returned
+/// `ManifestInstructions.blobs` lists those blobs in order of first reference and is what the
+/// caller should attach to the transaction.
 pub fn parse_manifest(
     input: &str,
     globals: HashMap<String, ManifestValue>,
     templates: HashMap<String, TemplateAddress>,
+    blob_inputs: HashMap<String, Blob>,
 ) -> Result<ManifestInstructions, ManifestError> {
     let tokens = TokenStream::from_str(input).map_err(|e| ManifestError::LexError(e.to_string()))?;
     let ast = parse2::<ManifestAst>(tokens)?;
 
-    ManifestInstructionGenerator::new(globals, templates).generate_instructions(ast)
+    ManifestInstructionGenerator::new(globals, templates, blob_inputs).generate_instructions(ast)
 }
 
 pub struct ManifestInstructions {
     pub instructions: Vec<Instruction>,
     pub fee_instructions: Vec<Instruction>,
+    /// Blobs referenced by `blob!(name)` in the manifest, in the order they were first
+    /// encountered. Indices in `InstructionArg::Blob(idx)` map directly into this list.
+    pub blobs: Blobs,
 }

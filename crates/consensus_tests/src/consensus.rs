@@ -1314,7 +1314,7 @@ async fn multishard_publish_template() {
     let wasm = load_binary_fixture("state.wasm");
     let expected_binary_hash = hash_template_code(&wasm);
     let tx = Transaction::builder_localnet()
-        .publish_template(wasm.try_into().unwrap())
+        .publish_template(wasm)
         .with_inputs(inputs.iter().cloned().map(Into::into))
         .build_and_seal(&sk);
     let tx = TransactionRecord::new(tx);

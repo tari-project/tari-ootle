@@ -55,6 +55,56 @@ fn test_hello_world() {
     assert_eq!(result, "Hello World!");
 }
 
+/// A `Blob`-typed argument should be resolved by the runtime against the surrounding
+/// transaction's `Blobs` and decoded as CBOR — semantically identical to `Literal` but with
+/// the bytes carried in the prunable side-channel.
+///
+/// Calls `HelloWorld::custom_greeting(&self, name: String)` with the `name` argument supplied
+/// via a blob registered under the name `"name"`. Expected result: `"Hello World!"`.
+#[test]
+fn instruction_arg_blob_resolves_to_template_method_arg() {
+    use tari_bor::encode;
+    use tari_ootle_transaction::args;
+
+    let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/hello_world"]);
+    let component: ComponentAddress = test.call_function("HelloWorld", "new", args!["Hello".to_string()], vec![]);
+
+    let name_bytes = encode(&"World".to_string()).expect("encode String");
+    let result = test.execute_expect_success(
+        test.transaction()
+            .add_blob("name", name_bytes)
+            .call_method(component, "custom_greeting", args![Blob("name")])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    let greeting: String = result
+        .finalize
+        .execution_results
+        .first()
+        .expect("single instruction result")
+        .decode()
+        .unwrap();
+    assert_eq!(greeting, "Hello World!");
+}
+
+/// Referencing a blob name that hasn't been registered must surface a builder error at
+/// instruction construction time, not silently produce a malformed transaction.
+#[test]
+#[should_panic(expected = "Invalid named arguments")]
+fn instruction_arg_blob_unknown_name_panics_in_builder() {
+    use tari_ootle_transaction::args;
+
+    let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/hello_world"]);
+    let component: ComponentAddress = test.call_function("HelloWorld", "new", args!["Hello".to_string()], vec![]);
+
+    // No `add_blob("name", ...)` call → builder must panic when resolving the args.
+    let _unused = test
+        .transaction()
+        .call_method(component, "custom_greeting", args![Blob("name")])
+        .build_and_seal(test.secret_key());
+}
+
 #[test]
 fn test_state() {
     let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/state"]);

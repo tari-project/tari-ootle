@@ -156,6 +156,9 @@ pub struct RuntimeInterfaceImpl<TStore, TTemplateProvider> {
     seal_signer_public_key: RistrettoPublicKeyBytes,
     modules: ModulesCollection<TStore>,
     claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
+    /// Transaction blob payloads, immutable for the duration of execution. Used to resolve
+    /// `InstructionArg::Blob(idx)` references against the surrounding transaction's blobs.
+    blobs: Arc<tari_ootle_transaction::Blobs>,
     /// A pointer to the runtime that is set after initialization to allow for cross-template calls.
     /// This is using an atomic pointer simply to make RuntimeInterfaceImpl Send + Sync to satisfy wasmer trait bounds.
     runtime_pointer: Option<AtomicPtr<Box<dyn RuntimeInterface>>>,
@@ -171,6 +174,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         entity_id_provider: EntityIdProvider,
         modules: ModulesCollection<TStore>,
         claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
+        blobs: Arc<tari_ootle_transaction::Blobs>,
     ) -> Result<Self, RuntimeError> {
         let mut runtime = Self {
             tracker,
@@ -179,6 +183,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             seal_signer_public_key: signer_public_key,
             modules,
             claim_burn_proof_verifier,
+            blobs,
             runtime_pointer: None,
         };
         runtime.invoke_modules_on_initialize()?;
@@ -3110,6 +3115,19 @@ where
             .map(|arg| match arg {
                 InstructionArg::Workspace(id) => self.resolve_workspace_id(id),
                 InstructionArg::Literal(v) => Ok(decode_exact(v)?),
+                // A blob arg's value is the raw bytes of the referenced blob, decoded as CBOR
+                // by the same path as `Literal`. Lookup is against the surrounding transaction's
+                // `Blobs`, set on the runtime at construction time.
+                InstructionArg::Blob(idx) => {
+                    let blob = self
+                        .blobs
+                        .get(*idx)
+                        .ok_or(ArgumentValidationError::BlobIndexOutOfBounds {
+                            index: *idx,
+                            count: self.blobs.len(),
+                        })?;
+                    Ok(decode_exact(blob.as_bytes())?)
+                },
             })
             .collect()
     }

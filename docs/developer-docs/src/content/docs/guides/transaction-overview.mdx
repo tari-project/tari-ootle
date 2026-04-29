@@ -41,7 +41,7 @@ An instruction is the smallest unit of work in a transaction. The Ootle engine s
 | `CreateAccount(owner_public_key, owner_rule?, access_rules?, bucket?)` | Creates a built-in account component for a given public key (idempotent)          |
 | `Assert(key, assertion)`                                               | Verifies a condition about a workspace item, failing the transaction if not met   |
 | `AllocateAddress(type, workspace_id)`                                  | Pre-allocates a component or resource address, placing it on the workspace        |
-| `PublishTemplate(binary)`                                              | Publishes a new WASM template to the network                                      |
+| `PublishTemplate(blob_index)`                                          | Publishes a new WASM template referenced from the transaction's [blob list](#blobs) |
 | `DropAllProofsInWorkspace`                                             | Drops all proofs currently held in the workspace                                  |
 | `ClaimBurn(claim_proof, output_data)`                                  | Claims a burn proof from the Minotari layer-1 chain                               |
 | `ClaimValidatorFees(address)`                                          | Claims accumulated validator fees from a fee pool                                 |
@@ -305,6 +305,88 @@ Available assertion methods:
 | `assert_bucket_contains_non_fungibles_all` | Bucket contains all of the specified NFTs |
 | `assert_bucket_contains_non_fungibles_any` | Bucket contains any of the specified NFTs |
 | `assert_workspace_item_is_not_null`        | Workspace item is non-null                |
+
+---
+
+## Blobs
+
+A **blob** is an opaque byte payload carried alongside the transaction's instructions. Blobs are
+referenced from instructions and arguments by a small `BlobIndex` (u8), and only their per-blob
+hashes — not the raw bytes — participate in the transaction's signing domain and id. This means
+blob payloads can be pruned by storage layers after a transaction has finalised without affecting
+signature verifiability or the transaction id.
+
+Two places use blobs today:
+
+- `PublishTemplate` references its WASM binary as a blob.
+- `InstructionArg::Blob(idx)` passes the blob's bytes as a function/method argument — same shape
+  as a `Literal` argument from the template's perspective, just carried out-of-band.
+
+### Adding and referencing blobs
+
+The `TransactionBuilder` mirrors the workspace-item naming pattern. Register a blob under a
+caller-supplied name, then reference it by name in `args![Blob(name)]` or via the
+`*_from_blob(name)` methods.
+
+```rust
+let transaction = Transaction::builder(network)
+    .pay_fee_from_component(account, Amount::from(1000))
+    // Register a blob under the name "wasm".
+    .add_blob("wasm", template_binary)
+    // Reference it from PublishTemplate.
+    .publish_template_from_blob("wasm")
+    // Or pass the same bytes as a method arg on a different call.
+    .call_method(other_component, "consume_payload", args![Blob("wasm")])
+    .build_and_seal(&secret_key);
+```
+
+For the common one-shot case where you only want to publish a template and never read the same
+bytes again, `.publish_template(binary)` registers an unnamed blob in one step:
+
+```rust
+let transaction = Transaction::builder(network)
+    .pay_fee_from_component(account, Amount::from(1000))
+    .publish_template(template_binary)  // auto-creates an unnamed blob
+    .build_and_seal(&secret_key);
+```
+
+`add_blob` panics if the transaction already has 256 blobs (the `BlobIndex` cap). Use
+`add_blob_checked` if you need the fallible variant.
+
+### Blob vs. Literal: which to use
+
+Both `Literal` and `Blob` arguments arrive at the template as the same decoded value — there is
+no behavioural difference at the template boundary. The difference is in transaction structure:
+
+| Concern                        | `Literal`                             | `Blob`                                                |
+|--------------------------------|---------------------------------------|-------------------------------------------------------|
+| Bytes are stored               | Inline in the instruction             | In the prunable blob list                             |
+| Bytes participate in signing   | Yes (full content)                    | Only the 32-byte commitment                           |
+| Network gossip cost            | Per-instruction                       | Once per transaction, irrespective of references      |
+| Reviewable on hardware signers | Yes (if small enough to display)      | Only the hash is shown; contents are opaque           |
+| Indexed reuse in same tx       | No (each occurrence repeats the data) | Yes (multiple `Blob(name)` refs share one payload)    |
+
+Rule of thumb: **prefer `Literal` for small values**, especially anything a user might want to
+review on a hardware signer. Reach for `Blob` when the payload is large (template binaries,
+big CBOR structs) or when it's referenced more than once in the same transaction.
+
+### Blobs in the manifest DSL
+
+Manifest text can reference blobs via the `blob!(name)` macro. The actual bytes are supplied
+out-of-band when you submit the manifest (e.g. as the `blobs` map on the wallet daemon's
+`submit_manifest` JSON-RPC request):
+
+```
+use template_<address> as MyTemplate;
+
+fn main() {
+  let comp = MyTemplate::new(blob!(payload));
+  comp.update(blob!("payload"));   // string-literal name form is also accepted
+}
+```
+
+Repeated references to the same name reuse the same `BlobIndex` — you don't need to add the
+same payload multiple times.
 
 ---
 

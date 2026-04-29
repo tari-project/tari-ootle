@@ -447,11 +447,12 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                 reason: format!("get_last_scanned_block_id: {}", e),
             })
             .and_then(|(body, created_at): (String, PrimitiveDateTime)| {
-                let transaction: Transaction = deserialize_json(&body)?;
+                let full: Transaction = deserialize_json(&body)?;
+                let transaction_id = full.calculate_id();
                 Ok(TransactionEntry {
-                    transaction_id: transaction.calculate_id(),
+                    transaction_id,
                     created_at,
-                    transaction,
+                    transaction: full.into(),
                 })
             })
         })

@@ -36,14 +36,14 @@ pub struct EngineLimits {
 
 pub const ENGINE_LIMITS: EngineLimits = EngineLimits {
     max_substate_outputs: 1000,
-    max_substate_size: 2 * 1024 * 1024,  // 2 MiB
+    max_substate_size: 1024 * 1024,      // 1 MiB
     max_call_size: 128 * 1024,           // 128 KiB
     max_internal_call_size: 1024 * 1024, // 1 MiB
     max_logs: 256,
     max_log_size_bytes: 32 * 1024, // 32 KiB
     max_events: 256,
-    max_panic_message_size: 32 * 1024,               // 32 KiB
-    max_template_binary_size_bytes: 2 * 1024 * 1024, // 2 MiB
+    max_panic_message_size: 32 * 1024,              // 32 KiB
+    max_template_binary_size_bytes: 3 * 512 * 1024, // 1.5 MiB
     max_template_name_length: 64,
     max_call_depth: 10,
     max_random_bytes_len: 1024, // 1 KiB per call

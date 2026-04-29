@@ -264,6 +264,25 @@ impl WalletStoreReader for ReadTransaction<'_> {
         Ok(transaction)
     }
 
+    fn transactions_get_full(
+        &mut self,
+        transaction_id: TransactionId,
+    ) -> Result<tari_ootle_transaction::Transaction, WalletStorageError> {
+        use crate::schema::transactions;
+        let row = transactions::table
+            .filter(transactions::transaction_id.eq(serialize_hex(transaction_id)))
+            .first::<models::TransactionRecord>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general("transactions_get_full", e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: "transactions_get_full",
+                entity: "transaction".to_string(),
+                key: transaction_id.to_string(),
+            })?;
+
+        deserialize_json::<tari_ootle_transaction::Transaction, _>(&row.transaction_json)
+    }
+
     fn transactions_fetch_all(
         &mut self,
         status: Option<TransactionStatus>,

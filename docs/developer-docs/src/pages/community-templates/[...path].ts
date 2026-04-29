@@ -14,6 +14,8 @@ export const ALL: APIRoute = async ({ params, request, url }) => {
 
   const response = await fetch(remoteUrl.toString(), {
     method: request.method,
+    headers: request.headers,
+    body: request.body,
     redirect: "follow",
   });
 

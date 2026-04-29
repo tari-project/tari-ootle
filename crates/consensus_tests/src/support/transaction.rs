@@ -75,7 +75,8 @@ pub fn create_execution_result_for_transaction(
                     let binary = transaction
                         .instructions()
                         .iter()
-                        .find_map(|i| i.published_template_binary())
+                        .find_map(|i| i.published_template_binary_index())
+                        .map(|idx| transaction.blobs().get(idx).expect("blob not found"))
                         .expect("No publish template instruction found in transaction");
                     diff.up(
                         output.versioned_substate_id().substate_id().clone(),

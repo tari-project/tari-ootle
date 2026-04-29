@@ -62,6 +62,7 @@ impl Executable for CreateAndFundAccountExecutable {
                 },
             ],
             main: vec![],
+            blobs: Default::default(),
         }
     }
 }

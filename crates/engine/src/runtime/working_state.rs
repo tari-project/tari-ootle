@@ -157,6 +157,10 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     fn enforce_substate_size_limit(&self, value: &SubstateValue) -> Result<(), RuntimeError> {
+        // Published template has its own size restriction
+        if value.published_template().is_some() {
+            return Ok(());
+        }
         let size = encoded_len(value)?;
         if size > limits::ENGINE_LIMITS.max_substate_size {
             return Err(LimitError::SubstateSizeExceeded { size }.into());

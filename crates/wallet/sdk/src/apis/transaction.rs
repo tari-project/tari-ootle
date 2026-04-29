@@ -82,7 +82,10 @@ where
             }));
         }
 
-        let resp = self.network_interface.submit_transaction(transaction.transaction).await;
+        // Re-submission needs the full transaction (blob payloads); the WalletTransaction
+        // returned above is the pruned API view.
+        let full = self.store.with_read_tx(|tx| tx.transactions_get_full(transaction_id))?;
+        let resp = self.network_interface.submit_transaction(full).await;
 
         match resp {
             Ok(_) => {

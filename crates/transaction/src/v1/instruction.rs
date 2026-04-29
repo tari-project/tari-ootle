@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use tari_engine_types::{
     confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
     limits,
-    published_template::TemplateBlob,
 };
 use tari_ootle_common_types::displayable::Displayable;
 use tari_ootle_template_metadata::MetadataHash;
@@ -27,6 +26,7 @@ use tari_template_lib_types::{
 use crate::{
     AllocatableAddressType,
     Assertion,
+    BlobIndex,
     ComponentReference,
     ResourceAddressRef,
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
@@ -79,9 +79,9 @@ pub enum Instruction {
         output_bucket: WorkspaceId,
     },
     PublishTemplate {
-        #[cfg_attr(feature = "ts", ts(type = "string"))]
-        #[serde(with = "ootle_serde::base64")]
-        binary: TemplateBlob,
+        /// Index into the transaction's `blobs` list. The referenced blob's bytes are the WASM
+        /// binary, which the engine resolves via the surrounding `Blobs` at execution time.
+        binary: BlobIndex,
         /// Optional multihash of off-chain CBOR metadata
         #[serde(default)]
         #[cfg_attr(feature = "ts", ts(type = "string | null"))]
@@ -107,9 +107,10 @@ pub enum Instruction {
 }
 
 impl Instruction {
-    pub fn published_template_binary(&self) -> Option<&[u8]> {
+    /// Returns the `BlobIndex` of the WASM binary for `PublishTemplate` instructions.
+    pub fn published_template_binary_index(&self) -> Option<BlobIndex> {
         match self {
-            Self::PublishTemplate { binary, .. } => Some(binary),
+            Self::PublishTemplate { binary, .. } => Some(*binary),
             _ => None,
         }
     }
@@ -118,6 +119,83 @@ impl Instruction {
         match self {
             Self::CallFunction { address, .. } => Some(address),
             _ => None,
+        }
+    }
+
+    /// Iterate over every `BlobIndex` this instruction references — both `PublishTemplate.binary`
+    /// and `InstructionArg::Blob` argument references.
+    ///
+    /// NOTE: Every variant is listed explicitly (no wildcard `_` arm) so adding a new
+    /// `Instruction` variant produces a compile error here, forcing the author to declare any
+    /// blob references the variant introduces.
+    pub fn referenced_blob_ids(&self) -> Vec<BlobIndex> {
+        let mut out = Vec::new();
+        match self {
+            Self::PublishTemplate { binary, .. } => out.push(*binary),
+            Self::CallFunction { args, .. } => collect_arg_blob_ids(args, &mut out),
+            Self::CallMethod { args, .. } => collect_arg_blob_ids(args, &mut out),
+            Self::UpdateComponentTemplate { migrate, .. } => {
+                if let Some(m) = migrate {
+                    collect_arg_blob_ids(&m.args, &mut out);
+                }
+            },
+            // No blob references in these variants
+            Self::CreateAccount { .. } |
+            Self::PutLastInstructionOutputOnWorkspace { .. } |
+            Self::EmitLog { .. } |
+            Self::ClaimBurn { .. } |
+            Self::ClaimValidatorFees { .. } |
+            Self::DropAllProofsInWorkspace |
+            Self::Assert { .. } |
+            Self::TakeFromBucket { .. } |
+            Self::AllocateAddress { .. } |
+            Self::StealthTransfer { .. } |
+            Self::PayFeeFromBucket { .. } => {},
+        }
+        out
+    }
+
+    /// Shift every `BlobIndex` in this instruction by the given offset. Used when merging two
+    /// transaction builders to avoid blob-index collisions, mirroring `remap_workspace_ids`.
+    ///
+    /// Panics on overflow.
+    pub fn remap_blob_ids(&mut self, id_offset: BlobIndex) {
+        if id_offset == 0 {
+            return;
+        }
+        match self {
+            Self::PublishTemplate { binary, .. } => {
+                *binary = binary.checked_add(id_offset).expect("BlobIndex overflow during merge");
+            },
+            Self::CallFunction { args, .. } => {
+                for arg in args {
+                    arg.remap_blob_id(id_offset);
+                }
+            },
+            Self::CallMethod { args, .. } => {
+                for arg in args {
+                    arg.remap_blob_id(id_offset);
+                }
+            },
+            Self::UpdateComponentTemplate { migrate, .. } => {
+                if let Some(m) = migrate {
+                    for arg in &mut m.args {
+                        arg.remap_blob_id(id_offset);
+                    }
+                }
+            },
+            // No blob references in these variants
+            Self::CreateAccount { .. } |
+            Self::PutLastInstructionOutputOnWorkspace { .. } |
+            Self::EmitLog { .. } |
+            Self::ClaimBurn { .. } |
+            Self::ClaimValidatorFees { .. } |
+            Self::DropAllProofsInWorkspace |
+            Self::Assert { .. } |
+            Self::TakeFromBucket { .. } |
+            Self::AllocateAddress { .. } |
+            Self::StealthTransfer { .. } |
+            Self::PayFeeFromBucket { .. } => {},
         }
     }
 
@@ -344,6 +422,14 @@ impl Display for Instruction {
     }
 }
 
+fn collect_arg_blob_ids(args: &[InstructionArg], out: &mut Vec<BlobIndex>) {
+    for arg in args {
+        if let Some(idx) = arg.as_blob_index() {
+            out.push(idx);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct MigrateFunction {
@@ -381,7 +467,7 @@ mod tests {
         assert_eq!(instruction, decoded);
 
         let instruction = Instruction::PublishTemplate {
-            binary: vec![1, 2, 3].try_into().unwrap(),
+            binary: 0,
             metadata_hash: None,
         };
         let json = serde_json::to_string(&instruction).unwrap();

@@ -52,7 +52,7 @@ import Grid from "@mui/material/Grid";
 import TextField from "@mui/material/TextField";
 import useManifestCodeStore from "@store/manifestStore";
 import type { ManifestTab } from "@store/manifestStore";
-import { FileDownload, FileUpload, FormatAlignLeft, LibraryAdd } from "@mui/icons-material";
+import { Description as DescriptionIcon, FileDownload, FileUpload, FormatAlignLeft, LibraryAdd } from "@mui/icons-material";
 import type { KeyId } from "@tari-project/ootle-ts-bindings";
 import { rejectReasonToString, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
@@ -118,11 +118,12 @@ function ManifestEditor() {
   const isDryRun = !fee;
 
   const handleSave = useCallback(() => {
-    const data = manifest.tabs.map(({ name, code, variables, signingKeys }) => ({
+    const data = manifest.tabs.map(({ name, code, variables, signingKeys, blobs }) => ({
       name,
       code,
       variables,
       signingKeys,
+      blobs,
     }));
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -178,6 +179,7 @@ function ManifestEditor() {
       seal_signer_key_id: null,
       signing_key_ids: manifest.signingKeys,
       dry_run: isDryRun,
+      blobs: manifest.blobs,
     })
       .then((response) => {
         if (!isDryRun) {
@@ -284,6 +286,13 @@ function ManifestEditor() {
               signingKeys={manifest.signingKeys}
               onAdd={manifest.addSigningKey}
               onRemove={manifest.removeSigningKey}
+            />
+          </Box>
+          <Box className="flex-container" style={{ justifyContent: "flex-start" }}>
+            <BlobsEditor
+              blobs={manifest.blobs}
+              onSet={manifest.setBlob}
+              onRemove={manifest.removeBlob}
             />
           </Box>
           <Box className="flex-container" style={{ justifyContent: "flex-end" }}>
@@ -828,56 +837,91 @@ function SigningKeysEditor({
   onAdd: (key: KeyId) => void;
   onRemove: (index: number) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Grid size={12} mt={1}>
+      <Stack direction="row" spacing={1} alignItems="center" marginBottom={2}>
+        <Button variant="outlined" size="small" onClick={() => setOpen(true)}>
+          Signing Keys ({signingKeys.length})
+        </Button>
+      </Stack>
+      <SigningKeysDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        signingKeys={signingKeys}
+        onAdd={onAdd}
+        onRemove={onRemove}
+      />
+    </Grid>
+  );
+}
+
+function SigningKeysDialog({
+  open,
+  onClose,
+  signingKeys,
+  onAdd,
+  onRemove,
+}: {
+  open: boolean;
+  onClose: () => void;
+  signingKeys: KeyId[];
+  onAdd: (key: KeyId) => void;
+  onRemove: (index: number) => void;
+}) {
   const { data: accountsData } = useAccountsList(0, 100);
   const accounts = accountsData?.accounts || [];
 
   const handleAddAccountKey = (e: SelectChangeEvent) => {
     const address = e.target.value;
     if (!address) return;
-    const accountInfo = accounts.find(
-      (a) => substateIdToString(a.account.component_address) === address,
-    );
+    const accountInfo = accounts.find((a) => substateIdToString(a.account.component_address) === address);
     if (accountInfo?.account.owner_key_id) {
       onAdd(accountInfo.account.owner_key_id);
     }
   };
 
   return (
-    <Grid size={12} mt={1}>
-      {signingKeys.length > 0 && (
-        <Table sx={{ marginBottom: 2 }}>
-          <TableHead>
-            <TableRow>
-              <TableCell>Signing Keys</TableCell>
-              <TableCell>Account</TableCell>
-              <TableCell />
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {signingKeys.map((key, index) => {
-              const accountName = findAccountNameForKey(key, accounts);
-              return (
-                <TableRow key={JSON.stringify(key)}>
-                  <DataTableCell sx={{ fontFamily: "monospace", fontSize: "0.8rem" }}>
-                    {formatKeyId(key)}
-                  </DataTableCell>
-                  <DataTableCell>
-                    {accountName || "-"}
-                  </DataTableCell>
-                  <DataTableCell>
-                    <IconButton size="small" onClick={() => onRemove(index)} title="Remove signing key">
-                      &times;
-                    </IconButton>
-                  </DataTableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      )}
-      <Stack direction="row" spacing={1} alignItems="center" marginBottom={2}>
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>Signing Keys</DialogTitle>
+      <DialogContent>
+        <DialogContentText sx={{ mb: 2 }}>
+          Extra signers attached to this transaction (in addition to the seal signer). Each
+          signer commits to the unsigned transaction including its blob commitments.
+        </DialogContentText>
+        {signingKeys.length > 0 ? (
+          <Table size="small" sx={{ marginBottom: 2 }}>
+            <TableHead>
+              <TableRow>
+                <TableCell>Key</TableCell>
+                <TableCell>Account</TableCell>
+                <TableCell />
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {signingKeys.map((key, index) => {
+                const accountName = findAccountNameForKey(key, accounts);
+                return (
+                  <TableRow key={JSON.stringify(key)}>
+                    <DataTableCell sx={{ fontFamily: "monospace", fontSize: "0.8rem" }}>
+                      {formatKeyId(key)}
+                    </DataTableCell>
+                    <DataTableCell>{accountName || "-"}</DataTableCell>
+                    <DataTableCell>
+                      <IconButton size="small" onClick={() => onRemove(index)} title="Remove signing key">
+                        &times;
+                      </IconButton>
+                    </DataTableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        ) : (
+          <DialogContentText sx={{ mb: 2, fontStyle: "italic" }}>No signing keys added.</DialogContentText>
+        )}
         {accounts.length > 0 && (
-          <FormControl style={{ minWidth: "200px" }}>
+          <FormControl fullWidth>
             <InputLabel id="add-signing-key-label">Add Signing Key</InputLabel>
             <Select labelId="add-signing-key-label" label="Add Signing Key" value="" onChange={handleAddAccountKey}>
               {accounts
@@ -893,8 +937,282 @@ function SigningKeysEditor({
             </Select>
           </FormControl>
         )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Close</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+/**
+ * Decode a base64 string to its byte length without materialising the bytes — used to show
+ * users the size of blob payloads in the UI.
+ */
+function base64ByteLength(base64: string): number {
+  if (!base64) return 0;
+  // Strip whitespace and trailing padding chars to compute the underlying byte count.
+  const stripped = base64.replace(/\s/g, "");
+  const padding = (stripped.match(/=+$/) || [""])[0].length;
+  // Each 4 base64 chars encode 3 bytes; padding chars subtract from the total.
+  return Math.max(0, Math.floor((stripped.length / 4) * 3) - padding);
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+/**
+ * Encode a `Uint8Array` as base64 — done in-browser without pulling extra dependencies.
+ */
+function bytesToBase64(bytes: Uint8Array): string {
+  // chunk to avoid call-stack issues with very large binaries
+  const CHUNK = 0x8000;
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+}
+
+function BlobsEditor({
+  blobs,
+  onSet,
+  onRemove,
+}: {
+  blobs: Record<string, string>;
+  onSet: (name: string, base64: string) => void;
+  onRemove: (name: string) => void;
+}) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingName, setEditingName] = useState<string | null>(null);
+
+  const openAdd = () => {
+    setEditingName(null);
+    setDialogOpen(true);
+  };
+  const openEdit = (name: string) => {
+    setEditingName(name);
+    setDialogOpen(true);
+  };
+
+  const entries = Object.entries(blobs);
+
+  return (
+    <Grid size={12} mt={1}>
+      {entries.length > 0 && (
+        <Table sx={{ marginBottom: 2 }}>
+          <TableHead>
+            <TableRow>
+              <TableCell>Blob name</TableCell>
+              <TableCell>Size</TableCell>
+              <TableCell>Preview (base64)</TableCell>
+              <TableCell />
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {entries.map(([name, base64]) => {
+              const size = base64ByteLength(base64);
+              const preview = base64.length > 24 ? `${base64.slice(0, 16)}…${base64.slice(-8)}` : base64;
+              return (
+                <TableRow key={name}>
+                  <DataTableCell sx={{ fontFamily: "monospace", fontSize: "0.85rem" }}>{name}</DataTableCell>
+                  <DataTableCell>{formatBytes(size)}</DataTableCell>
+                  <DataTableCell sx={{ fontFamily: "monospace", fontSize: "0.75rem", color: "text.secondary" }}>
+                    {preview}
+                  </DataTableCell>
+                  <DataTableCell>
+                    <Button size="small" variant="text" onClick={() => openEdit(name)}>
+                      Edit
+                    </Button>
+                    <IconButton size="small" onClick={() => onRemove(name)} title="Remove blob">
+                      &times;
+                    </IconButton>
+                  </DataTableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
+      <Stack direction="row" spacing={1} alignItems="center" marginBottom={2}>
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<DescriptionIcon fontSize="small" />}
+          onClick={openAdd}
+        >
+          Add Blob ({entries.length})
+        </Button>
       </Stack>
+
+      <BlobDialog
+        open={dialogOpen}
+        existingNames={Object.keys(blobs)}
+        editingName={editingName}
+        existingBase64={editingName ? blobs[editingName] : ""}
+        onClose={() => setDialogOpen(false)}
+        onSave={(name, base64) => {
+          // If renaming, drop the old key.
+          if (editingName && editingName !== name) {
+            onRemove(editingName);
+          }
+          onSet(name, base64);
+          setDialogOpen(false);
+        }}
+      />
     </Grid>
+  );
+}
+
+/**
+ * Dialog for adding or editing a single blob. Accepts either a file upload (any binary; the
+ * browser converts to base64) or a base64 string pasted directly. The value is stored as
+ * base64 in the manifest store, matching the wire format expected by the wallet daemon.
+ */
+function BlobDialog({
+  open,
+  existingNames,
+  editingName,
+  existingBase64,
+  onClose,
+  onSave,
+}: {
+  open: boolean;
+  existingNames: string[];
+  editingName: string | null;
+  existingBase64: string;
+  onClose: () => void;
+  onSave: (name: string, base64: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [base64, setBase64] = useState("");
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Re-initialise when the dialog opens.
+  // Using a state flag so the effect only fires on transitions.
+  const initRef = useRef(false);
+  if (open && !initRef.current) {
+    initRef.current = true;
+    setName(editingName ?? "");
+    setBase64(existingBase64 ?? "");
+    setFileName(null);
+    setError(null);
+  }
+  if (!open && initRef.current) {
+    initRef.current = false;
+  }
+
+  const handleFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError(null);
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const buf = reader.result as ArrayBuffer;
+      const bytes = new Uint8Array(buf);
+      setBase64(bytesToBase64(bytes));
+    };
+    reader.onerror = () => setError("Failed to read file");
+    reader.readAsArrayBuffer(file);
+    // Allow re-selecting the same file
+    e.target.value = "";
+  }, []);
+
+  const handleSave = () => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError("Name is required");
+      return;
+    }
+    if (trimmedName !== editingName && existingNames.includes(trimmedName)) {
+      setError(`A blob named "${trimmedName}" already exists`);
+      return;
+    }
+    const cleaned = base64.replace(/\s/g, "");
+    if (!cleaned) {
+      setError("Blob payload is empty");
+      return;
+    }
+    // Validate that the input parses as base64.
+    try {
+      atob(cleaned);
+    } catch {
+      setError("Payload is not valid base64");
+      return;
+    }
+    onSave(trimmedName, cleaned);
+  };
+
+  const size = base64ByteLength(base64);
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>{editingName ? "Edit blob" : "Add blob"}</DialogTitle>
+      <DialogContent>
+        <DialogContentText sx={{ mb: 2 }}>
+          Blobs are referenced from the manifest via <code>blob!(name)</code>. Provide the bytes
+          either by uploading a file or by pasting base64-encoded data.
+        </DialogContentText>
+        <Stack spacing={2} mt={1}>
+          <TextField
+            label="Name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="my_template"
+            autoFocus
+            fullWidth
+          />
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Button variant="outlined" component="label" startIcon={<FileUpload fontSize="small" />}>
+              Upload File
+              <input ref={fileInputRef} type="file" hidden onChange={handleFile} />
+            </Button>
+            {fileName && (
+              <Box component="span" sx={{ color: "text.secondary", fontSize: "0.875rem" }}>
+                Loaded: {fileName}
+              </Box>
+            )}
+          </Stack>
+          <TextField
+            label="Base64 payload"
+            value={base64}
+            onChange={(e) => {
+              setBase64(e.target.value);
+              setFileName(null);
+            }}
+            placeholder="Paste base64-encoded bytes here"
+            multiline
+            minRows={4}
+            maxRows={10}
+            fullWidth
+            slotProps={{
+              htmlInput: {
+                style: {
+                  fontFamily: "'Fira Code', 'Fira Mono', Consolas, Menlo, monospace",
+                  fontSize: "0.8rem",
+                },
+              },
+            }}
+          />
+          <Box sx={{ color: "text.secondary", fontSize: "0.875rem" }}>
+            Decoded size: {formatBytes(size)}
+          </Box>
+          {error && <Box sx={{ color: "error.main", fontSize: "0.875rem" }}>{error}</Box>}
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={handleSave} variant="contained" color="primary">
+          Save
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }
 

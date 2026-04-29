@@ -37,7 +37,11 @@ export type Instruction =
   | { TakeFromBucket: { input_bucket: WorkspaceOffsetId; amount: Amount; output_bucket: number } }
   | {
       PublishTemplate: {
-        binary: string;
+        /**
+         * Index into the transaction's `blobs` list. The referenced blob's bytes are the WASM
+         * binary, which the engine resolves via the surrounding `Blobs` at execution time.
+         */
+        binary: number;
         /**
          * Optional multihash of off-chain CBOR metadata
          */

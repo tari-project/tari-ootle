@@ -121,13 +121,15 @@ fn test_state() {
     let component_address2: ComponentAddress = template_test.call_function("State", "new", args![], vec![]);
     assert_ne!(component_address1, component_address2);
 
+    let template_addr = template_test.get_template_address("State");
+
     let store = template_test.read_only_state_store();
     let component = store.get_component(component_address1).unwrap();
-    assert_eq!(component.module_name, "State");
+    assert_eq!(*component.template_address(), template_addr);
 
     let component = store.get_component(component_address2).unwrap();
     assert_eq!(component.owner_public_key(), Some(&template_test.to_public_key_bytes()));
-    assert_eq!(component.module_name, "State");
+    assert_eq!(*component.template_address(), template_addr);
 
     // call the "set" method to update the instance value
     let new_value = 20_u32;
@@ -153,7 +155,7 @@ fn state_create_multiple_in_one_call() {
         .with_substates(|_, s| {
             if s.substate_value()
                 .component()
-                .filter(|a| a.template_address == template_address)
+                .filter(|a| *a.template_address() == template_address)
                 .is_some()
             {
                 count += 1;
@@ -539,7 +541,6 @@ mod consensus {
 }
 
 mod fungible {
-
     use super::*;
 
     #[test]
@@ -603,7 +604,6 @@ mod fungible {
 }
 
 mod basic_nft {
-
     use super::*;
 
     fn setup() -> (

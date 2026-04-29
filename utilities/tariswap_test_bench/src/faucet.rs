@@ -42,7 +42,7 @@ impl Runner {
             .up_iter()
             .find_map(|(addr, s)| {
                 addr.as_component_address()
-                    .filter(|_| s.substate_value().component().unwrap().template_address == self.faucet_template)
+                    .filter(|_| *s.substate_value().component().unwrap().template_address() == self.faucet_template)
             })
             .ok_or_else(|| anyhow::anyhow!("Faucet Component address not found"))?;
         let resource_address = diff

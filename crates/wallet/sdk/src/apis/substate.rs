@@ -323,7 +323,7 @@ where
             tx.substates_upsert_root(
                 id,
                 referenced_substates.into_iter().collect(),
-                maybe_removed.as_ref().and_then(|s| s.module_name.clone()),
+                None,
                 maybe_removed.and_then(|s| s.template_address),
             )
         })?;

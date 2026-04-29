@@ -38,9 +38,9 @@ pub async fn wait_listener_on_local_port_os_thread<T, E: Debug>(
                 .expect("Node exited unexpectedly");
             panic!("Node exited cleanly unexpectedly");
         }
-        // println!("Waiting for base node to start listening on port {}. {}", port, e);
+        // cucumber_log!("Waiting for base node to start listening on port {}. {}", port, e);
         if i >= 20 {
-            // println!("Node failed to start listening on port {} within 10s", port);
+            // cucumber_log!("Node failed to start listening on port {} within 10s", port);
             panic!(
                 "Node failed to start listening on port {} within 20s (err: {})",
                 port, e
@@ -85,9 +85,9 @@ pub async fn wait_listener_on_local_port<T, E: Debug>(
                         },
                     }
                 }
-                // println!("Waiting for base node to start listening on port {}. {}", port, e);
+                // cucumber_log!("Waiting for base node to start listening on port {}. {}", port, e);
                 if i >= 20 {
-                    // println!("Node failed to start listening on port {} within 10s", port);
+                    // cucumber_log!("Node failed to start listening on port {} within 10s", port);
                     panic!(
                         "Node failed to start listening on port {} within 20s (err: {})",
                         port, e

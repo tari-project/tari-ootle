@@ -24,7 +24,7 @@ use indexmap::IndexMap;
 use log::*;
 use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason, TransactionResult},
-    component::{ComponentBody, ComponentHeader},
+    component::{Component, ComponentBody, ComponentHeader},
     events::Event,
     fees::FeeSource,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
@@ -149,8 +149,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         address_allocation: Option<ComponentAddressAllocation>,
     ) -> Result<ComponentAddress, RuntimeError> {
         self.write_with(|state| {
-            let (template_address, module_name) =
-                state.current_template().map(|(addr, name)| (*addr, name.to_string()))?;
+            let template_address = state.current_template().map(|(addr, _)| *addr)?;
 
             let component_address = match address_allocation {
                 Some(address_allocation) => {
@@ -165,17 +164,16 @@ impl<TStore: StateReader> StateTracker<TStore> {
                 None => state.id_provider()?.new_component_address()?,
             };
 
-            let component = ComponentBody { state: component_state };
-            let component = ComponentHeader {
+            let body = ComponentBody { state: component_state };
+            let header = ComponentHeader {
                 template_address,
-                module_name: module_name.clone(),
                 access_rules,
                 owner_rule,
                 entity_id: component_address.entity_id(),
-                body: component,
             };
-            let substate_id = SubstateId::Component(component_address);
 
+            let component = Component { header, body };
+            let substate_id = SubstateId::Component(component_address);
             // The template address/component_id combination will not necessarily be unique so we need to check this.
             if state.substate_exists(&substate_id)? {
                 return Err(RuntimeError::ComponentAlreadyExists {
@@ -193,7 +191,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
                 template_address,
                 "component",
                 "created",
-                Metadata::from([("module_name".to_string(), module_name)]),
+                Metadata::new(),
             ))?;
 
             debug!(target: LOG_TARGET, "New component created: {}", component_address);

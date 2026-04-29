@@ -122,7 +122,7 @@ impl DryRunTransactionProcessor {
             substate
                 .substate_value()
                 .as_component()
-                .map(|component| &component.template_address)
+                .map(|component| component.template_address())
         });
 
         let req_templates = transaction

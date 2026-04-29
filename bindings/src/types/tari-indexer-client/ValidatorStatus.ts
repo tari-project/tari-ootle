@@ -3,11 +3,23 @@ import type { Epoch } from "../Epoch";
 import type { ShardGroup } from "../ShardGroup";
 import type { ValidatorConsensusState } from "./ValidatorConsensusState";
 
+/**
+ * A snapshot of one validator's consensus pacemaker state as observed by the
+ * indexer during a recent sync round.
+ */
 export type ValidatorStatus = {
+  /**
+   * libp2p PeerId of the validator.
+   */
   peer_id: string;
   shard_group: ShardGroup;
   epoch: Epoch;
-  height: number;
+  height: bigint;
   state: ValidatorConsensusState;
-  observed_at_unix_s: number;
+  /**
+   * Unix timestamp (seconds) at which this snapshot was captured. Clients
+   * can derive the freshness of the snapshot by comparing this to the
+   * current wall-clock time.
+   */
+  observed_at_unix_s: bigint;
 };

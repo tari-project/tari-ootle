@@ -61,9 +61,11 @@ fn initialize_composability(test: &mut CrossTemplateTest) -> ComponentInfo {
         vec![],
     );
 
+    let template_addr = test.template_test.get_template_address(TEMPLATE_NAME);
+    let state_template_addr = test.template_test.get_template_address("State");
     // extract the newly created component addresses
-    let composability_component = extract_component_address_from_result(&res, TEMPLATE_NAME);
-    let state_component = extract_component_address_from_result(&res, "State");
+    let composability_component = extract_component_address_from_result(&res, &template_addr);
+    let state_component = extract_component_address_from_result(&res, &state_template_addr);
 
     ComponentInfo {
         cross_template_component: composability_component,
@@ -71,12 +73,12 @@ fn initialize_composability(test: &mut CrossTemplateTest) -> ComponentInfo {
     }
 }
 
-fn extract_component_address_from_result(result: &ExecuteResult, template_name: &str) -> ComponentAddress {
+fn extract_component_address_from_result(result: &ExecuteResult, template_addr: &TemplateAddress) -> ComponentAddress {
     let (substate_addr, _) = result
         .expect_success()
         .up_iter()
         .find(|(address, substate)| {
-            address.is_component() && substate.substate_value().component().unwrap().module_name == template_name
+            address.is_component() && substate.substate_value().component().unwrap().template_address() == template_addr
         })
         .unwrap();
     substate_addr.as_component_address().unwrap()

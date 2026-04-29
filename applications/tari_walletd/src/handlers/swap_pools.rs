@@ -3,7 +3,7 @@
 
 use axum_extra::headers::authorization::Bearer;
 use log::warn;
-use tari_engine_types::{component::ComponentHeader, indexed_value::IndexedWellKnownTypes, substate::SubstateId};
+use tari_engine_types::{component::Component, indexed_value::IndexedWellKnownTypes, substate::SubstateId};
 use tari_ootle_wallet_sdk::network::WalletNetworkInterface;
 use tari_ootle_walletd_client::{
     permissions::JrpcPermission,
@@ -67,19 +67,11 @@ fn calculate_swap_input_for_pool(
 /// Fetches vault balances for a validated liquidity pool component.
 async fn get_pool_vault_info(
     context: &HandlerContext,
-    component: &ComponentHeader,
-) -> Result<
-    (
-        tari_template_lib_types::ResourceAddress,
-        tari_template_lib_types::Amount,
-        tari_template_lib_types::ResourceAddress,
-        tari_template_lib_types::Amount,
-    ),
-    anyhow::Error,
-> {
+    component: &Component,
+) -> Result<(ResourceAddress, Amount, ResourceAddress, Amount), anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
 
-    let indexed = IndexedWellKnownTypes::from_value(&component.body.state)?;
+    let indexed = IndexedWellKnownTypes::from_value(component.state())?;
     let vault_ids = indexed.vault_ids();
 
     if vault_ids.len() < 2 {
@@ -138,10 +130,10 @@ pub async fn handle_get_exchange_rate(
         .into_component()
         .ok_or_else(|| anyhow::anyhow!("Substate is not a component"))?;
 
-    if component.template_address != LIQUIDITY_POOL_TEMPLATE_ADDRESS {
+    if *component.template_address() != LIQUIDITY_POOL_TEMPLATE_ADDRESS {
         return Err(anyhow::anyhow!(
             "Component is not a liquidity pool (template: {})",
-            component.template_address
+            component.template_address()
         ));
     }
 

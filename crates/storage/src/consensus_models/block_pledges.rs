@@ -259,7 +259,7 @@ impl Display for SubstatePledge {
 
 #[cfg(test)]
 mod tests {
-    use tari_engine_types::component::{ComponentBody, ComponentHeader};
+    use tari_engine_types::component::{Component, ComponentBody, ComponentHeader};
     use tari_template_lib::types::{ComponentAddress, EntityId};
     use tari_template_lib_types::{SubstateOwnerRule, access_rules::ComponentAccessRules};
 
@@ -270,12 +270,13 @@ mod tests {
     }
 
     fn substate_value(seed: u8) -> SubstateValue {
-        SubstateValue::Component(ComponentHeader {
-            template_address: Default::default(),
-            module_name: "".to_string(),
-            owner_rule: SubstateOwnerRule::None,
-            access_rules: ComponentAccessRules::allow_all(),
-            entity_id: EntityId::from_array([seed; EntityId::LENGTH]),
+        SubstateValue::Component(Component {
+            header: ComponentHeader {
+                template_address: Default::default(),
+                owner_rule: SubstateOwnerRule::None,
+                access_rules: ComponentAccessRules::allow_all(),
+                entity_id: EntityId::from_array([seed; EntityId::LENGTH]),
+            },
             body: ComponentBody::empty(),
         })
     }

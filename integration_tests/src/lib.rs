@@ -254,31 +254,31 @@ impl TariWorld {
         let _drop = self.http_server.take();
 
         for (name, mut p) in self.indexers.drain(..) {
-            println!("Shutting down indexer {}", name);
+            cucumber_log!("Shutting down indexer {}", name);
             p.shutdown.trigger();
         }
 
         for (name, mut p) in self.validator_nodes.drain(..) {
-            println!("Shutting down validator node {}", name);
+            cucumber_log!("Shutting down validator node {}", name);
             p.shutdown.trigger();
         }
 
         for (name, mut p) in self.vn_seeds.drain(..) {
-            println!("Shutting down validator node seed {}", name);
+            cucumber_log!("Shutting down validator node seed {}", name);
             p.shutdown.trigger();
         }
 
         for (name, mut p) in self.wallets.drain(..) {
-            println!("Shutting down wallet {}", name);
+            cucumber_log!("Shutting down wallet {}", name);
             p.shutdown.trigger();
         }
         for (name, mut p) in self.base_nodes.drain(..) {
-            println!("Shutting down base node {}", name);
+            cucumber_log!("Shutting down base node {}", name);
             // You have explicitly trigger the shutdown now because of the change to use Arc/Mutex in tari_shutdown
             p.shutdown.trigger();
         }
         for (name, mut p) in self.wallet_daemons.drain(..) {
-            println!("Shutting down wallet daemon {}", name);
+            cucumber_log!("Shutting down wallet daemon {}", name);
             // You have explicitly trigger the shutdown now because of the change to use Arc/Mutex in tari_shutdown
             p.shutdown.trigger();
         }
@@ -295,14 +295,15 @@ impl TariWorld {
                 let tx_count = client.get_mempool_transaction_count().await.unwrap();
 
                 if tx_count < min_tx_count {
-                    // println!(
+                    // cucumber_log!(
                     //     "Waiting for {} to have {} transaction(s) in mempool (currently has {})",
                     //     bn.name, min_tx_count, tx_count
                     // );
                     if timer.elapsed() > timeout {
-                        println!(
+                        cucumber_log!(
                             "Timed out waiting for base node {} to have {} transactions in mempool",
-                            bn.name, min_tx_count
+                            bn.name,
+                            min_tx_count
                         );
                         panic!(
                             "Timed out waiting for base node {} to have {} transactions in mempool",
@@ -325,15 +326,13 @@ impl TariWorld {
     }
 
     pub fn print(&self) {
-        eprintln!();
-        eprintln!("======================================");
-        eprintln!("=========== CUCUMBER WORLD ===========");
-        eprintln!("======================================");
-        eprintln!();
+        cucumber_log!("======================================");
+        cucumber_log!("=========== CUCUMBER WORLD ===========");
+        cucumber_log!("======================================");
 
         // base nodes
         for (name, node) in &self.base_nodes {
-            eprintln!(
+            cucumber_log!(
                 "Base node \"{}\": grpc port \"{}\", temp dir path \"{}\"",
                 name,
                 node.grpc_port,
@@ -343,7 +342,7 @@ impl TariWorld {
 
         // wallets
         for (name, node) in &self.wallets {
-            eprintln!(
+            cucumber_log!(
                 "Wallet \"{}\": grpc port \"{}\", temp dir path \"{}\"",
                 name,
                 node.grpc_port,
@@ -353,51 +352,60 @@ impl TariWorld {
 
         // vns
         for (name, node) in &self.validator_nodes {
-            eprintln!(
+            cucumber_log!(
                 "Validator node \"{}\": json rpc port \"{}\", web ui port \"{}\", temp dir path \"{:?}\"",
-                name, node.json_rpc_port, node.web_ui_port, node.temp_dir_path
+                name,
+                node.json_rpc_port,
+                node.web_ui_port,
+                node.temp_dir_path
             );
         }
 
         // indexes
         for (name, node) in &self.indexers {
-            eprintln!(
+            cucumber_log!(
                 "Indexer \"{}\": json rpc port \"{}\", graphql port \"{}\", web ui port  \"{}\", temp dir path \"{}\"",
-                name, node.api_port, node.graphql_port, node.web_ui_port, node.temp_dir_path
+                name,
+                node.api_port,
+                node.graphql_port,
+                node.web_ui_port,
+                node.temp_dir_path
             );
         }
 
         // templates
         for (name, template) in &self.templates {
-            eprintln!("Template \"{}\" with address \"{}\"", name, template.address);
+            cucumber_log!("Template \"{}\" with address \"{}\"", name, template.address);
         }
 
         // templates
         for (name, outputs) in &self.outputs {
-            eprintln!("Outputs \"{}\"", name);
+            cucumber_log!("Outputs \"{}\"", name);
             for (name, addr) in outputs {
-                eprintln!("  - {}: {}", name, addr);
+                cucumber_log!("  - {}: {}", name, addr);
             }
         }
 
         // wallet daemons
         for (name, daemon) in &self.wallet_daemons {
-            eprintln!(
+            cucumber_log!(
                 "Wallet daemon \"{}\": json rpc port \"{}\", indexer api port \"{}\", temp dir path \"{:?}\"",
-                name, daemon.json_rpc_port, daemon.indexer_api_port, daemon.temp_path_dir
+                name,
+                daemon.json_rpc_port,
+                daemon.indexer_api_port,
+                daemon.temp_path_dir
             );
         }
 
         for (account_name, account) in &self.wallet_accounts {
-            eprintln!(
+            cucumber_log!(
                 "Wallet account \"{}\" with address \"{}\"",
-                account_name, account.address
+                account_name,
+                account.address
             );
         }
 
-        eprintln!();
-        eprintln!("======================================");
-        eprintln!();
+        cucumber_log!("======================================");
     }
 }
 

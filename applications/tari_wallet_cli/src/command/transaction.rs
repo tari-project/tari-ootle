@@ -567,8 +567,8 @@ pub fn print_substate_diff(diff: &SubstateDiff) {
             SubstateAddress::from_substate_id(id, substate.version())
         );
         match substate.substate_value() {
-            SubstateValue::Component(component) => {
-                println!("      ▶ component ({}): {}", component.module_name, id,);
+            SubstateValue::Component(_) => {
+                println!("      ▶ component: {}", id);
             },
             SubstateValue::Resource(_) => {
                 println!("      ▶ resource: {}", id);

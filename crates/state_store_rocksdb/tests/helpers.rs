@@ -8,7 +8,7 @@ use tari_bor::cbor;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, Decision, LeafBlock, PcId, ProposalCertificate, ShardGroupAccumulatedData};
 use tari_engine_types::{
-    component::{ComponentBody, ComponentHeader},
+    component::{Component, ComponentBody, ComponentHeader},
     substate::{SubstateId, SubstateValue, hash_substate},
 };
 use tari_ootle_common_types::{
@@ -119,7 +119,7 @@ pub fn build_substate_record(substate_id: &SubstateId, version: u32, state_versi
     SubstateRecord {
         substate_id: substate_id.clone(),
         version,
-        state_hash: hash_substate(&value, version, at_epoch.as_u64()),
+        state_hash: hash_substate(&value, version, at_epoch),
         substate_value: Some(value),
         created: SubstateCreated {
             at_epoch,
@@ -133,12 +133,13 @@ pub fn build_substate_record(substate_id: &SubstateId, version: u32, state_versi
 pub fn build_substate_value(entity_id: Option<EntityId>) -> SubstateValue {
     let bytes = random_bytes(100);
     let entity_id = entity_id.unwrap_or_else(|| EntityId::from_array(random_fixed()));
-    SubstateValue::Component(ComponentHeader {
-        template_address: TemplateAddress::default(),
-        module_name: "foo".to_string(),
-        owner_rule: SubstateOwnerRule::None,
-        access_rules: ComponentAccessRules::allow_all(),
-        entity_id,
+    SubstateValue::Component(Component {
+        header: ComponentHeader {
+            template_address: TemplateAddress::default(),
+            owner_rule: SubstateOwnerRule::None,
+            access_rules: ComponentAccessRules::allow_all(),
+            entity_id,
+        },
         body: ComponentBody {
             state: cbor!({
                 "foo" => "bar",
@@ -219,12 +220,13 @@ pub fn random_substate_id_for_shard(shard: Shard) -> SubstateId {
 }
 
 pub fn substate_value_for_entity(entity_id: EntityId) -> SubstateValue {
-    SubstateValue::Component(ComponentHeader {
-        template_address: TemplateAddress::default(),
-        module_name: "foo".to_string(),
-        owner_rule: SubstateOwnerRule::None,
-        access_rules: ComponentAccessRules::allow_all(),
-        entity_id,
+    SubstateValue::Component(Component {
+        header: ComponentHeader {
+            template_address: TemplateAddress::default(),
+            owner_rule: SubstateOwnerRule::None,
+            access_rules: ComponentAccessRules::allow_all(),
+            entity_id,
+        },
         body: ComponentBody {
             state: cbor!({
                 "baz" => "bar",

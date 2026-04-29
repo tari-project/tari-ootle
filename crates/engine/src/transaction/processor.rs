@@ -25,7 +25,7 @@ use std::{sync::Arc, time::Instant};
 use log::*;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult},
-    component::{ComponentHeader, derive_component_address_from_public_key},
+    component::{Component, derive_component_address_from_public_key},
     entity_id_provider::EntityIdProvider,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     instruction_result::InstructionResult,
@@ -203,7 +203,7 @@ where
                     return Ok(ExecuteResult {
                         finalize,
                         execution_time: timer.elapsed(),
-                        execute_epoch,
+                        execute_epoch: execute_epoch.map(Into::into),
                     });
                 }
                 execution_results
@@ -218,7 +218,7 @@ where
                 return Ok(ExecuteResult {
                     finalize: FinalizeResult::new_rejected(transaction_hash, err.to_reject_reason()),
                     execution_time: timer.elapsed(),
-                    execute_epoch,
+                    execute_epoch: execute_epoch.map(Into::into),
                 });
             },
         };
@@ -238,7 +238,7 @@ where
                 Ok(ExecuteResult {
                     finalize,
                     execution_time: timer.elapsed(),
-                    execute_epoch,
+                    execute_epoch: execute_epoch.map(Into::into),
                 })
             },
             // This can happen e.g if you have dangling buckets after running the instructions
@@ -251,7 +251,7 @@ where
                 Ok(ExecuteResult {
                     finalize,
                     execution_time: timer.elapsed(),
-                    execute_epoch,
+                    execute_epoch: execute_epoch.map(Into::into),
                 })
             },
         }
@@ -463,7 +463,7 @@ where
                 component_scope,
                 component_lock,
                 arg_scope: Box::new(arg_scope),
-                entity_id: component.entity_id,
+                entity_id: *component.entity_id(),
             };
             (frame, resolved_args)
         } else {
@@ -473,7 +473,7 @@ where
                 component_scope,
                 component_lock,
                 arg_scope: Box::new(IndexedWellKnownTypes::new()),
-                entity_id: component.entity_id,
+                entity_id: *component.entity_id(),
             };
             (frame, vec![])
         };
@@ -627,13 +627,14 @@ where
                 // Component exists, we'll attempt deposit funds into it as necessary
 
                 // Ensure that the existing component is indeed an Account
-                if component.template_address != ACCOUNT_TEMPLATE_ADDRESS {
+                if *component.template_address() != ACCOUNT_TEMPLATE_ADDRESS {
                     return Err(TransactionErrorKind::InvalidCreateAccount {
                         component_address: account_address,
                         details: format!(
                             "A component already exists at the derived account address {}, but it is not an Account \
                              (template address: {})",
-                            account_address, component.template_address
+                            account_address,
+                            component.template_address()
                         ),
                     });
                 }
@@ -780,7 +781,7 @@ where
         args: Vec<InstructionArg>,
     ) -> Result<InstructionResult, TransactionErrorKind> {
         let (component_address, component) = runtime.interface_mut().load_component(call)?;
-        let template_address = component.template_address;
+        let template_address = *component.template_address();
 
         let template = template_provider
             .get_template(&template_address)
@@ -803,7 +804,7 @@ where
         template: LoadedTemplate,
         runtime: &mut Runtime,
         component_address: ComponentAddress,
-        component: &ComponentHeader,
+        component: &Component,
         method: &str,
         args: Vec<InstructionArg>,
     ) -> Result<InstructionResult, TransactionErrorKind> {
@@ -839,12 +840,12 @@ where
         let component_scope = IndexedWellKnownTypes::from_value(component.state())?;
 
         runtime.interface_mut().push_call_frame(PushCallFrame::ForComponent {
-            template_address: component.template_address,
+            template_address: component.header.template_address,
             module_name: template.template_name().to_string(),
             component_scope,
             component_lock,
             arg_scope: Box::new(arg_scope),
-            entity_id: component.entity_id,
+            entity_id: component.header.entity_id,
         })?;
 
         // This must come after the call frame as that defines the authorization scope

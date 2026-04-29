@@ -185,7 +185,7 @@ async fn when_i_claim_fees_for_validator_and_epoch_fails(
         .await
         .unwrap_err();
 
-    println!("Expected error: {}", err);
+    cucumber_log!("Expected error: {}", err);
 }
 
 #[then(expr = "I create an account {word} via the wallet daemon {word}")]
@@ -291,19 +291,19 @@ async fn check_account_balance_via_daemon(
     match least_or_most.to_lowercase().as_str() {
         "least" => {
             if current_balance < amount {
-                println!("Expected balance to be at least {} but was {}", amount, current_balance);
+                cucumber_log!("Expected balance to be at least {} but was {}", amount, current_balance);
                 panic!("Expected balance to be at least {} but was {}", amount, current_balance);
             }
         },
         "most" => {
             if current_balance > amount {
-                println!("Expected balance to be at most {} but was {}", amount, current_balance);
+                cucumber_log!("Expected balance to be at most {} but was {}", amount, current_balance);
                 panic!("Expected balance to be at most {} but was {}", amount, current_balance);
             }
         },
         "exactly" => {
             if current_balance != amount {
-                println!("Expected balance to be exactly {} but was {}", amount, current_balance);
+                cucumber_log!("Expected balance to be exactly {} but was {}", amount, current_balance);
                 panic!("Expected balance to be exactly {} but was {}", amount, current_balance);
             }
         },
@@ -341,19 +341,19 @@ async fn check_account_balance_for_resource_via_daemon(
     match least_or_most.to_lowercase().as_str() {
         "least" => {
             if current_balance < amount {
-                println!("Expected balance to be at least {} but was {}", amount, current_balance);
+                cucumber_log!("Expected balance to be at least {} but was {}", amount, current_balance);
                 panic!("Expected balance to be at least {} but was {}", amount, current_balance);
             }
         },
         "most" => {
             if current_balance > amount {
-                println!("Expected balance to be at most {} but was {}", amount, current_balance);
+                cucumber_log!("Expected balance to be at most {} but was {}", amount, current_balance);
                 panic!("Expected balance to be at most {} but was {}", amount, current_balance);
             }
         },
         "exactly" => {
             if current_balance != amount {
-                println!("Expected balance to be exactly {} but was {}", amount, current_balance);
+                cucumber_log!("Expected balance to be exactly {} but was {}", amount, current_balance);
                 panic!("Expected balance to be exactly {} but was {}", amount, current_balance);
             }
         },
@@ -452,13 +452,13 @@ async fn check_account_confidential_balance_is_via_daemon(
     match least_or_most.to_lowercase().as_str() {
         "least" => {
             if current_balance < amount {
-                println!("Expected balance to be at least {} but was {}", amount, current_balance);
+                cucumber_log!("Expected balance to be at least {} but was {}", amount, current_balance);
                 panic!("Expected balance to be at least {} but was {}", amount, current_balance);
             }
         },
         "most" => {
             if current_balance > amount {
-                println!("Expected balance to be at most {} but was {}", amount, current_balance);
+                cucumber_log!("Expected balance to be at most {} but was {}", amount, current_balance);
                 panic!("Expected balance to be at most {} but was {}", amount, current_balance);
             }
         },

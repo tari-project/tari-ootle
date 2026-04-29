@@ -4,7 +4,7 @@
 @concurrency
 Feature: Concurrency
 
-  Scenario: Concurrent calls to the Counter template
+  Scenario: Concurrent calls to the counter template
     Given a network with registered validator VN and wallet daemon WALLET_D
 
     # Create the sender account
@@ -16,13 +16,13 @@ Feature: Concurrency
     ##### Scenario
     # The initial value of the counter must be 0
     When I call function "new" on template "counter" using account ACC to pay fees via wallet daemon WALLET_D named "COUNTER"
-    When I invoke on wallet daemon WALLET_D on account ACC on component COUNTER/components/Counter the method call "value" the result is "0"
+    When I invoke on wallet daemon WALLET_D on account ACC on component COUNTER/components/counter the method call "value" the result is "0"
 
     # Send multiple concurrent transactions to increase the counter
     # Currently there is a lock bug where the subsequent transactions executed are being rejected, should be tested later after engine changes:
     # Reject(FailedToLockInputs("Failed to Write lock substate component_459d...4443c:1 due to conflict with existing Write lock"))
-    When I invoke on wallet daemon WALLET_D on account ACC on component COUNTER/components/Counter the method call "increase" concurrently 30 times
+    When I invoke on wallet daemon WALLET_D on account ACC on component COUNTER/components/counter the method call "increase" concurrently 30 times
 
     # Check that the counter has been increased
     # Note: this is currently not working together with the previous test case when times > 1, only the first transaction is being executed properly
-    When I invoke on wallet daemon WALLET_D on account ACC on component COUNTER/components/Counter the method call "value" the result is "30"
+    When I invoke on wallet daemon WALLET_D on account ACC on component COUNTER/components/counter the method call "value" the result is "30"

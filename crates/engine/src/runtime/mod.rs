@@ -57,7 +57,7 @@ use std::{fmt::Debug, ptr::NonNull};
 pub use pay_fee::PayFee;
 use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason},
-    component::ComponentHeader,
+    component::Component,
     confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
     indexed_value::IndexedValue,
     lock::LockFlag,
@@ -116,8 +116,7 @@ pub trait RuntimeInterface {
 
     fn emit_log(&mut self, level: LogLevel, message: String) -> Result<(), RuntimeError>;
 
-    fn load_component(&mut self, call: ComponentReference)
-    -> Result<(ComponentAddress, ComponentHeader), RuntimeError>;
+    fn load_component(&mut self, call: ComponentReference) -> Result<(ComponentAddress, Component), RuntimeError>;
 
     fn lock_component(
         &mut self,

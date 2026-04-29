@@ -4,6 +4,7 @@ import type { Decision } from "./Decision";
 import type { Epoch } from "./Epoch";
 import type { Evidence } from "./Evidence";
 import type { LeaderFee } from "./LeaderFee";
+import type { LockedEpoch } from "./LockedEpoch";
 import type { TransactionPoolStage } from "./TransactionPoolStage";
 
 export type TransactionPoolRecord = {
@@ -26,7 +27,7 @@ export type TransactionPoolRecord = {
    * Epoch to use when executing the transaction. This updates as foreign proposals are received
    * until the transaction is executed.
    */
-  locked_epoch: Epoch | null;
+  locked_epoch: LockedEpoch | null;
   last_updated: string;
   last_updated_in_block: BlockId | null;
 };

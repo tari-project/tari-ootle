@@ -9,7 +9,6 @@ pub mod committee;
 pub mod crypto;
 pub mod displayable;
 mod engine_signature;
-mod epoch;
 mod era;
 mod extra_data;
 mod fee_pool;
@@ -38,7 +37,6 @@ mod vote_power;
 
 pub use bytes::*;
 pub use engine_signature::*;
-pub use epoch::Epoch;
 pub use era::*;
 pub use extra_data::*;
 pub use fee_pool::*;
@@ -54,6 +52,8 @@ pub use state_version::*;
 pub use substate_address::*;
 // Re-export
 pub use tari_engine_types as engine_types;
+// Exported here for backwards compatibility
+pub use tari_engine_types::Epoch;
 pub use validator_metadata::*;
 pub use versioned_substate_id::*;
 pub use vote_power::*;

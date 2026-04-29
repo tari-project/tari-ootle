@@ -438,7 +438,7 @@ pub async fn submit_manifest_with_signing_keys(
     let AccountGetResponse { account, .. } = client.accounts_get(account_name).await.unwrap();
     let owner_key_id = account.owner_key_id.expect("Account has no owner key id for signing");
 
-    let instructions = parse_manifest(&manifest_content, globals, HashMap::new()).unwrap();
+    let instructions = parse_manifest(&manifest_content, globals, HashMap::new(), Default::default()).unwrap();
 
     let transaction = transaction_builder()
         .pay_fee_from_component(account.component_address, 5000u64)
@@ -519,7 +519,7 @@ pub async fn submit_manifest(
         .map(|(_, addr)| addr.clone().into_unversioned())
         .collect::<Vec<_>>();
 
-    let instructions = parse_manifest(&manifest_content, globals, HashMap::new())
+    let instructions = parse_manifest(&manifest_content, globals, HashMap::new(), HashMap::new())
         .unwrap_or_else(|err| panic!("Attempted to parse manifest but failed: {err}"));
 
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;

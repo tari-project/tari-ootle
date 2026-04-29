@@ -7,7 +7,7 @@ use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::ProposalCertificate;
 use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateDiff};
-use tari_ootle_transaction::{Transaction, TransactionId};
+use tari_ootle_transaction::{PrunedTransaction, TransactionId};
 use time::PrimitiveDateTime;
 
 use crate::models::NewAccountData;
@@ -17,7 +17,10 @@ use crate::models::NewAccountData;
 pub struct WalletTransaction {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub id: TransactionId,
-    pub transaction: Transaction,
+    /// The transaction in its pruned (blob-bytes-stripped) form. Blob commitments are retained
+    /// so the `TransactionId` and signatures remain verifiable. Wallet daemon storage keeps the
+    /// full form on disk for re-submission, but the public API returns this slimmer view.
+    pub transaction: PrunedTransaction,
     pub status: TransactionStatus,
     pub finalize: Option<FinalizeResult>,
     pub final_fee: Option<u64>,

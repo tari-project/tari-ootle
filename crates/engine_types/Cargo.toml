@@ -20,16 +20,17 @@ ootle_byte_type = { workspace = true, features = ["crypto"] }
 blake2 = { workspace = true }
 borsh = { workspace = true, features = ["indexmap"] }
 bounded-vec = { workspace = true, features = ["serde"] }
-rand = { workspace = true }
 digest = { workspace = true }
 hex = { workspace = true, features = ["serde"] }
 indexmap = { workspace = true, features = ["serde"] }
 lazy_static = { workspace = true }
+log = { workspace = true }
+newtype-ops = { workspace = true }
+rand = { workspace = true }
 serde = { workspace = true, default-features = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }
-log = { workspace = true }
 
 [dev-dependencies]
 bincode = { workspace = true, features = ["serde"] }

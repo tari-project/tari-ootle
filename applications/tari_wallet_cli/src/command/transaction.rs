@@ -317,7 +317,12 @@ async fn handle_submit_manifest(
 ) -> Result<(), anyhow::Error> {
     let timer = Instant::now();
     let contents = fs::read_to_string(&args.manifest).map_err(|e| anyhow!("Failed to read manifest: {}", e))?;
-    let instructions = parse_manifest(&contents, parse_globals(args.input_variables)?, Default::default())?;
+    let instructions = parse_manifest(
+        &contents,
+        parse_globals(args.input_variables)?,
+        Default::default(),
+        Default::default(),
+    )?;
     let common = args.common;
 
     let fee_account;
@@ -562,8 +567,8 @@ pub fn print_substate_diff(diff: &SubstateDiff) {
             SubstateAddress::from_substate_id(id, substate.version())
         );
         match substate.substate_value() {
-            SubstateValue::Component(component) => {
-                println!("      ▶ component ({}): {}", component.module_name, id,);
+            SubstateValue::Component(_) => {
+                println!("      ▶ component: {}", id);
             },
             SubstateValue::Resource(_) => {
                 println!("      ▶ resource: {}", id);

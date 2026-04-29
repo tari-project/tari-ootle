@@ -122,7 +122,7 @@ async fn given_validator_connects_to_other_vns(world: &mut TariWorld, step: &Ste
         {
             // TODO: investigate why this can fail. This call failing ("cannot assign requested address (os error 99)")
             // doesnt cause the rest of the test test to fail, so ignoring for now.
-            eprintln!("Failed to add peer: {}", err);
+            cucumber_log!("Failed to add peer: {}", err);
         }
     }
 }
@@ -185,7 +185,7 @@ async fn publish_template(
         match template::publish_template(world, wallet_daemon_name, account_name, template_name.clone()).await {
             Ok(resp) => resp,
             Err(e) => {
-                println!("publish_template error = {}", e);
+                cucumber_log!("publish_template error = {}", e);
                 panic!("publish_template error = {}", e);
             },
         };
@@ -208,7 +208,7 @@ async fn register_template(world: &mut TariWorld, step: &Step, wallet_name: Stri
     let template_address = match send_template_registration(world, template_name.clone(), wallet_name).await {
         Ok(resp) => resp,
         Err(e) => {
-            println!("register_template error = {}", e);
+            cucumber_log!("register_template error = {}", e);
             panic!("register_template error = {}", e);
         },
     };
@@ -558,6 +558,9 @@ async fn when_i_wait_for_validator_leaf_block_at_least(
 
         if let Some(block) = resp.blocks.first() {
             assert!(block.epoch().as_u64() <= epoch);
+            if block.epoch().as_u64() < epoch {
+                cucumber_log!("VN {name} is in {}. Waiting for epoch {epoch}", block.epoch())
+            }
             if block.epoch().as_u64() == epoch && block.height().as_u64() >= height {
                 return;
             }
@@ -717,7 +720,7 @@ fn scan_for_eviction_proof(
             Err(_) => continue,
         };
         if def.payload.node_to_evict().as_bytes() == evict_vn.public_key.as_bytes() {
-            eprintln!("Found eviction proof file: {}", path.display());
+            cucumber_log!("Found eviction proof file: {}", path.display());
             return Some(def.payload);
         }
     }
@@ -757,7 +760,7 @@ async fn all_validators_have_started_epoch(world: &mut TariWorld, step: &Step, e
         }
 
         if pending.is_empty() {
-            println!(
+            cucumber_log!(
                 "All validator nodes have started epoch {} ({})",
                 epoch,
                 statuses.join("; ")

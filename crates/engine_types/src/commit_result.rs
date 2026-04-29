@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tari_template_lib::types::{ComponentAddress, Hash32, ResourceAddress, TemplateAddress};
 
 use crate::{
+    Epoch,
     events::Event,
     fees::FeeReceipt,
     instruction_result::InstructionResult,
@@ -48,11 +49,11 @@ pub struct ExecuteResult {
     pub execution_time: Duration,
     /// The epoch during which the transaction was executed. This may be None if consensus aborted before being able to
     /// lock to an epoch.
-    pub execute_epoch: Option<u64>,
+    pub execute_epoch: Option<Epoch>,
 }
 
 impl ExecuteResult {
-    pub fn new_rejected(transaction_hash: Hash32, reason: RejectReason, execute_epoch: Option<u64>) -> Self {
+    pub fn new_rejected(transaction_hash: Hash32, reason: RejectReason, execute_epoch: Option<Epoch>) -> Self {
         Self {
             finalize: FinalizeResult::new_rejected(transaction_hash, reason),
             execution_time: Duration::default(),
@@ -238,7 +239,7 @@ impl FinalizeResult {
         if let Some(diff) = self.any_accept() {
             for (id, substate) in diff.up_iter() {
                 if let Some(component) = substate.substate_value().as_component() &&
-                    component.template_address == *template_address
+                    component.template_address() == template_address
                 {
                     components.push(
                         id.as_component_address()

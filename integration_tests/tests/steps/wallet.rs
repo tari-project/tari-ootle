@@ -343,9 +343,12 @@ pub async fn check_balance(world: &mut TariWorld, step: &Step, wallet_name: Stri
         if resp.available_balance >= balance {
             break;
         }
-        eprintln!(
+        cucumber_log!(
             "Waiting for wallet {} to have at least {} uT (balance: {} uT, pending: {} uT)",
-            wallet_name, balance, resp.available_balance, resp.pending_incoming_balance
+            wallet_name,
+            balance,
+            resp.available_balance,
+            resp.pending_incoming_balance
         );
         sleep(Duration::from_secs(2)).await;
 

@@ -1918,7 +1918,8 @@
             "format": "date-time"
           },
           "transaction": {
-            "type": "object"
+            "type": "object",
+            "description": "Pruned transaction — blob commitments retained, raw blob bytes omitted to keep the\nresponse size bounded. The transaction id and signatures remain verifiable."
           },
           "transaction_id": {
             "type": "string"

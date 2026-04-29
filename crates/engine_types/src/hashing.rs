@@ -121,10 +121,12 @@ pub enum EngineHashDomainLabel {
     FeeClaimAddress,
     QuorumCertificate,
     SubstateValue,
+    SubstateValuePart,
     ViewableBalanceProof,
     UtxoAddress,
     StealthBalanceProof,
     ValueProof,
+    Blob,
 }
 
 impl EngineHashDomainLabel {
@@ -145,10 +147,12 @@ impl EngineHashDomainLabel {
             Self::FeeClaimAddress => "FeeClaimAddress",
             Self::QuorumCertificate => "QuorumCertificate",
             Self::SubstateValue => "SubstateValue",
+            Self::SubstateValuePart => "SubstateValuePart",
             Self::ViewableBalanceProof => "ViewableBalanceProof",
             Self::UtxoAddress => "UtxoAddress",
             Self::StealthBalanceProof => "StealthBalanceProof",
             Self::ValueProof => "ValueProof",
+            Self::Blob => "Blob",
         }
     }
 }

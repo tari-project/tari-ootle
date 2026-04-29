@@ -55,7 +55,17 @@ pub enum ManifestIntent {
     CreateAccount(CreateAccountIntent),
     Log(LogIntent),
     DropAllProofs,
+    PublishTemplate(PublishTemplateIntent),
     CallLocalFunction(Ident),
+}
+
+/// `publish_template!(blob!(name))` — publishes the WASM binary referenced by the named blob.
+#[derive(Debug, Clone)]
+pub struct PublishTemplateIntent {
+    /// Name of the blob containing the WASM binary. Must have been provided via `blob_inputs`.
+    pub blob_name: Ident,
+    /// Optional off-chain CBOR metadata multihash (hex-encoded literal).
+    pub metadata_hash_hex: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +120,9 @@ pub struct LogIntent {
 pub enum ManifestLiteral {
     Lit(Lit),
     Workspace(Ident),
+    /// A reference to a transaction blob by caller-supplied name. The generator resolves the
+    /// name to a `BlobIndex` against the blobs map passed to `parse_manifest`.
+    Blob(Ident),
     Special(SpecialLiteral),
 }
 
@@ -469,8 +482,47 @@ fn macro_call(mac: &Ident, tokens: TokenStream) -> Result<ManifestIntent, syn::E
                 bucket: args.bucket,
             }))
         },
+        "publish_template" => parse_publish_template_args(tokens),
         _ => Err(syn::Error::new_spanned(mac, "Invalid macro name")),
     }
+}
+
+/// Parse `publish_template!(blob_name)` or `publish_template!(blob_name, metadata = "0x...")`.
+/// The blob name must have a payload supplied via `parse_manifest`'s `blob_inputs` map.
+fn parse_publish_template_args(tokens: TokenStream) -> Result<ManifestIntent, syn::Error> {
+    syn::parse::Parser::parse2(
+        |input: ParseStream| {
+            let blob_name: Ident = input.parse()?;
+            let mut metadata_hash_hex = None;
+
+            while input.peek(syn::Token![,]) {
+                input.parse::<syn::Token![,]>()?;
+                if input.is_empty() {
+                    break;
+                }
+                let key: Ident = input.parse()?;
+                input.parse::<syn::Token![=]>()?;
+                match key.to_string().as_str() {
+                    "metadata" => {
+                        let value: LitStr = input.parse()?;
+                        metadata_hash_hex = Some(value.value());
+                    },
+                    _ => {
+                        return Err(syn::Error::new_spanned(
+                            key,
+                            "Unknown publish_template argument, expected 'metadata'",
+                        ));
+                    },
+                }
+            }
+
+            Ok(ManifestIntent::PublishTemplate(PublishTemplateIntent {
+                blob_name,
+                metadata_hash_hex,
+            }))
+        },
+        tokens,
+    )
 }
 
 fn build_arguments(args: Punctuated<Expr, Comma>) -> Result<Vec<ManifestLiteral>, syn::Error> {
@@ -745,11 +797,24 @@ fn handle_macro_argument(mac: Macro) -> Result<ManifestLiteral, syn::Error> {
                 .map_err(|e| syn::Error::new_spanned(&lit, format!("Failed to parse NonFungibleId: {}", e)))?;
             Ok(ManifestLiteral::Special(SpecialLiteral::NonFungibleId(id)))
         },
+        "blob" => {
+            // Accept either an identifier (`blob!(my_data)`) or a string literal
+            // (`blob!("my_data")`). Both resolve the same name against the blobs map supplied
+            // to `parse_manifest`.
+            let blob_name = if let Ok(lit_str) = parse2::<LitStr>(mac.tokens.clone()) {
+                Ident::new(&lit_str.value(), lit_str.span())
+            } else {
+                parse2::<Ident>(mac.tokens).map_err(|e| {
+                    syn::Error::new_spanned(name, format!("Expected identifier or string literal in blob!: {}", e))
+                })?
+            };
+            Ok(ManifestLiteral::Blob(blob_name))
+        },
         _ => Err(syn::Error::new_spanned(
             name,
             format!(
                 "Invalid argument macro '{name}', supported macros: cbor!, metadata!, amount!, hex_bytes!, bytes!, \
-                 public_key!, address!, substate_id!, non_fungible_id!"
+                 public_key!, address!, substate_id!, non_fungible_id!, blob!"
             ),
         )),
     }

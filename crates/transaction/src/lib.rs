@@ -21,6 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 pub mod args;
+mod blobs;
 pub mod builder;
 mod envelope;
 mod hashing;
@@ -32,6 +33,7 @@ mod unsigned_transaction;
 mod v1;
 mod weight;
 
+pub use blobs::*;
 pub use builder::TransactionBuilder;
 pub use envelope::*;
 pub use signable::*;

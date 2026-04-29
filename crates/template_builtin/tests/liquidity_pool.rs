@@ -226,7 +226,7 @@ pub fn create_test_faucet_component<A: Into<Amount>>(
         .filter_map(|(id, substate)| {
             id.as_component_address().and_then(|addr| {
                 let component = substate.substate_value().as_component()?;
-                if component.template_address == template_addr {
+                if *component.template_address() == template_addr {
                     Some((addr, component.clone()))
                 } else {
                     None

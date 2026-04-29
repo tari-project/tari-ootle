@@ -3,12 +3,9 @@
 
 use std::collections::HashSet;
 
-use tari_ootle_common_types::{
-    SubstateRequirement,
-    engine_types::{limits, published_template::TemplateBlob},
-};
+use tari_ootle_common_types::SubstateRequirement;
 use tari_ootle_template_metadata::MetadataHash;
-use tari_ootle_transaction::{TransactionBuilder, UnsignedTransaction, args};
+use tari_ootle_transaction::{Blob, TransactionBuilder, UnsignedTransaction, args};
 use tari_template_lib_types::{Amount, ResourceAddress, constants::TARI_TOKEN};
 
 use crate::{
@@ -127,28 +124,15 @@ impl<'a, P: Provider> AccountInvokeBuilder<'a, P> {
     }
 
     // TODO: move common builder code into a builder trait
-    pub fn publish_template<T: TryInto<TemplateBlob>>(mut self, template: T) -> Self {
-        let Ok(template) = template.try_into() else {
-            panic!(
-                "Template blob exceeds maximum size of {} bytes",
-                limits::ENGINE_LIMITS.max_template_binary_size_bytes
-            );
-        };
+    /// Publish a WASM template by passing the binary directly. The binary is auto-registered
+    /// as an unnamed blob.
+    pub fn publish_template<T: Into<Blob>>(mut self, template: T) -> Self {
         self.builder = self.builder.publish_template(template);
         self
     }
 
-    pub fn publish_template_with_metadata<T: TryInto<TemplateBlob>>(
-        mut self,
-        template: T,
-        metadata_hash: MetadataHash,
-    ) -> Self {
-        let Ok(template) = template.try_into() else {
-            panic!(
-                "Template blob exceeds maximum size of {} bytes",
-                limits::ENGINE_LIMITS.max_template_binary_size_bytes
-            );
-        };
+    /// Publish a WASM template with an off-chain metadata hash.
+    pub fn publish_template_with_metadata<T: Into<Blob>>(mut self, template: T, metadata_hash: MetadataHash) -> Self {
         self.builder = self.builder.publish_template_with_metadata(template, metadata_hash);
         self
     }

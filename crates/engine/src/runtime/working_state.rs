@@ -17,7 +17,7 @@ use tari_engine_types::{
     UtxoOutput,
     ValidatorFeeWithdrawal,
     bucket::Bucket,
-    component::ComponentHeader,
+    component::Component,
     events::Event,
     fees::{FeeReceipt, FeeReceiptBuilder},
     id_provider::{IdProvider, ObjectIds},
@@ -157,6 +157,10 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     fn enforce_substate_size_limit(&self, value: &SubstateValue) -> Result<(), RuntimeError> {
+        // Published template has its own size restriction
+        if value.published_template().is_some() {
+            return Ok(());
+        }
         let size = encoded_len(value)?;
         if size > limits::ENGINE_LIMITS.max_substate_size {
             return Err(LimitError::SubstateSizeExceeded { size }.into());
@@ -195,7 +199,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(())
     }
 
-    pub fn get_component(&self, locked: &LockedSubstate) -> Result<&ComponentHeader, RuntimeError> {
+    pub fn get_component(&self, locked: &LockedSubstate) -> Result<&Component, RuntimeError> {
         let (address, substate) = self.store.get_locked_substate(locked.lock_id())?;
         let component = substate.component().ok_or_else(|| RuntimeError::LockSubstateMismatch {
             lock_id: locked.lock_id(),
@@ -205,7 +209,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(component)
     }
 
-    pub fn get_component_mut(&mut self, locked: &LockedSubstate) -> Result<&mut ComponentHeader, RuntimeError> {
+    pub fn get_component_mut(&mut self, locked: &LockedSubstate) -> Result<&mut Component, RuntimeError> {
         let (address, substate) = self.store.get_locked_substate_mut(locked.lock_id())?;
         let component_mut = substate
             .component_mut()
@@ -217,7 +221,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(component_mut)
     }
 
-    pub fn modify_component_with<F: FnOnce(&mut ComponentHeader) -> bool>(
+    pub fn modify_component_with<F: FnOnce(&mut Component) -> bool>(
         &mut self,
         locked: &LockedSubstate,
         f: F,
@@ -895,7 +899,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 .ok_or(RuntimeError::AddressAllocationNoTemplate)?),
             None => {
                 let component = self.store.load_and_cache_component(component_address)?;
-                Ok(component.template_address)
+                Ok(*component.template_address())
             },
         }
     }
@@ -1048,12 +1052,12 @@ impl<TStore: StateReader> WorkingState<TStore> {
         let epoch = self.get_current_epoch()?;
         Ok(TransactionReceipt {
             outcome,
-            diff_summary: DiffSummary::from_diff(diff, epoch.as_u64()),
+            diff_summary: DiffSummary::from_diff(diff, epoch),
             fee_withdrawals: diff.validator_fee_withdrawals().to_vec().into_boxed_slice(),
             events: self.events.clone().into_boxed_slice(),
             logs: self.logs.clone().into_boxed_slice(),
             fee_receipt,
-            epoch: epoch.as_u64(),
+            epoch,
         })
     }
 
@@ -1333,7 +1337,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
     pub fn load_and_cache_component(
         &mut self,
         component_address: ComponentAddress,
-    ) -> Result<&ComponentHeader, RuntimeError> {
+    ) -> Result<&Component, RuntimeError> {
         self.store.load_and_cache_component(component_address)
     }
 

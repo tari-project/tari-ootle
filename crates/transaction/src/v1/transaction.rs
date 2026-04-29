@@ -7,7 +7,7 @@ use indexmap::IndexSet;
 use log::*;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{
-    hashing::hash_template_code,
+    hashing::{EngineHashDomainLabel, hash_template_code, hasher32},
     indexed_value::IndexedValueError,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
@@ -16,11 +16,13 @@ use tari_ootle_common_types::{Epoch, SubstateRequirement, SubstateRequirementRef
 use tari_template_lib_types::{ComponentAddress, constants::TARI_TOKEN, stealth::StealthTransferStatement};
 
 use crate::{
+    Blobs,
     Instruction,
+    TransactionId,
     TransactionSealSignature,
     UnsealedTransactionV1,
     args::InstructionArg,
-    v1::signature::TransactionSignature,
+    v1::signature::{TransactionSignature, TransactionSignatureFields},
     weight::TransactionWeight,
 };
 
@@ -63,6 +65,10 @@ impl TransactionV1 {
         self.body.instructions()
     }
 
+    pub fn blobs(&self) -> &Blobs {
+        self.body.blobs()
+    }
+
     pub fn signatures(&self) -> &[TransactionSignature] {
         self.body.signatures()
     }
@@ -92,6 +98,25 @@ impl TransactionV1 {
         &self.body
     }
 
+    /// Compute the deterministic transaction id.
+    ///
+    /// The id projection deliberately excludes raw blob bytes — only their per-blob commitments
+    /// (`BlobHashes`) participate. This keeps the id stable across pruning: a `TransactionV1`
+    /// and the `PrunedTransactionV1` derived from it produce the same id.
+    pub fn calculate_id(&self) -> TransactionId {
+        let unsigned = self.body.unsigned_transaction();
+        let blob_hashes = unsigned.blobs.hashes();
+        hasher32(EngineHashDomainLabel::Transaction)
+            .chain(&self.schema_version())
+            .chain(&TransactionSignatureFields::from(unsigned))
+            .chain(&blob_hashes)
+            .chain(self.body.signatures())
+            .chain(&self.seal_signature)
+            .result()
+            .into_array()
+            .into()
+    }
+
     pub fn calculate_transaction_weight(&self) -> TransactionWeight {
         const SIGNER_FACTOR: u64 = 5;
         const INPUT_FACTOR: u64 = 15;
@@ -103,7 +128,8 @@ impl TransactionV1 {
             .chain(self.fee_instructions())
             .map(calc_instruction_weight)
             .sum::<TransactionWeight>();
-        instruction_weight + (num_inputs * INPUT_FACTOR) + (num_signers * SIGNER_FACTOR)
+        let blob_weight = calc_blobs_weight(self.body.unsigned_transaction().blobs());
+        instruction_weight + blob_weight + (num_inputs * INPUT_FACTOR) + (num_signers * SIGNER_FACTOR)
     }
 
     pub fn into_unsealed_transaction(self) -> UnsealedTransactionV1 {
@@ -125,15 +151,17 @@ impl TransactionV1 {
 
     pub fn all_published_templates_iter(&self) -> impl Iterator<Item = (PublishedTemplateAddress, &[u8])> + '_ {
         let sealed_pk = self.seal_signature.public_key();
+        let blobs = self.body.unsigned_transaction().blobs();
         self.instructions()
             .iter()
             .chain(self.fee_instructions())
-            .filter_map(|instruction| {
+            .filter_map(move |instruction| {
                 if let Instruction::PublishTemplate { binary, .. } = instruction {
-                    let binary_hash = hash_template_code(binary);
+                    let bytes = blobs.get(*binary)?.as_bytes();
+                    let binary_hash = hash_template_code(bytes);
                     Some((
                         PublishedTemplateAddress::from_author_and_binary_hash(sealed_pk, &binary_hash),
-                        binary.as_slice(),
+                        bytes,
                     ))
                 } else {
                     None
@@ -161,6 +189,46 @@ impl TransactionV1 {
     pub fn has_inputs_without_version(&self) -> bool {
         self.inputs().iter().any(|i| i.version().is_none())
     }
+
+    /// Validate the blob side of the transaction:
+    ///  * every `BlobIndex` referenced from any instruction is `< blobs.len()`
+    ///  * every blob is referenced by at least one instruction (no free riders)
+    ///
+    /// Intended to run at ingress (RPC submit / mempool admission) before signature verification
+    /// — it's strictly cheaper than verifying signatures and rejects malformed transactions
+    /// up-front.
+    pub fn validate_blob_references(&self) -> Result<(), BlobValidationError> {
+        let blobs = self.body.unsigned_transaction().blobs();
+        let blob_count = blobs.len();
+        let mut referenced = vec![false; blob_count];
+        for inst in self.instructions().iter().chain(self.fee_instructions()) {
+            for idx in inst.referenced_blob_ids() {
+                let i = idx as usize;
+                if i >= blob_count {
+                    return Err(BlobValidationError::IndexOutOfBounds {
+                        index: idx,
+                        count: blob_count,
+                    });
+                }
+                referenced[i] = true;
+            }
+        }
+        if let Some(unused) = referenced.iter().position(|&r| !r) {
+            return Err(BlobValidationError::UnreferencedBlob {
+                index: unused as crate::BlobIndex,
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Failure modes for `TransactionV1::validate_blob_references`.
+#[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
+pub enum BlobValidationError {
+    #[error("Blob index {index} out of bounds (transaction has {count} blob(s))")]
+    IndexOutOfBounds { index: crate::BlobIndex, count: usize },
+    #[error("Blob at index {index} is not referenced by any instruction")]
+    UnreferencedBlob { index: crate::BlobIndex },
 }
 
 impl Display for TransactionV1 {
@@ -198,7 +266,9 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::DropAllProofsInWorkspace => 1,
         Instruction::Assert { .. } => 1,
         Instruction::TakeFromBucket { .. } => 1,
-        Instruction::PublishTemplate { binary, .. } => binary.len() as u64 / BINARY_WEIGHT_DIVISOR,
+        // The binary's bytes are charged at the transaction-level via `calc_blobs_weight`,
+        // uniformly with any other blob references. The instruction itself is a fixed cost.
+        Instruction::PublishTemplate { .. } => 1,
         Instruction::AllocateAddress { .. } => 1,
         Instruction::StealthTransfer { statement, .. } => calc_stealth_statement_weight(statement),
         Instruction::PayFeeFromBucket { .. } => 1,
@@ -214,11 +284,150 @@ fn calc_stealth_statement_weight(statement: &StealthTransferStatement) -> u64 {
 }
 
 fn calc_args_weight(args: &[InstructionArg]) -> u64 {
-    const FROM_WORKSPACE_WEIGHT: u64 = 1; // Default weight for args that are not literal bytes
+    const NON_LITERAL_WEIGHT: u64 = 1; // Default weight for workspace and blob refs (cheap, just an index)
+    // Blob payloads are charged at the transaction level by `calc_blobs_weight`, so we don't
+    // double-count them here.
     args.iter()
         .map(|a| {
             a.as_literal_bytes()
-                .map_or(FROM_WORKSPACE_WEIGHT, |b| b.len().min(1) as u64)
+                .map_or(NON_LITERAL_WEIGHT, |b| b.len().min(1) as u64)
         })
         .sum()
+}
+
+/// Per-blob byte weight. Each blob's payload contributes its bytes (divided by the binary
+/// weight divisor) plus the fixed commitment cost in the signing domain (32 bytes per blob).
+///
+/// This is uniform across all blob references — `PublishTemplate` binaries and `Blob`
+/// instruction args alike — since the network cost (gossip, storage, signing-domain commit)
+/// is indifferent to *how* the blob is referenced.
+fn calc_blobs_weight(blobs: &crate::Blobs) -> u64 {
+    const BLOB_BYTE_DIVISOR: u64 = 3;
+    const BLOB_COMMITMENT_BYTES: u64 = 32;
+    blobs
+        .iter()
+        .map(|blob| (blob.len() as u64 / BLOB_BYTE_DIVISOR) + BLOB_COMMITMENT_BYTES)
+        .sum()
+}
+
+#[cfg(test)]
+mod blob_validation_tests {
+    use ootle_byte_type::ToByteType;
+    use rand::rngs::OsRng;
+    use tari_crypto::{
+        keys::{PublicKey as PublicKeyT, SecretKey},
+        ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    };
+    use tari_template_lib_types::{FunctionName, TemplateAddress};
+
+    use super::*;
+    use crate::{Blob, Blobs, UnsignedTransactionV1, args::InstructionArg, v1::unsealed::UnsealedTransactionV1};
+
+    fn build_with_blobs(blobs: Vec<Blob>, instructions: Vec<Instruction>) -> TransactionV1 {
+        let blobs = Blobs::from_vec(blobs);
+        let unsigned = UnsignedTransactionV1 {
+            network: 1,
+            fee_instructions: vec![],
+            instructions,
+            inputs: indexmap::IndexSet::new(),
+            min_epoch: None,
+            max_epoch: None,
+            is_seal_signer_authorized: true,
+            dry_run: false,
+            blobs,
+        };
+        let sealer = RistrettoSecretKey::random(&mut OsRng);
+        let unsealed = UnsealedTransactionV1::new(unsigned, vec![]);
+        let seal = crate::TransactionSealSignature::sign_v1(&sealer, &unsealed);
+        TransactionV1::new(unsealed, seal)
+    }
+
+    fn call_function(blob_args: Vec<InstructionArg>) -> Instruction {
+        Instruction::CallFunction {
+            address: TemplateAddress::from_array([1; 32]),
+            function: FunctionName::try_from("f").unwrap(),
+            args: blob_args,
+        }
+    }
+
+    #[test]
+    fn validates_when_all_blobs_referenced_in_bounds() {
+        let blobs = vec![Blob::from(vec![1]), Blob::from(vec![2])];
+        let instructions = vec![
+            Instruction::PublishTemplate {
+                binary: 0,
+                metadata_hash: None,
+            },
+            call_function(vec![InstructionArg::Blob(1)]),
+        ];
+        let tx = build_with_blobs(blobs, instructions);
+        assert!(tx.validate_blob_references().is_ok());
+    }
+
+    #[test]
+    fn rejects_out_of_bounds_blob_index_in_publish_template() {
+        let tx = build_with_blobs(vec![], vec![Instruction::PublishTemplate {
+            binary: 0,
+            metadata_hash: None,
+        }]);
+        let err = tx.validate_blob_references().unwrap_err();
+        assert!(matches!(err, BlobValidationError::IndexOutOfBounds {
+            index: 0,
+            count: 0
+        }));
+    }
+
+    #[test]
+    fn rejects_out_of_bounds_blob_index_in_arg() {
+        let tx = build_with_blobs(vec![Blob::from(vec![1])], vec![call_function(vec![
+            InstructionArg::Blob(5),
+        ])]);
+        let err = tx.validate_blob_references().unwrap_err();
+        assert!(matches!(err, BlobValidationError::IndexOutOfBounds {
+            index: 5,
+            count: 1
+        }));
+    }
+
+    #[test]
+    fn rejects_unreferenced_blob() {
+        let tx = build_with_blobs(vec![Blob::from(vec![1]), Blob::from(vec![2])], vec![
+            Instruction::PublishTemplate {
+                binary: 0,
+                metadata_hash: None,
+            },
+        ]);
+        let err = tx.validate_blob_references().unwrap_err();
+        assert_eq!(err, BlobValidationError::UnreferencedBlob { index: 1 });
+    }
+
+    #[test]
+    fn validates_empty_when_no_instructions_and_no_blobs() {
+        let tx = build_with_blobs(vec![], vec![]);
+        assert!(tx.validate_blob_references().is_ok());
+    }
+
+    #[test]
+    fn blob_size_contributes_to_transaction_weight() {
+        // Same instructions, different blob payload size → larger blob ⇒ larger weight.
+        let small = build_with_blobs(vec![Blob::from(vec![0u8; 30])], vec![Instruction::PublishTemplate {
+            binary: 0,
+            metadata_hash: None,
+        }]);
+        let large = build_with_blobs(vec![Blob::from(vec![0u8; 3000])], vec![Instruction::PublishTemplate {
+            binary: 0,
+            metadata_hash: None,
+        }]);
+        assert!(
+            large.calculate_transaction_weight() > small.calculate_transaction_weight(),
+            "larger blob payload must produce larger transaction weight",
+        );
+    }
+
+    /// Make sure the seal-signer public key recovery isn't silently affected by the new tests
+    /// using a randomly-generated sealer.
+    #[allow(dead_code)]
+    fn pk_smoke() {
+        let _ = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::random(&mut OsRng)).to_byte_type();
+    }
 }

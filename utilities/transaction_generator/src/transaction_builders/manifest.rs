@@ -19,7 +19,7 @@ pub fn builder<P: AsRef<Path>>(
     templates: HashMap<String, TemplateAddress>,
 ) -> anyhow::Result<BoxedTransactionBuilder> {
     let contents = fs::read_to_string(manifest).unwrap();
-    let instructions = tari_transaction_manifest::parse_manifest(&contents, globals, templates)?;
+    let instructions = tari_transaction_manifest::parse_manifest(&contents, globals, templates, Default::default())?;
     Ok(Box::new(move |_| {
         Transaction::builder(network.as_byte())
             .with_fee_instructions(instructions.fee_instructions.clone())

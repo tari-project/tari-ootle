@@ -52,6 +52,7 @@ use tonic::{
 type WalletGrpcClient = WalletClient<InterceptedService<Channel, ClientAuthenticationInterceptor>>;
 use crate::{
     TariWorld,
+    cucumber_log,
     helpers::{get_os_assigned_ports, wait_listener_on_local_port_os_thread},
     logging::get_base_dir_for_scenario,
 };
@@ -78,9 +79,11 @@ impl WalletProcess {
             match endpoint.connect().await {
                 Ok(channel) => break channel,
                 Err(e) => {
-                    eprintln!(
+                    cucumber_log!(
                         "Attempt: {}/10 Could not connect to wallet GRPC address {}: {}",
-                        attempts, wallet_addr, e
+                        attempts,
+                        wallet_addr,
+                        e
                     );
                     if attempts > 10 {
                         panic!("Failed to connect to wallet GRPC address {}", wallet_addr);
@@ -135,7 +138,7 @@ pub async fn spawn_minotari_wallet(world: &mut TariWorld, wallet_name: String, b
                 peer_seeds: PeerSeedsConfig::default(),
             };
 
-            eprintln!("Using wallet temp_dir: {}", temp_dir.display());
+            cucumber_log!("Using wallet temp_dir: {}", temp_dir.display());
 
             wallet_config.wallet.set_base_path(temp_dir.clone());
             wallet_config.wallet.network = Network::LocalNet;
@@ -188,7 +191,7 @@ pub async fn spawn_minotari_wallet(world: &mut TariWorld, wallet_name: String, b
         shutdown,
     };
 
-    // eprintln!(
+    // cucumber_log!(
     //     "Wallet {} GRPC listening on port {}",
     //     wallet_name, wallet_process.grpc_port
     // );
@@ -201,13 +204,13 @@ pub async fn spawn_minotari_wallet(world: &mut TariWorld, wallet_name: String, b
         .unwrap()
         .into_inner();
 
-    // eprintln!("Wallet {} comms address: {}", wallet_name, identity.public_address);
+    // cucumber_log!("Wallet {} comms address: {}", wallet_name, identity.public_address);
 
     // TODO: Clean up
     // let mut status = wallet_client.get_network_status(Empty {}).await.unwrap().into_inner();
     // let mut counter = 0;
     // while status.status != ConnectivityStatus::Online as i32 {
-    //     eprintln!(
+    //     cucumber_log!(
     //         "Waiting for wallet to connect to base node {} on port {} (status: {:?})",
     //         base_node_name, base_node_port, status
     //     );

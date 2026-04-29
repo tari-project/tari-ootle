@@ -115,7 +115,7 @@ impl SubstateChange {
         match self {
             SubstateChange::Up { id, substate, .. } => SubstateTreeChange::Up {
                 id: VersionedSubstateId::new(id.clone(), substate.version()),
-                value_hash: substate.to_value_hash(epoch.as_u64()),
+                value_hash: substate.to_value_hash(epoch),
             },
             SubstateChange::Down { id, .. } => SubstateTreeChange::Down { id: id.clone() },
         }

@@ -6,7 +6,7 @@ use std::ops::Deref;
 use serde::Serialize;
 use tari_bor::cbor;
 use tari_engine_types::{
-    component::{ComponentBody, ComponentHeader},
+    component::{Component, ComponentBody, ComponentHeader},
     resource::Resource,
     resource_container::ResourceContainer,
     substate::{SubstateId, SubstateValue},
@@ -101,12 +101,13 @@ where
 
     create_substate(tx, num_preshards, XTR_FAUCET_VAULT_ADDRESS, value)?;
 
-    let value = ComponentHeader {
-        template_address: tari_template_builtin::XTR_FAUCET_TEMPLATE_ADDRESS,
-        module_name: "XtrFaucet".to_string(),
-        owner_rule: SubstateOwnerRule::None,
-        access_rules: ComponentAccessRules::allow_all(),
-        entity_id: EntityId::default(),
+    let value = Component {
+        header: ComponentHeader {
+            template_address: tari_template_builtin::XTR_FAUCET_TEMPLATE_ADDRESS,
+            owner_rule: SubstateOwnerRule::None,
+            access_rules: ComponentAccessRules::allow_all(),
+            entity_id: EntityId::default(),
+        },
         body: ComponentBody::from_cbor_value(
             cbor!({
                 "vault" => XTR_FAUCET_VAULT_ADDRESS,
@@ -141,12 +142,13 @@ where
     TTx::Target: StateStoreReadTransaction,
     TTx::Addr: NodeAddressable + Serialize,
 {
-    let value = ComponentHeader {
-        template_address: tari_template_builtin::NFT_FAUCET_TEMPLATE_ADDRESS,
-        module_name: "NftFaucet".to_string(),
-        owner_rule: SubstateOwnerRule::None,
-        access_rules: ComponentAccessRules::allow_all(),
-        entity_id: EntityId::default(),
+    let value = Component {
+        header: ComponentHeader {
+            template_address: tari_template_builtin::NFT_FAUCET_TEMPLATE_ADDRESS,
+            owner_rule: SubstateOwnerRule::None,
+            access_rules: ComponentAccessRules::allow_all(),
+            entity_id: EntityId::default(),
+        },
         body: ComponentBody {
             state: cbor!({"serial_number" => 0u64}).unwrap(),
         },

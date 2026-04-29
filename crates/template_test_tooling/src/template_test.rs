@@ -879,6 +879,7 @@ impl TemplateTest {
             &manifest,
             variables.into_iter().map(|(a, b)| (a.to_string(), b)).collect(),
             Default::default(),
+            Default::default(),
         )?;
         self.execute_and_commit(instructions.instructions, proofs)
     }

@@ -82,7 +82,10 @@ where
             }));
         }
 
-        let resp = self.network_interface.submit_transaction(transaction.transaction).await;
+        // Re-submission needs the full transaction (blob payloads); the WalletTransaction
+        // returned above is the pruned API view.
+        let full = self.store.with_read_tx(|tx| tx.transactions_get_full(transaction_id))?;
+        let resp = self.network_interface.submit_transaction(full).await;
 
         match resp {
             Ok(_) => {
@@ -365,8 +368,9 @@ where
             tx.substates_upsert_root(
                 VersionedSubstateIdRef::new(component_addr, substate.version()),
                 indexed.referenced_substates().collect(),
-                Some(component.module_name.clone()),
-                Some(component.template_address),
+                // TODO: we can clean out module name, this is never populated
+                None,
+                Some(*component.template_address()),
             )?;
 
             for owned_id in indexed.referenced_substates() {

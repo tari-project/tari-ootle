@@ -95,15 +95,15 @@ export default function AddressBookPage() {
         const currentNote = editingEntry.note ?? "";
         await updateMutation.mutateAsync({
           name: editingEntry.name,
-          new_name: trimmedName !== editingEntry.name ? trimmedName : undefined,
-          address: trimmedAddress !== editingEntry.address ? trimmedAddress : undefined,
-          note: trimmedNote !== currentNote ? trimmedNote : undefined,
+          new_name: trimmedName !== editingEntry.name ? trimmedName : null,
+          address: trimmedAddress !== editingEntry.address ? trimmedAddress : null,
+          note: trimmedNote !== currentNote ? trimmedNote : null,
         });
       } else {
         await addMutation.mutateAsync({
           name: form.name.trim(),
           address: form.address.trim(),
-          note: form.note.trim() || undefined,
+          note: form.note.trim() || null,
         });
       }
       setDialogOpen(false);
@@ -214,11 +214,7 @@ export default function AddressBookPage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
-          <Button
-            onClick={handleSave}
-            variant="contained"
-            disabled={addMutation.isPending || updateMutation.isPending}
-          >
+          <Button onClick={handleSave} variant="contained" disabled={addMutation.isPending || updateMutation.isPending}>
             {editingEntry ? "Update" : "Add"}
           </Button>
         </DialogActions>
@@ -228,9 +224,7 @@ export default function AddressBookPage() {
       <Dialog open={deleteConfirm !== null} onClose={() => setDeleteConfirm(null)}>
         <DialogTitle>Delete Entry</DialogTitle>
         <DialogContent>
-          <Typography>
-            Are you sure you want to delete &quot;{deleteConfirm}&quot; from your address book?
-          </Typography>
+          <Typography>Are you sure you want to delete &quot;{deleteConfirm}&quot; from your address book?</Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteConfirm(null)}>Cancel</Button>

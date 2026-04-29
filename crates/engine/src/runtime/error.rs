@@ -387,6 +387,8 @@ pub enum ArgumentValidationError {
     MaxStealthInputsExceeded { max_inputs: usize, actual_inputs: usize },
     #[error("Too many arguments provided. Got {got}, max is {max}")]
     TooManyArguments { got: usize, max: usize },
+    #[error("Blob index {index} out of bounds (transaction has {count} blob(s))")]
+    BlobIndexOutOfBounds { index: u8, count: usize },
 }
 
 #[derive(Debug, thiserror::Error)]

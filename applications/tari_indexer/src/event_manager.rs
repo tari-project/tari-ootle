@@ -50,9 +50,21 @@ impl EventManager {
         offset: u32,
         limit: u32,
     ) -> Result<Vec<(TransactionId, Event)>, anyhow::Error> {
+        let topic = topic.map(str::to_owned);
+        let substate_id = substate_id.cloned();
+        let resource_address = resource_address.copied();
         let events = self
             .substate_store
-            .with_read_tx(|tx| tx.get_events(substate_id, topic, resource_address, offset, limit))?;
+            .with_read_tx(move |tx| {
+                tx.get_events(
+                    substate_id.as_ref(),
+                    topic.as_deref(),
+                    resource_address.as_ref(),
+                    offset,
+                    limit,
+                )
+            })
+            .await?;
 
         debug!(target: LOG_TARGET, "Found {} events", events.len());
         Ok(events)

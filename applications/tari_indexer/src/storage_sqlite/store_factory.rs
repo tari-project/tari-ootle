@@ -3,32 +3,28 @@
 
 use std::{fmt::Debug, fs::create_dir_all, path::PathBuf, time::Duration};
 
-use diesel::{
-    Connection,
-    RunQueryDsl,
-    SqliteConnection,
-    r2d2::{ConnectionManager, CustomizeConnection, Error as R2D2Error, Pool, PooledConnection},
-    sql_query,
+use async_trait::async_trait;
+use deadpool_diesel::{
+    Runtime,
+    sqlite::{Hook, HookError, Manager, Pool},
 };
+use diesel::{Connection, RunQueryDsl, SqliteConnection, sql_query};
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
 use tari_ootle_storage::StorageError;
 use tari_ootle_storage_sqlite::{SqliteTransaction, error::SqliteStorageError};
 
 use crate::{
     storage_sqlite::{reader::SqliteStoreReadTransaction, writer::SqliteStoreWriteTransaction},
-    store::{IndexerStore, IndexerStoreReader},
+    store::{IndexerStore, IndexerStoreReader, IndexerStoreWriteTransaction},
 };
 
 const LOG_TARGET: &str = "tari::indexer::storage_sqlite";
-const POOL_MAX_SIZE: u32 = 16;
+const POOL_MAX_SIZE: usize = 16;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
-
-type SqlitePool = Pool<ConnectionManager<SqliteConnection>>;
-pub(super) type SqlitePooledConnection = PooledConnection<ConnectionManager<SqliteConnection>>;
 
 #[derive(Clone)]
 pub struct SqliteIndexerStore {
-    pool: SqlitePool,
+    pool: Pool,
 }
 
 impl SqliteIndexerStore {
@@ -50,11 +46,19 @@ impl SqliteIndexerStore {
         }
         drop(migration_conn);
 
-        let manager = ConnectionManager::<SqliteConnection>::new(database_url);
-        let pool = Pool::builder()
+        let manager = Manager::new(database_url, Runtime::Tokio1);
+        let pool = Pool::builder(manager)
             .max_size(POOL_MAX_SIZE)
-            .connection_customizer(Box::new(SqliteCustomizer))
-            .build(manager)
+            .post_create(Hook::async_fn(|conn, _metrics| {
+                Box::pin(async move {
+                    conn.interact(apply_pragmas)
+                        .await
+                        .map_err(|e| HookError::message(format!("post_create panicked: {e}")))?
+                        .map_err(|e| HookError::message(format!("apply_pragmas failed: {e}")))?;
+                    Ok(())
+                })
+            }))
+            .build()
             .map_err(|e| StorageError::General {
                 details: format!("Failed to build sqlite connection pool: {}", e),
             })?;
@@ -62,8 +66,8 @@ impl SqliteIndexerStore {
         Ok(Self { pool })
     }
 
-    fn get_connection(&self) -> Result<SqlitePooledConnection, StorageError> {
-        self.pool.get().map_err(|e| StorageError::General {
+    async fn acquire(&self) -> Result<deadpool_diesel::sqlite::Connection, StorageError> {
+        self.pool.get().await.map_err(|e| StorageError::General {
             details: format!("Failed to acquire sqlite connection from pool: {}", e),
         })
     }
@@ -75,30 +79,68 @@ impl Debug for SqliteIndexerStore {
     }
 }
 
+#[async_trait]
 impl IndexerStoreReader for SqliteIndexerStore {
-    type ReadTransaction<'a> = SqliteStoreReadTransaction;
+    type ReadTransaction<'a> = SqliteStoreReadTransaction<'a>;
 
-    fn create_read_tx(&self) -> Result<Self::ReadTransaction<'_>, StorageError> {
-        let tx = SqliteTransaction::begin(self.get_connection()?)?;
-        Ok(SqliteStoreReadTransaction::new(tx))
+    async fn with_read_tx<F, R, E>(&self, f: F) -> Result<R, E>
+    where
+        F: for<'a> FnOnce(&mut Self::ReadTransaction<'a>) -> Result<R, E> + Send + 'static,
+        R: Send + 'static,
+        E: From<StorageError> + Send + 'static,
+    {
+        let conn = self.acquire().await?;
+        let result: Result<R, E> = conn
+            .interact(move |c| -> Result<R, E> {
+                let inner = SqliteTransaction::begin(c)
+                    .map_err(StorageError::from)
+                    .map_err(E::from)?;
+                let mut tx = SqliteStoreReadTransaction::new(inner);
+                f(&mut tx)
+            })
+            .await
+            .map_err(|e| StorageError::General {
+                details: format!("Pool interact panicked: {}", e),
+            })?;
+        result
     }
 }
 
+#[async_trait]
 impl IndexerStore for SqliteIndexerStore {
-    type WriteTransaction<'a> = SqliteStoreWriteTransaction;
+    type WriteTransaction<'a> = SqliteStoreWriteTransaction<'a>;
 
-    fn create_write_tx(&self) -> Result<Self::WriteTransaction<'_>, StorageError> {
-        let tx = SqliteTransaction::begin_immediate(self.get_connection()?)?;
-        Ok(SqliteStoreWriteTransaction::new(tx))
-    }
-}
-
-#[derive(Debug)]
-struct SqliteCustomizer;
-
-impl CustomizeConnection<SqliteConnection, R2D2Error> for SqliteCustomizer {
-    fn on_acquire(&self, conn: &mut SqliteConnection) -> Result<(), R2D2Error> {
-        apply_pragmas(conn).map_err(R2D2Error::QueryError)
+    async fn with_write_tx<F, R, E>(&self, f: F) -> Result<R, E>
+    where
+        F: for<'a> FnOnce(&mut Self::WriteTransaction<'a>) -> Result<R, E> + Send + 'static,
+        R: Send + 'static,
+        E: From<StorageError> + Send + 'static,
+    {
+        let conn = self.acquire().await?;
+        let result: Result<R, E> = conn
+            .interact(move |c| -> Result<R, E> {
+                let inner = SqliteTransaction::begin_immediate(c)
+                    .map_err(StorageError::from)
+                    .map_err(E::from)?;
+                let mut tx = SqliteStoreWriteTransaction::new(inner);
+                match f(&mut tx) {
+                    Ok(r) => {
+                        tx.commit().map_err(E::from)?;
+                        Ok(r)
+                    },
+                    Err(e) => {
+                        if let Err(err) = tx.rollback() {
+                            log::error!(target: LOG_TARGET, "Failed to rollback transaction: {}", err);
+                        }
+                        Err(e)
+                    },
+                }
+            })
+            .await
+            .map_err(|e| StorageError::General {
+                details: format!("Pool interact panicked: {}", e),
+            })?;
+        result
     }
 }
 

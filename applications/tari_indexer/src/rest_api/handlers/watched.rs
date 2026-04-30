@@ -36,6 +36,7 @@ pub async fn list_watched_substates(
     let entries = context
         .read_only_store()
         .list_watched_substates(req.template_address.as_ref(), limit, offset)
+        .await
         .map_err(ErrorResponse::anyhow)?;
 
     let substates = entries
@@ -61,20 +62,18 @@ pub async fn list_watched_templates(
     Extension(context): Extension<HandlerContext>,
 ) -> HandlerResult<Json<ListWatchedTemplatesResponse>> {
     let store = context.read_only_store();
-    let templates = context
-        .watched_templates()
-        .iter()
-        .map(|addr| {
-            let template_name = store
-                .get_template_catalogue_entry(addr)
-                .ok()
-                .flatten()
-                .map(|e| e.template_name);
-            WatchedTemplateItem {
-                template_address: *addr,
-                template_name,
-            }
-        })
-        .collect();
+    let mut templates = Vec::new();
+    for addr in context.watched_templates().iter() {
+        let template_name = store
+            .get_template_catalogue_entry(addr)
+            .await
+            .ok()
+            .flatten()
+            .map(|e| e.template_name);
+        templates.push(WatchedTemplateItem {
+            template_address: *addr,
+            template_name,
+        });
+    }
     Ok(Json(ListWatchedTemplatesResponse { templates }))
 }

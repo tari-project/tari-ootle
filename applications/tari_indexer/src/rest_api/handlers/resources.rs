@@ -62,6 +62,7 @@ pub async fn get_resource(
         let amount = context
             .read_only_store()
             .get_xtr_total_supply()
+            .await
             .map_err(ErrorResponse::anyhow)?;
         Some(amount)
     } else {

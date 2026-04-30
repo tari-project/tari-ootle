@@ -44,6 +44,7 @@ pub async fn list_transaction_receipts(
     let receipts = context
         .read_only_store()
         .list_transaction_receipts(req.last_id, u64::from(limit), ordering)
+        .await
         .map_err(ErrorResponse::anyhow)?;
 
     Ok(context.apply_cache_control(Json(ListTransactionReceiptsResponse { receipts }), 10))
@@ -66,6 +67,7 @@ pub async fn get_transaction_receipt(
     let receipt = context
         .read_only_store()
         .get_transaction_receipt(&receipt_addr)
+        .await
         .optional()
         .map_err(ErrorResponse::anyhow)?
         .ok_or_else(|| ErrorResponse::not_found(format!("Transaction receipt {receipt_addr} not found")))?;

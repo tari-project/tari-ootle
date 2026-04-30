@@ -39,20 +39,19 @@ use crate::{
         },
         reader::SqliteStoreReadTransaction,
         serialization::{serialize_bincode, serialize_hex, serialize_json},
-        store_factory::SqlitePooledConnection,
     },
     store::{IndexerStoreWriteTransaction, InsertedEvent},
 };
 
 const LOG_TARGET: &str = "tari::indexer::storage_sqlite::writer";
 
-pub struct SqliteStoreWriteTransaction {
+pub struct SqliteStoreWriteTransaction<'a> {
     /// None indicates if the transaction has been explicitly committed/rolled back
-    transaction: Option<SqliteStoreReadTransaction>,
+    transaction: Option<SqliteStoreReadTransaction<'a>>,
 }
 
-impl SqliteStoreWriteTransaction {
-    pub fn new(transaction: SqliteTransaction<SqlitePooledConnection>) -> Self {
+impl<'a> SqliteStoreWriteTransaction<'a> {
+    pub fn new(transaction: SqliteTransaction<&'a mut SqliteConnection>) -> Self {
         Self {
             transaction: Some(SqliteStoreReadTransaction::new(transaction)),
         }
@@ -62,7 +61,7 @@ impl SqliteStoreWriteTransaction {
         self.transaction.as_mut().unwrap().connection()
     }
 }
-impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction {
+impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
     fn commit(mut self) -> Result<(), StorageError> {
         self.transaction.take().unwrap().transaction.commit()?;
         Ok(())
@@ -404,21 +403,21 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction {
     }
 }
 
-impl Deref for SqliteStoreWriteTransaction {
-    type Target = SqliteStoreReadTransaction;
+impl<'a> Deref for SqliteStoreWriteTransaction<'a> {
+    type Target = SqliteStoreReadTransaction<'a>;
 
     fn deref(&self) -> &Self::Target {
         self.transaction.as_ref().unwrap()
     }
 }
 
-impl DerefMut for SqliteStoreWriteTransaction {
+impl DerefMut for SqliteStoreWriteTransaction<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.transaction.as_mut().unwrap()
     }
 }
 
-impl Drop for SqliteStoreWriteTransaction {
+impl Drop for SqliteStoreWriteTransaction<'_> {
     fn drop(&mut self) {
         if self.transaction.is_some() {
             warn!(

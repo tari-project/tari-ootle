@@ -52,7 +52,7 @@ pub fn handle<T, R, F, const N: usize>(state_mut: &mut State, mut command: Comma
 where
     T: BorshDeserialize,
     R: BorshSerialize,
-    F: FnOnce(T) -> Result<R, AppStatus>,
+    F: FnOnce(&mut State, T) -> Result<R, AppStatus>,
 {
     match handle_inner(state_mut, &mut command, handler) {
         Ok(data) => {
@@ -92,7 +92,7 @@ pub fn handle_apdu_request<const N: usize>(state_mut: &mut State, command: Comma
             Instruction::GetVersion => handle(state_mut, command, handlers::get_version),
             Instruction::GetAppName => handle(state_mut, command, handlers::get_app_name),
             Instruction::GetPublicKey => handle(state_mut, command, handlers::get_public_key),
-            Instruction::SignTransaction => handle(state_mut, comm, handlers::sign_transaction),
+            Instruction::SignTransaction => handle(state_mut, command, handlers::sign_transaction),
         },
         Err(e) => {
             command.into_response().send(e).unwrap();

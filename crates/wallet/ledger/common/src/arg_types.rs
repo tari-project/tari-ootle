@@ -44,6 +44,7 @@ pub struct GetPublicKeyResponse {
 }
 
 /// P1 parameter values for APDU commands with large payloads.
+#[repr(u8)]
 pub enum PayloadChunk {
     /// First chunk (header)
     First = 0x00,

@@ -47,7 +47,7 @@ import { renderJson } from "../../utils/helpers";
 import { convertCborValue } from "../../utils/cbor";
 import CopyToClipboard from "../../Components/CopyToClipboard";
 import { useGetSubstate } from "../../api/hooks/useSubstates";
-import type { SubstateValue } from "@tari-project/ootle-ts-bindings";
+import type { Component, SubstateValue } from "@tari-project/ootle-ts-bindings";
 import SearchIcon from "@mui/icons-material/Search";
 import ClearIcon from "@mui/icons-material/Clear";
 
@@ -95,7 +95,7 @@ function SubstateDetails({ substate, version }: { substate: SubstateValue; versi
 function renderSubstateByType(type: string, data: unknown): React.ReactNode {
   switch (type) {
     case "Component":
-      return <ComponentView data={data as any} />;
+      return <ComponentView data={data as Component} />;
     case "Resource":
       return <ResourceView data={data as any} />;
     case "Vault":
@@ -136,18 +136,17 @@ function FieldTable({ fields }: { fields: Array<{ label: string; value: React.Re
   );
 }
 
-function ComponentView({ data }: { data: any }) {
+function ComponentView({ data }: { data: Component }) {
   const decodedState = data.body?.state ? convertCborValue(data.body.state) : data.body;
 
   return (
     <Stack spacing={2}>
       <FieldTable
         fields={[
-          { label: "Template Address", value: data.template_address },
-          { label: "Module", value: data.module_name },
-          { label: "Entity ID", value: String(data.entity_id) },
-          { label: "Owner Rule", value: <CodeBlock>{renderJson(data.owner_rule)}</CodeBlock> },
-          { label: "Access Rules", value: <CodeBlock>{renderJson(data.access_rules)}</CodeBlock> },
+          { label: "Template Address", value: data.header.template_address },
+          { label: "Entity ID", value: String(data.header.entity_id) },
+          { label: "Owner Rule", value: <CodeBlock>{renderJson(data.header.owner_rule)}</CodeBlock> },
+          { label: "Access Rules", value: <CodeBlock>{renderJson(data.header.access_rules)}</CodeBlock> },
         ]}
       />
       <Typography variant="subtitle2">State</Typography>

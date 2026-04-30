@@ -142,6 +142,7 @@ pub async fn list_template_catalogue(
     let entries = context
         .read_only_store()
         .list_template_catalogue(req.name_filter.as_deref(), req.after.as_ref(), limit)
+        .await
         .map_err(ErrorResponse::anyhow)?
         .into_iter()
         .map(TemplateCatalogueItem::from)
@@ -167,6 +168,8 @@ pub async fn get_template_catalogue_entry(
     let entry = context
         .read_only_store()
         .get_template_catalogue_entry(&template_address)
+        .await
+        .optional()
         .map_err(ErrorResponse::anyhow)?
         .ok_or_else(|| ErrorResponse::not_found(format!("Template {} not found in the catalogue", template_address)))?;
 

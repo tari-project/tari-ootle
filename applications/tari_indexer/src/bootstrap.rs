@@ -169,13 +169,13 @@ pub async fn spawn_services(
 
     // Connect to substate db
     let store = SqliteIndexerStore::try_create(config.state_db_path())?;
-    check_store(config, &store)?;
+    check_store(config, &store).await?;
 
-    seed_builtin_template_catalogue(&store)?;
+    seed_builtin_template_catalogue(&store).await?;
 
     if config.network.is_testnet() {
         // TODO: We happen to know that the testnet faucet mints u64::MAX tXTR. This is hacky.
-        hack_xtr_initial_supply(&store)?;
+        hack_xtr_initial_supply(&store).await?;
     }
 
     // Epoch event oracle
@@ -403,56 +403,63 @@ async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHea
     Ok(HybridEpochOracle::new(configured_oracle, base_layer_oracle, trigger))
 }
 
-fn check_store<TStore: IndexerStore>(config: &ApplicationConfig, store: &TStore) -> anyhow::Result<()> {
-    store.with_write_tx(|tx| {
-        match tx.key_value_get_value::<_, Network>(Key::Network).optional()? {
-            Some(network) => {
-                if network != config.network {
-                    return Err(anyhow!(
-                        "The network in the database ({}) does not match the configured network ({})",
-                        network,
-                        config.network
-                    ));
-                }
-                Ok(())
-            },
-            None => {
-                // If the network is not set, we can assume this is a new store and we can set it
-                tx.key_value_set(Key::Network, config.network)
-                    .map_err(|e| anyhow!("Failed to set network in the store: {}", e))
-            },
-        }
-    })
+async fn check_store<TStore: IndexerStore>(config: &ApplicationConfig, store: &TStore) -> anyhow::Result<()> {
+    let configured_network = config.network;
+    store
+        .with_write_tx(move |tx| {
+            match tx.key_value_get_value::<_, Network>(Key::Network).optional()? {
+                Some(network) => {
+                    if network != configured_network {
+                        return Err(anyhow!(
+                            "The network in the database ({}) does not match the configured network ({})",
+                            network,
+                            configured_network
+                        ));
+                    }
+                    Ok(())
+                },
+                None => {
+                    // If the network is not set, we can assume this is a new store and we can set it
+                    tx.key_value_set(Key::Network, configured_network)
+                        .map_err(|e| anyhow!("Failed to set network in the store: {}", e))
+                },
+            }
+        })
+        .await
 }
 
-fn seed_builtin_template_catalogue<TStore: IndexerStore>(store: &TStore) -> anyhow::Result<()> {
-    store.with_write_tx(|tx| {
-        for (address, code) in all_builtin_templates() {
-            let loaded = WasmModule::load_template_from_code(code)
-                .map_err(|e| anyhow!("Failed to load built-in template: {e}"))?;
-            let binary_hash = calculate_template_binary_hash(code);
-            let metadata = PublishedTemplateMetadata {
-                template_name: loaded.template_name().to_string(),
-                author_public_key: RistrettoPublicKeyBytes::default(),
-                binary_hash,
-                at_epoch: 0,
-                metadata_hash: None,
-            };
-            tx.upsert_template_catalogue(address, &metadata)?;
-        }
-        Ok(())
-    })
+async fn seed_builtin_template_catalogue<TStore: IndexerStore>(store: &TStore) -> anyhow::Result<()> {
+    store
+        .with_write_tx(|tx| {
+            for (address, code) in all_builtin_templates() {
+                let loaded = WasmModule::load_template_from_code(code)
+                    .map_err(|e| anyhow!("Failed to load built-in template: {e}"))?;
+                let binary_hash = calculate_template_binary_hash(code);
+                let metadata = PublishedTemplateMetadata {
+                    template_name: loaded.template_name().to_string(),
+                    author_public_key: RistrettoPublicKeyBytes::default(),
+                    binary_hash,
+                    at_epoch: 0,
+                    metadata_hash: None,
+                };
+                tx.upsert_template_catalogue(address, &metadata)?;
+            }
+            Ok(())
+        })
+        .await
 }
 
-fn hack_xtr_initial_supply<TStore: IndexerStore>(store: &TStore) -> anyhow::Result<()> {
-    store.with_write_tx(|tx| {
-        // Check if the initial supply is already set
-        let existing_supply: Option<Amount> = tx.key_value_get_value(Key::XtrAccumulatedClaimed).optional()?;
-        if existing_supply.is_some() {
-            return Ok(());
-        }
+async fn hack_xtr_initial_supply<TStore: IndexerStore>(store: &TStore) -> anyhow::Result<()> {
+    store
+        .with_write_tx(|tx| {
+            // Check if the initial supply is already set
+            let existing_supply: Option<Amount> = tx.key_value_get_value(Key::XtrAccumulatedClaimed).optional()?;
+            if existing_supply.is_some() {
+                return Ok(());
+            }
 
-        tx.key_value_set(Key::XtrAccumulatedClaimed, TXTR_FAUCET_INITIAL_SUPPLY)
-            .map_err(|e| anyhow!("Failed to set XTR initial supply in the store: {}", e))
-    })
+            tx.key_value_set(Key::XtrAccumulatedClaimed, TXTR_FAUCET_INITIAL_SUPPLY)
+                .map_err(|e| anyhow!("Failed to set XTR initial supply in the store: {}", e))
+        })
+        .await
 }

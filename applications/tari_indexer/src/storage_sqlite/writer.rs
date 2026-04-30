@@ -51,7 +51,7 @@ pub struct SqliteStoreWriteTransaction<'a> {
 }
 
 impl<'a> SqliteStoreWriteTransaction<'a> {
-    pub fn new(transaction: SqliteTransaction<'a>) -> Self {
+    pub fn new(transaction: SqliteTransaction<&'a mut SqliteConnection>) -> Self {
         Self {
             transaction: Some(SqliteStoreReadTransaction::new(transaction)),
         }

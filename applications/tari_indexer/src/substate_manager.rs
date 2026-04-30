@@ -104,7 +104,7 @@ impl SubstateManager {
         }
     }
 
-    pub fn get_stored_substates_by_filters(
+    pub async fn get_stored_substates_by_filters(
         &self,
         by_id: Option<&SubstateId>,
         filter_by_type: Option<SubstateType>,
@@ -112,13 +112,17 @@ impl SubstateManager {
         limit: Option<u64>,
         offset: Option<u64>,
     ) -> Result<Vec<ListSubstateItem>, SubstateManagerError> {
+        let by_id = by_id.cloned();
         let substates = self
             .substate_store
-            .with_read_tx(|tx| tx.list_substates(by_id, filter_by_type, filter_by_template, limit, offset))?;
+            .with_read_tx(move |tx| {
+                tx.list_substates(by_id.as_ref(), filter_by_type, filter_by_template, limit, offset)
+            })
+            .await?;
         Ok(substates)
     }
 
-    pub fn get_utxo_updates(
+    pub async fn get_utxo_updates(
         &self,
         resource_address: ResourceAddress,
         from_epoch: Epoch,
@@ -127,50 +131,62 @@ impl SubstateManager {
         unspent_only: bool,
         limit: u32,
     ) -> Result<UtxoStateUpdateSet, SubstateManagerError> {
-        let updates = self.substate_store.with_read_tx(|tx| {
-            tx.utxos_get_updates(
-                resource_address,
-                from_epoch,
-                shard,
-                from_state_version,
-                unspent_only,
-                limit,
-            )
-        })?;
+        let updates = self
+            .substate_store
+            .with_read_tx(move |tx| {
+                tx.utxos_get_updates(
+                    resource_address,
+                    from_epoch,
+                    shard,
+                    from_state_version,
+                    unspent_only,
+                    limit,
+                )
+            })
+            .await?;
         Ok(updates)
     }
 
-    pub fn get_max_state_version(
+    pub async fn get_max_state_version(
         &self,
         resource_address: &ResourceAddress,
         shard: Shard,
     ) -> Result<StateVersion, SubstateManagerError> {
+        let resource_address = *resource_address;
         let max_version = self
             .substate_store
-            .with_read_tx(|tx| tx.utxos_get_max_state_version(*resource_address, shard))?;
+            .with_read_tx(move |tx| tx.utxos_get_max_state_version(resource_address, shard))
+            .await?;
         Ok(max_version)
     }
 
-    pub fn get_unspent_utxos(
+    pub async fn get_unspent_utxos(
         &self,
         resource_address: &ResourceAddress,
         public_nonce_and_tag: &[(UtxoTag, RistrettoPublicKeyBytes)],
     ) -> Result<Vec<(UtxoId, Utxo)>, SubstateManagerError> {
+        let resource_address = *resource_address;
+        let public_nonce_and_tag = public_nonce_and_tag.to_vec();
         let utxos = self
             .substate_store
-            .with_read_tx(|tx| tx.utxos_get_unspent_by_public_nonce_and_tag(resource_address, public_nonce_and_tag))?;
+            .with_read_tx(move |tx| {
+                tx.utxos_get_unspent_by_public_nonce_and_tag(&resource_address, &public_nonce_and_tag)
+            })
+            .await?;
         Ok(utxos)
     }
 
-    pub fn list_utxos(
+    pub async fn list_utxos(
         &self,
         resource_address: &ResourceAddress,
         from_id: Option<UtxoId>,
         limit: u32,
     ) -> Result<Vec<(UtxoId, Utxo)>, SubstateManagerError> {
+        let resource_address = *resource_address;
         let utxos = self
             .substate_store
-            .with_read_tx(|tx| tx.utxos_list(resource_address, from_id, limit))?;
+            .with_read_tx(move |tx| tx.utxos_list(&resource_address, from_id, limit))
+            .await?;
         Ok(utxos)
     }
 
@@ -202,7 +218,7 @@ impl SubstateManager {
 
         for req in &substate_req {
             if let Some(version) = req.version() &&
-                let Some(substate) = self.get_substate_from_db(req.substate_id(), Some(version))?
+                let Some(substate) = self.get_substate_from_db(req.substate_id(), Some(version)).await?
             {
                 found_in_cache.insert(*req);
                 results.insert(
@@ -248,7 +264,11 @@ impl SubstateManager {
     ) -> Result<HashMap<SubstateId, Substate>, SubstateManagerError> {
         let mut substate_set = substates.iter().collect::<HashSet<_>>();
 
-        let mut substates = self.substate_store.with_read_tx(|tx| tx.get_substates(substates))?;
+        let substates_arg = substates.to_vec();
+        let mut substates = self
+            .substate_store
+            .with_read_tx(move |tx| tx.get_substates(&substates_arg))
+            .await?;
 
         for k in substates.keys() {
             substate_set.remove(k);
@@ -279,30 +299,32 @@ impl SubstateManager {
         Ok(result)
     }
 
-    fn get_substate_from_db(
+    async fn get_substate_from_db(
         &self,
         substate_address: &SubstateId,
         version: Option<u32>,
     ) -> Result<Option<SubstateResponse>, SubstateManagerError> {
-        let mut tx = self.substate_store.create_read_tx()?;
-        if let Some(row) = tx.get_substate(substate_address, version)? {
-            // the substate is present in db and the version matches the requested version
-            let substate_resp = row.try_into()?;
-            return Ok(Some(substate_resp));
-        };
-
-        // the substate is not present in db
-        Ok(None)
+        let substate_address = substate_address.clone();
+        let row = self
+            .substate_store
+            .with_read_tx(move |tx| tx.get_substate(&substate_address, version))
+            .await?;
+        match row {
+            Some(row) => Ok(Some(row.try_into()?)),
+            None => Ok(None),
+        }
     }
 
-    pub fn get_non_fungibles_by_resource_address(
+    pub async fn get_non_fungibles_by_resource_address(
         &self,
         address: ResourceAddress,
         limit: usize,
         offset: usize,
     ) -> Result<Vec<NonFungibleSubstate>, SubstateManagerError> {
-        let mut tx = self.substate_store.create_read_tx()?;
-        let nfts = tx.get_non_fungibles_by_resource_address(address, limit, offset)?;
+        let nfts = self
+            .substate_store
+            .with_read_tx(move |tx| tx.get_non_fungibles_by_resource_address(address, limit, offset))
+            .await?;
         Ok(nfts)
     }
 }

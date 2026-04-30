@@ -43,14 +43,17 @@ tari_validator_node_rpc = { workspace = true }
 ootle_byte_type = { workspace = true, features = ["crypto"] }
 
 anyhow = { workspace = true }
+async-trait = { workspace = true }
 axum = { workspace = true, features = ["query", "matched-path"] }
 dashmap = { workspace = true }
 async-graphql = { workspace = true }
 async-graphql-axum = { workspace = true }
+async-stream = { workspace = true }
 bytes = { workspace = true }
 bincode = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive", "env"] }
 config = { workspace = true }
+deadpool-diesel = { workspace = true, default-features = false, features = ["sqlite", "rt_tokio_1"] }
 diesel = { workspace = true, default-features = false, features = [
     "sqlite",
     "returning_clauses_for_sqlite_3_35",

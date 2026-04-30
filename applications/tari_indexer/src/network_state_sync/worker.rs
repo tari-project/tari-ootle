@@ -1,7 +1,10 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, pin::pin};
+use std::{
+    collections::{HashMap, HashSet},
+    pin::pin,
+};
 
 use futures::StreamExt;
 use log::*;
@@ -162,6 +165,7 @@ impl NetworkWideStateSync {
         let sync_progress = self
             .store
             .with_read_tx(|tx| tx.key_value_get_value::<_, SyncProgress>(Key::SyncProgress))
+            .await
             .optional()?
             .unwrap_or_default();
 
@@ -240,8 +244,10 @@ impl NetworkWideStateSync {
             if checkpoints.is_empty() {
                 info!(target: LOG_TARGET, "🌍️ No checkpoints found for shard group {shard_group} from epoch {from_epoch} (prev_epoch {prev_epoch})");
                 sync_plan_mut.add_checkpoint_sync_progress(shard_group, prev_epoch);
+                let sync_progress_snapshot = sync_plan_mut.sync_progress().clone();
                 self.store
-                    .with_write_tx(|tx| tx.key_value_set(Key::SyncProgress, sync_plan_mut.sync_progress()))?;
+                    .with_write_tx(move |tx| tx.key_value_set(Key::SyncProgress, sync_progress_snapshot))
+                    .await?;
                 continue;
             }
 
@@ -292,19 +298,23 @@ impl NetworkWideStateSync {
                 self.stats.increment_checkpoints();
                 sync_plan_mut.add_checkpoint_sync_progress(shard_group, checkpoint.epoch());
                 let xtr_exhausted = Amount::from(checkpoint.header().accumulated_data().total_exhaust_burn);
-                self.store.with_write_tx(|tx| {
-                    if !tx.epoch_checkpoint_exists(shard_group, checkpoint.epoch())? {
-                        tx.insert_or_ignore_epoch_checkpoint(&checkpoint)?;
+                let checkpoint_epoch = checkpoint.epoch();
+                let sync_progress_snapshot = sync_plan_mut.sync_progress().clone();
+                self.store
+                    .with_write_tx(move |tx| {
+                        if !tx.epoch_checkpoint_exists(shard_group, checkpoint_epoch)? {
+                            tx.insert_or_ignore_epoch_checkpoint(&checkpoint)?;
 
-                        let exhausted = tx
-                            .key_value_get_value::<_, Amount>(Key::XtrAccumulatedExhaustBurn)
-                            .optional()?;
+                            let exhausted = tx
+                                .key_value_get_value::<_, Amount>(Key::XtrAccumulatedExhaustBurn)
+                                .optional()?;
 
-                        let new_exhausted = exhausted.unwrap_or_else(Amount::zero) + xtr_exhausted;
-                        tx.key_value_set(Key::XtrAccumulatedExhaustBurn, new_exhausted)?;
-                    }
-                    tx.key_value_set(Key::SyncProgress, sync_plan_mut.sync_progress())
-                })?;
+                            let new_exhausted = exhausted.unwrap_or_else(Amount::zero) + xtr_exhausted;
+                            tx.key_value_set(Key::XtrAccumulatedExhaustBurn, new_exhausted)?;
+                        }
+                        tx.key_value_set(Key::SyncProgress, sync_progress_snapshot)
+                    })
+                    .await?;
             }
         }
 
@@ -367,6 +377,7 @@ impl NetworkWideStateSync {
         Ok(())
     }
 
+    #[expect(clippy::too_many_lines)]
     async fn sync_shard_state(
         &mut self,
         shard: Shard,
@@ -455,124 +466,128 @@ impl NetworkWideStateSync {
 
             self.stats.increase_state_updates(update_buf.len());
 
-            self.store.clone().with_write_tx(|tx| {
-                debug!(target: LOG_TARGET, "✅ Committing {} updates for shard {shard} (epoch: {msg_epoch}, state version: {state_version})", update_buf.len());
-                // TODO: this is not currently used. Consider removing.
-                tx.batch_insert_substate_transitions(shard, state_version, update_buf.drain(..))?;
-                debug!(target: LOG_TARGET, "✅ Committing {} UTXOs for shard {shard} (epoch: {msg_epoch})", utxos_buf.len());
-                tx.batch_insert_utxo_updates(msg_epoch, utxos_buf.drain(..))?;
-                // There are many ways to do this. This might not be the best way.
-                // This allows wallet to query for validator fee pool values when preparing a claim fee transaction.
-                for substate_data in validator_fee_pools_buf.drain(..) {
-                    tx.upsert_substate(&substate_data)?;
-                }
-                debug!(target: LOG_TARGET, "✅ Committing {} transactions for shard {shard} (epoch: {msg_epoch})", transactions_buf.len());
-                self.stats.increase_events(transactions_buf.iter().map(|(_, t)| t.events.len()).sum());
-                self.persist_transaction_receipts(tx, transactions_buf.drain(..))?;
+            let updates = std::mem::take(update_buf);
+            let utxos = std::mem::take(utxos_buf);
+            let transactions = std::mem::take(transactions_buf);
+            let validator_fee_pools = std::mem::take(validator_fee_pools_buf);
+            let template_catalogue = std::mem::take(template_catalogue_buf);
 
-                if !template_catalogue_buf.is_empty() {
-                    debug!(target: LOG_TARGET, "✅ Upserting {} template catalogue entries for shard {shard} (epoch: {msg_epoch})", template_catalogue_buf.len());
-                    for (template_addr, metadata) in template_catalogue_buf.drain(..) {
-                        tx.upsert_template_catalogue(&template_addr, &metadata)?;
+            let updates_len = updates.len();
+            let utxos_len = utxos.len();
+            let transactions_len = transactions.len();
+            let template_catalogue_len = template_catalogue.len();
+            let event_count: usize = transactions.iter().map(|(_, t)| t.events.len()).sum();
+            self.stats.increase_events(event_count);
+
+            sync_plan_mut.add_state_sync_progress(shard, state_version, msg_epoch);
+            let sync_progress_snapshot = sync_plan_mut.sync_progress().clone();
+
+            let event_filters = self.config.event_filters.clone();
+            let watched_templates = self.config.watched_templates.clone();
+            let xtr_claimed_snapshot = xtr_claimed;
+
+            let inserted_events = self
+                .store
+                .clone()
+                .with_write_tx(move |tx| -> Result<Vec<InsertedEvent>, StorageError> {
+                    debug!(target: LOG_TARGET, "✅ Committing {} updates for shard {shard} (epoch: {msg_epoch}, state version: {state_version})", updates_len);
+                    // TODO: this is not currently used. Consider removing.
+                    tx.batch_insert_substate_transitions(shard, state_version, updates)?;
+                    debug!(target: LOG_TARGET, "✅ Committing {} UTXOs for shard {shard} (epoch: {msg_epoch})", utxos_len);
+                    tx.batch_insert_utxo_updates(msg_epoch, utxos)?;
+                    for substate_data in validator_fee_pools {
+                        tx.upsert_substate(&substate_data)?;
                     }
-                }
-
-                // All done - write the sync progress
-                sync_plan_mut.add_state_sync_progress(shard, state_version, msg_epoch);
-                tx.key_value_set(Key::SyncProgress, sync_plan_mut.sync_progress())?;
-                let claimed = tx.key_value_get_value(Key::XtrAccumulatedClaimed).optional()?;
-                let new_claimed = claimed.unwrap_or_else(Amount::zero) + xtr_claimed;
-                tx.key_value_set(Key::XtrAccumulatedClaimed, new_claimed)
-            })?;
-        }
-        Ok(())
-    }
-
-    fn persist_transaction_receipts<I: IntoIterator<Item = (TransactionReceiptAddress, TransactionReceipt)>>(
-        &self,
-        tx: &mut SqliteStoreWriteTransaction<'_>,
-        receipts: I,
-    ) -> Result<(), StorageError> {
-        // Insert into DB first so events get assigned their auto-increment IDs,
-        // then broadcast with IDs attached. This ensures SSE clients can use
-        // the ID for catch-up/replay.
-        let inserted_events = tx.batch_insert_transaction_receipts(receipts, &self.config.event_filters)?;
-
-        if !self.config.watched_templates.is_empty() {
-            self.process_watched_substate_events(tx, &inserted_events)?;
-        }
-
-        for inserted in inserted_events {
-            self.transaction_event_notify.notify(TransactionEvent {
-                id: inserted.id,
-                transaction_id: inserted.transaction_id,
-                event: inserted.event,
-            });
-        }
-
-        Ok(())
-    }
-
-    fn process_watched_substate_events(
-        &self,
-        tx: &mut SqliteStoreWriteTransaction<'_>,
-        events: &[InsertedEvent],
-    ) -> Result<(), StorageError> {
-        use crate::store::IndexerStoreWriteTransaction;
-
-        for inserted in events {
-            let event = &inserted.event;
-            match event.topic() {
-                "std.component.created" => {
-                    if self.config.watched_templates.contains(&event.template_address()) &&
-                        let Some(substate_id) = event.substate_id()
-                    {
-                        debug!(
-                            target: LOG_TARGET,
-                            "📌 Watched component created: {} (template: {})",
-                            substate_id,
-                            event.template_address()
-                        );
-                        tx.insert_watched_substate(substate_id, &event.template_address())?;
+                    debug!(target: LOG_TARGET, "✅ Committing {} transactions for shard {shard} (epoch: {msg_epoch})", transactions_len);
+                    let inserted = tx.batch_insert_transaction_receipts(transactions, &event_filters)?;
+                    if !watched_templates.is_empty() {
+                        process_watched_substate_events(tx, &inserted, &watched_templates)?;
                     }
-                },
-                "std.component.template_update" => {
-                    if let Some(substate_id) = event.substate_id() {
-                        let prev_template = event
-                            .payload()
-                            .get("prev_template")
-                            .and_then(|v| TemplateAddress::from_hex(v).ok());
 
-                        let prev_was_watched = prev_template
-                            .as_ref()
-                            .is_some_and(|t| self.config.watched_templates.contains(t));
-                        let new_is_watched = self.config.watched_templates.contains(&event.template_address());
-
-                        if prev_was_watched && !new_is_watched {
-                            debug!(
-                                target: LOG_TARGET,
-                                "📌 Watched component removed (template update): {}",
-                                substate_id
-                            );
-                            tx.delete_watched_substate(substate_id)?;
-                        } else if new_is_watched {
-                            debug!(
-                                target: LOG_TARGET,
-                                "📌 Watched component updated: {} (template: {})",
-                                substate_id,
-                                event.template_address()
-                            );
-                            tx.insert_watched_substate(substate_id, &event.template_address())?;
-                        } else {
-                            // N/A
+                    if !template_catalogue.is_empty() {
+                        debug!(target: LOG_TARGET, "✅ Upserting {} template catalogue entries for shard {shard} (epoch: {msg_epoch})", template_catalogue_len);
+                        for (template_addr, metadata) in template_catalogue {
+                            tx.upsert_template_catalogue(&template_addr, &metadata)?;
                         }
                     }
-                },
-                _ => {},
+
+                    tx.key_value_set(Key::SyncProgress, sync_progress_snapshot)?;
+                    let claimed = tx.key_value_get_value(Key::XtrAccumulatedClaimed).optional()?;
+                    let new_claimed = claimed.unwrap_or_else(Amount::zero) + xtr_claimed_snapshot;
+                    tx.key_value_set(Key::XtrAccumulatedClaimed, new_claimed)?;
+                    Ok(inserted)
+                })
+                .await?;
+
+            for inserted in inserted_events {
+                self.transaction_event_notify.notify(TransactionEvent {
+                    id: inserted.id,
+                    transaction_id: inserted.transaction_id,
+                    event: inserted.event,
+                });
             }
         }
         Ok(())
     }
+}
+
+fn process_watched_substate_events(
+    tx: &mut SqliteStoreWriteTransaction<'_>,
+    events: &[InsertedEvent],
+    watched_templates: &HashSet<TemplateAddress>,
+) -> Result<(), StorageError> {
+    use crate::store::IndexerStoreWriteTransaction;
+
+    for inserted in events {
+        let event = &inserted.event;
+        match event.topic() {
+            "std.component.created" => {
+                if watched_templates.contains(&event.template_address()) &&
+                    let Some(substate_id) = event.substate_id()
+                {
+                    debug!(
+                        target: LOG_TARGET,
+                        "📌 Watched component created: {} (template: {})",
+                        substate_id,
+                        event.template_address()
+                    );
+                    tx.insert_watched_substate(substate_id, &event.template_address())?;
+                }
+            },
+            "std.component.template_update" => {
+                if let Some(substate_id) = event.substate_id() {
+                    let prev_template = event
+                        .payload()
+                        .get("prev_template")
+                        .and_then(|v| TemplateAddress::from_hex(v).ok());
+
+                    let prev_was_watched = prev_template.as_ref().is_some_and(|t| watched_templates.contains(t));
+                    let new_is_watched = watched_templates.contains(&event.template_address());
+
+                    if prev_was_watched && !new_is_watched {
+                        debug!(
+                            target: LOG_TARGET,
+                            "📌 Watched component removed (template update): {}",
+                            substate_id
+                        );
+                        tx.delete_watched_substate(substate_id)?;
+                    } else if new_is_watched {
+                        debug!(
+                            target: LOG_TARGET,
+                            "📌 Watched component updated: {} (template: {})",
+                            substate_id,
+                            event.template_address()
+                        );
+                        tx.insert_watched_substate(substate_id, &event.template_address())?;
+                    } else {
+                        // N/A
+                    }
+                }
+            },
+            _ => {},
+        }
+    }
+    Ok(())
 }
 
 fn extend_bufs_from_substate_update(

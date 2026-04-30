@@ -9,6 +9,7 @@ use tari_indexer_client::types::{
     WatchedSubstateItem,
     WatchedTemplateItem,
 };
+use tari_ootle_common_types::optional::Optional;
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
 
@@ -36,6 +37,7 @@ pub async fn list_watched_substates(
     let entries = context
         .read_only_store()
         .list_watched_substates(req.template_address.as_ref(), limit, offset)
+        .await
         .map_err(ErrorResponse::anyhow)?;
 
     let substates = entries
@@ -61,20 +63,19 @@ pub async fn list_watched_templates(
     Extension(context): Extension<HandlerContext>,
 ) -> HandlerResult<Json<ListWatchedTemplatesResponse>> {
     let store = context.read_only_store();
-    let templates = context
-        .watched_templates()
-        .iter()
-        .map(|addr| {
-            let template_name = store
-                .get_template_catalogue_entry(addr)
-                .ok()
-                .flatten()
-                .map(|e| e.template_name);
-            WatchedTemplateItem {
+    let mut templates = Vec::with_capacity(context.watched_templates().len());
+    for addr in context.watched_templates() {
+        if let Some(template) = store
+            .get_template_catalogue_entry(addr)
+            .await
+            .optional()
+            .map_err(ErrorResponse::anyhow)?
+        {
+            templates.push(WatchedTemplateItem {
                 template_address: *addr,
-                template_name,
-            }
-        })
-        .collect();
+                template_name: Some(template.template_name),
+            });
+        }
+    }
     Ok(Json(ListWatchedTemplatesResponse { templates }))
 }

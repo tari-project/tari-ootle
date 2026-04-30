@@ -7,6 +7,7 @@ use std::{
     sync::Arc,
 };
 
+use async_trait::async_trait;
 use serde::{Serialize, de::DeserializeOwned};
 use tari_engine_types::{
     Utxo,
@@ -51,44 +52,31 @@ use crate::{
     },
 };
 
-const LOG_TARGET: &str = "tari::indexer::store";
-
+#[async_trait]
 pub trait IndexerStore: IndexerStoreReader {
-    type WriteTransaction<'a>: IndexerStoreWriteTransaction + Deref<Target = Self::ReadTransaction<'a>> + DerefMut
+    type WriteTransaction<'a>: IndexerStoreWriteTransaction
+        + Deref<Target = Self::ReadTransaction<'a>>
+        + DerefMut
+        + Send
     where Self: 'a;
 
-    fn create_write_tx(&self) -> Result<Self::WriteTransaction<'_>, StorageError>;
-
-    fn with_write_tx<F: FnOnce(&mut Self::WriteTransaction<'_>) -> Result<R, E>, R, E>(&self, f: F) -> Result<R, E>
-    where E: From<StorageError> {
-        let mut tx = self.create_write_tx()?;
-        match f(&mut tx) {
-            Ok(r) => {
-                tx.commit()?;
-                Ok(r)
-            },
-            Err(e) => {
-                if let Err(err) = tx.rollback() {
-                    log::error!(target: LOG_TARGET, "Failed to rollback transaction: {}", err);
-                }
-                Err(e)
-            },
-        }
-    }
+    async fn with_write_tx<F, R, E>(&self, f: F) -> Result<R, E>
+    where
+        F: for<'a> FnOnce(&mut Self::WriteTransaction<'a>) -> Result<R, E> + Send + 'static,
+        R: Send + 'static,
+        E: From<StorageError> + Send + 'static;
 }
 
-pub trait IndexerStoreReader {
-    type ReadTransaction<'a>: IndexerStoreReadTransaction
+#[async_trait]
+pub trait IndexerStoreReader: Send + Sync + 'static {
+    type ReadTransaction<'a>: IndexerStoreReadTransaction + Send
     where Self: 'a;
 
-    fn create_read_tx(&self) -> Result<Self::ReadTransaction<'_>, StorageError>;
-
-    fn with_read_tx<F: FnOnce(&mut Self::ReadTransaction<'_>) -> Result<R, E>, R, E>(&self, f: F) -> Result<R, E>
-    where E: From<StorageError> {
-        let mut tx = self.create_read_tx()?;
-        let ret = f(&mut tx)?;
-        Ok(ret)
-    }
+    async fn with_read_tx<F, R, E>(&self, f: F) -> Result<R, E>
+    where
+        F: for<'a> FnOnce(&mut Self::ReadTransaction<'a>) -> Result<R, E> + Send + 'static,
+        R: Send + 'static,
+        E: From<StorageError> + Send + 'static;
 }
 
 pub trait IndexerStoreReadTransaction {
@@ -208,7 +196,7 @@ pub trait IndexerStoreReadTransaction {
     fn get_template_catalogue_entry(
         &mut self,
         template_address: &TemplateAddress,
-    ) -> Result<Option<TemplateCatalogueEntry>, StorageError>;
+    ) -> Result<TemplateCatalogueEntry, StorageError>;
 
     // -------------------------------- Watched Substates -------------------------------- //
 
@@ -283,53 +271,58 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
         Self { inner }
     }
 
-    pub fn list_transaction_receipts(
+    pub async fn list_transaction_receipts(
         &self,
         last_id: Option<TransactionReceiptAddress>,
         limit: u64,
         ordering: Ordering,
     ) -> Result<Vec<(TransactionReceiptAddress, TransactionReceipt)>, StorageError> {
         self.inner
-            .with_read_tx(|tx| tx.list_transaction_receipts(last_id, limit, ordering))
+            .with_read_tx(move |tx| tx.list_transaction_receipts(last_id, limit, ordering))
+            .await
     }
 
-    pub fn get_transaction_receipt(
+    pub async fn get_transaction_receipt(
         &self,
         address: &TransactionReceiptAddress,
     ) -> Result<TransactionReceipt, StorageError> {
-        self.inner.with_read_tx(|tx| tx.get_transaction_receipt(address))
+        let address = *address;
+        self.inner
+            .with_read_tx(move |tx| tx.get_transaction_receipt(&address))
+            .await
     }
 
-    pub fn get_xtr_total_supply(&self) -> Result<Amount, StorageError> {
-        self.inner.with_read_tx(|tx| {
-            let claimed = tx
-                .key_value_get_value::<_, Amount>(Key::XtrAccumulatedClaimed)
-                .optional()?
-                .unwrap_or_default();
-            let burnt = tx
-                .key_value_get_value::<_, Amount>(Key::XtrAccumulatedExhaustBurn)
-                .optional()?
-                .unwrap_or_default();
+    pub async fn get_xtr_total_supply(&self) -> Result<Amount, StorageError> {
+        self.inner
+            .with_read_tx(|tx| {
+                let claimed = tx
+                    .key_value_get_value::<_, Amount>(Key::XtrAccumulatedClaimed)
+                    .optional()?
+                    .unwrap_or_default();
+                let burnt = tx
+                    .key_value_get_value::<_, Amount>(Key::XtrAccumulatedExhaustBurn)
+                    .optional()?
+                    .unwrap_or_default();
 
-            claimed
-                .checked_sub(burnt)
-                .ok_or_else(|| StorageError::DataInconsistency {
-                    details: format!(
-                        "XTR total supply underflow: claimed {} < total exhaust {}",
-                        claimed, burnt
-                    ),
-                })
-        })
+                claimed
+                    .checked_sub(burnt)
+                    .ok_or_else(|| StorageError::DataInconsistency {
+                        details: format!(
+                            "XTR total supply underflow: claimed {} < total exhaust {}",
+                            claimed, burnt
+                        ),
+                    })
+            })
+            .await
     }
 
-    pub fn get_sync_progress(&self) -> Result<SyncProgress, StorageError> {
-        let progress = self
-            .inner
-            .with_read_tx(|tx| tx.key_value_get_value(Key::SyncProgress))?;
-        Ok(progress)
+    pub async fn get_sync_progress(&self) -> Result<SyncProgress, StorageError> {
+        self.inner
+            .with_read_tx(|tx| tx.key_value_get_value(Key::SyncProgress))
+            .await
     }
 
-    pub fn get_events(
+    pub async fn get_events(
         &self,
         substate_id_filter: Option<&SubstateId>,
         topic_filter: Option<&str>,
@@ -337,11 +330,23 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
         offset: u32,
         limit: u32,
     ) -> Result<Vec<(TransactionId, Event)>, StorageError> {
+        let substate_id_filter = substate_id_filter.cloned();
+        let topic_filter = topic_filter.map(str::to_owned);
+        let resource_address_filter = resource_address_filter.copied();
         self.inner
-            .with_read_tx(|tx| tx.get_events(substate_id_filter, topic_filter, resource_address_filter, offset, limit))
+            .with_read_tx(move |tx| {
+                tx.get_events(
+                    substate_id_filter.as_ref(),
+                    topic_filter.as_deref(),
+                    resource_address_filter.as_ref(),
+                    offset,
+                    limit,
+                )
+            })
+            .await
     }
 
-    pub fn get_events_after_id(
+    pub async fn get_events_after_id(
         &self,
         after_id: i64,
         topic_filter: Option<&str>,
@@ -350,56 +355,70 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
         resource_address_filter: Option<&ResourceAddress>,
         limit: u32,
     ) -> Result<Vec<(i64, TransactionId, Event)>, StorageError> {
-        self.inner.with_read_tx(|tx| {
-            tx.get_events_after_id(
-                after_id,
-                topic_filter,
-                substate_id_filter,
-                template_address_filter,
-                resource_address_filter,
-                limit,
-            )
-        })
+        let topic_filter = topic_filter.map(str::to_owned);
+        let substate_id_filter = substate_id_filter.cloned();
+        let template_address_filter = template_address_filter.copied();
+        let resource_address_filter = resource_address_filter.copied();
+        self.inner
+            .with_read_tx(move |tx| {
+                tx.get_events_after_id(
+                    after_id,
+                    topic_filter.as_deref(),
+                    substate_id_filter.as_ref(),
+                    template_address_filter.as_ref(),
+                    resource_address_filter.as_ref(),
+                    limit,
+                )
+            })
+            .await
     }
 
-    pub fn list_template_catalogue(
+    pub async fn list_template_catalogue(
         &self,
         name_filter: Option<&str>,
         after: Option<&TemplateAddress>,
         limit: u64,
     ) -> Result<Vec<crate::storage_sqlite::models::TemplateCatalogueEntry>, StorageError> {
+        let name_filter = name_filter.map(str::to_owned);
+        let after = after.copied();
         self.inner
-            .with_read_tx(|tx| tx.list_template_catalogue(name_filter, after, limit))
+            .with_read_tx(move |tx| tx.list_template_catalogue(name_filter.as_deref(), after.as_ref(), limit))
+            .await
     }
 
-    pub fn get_template_catalogue_entry(
+    pub async fn get_template_catalogue_entry(
         &self,
         template_address: &TemplateAddress,
-    ) -> Result<Option<crate::storage_sqlite::models::TemplateCatalogueEntry>, StorageError> {
+    ) -> Result<TemplateCatalogueEntry, StorageError> {
+        let template_address = *template_address;
         self.inner
-            .with_read_tx(|tx| tx.get_template_catalogue_entry(template_address))
+            .with_read_tx(move |tx| tx.get_template_catalogue_entry(&template_address))
+            .await
     }
 
-    pub fn epoch_checkpoint_get_all(
+    pub async fn epoch_checkpoint_get_all(
         &self,
         from_epoch: Epoch,
         limit: u64,
     ) -> Result<Vec<EpochCheckpoint>, StorageError> {
         self.inner
-            .with_read_tx(|tx| tx.epoch_checkpoint_get_all(from_epoch, limit))
+            .with_read_tx(move |tx| tx.epoch_checkpoint_get_all(from_epoch, limit))
+            .await
     }
 
-    pub fn epoch_checkpoint_get_latest(&self) -> Result<EpochCheckpoint, StorageError> {
-        self.inner.with_read_tx(|tx| tx.epoch_checkpoint_get_latest())
+    pub async fn epoch_checkpoint_get_latest(&self) -> Result<EpochCheckpoint, StorageError> {
+        self.inner.with_read_tx(|tx| tx.epoch_checkpoint_get_latest()).await
     }
 
-    pub fn list_watched_substates(
+    pub async fn list_watched_substates(
         &self,
         template_address: Option<&TemplateAddress>,
         limit: u64,
         offset: u64,
     ) -> Result<Vec<WatchedSubstateEntry>, StorageError> {
+        let template_address = template_address.copied();
         self.inner
-            .with_read_tx(|tx| tx.list_watched_substates(template_address, limit, offset))
+            .with_read_tx(move |tx| tx.list_watched_substates(template_address.as_ref(), limit, offset))
+            .await
     }
 }

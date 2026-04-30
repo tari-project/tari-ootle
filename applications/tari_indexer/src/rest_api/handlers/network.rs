@@ -52,6 +52,7 @@ pub async fn get_network_sync_stats(
     let sync_progress = context
         .read_only_store()
         .get_sync_progress()
+        .await
         .optional()
         .map_err(ErrorResponse::anyhow)?;
 

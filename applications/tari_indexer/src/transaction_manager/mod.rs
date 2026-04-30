@@ -60,8 +60,10 @@ where
                 details: "Transaction has one or more invalid signature(s)".to_string(),
             });
         }
+        let transaction_for_db = transaction.clone();
         self.store
-            .with_write_tx(|tx| tx.insert_or_ignore_transaction(&transaction))?;
+            .with_write_tx(move |tx| tx.insert_or_ignore_transaction(&transaction_for_db))
+            .await?;
         let id = self.network_client.submit_transaction(transaction).await?;
         Ok(id)
     }
@@ -82,14 +84,15 @@ where
             })
     }
 
-    pub fn list_recent_transactions(
+    pub async fn list_recent_transactions(
         &self,
         last_id: Option<TransactionId>,
         limit: usize,
     ) -> Result<Vec<TransactionEntry>, TransactionManagerError> {
         let transactions = self
             .store
-            .with_read_tx(|tx| tx.list_recent_transactions(last_id, limit))?;
+            .with_read_tx(move |tx| tx.list_recent_transactions(last_id, limit))
+            .await?;
         Ok(transactions)
     }
 }

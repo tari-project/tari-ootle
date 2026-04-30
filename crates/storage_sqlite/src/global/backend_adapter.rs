@@ -25,7 +25,7 @@ use std::{
     convert::{TryFrom, TryInto},
     fmt::{Debug, Formatter},
     marker::PhantomData,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 use diesel::{
@@ -101,7 +101,11 @@ impl<TAddr> SqliteGlobalDbAdapter<TAddr> {
         }
     }
 
-    fn exists(&self, tx: &mut SqliteTransaction<'_>, key: &[u8]) -> Result<bool, SqliteStorageError> {
+    fn exists(
+        &self,
+        tx: &mut SqliteTransaction<MutexGuard<'_, SqliteConnection>>,
+        key: &[u8],
+    ) -> Result<bool, SqliteStorageError> {
         use crate::global::schema::metadata;
         let result = metadata::table
             .filter(metadata::key_name.eq(key))
@@ -127,7 +131,7 @@ impl<TAddr> SqliteGlobalDbAdapter<TAddr> {
 }
 
 impl<TAddr> AtomicDb for SqliteGlobalDbAdapter<TAddr> {
-    type DbTransaction<'a> = SqliteTransaction<'a>;
+    type DbTransaction<'a> = SqliteTransaction<MutexGuard<'a, SqliteConnection>>;
     type Error = SqliteStorageError;
 
     fn create_transaction(&self) -> Result<Self::DbTransaction<'_>, Self::Error> {

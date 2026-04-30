@@ -136,14 +136,16 @@ async fn run_replay_then_live(
     let mut total_replayed = 0u32;
 
     loop {
-        let batch = store.get_events_after_id(
-            highest_id,
-            filter.topic.as_deref(),
-            filter.substate_id.as_ref(),
-            filter.template_address.as_ref(),
-            filter.resource_address.as_ref(),
-            REPLAY_PAGE_SIZE,
-        )?;
+        let batch = store
+            .get_events_after_id(
+                highest_id,
+                filter.topic.as_deref(),
+                filter.substate_id.as_ref(),
+                filter.template_address.as_ref(),
+                filter.resource_address.as_ref(),
+                REPLAY_PAGE_SIZE,
+            )
+            .await?;
 
         if batch.is_empty() {
             break;
@@ -189,14 +191,16 @@ async fn run_replay_then_live(
                 warn!(target: LOG_TARGET, "SSE broadcast lagged by {} events, catching up from DB (highest_id={})", n, highest_id);
                 // Iteratively catch up from DB in pages until we've replayed everything
                 loop {
-                    let batch = store.get_events_after_id(
-                        highest_id,
-                        filter.topic.as_deref(),
-                        filter.substate_id.as_ref(),
-                        filter.template_address.as_ref(),
-                        filter.resource_address.as_ref(),
-                        REPLAY_PAGE_SIZE,
-                    )?;
+                    let batch = store
+                        .get_events_after_id(
+                            highest_id,
+                            filter.topic.as_deref(),
+                            filter.substate_id.as_ref(),
+                            filter.template_address.as_ref(),
+                            filter.resource_address.as_ref(),
+                            REPLAY_PAGE_SIZE,
+                        )
+                        .await?;
 
                     if batch.is_empty() {
                         break;

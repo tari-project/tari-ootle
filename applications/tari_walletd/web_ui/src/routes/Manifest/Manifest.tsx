@@ -21,9 +21,18 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useAccountsList } from "@api/hooks/useAccounts";
+import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
 import { useSubmitManifest } from "@api/hooks/useTransactions";
 import PageHeading from "@components/PageHeading";
 import { DataTableCell, StyledPaper } from "@components/StyledComponents";
+import {
+  Description as DescriptionIcon,
+  FileDownload,
+  FileUpload,
+  FormatAlignLeft,
+  LibraryAdd,
+} from "@mui/icons-material";
+import type { SelectChangeEvent } from "@mui/material";
 import {
   Dialog,
   DialogActions,
@@ -45,17 +54,14 @@ import {
   Tabs,
   useTheme,
 } from "@mui/material";
-import type { SelectChangeEvent } from "@mui/material";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Grid from "@mui/material/Grid";
 import TextField from "@mui/material/TextField";
-import useManifestCodeStore from "@store/manifestStore";
 import type { ManifestTab } from "@store/manifestStore";
-import { Description as DescriptionIcon, FileDownload, FileUpload, FormatAlignLeft, LibraryAdd } from "@mui/icons-material";
+import useManifestCodeStore from "@store/manifestStore";
 import type { KeyId } from "@tari-project/ootle-ts-bindings";
 import { rejectReasonToString, substateIdToString } from "@tari-project/ootle-ts-bindings";
-import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
 import { Highlight, themes } from "prism-react-renderer";
 import { useCallback, useRef, useState } from "react";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -175,7 +181,7 @@ function ManifestEditor() {
     submitManifest({
       manifest: manifest.code,
       variables: manifest.variables,
-      max_fee: isDryRun ? 3000 : Number(fee),
+      max_fee: isDryRun ? 5000 : Number(fee),
       seal_signer_key_id: null,
       signing_key_ids: manifest.signingKeys,
       dry_run: isDryRun,
@@ -208,13 +214,7 @@ function ManifestEditor() {
   return (
     <>
       <Grid size={12}>
-        <input
-          type="file"
-          accept=".json"
-          ref={fileInputRef}
-          onChange={handleFileChange}
-          style={{ display: "none" }}
-        />
+        <input type="file" accept=".json" ref={fileInputRef} onChange={handleFileChange} style={{ display: "none" }} />
         <form onSubmit={handleSubmit}>
           <ManifestTabBar
             tabs={manifest.tabs}
@@ -289,11 +289,7 @@ function ManifestEditor() {
             />
           </Box>
           <Box className="flex-container" style={{ justifyContent: "flex-start" }}>
-            <BlobsEditor
-              blobs={manifest.blobs}
-              onSet={manifest.setBlob}
-              onRemove={manifest.removeBlob}
-            />
+            <BlobsEditor blobs={manifest.blobs} onSet={manifest.setBlob} onRemove={manifest.removeBlob} />
           </Box>
           <Box className="flex-container" style={{ justifyContent: "flex-end" }}>
             <TextField
@@ -554,12 +550,12 @@ function TabLabel({
             onClose();
           }}
           sx={{
-            ml: 0.5,
-            px: 0.5,
-            lineHeight: 1,
-            fontSize: "1rem",
-            cursor: "pointer",
-            borderRadius: "50%",
+            "ml": 0.5,
+            "px": 0.5,
+            "lineHeight": 1,
+            "fontSize": "1rem",
+            "cursor": "pointer",
+            "borderRadius": "50%",
             "&:hover": { backgroundColor: "action.hover" },
           }}
         >
@@ -614,13 +610,21 @@ function EditableKeyCell({ varKey, onRename }: { varKey: string; onRename: (oldK
   }
 
   return (
-    <Box onClick={() => setEditing(true)} sx={{ cursor: "pointer", "&:hover": { textDecoration: "underline" } }}>
+    <Box onClick={() => setEditing(true)} sx={{ "cursor": "pointer", "&:hover": { textDecoration: "underline" } }}>
       {varKey}
     </Box>
   );
 }
 
-function EditableValueCell({ varKey, value, onUpdate }: { varKey: string; value: string; onUpdate: (key: string, value: string) => void }) {
+function EditableValueCell({
+  varKey,
+  value,
+  onUpdate,
+}: {
+  varKey: string;
+  value: string;
+  onUpdate: (key: string, value: string) => void;
+}) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
 
@@ -654,7 +658,13 @@ function EditableValueCell({ varKey, value, onUpdate }: { varKey: string; value:
   }
 
   return (
-    <Box onClick={() => { setDraft(value); setEditing(true); }} sx={{ cursor: "pointer", "&:hover": { textDecoration: "underline" } }}>
+    <Box
+      onClick={() => {
+        setDraft(value);
+        setEditing(true);
+      }}
+      sx={{ "cursor": "pointer", "&:hover": { textDecoration: "underline" } }}
+    >
       {value}
     </Box>
   );
@@ -685,9 +695,7 @@ function VariableEditor({
     const varName = nextAccountVarName(variables);
     onAdd(varName, address);
     // Auto-add the account's signing key
-    const accountInfo = accountsData?.accounts.find(
-      (a) => substateIdToString(a.account.component_address) === address,
-    );
+    const accountInfo = accountsData?.accounts.find((a) => substateIdToString(a.account.component_address) === address);
     if (accountInfo?.account.owner_key_id) {
       onAddSigningKey(accountInfo.account.owner_key_id);
     }
@@ -768,12 +776,7 @@ function VariableEditor({
               }
             }}
           />
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={handleAdd}
-            style={{ minHeight: "52px" }}
-          >
+          <Button variant="contained" color="primary" onClick={handleAdd} style={{ minHeight: "52px" }}>
             Add
           </Button>
           <Button
@@ -821,7 +824,10 @@ function formatKeyId(key: KeyId): string {
   return `imported/${key.Imported.local_key_id}`;
 }
 
-function findAccountNameForKey(key: KeyId, accounts: { account: { name: string | null; owner_key_id: KeyId | null } }[]): string | null {
+function findAccountNameForKey(
+  key: KeyId,
+  accounts: { account: { name: string | null; owner_key_id: KeyId | null } }[],
+): string | null {
   const match = accounts.find(
     (a) => a.account.owner_key_id && JSON.stringify(a.account.owner_key_id) === JSON.stringify(key),
   );
@@ -886,8 +892,8 @@ function SigningKeysDialog({
       <DialogTitle>Signing Keys</DialogTitle>
       <DialogContent>
         <DialogContentText sx={{ mb: 2 }}>
-          Extra signers attached to this transaction (in addition to the seal signer). Each
-          signer commits to the unsigned transaction including its blob commitments.
+          Extra signers attached to this transaction (in addition to the seal signer). Each signer commits to the
+          unsigned transaction including its blob commitments.
         </DialogContentText>
         {signingKeys.length > 0 ? (
           <Table size="small" sx={{ marginBottom: 2 }}>
@@ -1038,12 +1044,7 @@ function BlobsEditor({
         </Table>
       )}
       <Stack direction="row" spacing={1} alignItems="center" marginBottom={2}>
-        <Button
-          variant="outlined"
-          size="small"
-          startIcon={<DescriptionIcon fontSize="small" />}
-          onClick={openAdd}
-        >
+        <Button variant="outlined" size="small" startIcon={<DescriptionIcon fontSize="small" />} onClick={openAdd}>
           Add Blob ({entries.length})
         </Button>
       </Stack>
@@ -1156,8 +1157,8 @@ function BlobDialog({
       <DialogTitle>{editingName ? "Edit blob" : "Add blob"}</DialogTitle>
       <DialogContent>
         <DialogContentText sx={{ mb: 2 }}>
-          Blobs are referenced from the manifest via <code>blob!(name)</code>. Provide the bytes
-          either by uploading a file or by pasting base64-encoded data.
+          Blobs are referenced from the manifest via <code>blob!(name)</code>. Provide the bytes either by uploading a
+          file or by pasting base64-encoded data.
         </DialogContentText>
         <Stack spacing={2} mt={1}>
           <TextField
@@ -1200,9 +1201,7 @@ function BlobDialog({
               },
             }}
           />
-          <Box sx={{ color: "text.secondary", fontSize: "0.875rem" }}>
-            Decoded size: {formatBytes(size)}
-          </Box>
+          <Box sx={{ color: "text.secondary", fontSize: "0.875rem" }}>Decoded size: {formatBytes(size)}</Box>
           {error && <Box sx={{ color: "error.main", fontSize: "0.875rem" }}>{error}</Box>}
         </Stack>
       </DialogContent>

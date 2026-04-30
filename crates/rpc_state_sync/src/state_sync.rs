@@ -40,7 +40,7 @@ use tari_ootle_storage::{
         SubstateValueFilterFlags,
     },
 };
-use tari_rpc_framework::RpcError;
+use tari_rpc_framework::{RpcError, RpcStatusCode};
 use tari_state_tree::{SPARSE_MERKLE_PLACEHOLDER_HASH, SpreadPrefixStateTree, SubstateTreeChange, TreeHash, Version};
 use tari_validator_node_rpc::{
     STATE_SYNC_MAX_BATCH_SIZE,
@@ -113,6 +113,12 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             Ok(GetCheckpointsResponse { mut checkpoints }) => {
                 match EpochCheckpoint::try_from(checkpoints.pop().expect("checked is_empty")) {
                     Ok(checkpoint) => {
+                        checkpoint.checked_shard_group().map_err(|err| {
+                            RpcStateSyncError::InvalidResponse(anyhow!(
+                                "Fetched checkpoint for epoch {} has invalid shard group: {err}",
+                                checkpoint.epoch()
+                            ))
+                        })?;
                         info!(target: LOG_TARGET, "🛜 Checkpoint: {checkpoint}");
                         self.validate_checkpoint(&checkpoint, prev_committee, prev_epoch)?;
                         self.state_store.with_write_tx(|tx| checkpoint.save(tx))?;
@@ -410,6 +416,24 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         Ok(())
     }
 
+    fn is_checkpoint_temporarily_unavailable_error(err: &RpcStateSyncError, prev_epoch: Epoch) -> bool {
+        match err {
+            RpcStateSyncError::CheckpointNotAvailable { epoch } => *epoch == prev_epoch,
+            RpcStateSyncError::RpcError(RpcError::RequestFailed(status)) => {
+                let details = status.details();
+                // Remote node count be behind in syncing the epoch oracle
+                (status.as_status_code() == RpcStatusCode::BadRequest &&
+                    details.contains(&format!("Peer requested checkpoint with epoch {}", prev_epoch))) ||
+                    // Remote node is syncing
+                    (status.as_status_code() == RpcStatusCode::General &&
+                        (details.contains("Consensus is not running on this node") ||
+                            details.contains("Node is still catching up to the epoch") ||
+                            details.contains("Node is not in sync with the consensus epoch")))
+            },
+            _ => false,
+        }
+    }
+
     /// Synchronizes the given [`Shard`].
     async fn sync_shard(
         &mut self,
@@ -419,13 +443,15 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         prev_committee: &Committee<PeerAddress>,
         our_vn_addr: &PeerAddress,
     ) -> Result<Option<Version>, RpcStateSyncError> {
-        let mut remaining_members = prev_committee.len();
         let prev_epoch = epoch
             .checked_sub(Epoch(1))
             .ok_or_else(|| RpcStateSyncError::InvalidResponse(anyhow!("Epoch is zero")))?;
         info!(target: LOG_TARGET, "🛜 Syncing state for shard {shard} and epoch {}", prev_epoch);
+
+        let mut last_hard_error = None;
+        let mut saw_unavailable_checkpoint = false;
+
         for member in prev_committee.shuffled() {
-            remaining_members = remaining_members.saturating_sub(1);
             if *our_vn_addr == member.address {
                 continue;
             }
@@ -436,9 +462,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                         target: LOG_TARGET,
                         "Failed to establish RPC session with vn {member}: {err}. Attempting another VN if available"
                     );
-                    if remaining_members == 0 {
-                        return Err(err);
-                    }
+                    last_hard_error = Some(err);
                     continue;
                 },
             };
@@ -450,25 +474,30 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             {
                 Ok(Some(cp)) => cp,
                 Ok(None) => {
-                    // TODO: we should check with f + 1 validators in this case. If a single validator reports
-                    // this falsely, this will prevent us from continuing with consensus for a long time (state
-                    // root will mismatch).
-                    // TODO: we should instead ask the epoch manager if this is the first epoch in the network (NOTE:
-                    // first epoch is not 0 but the first epoch where validators become active).
                     warn!(
                         target: LOG_TARGET,
-                        "❓️ No checkpoint for epoch {prev_epoch}. This may mean that this is the first epoch in the network or the epoch has not yet been finalized.",
+                        "❓️ No checkpoint for epoch {prev_epoch} from {member}. Previous committee exists, so state \
+                         sync will retry instead of proceeding without a checkpoint.",
                     );
-                    return Ok(None);
+                    saw_unavailable_checkpoint = true;
+                    continue;
                 },
                 Err(err) => {
+                    if Self::is_checkpoint_temporarily_unavailable_error(&err, prev_epoch) {
+                        saw_unavailable_checkpoint = true;
+                        warn!(
+                            target: LOG_TARGET,
+                            "⚠️Checkpoint for epoch {prev_epoch} is not yet available from {member}: {err}. \
+                             Attempting another peer if available"
+                        );
+                        continue;
+                    }
+
                     warn!(
                         target: LOG_TARGET,
                         "⚠️Failed to fetch checkpoint from {member}: {err}. Attempting another peer if available"
                     );
-                    if remaining_members == 0 {
-                        return Err(err);
-                    }
+                    last_hard_error = Some(err);
                     continue;
                 },
             };
@@ -489,13 +518,18 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                         target: LOG_TARGET,
                         "⚠️Failed to sync state from {member}: {err}. Attempting another peer if available"
                     );
-
-                    if remaining_members == 0 {
-                        return Err(err);
-                    }
+                    last_hard_error = Some(err);
                     continue;
                 },
             }
+        }
+
+        if let Some(err) = last_hard_error {
+            return Err(err);
+        }
+
+        if saw_unavailable_checkpoint {
+            return Err(RpcStateSyncError::CheckpointNotAvailable { epoch: prev_epoch });
         }
 
         Err(RpcStateSyncError::SyncFailedAllPeers {
@@ -620,8 +654,22 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
             .state_store
             .with_read_tx(|tx| LeafBlock::get(tx, current_epoch).optional())?;
 
-        // We only sync if we're behind by an epoch. The current epoch is replayed in consensus.
-        if current_epoch > leaf_block.map_or(Epoch::zero(), |b| b.epoch()) {
+        // We only sync if we're behind by at least one epoch. If consensus has never started, leaf_block will be none,
+        // and we'll only need to sync if the current epoch is past the birthday epoch (the start epoch for the
+        // network). The state for the current epoch is replayed in consensus via block catch up.
+        let last_epoch = match leaf_block {
+            Some(b) => b.epoch(),
+            None => {
+                let Some(birthday_epoch) = self.epoch_manager.get_birthday_epoch().await? else {
+                    return Err(RpcStateSyncError::InvariantError {
+                        details: "Check sync called before epoch birthday was determined".to_string(),
+                    });
+                };
+                birthday_epoch
+            },
+        };
+
+        if current_epoch > last_epoch {
             info!(target: LOG_TARGET, "🛜Our current leaf block {} is behind the current epoch {}. Syncing...", leaf_block.display(), current_epoch);
             return Ok(SyncStatus::Behind);
         }

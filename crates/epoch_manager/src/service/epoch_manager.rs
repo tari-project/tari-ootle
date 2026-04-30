@@ -62,6 +62,7 @@ pub struct EpochManager<TSpec: EpochManagerSpec> {
     current_shard_key: Option<SubstateAddress>,
     layer_one_submitter: TSpec::LayerOneSubmitter,
     current_epoch: Arc<AtomicU64>,
+    birthday_epoch: Option<Epoch>,
     /// Highest epoch whose hash has been locked by a committed EndEpoch block in consensus.
     /// Oracle-driven activations for epochs <= this value are ignored.
     highest_locked_epoch: Epoch,
@@ -81,6 +82,7 @@ where TSpec: EpochManagerSpec
             global_db,
             config,
             current_epoch_hash: FixedHash::zero(),
+            birthday_epoch: None,
             node_public_key,
             current_shard_key: None,
             layer_one_submitter,
@@ -108,6 +110,7 @@ where TSpec: EpochManagerSpec
         self.highest_locked_epoch = metadata
             .get_metadata(MetadataKey::EpochManagerHighestLockedEpoch.as_key_bytes())?
             .unwrap_or_else(Epoch::zero);
+        self.birthday_epoch = metadata.get_metadata(MetadataKey::EpochManagerBirthdayEpoch.as_key_bytes())?;
         Ok(())
     }
 
@@ -561,6 +564,22 @@ where TSpec: EpochManagerSpec
             shard_groups,
             num_preshards: self.config.num_preshards,
         })
+    }
+
+    pub fn set_birthday_epoch_if_unset(&mut self, epoch: Epoch) -> Result<bool, EpochManagerError> {
+        if self.birthday_epoch.is_none() {
+            let mut tx = self.global_db.create_transaction()?;
+            let mut metadata = self.global_db.metadata(&mut tx);
+            metadata.set_metadata(MetadataKey::EpochManagerBirthdayEpoch.as_key_bytes(), &epoch)?;
+            self.birthday_epoch = Some(epoch);
+            tx.commit()?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    pub fn birthday_epoch(&self) -> Option<Epoch> {
+        self.birthday_epoch
     }
 }
 

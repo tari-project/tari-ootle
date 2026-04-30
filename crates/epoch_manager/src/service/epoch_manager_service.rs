@@ -159,6 +159,8 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     target: LOG_TARGET,
                     "⛓️ {} validator node change(s) for epoch {}", node_changes.len(), epoch,
                 );
+                // Mark it as a birthday epoch if not already set
+                self.inner.set_birthday_epoch_if_unset(epoch + Epoch(1))?;
 
                 for node_change in node_changes {
                     match node_change {
@@ -489,6 +491,9 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     Ok(self.epoch_events.is_within_epoch_end_spread(current_epoch)),
                     context,
                 );
+            },
+            EpochManagerRequest::GetBirthdayEpoch { reply } => {
+                handle(reply, Ok(self.inner.birthday_epoch()), context);
             },
         }
     }

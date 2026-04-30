@@ -34,8 +34,12 @@ pub enum RpcStateSyncError {
     StateTreeError(#[from] tari_state_tree::StateTreeError),
     #[error("State root mismatch. Expected: {expected}, actual: {actual}")]
     StateRootMismatch { expected: TreeHash, actual: TreeHash },
+    #[error("Checkpoint for epoch {epoch} is not yet available from the previous committee")]
+    CheckpointNotAvailable { epoch: Epoch },
     #[error("No committees found for epoch {0}")]
     NoCommittees(Epoch),
+    #[error("Invariant error: {details}")]
+    InvariantError { details: String },
 }
 
 impl RpcStateSyncError {

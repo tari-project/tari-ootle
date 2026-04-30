@@ -28,12 +28,11 @@ Feature: State Sync
     Then VN2 has scanned to at least height 40
     Then the validator node VN2 has started epoch 4
 
-#    When I wait for validator VN has leaf block height of at least 1 at epoch 4
-#    When I wait for validator VN2 has leaf block height of at least 1 at epoch 4
+    When I wait for validator VN has leaf block height of at least 1 at epoch 4
+    When I wait for validator VN2 has leaf block height of at least 1 at epoch 4
 
-    When I create an account ACC1 via the wallet daemon WALLET_D with 2 XTR
+    When I create an account ACC4 via the wallet daemon WALLET_D with 2 XTR
     When I create an account ACC2 via the wallet daemon WALLET_D with 2 XTR
 
     When I wait for validator VN has leaf block height of at least 5 at epoch 4
     When I wait for validator VN2 has leaf block height of at least 5 at epoch 4
-

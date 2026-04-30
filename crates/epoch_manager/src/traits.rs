@@ -242,6 +242,9 @@ pub trait EpochManagerReader: Send + Sync {
         &self,
         current_epoch: Epoch,
     ) -> impl Future<Output = Result<bool, EpochManagerError>> + Send;
+
+    /// The first epoch for which the network has validators.
+    fn get_birthday_epoch(&self) -> impl Future<Output = Result<Option<Epoch>, EpochManagerError>> + Send;
 }
 
 pub trait LayerOneTransactionSubmitter {

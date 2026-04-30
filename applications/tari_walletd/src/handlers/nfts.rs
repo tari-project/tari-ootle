@@ -38,7 +38,13 @@ use tari_template_lib_types::{
 use super::{context::HandlerContext, helpers::get_account_or_default};
 use crate::{
     DEFAULT_FEE,
-    handlers::helpers::{application_error, get_account, get_account_with_inputs, invalid_params, wait_for_result},
+    handlers::helpers::{
+        application_error,
+        get_account,
+        get_account_with_inputs,
+        invalid_params,
+        wait_for_result_and_account,
+    },
     server::ApplicationErrorCode,
 };
 
@@ -127,7 +133,8 @@ pub async fn handle_mint_faucet(
     let mut events = context.notifier().subscribe();
     let tx_id = context.transaction_service().submit_transaction(transaction).await?;
 
-    let finalize_event = wait_for_result(&mut events, tx_id).await?;
+    // Wait for the account monitor to observe the newly deposited NFT before returning.
+    let (finalize_event, _) = wait_for_result_and_account(&mut events, &tx_id, &account.component_address).await?;
     if let Some(reject) = finalize_event.finalize.any_reject() {
         return Err(application_error(
             ApplicationErrorCode::TransactionRejected,

@@ -62,17 +62,15 @@ pub async fn list_watched_templates(
     Extension(context): Extension<HandlerContext>,
 ) -> HandlerResult<Json<ListWatchedTemplatesResponse>> {
     let store = context.read_only_store();
-    let mut templates = Vec::new();
-    for addr in context.watched_templates().iter() {
-        let template_name = store
+    let mut templates = Vec::with_capacity(context.watched_templates().len());
+    for addr in context.watched_templates() {
+        let template = store
             .get_template_catalogue_entry(addr)
             .await
-            .ok()
-            .flatten()
-            .map(|e| e.template_name);
+            .map_err(ErrorResponse::anyhow)?;
         templates.push(WatchedTemplateItem {
             template_address: *addr,
-            template_name,
+            template_name: Some(template.template_name),
         });
     }
     Ok(Json(ListWatchedTemplatesResponse { templates }))

@@ -377,6 +377,7 @@ impl NetworkWideStateSync {
         Ok(())
     }
 
+    #[expect(clippy::too_many_lines)]
     async fn sync_shard_state(
         &mut self,
         shard: Shard,
@@ -500,7 +501,7 @@ impl NetworkWideStateSync {
                     debug!(target: LOG_TARGET, "✅ Committing {} transactions for shard {shard} (epoch: {msg_epoch})", transactions_len);
                     let inserted = tx.batch_insert_transaction_receipts(transactions, &event_filters)?;
                     if !watched_templates.is_empty() {
-                        process_watched_substate_events(tx, &inserted, &*watched_templates)?;
+                        process_watched_substate_events(tx, &inserted, &watched_templates)?;
                     }
 
                     if !template_catalogue.is_empty() {

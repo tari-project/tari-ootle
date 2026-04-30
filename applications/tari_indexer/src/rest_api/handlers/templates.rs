@@ -169,6 +169,7 @@ pub async fn get_template_catalogue_entry(
         .read_only_store()
         .get_template_catalogue_entry(&template_address)
         .await
+        .optional()
         .map_err(ErrorResponse::anyhow)?
         .ok_or_else(|| ErrorResponse::not_found(format!("Template {} not found in the catalogue", template_address)))?;
 

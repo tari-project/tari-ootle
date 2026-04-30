@@ -196,7 +196,7 @@ pub trait IndexerStoreReadTransaction {
     fn get_template_catalogue_entry(
         &mut self,
         template_address: &TemplateAddress,
-    ) -> Result<Option<TemplateCatalogueEntry>, StorageError>;
+    ) -> Result<TemplateCatalogueEntry, StorageError>;
 
     // -------------------------------- Watched Substates -------------------------------- //
 
@@ -389,7 +389,7 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
     pub async fn get_template_catalogue_entry(
         &self,
         template_address: &TemplateAddress,
-    ) -> Result<Option<crate::storage_sqlite::models::TemplateCatalogueEntry>, StorageError> {
+    ) -> Result<TemplateCatalogueEntry, StorageError> {
         let template_address = *template_address;
         self.inner
             .with_read_tx(move |tx| tx.get_template_catalogue_entry(&template_address))

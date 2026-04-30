@@ -848,7 +848,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
     fn get_template_catalogue_entry(
         &mut self,
         template_address: &TemplateAddress,
-    ) -> Result<Option<TemplateCatalogueEntry>, StorageError> {
+    ) -> Result<TemplateCatalogueEntry, StorageError> {
         const OPERATION: &str = "get_template_catalogue_entry";
         use crate::storage_sqlite::schema::template_catalogue;
 
@@ -859,16 +859,17 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             .optional()
             .map_err(|e| StorageError::QueryError {
                 reason: format!("{OPERATION}: {e}"),
+            })?
+            .ok_or_else(|| StorageError::NotFound {
+                item: "template_catalogue_entry",
+                key: template_address.to_string(),
             })?;
 
-        row.map(|r| {
-            TemplateCatalogueEntry::try_from(r).map_err(|e| StorageError::DecodingError {
-                operation: OPERATION,
-                item: "TemplateCatalogueEntry",
-                details: e.to_string(),
-            })
+        TemplateCatalogueEntry::try_from(row).map_err(|e| StorageError::DecodingError {
+            operation: OPERATION,
+            item: "TemplateCatalogueEntry",
+            details: e.to_string(),
         })
-        .transpose()
     }
 
     fn list_watched_substates(

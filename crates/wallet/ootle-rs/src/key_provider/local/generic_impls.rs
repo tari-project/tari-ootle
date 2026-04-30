@@ -12,10 +12,6 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
 use tari_ootle_address::RistrettoOotleAddress;
-use tari_ootle_common_types::{
-    base_layer_hashing::{WalletOutputEncryptionKeysDomainHasher, encrypted_data_hasher},
-    engine_types::crypto::OutputBody,
-};
 use tari_ootle_transaction::{
     Signable,
     TransactionSealSignature,
@@ -24,32 +20,27 @@ use tari_ootle_transaction::{
     UnsignedTransaction,
 };
 use tari_ootle_wallet_crypto::{
-    DecryptedData,
     OutputWitness,
     StealthCryptoApi,
     StealthOutputWitness,
     bullet_proof::generate_extended_bullet_proof,
-    encrypted_data,
-    kdfs,
     pay_to::PayTo,
     viewable_balance_proof::generate_elgamal_viewable_balance_proof,
 };
 use tari_template_lib_types::{
     Amount,
     EncryptedData,
-    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    crypto::RistrettoPublicKeyBytes,
     stealth::{SpendCondition, StealthOutputsStatement, StealthUnspentOutput, UnspentOutput},
 };
 use tokio::task;
 
 use crate::{
     Address,
-    key_provider,
-    key_provider::{DiffieHellmanKdfKeyProvider, LocalKeyProvider, OutputMaskProvider},
-    keys::HasViewOnlyKeySecret,
+    key_provider::{LocalKeyProvider, OutputMaskProvider},
     signer,
     signer::StealthKeyPrehashSigner,
-    stealth::{InputDecryptor, Output, StealthOutputStatementFactory, StealthProviderError, StealthResult},
+    stealth::{Output, StealthOutputStatementFactory, StealthProviderError, StealthResult},
     transaction::{TransactionSigner, TransactionStealthKeySigner},
     wallet::TransactionAuthorization,
 };
@@ -78,23 +69,6 @@ where C: PrehashSigner<(RistrettoSchnorr, RistrettoPublicKey)> + Send + Sync
         let (signature, public_key) = self.credentials.sign_prehash(&message)?;
         let sig = TransactionSignature::new(public_key.to_byte_type(), signature.to_byte_type());
         Ok(sig.into())
-    }
-}
-
-#[async_trait]
-impl<C: HasViewOnlyKeySecret + Send + Sync> DiffieHellmanKdfKeyProvider<WalletOutputEncryptionKeysDomainHasher>
-    for LocalKeyProvider<C>
-{
-    async fn create_kdf_dh_key(
-        &self,
-        hasher: WalletOutputEncryptionKeysDomainHasher,
-        public_key: &RistrettoPublicKey,
-    ) -> key_provider::Result<RistrettoSecretKey> {
-        Ok(kdfs::dh_kdf_aead(
-            hasher,
-            self.credentials.view_only_secret(),
-            public_key,
-        ))
     }
 }
 
@@ -153,44 +127,6 @@ impl<C: OutputMaskProvider + Send + Sync> StealthOutputStatementFactory for Loca
             },
             agg_output_mask,
         ))
-    }
-}
-
-#[async_trait]
-impl<C: HasViewOnlyKeySecret + Send + Sync> InputDecryptor for LocalKeyProvider<C> {
-    async fn decrypt_input_data(
-        &self,
-        commitment: &PedersenCommitmentBytes,
-        input: &OutputBody,
-        skip_memo: bool,
-    ) -> StealthResult<DecryptedData> {
-        let sender_nonce_pk =
-            input
-                .public_nonce
-                .try_from_byte_type()
-                .map_err(|e| StealthProviderError::DecryptionFailed {
-                    commitment: *commitment,
-                    details: format!(
-                        "Malformed public nonce in output ({e}). This should not happen because this is verified by \
-                         the validators."
-                    ),
-                })?;
-
-        let hasher = encrypted_data_hasher();
-        let encryption_key = self.create_kdf_dh_key(hasher, &sender_nonce_pk).await.map_err(|e| {
-            StealthProviderError::DecryptionFailed {
-                commitment: *commitment,
-                details: format!("Failed to derive encryption key: {}", e),
-            }
-        })?;
-
-        let decrypted = encrypted_data::unblind_output(commitment, &input.encrypted_data, &encryption_key, skip_memo)
-            .map_err(|e| StealthProviderError::DecryptionFailed {
-            commitment: *commitment,
-            details: e.to_string(),
-        })?;
-
-        Ok(decrypted)
     }
 }
 

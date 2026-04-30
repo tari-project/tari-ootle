@@ -3,6 +3,8 @@
 
 mod app;
 mod get_public_key;
+mod sign_transaction;
 
 pub use app::*;
 pub use get_public_key::*;
+pub use sign_transaction::*;

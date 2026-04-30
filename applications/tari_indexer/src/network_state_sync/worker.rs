@@ -490,7 +490,7 @@ impl NetworkWideStateSync {
 
     fn persist_transaction_receipts<I: IntoIterator<Item = (TransactionReceiptAddress, TransactionReceipt)>>(
         &self,
-        tx: &mut SqliteStoreWriteTransaction<'_>,
+        tx: &mut SqliteStoreWriteTransaction,
         receipts: I,
     ) -> Result<(), StorageError> {
         // Insert into DB first so events get assigned their auto-increment IDs,
@@ -515,7 +515,7 @@ impl NetworkWideStateSync {
 
     fn process_watched_substate_events(
         &self,
-        tx: &mut SqliteStoreWriteTransaction<'_>,
+        tx: &mut SqliteStoreWriteTransaction,
         events: &[InsertedEvent],
     ) -> Result<(), StorageError> {
         use crate::store::IndexerStoreWriteTransaction;

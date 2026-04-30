@@ -55,6 +55,7 @@ diesel = { workspace = true, default-features = false, features = [
     "sqlite",
     "returning_clauses_for_sqlite_3_35",
     "time",
+    "r2d2",
 ] }
 indexmap = { workspace = true }
 diesel_migrations = { workspace = true }

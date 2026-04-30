@@ -58,6 +58,7 @@ use crate::{
             WatchedSubstateRow,
         },
         serialization::{deserialize_hex_try_from, deserialize_json, serialize_hex},
+        store_factory::SqlitePooledConnection,
     },
     store::IndexerStoreReadTransaction,
     substate_manager::SubstateResponse,
@@ -65,12 +66,12 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::indexer::storage_sqlite::reader";
 
-pub struct SqliteStoreReadTransaction<'a> {
-    pub(super) transaction: SqliteTransaction<'a>,
+pub struct SqliteStoreReadTransaction {
+    pub(super) transaction: SqliteTransaction<SqlitePooledConnection>,
 }
 
-impl<'a> SqliteStoreReadTransaction<'a> {
-    pub(super) fn new(transaction: SqliteTransaction<'a>) -> Self {
+impl SqliteStoreReadTransaction {
+    pub(super) fn new(transaction: SqliteTransaction<SqlitePooledConnection>) -> Self {
         Self { transaction }
     }
 
@@ -79,7 +80,7 @@ impl<'a> SqliteStoreReadTransaction<'a> {
     }
 }
 
-impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
+impl IndexerStoreReadTransaction for SqliteStoreReadTransaction {
     fn list_substates(
         &mut self,
         by_id: Option<&SubstateId>,

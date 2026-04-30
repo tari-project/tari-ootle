@@ -32,16 +32,23 @@ impl SqliteIndexerStore {
         let database_url = path.to_str().expect("database_url utf-8 error").to_string();
         let mut connection = SqliteConnection::establish(&database_url).map_err(SqliteStorageError::from)?;
 
+        for pragma in [
+            "PRAGMA journal_mode = WAL;",
+            "PRAGMA synchronous = NORMAL;",
+            "PRAGMA foreign_keys = ON;",
+        ] {
+            sql_query(pragma)
+                .execute(&mut connection)
+                .map_err(|source| SqliteStorageError::DieselError {
+                    source,
+                    operation: "set pragma",
+                })?;
+        }
+
         pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./src/storage_sqlite/migrations");
         if let Err(err) = connection.run_pending_migrations(MIGRATIONS) {
             log::error!(target: LOG_TARGET, "Error running migrations: {}", err);
         }
-        sql_query("PRAGMA foreign_keys = ON;")
-            .execute(&mut connection)
-            .map_err(|source| SqliteStorageError::DieselError {
-                source,
-                operation: "set pragma",
-            })?;
 
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),

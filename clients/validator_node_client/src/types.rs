@@ -325,7 +325,7 @@ pub struct GetCommitteeRequest {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
 pub struct GetCommitteeResponse {
-    pub committee: Committee<PeerAddress>,
+    pub committee: Arc<Committee<PeerAddress>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

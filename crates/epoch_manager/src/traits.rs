@@ -23,6 +23,7 @@
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
+    sync::Arc,
 };
 
 use tari_common_types::types::FixedHash;
@@ -78,10 +79,6 @@ pub trait EpochManagerReader: Send + Sync {
         epoch: Epoch,
     ) -> impl Future<Output = Result<Vec<ValidatorNode<Self::Addr>>, EpochManagerError>> + Send;
 
-    fn get_committees(
-        &self,
-        epoch: Epoch,
-    ) -> impl Future<Output = Result<HashMap<ShardGroup, Committee<Self::Addr>>, EpochManagerError>> + Send;
     fn get_committee_info_by_validator_address(
         &self,
         epoch: Epoch,
@@ -91,7 +88,7 @@ pub trait EpochManagerReader: Send + Sync {
         &self,
         epoch: Epoch,
         substate_address: SubstateAddress,
-    ) -> impl Future<Output = Result<Committee<Self::Addr>, EpochManagerError>> + Send;
+    ) -> impl Future<Output = Result<Arc<Committee<Self::Addr>>, EpochManagerError>> + Send;
 
     fn get_validator_node_by_public_key(
         &self,
@@ -142,9 +139,7 @@ pub trait EpochManagerReader: Send + Sync {
         &self,
         epoch: Epoch,
         shards: ShardGroup,
-        limit: Option<usize>,
-        shuffled: bool,
-    ) -> impl Future<Output = Result<Committee<Self::Addr>, EpochManagerError>> + Send;
+    ) -> impl Future<Output = Result<Arc<Committee<Self::Addr>>, EpochManagerError>> + Send;
     fn get_committees_overlapping_shard_group(
         &self,
         epoch: Epoch,
@@ -154,7 +149,7 @@ pub trait EpochManagerReader: Send + Sync {
     fn get_local_committee(
         &self,
         epoch: Epoch,
-    ) -> impl Future<Output = Result<Committee<Self::Addr>, EpochManagerError>> + Send {
+    ) -> impl Future<Output = Result<Arc<Committee<Self::Addr>>, EpochManagerError>> + Send {
         async move {
             let validator = self.get_our_validator_node(epoch).await?;
             let committee = self.get_committee_for_substate(epoch, validator.shard_key).await?;
@@ -166,7 +161,7 @@ pub trait EpochManagerReader: Send + Sync {
         &self,
         epoch: Epoch,
         public_key: RistrettoPublicKeyBytes,
-    ) -> impl Future<Output = Result<Committee<Self::Addr>, EpochManagerError>> + Send {
+    ) -> impl Future<Output = Result<Arc<Committee<Self::Addr>>, EpochManagerError>> + Send {
         async move {
             let validator = self.get_validator_node_by_public_key(epoch, public_key).await?;
             let committee = self.get_committee_for_substate(epoch, validator.shard_key).await?;
@@ -190,7 +185,7 @@ pub trait EpochManagerReader: Send + Sync {
     fn get_current_epoch_committee(
         &self,
         shard: SubstateAddress,
-    ) -> impl Future<Output = Result<Committee<Self::Addr>, EpochManagerError>> + Send {
+    ) -> impl Future<Output = Result<Arc<Committee<Self::Addr>>, EpochManagerError>> + Send {
         async move {
             let current_epoch = self.current_epoch().await?;
             self.get_committee_for_substate(current_epoch, shard).await

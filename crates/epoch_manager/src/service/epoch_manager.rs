@@ -37,7 +37,7 @@ use tari_ootle_common_types::{
     ShardGroup,
     SubstateAddress,
     VotePower,
-    committee::{Committee, CommitteeInfo, CommitteeMember},
+    committee::{Committee, CommitteeInfo},
     layer_one_transaction::{LayerOnePayloadType, LayerOneTransactionDef},
     optional::Optional,
 };
@@ -298,15 +298,6 @@ where TSpec: EpochManagerSpec
         Ok(vn)
     }
 
-    pub fn get_committees(
-        &self,
-        epoch: Epoch,
-    ) -> Result<HashMap<ShardGroup, Committee<TSpec::Addr>>, EpochManagerError> {
-        let mut tx = self.global_db.create_transaction()?;
-        let mut validator_node_db = self.global_db.validator_nodes(&mut tx);
-        Ok(validator_node_db.get_committees(epoch)?)
-    }
-
     pub fn get_committee_info_by_validator_address(
         &self,
         epoch: Epoch,
@@ -321,11 +312,11 @@ where TSpec: EpochManagerSpec
         self.get_committee_info_for_substate(epoch, vn.shard_key)
     }
 
-    pub(crate) fn get_committee_vns_from_shard_key(
+    pub(crate) fn get_committee_for_substate(
         &self,
         epoch: Epoch,
         substate_address: SubstateAddress,
-    ) -> Result<Vec<ValidatorNode<TSpec::Addr>>, EpochManagerError> {
+    ) -> Result<Committee<TSpec::Addr>, EpochManagerError> {
         let num_vns = self.get_total_validator_count(epoch)?;
         if num_vns == 0 {
             return Err(EpochManagerError::NoCommitteeVns {
@@ -335,52 +326,10 @@ where TSpec: EpochManagerSpec
         }
 
         let num_committees = calculate_num_committees(num_vns, self.config.committee_size);
-        if num_committees == 1 {
-            // retrieve the validator nodes for this epoch from database, sorted by shard_key
-            return self.get_validator_nodes_per_epoch(epoch);
-        }
-
         let shard_group = substate_address.to_shard_group(self.config.num_preshards, num_committees);
 
-        // TODO(perf): fetch full validator node records for the shard group in single query (current O(n + 1) queries)
-        let committees = self.get_committee_for_shard_group(epoch, shard_group, false, None)?;
-
-        let mut res = vec![];
-        for member in committees {
-            let vn = self
-                .get_validator_node_by_public_key(epoch, &member.public_key)?
-                .ok_or_else(|| EpochManagerError::ValidatorNodeNotRegistered {
-                    address: member
-                        .public_key
-                        .try_from_byte_type()
-                        .ok()
-                        .and_then(|pk| TSpec::Addr::try_from_public_key(&pk))
-                        .map(|a| a.to_string())
-                        .unwrap_or_else(|| format!("PARSE FAIL for pk bytes {}", member.public_key)),
-                    epoch,
-                })?;
-            res.push(vn);
-        }
-        res.sort_by_key(|a| a.shard_key);
-        Ok(res)
-    }
-
-    pub(crate) fn get_committee_for_substate(
-        &self,
-        epoch: Epoch,
-        substate_address: SubstateAddress,
-    ) -> Result<Committee<TSpec::Addr>, EpochManagerError> {
-        let result = self.get_committee_vns_from_shard_key(epoch, substate_address)?;
-        Ok(Committee::new(
-            result
-                .into_iter()
-                .map(|v| CommitteeMember {
-                    public_key: v.public_key,
-                    address: v.address,
-                    vote_power: v.vote_power,
-                })
-                .collect(),
-        ))
+        let committee = self.get_committee_for_shard_group(epoch, shard_group, None)?;
+        Ok(committee)
     }
 
     pub fn get_number_of_committees(&self, epoch: Epoch) -> Result<u32, EpochManagerError> {
@@ -475,17 +424,12 @@ where TSpec: EpochManagerSpec
         &self,
         epoch: Epoch,
         shard_group: ShardGroup,
-        shuffle: bool,
         limit: Option<usize>,
     ) -> Result<Committee<TSpec::Addr>, EpochManagerError> {
         let mut tx = self.global_db.create_transaction()?;
         let mut validator_node_db = self.global_db.validator_nodes(&mut tx);
-        let committees = validator_node_db.get_committee_for_shard_group(
-            epoch,
-            shard_group,
-            shuffle,
-            limit.unwrap_or(usize::MAX),
-        )?;
+        let committees =
+            validator_node_db.get_committee_for_shard_group(epoch, shard_group, limit.unwrap_or(usize::MAX))?;
         Ok(committees)
     }
 

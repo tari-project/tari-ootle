@@ -227,7 +227,7 @@ where TConsensusSpec: ConsensusSpec
         } else {
             let committee = self
                 .epoch_manager
-                .get_committee_by_shard_group(epoch, local_committee_info.shard_group(), None, false)
+                .get_committee_by_shard_group(epoch, local_committee_info.shard_group())
                 .await?;
 
             info!(
@@ -236,7 +236,11 @@ where TConsensusSpec: ConsensusSpec
                 committee.len(), local_committee_info.num_shard_group_members(), leaf_block,
             );
 
-            if let Err(err) = self.outbound_messaging.multicast(committee.into_addresses(), msg).await {
+            if let Err(err) = self
+                .outbound_messaging
+                .multicast(std::sync::Arc::unwrap_or_clone(committee).into_addresses(), msg)
+                .await
+            {
                 warn!(
                     target: LOG_TARGET,
                     "Failed to multicast proposal to local committee: {}",

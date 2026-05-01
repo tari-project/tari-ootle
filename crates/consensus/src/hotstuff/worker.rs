@@ -507,11 +507,9 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     // the transaction (we deleted our database likely during development testing).
                     // In this case, request from another random VN.
                     // (TODO: not 100% reliable since we're just asking a single random committee member)
-                    let mut local_committee = self.epoch_manager.get_local_committee(epoch).await?;
-
-                    local_committee.shuffle();
-                    match local_committee
-                        .into_iter()
+                    match epoch_state
+                        .local_committee
+                        .shuffled()
                         .find(|m| m.address != self.local_validator_addr)
                     {
                         Some(m) => {
@@ -521,7 +519,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                                 m,
                                 self.local_validator_addr,
                             );
-                            request_from_address = m.address;
+                            request_from_address = m.address.clone();
                         },
                         None => {
                             warn!(

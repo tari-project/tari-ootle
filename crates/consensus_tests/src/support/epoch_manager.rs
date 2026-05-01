@@ -126,7 +126,7 @@ impl TestEpochManager {
                 state.address_shard.insert(member.address.clone(), shard_group);
             }
 
-            state.committees.insert(shard_group, committee);
+            state.committees.insert(shard_group, Arc::new(committee));
         }
         self
     }
@@ -166,7 +166,7 @@ impl EpochManagerReader for TestEpochManager {
         &self,
         _epoch: Epoch,
         substate_address: SubstateAddress,
-    ) -> Result<Committee<Self::Addr>, EpochManagerError> {
+    ) -> Result<Arc<Committee<Self::Addr>>, EpochManagerError> {
         let state = self.state_lock().await;
         let shard_group = substate_address.to_shard_group(TEST_NUM_PRESHARDS, state.committees.len() as u32);
         Ok(state.committees[&shard_group].clone())
@@ -230,13 +230,6 @@ impl EpochManagerReader for TestEpochManager {
         Ok(self.inner.lock().await.committees.len() as u32)
     }
 
-    async fn get_committees(
-        &self,
-        _epoch: Epoch,
-    ) -> Result<HashMap<ShardGroup, Committee<Self::Addr>>, EpochManagerError> {
-        Ok(self.inner.lock().await.committees.clone())
-    }
-
     async fn get_committee_info_by_validator_address(
         &self,
         epoch: Epoch,
@@ -269,20 +262,11 @@ impl EpochManagerReader for TestEpochManager {
         &self,
         _epoch: Epoch,
         shard_group: ShardGroup,
-        limit: Option<usize>,
-        shuffled: bool,
-    ) -> Result<Committee<Self::Addr>, EpochManagerError> {
+    ) -> Result<Arc<Committee<Self::Addr>>, EpochManagerError> {
         let state = self.state_lock().await;
-        let Some(mut committee) = state.committees.get(&shard_group).cloned() else {
+        let Some(committee) = state.committees.get(&shard_group).cloned() else {
             panic!("Committee not found for shard group {}", shard_group);
         };
-        if shuffled {
-            committee.shuffle();
-        }
-
-        if let Some(limit) = limit {
-            committee.members_mut().truncate(limit);
-        }
 
         Ok(committee)
     }
@@ -296,7 +280,7 @@ impl EpochManagerReader for TestEpochManager {
         let mut committees = HashMap::new();
         for (sg, committee) in &state.committees {
             if sg.overlaps_shard_group(&shard_group) {
-                committees.insert(*sg, committee.clone());
+                committees.insert(*sg, (**committee).clone());
             }
         }
         Ok(committees)
@@ -449,7 +433,7 @@ pub struct TestEpochManagerState {
     pub last_epoch_hash: FixedHash,
     #[allow(clippy::type_complexity)]
     pub validator_nodes: HashMap<TestAddress, (ValidatorNode<TestAddress>, ShardGroup)>,
-    pub committees: HashMap<ShardGroup, Committee<TestAddress>>,
+    pub committees: HashMap<ShardGroup, Arc<Committee<TestAddress>>>,
     pub address_shard: HashMap<TestAddress, ShardGroup>,
     pub eviction_proofs: Vec<tari_sidechain::EvictionProof>,
 }

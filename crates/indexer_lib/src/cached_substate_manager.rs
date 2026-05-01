@@ -237,7 +237,7 @@ where
     ) -> Result<SubstateResult, IndexerError> {
         debug!(target: LOG_TARGET, "get_specific_substate_from_committee: {substate_req}");
         let epoch = self.committee_provider.current_epoch().await?;
-        let mut committee = self
+        let committee = self
             .committee_provider
             .get_committee_for_substate(epoch, substate_req.or_zero_version().to_substate_address())
             .await?;
@@ -247,12 +247,11 @@ where
             });
         }
 
-        committee.shuffle();
-
         let f = (committee.len() - 1) / 3;
         let mut num_nexist_substate_results = 0;
         let mut last_error = None;
-        for vn_addr in committee.address_iter() {
+        for member in committee.shuffled() {
+            let vn_addr = &member.address;
             debug!(target: LOG_TARGET, "Getting substate {} from vn {}", substate_req, vn_addr);
 
             match self.get_substate_from_vn(vn_addr, substate_req).await {

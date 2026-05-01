@@ -43,7 +43,8 @@ pub async fn optimize_wasm_template(template_binary: &[u8]) -> Result<Vec<u8>, E
     OptimizationOptions::new_optimize_for_size()
         .enable_feature(Feature::BulkMemory)
         .enable_feature(Feature::ReferenceTypes)
-        .enable_feature(Feature::Simd)
+        .disable_feature(Feature::Simd)
+        .disable_feature(Feature::RelaxedSimd)
         .run(input_file_path, output_file_path.as_path())?;
 
     let result = tokio::fs::read(output_file_path).await?;

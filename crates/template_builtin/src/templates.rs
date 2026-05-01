@@ -17,21 +17,37 @@ pub fn get_template_builtin(address: &TemplateAddress) -> &'static [u8] {
 pub fn try_get_template_builtin(address: &TemplateAddress) -> Option<&'static [u8]> {
     all_builtin_templates()
         .iter()
-        .find(|(a, _)| a == address)
-        .map(|(_, b)| *b)
+        .find(|t| t.address == *address)
+        .map(|t| t.binary)
 }
 
-pub const fn all_builtin_templates() -> &'static [(TemplateAddress, &'static [u8])] {
+pub const fn all_builtin_templates() -> &'static [Template] {
     &[
-        (ACCOUNT_TEMPLATE_ADDRESS, include_bytes!("../compiled/account.wasm")),
-        (
-            NFT_FAUCET_TEMPLATE_ADDRESS,
-            include_bytes!("../compiled/nft_faucet.wasm"),
-        ),
-        (XTR_FAUCET_TEMPLATE_ADDRESS, include_bytes!("../compiled/faucet.wasm")),
-        (
-            LIQUIDITY_POOL_TEMPLATE_ADDRESS,
-            include_bytes!("../compiled/liquidity_pool.wasm"),
-        ),
+        Template {
+            address: ACCOUNT_TEMPLATE_ADDRESS,
+            binary: include_bytes!("../compiled/account.wasm"),
+            name: "Account",
+        },
+        Template {
+            address: NFT_FAUCET_TEMPLATE_ADDRESS,
+            binary: include_bytes!("../compiled/nft_faucet.wasm"),
+            name: "NftFaucet",
+        },
+        Template {
+            address: XTR_FAUCET_TEMPLATE_ADDRESS,
+            binary: include_bytes!("../compiled/faucet.wasm"),
+            name: "XtrFaucet",
+        },
+        Template {
+            address: LIQUIDITY_POOL_TEMPLATE_ADDRESS,
+            binary: include_bytes!("../compiled/liquidity_pool.wasm"),
+            name: "TwoResourceLiquidityPool",
+        },
     ]
+}
+
+pub struct Template {
+    pub address: TemplateAddress,
+    pub binary: &'static [u8],
+    pub name: &'static str,
 }

@@ -97,7 +97,7 @@ impl TemplateManager {
     fn builtin_templates() -> impl Iterator<Item = Template> {
         all_builtin_templates()
             .iter()
-            .map(|(address, code)| convert_builtin_template_from_code(*address, code))
+            .map(|t| convert_builtin_template_from_code(t.address, t.binary))
     }
 
     pub fn template_exists(

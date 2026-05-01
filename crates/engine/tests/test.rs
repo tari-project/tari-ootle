@@ -1243,8 +1243,8 @@ fn test_builtin_templates() {
 
 #[test]
 fn all_builtin_templates_are_correct() {
-    for (address, wasm_bytes) in all_builtin_templates() {
-        WasmModule::load_template_from_code(wasm_bytes)
-            .unwrap_or_else(|e| panic!("Failed to load builtin template at address {}: {}", address, e));
+    for template in all_builtin_templates() {
+        WasmModule::load_template_from_code(template.binary)
+            .unwrap_or_else(|e| panic!("Failed to load builtin template at address {}: {}", template.address, e));
     }
 }

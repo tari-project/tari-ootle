@@ -44,7 +44,7 @@ impl Runner {
             .new_transaction_builder()
             .pay_fee_from_component(
                 in_account.component_address,
-                Amount::from_usize(num_tariswaps) * 1000u64,
+                Amount::from_usize(num_tariswaps) * 2000u64,
             )
             .then(|mut builder| {
                 for _ in 0..num_tariswaps {

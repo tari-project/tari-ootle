@@ -29,8 +29,6 @@ pub struct CommonArgs {
     pub db_path: PathBuf,
     #[clap(long, short = 'i', alias = "indexer", default_value = "http://localhost:18300")]
     pub indexer_url: Url,
-    #[clap(long, short = 'v', alias = "vn", default_value = "http://localhost:18200/json_rpc")]
-    pub validator_node_url: Url,
     #[clap(long, alias = "faucet")]
     pub faucet_template: Option<TemplateAddress>,
     #[clap(long, alias = "swap")]

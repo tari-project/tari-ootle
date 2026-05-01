@@ -37,7 +37,7 @@ impl Runner {
                     .create_account(owner_public_key)
                     .put_last_instruction_output_on_workspace("account")
                     .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Workspace("account")])
-                    .pay_fee_from_component("account", 1000u64)
+                    .pay_fee_from_component("account", 2000u64)
             })
             .with_inputs([
                 SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
@@ -111,7 +111,7 @@ impl Runner {
                         .create_account(owner_public_key)
                         .put_last_instruction_output_on_workspace("account")
                         .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Workspace("account")])
-                        .pay_fee_from_component("account", 1000u64)
+                        .pay_fee_from_component("account", 2000u64)
                 })
                 .with_inputs([
                     SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),

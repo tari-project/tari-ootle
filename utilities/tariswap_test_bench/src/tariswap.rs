@@ -139,7 +139,7 @@ impl Runner {
                         SubstateRequirement::unversioned(faucet.resource_address),
                     ])
                     .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
-                    .pay_fee_from_component(account.component_address, 2000u64)
+                    .pay_fee_from_component(account.component_address, 3000u64)
                     .call_method(account.component_address, "withdraw", args![TARI_TOKEN, amount_a])
                     .put_last_instruction_output_on_workspace("a")
                     .call_method(account.component_address, "withdraw", args![
@@ -225,7 +225,7 @@ impl Runner {
         amount_b_for_a: Amount,
         faucet: &Faucet,
     ) -> anyhow::Result<()> {
-        const SWAP_FEE: u64 = 1500;
+        const SWAP_FEE: u64 = 8000;
         let primary_account_key = self
             .sdk
             .key_manager_api()

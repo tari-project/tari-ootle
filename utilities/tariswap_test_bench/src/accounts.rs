@@ -183,14 +183,12 @@ impl Runner {
                     fee_account.component_address,
                     Amount::ONE_THOUSAND * Amount::from_usize(accounts.len()),
                 )
-                .then(|builder| {
-                    accounts.iter().fold(builder, |builder, account| {
-                        builder
-                            .call_method(faucet.component_address, "take_free_coins", args![])
-                            .put_last_instruction_output_on_workspace("faucet")
-                            .call_method(account.component_address, "deposit", args![Workspace("faucet")])
-                            .add_input(SubstateRequirement::unversioned(account.component_address))
-                    })
+                .fold(accounts.iter(), |builder, account| {
+                    builder
+                        .call_method(faucet.component_address, "take_free_coins", args![])
+                        .put_last_instruction_output_on_workspace("faucet")
+                        .call_method(account.component_address, "deposit", args![Workspace("faucet")])
+                        .add_input(SubstateRequirement::unversioned(account.component_address))
                 })
                 .with_inputs([
                     SubstateRequirement::unversioned(faucet.component_address),
@@ -216,21 +214,22 @@ impl Runner {
                 .filter_map(|(addr, substate)| {
                     Some((addr.as_component_address()?, substate.substate_value().component()?))
                 })
-                .map(|(addr, component)| (addr, IndexedWellKnownTypes::from_value(&component.body.state).unwrap()));
+                .map(|(addr, component)| (addr, IndexedWellKnownTypes::from_value(component.state()).unwrap()));
 
             for (account, indexed) in accounts_and_state {
                 log::debug!("Funded account {account} with vaults:");
                 for vault_id in indexed.vault_ids() {
-                    let vault = result
+                    let Some(vault) = result
                         .result
                         .any_accept()
                         .unwrap()
                         .up_iter()
                         .find(|(addr, _)| addr == vault_id)
                         .map(|(_, substate)| substate.substate_value().vault().unwrap())
-                        .unwrap_or_else(|| {
-                            panic!("Vault {vault_id} not found in diff");
-                        });
+                    else {
+                        // This vault is for another resource that was not used in this transaction
+                        continue;
+                    };
                     log::debug!("- {} {} {}", vault_id, vault.resource_address(), vault.resource_type());
                     self.sdk.accounts_api().add_vault(
                         account,

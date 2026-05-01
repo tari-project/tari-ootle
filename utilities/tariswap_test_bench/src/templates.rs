@@ -19,7 +19,7 @@ pub async fn get_templates(cli: &CommonArgs) -> anyhow::Result<(TemplateAddress,
     };
 
     let tariswap = if let Some(template_address) = cli.swap_template {
-        template_address
+        template_address.as_template_address()
     } else {
         templates
             .iter()
@@ -29,7 +29,7 @@ pub async fn get_templates(cli: &CommonArgs) -> anyhow::Result<(TemplateAddress,
     };
 
     let faucet = if let Some(template_address) = cli.faucet_template {
-        template_address
+        template_address.as_template_address()
     } else {
         templates
             .iter()

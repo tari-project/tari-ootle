@@ -4,7 +4,8 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
-use tari_template_lib_types::TemplateAddress;
+use tari_engine_types::published_template::PublishedTemplateAddress;
+use tari_ootle_transaction::Network;
 use url::Url;
 
 #[derive(Parser, Debug)]
@@ -27,12 +28,14 @@ impl Cli {
 pub struct CommonArgs {
     #[clap(long, short = 'd', alias = "db", default_value = "data/tariswap-test-bench.sqlite")]
     pub db_path: PathBuf,
+    #[clap(long, short = 'n', default_value = "localnet")]
+    pub network: Network,
     #[clap(long, short = 'i', alias = "indexer", default_value = "http://localhost:18300")]
     pub indexer_url: Url,
     #[clap(long, alias = "faucet")]
-    pub faucet_template: Option<TemplateAddress>,
+    pub faucet_template: Option<PublishedTemplateAddress>,
     #[clap(long, alias = "swap")]
-    pub swap_template: Option<TemplateAddress>,
+    pub swap_template: Option<PublishedTemplateAddress>,
 }
 
 #[derive(Subcommand, Debug)]

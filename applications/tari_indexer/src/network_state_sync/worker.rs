@@ -16,7 +16,15 @@ use tari_engine_types::{
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader, service::EpochManagerHandle};
 use tari_indexer_client::event::{IndexerEvent, NewEpochEvent, TransactionEvent, TransactionFinalizedEvent};
 use tari_networking::NetworkingHandle;
-use tari_ootle_common_types::{Epoch, ShardGroup, StateVersion, VotePower, optional::Optional, shard::Shard};
+use tari_ootle_common_types::{
+    Epoch,
+    ShardGroup,
+    StateVersion,
+    VotePower,
+    displayable::Displayable,
+    optional::Optional,
+    shard::Shard,
+};
 use tari_ootle_p2p::{PeerAddress, TariMessagingSpec, proto::rpc};
 use tari_ootle_storage::{
     StorageError,
@@ -404,6 +412,8 @@ impl NetworkWideStateSync {
             .map(|(v, e)| (v.as_u64(), *e))
             .unwrap_or_else(|| (0, Epoch::zero()));
         let from_version = prev_version + 1;
+
+        info!(target: LOG_TARGET, "🌍️ Starting state sync for shard {shard} from version {from_version}");
         let mut value_filters = SubstateValueFilterFlags::UTXO |
             SubstateValueFilterFlags::VALIDATOR_FEE_POOL |
             SubstateValueFilterFlags::CLAIMED_OUTPUT_TOMBSTONE |
@@ -428,6 +438,8 @@ impl NetworkWideStateSync {
 
         let mut is_first_iter = true;
         let mut xtr_claimed = Amount::zero();
+        let mut last_version = StateVersion::new(from_version);
+        let mut last_epoch = None;
         while let Some(result) = stream.next().await {
             if is_first_iter {
                 // Avoid log spam, only log once per stream
@@ -441,7 +453,9 @@ impl NetworkWideStateSync {
                 .ok_or_else(|| NetworkStateSyncError::InvalidStateUpdate {
                     details: "Received state update without epoch".to_string(),
                 })?;
+            last_epoch = Some(msg_epoch);
             let state_version = StateVersion::new(msg.state_version);
+            last_version = state_version;
 
             for update in msg.updates {
                 let update =
@@ -468,7 +482,7 @@ impl NetworkWideStateSync {
                 continue;
             }
 
-            info!(target: LOG_TARGET, "🌍️ Received {} updates for shard {shard} (epoch: {msg_epoch}, state version: {state_version})", update_buf.len());
+            debug!(target: LOG_TARGET, "🌍️ Received {} updates for shard {shard} (epoch: {msg_epoch}, state version: {state_version})", update_buf.len());
 
             self.stats.increase_state_updates(update_buf.len());
 
@@ -533,6 +547,7 @@ impl NetworkWideStateSync {
                 });
             }
         }
+        info!(target: LOG_TARGET, "🌍️ Completed state sync for shard {shard} in shard group {shard_group} to epoch {} and state version {last_version}",last_epoch.display() );
         Ok(())
     }
 }

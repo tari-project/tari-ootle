@@ -11147,9 +11147,11 @@ name = "tari_engine"
 version = "0.30.2"
 dependencies = [
  "blake2",
+ "bytes",
  "criterion",
  "indexmap 2.13.0",
  "log",
+ "memmap2 0.9.9",
  "ootle_byte_type",
  "rand 0.8.5",
  "serde",

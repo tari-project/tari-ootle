@@ -29,6 +29,7 @@ use std::{
 };
 
 use log::*;
+use memmap2::Mmap;
 use tari_engine_types::published_template::PublishedTemplate;
 use tari_ootle_common_types::{
     Epoch,
@@ -97,43 +98,75 @@ impl WasmModuleCache {
     /// any miss — file missing, header malformed, deserialize failure. On
     /// recoverable corruption the bad file is removed so a subsequent `store`
     /// can replace it.
+    ///
+    /// The file is `mmap`'d rather than read into a `Vec<u8>` — wasmer's
+    /// deserialize path accepts `bytes::Bytes` and `Bytes::from_owner` lets us
+    /// hand it the mmap region without copying. Cache hits cost a single
+    /// `mmap` syscall (and the page faults wasmer's deserializer triggers as
+    /// it walks the artifact); no full-artifact allocation.
     pub fn try_load(&self, addr: &TemplateAddress) -> Option<LoadedTemplate> {
         let path = self.path_for(addr);
-        let bytes = match fs::read(&path) {
-            Ok(b) => b,
+        let file = match fs::File::open(&path) {
+            Ok(f) => f,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return None,
             Err(e) => {
                 warn!(
                     target: LOG_TARGET,
-                    "Failed to read cache file {}: {}", path.display(), e,
+                    "Failed to open cache file {}: {}", path.display(), e,
                 );
                 return None;
             },
         };
 
-        if bytes.len() < HEADER_BYTES {
+        // SAFETY: see the docs on `Mmap::map`. We don't promise immutability
+        // of the underlying file — if another process truncates or rewrites
+        // it concurrently the mmap read could SIGBUS. The cache dir is owned
+        // by this process (single writer, atomic rename on update), so this
+        // is safe in the deployment model. The fingerprint-suffixed filename
+        // also means concurrent writers from a different engine config would
+        // target a different file.
+        let mmap = match unsafe { Mmap::map(&file) } {
+            Ok(m) => m,
+            Err(e) => {
+                warn!(
+                    target: LOG_TARGET,
+                    "Failed to mmap cache file {}: {}", path.display(), e,
+                );
+                return None;
+            },
+        };
+
+        if mmap.len() < HEADER_BYTES {
             warn!(
                 target: LOG_TARGET,
                 "Cache file {} is shorter than the {}-byte header; removing.",
                 path.display(),
                 HEADER_BYTES,
             );
+            drop(mmap);
             let _ignore = fs::remove_file(&path);
             return None;
         }
 
         let mut header = [0u8; HEADER_BYTES];
-        header.copy_from_slice(&bytes[..HEADER_BYTES]);
+        header.copy_from_slice(&mmap[..HEADER_BYTES]);
         let code_size = u64::from_le_bytes(header) as usize;
-        let serialized = &bytes[HEADER_BYTES..];
 
-        // SAFETY: bytes were written by [`Self::store`] in a previous run of this
-        // process (or an earlier process owning the same data dir) via
-        // `wasmer::Module::serialize`. The cache directory is node-local and not
-        // attacker-controlled in any sane operational setup. The fingerprint
-        // suffix in the filename guarantees the engine config matches this
-        // build; a deserialize failure simply triggers the recompile fallback.
-        match unsafe { WasmModule::load_template_from_serialized(serialized, code_size) } {
+        // Wrap the mmap as a Bytes that owns it, then slice past the
+        // 8-byte header. `Bytes::slice` is zero-copy (pointer + length
+        // adjustment); the wrapped Mmap is dropped only when the resulting
+        // Bytes (and any clones the deserializer may keep) goes out of
+        // scope.
+        let body = bytes::Bytes::from_owner(mmap).slice(HEADER_BYTES..);
+
+        // SAFETY: bytes were written by [`Self::store`] in a previous run of
+        // this process (or an earlier process owning the same data dir) via
+        // `wasmer::Module::serialize`. The cache directory is node-local and
+        // not attacker-controlled in any sane operational setup. The
+        // fingerprint suffix in the filename guarantees the engine config
+        // matches this build; a deserialize failure simply triggers the
+        // recompile fallback.
+        match unsafe { WasmModule::load_template_from_serialized(body, code_size) } {
             Ok(loaded) => {
                 debug!(target: LOG_TARGET, "Cache hit for template {}", addr);
                 Some(loaded)

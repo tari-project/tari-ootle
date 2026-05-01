@@ -77,7 +77,15 @@ impl WasmModule {
     /// [`wasmer::Module::serialize`]). `code_size` is the size of the original
     /// WASM source bytes — preserved from the source compile and used by
     /// downstream caches (e.g. the in-memory moka weigher in
-    /// `StateStoreTemplateProvider`).
+    /// `MemoryCacheTemplateProvider`).
+    ///
+    /// Takes [`bytes::Bytes`] so callers can pass mmap-backed regions through
+    /// without a copy: `wasmer::Module::deserialize_unchecked` accepts `Bytes`
+    /// directly, and [`bytes::Bytes::from_owner`] wraps any
+    /// `AsRef<[u8]> + Send + 'static` (such as [`memmap2::Mmap`]) without
+    /// copying. With `&[u8]`, wasmer's `IntoBytes` impl falls back to
+    /// `to_vec()` and we'd pay an extra full-artifact allocation on every
+    /// cache hit.
     ///
     /// # Safety
     ///
@@ -86,8 +94,9 @@ impl WasmModule {
     /// arbitrary bytes here is undefined behaviour. Callers are expected to gate
     /// this behind a node-local cache directory whose contents only this process
     /// writes.
+    #[cfg(feature = "wasm-cache")]
     pub unsafe fn load_template_from_serialized(
-        serialized: &[u8],
+        serialized: bytes::Bytes,
         code_size: usize,
     ) -> Result<LoadedTemplate, TemplateLoaderError> {
         let engine = Self::create_engine();

@@ -28,14 +28,17 @@ serde = { workspace = true, default-features = true }
 thiserror = { workspace = true }
 wasmer = { workspace = true, features = ["cranelift"] }
 wasmer-middlewares = { workspace = true }
+bytes = { workspace = true, optional = true }
+memmap2 = { workspace = true, optional = true }
 
 [features]
 default = []
 # Enables the on-disk wasmer module cache (`tari_engine::wasm::cache`). Pulls
 # in `tari_template_builtin` to bypass caching for builtin addresses, plus the
-# filesystem I/O surface. Disable if embedding the engine in an environment
-# where a local data directory isn't available or isn't desirable.
-wasm-cache = []
+# filesystem I/O surface (memmap + bytes). Disable if embedding the engine in
+# an environment where a local data directory isn't available or isn't
+# desirable.
+wasm-cache = ["dep:bytes", "dep:memmap2"]
 
 [dev-dependencies]
 tari_template_test_tooling = { workspace = true }

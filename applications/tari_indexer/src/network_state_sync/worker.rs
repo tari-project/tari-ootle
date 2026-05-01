@@ -253,11 +253,6 @@ impl NetworkWideStateSync {
 
             info!(target: LOG_TARGET, "🌍️ Found {} checkpoints for shard group {shard_group} from epoch {from_epoch}", checkpoints.len());
 
-            let committee = self
-                .epoch_manager
-                .get_committee_by_shard_group(prev_epoch, shard_group, None, false)
-                .await?;
-
             for checkpoint in checkpoints {
                 info!(target: LOG_TARGET, "🌍️ Validating checkpoint for shard group {shard_group}: {}", checkpoint.header().calculate_hash());
 
@@ -274,12 +269,23 @@ impl NetworkWideStateSync {
                 // indexers. For now, to avoid       complexity that may be removed later, we'll skip
                 // validating them and only validate prev_epochs       checkpoint.
                 if checkpoint.epoch() == prev_epoch {
+                    // Use the checkpoint's own shard group, not the iterator's: the network may have
+                    // had a different shard-group structure at prev_epoch than the current epoch we
+                    // are iterating, so the QC is signed by the committee for `checkpoint_shard_group`,
+                    // not `shard_group`.
+                    let committee = self
+                        .epoch_manager
+                        .get_committee_by_shard_group(checkpoint.epoch(), checkpoint_shard_group, None, false)
+                        .await?;
                     checkpoint
                         .validate(checkpoint.epoch(), committee.quorum_threshold(), |pk| {
                             Ok(committee.get_power_by_public_key(pk).unwrap_or_else(VotePower::zero))
                         })
                         .map_err(|e| NetworkStateSyncError::InvalidCheckpoint {
-                            details: format!("Failed to validate checkpoint for shard group {}: {}", shard_group, e),
+                            details: format!(
+                                "Failed to validate checkpoint for shard group {}: {}",
+                                checkpoint_shard_group, e
+                            ),
                         })?;
                 } else {
                     checkpoint

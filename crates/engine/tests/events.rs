@@ -28,7 +28,7 @@ fn basic_emit_event() {
     assert!(result.finalize.is_accept());
     assert_eq!(result.finalize.events.len(), 1);
     assert_eq!(result.finalize.events[0].topic(), format!("EventEmitter.{}", topic));
-    assert_eq!(result.finalize.events[0].template_address(), event_emitter_template);
+    assert_eq!(*result.finalize.events[0].template_address(), event_emitter_template);
     assert_eq!(result.finalize.events[0].substate_id(), None);
     assert_eq!(
         result.finalize.events[0].get_payload("my").unwrap(),
@@ -81,7 +81,7 @@ fn builtin_vault_events() {
         .iter()
         .find(|e| e.topic() == "std.vault.withdraw")
         .unwrap();
-    assert_eq!(event.template_address(), ACCOUNT_TEMPLATE_ADDRESS);
+    assert_eq!(*event.template_address(), ACCOUNT_TEMPLATE_ADDRESS);
     // assert_eq!(event.component_address().unwrap(), sender_address);
     assert_eq!(
         *event.payload().get("resource_address").unwrap(),
@@ -97,7 +97,7 @@ fn builtin_vault_events() {
         .iter()
         .find(|e| e.topic() == "std.vault.deposit")
         .unwrap();
-    assert_eq!(event.template_address(), ACCOUNT_TEMPLATE_ADDRESS);
+    assert_eq!(*event.template_address(), ACCOUNT_TEMPLATE_ADDRESS);
     // assert_eq!(event.component_address().unwrap(), receiver_address);
     assert_eq!(event.payload().get("resource_address").unwrap(), TARI_TOKEN.to_string());
     assert_eq!(event.payload().get("resource_type").unwrap(), "Stealth");

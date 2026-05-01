@@ -30,7 +30,6 @@ use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common::configuration::bootstrap::{ApplicationType, grpc_default_port};
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_engine::wasm::WasmModule;
 use tari_engine_types::{calculate_template_binary_hash, published_template::PublishedTemplateMetadata};
 use tari_epoch_manager::service::{EpochManagerConfig, EpochManagerHandle};
 use tari_epoch_oracles::{
@@ -431,18 +430,16 @@ async fn check_store<TStore: IndexerStore>(config: &ApplicationConfig, store: &T
 async fn seed_builtin_template_catalogue<TStore: IndexerStore>(store: &TStore) -> anyhow::Result<()> {
     store
         .with_write_tx(|tx| {
-            for (address, code) in all_builtin_templates() {
-                let loaded = WasmModule::load_template_from_code(code)
-                    .map_err(|e| anyhow!("Failed to load built-in template: {e}"))?;
-                let binary_hash = calculate_template_binary_hash(code);
+            for template in all_builtin_templates() {
+                let binary_hash = calculate_template_binary_hash(template.binary);
                 let metadata = PublishedTemplateMetadata {
-                    template_name: loaded.template_name().to_string(),
+                    template_name: template.name.to_string(),
                     author_public_key: RistrettoPublicKeyBytes::default(),
                     binary_hash,
                     at_epoch: 0,
                     metadata_hash: None,
                 };
-                tx.upsert_template_catalogue(address, &metadata)?;
+                tx.upsert_template_catalogue(&template.address, &metadata)?;
             }
             Ok(())
         })

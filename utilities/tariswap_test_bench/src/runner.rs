@@ -33,7 +33,7 @@ impl tari_ootle_wallet_sdk::WalletSdkSpec for TariswapTestSdkSpec {
 type WalletSdk = Sdk<TariswapTestSdkSpec>;
 pub struct Runner {
     pub(crate) sdk: WalletSdk,
-    pub(crate) _cli: CommonArgs,
+    pub(crate) cli: CommonArgs,
     pub(crate) faucet_template: TemplateAddress,
     pub(crate) tariswap_template: TemplateAddress,
     pub(crate) stats: Stats,
@@ -45,7 +45,7 @@ impl Runner {
         let (faucet_template, tariswap_template) = get_templates(&cli).await?;
         Ok(Self {
             sdk,
-            _cli: cli,
+            cli,
             faucet_template,
             tariswap_template,
             stats: Stats::default(),
@@ -117,7 +117,7 @@ impl Runner {
     }
 
     pub fn new_transaction_builder(&self) -> TransactionBuilder {
-        Transaction::builder(Network::LocalNet)
+        Transaction::builder(self.cli.network)
     }
 }
 

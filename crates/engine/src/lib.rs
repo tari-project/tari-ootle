@@ -10,6 +10,7 @@ pub mod traits;
 pub mod transaction;
 pub mod wasm;
 
+pub use tari_engine_types as types;
 pub use tari_template_abi as abi;
 
 pub mod base_layer_hashers {

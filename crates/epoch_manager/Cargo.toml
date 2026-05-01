@@ -24,6 +24,9 @@ thiserror = { workspace = true }
 tokio = { workspace = true, default-features = false, features = ["sync"] }
 serde = { workspace = true }
 
+[dev-dependencies]
+tokio = { workspace = true, default-features = false, features = ["rt-multi-thread", "macros"] }
+
 [features]
 service = [
     "log",

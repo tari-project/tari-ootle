@@ -1,6 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+mod committee_cache;
 mod config;
 mod epoch_manager;
 mod epoch_manager_service;
@@ -10,6 +11,7 @@ mod initializer;
 mod network_description;
 mod types;
 
+pub use committee_cache::CommitteeCache;
 pub use config::EpochManagerConfig;
 pub use epoch_manager::EpochManager;
 pub use handle::EpochManagerHandle;

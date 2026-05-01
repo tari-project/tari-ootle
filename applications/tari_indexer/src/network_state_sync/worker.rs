@@ -253,11 +253,6 @@ impl NetworkWideStateSync {
 
             info!(target: LOG_TARGET, "🌍️ Found {} checkpoints for shard group {shard_group} from epoch {from_epoch}", checkpoints.len());
 
-            let committee = self
-                .epoch_manager
-                .get_committee_by_shard_group(prev_epoch, shard_group, None, false)
-                .await?;
-
             for checkpoint in checkpoints {
                 info!(target: LOG_TARGET, "🌍️ Validating checkpoint for shard group {shard_group}: {}", checkpoint.header().calculate_hash());
 
@@ -274,12 +269,23 @@ impl NetworkWideStateSync {
                 // indexers. For now, to avoid       complexity that may be removed later, we'll skip
                 // validating them and only validate prev_epochs       checkpoint.
                 if checkpoint.epoch() == prev_epoch {
+                    // Use the checkpoint's own shard group, not the iterator's: the network may have
+                    // had a different shard-group structure at prev_epoch than the current epoch we
+                    // are iterating, so the QC is signed by the committee for `checkpoint_shard_group`,
+                    // not `shard_group`.
+                    let committee = self
+                        .epoch_manager
+                        .get_committee_by_shard_group(checkpoint.epoch(), checkpoint_shard_group)
+                        .await?;
                     checkpoint
                         .validate(checkpoint.epoch(), committee.quorum_threshold(), |pk| {
                             Ok(committee.get_power_by_public_key(pk).unwrap_or_else(VotePower::zero))
                         })
                         .map_err(|e| NetworkStateSyncError::InvalidCheckpoint {
-                            details: format!("Failed to validate checkpoint for shard group {}: {}", shard_group, e),
+                            details: format!(
+                                "Failed to validate checkpoint for shard group {}: {}",
+                                checkpoint_shard_group, e
+                            ),
                         })?;
                 } else {
                     checkpoint
@@ -542,7 +548,7 @@ fn process_watched_substate_events(
         let event = &inserted.event;
         match event.topic() {
             "std.component.created" => {
-                if watched_templates.contains(&event.template_address()) &&
+                if watched_templates.contains(event.template_address()) &&
                     let Some(substate_id) = event.substate_id()
                 {
                     debug!(
@@ -551,7 +557,7 @@ fn process_watched_substate_events(
                         substate_id,
                         event.template_address()
                     );
-                    tx.insert_watched_substate(substate_id, &event.template_address())?;
+                    tx.insert_watched_substate(substate_id, event.template_address())?;
                 }
             },
             "std.component.template_update" => {
@@ -562,7 +568,7 @@ fn process_watched_substate_events(
                         .and_then(|v| TemplateAddress::from_hex(v).ok());
 
                     let prev_was_watched = prev_template.as_ref().is_some_and(|t| watched_templates.contains(t));
-                    let new_is_watched = watched_templates.contains(&event.template_address());
+                    let new_is_watched = watched_templates.contains(event.template_address());
 
                     if prev_was_watched && !new_is_watched {
                         debug!(
@@ -578,7 +584,7 @@ fn process_watched_substate_events(
                             substate_id,
                             event.template_address()
                         );
-                        tx.insert_watched_substate(substate_id, &event.template_address())?;
+                        tx.insert_watched_substate(substate_id, event.template_address())?;
                     } else {
                         // N/A
                     }

@@ -307,6 +307,21 @@ impl<D> TransactionBuilder<D> {
         f(self)
     }
 
+    /// Convenience method for chaining multiple operations that produce a builder, e.g. when building fee instructions
+    /// with `with_fee_instructions_builder`.
+    ///
+    /// ## Example
+    ///
+    /// ```rust,ignore
+    /// let accounts = [account1, account2, account3];
+    ///
+    /// builder.fold(accounts, |builder, account| builder.pay_fee_from_component(account.component_address, 1000u64))
+    /// ```
+    pub fn fold<F, T>(self, items: impl IntoIterator<Item = T>, f: F) -> Self
+    where F: FnMut(Self, T) -> Self {
+        items.into_iter().fold(self, f)
+    }
+
     /// Merge another builder's instructions, inputs and blobs into this builder.
     ///
     /// Workspace IDs and blob indices from `other` are remapped to avoid collisions with this

@@ -1243,8 +1243,15 @@ fn test_builtin_templates() {
 
 #[test]
 fn all_builtin_templates_are_correct() {
-    for (address, wasm_bytes) in all_builtin_templates() {
-        WasmModule::load_template_from_code(wasm_bytes)
-            .unwrap_or_else(|e| panic!("Failed to load builtin template at address {}: {}", address, e));
+    // To prevent cyclic dev-deps on publish, we add this test here instead of inside template builtin
+    for template in all_builtin_templates() {
+        let loaded = WasmModule::load_template_from_code(template.binary)
+            .unwrap_or_else(|e| panic!("Failed to load builtin template at address {}: {}", template.address, e));
+        assert_eq!(
+            loaded.template_name(),
+            template.name,
+            "Template name mismatch for address {}",
+            template.address
+        );
     }
 }

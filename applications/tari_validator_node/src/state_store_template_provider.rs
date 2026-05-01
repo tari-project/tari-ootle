@@ -56,10 +56,10 @@ impl<TStore: TemplateProvider<Template = PublishedTemplate>> StateStoreTemplateP
             .build();
 
         // Precache builtins
-        for (addr, code) in all_builtin_templates() {
+        for template in all_builtin_templates() {
             cache.insert(
-                *addr,
-                WasmModule::load_template_from_code(code).expect("Built-in template failed to load"),
+                template.address,
+                WasmModule::load_template_from_code(template.binary).expect("Built-in template failed to load"),
             );
         }
 

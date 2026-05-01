@@ -31,12 +31,12 @@ mod genesis_state;
 #[cfg(feature = "web_ui")]
 mod http_ui;
 mod json_rpc;
+mod memory_cache_template_provider;
 #[cfg(feature = "metrics")]
 mod metrics;
 mod migrations;
 pub mod node;
 mod p2p;
-mod state_store_template_provider;
 pub mod transaction_validators;
 mod validator;
 

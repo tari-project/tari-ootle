@@ -22,7 +22,7 @@ tari_common = { workspace = true }
 tari_consensus = { workspace = true }
 tari_template_builtin = { workspace = true, features = ["templates"] }
 tari_crypto = { workspace = true }
-tari_engine = { workspace = true }
+tari_engine = { workspace = true, features = ["wasm-cache"] }
 tari_engine_types = { workspace = true }
 tari_epoch_manager = { workspace = true, features = ["service"] }
 tari_epoch_oracles = { workspace = true, features = ["base_layer"] }

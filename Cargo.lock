@@ -11165,6 +11165,7 @@ dependencies = [
  "tari_template_test_tooling",
  "tari_transaction_manifest",
  "tari_utilities",
+ "tempfile",
  "thiserror 2.0.18",
  "wasmer",
  "wasmer-middlewares",

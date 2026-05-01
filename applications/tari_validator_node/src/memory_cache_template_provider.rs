@@ -3,21 +3,18 @@
 
 use log::debug;
 use serde::{Deserialize, Serialize};
-use tari_engine::{
-    template::{LoadedTemplate, TemplateLoaderError},
-    wasm::WasmModule,
-};
-use tari_engine_types::published_template::PublishedTemplate;
-use tari_ootle_common_types::{
-    Epoch,
-    services::template_provider::{TemplateMetadataProvider, TemplateProvider, TemplateProviderMetadata},
+use tari_engine::{template::LoadedTemplate, wasm::WasmModule};
+use tari_ootle_common_types::services::template_provider::{
+    TemplateMetadataProvider,
+    TemplateProvider,
+    TemplateProviderMetadata,
 };
 use tari_template_builtin::all_builtin_templates;
 use tari_template_lib::types::TemplateAddress;
 
 use crate::cmap_semaphore;
 
-const LOG_TARGET: &str = "tari::validator::state_store_template_provider";
+const LOG_TARGET: &str = "tari::validator::memory_cache_template_provider";
 const CONCURRENT_ACCESS_LIMIT: isize = 100;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -39,23 +36,42 @@ impl TemplateConfig {
     }
 }
 
+/// Outermost layer of the validator-node template provider chain.
+///
+/// Holds an in-memory moka cache of `LoadedTemplate`s keyed by address and a
+/// per-address semaphore to coalesce concurrent first-fetches. Builtin
+/// templates are precompiled into the cache at construction time. Everything
+/// else delegates to `inner` on miss — typically a
+/// `tari_engine::wasm::DiskCachedWasmTemplateProvider` wrapping the raw state
+/// store, so the layering is:
+///
+/// ```text
+/// MemoryCacheTemplateProvider          (this)
+///   └── DiskCachedWasmTemplateProvider (compiled-module disk cache + compile)
+///         └── ValidatorNodeStateStore  (raw PublishedTemplate bytes from rocksdb)
+/// ```
 #[derive(Clone)]
-pub struct StateStoreTemplateProvider<TStore> {
-    inner: TStore,
+pub struct MemoryCacheTemplateProvider<TInner> {
+    inner: TInner,
     cache: mini_moka::sync::Cache<TemplateAddress, LoadedTemplate>,
     cmap_semaphore: cmap_semaphore::ConcurrentMapSemaphore<TemplateAddress>,
 }
 
-impl<TStore: TemplateProvider<Template = PublishedTemplate>> StateStoreTemplateProvider<TStore> {
-    pub fn new(inner: TStore, config: &TemplateConfig) -> Self {
-        // load the builtin account templates
+impl<TInner> MemoryCacheTemplateProvider<TInner>
+where TInner: TemplateProvider<Template = LoadedTemplate>
+{
+    pub fn new(inner: TInner, config: &TemplateConfig) -> Self {
         let cache = mini_moka::sync::Cache::builder()
             .weigher(|_, t: &LoadedTemplate| u32::try_from(t.code_size()).unwrap_or(u32::MAX))
             .max_capacity(config.max_cache_size_bytes())
             .initial_capacity(all_builtin_templates().len())
             .build();
 
-        // Precache builtins
+        // Precache builtins. Compile directly here — builtins live only in
+        // memory, never go through the disk-cache layer (their addresses are
+        // hardcoded constants and would otherwise pin stale compiled modules
+        // across builtin recompiles). The disk-cache layer also has a
+        // matching bypass on the lookup side as defence in depth.
         for template in all_builtin_templates() {
             cache.insert(
                 template.address,
@@ -71,8 +87,10 @@ impl<TStore: TemplateProvider<Template = PublishedTemplate>> StateStoreTemplateP
     }
 }
 
-impl<TStore: TemplateProvider<Template = PublishedTemplate>> TemplateProvider for StateStoreTemplateProvider<TStore> {
-    type Error = StateStoreTemplateProviderError;
+impl<TInner> TemplateProvider for MemoryCacheTemplateProvider<TInner>
+where TInner: TemplateProvider<Template = LoadedTemplate> + Clone + 'static
+{
+    type Error = MemoryCacheTemplateProviderError;
     type Template = LoadedTemplate;
 
     fn get_template(&self, address: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error> {
@@ -91,18 +109,21 @@ impl<TStore: TemplateProvider<Template = PublishedTemplate>> TemplateProvider fo
         let guard = self.cmap_semaphore.acquire(*address);
         let _access = guard.access();
 
-        let Some(template) = self
+        // After acquiring the semaphore, the racing thread may have populated
+        // the cache; check again before delegating to the inner provider.
+        if let Some(template) = self.cache.get(address) {
+            return Ok(Some(template));
+        }
+
+        let Some(loaded) = self
             .inner
             .get_template(address)
-            .map_err(|e| StateStoreTemplateProviderError::InnerProvider(e.into()))?
+            .map_err(|e| MemoryCacheTemplateProviderError::Inner(e.into()))?
         else {
             return Ok(None);
         };
 
-        let loaded = WasmModule::load_template_from_code(template.binary.as_slice())?;
-
         self.cache.insert(*address, loaded.clone());
-
         Ok(Some(loaded))
     }
 
@@ -110,31 +131,24 @@ impl<TStore: TemplateProvider<Template = PublishedTemplate>> TemplateProvider fo
         Ok(self.cache.contains_key(id) ||
             self.inner
                 .has_template(id)
-                .map_err(|e| StateStoreTemplateProviderError::InnerProvider(e.into()))?)
+                .map_err(|e| MemoryCacheTemplateProviderError::Inner(e.into()))?)
     }
 }
-impl<TStore: TemplateProvider<Template = PublishedTemplate>> TemplateMetadataProvider
-    for StateStoreTemplateProvider<TStore>
+
+impl<TInner> TemplateMetadataProvider for MemoryCacheTemplateProvider<TInner>
+where TInner: TemplateProvider<Template = LoadedTemplate> + TemplateMetadataProvider + Clone + 'static
 {
     fn get_template_metadata(&self, id: &TemplateAddress) -> Result<Option<TemplateProviderMetadata>, Self::Error> {
-        let template = self
-            .inner
-            .get_template(id)
-            .map_err(|e| StateStoreTemplateProviderError::InnerProvider(e.into()))?;
-
-        Ok(template.map(|t| TemplateProviderMetadata {
-            author: t.author,
-            binary_hash: t.to_binary_hash(),
-            epoch: Epoch(t.at_epoch),
-            metadata_hash: t.metadata_hash,
-        }))
+        // The hot cache only stores compiled modules, not metadata fields.
+        // Always delegate.
+        self.inner
+            .get_template_metadata(id)
+            .map_err(|e| MemoryCacheTemplateProviderError::Inner(e.into()))
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum StateStoreTemplateProviderError {
+pub enum MemoryCacheTemplateProviderError {
     #[error(transparent)]
-    InnerProvider(anyhow::Error),
-    #[error("Template load error: {0}")]
-    TemplateLoadError(#[from] TemplateLoaderError),
+    Inner(anyhow::Error),
 }

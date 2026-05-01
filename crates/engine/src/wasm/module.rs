@@ -70,6 +70,37 @@ impl WasmModule {
     pub fn load_template_from_code(code: &[u8]) -> Result<LoadedTemplate, TemplateLoaderError> {
         let engine = Self::create_engine();
         let module = wasmer::Module::new(&engine, code)?;
+        Self::finalize_loaded_module(engine, module, code.len())
+    }
+
+    /// Load a template from a previously serialized wasmer module (see
+    /// [`wasmer::Module::serialize`]). `code_size` is the size of the original
+    /// WASM source bytes — preserved from the source compile and used by
+    /// downstream caches (e.g. the in-memory moka weigher in
+    /// `StateStoreTemplateProvider`).
+    ///
+    /// # Safety
+    ///
+    /// The serialized bytes MUST have been produced by `wasmer::Module::serialize`
+    /// against an engine configured identically to [`Self::create_engine`]. Feeding
+    /// arbitrary bytes here is undefined behaviour. Callers are expected to gate
+    /// this behind a node-local cache directory whose contents only this process
+    /// writes.
+    pub unsafe fn load_template_from_serialized(
+        serialized: &[u8],
+        code_size: usize,
+    ) -> Result<LoadedTemplate, TemplateLoaderError> {
+        let engine = Self::create_engine();
+        // SAFETY: forwarded to caller — see function-level docs.
+        let module = unsafe { wasmer::Module::deserialize_unchecked(&engine, serialized) }?;
+        Self::finalize_loaded_module(engine, module, code_size)
+    }
+
+    fn finalize_loaded_module(
+        engine: Engine,
+        module: wasmer::Module,
+        code_size: usize,
+    ) -> Result<LoadedTemplate, TemplateLoaderError> {
         let mut store = Store::new(engine);
 
         let imports = imports! {
@@ -93,7 +124,7 @@ impl WasmModule {
 
         let engine = store.engine().clone();
 
-        Ok(LoadedWasmTemplate::new(template, module, engine, code.len()).into())
+        Ok(LoadedWasmTemplate::new(template, module, engine, code_size).into())
     }
 
     pub fn code(&self) -> &[u8] {

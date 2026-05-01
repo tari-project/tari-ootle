@@ -238,7 +238,7 @@ where TConsensusSpec: ConsensusSpec
 
             if let Err(err) = self
                 .outbound_messaging
-                .multicast(std::sync::Arc::unwrap_or_clone(committee).into_addresses(), msg)
+                .multicast(committee.address_iter().cloned(), msg)
                 .await
             {
                 warn!(

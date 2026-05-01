@@ -17,6 +17,16 @@ use crate::cmap_semaphore;
 const LOG_TARGET: &str = "tari::validator::memory_cache_template_provider";
 const CONCURRENT_ACCESS_LIMIT: isize = 100;
 
+/// Multiplier applied to the WASM source byte count when weighing cache
+/// entries. The source size under-estimates the resident footprint of a
+/// `LoadedTemplate` because the dominant cost is the Cranelift-compiled
+/// artifact (machine code + relocations + frame info), which inflates the
+/// source by ~1.5–3× in typical templates and up to ~5× for hot-loop heavy
+/// code. K=4 keeps the bound honest in the typical case and overshoots by at
+/// most ~25% in the worst case — acceptable for a coarse process-memory
+/// budget. Cheaper than serializing each module on insert and infallible.
+const CODE_SIZE_TO_RESIDENT_BYTES_FACTOR: usize = 4;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TemplateConfig {
     max_cache_size_bytes: u64,
@@ -62,7 +72,10 @@ where TInner: TemplateProvider<Template = LoadedTemplate>
 {
     pub fn new(inner: TInner, config: &TemplateConfig) -> Self {
         let cache = mini_moka::sync::Cache::builder()
-            .weigher(|_, t: &LoadedTemplate| u32::try_from(t.code_size()).unwrap_or(u32::MAX))
+            .weigher(|_, t: &LoadedTemplate| {
+                let est = t.code_size().saturating_mul(CODE_SIZE_TO_RESIDENT_BYTES_FACTOR);
+                u32::try_from(est).unwrap_or(u32::MAX)
+            })
             .max_capacity(config.max_cache_size_bytes())
             .initial_capacity(all_builtin_templates().len())
             .build();

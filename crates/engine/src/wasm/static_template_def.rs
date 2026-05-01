@@ -26,11 +26,14 @@ use wasmer::wasmparser::{BinaryReaderError, Data, DataKind, ExternalKind, Operat
 /// Cheap relative to a full compile: parses only the export, global, import
 /// and data sections needed to locate and read the ABI blob. No cranelift, no
 /// instantiation, no linear-memory allocation.
+///
+/// All arithmetic on offsets / lengths is checked. Adversarial inputs are
+/// rejected with an explicit error rather than panicking or wrapping.
 pub fn extract_template_def(code: &[u8]) -> Result<TemplateDef, ExtractTemplateDefError> {
     let mut imported_global_count: u32 = 0;
     let mut globals_init: Vec<Option<i32>> = Vec::new();
     let mut export_global_idx: Option<u32> = None;
-    let mut data_segments= Vec::new();
+    let mut data_segments = Vec::new();
 
     for payload in Parser::new(0).parse_all(code) {
         match payload? {
@@ -39,7 +42,9 @@ pub fn extract_template_def(code: &[u8]) -> Result<TemplateDef, ExtractTemplateD
                     for entry in imports? {
                         let (_, import) = entry?;
                         if matches!(import.ty, TypeRef::Global(_)) {
-                            imported_global_count += 1;
+                            imported_global_count = imported_global_count
+                                .checked_add(1)
+                                .ok_or(ExtractTemplateDefError::TooManyImportedGlobals)?;
                         }
                     }
                 }
@@ -67,10 +72,14 @@ pub fn extract_template_def(code: &[u8]) -> Result<TemplateDef, ExtractTemplateD
             Payload::DataSection(reader) => {
                 for segment in reader {
                     let segment = segment?;
-                    if let DataKind::Active { memory_index: 0, offset_expr } = segment.kind {
+                    if let DataKind::Active {
+                        memory_index: 0,
+                        offset_expr,
+                    } = &segment.kind
+                    {
                         let mut ops = offset_expr.get_operators_reader();
                         if let Ok(Operator::I32Const { value }) = ops.read() {
-                            data_segments.push((value as u32 as u64, segment));
+                            data_segments.push((u64::from(value as u32), segment));
                         }
                     }
                 }
@@ -90,25 +99,47 @@ pub fn extract_template_def(code: &[u8]) -> Result<TemplateDef, ExtractTemplateD
         .copied()
         .flatten()
         .ok_or(ExtractTemplateDefError::AbiGlobalNotConst)?;
-    let abi_ptr = abi_ptr as u32 as u64;
+    let abi_ptr = u64::from(abi_ptr as u32);
 
     // [u32 LE: length] || [length bytes: tari-bor-encoded TemplateDef]
     let len_bytes = read_data_at(&data_segments, abi_ptr, WASM_PTR_SIZE)?;
     let length = u32::from_le_bytes(len_bytes.try_into().expect("WASM_PTR_SIZE == 4")) as usize;
-    let body = read_data_at(&data_segments, abi_ptr + WASM_PTR_SIZE as u64, length)?;
+    // Cap against the input binary size: an embedded TemplateDef cannot be
+    // larger than the WASM file that contains it. Without this, a length
+    // prefix of ~u32::MAX from adversarial bytes would force the search loop
+    // in `read_data_at` to consider a 4 GiB span.
+    if length > code.len() {
+        return Err(ExtractTemplateDefError::AbiLengthExceedsBinary {
+            length,
+            binary_size: code.len(),
+        });
+    }
 
-    tari_bor::decode(&body).map_err(ExtractTemplateDefError::Decode)
+    let body_offset = abi_ptr
+        .checked_add(WASM_PTR_SIZE as u64)
+        .ok_or(ExtractTemplateDefError::OffsetOverflow)?;
+    let body = read_data_at(&data_segments, body_offset, length)?;
+
+    tari_bor::decode(body).map_err(ExtractTemplateDefError::Decode)
 }
 
 fn read_data_at<'a>(
-    segments: &'a [(u64, Data)],
+    segments: &[(u64, Data<'a>)],
     offset: u64,
     len: usize,
 ) -> Result<&'a [u8], ExtractTemplateDefError> {
     let len_u64 = len as u64;
+    let read_end = offset
+        .checked_add(len_u64)
+        .ok_or(ExtractTemplateDefError::OffsetOverflow)?;
     for (seg_offset, seg_data) in segments {
-        let seg_end = seg_offset + seg_data.data.len() as u64;
-        if offset >= *seg_offset && offset + len_u64 <= seg_end {
+        let seg_end = seg_offset
+            .checked_add(seg_data.data.len() as u64)
+            .ok_or(ExtractTemplateDefError::OffsetOverflow)?;
+        if offset >= *seg_offset && read_end <= seg_end {
+            // Both casts are bounded: `offset - seg_offset <= seg_data.data.len()`
+            // (just verified above), and `seg_data.data.len()` is `usize` by
+            // construction, so the subtraction-then-cast cannot truncate.
             let local = (offset - seg_offset) as usize;
             return Ok(&seg_data.data[local..local + len]);
         }
@@ -126,6 +157,12 @@ pub enum ExtractTemplateDefError {
     AbiExportImported,
     #[error("`{ABI_TEMPLATE_DEF_GLOBAL_NAME}` initializer is not an i32.const")]
     AbiGlobalNotConst,
+    #[error("ABI length prefix ({length}) exceeds the WASM binary size ({binary_size})")]
+    AbiLengthExceedsBinary { length: usize, binary_size: usize },
+    #[error("Module imports more globals than fit in u32")]
+    TooManyImportedGlobals,
+    #[error("Arithmetic overflow computing memory offset")]
+    OffsetOverflow,
     #[error("ABI bytes at offset {offset} (len {len}) are not covered by any active data segment")]
     DataOutOfRange { offset: u64, len: usize },
     #[error("Failed to decode TemplateDef: {0}")]

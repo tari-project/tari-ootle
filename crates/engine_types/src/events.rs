@@ -104,8 +104,8 @@ impl Event {
         self.substate_id.as_ref()
     }
 
-    pub fn template_address(&self) -> TemplateAddress {
-        self.template_address
+    pub fn template_address(&self) -> &TemplateAddress {
+        &self.template_address
     }
 
     pub fn topic(&self) -> &str {

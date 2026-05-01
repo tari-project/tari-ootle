@@ -95,9 +95,7 @@ impl TemplateManager {
     }
 
     fn builtin_templates() -> impl Iterator<Item = Template> {
-        all_builtin_templates()
-            .iter()
-            .map(|t| convert_builtin_template_from_code(t.address, t.binary))
+        all_builtin_templates().iter().map(convert_builtin_template_from_code)
     }
 
     pub fn template_exists(
@@ -305,20 +303,19 @@ fn now() -> PrimitiveDateTime {
     PrimitiveDateTime::new(now.date(), now.time())
 }
 
-fn convert_builtin_template_from_code(address: TemplateAddress, code: &'static [u8]) -> Template {
-    let binary_sha = calculate_template_binary_hash(code);
-    let loaded = WasmModule::load_template_from_code(code).expect("Built-in template failed to load");
+fn convert_builtin_template_from_code(template: &tari_template_builtin::Template) -> Template {
+    let binary_sha = calculate_template_binary_hash(template.binary);
     Template {
         metadata: TemplateMetadata {
-            name: loaded.template_name().to_string(),
-            address,
+            name: template.name.to_string(),
+            address: template.address,
             binary_sha: binary_sha.into_array().into(),
             author_public_key: Default::default(),
-            code_size: code.len(),
+            code_size: template.binary.len(),
             epoch: Epoch::zero(),
             metadata_hash: None,
         },
-        code: TemplateCode::StaticWasm(code),
+        code: TemplateCode::StaticWasm(template.binary),
     }
 }
 

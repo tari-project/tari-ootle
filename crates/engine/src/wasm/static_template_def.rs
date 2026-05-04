@@ -8,15 +8,40 @@
 //! definition as a tari-bor-encoded blob in the module's data section,
 //! addressed by an exported global named [`ABI_TEMPLATE_DEF_GLOBAL_NAME`].
 //! `WasmEnv::load_template_def` recovers it via wasmer instantiation and
-//! linear-memory access; `WasmModule::extract_template_def` recovers the same
+//! linear-memory access; `extract_template_def` here recovers the same
 //! bytes by parsing the WASM binary statically (no compile, no JIT, no
 //! linear memory).
 //!
-//! This is intended for callers that only need the type/function metadata
-//! (e.g. the wallet daemon's template monitor) and want to avoid pulling in
-//! cranelift's compile cost. It does **not** validate the WASM module —
-//! anyone using a template for execution should still go through
+//! Intended exclusively for callers that only need the type/function
+//! metadata (today: only the wallet daemon's template monitor, which
+//! records each authored template's ABI) and want to avoid the cranelift
+//! compile cost. It does **not** validate the WASM module — anyone using
+//! a template for execution should go through
 //! `WasmModule::load_template_from_code`.
+//!
+//! # Toolchain assumptions
+//!
+//! The data-segment layout this extractor walks is what `rustc`'s
+//! `wasm32-unknown-unknown` LLVM backend produces in practice for templates
+//! built from `tari_template_lib`'s `#[template]` macro: a single active
+//! data segment in memory 0 covering the static rodata, with the
+//! `_ABI_TEMPLATE_DEF` global initialised to an `i32.const` pointer into
+//! that segment, and the `[u32 LE: length] || [bor bytes]` blob laid out
+//! contiguously at that pointer.
+//!
+//! Specifically, [`read_data_at`] requires the `[length, payload]` blob to
+//! lie **entirely within a single active data segment**. Other WASM
+//! toolchains (AssemblyScript, emscripten, custom code generators) may
+//! split static data across multiple segments or place the rodata at
+//! arbitrary offsets, in which case extraction fails with
+//! [`ExtractTemplateDefError::DataOutOfRange`]. This is acceptable today
+//! because the only consumer is the wallet daemon, and templates are only
+//! built with `tari_template_lib`. If templates from arbitrary toolchains
+//! ever need to be supported, the canonical fix is to switch the ABI
+//! storage from "data segment + global" to a WASM **custom section** —
+//! `Payload::CustomSection` is trivially extractable regardless of layout
+//! and is the standard way (wasm-bindgen, DWARF, the `name` section, …)
+//! to embed metadata in a WASM module.
 
 use tari_template_abi::{ABI_TEMPLATE_DEF_GLOBAL_NAME, TemplateDef, WASM_PTR_SIZE};
 use wasmer::wasmparser::{BinaryReaderError, Data, DataKind, ExternalKind, Operator, Parser, Payload, TypeRef};
@@ -123,6 +148,17 @@ pub fn extract_template_def(code: &[u8]) -> Result<TemplateDef, ExtractTemplateD
     tari_bor::decode(body).map_err(ExtractTemplateDefError::Decode)
 }
 
+/// Returns a slice of length `len` starting at `offset` within the union of
+/// the supplied active data segments (memory 0).
+///
+/// **Single-segment assumption.** The requested `[offset, offset+len)` range
+/// must lie entirely within one segment. A range that straddles two adjacent
+/// segments returns [`ExtractTemplateDefError::DataOutOfRange`] even if the
+/// bytes would be contiguous in linear memory after instantiation. This is
+/// fine for `tari_template_lib`-compiled templates — rustc emits a single
+/// rodata segment that holds the entire ABI blob — but it does not generalise
+/// to arbitrary WASM toolchains. See the module-level docs for the proper
+/// long-term fix (switch to a WASM custom section).
 fn read_data_at<'a>(
     segments: &[(u64, Data<'a>)],
     offset: u64,

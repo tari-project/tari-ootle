@@ -268,9 +268,7 @@ impl fmt::Debug for LoadedWasmTemplate {
 /// Wasmer preserves custom sections through compile and `serialize` /
 /// `deserialize`, so this works on both freshly compiled modules and modules
 /// loaded from the disk cache.
-fn load_template_def_from_custom_section(
-    module: &wasmer::Module,
-) -> Result<Option<TemplateDef>, WasmExecutionError> {
+fn load_template_def_from_custom_section(module: &wasmer::Module) -> Result<Option<TemplateDef>, WasmExecutionError> {
     let mut sections = module.custom_sections(TEMPLATE_DEF_CUSTOM_SECTION);
     let Some(section) = sections.next() else {
         return Ok(None);

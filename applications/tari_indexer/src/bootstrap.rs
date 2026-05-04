@@ -30,6 +30,7 @@ use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common::configuration::bootstrap::{ApplicationType, grpc_default_port};
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_crypto::tari_utilities::ByteArray;
+use tari_engine::wasm::WasmModuleCache;
 use tari_engine_types::{calculate_template_binary_hash, published_template::PublishedTemplateMetadata};
 use tari_epoch_manager::service::{EpochManagerConfig, EpochManagerHandle};
 use tari_epoch_oracles::{
@@ -243,7 +244,15 @@ pub async fn spawn_services(
     let substate_manager = substate_manager.with_metrics(metrics_registry);
 
     // Template manager
-    let template_manager = TemplateManager::initialize(global_db.clone(), substate_manager.clone())?;
+    let wasm_cache_dir = config.indexer.data_dir.join("wasm_cache");
+    let wasm_cache = WasmModuleCache::open(&wasm_cache_dir).map_err(|e| {
+        anyhow!(
+            "Failed to open WASM module cache at {}: {}",
+            wasm_cache_dir.display(),
+            e,
+        )
+    })?;
+    let template_manager = TemplateManager::initialize(global_db.clone(), substate_manager.clone(), wasm_cache)?;
 
     // Dry run - use a shorter cache TTL for more accurate fee estimates
     let dry_run_substate_manager = substate_manager

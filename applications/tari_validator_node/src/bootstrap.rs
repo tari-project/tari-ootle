@@ -84,8 +84,15 @@ use crate::{
     ValidatorNodeEpochManagerSpec,
     ValidatorNodeStateStore,
     base_layer::verify_correct_network,
-    consensus::{self, ConsensusHandle, TariBlockTransactionExecutor, ValidationContext},
+    consensus::{
+        self,
+        ConsensusHandle,
+        TariBlockTransactionExecutor,
+        ValidationContext,
+        spec::ValidatorTemplateProvider,
+    },
     file_l1_submitter::FileLayerOneSubmitter,
+    memory_cache_template_provider::MemoryCacheTemplateProvider,
     migrations,
     p2p::{
         NopLogger,
@@ -96,7 +103,6 @@ use crate::{
             messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
         },
     },
-    state_store_template_provider::StateStoreTemplateProvider,
     transaction_validators::{
         BasicValidations,
         EpochRangeValidator,
@@ -260,7 +266,11 @@ pub async fn spawn_services(
 
     info!(target: LOG_TARGET, "Template manager initializing");
     // Template manager
-    let template_provider = StateStoreTemplateProvider::new(state_store.clone(), &config.validator_node.templates);
+    let wasm_cache_dir = config.validator_node.data_dir.join("wasm_cache");
+    let template_provider = MemoryCacheTemplateProvider::new(
+        tari_engine::wasm::DiskCachedWasmTemplateProvider::open(state_store.clone(), wasm_cache_dir)?,
+        &config.validator_node.templates,
+    );
 
     info!(target: LOG_TARGET, "Payload processor initializing");
     // Payload processor
@@ -397,7 +407,7 @@ pub struct Services<TStore> {
     pub networking: NetworkingHandle<TariMessagingSpec>,
     pub mempool: MempoolHandle,
     pub epoch_manager: EpochManagerHandle<PeerAddress>,
-    pub template_provider: StateStoreTemplateProvider<ValidatorNodeStateStore>,
+    pub template_provider: ValidatorTemplateProvider,
     pub consensus_handle: ConsensusHandle,
     pub state_store: TStore,
     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,

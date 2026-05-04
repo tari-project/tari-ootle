@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_engine::wasm::WasmModule;
+use tari_engine::wasm;
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_ootle_wallet_sdk::{WalletSdk, WalletSdkSpec, models::WalletEvent};
 use tari_ootle_wallet_sdk_services::notify::Notify;
@@ -54,16 +54,20 @@ where TSpec: WalletSdkSpec
                     continue;
                 };
 
+                // The wallet daemon only stores the template's ABI; it never
+                // executes templates locally. Skip the heavyweight cranelift
+                // compile path and statically extract the TemplateDef from the
+                // WASM binary instead.
                 match task::spawn_blocking(move || {
-                    WasmModule::load_template_from_code(&template.binary).map(|loaded| (template, loaded))
+                    wasm::extract_template_def(&template.binary).map(|def| (template, def))
                 })
                 .await?
                 {
-                    Ok((template, loaded)) => {
+                    Ok((template, template_def)) => {
                         self.wallet_sdk.template_api().add_authored_template(
                             template.author,
                             template_address.as_hash(),
-                            loaded.template_def().clone(),
+                            template_def,
                         )?;
                     },
                     Err(err) => {

@@ -23,8 +23,8 @@
 use std::collections::{HashMap, HashSet};
 
 use tari_engine::{
-    template::{LoadedTemplate, TemplateModuleLoader},
-    wasm::WasmModule,
+    template::LoadedTemplate,
+    wasm::{WasmModule, WasmModuleCache},
 };
 use tari_engine_types::{
     calculate_template_binary_hash,
@@ -44,7 +44,7 @@ use tari_ootle_storage::{
     time::{OffsetDateTime, PrimitiveDateTime},
 };
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_template_builtin::{all_builtin_templates, try_get_template_builtin};
+use tari_template_builtin::{all_builtin_templates, is_builtin_template_address, try_get_template_builtin};
 use tari_template_lib_types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 use super::{Template, TemplateCode, TemplateMetadata};
@@ -54,12 +54,14 @@ use crate::{substate_manager::SubstateManager, template_manager::error::Template
 pub struct TemplateManager {
     global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     substate_manager: SubstateManager,
+    wasm_cache: WasmModuleCache,
 }
 
 impl TemplateManager {
     pub fn initialize(
         global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
         substate_manager: SubstateManager,
+        wasm_cache: WasmModuleCache,
     ) -> Result<Self, TemplateManagerError> {
         // load the builtin templates
         let builtin_templates = Self::builtin_templates();
@@ -91,7 +93,33 @@ impl TemplateManager {
         Ok(Self {
             global_db,
             substate_manager,
+            wasm_cache,
         })
+    }
+
+    /// Compile or deserialize the template binary for `address`. Result is
+    /// persisted in the on-disk wasm cache so subsequent calls (across process
+    /// restarts) skip the cranelift compile.
+    ///
+    /// Builtin templates bypass the cache: their addresses are hardcoded
+    /// constants (independent of binary content), so a stale cache entry
+    /// would silently serve an out-of-date compiled module after a builtin
+    /// recompile. User-template addresses are content-addressed, so binary
+    /// changes naturally invalidate the cache key.
+    fn load_template_with_cache(
+        &self,
+        address: &TemplateAddress,
+        code: &TemplateCode,
+    ) -> Result<LoadedTemplate, TemplateManagerError> {
+        if is_builtin_template_address(address) {
+            return Ok(WasmModule::load_template_from_code(code.as_raw_bytes())?);
+        }
+        if let Some(loaded) = self.wasm_cache.try_load(address) {
+            return Ok(loaded);
+        }
+        let loaded = WasmModule::load_template_from_code(code.as_raw_bytes())?;
+        self.wasm_cache.store(address, &loaded);
+        Ok(loaded)
     }
 
     fn builtin_templates() -> impl Iterator<Item = Template> {
@@ -193,7 +221,7 @@ impl TemplateManager {
         epoch: Epoch,
         metadata_hash: Option<Vec<u8>>,
     ) -> Result<LoadedTemplate, TemplateManagerError> {
-        let loaded_template = load_template_from_code(&code)?;
+        let loaded_template = self.load_template_with_cache(&template_address, &code)?;
 
         self.add_template(
             loaded_template.template_name().to_string(),
@@ -218,7 +246,10 @@ impl TemplateManager {
 
         for template_addr in &template_addrs {
             if let Some(template) = self.fetch_cached_template(template_addr).optional()? {
-                loaded_templates.insert(**template_addr, load_template_from_code(&template.code)?);
+                loaded_templates.insert(
+                    **template_addr,
+                    self.load_template_with_cache(template_addr, &template.code)?,
+                );
             }
         }
 
@@ -282,13 +313,13 @@ impl TemplateProvider for TemplateManager {
         let Some(template) = self.fetch_cached_template(address).optional()? else {
             return Ok(None);
         };
-        let wasm = template
-            .code
-            .as_wasm_code()
-            .ok_or(TemplateManagerError::UnsupportedTemplateType)?;
-        let module = WasmModule::from_code(wasm);
-        let loaded = module.load_template()?;
-
+        // Validate the template carries WASM code (the cache itself is keyed by
+        // template address; the loader inside `load_template_with_cache` reads
+        // `template.code.as_raw_bytes()` which is fine for WASM templates).
+        if template.code.as_wasm_code().is_none() {
+            return Err(TemplateManagerError::UnsupportedTemplateType);
+        }
+        let loaded = self.load_template_with_cache(address, &template.code)?;
         Ok(Some(loaded))
     }
 
@@ -317,10 +348,4 @@ fn convert_builtin_template_from_code(template: &tari_template_builtin::Template
         },
         code: TemplateCode::StaticWasm(template.binary),
     }
-}
-
-fn load_template_from_code(code: &TemplateCode) -> Result<LoadedTemplate, TemplateManagerError> {
-    let binary = code.as_raw_bytes();
-    let loaded_template = WasmModule::load_template_from_code(binary)?;
-    Ok(loaded_template)
 }

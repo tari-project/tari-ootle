@@ -35,7 +35,7 @@ use tari_ootle_app_utilities::{
 };
 use tari_ootle_transaction::Network;
 
-use crate::state_store_template_provider::TemplateConfig;
+use crate::memory_cache_template_provider::TemplateConfig;
 
 #[derive(Debug, Clone)]
 pub struct ApplicationConfig {

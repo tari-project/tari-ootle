@@ -7,6 +7,6 @@ export type TransactionAtom = {
   id: string;
   decision: Decision;
   evidence: Evidence;
-  transaction_fee: number;
+  transaction_fee: bigint;
   leader_fee: LeaderFee | null;
 };

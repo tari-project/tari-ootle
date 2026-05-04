@@ -4,7 +4,7 @@ import type { TransactionId } from "../TransactionId";
 
 export type TransferNftResponse = {
   transaction_id: TransactionId;
-  fee: number;
-  fee_refunded: number;
+  fee: bigint;
+  fee_refunded: bigint;
   result: FinalizeResult;
 };

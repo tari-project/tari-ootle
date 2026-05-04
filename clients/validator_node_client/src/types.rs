@@ -285,7 +285,6 @@ pub struct GetBlocksResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
 pub struct GetBlocksCountResponse {
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub count: u64,
 }
 
@@ -296,7 +295,6 @@ pub struct GetBlocksCountResponse {
     ts(export, export_to = "validator-node-client/", rename = "VNLogEntry")
 )]
 pub struct LogEntry {
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub timestamp: u64,
     pub message: String,
     pub level: LogLevel,
@@ -342,7 +340,6 @@ pub struct GetNetworkCommitteeResponse {
     ts(export, export_to = "validator-node-client/", rename = "VNCommitteeShardInfo")
 )]
 pub struct CommitteeShardInfo {
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub shard: Shard,
     pub substate_address_range: RangeInclusive<SubstateAddress>,
     pub validators: Vec<ValidatorNode>,
@@ -462,7 +459,6 @@ pub struct GetCommsStatsResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
 pub struct GetEpochManagerStatsResponse {
     pub current_epoch: Epoch,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub current_block_height: u64,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub current_block_hash: FixedHash,
@@ -482,10 +478,8 @@ pub struct GetBlockRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
 pub struct GetBlocksRequest {
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub limit: u64,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub offset: u64,
+    pub limit: u32,
+    pub offset: u32,
     pub ordering_index: Option<usize>,
     pub ordering: Option<Ordering>,
     pub filter_index: Option<usize>,

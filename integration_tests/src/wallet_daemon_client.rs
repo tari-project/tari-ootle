@@ -86,7 +86,7 @@ pub async fn claim_fees(
     let request = ClaimValidatorFeesRequest {
         account: Some(ComponentAddressOrName::Name(account_name)),
         claim_key_index: None,
-        max_fee: None,
+        max_fee: 1500,
         shards: vec![
             stats
                 .committee_info
@@ -262,7 +262,7 @@ pub async fn create_account_with_free_coins(world: &mut TariWorld, account_name:
 
     let request = AccountsCreateFreeTestCoinsRequest {
         account: account.account.component_address.into(),
-        max_fee: None,
+        max_fee: 1500,
     };
 
     let resp = client.create_free_test_coins(request).await.unwrap();
@@ -305,7 +305,7 @@ pub async fn mint_new_nft_on_account(
         account: ComponentAddressOrName::Name(account_name.clone()),
         mutable_data: metadata,
         number_to_mint: 1,
-        max_fee: None,
+        max_fee: Some(1500),
     };
     let resp = client
         .mint_faucet_nft(request)
@@ -842,14 +842,13 @@ pub async fn transfer(
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let account = Some(ComponentAddressOrName::Name(account_name));
-    let max_fee = Some(5000);
 
     let request = AccountsTransferRequest {
         account,
         amount,
         resource_address,
         destination_public_key,
-        max_fee,
+        max_fee: 5000,
         proof_from_badge_resource: None,
         dry_run: false,
     };
@@ -881,13 +880,12 @@ pub async fn confidential_transfer(
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let account = Some(ComponentAddressOrName::Name(account_name));
-    let max_fee = Some(5000);
 
     let request = ConfidentialTransferRequest {
         account,
         amount,
         destination_address,
-        max_fee,
+        max_fee: 5000,
         resource_address,
         proof_from_badge_resource: None,
         memo: None,

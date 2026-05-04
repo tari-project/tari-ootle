@@ -33,7 +33,6 @@ import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import Loading from "../../Components/Loading";
 import { getBlock, getIdentity } from "../../utils/json_rpc";
 import Transactions from "./Transactions";
-import { decodeShardGroup } from "../../utils/helpers";
 import type {
   Block,
   Command,
@@ -310,7 +309,7 @@ export default function BlockDetails() {
                     <AccordionDetails>
                       {foreignProposals.map((proposal, i) => (
                         <div key={i}>
-                          Foreign Proposal: {proposal.block_id} {JSON.stringify(decodeShardGroup(proposal.shard_group))}
+                          Foreign Proposal: {proposal.block_id} {JSON.stringify(proposal.shard_group)}
                         </div>
                       ))}
                     </AccordionDetails>

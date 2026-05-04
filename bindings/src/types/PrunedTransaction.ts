@@ -5,5 +5,8 @@ import type { PrunedTransactionV1 } from "./PrunedTransactionV1";
  * Pruned, archive-only counterpart of `Transaction`. Carries blob commitments instead of
  * blob payloads, so API responses can omit the raw bytes while preserving the `TransactionId`,
  * signature verifiability, and the structural shape the UI needs to display.
+ *
+ * Constructed only via `From<Transaction>` (which derives commitments from the full blobs and
+ * drops the payloads) or via deserialization of bytes previously written by the storage layer.
  */
 export type PrunedTransaction = { V1: PrunedTransactionV1 };

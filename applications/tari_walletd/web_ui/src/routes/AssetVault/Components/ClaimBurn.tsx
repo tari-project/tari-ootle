@@ -49,7 +49,7 @@ import { rejectReasonToString } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
 import { formatCurrency } from "@utils/helpers";
 import { accountsClaimBurn, burnProofsGet, burnProofsList, transactionsWaitResult } from "@utils/json_rpc";
-import { FormEvent, useEffect, useState } from "react";
+import React, { SyntheticEvent, useEffect, useState } from "react";
 import { Form } from "react-router";
 
 type ProofSource = "file" | "paste";
@@ -151,10 +151,9 @@ export default function ClaimBurn() {
   };
 
   const hasProof = isProofValid();
-  const parsedFee = formState.fee !== "" ? Number(formState.fee) : NaN;
-  const hasFee = !isNaN(parsedFee) && parsedFee > 0;
+  const parsedFee = formState.fee ? BigInt(formState.fee) : undefined;
+  const hasFee = Boolean(parsedFee) && parsedFee! > 0n;
   const canEstimate = formState.account !== "" && hasProof;
-  const canSubmit = canEstimate && hasFee;
 
   const onAccountChange = (e: SelectChangeEvent) => {
     setFormState({ ...formState, account: e.target.value, selectedFile: "" });
@@ -214,7 +213,7 @@ export default function ClaimBurn() {
       const resp = await accountsClaimBurn({
         account: { ComponentAddress: formState.account },
         claim_proof: proof,
-        max_fee: 3000,
+        max_fee: 0n,
         is_dry_run: true,
       });
 
@@ -241,7 +240,7 @@ export default function ClaimBurn() {
     }
   };
 
-  const onSubmit = async (e: FormEvent) => {
+  const onSubmit = async (e: SyntheticEvent) => {
     e.preventDefault();
 
     if (!hasFee) {
@@ -257,7 +256,7 @@ export default function ClaimBurn() {
       const resp = await accountsClaimBurn({
         account: { ComponentAddress: formState.account },
         claim_proof: proof,
-        max_fee: parsedFee,
+        max_fee: parsedFee!,
         is_dry_run: false,
       });
       const waitResp = await transactionsWaitResult({ transaction_id: resp.transaction_id, timeout_secs: 30 });
@@ -410,9 +409,9 @@ export default function ClaimBurn() {
               </Box>
             )}
 
+            <InputLabel>Max Fee</InputLabel>
             <TextField
               name="fee"
-              label="Max Transaction Fee"
               placeholder="Press Estimate Fee to calculate"
               value={formState.fee}
               onChange={onFeeChange}

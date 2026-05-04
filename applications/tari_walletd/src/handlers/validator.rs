@@ -25,7 +25,6 @@ use tari_ootle_walletd_client::{
 };
 
 use crate::{
-    DEFAULT_FEE,
     NUM_PRESHARDS,
     handlers::{
         HandlerContext,
@@ -132,7 +131,7 @@ pub async fn handle_claim_validator_fees(
         .map(|shard| derive_fee_pool_address(&claim_public_key, NUM_PRESHARDS, shard));
 
     // build the transaction
-    let max_fee = req.max_fee.unwrap_or(DEFAULT_FEE);
+    let max_fee = req.max_fee.max(1);
 
     let unsigned_transaction = context
         .transaction_builder()
@@ -187,10 +186,12 @@ pub async fn handle_claim_validator_fees(
         let transaction = sdk.transaction_api().submit_dry_run_transaction(transaction).await?;
         return Ok(ClaimValidatorFeesResponse {
             transaction_id: transaction.id,
+            // Dry-run forces a minimal max_fee so the call doesn't require funded vaults, which clamps
+            // `total_fees_paid` to that placeholder. Report the uncapped estimate instead.
             fee: transaction
                 .finalize
                 .as_ref()
-                .map(|f| f.fee_receipt.total_fees_paid())
+                .map(|f| f.fee_receipt.required_fees())
                 .unwrap_or_default(),
             result: transaction
                 .finalize

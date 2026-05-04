@@ -683,7 +683,7 @@ impl TemplateTest {
         modules.push(Box::new(self.track_calls.clone()));
 
         if self.enable_fees {
-            modules.push(Box::new(FeeModule::new(0, self.fee_table.clone())));
+            modules.push(Box::new(FeeModule::new(0, self.fee_table.clone(), false)));
         }
 
         if self.auto_add_proofs_from_signers && proofs.is_empty() {

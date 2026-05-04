@@ -43,7 +43,7 @@ export type BlockHeader = {
   /**
    * The total leader fee for this block. This should match the sum of the leader fees in the block's body.
    */
-  total_leader_fee: number;
+  total_leader_fee: bigint;
   /**
    * A Merkle root hash committing to all state after this block has been applied.
    */
@@ -60,7 +60,7 @@ export type BlockHeader = {
    * The Unix Epoch timestamp indicating the creation time of the block. Currently, this can be chosen arbitrarily
    * and is only informational/used for metrics.
    */
-  timestamp: number;
+  timestamp: bigint;
   /**
    * The epoch hash is a hash given by the epoch oracle. E.g. the base layer epoch oracle gives the first block hash
    * of the epoch.

@@ -63,7 +63,6 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon";
 
-const DEFAULT_FEE: u64 = 1500;
 // TODO: must match the global network value. All testnets currently have 256 pre-shards.
 const NUM_PRESHARDS: NumPreshards = NumPreshards::current();
 

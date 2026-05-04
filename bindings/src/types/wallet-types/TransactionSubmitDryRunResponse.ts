@@ -11,6 +11,6 @@ export type TransactionSubmitDryRunResponse = {
    * `floor(total_bytes / 4)` by 1 at a rounding boundary). Non-refundable overcharge is
    * subtracted since it won't recur with a tighter max_fee.
    */
-  required_fees: number;
+  required_fees: bigint;
   result: ExecuteResult;
 };

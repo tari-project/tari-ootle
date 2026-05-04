@@ -299,7 +299,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         swap_input_amount: dryRunSwapInputAmount,
       };
 
-      const result = await sendIt?.({ ...currentTransfer, dry_run: true, max_fee: 3000 });
+      const result = await sendIt?.({ ...currentTransfer, dry_run: true, max_fee: 1 });
       const resp = await transactionsWaitResult({ transaction_id: result.transaction_id, timeout_secs: null });
       const transactionResult = resp.result?.result;
 

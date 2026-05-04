@@ -11,7 +11,7 @@ export type TransactionPoolRecord = {
   transaction_id: string;
   evidence: Evidence;
   is_global: boolean;
-  transaction_fee: number;
+  transaction_fee: bigint;
   leader_fee: LeaderFee | null;
   stage: TransactionPoolStage;
   pending_stage: TransactionPoolStage | null;

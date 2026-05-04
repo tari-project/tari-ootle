@@ -156,7 +156,7 @@ impl TariWalletDaemonProcess {
         let req = ClaimBurnRequest {
             account: ComponentAddressOrName::Name(account_name.into()),
             claim_proof,
-            max_fee: Some(5000),
+            max_fee: 5000,
             is_dry_run: false,
         };
 

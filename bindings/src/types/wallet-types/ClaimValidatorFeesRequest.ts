@@ -5,7 +5,7 @@ import type { ComponentAddressOrName } from "./ComponentAddressOrName";
 export type ClaimValidatorFeesRequest = {
   account: ComponentAddressOrName | null;
   claim_key_index: number | null;
-  max_fee: number | null;
+  max_fee: bigint;
   shards: Array<Shard>;
   dry_run: boolean;
 };

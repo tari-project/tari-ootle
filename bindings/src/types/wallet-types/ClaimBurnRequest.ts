@@ -5,6 +5,6 @@ import type { ComponentAddressOrName } from "./ComponentAddressOrName";
 export type ClaimBurnRequest = {
   account: ComponentAddressOrName;
   claim_proof: ClaimBurnProof;
-  max_fee: number | null;
+  max_fee: bigint;
   is_dry_run: boolean;
 };

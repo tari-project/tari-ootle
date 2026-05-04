@@ -93,23 +93,20 @@ use tari_template_lib_types::{
 use tokio::task;
 
 use super::context::HandlerContext;
-use crate::{
-    DEFAULT_FEE,
-    handlers::helpers::{
-        complete_burn_proof_to_contents,
-        faucet_already_claimed,
-        general_error,
-        get_account,
-        get_account_by_key_index,
-        get_account_or_default,
-        get_account_with_inputs,
-        invalid_params,
-        invalid_request,
-        not_found,
-        transaction_rejected,
-        wait_for_result,
-        wait_for_result_and_account,
-    },
+use crate::handlers::helpers::{
+    complete_burn_proof_to_contents,
+    faucet_already_claimed,
+    general_error,
+    get_account,
+    get_account_by_key_index,
+    get_account_or_default,
+    get_account_with_inputs,
+    invalid_params,
+    invalid_request,
+    not_found,
+    transaction_rejected,
+    wait_for_result,
+    wait_for_result_and_account,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::transaction";
@@ -434,7 +431,7 @@ pub async fn handle_claim_burn(
         is_dry_run,
     } = req;
 
-    let max_fee = max_fee.unwrap_or(DEFAULT_FEE);
+    let max_fee = max_fee.max(1);
 
     // Capture the file name before resolving so we can mark it as claimed after submission
     let proof_file_name = match &claim_proof {
@@ -671,7 +668,7 @@ pub async fn handle_create_free_test_coins(
     // Fixed amount: always 1,000 TARI (matches the on-chain faucet template constant)
     let amount = Amount::from(XTR_FAUCET_AMOUNT);
 
-    let max_fee = max_fee.unwrap_or(DEFAULT_FEE);
+    let max_fee = max_fee.max(1);
 
     let account = get_account(&account, &accounts_api)
         .optional()?
@@ -910,7 +907,7 @@ pub async fn handle_transfer(
     }
 
     // build the transaction
-    let max_fee = req.max_fee.unwrap_or(DEFAULT_FEE);
+    let max_fee = req.max_fee.max(1);
 
     let transaction = builder
         .with_dry_run(req.dry_run)
@@ -1005,7 +1002,7 @@ pub async fn handle_confidential_transfer(
                 amount: req.amount,
                 destination_address: req.destination_address,
                 resource_address: req.resource_address,
-                max_fee: req.max_fee.unwrap_or(DEFAULT_FEE),
+                max_fee: req.max_fee.max(1),
                 output_to_revealed: req.output_to_revealed,
                 proof_from_resource: req.proof_from_badge_resource,
                 memo: req.memo,

@@ -983,7 +983,12 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .filter(confidential_outputs::status.eq(OutputStatus::Unspent.as_key_str()))
             // We have the key to spend
             .filter(confidential_outputs::owner_key_id.is_not_null())
-            .order_by(confidential_outputs::value.asc())
+            // `value` is u64 stored in a signed BigInt column; values >= 2^63 wrap to negative.
+            // Sort non-negatives first (small u64s ascending) then negatives (large u64s ascending) to recover u64 order.
+            .order_by(dsl::sql::<diesel::sql_types::Integer>(
+                "CASE WHEN confidential_outputs.value < 0 THEN 1 ELSE 0 END",
+            ))
+            .then_order_by(confidential_outputs::value.asc())
             .first::<models::ConfidentialOutput>(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general("outputs_lock_smallest_amount", e))?;
@@ -1178,7 +1183,12 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .filter(stealth_outputs::is_burnt.eq(false))
             .filter(stealth_outputs::is_frozen.eq(false))
             .filter(stealth_outputs::is_condition_spendable.eq(true))
-            .order_by(stealth_outputs::value.asc())
+            // `value` is u64 stored in a signed BigInt column; values >= 2^63 wrap to negative.
+            // Sort non-negatives first (small u64s ascending) then negatives (large u64s ascending) to recover u64 order.
+            .order_by(dsl::sql::<diesel::sql_types::Integer>(
+                "CASE WHEN stealth_outputs.value < 0 THEN 1 ELSE 0 END",
+            ))
+            .then_order_by(stealth_outputs::value.asc())
             .first::<models::StealthOutput>(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general(OPERATION, e))?

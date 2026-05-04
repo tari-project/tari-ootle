@@ -48,11 +48,7 @@ export const useKeysCreate = (branch: KeyBranch) => {
 };
 
 export const useKeysSetActive = () => {
-  const setActive = async (index: bigint) => {
-    const result = await keysSetActive({ index: Number(index) });
-    return result;
-  };
-
+  const setActive = async (index: bigint) => await keysSetActive({ index });
   return useMutation({
     mutationFn: setActive,
     onError: (error: ApiError) => {

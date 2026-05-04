@@ -5,8 +5,8 @@ import type { TransactionStatus } from "../TransactionStatus";
 
 export type TransactionGetResponse = {
   /**
-   * Pruned transaction — blob commitments are present but raw blob bytes are omitted to keep
-   * API responses small. Use a separate endpoint to fetch blob payloads if required.
+   * Pruned transaction — blob commitments are present but raw blob bytes are omitted to
+   * keep API responses small. Use a separate endpoint to fetch blob payloads if required.
    */
   transaction: PrunedTransaction;
   result: FinalizeResult | null;

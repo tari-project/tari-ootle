@@ -63,11 +63,11 @@ pub async fn handle_list_owned(
 ) -> Result<TemplatesListAuthoredResponse, anyhow::Error> {
     context.check_auth(token, &[JrpcPermission::TemplatesRead])?;
 
-    let (templates, total_templates) =
-        context
-            .wallet_sdk()
-            .template_api()
-            .list_templates(req.author_public_key.as_ref(), req.page, req.page_size)?;
+    let (templates, total_templates) = context.wallet_sdk().template_api().list_templates(
+        req.author_public_key.as_ref(),
+        req.page.into(),
+        req.page_size.into(),
+    )?;
     Ok(TemplatesListAuthoredResponse {
         templates: templates.into_iter().map(AuthoredTemplate::from).collect(),
         total_templates,

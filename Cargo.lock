@@ -11865,7 +11865,6 @@ dependencies = [
 name = "tari_ootle_wallet_storage_sqlite"
 version = "0.30.3"
 dependencies = [
- "bigdecimal",
  "diesel",
  "diesel_migrations",
  "hex",

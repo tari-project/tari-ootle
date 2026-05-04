@@ -308,6 +308,7 @@ pub async fn spawn_services(
     let transaction_processor = TariTransactionProcessor::new(
         template_provider.clone(),
         fee_table.clone(),
+        false,
         Arc::new(TariClaimBurnProofVerifier::new(config.network, global_db.clone())),
     );
     let transaction_executor = TariBlockTransactionExecutor::new(

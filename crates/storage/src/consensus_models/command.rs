@@ -29,7 +29,6 @@ pub struct TransactionAtom {
     pub id: TransactionId,
     pub decision: Decision,
     pub evidence: Evidence,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub transaction_fee: u64,
     pub leader_fee: Option<LeaderFee>,
 }

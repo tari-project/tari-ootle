@@ -14,19 +14,22 @@ use crate::{
 pub struct FeeModule {
     initial_cost: u64,
     fee_table: FeeTable,
+    dry_run: bool,
 }
 
 impl FeeModule {
-    pub const fn new(initial_cost: u64, fee_table: FeeTable) -> Self {
+    pub const fn new(initial_cost: u64, fee_table: FeeTable, dry_run: bool) -> Self {
         Self {
             initial_cost,
             fee_table,
+            dry_run,
         }
     }
 }
 
 impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
     fn on_initialize(&self, track: &mut StateTracker<TStore>) -> Result<(), RuntimeModuleError> {
+        track.set_fee_state_dry_run(self.dry_run);
         track.add_fee_charge(FeeSource::Initial, self.initial_cost);
         let transaction_weight = track.get_transaction_weight();
         let transaction_weight_cost = transaction_weight

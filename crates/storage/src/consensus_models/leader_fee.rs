@@ -12,9 +12,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct LeaderFee {
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub fee: u64,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub exhaust_burn: u64,
 }
 

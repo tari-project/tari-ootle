@@ -1797,12 +1797,6 @@ where
                 })?;
 
                 let arg: PayFeeArg = args.assert_one_arg()?;
-                if arg.amount.is_negative() {
-                    return Err(RuntimeError::InvalidArgument {
-                        argument: "amount",
-                        reason: "Amount must be positive".to_string(),
-                    });
-                }
 
                 if self.tracker.is_fee_intent_checkpointed() {
                     return Err(RuntimeError::FeePaymentInMainIntent);
@@ -2677,7 +2671,8 @@ where
     }
 
     fn checkpoint_fee_intent(&mut self) -> Result<(), RuntimeError> {
-        if self.tracker.total_fee_payments() < self.tracker.total_fee_charges() {
+        if !self.tracker.is_fee_state_dry_run() && self.tracker.total_fee_payments() < self.tracker.total_fee_charges()
+        {
             return Err(RuntimeError::InsufficientFeesPaid {
                 required_fee: self.tracker.total_fee_charges(),
                 fees_paid: self.tracker.total_fee_payments(),

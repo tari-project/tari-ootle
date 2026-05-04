@@ -3,10 +3,12 @@
 /**
  * An opaque, content-addressed payload referenced from a transaction's instructions by index.
  *
- * Blobs are the prunable side-channel of a transaction: only their per-blob hashes participate
- * in the signing domain, so blob payloads can be dropped post-finalization without affecting
- * signature verifiability or the transaction id.
+ * Blobs are the prunable side-channel of a transaction: the bytes themselves are not bound
+ * directly into the signing domain — only their per-blob hashes are. Once a transaction has
+ * been finalized and its retention window has elapsed, blob payloads can be discarded without
+ * affecting the transaction id or signature verifiability.
  *
- * JSON encoding is base64.
+ * JSON encoding is base64 (matches `PublishTemplate` binary today). Borsh and CBOR use the
+ * `Bytes` byte-array form.
  */
 export type Blob = string;

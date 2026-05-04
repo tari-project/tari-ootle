@@ -43,7 +43,7 @@ import type { VNGetIdentityResponse } from "@tari-project/ootle-ts-bindings";
 
 function Blocks() {
   const [blocks, setBlocks] = useState<Block[]>([]);
-  const [blocksCount, setBlocksCount] = useState(0);
+  const [blocksCount, setBlocksCount] = useState(0n);
   const [lastSort, setLastSort] = useState({ column: "height", order: -1 });
   const [identity, setIdentity] = useState<VNGetIdentityResponse>();
 
@@ -74,7 +74,7 @@ function Blocks() {
     getFilteredBlocksCount({ filter: filter, filter_index: filterIndex }).then((resp) => {
       setBlocksCount(resp.count);
       if (rowsPerPage * page > resp.count) {
-        setPage(Math.floor(resp.count / rowsPerPage));
+        setPage(Math.floor(Number(resp.count) / rowsPerPage));
       }
       getBlocks({
         limit: rowsPerPage,
@@ -392,7 +392,7 @@ function Blocks() {
         <TablePagination
           rowsPerPageOptions={[10, 25, 50]}
           component="div"
-          count={blocksCount}
+          count={Number(blocksCount)}
           rowsPerPage={rowsPerPage}
           page={page}
           onPageChange={handleChangePage}

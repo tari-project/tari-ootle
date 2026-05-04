@@ -264,11 +264,17 @@ impl<TStore: StateReader> StateTracker<TStore> {
         })
     }
 
+    pub fn set_fee_state_dry_run(&mut self, dry_run: bool) {
+        self.write_with(|state| {
+            state.fee_state_mut().set_dry_run(dry_run);
+        })
+    }
+
     pub fn finalize(&mut self, failure: Option<RejectReason>) -> Result<FinalizeResult, RuntimeError> {
         let failure = failure.or_else(|| {
             self.read_with(|state| {
                 let fee_state = state.fee_state();
-                if fee_state.is_paid_in_full() {
+                if fee_state.is_dry_run() || fee_state.is_paid_in_full() {
                     None
                 } else {
                     Some(RejectReason::InsufficientFeesPaid(format!(
@@ -386,6 +392,10 @@ impl<TStore: StateReader> StateTracker<TStore> {
 
     pub fn total_fee_charges(&self) -> u64 {
         self.read_with(|state| state.fee_state().total_charges())
+    }
+
+    pub fn is_fee_state_dry_run(&self) -> bool {
+        self.read_with(|state| state.fee_state().is_dry_run())
     }
 
     pub(super) fn read_with<R, F: FnOnce(&WorkingState<TStore>) -> R>(&self, f: F) -> R {

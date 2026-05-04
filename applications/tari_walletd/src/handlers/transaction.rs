@@ -62,17 +62,8 @@ pub async fn handle_submit_instruction(
 ) -> Result<TransactionSubmitResponse, anyhow::Error> {
     // TODO: fine-grained checks of individual addresses involved (resources, components, etc)
     context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
-    let mut builder = context.transaction_builder().with_instructions(req.instructions);
     let sdk = context.wallet_sdk();
 
-    if let Some(ref dump_account) = req.dump_outputs_into {
-        let dump_account = get_account(dump_account, &sdk.accounts_api())?;
-        builder = builder.put_last_instruction_output_on_workspace("bucket").call_method(
-            *dump_account.component_address(),
-            "deposit",
-            args![Workspace("bucket")],
-        );
-    }
     let fee_account = get_account(&req.fee_account, &sdk.accounts_api())?;
     let owner_key_id = fee_account.owner_key_id().ok_or_else(|| {
         invalid_params(
@@ -80,9 +71,10 @@ pub async fn handle_submit_instruction(
             Some("Fee account does not have an owner key set".to_string()),
         )
     })?;
-
-    let transaction = builder
-        .pay_fee_from_component(*fee_account.component_address(), req.max_fee)
+    let transaction = context
+        .transaction_builder()
+        .with_instructions(req.instructions)
+        .pay_fee_from_component(*fee_account.component_address(), req.max_fee.max(1))
         .with_min_epoch(req.min_epoch.map(Epoch))
         .with_max_epoch(req.max_epoch.map(Epoch))
         .build_unsigned();
@@ -314,7 +306,8 @@ pub async fn handle_submit_manifest(
 
     let seal_signer_key_id = req.seal_signer_key_id.unwrap_or(default_owner_key_id);
 
-    let fee_amount = req.max_fee;
+    // Fee of zero is never valid
+    let fee_amount = req.max_fee.max(1);
 
     let mut transaction = context
         .transaction_builder()
@@ -538,6 +531,9 @@ pub async fn handle_publish_template(
         )
     })?;
 
+    // A max_fee of zero will fail, since paying zero fees is never valid
+    let max_fee = req.max_fee.max(1);
+
     // trying to optimize WASM binary
     let wasm_binary = match optimize_wasm_template(req.binary.as_slice()).await {
         Ok(optimized) => {
@@ -558,7 +554,7 @@ pub async fn handle_publish_template(
 
     let builder = context
         .transaction_builder()
-        .pay_fee_from_component(*fee_account.component_address(), req.max_fee);
+        .pay_fee_from_component(*fee_account.component_address(), max_fee);
     let builder = match metadata_hash {
         Some(hash) => builder.publish_template_with_metadata(wasm_binary, hash),
         None => builder.publish_template(wasm_binary),

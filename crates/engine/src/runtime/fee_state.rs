@@ -16,6 +16,9 @@ pub struct FeeState {
     fee_payments: Vec<(ResourceContainer, VaultId)>,
     running_payments_total: u64,
     fee_charges: FeeBreakdown,
+    /// When true, fee charges are still metered but the executor will not abort if payments are insufficient.
+    /// Set out-of-band by `FeeModule` during runtime initialization (only ever true for indexer dry-runs).
+    dry_run: bool,
 }
 
 impl FeeState {
@@ -89,6 +92,14 @@ impl FeeState {
 
     pub fn total_payments(&self) -> u64 {
         self.running_payments_total
+    }
+
+    pub fn set_dry_run(&mut self, dry_run: bool) {
+        self.dry_run = dry_run;
+    }
+
+    pub fn is_dry_run(&self) -> bool {
+        self.dry_run
     }
 }
 

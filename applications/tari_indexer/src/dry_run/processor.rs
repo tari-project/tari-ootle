@@ -103,8 +103,12 @@ impl DryRunTransactionProcessor {
         state_store.set_many(found_substates)?;
 
         // execute the payload in the WASM engine and return the result
-        let processor =
-            TariTransactionProcessor::new(package, self.fee_table.clone(), self.claim_burn_proof_verifier.clone());
+        let processor = TariTransactionProcessor::new(
+            package,
+            self.fee_table.clone(),
+            true,
+            self.claim_burn_proof_verifier.clone(),
+        );
         let exec_output = task::spawn_blocking(move || {
             processor.execute(&transaction, state_store.into_read_only(), virtual_substates)
         })

@@ -176,7 +176,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       source_account: sourceAccount!,
       target_account_address: transferFormState.targetAccountAddress,
       dry_run: false,
-      max_fee: BigInt(parseInt(transferFormState.maxFee)),
+      max_fee: transferFormState.maxFee ? BigInt(transferFormState.maxFee) : 0n,
       fee_payer_account: feePayerAccount!,
       resource_address: transferFormState.resourceAddress,
     };

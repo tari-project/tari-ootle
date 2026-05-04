@@ -125,7 +125,7 @@ function PublishTemplateDialog(props: DialogProps) {
 
   const hasFile = formState.binary !== null;
   const hasAccount = Boolean(formState.account);
-  const maxFeeNum = BigInt(formState.maxFee);
+  const maxFeeNum = formState.maxFee ? BigInt(formState.maxFee) : 0n;
   const feeIsBelowEstimate = estimatedFee !== null && maxFeeNum !== null && maxFeeNum > 0 && maxFeeNum < estimatedFee;
   const canSubmit = hasFile && hasAccount && maxFeeNum !== null && maxFeeNum > 0;
 

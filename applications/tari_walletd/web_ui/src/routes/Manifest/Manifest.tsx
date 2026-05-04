@@ -181,7 +181,7 @@ function ManifestEditor() {
     submitManifest({
       manifest: manifest.code,
       variables: manifest.variables,
-      max_fee: isDryRun ? 1n : BigInt(fee),
+      max_fee: isDryRun ? 1n : fee ? BigInt(fee) : 0n,
       seal_signer_key_id: null,
       signing_key_ids: manifest.signingKeys,
       dry_run: isDryRun,

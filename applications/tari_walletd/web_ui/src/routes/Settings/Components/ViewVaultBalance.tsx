@@ -32,17 +32,24 @@ import { useState } from "react";
 
 function ViewVaultBalanceForm() {
   const [formState, setFormState] = useState({
-    vaultId: null,
-    keyId: 0,
+    vaultId: "",
+    keyId: "",
   });
   const [vaultBalance, setVaultBalance] = useState<any>(null);
 
   const onViewBalanceClicked = async () => {
+    let viewKeyId;
+    try {
+      viewKeyId = BigInt(formState.keyId!);
+    } catch (e) {
+      console.error("keyId is not an integer", e);
+      throw e;
+    }
     const resp = await confidentialViewVaultBalance({
-      vault_id: formState.vaultId!,
+      vault_id: formState.vaultId,
       minimum_expected_value: null,
       maximum_expected_value: null,
-      view_key_id: BigInt(formState.keyId),
+      view_key_id: viewKeyId,
     } as ConfidentialViewVaultBalanceRequest);
 
     setVaultBalance(resp);
@@ -73,18 +80,19 @@ function ViewVaultBalanceForm() {
         <TextField
           name="keyId"
           label="Key ID"
-          value={formState.keyId || ""}
+          value={formState.keyId}
           onChange={onChange}
           style={{ flexGrow: 1 }}
+          type="number"
         />
         <TextField
           name="vaultId"
           label="Vault Id"
-          value={formState.vaultId || ""}
+          value={formState.vaultId}
           onChange={onChange}
           style={{ flexGrow: 1 }}
         />
-        <Button variant="contained" onClick={onViewBalanceClicked} disabled={!formState.vaultId}>
+        <Button variant="contained" onClick={onViewBalanceClicked} disabled={!formState.vaultId || !formState.keyId}>
           Fetch Balance
         </Button>
       </Box>

@@ -3017,9 +3017,9 @@ dependencies = [
 
 [[package]]
 name = "diesel"
-version = "2.3.5"
+version = "2.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e130c806dccc85428c564f2dc5a96e05b6615a27c9a28776bd7761a9af4bb552"
+checksum = "9940fb8467a0a06312218ed384185cb8536aa10d8ec017d0ce7fad2c1bd882d5"
 dependencies = [
  "bigdecimal",
  "chrono",

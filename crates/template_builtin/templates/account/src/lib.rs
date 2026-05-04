@@ -177,22 +177,16 @@ mod account_template {
 
         /// Pay fees from previously revealed stealth resource.
         pub fn pay_fee(&mut self, amount: Amount) {
-            emit_event("pay_fee", [("amount", amount.to_string())]);
             self.get_vault_mut(STEALTH_TARI_RESOURCE_ADDRESS).pay_fee(amount);
         }
 
         /// Reveal stealth tokens and return the revealed bucket to pay fees.
         pub fn pay_fee_stealth(&mut self, transfer: StealthTransferStatement) {
-            emit_event("pay_fee", [
-                ("stealth", "true".to_string()),
-                ("num_inputs", transfer.inputs_statement.inputs.len().to_string()),
-            ]);
             self.get_vault_mut(STEALTH_TARI_RESOURCE_ADDRESS)
                 .pay_fee_stealth(transfer);
         }
 
         pub fn create_proof_for_resource(&mut self, resource: ResourceAddress) -> Proof {
-            emit_event("create_proof_for_resource", [("resource", resource.to_string())]);
             let v = self.get_vault_mut(resource);
             v.create_proof()
         }
@@ -206,19 +200,11 @@ mod account_template {
             resource: ResourceAddress,
             ids: Vec<NonFungibleId>,
         ) -> Proof {
-            emit_event("create_proof_by_non_fungible_ids", [
-                ("resource", resource.to_string()),
-                ("ids", ids.iter().map(ToString::to_string).collect::<Vec<_>>().join(",")),
-            ]);
             let v = self.get_vault_mut(resource);
             v.create_proof_by_non_fungible_ids(ids.into_iter().collect())
         }
 
         pub fn create_proof_by_amount(&mut self, resource: ResourceAddress, amount: Amount) -> Proof {
-            emit_event("create_proof_by_amount", [
-                ("resource", resource.to_string()),
-                ("amount", amount.to_string()),
-            ]);
             let v = self.get_vault_mut(resource);
             v.create_proof_by_amount(amount)
         }

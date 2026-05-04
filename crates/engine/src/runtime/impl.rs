@@ -3085,8 +3085,10 @@ where
             return Ok(());
         }
 
+        // Note: per-transaction dedup is intentionally pushed into the modules that want it (see
+        // `FeeModule::on_template_loaded`), so observer-style modules continue to see every load.
         for module in self.modules.iter() {
-            module.on_template_loaded(&mut self.tracker, bytes_loaded)?;
+            module.on_template_loaded(&mut self.tracker, template_address, bytes_loaded)?;
         }
         Ok(())
     }

@@ -121,6 +121,14 @@ impl<TStore: StateReader> StateTracker<TStore> {
         self.write_with(|state| state.push_log(log))
     }
 
+    /// Returns `true` the first time a given template address is seen within this transaction's
+    /// state, `false` thereafter. Callers use this to dedupe `FeeSource::TemplateLoad` charges:
+    /// the validator pays the cold compile/deserialise cost at most once per template per
+    /// process, so charging it on every entry over-bills the user.
+    pub fn record_template_load_charge(&mut self, address: TemplateAddress) -> bool {
+        self.write_with(|state| state.record_template_load_charge(address))
+    }
+
     pub fn take_events(&mut self) -> Vec<Event> {
         self.write_with(|state| state.take_events())
     }

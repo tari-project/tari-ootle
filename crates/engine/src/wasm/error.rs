@@ -47,6 +47,8 @@ pub enum WasmExecutionError {
     EngineArgDecodeFailed(BorError),
     #[error("Failed to decode template definition: {0:?}")]
     AbiTemplateDefDecodeError(BorError),
+    #[error("Malformed `tari_tdef` custom section: {reason}")]
+    AbiTemplateDefSectionMalformed { reason: String },
     #[error("Unexpected ABI function {name}")]
     UnexpectedAbiFunction { name: String },
     #[error("Encoding error: {0}")]

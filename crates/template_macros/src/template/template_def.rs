@@ -21,12 +21,12 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
+use quote::quote;
 use syn::{AngleBracketedGenericArguments, GenericArgument, PathArguments, PathSegment, Result, Type, TypeTuple};
 use tari_template_abi::{
-    ABI_TEMPLATE_DEF_GLOBAL_NAME,
     ArgDef,
     FunctionDef,
+    TEMPLATE_DEF_CUSTOM_SECTION,
     TemplateDef,
     TemplateDefV1,
     Type as ArgType,
@@ -86,11 +86,17 @@ pub fn generate_template_def(ast: &TemplateAst) -> Result<TokenStream> {
         )
     })?;
     let len = template_def_data.len();
-    let template_def_name = format_ident!("{ABI_TEMPLATE_DEF_GLOBAL_NAME}");
+    let section_name = TEMPLATE_DEF_CUSTOM_SECTION;
 
+    // Embed the `[u32 LE length] || [bor bytes]` blob into a WASM custom
+    // section. Engines extract the bytes directly out of the section without
+    // any linear-memory access. `#[used]` keeps the linker from stripping it;
+    // LLVM's wasm backend preserves a non-standard `link_section` name as a
+    // WASM custom section in the output binary.
     let output = quote! {
-        #[unsafe(no_mangle)]
-        pub static #template_def_name: [u8;#len] = [#(#template_def_data),*];
+        #[used]
+        #[unsafe(link_section = #section_name)]
+        static _TARI_TEMPLATE_DEF: [u8; #len] = [#(#template_def_data),*];
     };
 
     Ok(output)

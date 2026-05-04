@@ -66,6 +66,7 @@ use tari_shutdown::ShutdownSignal;
 use tari_template_builtin::all_builtin_templates;
 use tari_template_lib_types::{Amount, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
+use tokio::task;
 
 use crate::{
     ApplicationConfig,
@@ -245,14 +246,24 @@ pub async fn spawn_services(
 
     // Template manager
     let wasm_cache_dir = config.indexer.data_dir.join("wasm_cache");
-    let wasm_cache = WasmModuleCache::open(&wasm_cache_dir).map_err(|e| {
-        anyhow!(
-            "Failed to open WASM module cache at {}: {}",
-            wasm_cache_dir.display(),
-            e,
-        )
-    })?;
-    let template_manager = TemplateManager::initialize(global_db.clone(), substate_manager.clone(), wasm_cache)?;
+
+    let template_manager = task::spawn_blocking({
+        let global_db = global_db.clone();
+        let substate_manager = substate_manager.clone();
+        move || {
+            let wasm_cache = WasmModuleCache::open(&wasm_cache_dir).map_err(|e| {
+                anyhow!(
+                    "Failed to open WASM module cache at {}: {}",
+                    wasm_cache_dir.display(),
+                    e,
+                )
+            })?;
+            let manager = TemplateManager::initialize(global_db, substate_manager, wasm_cache)?;
+            anyhow::Ok(manager)
+        }
+    })
+    .await
+    .context("template manager init thread panicked")??;
 
     // Dry run - use a shorter cache TTL for more accurate fee estimates
     let dry_run_substate_manager = substate_manager

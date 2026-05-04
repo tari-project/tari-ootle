@@ -23,7 +23,14 @@
 use std::{fmt, fmt::Formatter, sync::Arc};
 
 use tari_engine_types::limits;
-use tari_template_abi::{ABI_TEMPLATE_DEF_GLOBAL_NAME, FunctionDef, TemplateDef, Type};
+use tari_template_abi::{
+    ABI_TEMPLATE_DEF_GLOBAL_NAME,
+    FunctionDef,
+    TEMPLATE_DEF_CUSTOM_SECTION,
+    TemplateDef,
+    Type,
+    WASM_PTR_SIZE,
+};
 use wasmer::{
     AsStoreMut,
     Engine,
@@ -124,7 +131,15 @@ impl WasmModule {
         let memory = instance.exports.get_memory("memory")?.clone();
         env.set_memory(memory);
 
-        let template = env.load_template_def(&mut store, &instance)?;
+        // Prefer the `tari_tdef` custom section. New templates produced by the
+        // current `#[template]` macro embed the bor-encoded `TemplateDef`
+        // there. If the section is absent we treat the binary as legacy and
+        // fall back to reading the blob out of linear memory via the
+        // `_ABI_TEMPLATE_DEF` exported global.
+        let template = match load_template_def_from_custom_section(&module)? {
+            Some(def) => def,
+            None => env.load_template_def(&mut store, &instance)?,
+        };
         let main_fn = format!("{}_main", template.template_name());
 
         WasmProcess::validate_template_abi_version(&template)?;
@@ -244,6 +259,58 @@ impl fmt::Debug for LoadedWasmTemplate {
     }
 }
 
+/// Try to recover the `TemplateDef` directly from the `tari_tdef` custom
+/// section. Returns `Ok(None)` when the section is absent (legacy templates
+/// that only embed the ABI via the `_ABI_TEMPLATE_DEF` global+rodata
+/// pattern); the caller falls back to reading the blob out of linear memory
+/// in that case.
+///
+/// Wasmer preserves custom sections through compile and `serialize` /
+/// `deserialize`, so this works on both freshly compiled modules and modules
+/// loaded from the disk cache.
+fn load_template_def_from_custom_section(module: &wasmer::Module) -> Result<Option<TemplateDef>, WasmExecutionError> {
+    let mut sections = module.custom_sections(TEMPLATE_DEF_CUSTOM_SECTION);
+    let Some(section) = sections.next() else {
+        return Ok(None);
+    };
+    // The macro emits exactly one `tari_tdef` section per template. Multiple
+    // sections with this name would be ambiguous — refuse to guess which one
+    // is canonical.
+    if sections.next().is_some() {
+        return Err(WasmExecutionError::AbiTemplateDefSectionMalformed {
+            reason: format!(
+                "module contains more than one `{}` custom section",
+                TEMPLATE_DEF_CUSTOM_SECTION
+            ),
+        });
+    }
+    if section.len() < WASM_PTR_SIZE {
+        return Err(WasmExecutionError::AbiTemplateDefSectionMalformed {
+            reason: format!(
+                "section is {} bytes; expected at least {} for the length prefix",
+                section.len(),
+                WASM_PTR_SIZE
+            ),
+        });
+    }
+    let prefix: [u8; WASM_PTR_SIZE] = section[..WASM_PTR_SIZE]
+        .try_into()
+        .expect("section.len() >= WASM_PTR_SIZE checked above");
+    let full_len = u32::from_le_bytes(prefix) as usize;
+    if full_len < WASM_PTR_SIZE || full_len > section.len() {
+        return Err(WasmExecutionError::AbiTemplateDefSectionMalformed {
+            reason: format!(
+                "declared length {} is inconsistent with section size {}",
+                full_len,
+                section.len()
+            ),
+        });
+    }
+    let template = tari_bor::decode::<TemplateDef>(&section[WASM_PTR_SIZE..full_len])
+        .map_err(WasmExecutionError::AbiTemplateDefDecodeError)?;
+    Ok(Some(template))
+}
+
 fn validate_instance<S: AsStoreMut>(
     store: &mut S,
     instance: &Instance,
@@ -266,12 +333,17 @@ fn validate_instance<S: AsStoreMut>(
         return Err(WasmExecutionError::UnexpectedAbiFunction { name: name.to_string() });
     }
 
-    instance
-        .exports
-        .get_global(ABI_TEMPLATE_DEF_GLOBAL_NAME)?
-        .get(store)
-        .i32()
-        .ok_or(WasmExecutionError::ExportError(ExportError::IncompatibleType))?;
+    // The `_ABI_TEMPLATE_DEF` global is present in legacy templates (where
+    // the ABI lives in linear memory) and absent in templates produced by
+    // the current macro (which puts the ABI in the `tari_tdef` custom
+    // section). When present, sanity-check that it's an i32; when missing,
+    // we've already validated the ABI via the custom section.
+    if let Ok(global) = instance.exports.get_global(ABI_TEMPLATE_DEF_GLOBAL_NAME) {
+        global
+            .get(store)
+            .i32()
+            .ok_or(WasmExecutionError::ExportError(ExportError::IncompatibleType))?;
+    }
 
     // Check that the main function exists and it's signature is correct
     let _main: MainFunction = instance.exports.get_typed_function(store, main_fn)?;

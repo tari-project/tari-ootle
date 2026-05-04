@@ -44,7 +44,7 @@ use tari_ootle_storage::{
     time::{OffsetDateTime, PrimitiveDateTime},
 };
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_template_builtin::{all_builtin_templates, is_builtin_template_address, try_get_template_builtin};
+use tari_template_builtin::{all_builtin_templates, try_get_template_builtin};
 use tari_template_lib_types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 use super::{Template, TemplateCode, TemplateMetadata};
@@ -55,6 +55,7 @@ pub struct TemplateManager {
     global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     substate_manager: SubstateManager,
     wasm_cache: WasmModuleCache,
+    build_in_template_cache: HashMap<TemplateAddress, LoadedTemplate>,
 }
 
 impl TemplateManager {
@@ -94,6 +95,17 @@ impl TemplateManager {
             global_db,
             substate_manager,
             wasm_cache,
+            // NOTE: this is fairly slow (100s of ms) but is paid once at startup
+            build_in_template_cache: all_builtin_templates()
+                .iter()
+                .map(|template| {
+                    (
+                        template.address,
+                        WasmModule::load_template_from_code(template.binary)
+                            .expect("builtin templates should always load"),
+                    )
+                })
+                .collect(),
         })
     }
 
@@ -111,8 +123,8 @@ impl TemplateManager {
         address: &TemplateAddress,
         code: &TemplateCode,
     ) -> Result<LoadedTemplate, TemplateManagerError> {
-        if is_builtin_template_address(address) {
-            return Ok(WasmModule::load_template_from_code(code.as_raw_bytes())?);
+        if let Some(template) = self.build_in_template_cache.get(address) {
+            return Ok(template.clone());
         }
         if let Some(loaded) = self.wasm_cache.try_load(address) {
             return Ok(loaded);

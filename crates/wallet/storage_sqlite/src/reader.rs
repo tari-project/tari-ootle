@@ -7,7 +7,6 @@ use std::{
     sync::MutexGuard,
 };
 
-use bigdecimal::{BigDecimal, ToPrimitive};
 use diesel::{
     BoolExpressionMethods,
     ExpressionMethods,
@@ -19,10 +18,7 @@ use diesel::{
     SelectableHelper,
     SqliteConnection,
     TextExpressionMethods,
-    dsl,
-    dsl::sum,
     sql_query,
-    sql_types,
 };
 use log::{error, warn};
 use serde::de::DeserializeOwned;
@@ -794,14 +790,24 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 key: vault_address.to_string(),
             })?;
 
-        let balance = confidential_outputs::table
-            .select(sum(confidential_outputs::value))
+        // `value` is u64 stored in a signed BigInt column; values >= 2^63 wrap to negative.
+        // Reinterpret each row's bits via `as u64` and aggregate in u128 to recover the true total.
+        let balance: u128 = confidential_outputs::table
+            .select(confidential_outputs::value)
             .filter(confidential_outputs::vault_id.eq(vault_id))
             .filter(confidential_outputs::status.eq(OutputStatus::Unspent.as_key_str()))
-            .first::<Option<BigDecimal>>(self.connection())
-            .map_err(|e| WalletStorageError::general("outputs_get_unspent_balance", e))?;
+            .load::<i64>(self.connection())
+            .map_err(|e| WalletStorageError::general("outputs_get_unspent_balance", e))?
+            .into_iter()
+            .map(|v| u128::from(v as u64))
+            .sum();
 
-        Ok(balance.map(|v| v.to_u64().expect("overflow")).unwrap_or(0))
+        u64::try_from(balance).map_err(|_| {
+            WalletStorageError::general(
+                "outputs_get_unspent_balance",
+                format!("balance overflow u64: {balance}"),
+            )
+        })
     }
 
     fn confidential_outputs_get_locked_by_lock_id(
@@ -945,26 +951,21 @@ impl WalletStoreReader for ReadTransaction<'_> {
         const OPERATION: &str = "stealth_outputs_get_unspent_balance";
         use crate::schema::stealth_outputs;
 
-        let (balance, utxo_count) = stealth_outputs::table
-            .select((
-                dsl::sum(dsl::sql::<sql_types::BigInt>("CAST(value as LONG)")),
-                dsl::count(stealth_outputs::id),
-            ))
+        // `value` is u64 stored in a signed BigInt column; values >= 2^63 wrap to negative.
+        // Reinterpret each row's bits via `as u64` and aggregate in u128 to recover the true total.
+        let values = stealth_outputs::table
+            .select(stealth_outputs::value)
             .filter(stealth_outputs::resource_address.eq(resource_address.to_string()))
             .filter(stealth_outputs::status.eq(OutputStatus::Unspent.as_key_str()))
-            .first::<(Option<BigDecimal>, i64)>(self.connection())
+            .load::<i64>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
-        let balance = balance
-            .map(|v| v.to_u128().expect("BUG: stealth amount overflow"))
-            .unwrap_or(0)
-            .into();
+        let utxo_count = values.len();
+        let balance: u128 = values.into_iter().map(|v| u128::from(v as u64)).sum();
 
         Ok(StealthBalance {
-            balance,
-            // Negative count should be impossible
-            utxo_count: usize::try_from(utxo_count)
-                .expect("INVARIANT: negative or utxo count > usize:::MAX should not be possible in SQLite"),
+            balance: balance.into(),
+            utxo_count,
         })
     }
 

@@ -1699,7 +1699,7 @@ dependencies = [
  "itertools 0.13.0",
  "log",
  "ootle_byte_type",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "serde_json",
  "tari_bor",
@@ -3219,7 +3219,7 @@ dependencies = [
  "p256",
  "p384",
  "portable-atomic",
- "rand 0.9.2",
+ "rand 0.9.4",
  "rand_core 0.6.4",
  "rcgen 0.13.2",
  "ring",
@@ -3442,7 +3442,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3612,7 +3612,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "835c052cb0c08c1acf6ffd71c022172e18723949c8282f2b9f27efbc51e64534"
 dependencies = [
  "byteorder",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rustc-hex",
  "static_assertions",
 ]
@@ -4240,9 +4240,9 @@ checksum = "b07f60793ff0a4d9cef0f18e63b5357e06209987153a64648c972c1e5aff336f"
 
 [[package]]
 name = "hickory-net"
-version = "0.26.0"
+version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c61c8db47fae51ba9f8f2a2748bd87542acfbe22f2ec9cf9c8ec72d1ee6e9a6"
+checksum = "e2295ed2f9c31e471e1428a8f88a3f0e1f4b27c15049592138d1eebe9c35b183"
 dependencies = [
  "async-trait",
  "bytes",
@@ -4251,7 +4251,7 @@ dependencies = [
  "futures-channel",
  "futures-io",
  "futures-util",
- "hickory-proto 0.26.0",
+ "hickory-proto 0.26.1",
  "idna",
  "ipnet",
  "jni 0.22.4",
@@ -4282,7 +4282,7 @@ dependencies = [
  "idna",
  "ipnet",
  "once_cell",
- "rand 0.9.2",
+ "rand 0.9.4",
  "ring",
  "socket2 0.5.10",
  "thiserror 2.0.18",
@@ -4294,9 +4294,9 @@ dependencies = [
 
 [[package]]
 name = "hickory-proto"
-version = "0.26.0"
+version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a916d0494600d99ecb15aadfab677ad97c4de559e8f1af0c129353a733ac1fcc"
+checksum = "0bab31817bfb44672a252e97fe81cd0c18d1b2cf892108922f6818820df8c643"
 dependencies = [
  "data-encoding",
  "idna",
@@ -4325,7 +4325,7 @@ dependencies = [
  "moka",
  "once_cell",
  "parking_lot",
- "rand 0.9.2",
+ "rand 0.9.4",
  "resolv-conf",
  "smallvec 1.15.1",
  "thiserror 2.0.18",
@@ -4342,7 +4342,7 @@ dependencies = [
  "cfg-if",
  "futures-util",
  "hickory-net",
- "hickory-proto 0.26.0",
+ "hickory-proto 0.26.1",
  "ipconfig",
  "ipnet",
  "jni 0.22.4",
@@ -4836,7 +4836,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "log",
- "rand 0.9.2",
+ "rand 0.9.4",
  "tokio",
  "url",
  "xmltree",
@@ -5023,7 +5023,7 @@ dependencies = [
  "multiaddr 0.18.3",
  "notify",
  "ootle_byte_type",
- "rand 0.8.5",
+ "rand 0.8.6",
  "regex",
  "reqwest 0.13.2",
  "serde",
@@ -5077,7 +5077,7 @@ dependencies = [
  "futures 0.3.31",
  "log",
  "portable-atomic",
- "rand 0.9.2",
+ "rand 0.9.4",
  "rtcp",
  "rtp",
  "thiserror 1.0.69",
@@ -5135,7 +5135,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi 0.5.2",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5325,7 +5325,7 @@ dependencies = [
  "p256",
  "p384",
  "pem",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rsa",
  "serde",
  "serde_json",
@@ -5607,7 +5607,7 @@ dependencies = [
  "libp2p-swarm",
  "quick-protobuf",
  "quick-protobuf-codec 0.3.1 (git+https://github.com/tari-project/rust-libp2p.git?rev=470c41380d6c5140b52ef65becf4f643e4769e66)",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rand_core 0.6.4",
  "thiserror 2.0.18",
  "tracing",
@@ -5640,7 +5640,7 @@ dependencies = [
  "parking_lot",
  "pin-project 1.1.10",
  "quick-protobuf",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rw-stream-sink",
  "thiserror 2.0.18",
  "tracing",
@@ -5707,7 +5707,7 @@ dependencies = [
  "prometheus-client",
  "quick-protobuf",
  "quick-protobuf-codec 0.3.1 (git+https://github.com/tari-project/rust-libp2p.git?rev=470c41380d6c5140b52ef65becf4f643e4769e66)",
- "rand 0.8.5",
+ "rand 0.8.6",
  "regex",
  "sha2 0.10.9",
  "tracing",
@@ -5758,7 +5758,7 @@ dependencies = [
  "hkdf",
  "multihash",
  "quick-protobuf",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "sha2 0.10.9",
  "tari_crypto",
@@ -5778,7 +5778,7 @@ dependencies = [
  "libp2p-core",
  "libp2p-identity 0.2.13 (git+https://github.com/tari-project/rust-libp2p.git?rev=470c41380d6c5140b52ef65becf4f643e4769e66)",
  "libp2p-swarm",
- "rand 0.8.5",
+ "rand 0.8.6",
  "smallvec 1.15.1",
  "socket2 0.6.1",
  "tokio",
@@ -5830,7 +5830,7 @@ dependencies = [
  "multiaddr 0.18.3",
  "multihash",
  "quick-protobuf",
- "rand 0.8.5",
+ "rand 0.8.6",
  "snow",
  "static_assertions",
  "thiserror 2.0.18",
@@ -5877,7 +5877,7 @@ dependencies = [
  "libp2p-core",
  "libp2p-identity 0.2.13 (git+https://github.com/tari-project/rust-libp2p.git?rev=470c41380d6c5140b52ef65becf4f643e4769e66)",
  "libp2p-swarm",
- "rand 0.8.5",
+ "rand 0.8.6",
  "tracing",
  "web-time",
 ]
@@ -5894,7 +5894,7 @@ dependencies = [
  "libp2p-identity 0.2.13 (git+https://github.com/tari-project/rust-libp2p.git?rev=470c41380d6c5140b52ef65becf4f643e4769e66)",
  "libp2p-tls",
  "quinn",
- "rand 0.8.5",
+ "rand 0.8.6",
  "ring",
  "rustls",
  "socket2 0.6.1",
@@ -5919,7 +5919,7 @@ dependencies = [
  "libp2p-swarm",
  "quick-protobuf",
  "quick-protobuf-codec 0.3.1 (git+https://github.com/tari-project/rust-libp2p.git?rev=470c41380d6c5140b52ef65becf4f643e4769e66)",
- "rand 0.8.5",
+ "rand 0.8.6",
  "static_assertions",
  "thiserror 2.0.18",
  "tracing",
@@ -5942,7 +5942,7 @@ dependencies = [
  "libp2p-swarm",
  "quick-protobuf",
  "quick-protobuf-codec 0.3.1 (git+https://github.com/tari-project/rust-libp2p.git?rev=470c41380d6c5140b52ef65becf4f643e4769e66)",
- "rand 0.8.5",
+ "rand 0.8.6",
  "thiserror 2.0.18",
  "tracing",
  "web-time",
@@ -5959,7 +5959,7 @@ dependencies = [
  "libp2p-core",
  "libp2p-identity 0.2.13 (git+https://github.com/tari-project/rust-libp2p.git?rev=470c41380d6c5140b52ef65becf4f643e4769e66)",
  "libp2p-swarm",
- "rand 0.8.5",
+ "rand 0.8.6",
  "smallvec 1.15.1",
  "tracing",
 ]
@@ -5988,7 +5988,7 @@ dependencies = [
  "libp2p-identity 0.2.13 (git+https://github.com/tari-project/rust-libp2p.git?rev=470c41380d6c5140b52ef65becf4f643e4769e66)",
  "libp2p-swarm-derive",
  "multistream-select",
- "rand 0.8.5",
+ "rand 0.8.6",
  "smallvec 1.15.1",
  "tokio",
  "tracing",
@@ -6112,7 +6112,7 @@ dependencies = [
  "libtor-derive",
  "libtor-sys",
  "log",
- "rand 0.8.5",
+ "rand 0.8.6",
  "sha1 0.6.0",
 ]
 
@@ -6277,7 +6277,7 @@ dependencies = [
  "log-mdc",
  "mock_instant",
  "parking_lot",
- "rand 0.9.2",
+ "rand 0.9.4",
  "serde",
  "serde-value",
  "serde_json",
@@ -6564,7 +6564,7 @@ dependencies = [
  "borsh",
  "log",
  "prost 0.13.5",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rcgen 0.12.1",
  "subtle",
  "tari_common_types",
@@ -6595,7 +6595,7 @@ dependencies = [
  "futures 0.3.31",
  "json5",
  "log",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "tari_common",
  "tari_common_types",
@@ -6633,7 +6633,7 @@ dependencies = [
  "minotari_node_wallet_client",
  "minotari_wallet",
  "qrcode",
- "rand 0.8.5",
+ "rand 0.8.6",
  "regex",
  "rpassword",
  "rustyline",
@@ -6684,7 +6684,7 @@ dependencies = [
  "ledger-transport-hid",
  "log",
  "minotari_ledger_wallet_common",
- "rand 0.8.5",
+ "rand 0.8.6",
  "semver",
  "serde",
  "tari_common",
@@ -6806,7 +6806,7 @@ dependencies = [
  "minotari_ledger_wallet_common",
  "minotari_node_wallet_client",
  "prost 0.13.5",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -7327,7 +7327,7 @@ dependencies = [
  "num-integer",
  "num-iter",
  "num-traits",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "smallvec 1.15.1",
  "zeroize",
@@ -7553,7 +7553,7 @@ dependencies = [
  "futures 0.3.31",
  "indexmap 2.13.0",
  "ootle_byte_type",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "serde_json",
  "signature 3.0.0-rc.8",
@@ -7588,7 +7588,7 @@ version = "0.30.3"
 dependencies = [
  "base64 0.22.1",
  "ootle_byte_type",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "serde_json",
  "tari_bor",
@@ -8075,7 +8075,7 @@ dependencies = [
  "p256",
  "p384",
  "p521",
- "rand 0.8.5",
+ "rand 0.8.6",
  "regex",
  "replace_with",
  "ripemd",
@@ -8734,15 +8734,15 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.13"
+version = "0.11.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1906b49b0c3bc04b5fe5d86a77925ae6524a19b816ae38ce1e426255f1d8a31"
+checksum = "434b42fec591c96ef50e21e886936e66d3cc3f737104fdb9b737c40ffb94c098"
 dependencies = [
  "aws-lc-rs",
  "bytes",
  "getrandom 0.3.4",
  "lru-slab",
- "rand 0.9.2",
+ "rand 0.9.4",
  "ring",
  "rustc-hash 2.1.1",
  "rustls",
@@ -8765,7 +8765,7 @@ dependencies = [
  "once_cell",
  "socket2 0.5.10",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8827,9 +8827,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.8.5"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
+checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
@@ -8838,9 +8838,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.9.2"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6db2770f06117d490610c7488547d543617b21bfa07796d7a12f6f1bd53850d1"
+checksum = "44c5af06bb1b7d3216d91932aed5265164bf384dc89cd6ba05cf59a35f5f76ea"
 dependencies = [
  "rand_chacha 0.9.0",
  "rand_core 0.9.3",
@@ -8907,7 +8907,7 @@ version = "1.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "593d142cfebb4f8a2f3c97862b2381d711faa98a30f2497df441ac51580a1edf"
 dependencies = [
- "rand 0.9.2",
+ "rand 0.9.4",
 ]
 
 [[package]]
@@ -9356,7 +9356,7 @@ dependencies = [
  "bytes",
  "memchr",
  "portable-atomic",
- "rand 0.9.2",
+ "rand 0.9.4",
  "serde",
  "thiserror 1.0.69",
  "webrtc-util",
@@ -9471,7 +9471,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -9530,7 +9530,7 @@ dependencies = [
  "security-framework 3.5.1",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -9551,7 +9551,7 @@ dependencies = [
  "security-framework 3.5.1",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -9706,7 +9706,7 @@ version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32c374dceda16965d541c8800ce9cc4e1c14acfd661ddf7952feeedc3411e5c6"
 dependencies = [
- "rand 0.9.2",
+ "rand 0.9.4",
  "substring",
  "thiserror 1.0.69",
  "url",
@@ -10605,7 +10605,7 @@ dependencies = [
  "crc",
  "lazy_static",
  "md-5",
- "rand 0.9.2",
+ "rand 0.9.4",
  "ring",
  "subtle",
  "thiserror 1.0.69",
@@ -10880,7 +10880,7 @@ dependencies = [
  "diesel_migrations",
  "lazy_static",
  "log",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "serde_json",
  "tari_utilities",
@@ -10908,7 +10908,7 @@ dependencies = [
  "newtype-ops",
  "once_cell",
  "primitive-types",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "serde_json",
  "strum 0.22.0",
@@ -10949,7 +10949,7 @@ dependencies = [
  "once_cell",
  "pin-project 1.1.10",
  "prost 0.13.5",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "serde_derive",
  "serde_json",
@@ -10990,7 +10990,7 @@ dependencies = [
  "log",
  "pin-project 0.4.30",
  "prost 0.13.5",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "tari_common",
  "tari_common_sqlite",
@@ -11074,7 +11074,7 @@ dependencies = [
  "fs2",
  "futures 0.3.31",
  "hex",
- "hickory-proto 0.26.0",
+ "hickory-proto 0.26.1",
  "integer-encoding",
  "jmt",
  "lmdb-zero",
@@ -11083,7 +11083,7 @@ dependencies = [
  "once_cell",
  "primitive-types",
  "prost 0.13.5",
- "rand 0.8.5",
+ "rand 0.8.6",
  "randomx-rs",
  "serde",
  "serde_json",
@@ -11153,7 +11153,7 @@ dependencies = [
  "log",
  "memmap2 0.9.9",
  "ootle_byte_type",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "tari_bor",
  "tari_crypto",
@@ -11189,7 +11189,7 @@ dependencies = [
  "newtype-ops",
  "ootle_byte_type",
  "ootle_serde",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "serde_json",
  "tari_bor",
@@ -11430,7 +11430,7 @@ dependencies = [
  "derivative",
  "libtor",
  "log",
- "rand 0.8.5",
+ "rand 0.8.6",
  "tari_common",
  "tari_p2p",
  "tor-hash-passwd",
@@ -11479,7 +11479,7 @@ dependencies = [
  "libp2p",
  "log",
  "prometheus-client",
- "rand 0.8.5",
+ "rand 0.8.6",
  "tari_rpc_framework",
  "tari_shutdown",
  "tari_swarm",
@@ -11537,7 +11537,7 @@ dependencies = [
  "multiaddr 0.18.3",
  "ootle_byte_type",
  "ootle_serde",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "serde_json5",
  "tari_bor",
@@ -11578,7 +11578,7 @@ dependencies = [
  "ootle_serde",
  "prost 0.14.3",
  "prost-types 0.14.3",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "tari_bor",
  "tari_crypto",
@@ -11598,7 +11598,7 @@ dependencies = [
  "libp2p-identity 0.2.13 (git+https://github.com/tari-project/rust-libp2p.git?rev=470c41380d6c5140b52ef65becf4f643e4769e66)",
  "prost 0.14.3",
  "proto_builder",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "tari_bor",
  "tari_consensus",
@@ -11624,7 +11624,7 @@ dependencies = [
  "indexmap 2.13.0",
  "log",
  "ootle_serde",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "tari_common_types",
  "tari_consensus_types",
@@ -11649,7 +11649,7 @@ dependencies = [
  "diesel_migrations",
  "log",
  "ootle_byte_type",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "serde_json",
  "tari_common_types",
@@ -11704,7 +11704,7 @@ dependencies = [
  "ootle-network",
  "ootle_byte_type",
  "ootle_serde",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "serde_json",
  "tari_bor",
@@ -11761,7 +11761,7 @@ dependencies = [
  "memmap2 0.9.9",
  "ootle-network",
  "ootle_byte_type",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "serde_json",
  "subtle",
@@ -11790,7 +11790,7 @@ dependencies = [
  "ootle_byte_type",
  "ootle_serde",
  "passwords",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "tari_bor",
  "tari_common_types",
@@ -11910,7 +11910,7 @@ dependencies = [
  "mime_guess",
  "notify",
  "ootle_byte_type",
- "rand 0.8.5",
+ "rand 0.8.6",
  "reqwest 0.13.2",
  "serde",
  "serde_json",
@@ -11980,12 +11980,12 @@ source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-rc.0#55942473f
 dependencies = [
  "anyhow",
  "futures 0.3.31",
- "hickory-proto 0.26.0",
+ "hickory-proto 0.26.1",
  "hickory-resolver 0.26.0",
  "log",
  "pgp",
  "prost 0.13.5",
- "rand 0.8.5",
+ "rand 0.8.6",
  "reqwest 0.12.28",
  "semver",
  "serde",
@@ -12122,7 +12122,7 @@ dependencies = [
  "hex",
  "indexmap 2.13.0",
  "log",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rocksdb",
  "serde",
  "smallvec 2.0.0-alpha.12",
@@ -12299,7 +12299,7 @@ dependencies = [
  "anyhow",
  "cargo_toml 0.22.3",
  "ootle_byte_type",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "tari_bor",
  "tari_crypto",
@@ -12320,7 +12320,7 @@ version = "5.3.0-rc.0"
 source = "git+https://github.com/tari-project/tari.git?tag=v5.3.0-rc.0#55942473fd6654f654d69255a90da9be69a67523"
 dependencies = [
  "futures 0.3.31",
- "rand 0.8.5",
+ "rand 0.8.6",
  "tari_shutdown",
  "tempfile",
  "tokio",
@@ -12351,7 +12351,7 @@ dependencies = [
  "num-format",
  "num-traits",
  "primitive-types",
- "rand 0.8.5",
+ "rand 0.8.6",
  "semver",
  "serde",
  "serde_json",
@@ -12388,7 +12388,7 @@ dependencies = [
  "futures 0.3.31",
  "log",
  "minotari_ledger_wallet_common",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "strum 0.22.0",
  "strum_macros 0.22.0",
@@ -12464,7 +12464,7 @@ dependencies = [
  "mini-moka",
  "ootle_byte_type",
  "prometheus-client",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "serde_json",
  "serde_json5",
@@ -12650,7 +12650,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.3",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -13138,7 +13138,7 @@ checksum = "8b83cd43a176c0c19d5db4401283e8f5c296b9c6c7fa29029de15cc445f26e12"
 dependencies = [
  "hex",
  "hex-literal 0.3.4",
- "rand 0.8.5",
+ "rand 0.8.6",
  "sha1 0.6.0",
  "thiserror 1.0.69",
 ]
@@ -13155,7 +13155,7 @@ dependencies = [
  "indexmap 1.9.3",
  "pin-project 1.1.10",
  "pin-project-lite",
- "rand 0.8.5",
+ "rand 0.8.6",
  "slab",
  "tokio",
  "tokio-util 0.7.18",
@@ -13306,7 +13306,7 @@ dependencies = [
  "csv",
  "env_logger",
  "log",
- "rand 0.8.5",
+ "rand 0.8.6",
  "reqwest 0.13.2",
  "serde",
  "serde_json",
@@ -13329,7 +13329,7 @@ dependencies = [
  "clap 4.5.54",
  "once_cell",
  "ootle_byte_type",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rayon",
  "tari_crypto",
  "tari_ootle_common_types",
@@ -13411,7 +13411,7 @@ dependencies = [
  "http 1.4.0",
  "httparse",
  "log",
- "rand 0.9.2",
+ "rand 0.9.4",
  "sha1 0.10.6",
  "thiserror 2.0.18",
  "utf-8",
@@ -13429,7 +13429,7 @@ dependencies = [
  "log",
  "md-5",
  "portable-atomic",
- "rand 0.9.2",
+ "rand 0.9.4",
  "ring",
  "stun",
  "thiserror 1.0.69",
@@ -14166,7 +14166,7 @@ dependencies = [
  "nom 7.1.3",
  "openssl",
  "openssl-sys",
- "rand 0.9.2",
+ "rand 0.9.4",
  "rand_chacha 0.9.0",
  "serde",
  "serde_cbor_2",
@@ -14217,7 +14217,7 @@ dependencies = [
  "lazy_static",
  "log",
  "portable-atomic",
- "rand 0.9.2",
+ "rand 0.9.4",
  "rcgen 0.13.2",
  "regex",
  "ring",
@@ -14270,7 +14270,7 @@ dependencies = [
  "crc",
  "log",
  "portable-atomic",
- "rand 0.9.2",
+ "rand 0.9.4",
  "serde",
  "serde_json",
  "stun",
@@ -14305,7 +14305,7 @@ checksum = "94a84c910fec0848fd5a0d8a5651e0ddbdedaf25a7d3ae3f0b15f71ac73a1773"
 dependencies = [
  "byteorder",
  "bytes",
- "rand 0.9.2",
+ "rand 0.9.4",
  "rtp",
  "thiserror 1.0.69",
 ]
@@ -14322,7 +14322,7 @@ dependencies = [
  "crc",
  "log",
  "portable-atomic",
- "rand 0.9.2",
+ "rand 0.9.4",
  "thiserror 1.0.69",
  "tokio",
  "webrtc-util",
@@ -14365,7 +14365,7 @@ dependencies = [
  "log",
  "nix 0.26.4",
  "portable-atomic",
- "rand 0.9.2",
+ "rand 0.9.4",
  "thiserror 1.0.69",
  "tokio",
  "winapi",
@@ -14422,7 +14422,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -15112,7 +15112,7 @@ dependencies = [
  "nohash-hasher",
  "parking_lot",
  "pin-project 1.1.10",
- "rand 0.8.5",
+ "rand 0.8.6",
  "static_assertions",
 ]
 
@@ -15127,7 +15127,7 @@ dependencies = [
  "nohash-hasher",
  "parking_lot",
  "pin-project 1.1.10",
- "rand 0.9.2",
+ "rand 0.9.4",
  "static_assertions",
  "web-time",
 ]

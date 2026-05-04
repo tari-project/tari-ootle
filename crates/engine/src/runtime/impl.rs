@@ -3085,6 +3085,15 @@ where
             return Ok(());
         }
 
+        // Dedupe per template per transaction: the validator's compile/deserialise cost is paid
+        // once per template per process (in-memory + on-disk caches), so subsequent loads within
+        // the same transaction (cross-template calls, repeated method invocations on the same
+        // component, etc.) carry no incremental load cost. Per-call dispatch overhead is already
+        // captured by `per_module_call_cost`.
+        if !self.tracker.record_template_load_charge(*template_address) {
+            return Ok(());
+        }
+
         for module in self.modules.iter() {
             module.on_template_loaded(&mut self.tracker, bytes_loaded)?;
         }

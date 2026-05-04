@@ -106,6 +106,12 @@ pub(super) struct WorkingState<TStore> {
     initial_call_scope: CallScope,
 
     fee_state: FeeState,
+    /// Template addresses for which a load fee has already been charged in this transaction.
+    /// Used to dedupe `FeeSource::TemplateLoad` charges across repeated calls into the same
+    /// template (cross-template invocations, multiple instructions on the same component, etc.):
+    /// the validator pays the cold compile/deserialise cost at most once per template per process,
+    /// so charging it on every entry over-bills the user.
+    loaded_template_charges: HashSet<TemplateAddress>,
 }
 
 impl<TStore: StateReader> WorkingState<TStore> {
@@ -135,6 +141,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
             call_frames: Vec::new(),
             initial_call_scope,
             fee_state: FeeState::new(),
+            loaded_template_charges: HashSet::new(),
             object_ids: ObjectIds::new(limits::ENGINE_LIMITS.max_substate_outputs),
         }
     }
@@ -1037,6 +1044,13 @@ impl<TStore: StateReader> WorkingState<TStore> {
 
     pub fn fee_state_mut(&mut self) -> &mut FeeState {
         &mut self.fee_state
+    }
+
+    /// Records that a template-load charge is being applied for `address`. Returns `true` if this
+    /// is the first time within the transaction (caller should charge), `false` if already
+    /// recorded (caller should skip).
+    pub fn record_template_load_charge(&mut self, address: TemplateAddress) -> bool {
+        self.loaded_template_charges.insert(address)
     }
 
     pub fn set_last_instruction_output(&mut self, output: IndexedValue) {

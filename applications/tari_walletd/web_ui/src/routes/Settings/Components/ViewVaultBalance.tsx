@@ -42,7 +42,7 @@ function ViewVaultBalanceForm() {
       vault_id: formState.vaultId!,
       minimum_expected_value: null,
       maximum_expected_value: null,
-      view_key_id: Number(formState.keyId),
+      view_key_id: BigInt(formState.keyId),
     } as ConfidentialViewVaultBalanceRequest);
 
     setVaultBalance(resp);

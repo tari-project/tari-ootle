@@ -5,7 +5,8 @@ import type { TransactionId } from "../TransactionId";
 export type TransactionEntry = {
   transaction_id: TransactionId;
   /**
-   * Pruned transaction — blob commitments retained, raw blob bytes omitted.
+   * Pruned transaction — blob commitments retained, raw blob bytes omitted to keep the
+   * response size bounded. The transaction id and signatures remain verifiable.
    */
   transaction: PrunedTransaction;
   created_at: string;

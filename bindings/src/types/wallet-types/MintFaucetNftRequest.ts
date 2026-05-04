@@ -5,5 +5,5 @@ export type MintFaucetNftRequest = {
   account: ComponentAddressOrName;
   mutable_data: object;
   number_to_mint: bigint;
-  max_fee: number | null;
+  max_fee: bigint | null;
 };

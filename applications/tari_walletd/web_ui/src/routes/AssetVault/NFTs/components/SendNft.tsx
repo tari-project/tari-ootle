@@ -155,7 +155,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   const feeEstimateParams = useMemo(() => {
     return {
       dry_run: true,
-      max_fee: 3000,
+      max_fee: 1n,
       nfts: transferFormState.nfts,
       source_account: sourceAccount!,
       target_account_address: transferFormState.targetAccountAddress,
@@ -176,7 +176,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       source_account: sourceAccount!,
       target_account_address: transferFormState.targetAccountAddress,
       dry_run: false,
-      max_fee: parseInt(transferFormState.maxFee) || 3000,
+      max_fee: BigInt(parseInt(transferFormState.maxFee)),
       fee_payer_account: feePayerAccount!,
       resource_address: transferFormState.resourceAddress,
     };
@@ -372,13 +372,22 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
         setValidity({ nfts: true });
       }
     }
-  }, [props.open, preSelectedNftId, preSelectedResourceAddress, account?.component_address, hasBatchSelection, preSelectedNfts]);
+  }, [
+    props.open,
+    preSelectedNftId,
+    preSelectedResourceAddress,
+    account?.component_address,
+    hasBatchSelection,
+    preSelectedNfts,
+  ]);
 
   return (
     <Dialog open={props.open} onClose={handleClose} maxWidth="sm" fullWidth>
       <PopupTitle
         onClose={handleClose}
-        title={preSelectedNftId ? "Transfer NFT" : `Transfer NFTs${hasBatchSelection ? ` (${preSelectedNfts.length})` : ""}`}
+        title={
+          preSelectedNftId ? "Transfer NFT" : `Transfer NFTs${hasBatchSelection ? ` (${preSelectedNfts.length})` : ""}`
+        }
       />
       <DialogContent>
         {!account ? (

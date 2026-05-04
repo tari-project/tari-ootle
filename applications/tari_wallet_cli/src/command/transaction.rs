@@ -120,7 +120,7 @@ pub struct CommonSubmitArgs {
     #[clap(long)]
     pub dry_run: bool,
     #[clap(long)]
-    pub max_fee: Option<u64>,
+    pub max_fee: u64,
     #[clap(long, short = 'f', alias = "fee-account")]
     pub fee_account: Option<ComponentAddressOrName>,
     #[clap(long)]
@@ -259,9 +259,7 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
     let SettingsGetResponse { network, .. } = client.get_settings().await?;
 
     let mut builder = Transaction::builder(network.byte)
-        .call_method(fee_account.component_address, "withdraw", args![
-            common.max_fee.unwrap_or(1000)
-        ])
+        .call_method(fee_account.component_address, "withdraw", args![common.max_fee,])
         .put_last_instruction_output_on_workspace("fee_bucket")
         .pay_fee_from_bucket("fee_bucket")
         .add_instruction(instruction)
@@ -343,7 +341,7 @@ async fn handle_submit_manifest(
             builder.with_instructions(instructions.fee_instructions).call_method(
                 fee_account.component_address,
                 "pay_fee",
-                args![common.max_fee.unwrap_or(1000)],
+                args![common.max_fee],
             )
         })
         .with_instructions(instructions.instructions)

@@ -55,8 +55,6 @@ import {
   validatorsGetFees,
 } from "@utils/json_rpc";
 
-const DEFAULT_MAX_FEE = 2000;
-
 //   Fees are passed as strings because Amount is tagged
 export const useAccountsClaimBurn = () => {
   return useMutation({
@@ -138,7 +136,7 @@ export const useAccountsTransfer = () => {
   return useMutation({
     mutationFn: (params: TransferParams) => {
       const account = { ComponentAddress: params.account };
-      const max_fee = params.max_fee || DEFAULT_MAX_FEE;
+      const max_fee = BigInt(params.max_fee || 1);
       const parsedAddress = decodeOotleAddress(params.destination_address);
       if (params.resourceType === "Confidential") {
         let transferRequest = {
@@ -221,16 +219,10 @@ export const useAccountsTransfer = () => {
 };
 
 export const useAccountsCreateFreeTestCoins = () => {
-  const createFreeTestCoins = async ({
-    account,
-    fee,
-  }: {
-    account: ComponentAddressOrName;
-    fee: number | null;
-  }) =>
+  const createFreeTestCoins = async ({ account, fee }: { account: ComponentAddressOrName; fee: number }) =>
     accountsCreateFreeTestCoins({
       account,
-      max_fee: fee,
+      max_fee: BigInt(fee),
     });
 
   return useMutation({
@@ -255,13 +247,13 @@ export const useMintTestnetFaucetNfts = () => {
     account: ComponentAddressOrName;
     numberToMint: number;
     mutableData: object;
-    maxFee: number | null;
+    maxFee: number;
   }) =>
     mintFaucetNfts({
       account,
       mutable_data: mutableData,
       number_to_mint: BigInt(numberToMint),
-      max_fee: maxFee,
+      max_fee: BigInt(maxFee),
     });
 
   return useMutation({

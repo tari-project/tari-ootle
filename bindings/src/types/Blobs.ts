@@ -2,7 +2,7 @@
 import type { Blob } from "./Blob";
 
 /**
- * Ordered collection of blobs carried by a transaction. Index 0 is the first blob, etc.
- * Instructions and arguments reference blobs by `BlobIndex` (number) into this list.
+ * Ordered collection of `Blob`s carried by a transaction. Index 0 corresponds to the first
+ * blob, etc. Instructions and arguments reference blobs by `BlobIndex` into this list.
  */
 export type Blobs = Array<Blob>;

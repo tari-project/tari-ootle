@@ -420,8 +420,8 @@ impl JsonRpcHandlers {
             .state_store
             .with_read_tx(|tx| {
                 tx.blocks_get_paginated(
-                    req.limit,
-                    req.offset,
+                    req.limit.into(),
+                    req.offset.into(),
                     req.filter_index,
                     req.filter,
                     req.ordering_index,

@@ -373,8 +373,8 @@ impl WalletDaemonClient {
     /// Lists accounts with pagination.
     pub async fn list_accounts(
         &mut self,
-        offset: u64,
-        limit: u64,
+        offset: u32,
+        limit: u32,
     ) -> Result<AccountsListResponse, WalletDaemonClientError> {
         self.send_request("accounts.list", &AccountsListRequest { offset, limit })
             .await

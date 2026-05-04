@@ -187,7 +187,7 @@ async fn handle_create_free_test_coins(
     let resp = client
         .create_free_test_coins(AccountsCreateFreeTestCoinsRequest {
             account: account.component_address.into(),
-            max_fee: args.fee,
+            max_fee: args.fee.unwrap_or(1500),
         })
         .await?;
 

@@ -278,7 +278,7 @@ impl TrafficSim {
                     .client
                     .create_free_test_coins(AccountsCreateFreeTestCoinsRequest {
                         account: resp.account.component_address.into(),
-                        max_fee: None,
+                        max_fee: 1500,
                     })
                     .await?;
                 AccountWithAddress::new(resp.account, resp.address)
@@ -416,7 +416,7 @@ impl TrafficSim {
                 client
                     .create_free_test_coins(AccountsCreateFreeTestCoinsRequest {
                         account: (*account.component_address()).into(),
-                        max_fee: None,
+                        max_fee: 1500,
                     })
                     .await?;
             }

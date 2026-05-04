@@ -3,8 +3,10 @@ import type { PrunedUnsealedTransactionV1 } from "./PrunedUnsealedTransactionV1"
 import type { TransactionSealSignature } from "./TransactionSealSignature";
 
 /**
- * Pruned, archive-only counterpart of `TransactionV1`. Carries blob commitments instead of
- * blob payloads. Produces the same `TransactionId` and verifies the same signatures as the
- * full form.
+ * Pruned, archive-only counterpart of `TransactionV1`.
+ *
+ * Constructed only via `From<TransactionV1>` (which derives blob commitments from the full
+ * blobs and drops the payloads) or via deserialization of bytes previously written by the
+ * storage layer.
  */
 export type PrunedTransactionV1 = { body: PrunedUnsealedTransactionV1; seal_signature: TransactionSealSignature };

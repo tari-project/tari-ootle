@@ -55,15 +55,15 @@ export const useGetSubstate = (props: UseGetSubstateProps) => {
 
 interface UseGetNonFungiblesProps {
   address: any;
-  start_index?: number;
-  end_index?: number;
+  start_index?: bigint;
+  end_index?: bigint;
   enabled?: boolean;
 }
 
 export const useGetNonFungibles = ({
                                      address,
-                                     start_index = 0,
-                                     end_index = 10,
+                                     start_index = 0n,
+                                     end_index = 10n,
                                      enabled = true,
                                    }: UseGetNonFungiblesProps) => {
   return useQuery({

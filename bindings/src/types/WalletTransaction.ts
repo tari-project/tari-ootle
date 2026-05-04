@@ -8,8 +8,9 @@ import type { NewAccountData } from "./wallet-types/NewAccountData";
 export type WalletTransaction = {
   id: string;
   /**
-   * Pruned transaction — blob commitments are present but raw blob payloads are omitted to
-   * keep API responses small.
+   * The transaction in its pruned (blob-bytes-stripped) form. Blob commitments are retained
+   * so the `TransactionId` and signatures remain verifiable. Wallet daemon storage keeps the
+   * full form on disk for re-submission, but the public API returns this slimmer view.
    */
   transaction: PrunedTransaction;
   status: TransactionStatus;

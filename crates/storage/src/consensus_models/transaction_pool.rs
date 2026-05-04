@@ -339,7 +339,6 @@ pub struct TransactionPoolRecord {
     transaction_id: TransactionId,
     evidence: Evidence,
     is_global: bool,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     transaction_fee: u64,
     leader_fee: Option<LeaderFee>,
     stage: TransactionPoolStage,

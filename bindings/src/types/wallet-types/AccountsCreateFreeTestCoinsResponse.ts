@@ -9,7 +9,7 @@ export type AccountsCreateFreeTestCoinsResponse = {
   account: Account;
   transaction_id: TransactionId;
   amount: Amount;
-  fee: number;
+  fee: bigint;
   result: FinalizeResult;
   address: OotleAddress;
 };

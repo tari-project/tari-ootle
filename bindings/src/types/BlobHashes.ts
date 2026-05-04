@@ -4,5 +4,10 @@ import type { Hash32 } from "./Hash32";
 /**
  * A typed collection of per-blob commitments — the prunable surrogate of `Blobs` in the
  * signing domain.
+ *
+ * The only public way to obtain a non-default `BlobHashes` is via `Blobs::hashes()`. There is
+ * no `from_raw` constructor: anywhere a `BlobHashes` appears, it either originated from
+ * hashing real blobs or arrived via deserialization of bytes previously written by this
+ * crate's storage layer (and is bound by a signature, so tampering is detectable).
  */
 export type BlobHashes = Array<Hash32>;

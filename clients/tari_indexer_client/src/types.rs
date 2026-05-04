@@ -392,9 +392,7 @@ pub struct GetIdentityResponse {
 pub struct GetNonFungiblesRequest {
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub address: ResourceAddress,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub start_index: u64,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub end_index: u64,
 }
 
@@ -442,7 +440,6 @@ pub struct GetEpochManagerStatsResponse {
     #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
     /// The current epoch according to the indexer's epoch oracle view
     pub current_epoch: Epoch,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub current_block_height: u64,
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub current_block_hash: Hash32,

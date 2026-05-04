@@ -94,7 +94,7 @@ pub async fn handle_claim_validator_fees(
                 .map(|name| ComponentAddressOrName::from_str(&name))
                 .transpose()?,
             claim_key_index: None,
-            max_fee: max_fee.map(Into::into),
+            max_fee: max_fee.map(Into::into).unwrap_or(1500),
             shards: vec![shard],
             dry_run,
         })

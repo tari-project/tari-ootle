@@ -33,7 +33,6 @@ use http_server::MockHttpServer;
 use indexer::IndexerProcess;
 use indexmap::IndexMap;
 use miner::MinerProcess;
-use rand::rngs::OsRng;
 use tari_common::configuration::Network as L1Network;
 use tari_common_types::{
     tari_address::{TariAddress, TariAddressFeatures},
@@ -102,7 +101,7 @@ pub struct TariWorld {
 
 impl TariWorld {
     async fn init() -> Self {
-        let wallet_private_key = PrivateKey::random(&mut OsRng);
+        let wallet_private_key = PrivateKey::random(&mut rand::rng());
         let default_payment_address = TariAddress::new_single_address(
             CompressedPublicKey::from_secret_key(&wallet_private_key),
             L1Network::LocalNet,

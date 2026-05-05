@@ -2,7 +2,6 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use ootle_byte_type::ToByteType;
-use rand::rngs::OsRng;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_ootle_common_types::SubstateRequirement;
 use tari_ootle_transaction::{Network, Transaction, args};
@@ -15,7 +14,7 @@ use tari_template_lib_types::constants::{
 
 pub fn builder(network: Network) -> impl Fn(u64) -> Transaction {
     move |_: u64| -> Transaction {
-        let (signer_secret_key, signer_public_key) = RistrettoPublicKey::random_keypair(&mut OsRng);
+        let (signer_secret_key, signer_public_key) = RistrettoPublicKey::random_keypair(&mut rand::rng());
         let signer_public_key = signer_public_key.to_byte_type();
 
         Transaction::builder(network.as_byte())

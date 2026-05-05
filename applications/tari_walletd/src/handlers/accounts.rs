@@ -8,7 +8,6 @@ use axum_extra::headers::authorization::Bearer;
 use indexmap::{IndexMap, IndexSet};
 use log::*;
 use ootle_byte_type::{FromByteType, ToByteType};
-use rand::rngs::OsRng;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
     commit_result::RejectReason,
@@ -542,7 +541,7 @@ pub(crate) async fn execute_claim_burn(
         return Err(invalid_params("max_fee", Some("fee equals or exceeds claimed amount")));
     }
 
-    let (nonce, output_public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
+    let (nonce, output_public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
     let account_owner = sdk.key_manager_api().get_public_key(account_owner_key_id)?;
     let view_only = sdk.key_manager_api().get_public_key(account.view_only_key_id())?;
     let memo = Memo::new_message("Burnt funds claimed from L1").expect("valid memo");

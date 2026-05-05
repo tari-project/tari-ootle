@@ -313,7 +313,6 @@ fn calc_blobs_weight(blobs: &crate::Blobs) -> u64 {
 #[cfg(test)]
 mod blob_validation_tests {
     use ootle_byte_type::ToByteType;
-    use rand::rngs::OsRng;
     use tari_crypto::{
         keys::{PublicKey as PublicKeyT, SecretKey},
         ristretto::{RistrettoPublicKey, RistrettoSecretKey},
@@ -336,7 +335,7 @@ mod blob_validation_tests {
             dry_run: false,
             blobs,
         };
-        let sealer = RistrettoSecretKey::random(&mut OsRng);
+        let sealer = RistrettoSecretKey::random(&mut rand::rng());
         let unsealed = UnsealedTransactionV1::new(unsigned, vec![]);
         let seal = crate::TransactionSealSignature::sign_v1(&sealer, &unsealed);
         TransactionV1::new(unsealed, seal)
@@ -428,6 +427,6 @@ mod blob_validation_tests {
     /// using a randomly-generated sealer.
     #[allow(dead_code)]
     fn pk_smoke() {
-        let _ = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::random(&mut OsRng)).to_byte_type();
+        let _ = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::random(&mut rand::rng())).to_byte_type();
     }
 }

@@ -1,7 +1,6 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use rand::rngs::OsRng;
 use tari_common_types::types::PrivateKey;
 use tari_consensus::traits::{ValidatorSignatureVerifierService, ValidatorSignerService};
 use tari_consensus_types::{ToSignatureMessage, ValidatorSchnorrSignature};
@@ -24,7 +23,7 @@ impl TestVoteSignatureService {
 
 impl ValidatorSignerService for TestVoteSignatureService {
     fn sign<M: ToSignatureMessage>(&self, message: &M) -> ValidatorSchnorrSignature {
-        ValidatorSchnorrSignature::sign(&self.secret_key, message.to_signature_message(), &mut OsRng).unwrap()
+        ValidatorSchnorrSignature::sign(&self.secret_key, message.to_signature_message(), &mut rand::rng()).unwrap()
     }
 
     fn public_key(&self) -> &RistrettoPublicKey {

@@ -42,7 +42,7 @@
 use std::{fs, io, path::Path, sync::Arc};
 
 use log::*;
-use rand::{CryptoRng, RngCore, rngs::OsRng};
+use rand::{CryptoRng, Rng};
 use serde::{Serialize, de::DeserializeOwned};
 use tari_common::{
     configuration::bootstrap::prompt,
@@ -63,7 +63,7 @@ const LOG_TARGET: &str = "tari::identity";
 pub struct RistrettoKeypair(Arc<KeyPairInner>);
 
 impl RistrettoKeypair {
-    pub fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
+    pub fn random<R: Rng + CryptoRng>(rng: &mut R) -> Self {
         let secret_key = RistrettoSecretKey::random(rng);
         Self::from_secret_key(secret_key)
     }
@@ -202,7 +202,7 @@ fn load_keypair<P: AsRef<Path>>(path: P) -> Result<RistrettoKeypair, IdentityErr
 /// ## Returns
 /// Result containing the node identity, string will indicate reason on error
 pub fn create_new_keypair<P: AsRef<Path>>(path: P) -> Result<RistrettoKeypair, IdentityError> {
-    let node_identity = RistrettoKeypair::random(&mut OsRng);
+    let node_identity = RistrettoKeypair::random(&mut rand::rng());
     save_as_json(&path, &node_identity)?;
     Ok(node_identity)
 }

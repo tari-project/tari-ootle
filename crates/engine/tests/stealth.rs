@@ -4,7 +4,6 @@
 use std::collections::BTreeMap;
 
 use ootle_byte_type::ToByteType;
-use rand::rngs::OsRng;
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
     keys::PublicKey,
@@ -459,7 +458,7 @@ where
 #[test]
 fn mint_with_view_key() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let (view_key_secret, view_key) = RistrettoPublicKey::random_keypair(&mut OsRng);
+    let (view_key_secret, view_key) = RistrettoPublicKey::random_keypair(&mut rand::rng());
     let mint = stealth::generate_mint_statement([1000], 0u64, Some(&view_key));
     let (_faucet, faucet_resx) = setup(&mut test, &mint, Some(&view_key));
 

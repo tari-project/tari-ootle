@@ -321,7 +321,6 @@ impl From<TransactionV1> for PrunedTransactionV1 {
 #[cfg(test)]
 mod tests {
     use ootle_byte_type::ToByteType;
-    use rand::rngs::OsRng;
     use tari_crypto::{
         keys::{PublicKey as PublicKeyT, SecretKey},
         ristretto::{RistrettoPublicKey, RistrettoSecretKey},
@@ -353,7 +352,7 @@ mod tests {
 
     fn sealed(unsigned: UnsignedTransactionV1, sealer: &RistrettoSecretKey) -> TransactionV1 {
         let seal_signer = RistrettoPublicKey::from_secret_key(sealer).to_byte_type();
-        let extra_sk = RistrettoSecretKey::random(&mut OsRng);
+        let extra_sk = RistrettoSecretKey::random(&mut rand::rng());
         let sig = TransactionSignature::sign_v1(&extra_sk, &seal_signer, &unsigned);
         let unsealed = UnsealedTransactionV1::new(unsigned, vec![sig]);
         let seal = TransactionSealSignature::sign_v1(sealer, &unsealed);
@@ -364,7 +363,7 @@ mod tests {
     fn id_is_stable_across_pruning_with_blobs() {
         let blobs = Blobs::from_vec(vec![Blob::from(vec![1, 2, 3]), Blob::from(vec![4, 5, 6, 7, 8])]);
         let unsigned = sample_unsigned_with_blobs(blobs);
-        let sealer = RistrettoSecretKey::random(&mut OsRng);
+        let sealer = RistrettoSecretKey::random(&mut rand::rng());
         let full = sealed(unsigned, &sealer);
         let id_full = full.calculate_id();
         let pruned = PrunedTransactionV1::from(full);
@@ -375,7 +374,7 @@ mod tests {
     #[test]
     fn id_is_stable_across_pruning_without_blobs() {
         let unsigned = sample_unsigned_with_blobs(Blobs::empty());
-        let sealer = RistrettoSecretKey::random(&mut OsRng);
+        let sealer = RistrettoSecretKey::random(&mut rand::rng());
         let full = sealed(unsigned, &sealer);
         let id_full = full.calculate_id();
         let pruned = PrunedTransactionV1::from(full);
@@ -386,7 +385,7 @@ mod tests {
     fn pruned_form_verifies_signatures_without_blobs() {
         let blobs = Blobs::from_vec(vec![Blob::from(vec![10, 20, 30, 40])]);
         let unsigned = sample_unsigned_with_blobs(blobs);
-        let sealer = RistrettoSecretKey::random(&mut OsRng);
+        let sealer = RistrettoSecretKey::random(&mut rand::rng());
         let full = sealed(unsigned, &sealer);
         assert!(full.verify_all_signatures());
         let pruned = PrunedTransactionV1::from(full);
@@ -397,7 +396,7 @@ mod tests {
     fn rehydrate_succeeds_with_matching_blobs() {
         let blobs = Blobs::from_vec(vec![Blob::from(vec![1, 2, 3]), Blob::from(vec![4, 5])]);
         let unsigned = sample_unsigned_with_blobs(blobs.clone());
-        let sealer = RistrettoSecretKey::random(&mut OsRng);
+        let sealer = RistrettoSecretKey::random(&mut rand::rng());
         let full = sealed(unsigned, &sealer);
         let id = full.calculate_id();
         let pruned = PrunedTransactionV1::from(full);
@@ -410,7 +409,7 @@ mod tests {
     fn rehydrate_rejects_count_mismatch() {
         let blobs = Blobs::from_vec(vec![Blob::from(vec![1])]);
         let unsigned = sample_unsigned_with_blobs(blobs);
-        let sealer = RistrettoSecretKey::random(&mut OsRng);
+        let sealer = RistrettoSecretKey::random(&mut rand::rng());
         let full = sealed(unsigned, &sealer);
         let pruned = PrunedTransactionV1::from(full);
         let err = pruned.rehydrate(Blobs::empty()).unwrap_err();
@@ -421,7 +420,7 @@ mod tests {
     fn rehydrate_rejects_hash_mismatch() {
         let blobs = Blobs::from_vec(vec![Blob::from(vec![1, 2, 3])]);
         let unsigned = sample_unsigned_with_blobs(blobs);
-        let sealer = RistrettoSecretKey::random(&mut OsRng);
+        let sealer = RistrettoSecretKey::random(&mut rand::rng());
         let full = sealed(unsigned, &sealer);
         let pruned = PrunedTransactionV1::from(full);
         let bad = Blobs::from_vec(vec![Blob::from(vec![9, 9, 9])]);
@@ -433,7 +432,7 @@ mod tests {
     fn pruned_signature_rejects_tampered_field() {
         let blobs = Blobs::from_vec(vec![Blob::from(vec![1, 2, 3])]);
         let unsigned = sample_unsigned_with_blobs(blobs);
-        let sealer = RistrettoSecretKey::random(&mut OsRng);
+        let sealer = RistrettoSecretKey::random(&mut rand::rng());
         let full = sealed(unsigned, &sealer);
         let mut pruned = PrunedTransactionV1::from(full);
         // Tamper a field — seal verification must fail.
@@ -445,7 +444,7 @@ mod tests {
     fn pruned_signature_rejects_tampered_blob_hashes() {
         let blobs = Blobs::from_vec(vec![Blob::from(vec![1, 2, 3])]);
         let unsigned = sample_unsigned_with_blobs(blobs);
-        let sealer = RistrettoSecretKey::random(&mut OsRng);
+        let sealer = RistrettoSecretKey::random(&mut rand::rng());
         let full = sealed(unsigned, &sealer);
         let mut pruned = PrunedTransactionV1::from(full);
         // Replace the stored blob_hashes with hashes of different data.

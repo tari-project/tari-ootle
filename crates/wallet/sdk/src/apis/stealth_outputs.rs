@@ -3,7 +3,6 @@
 
 use std::collections::HashMap;
 
-use digest::crypto_common::rand_core::OsRng;
 use log::*;
 use ootle_byte_type::{FromByteType, ToByteType};
 use ootle_network::Network;
@@ -666,7 +665,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
     ) -> Result<StealthOutputWitness, StealthOutputsApiError> {
         let mask = self.key_manager_api.next_key(KeyBranch::StealthMask)?;
 
-        let (nonce_secret, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
+        let (nonce_secret, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
         let encrypted_data = self.crypto_api.encrypt_value_and_mask(
             amount,
             &mask.key,

@@ -2,7 +2,6 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use ootle_byte_type::ConvertFromByteType;
-use rand::rngs::OsRng;
 use tari_consensus::traits::{ValidatorSignatureVerifierService, ValidatorSignerService};
 use tari_consensus_types::{SignedMessage, ToSignatureMessage, ValidatorSchnorrSignature};
 use tari_crypto::ristretto::RistrettoPublicKey;
@@ -21,7 +20,12 @@ impl TariSignatureService {
 
 impl ValidatorSignerService for TariSignatureService {
     fn sign<M: ToSignatureMessage>(&self, message: &M) -> ValidatorSchnorrSignature {
-        ValidatorSchnorrSignature::sign(self.keypair.secret_key(), message.to_signature_message(), &mut OsRng).unwrap()
+        ValidatorSchnorrSignature::sign(
+            self.keypair.secret_key(),
+            message.to_signature_message(),
+            &mut rand::rng(),
+        )
+        .unwrap()
     }
 
     fn public_key(&self) -> &RistrettoPublicKey {

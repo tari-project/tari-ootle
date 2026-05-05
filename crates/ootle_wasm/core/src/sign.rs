@@ -1,7 +1,6 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use rand::rngs::OsRng;
 use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
@@ -28,7 +27,7 @@ pub struct SchnorrSignatureResult {
 
 /// Generate a new random Ristretto keypair.
 pub fn generate_keypair() -> KeypairResult {
-    let secret_key = RistrettoSecretKey::random(&mut OsRng);
+    let secret_key = RistrettoSecretKey::random(&mut rand::rng());
     let public_key = RistrettoPublicKey::from_secret_key(&secret_key);
     KeypairResult {
         secret_key: secret_key.as_bytes().to_vec(),
@@ -44,7 +43,7 @@ pub fn schnorr_sign(secret_key: &[u8], message: &[u8]) -> Result<SchnorrSignatur
     let secret_key = RistrettoSecretKey::from_canonical_bytes(secret_key)
         .map_err(|e| OotleWasmError::InvalidSecretKey(e.to_string()))?;
 
-    let sig = RistrettoSchnorr::sign(&secret_key, message, &mut OsRng)
+    let sig = RistrettoSchnorr::sign(&secret_key, message, &mut rand::rng())
         .map_err(|e| OotleWasmError::SigningFailed(e.to_string()))?;
 
     Ok(SchnorrSignatureResult {
@@ -67,7 +66,7 @@ mod tests {
 
     #[test]
     fn sign_and_verify_round_trip() {
-        let secret = RistrettoSecretKey::random(&mut OsRng);
+        let secret = RistrettoSecretKey::random(&mut rand::rng());
         let message = b"hello world";
 
         let result = schnorr_sign(secret.as_bytes(), message).unwrap();
@@ -77,7 +76,7 @@ mod tests {
 
     #[test]
     fn public_key_derivation() {
-        let secret = RistrettoSecretKey::random(&mut OsRng);
+        let secret = RistrettoSecretKey::random(&mut rand::rng());
         let expected = RistrettoPublicKey::from_secret_key(&secret);
 
         let result = public_key_from_secret_key(secret.as_bytes()).unwrap();

@@ -4,7 +4,6 @@
 use std::{fmt::Display, str::FromStr};
 
 use anyhow::anyhow;
-use rand::rngs::OsRng;
 use tari_bor::{Deserialize, Serialize};
 use tari_crypto::{
     keys::PublicKey as _,
@@ -177,7 +176,7 @@ impl WalletSecretKey {
 
     pub fn sign<T: Signable<C>, C>(&self, context: C, item: &T) -> RistrettoSchnorr {
         let message = item.to_signing_message(context);
-        RistrettoSchnorr::sign(&self.secret, message.as_ref(), &mut OsRng)
+        RistrettoSchnorr::sign(&self.secret, message.as_ref(), &mut rand::rng())
             .expect("message is hashed internally into canonical form, so signing is infallible")
     }
 }

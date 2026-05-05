@@ -3,7 +3,6 @@
 
 use async_trait::async_trait;
 use ootle_byte_type::{FromByteType, ToByteType};
-use rand::thread_rng;
 use signature::{Keypair, hazmat::PrehashSigner};
 use tari_crypto::{
     keys::{PublicKey, SecretKey},
@@ -40,7 +39,7 @@ impl OotleSecretKey {
     }
 
     pub fn random(network: Network) -> Self {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         Self::random_with(&mut rng, network)
     }
 
@@ -75,7 +74,7 @@ impl OotleSecretKey {
 
 impl PrehashSigner<(RistrettoSchnorr, RistrettoPublicKey)> for OotleSecretKey {
     fn sign_prehash(&self, prehash: &[u8]) -> signature::Result<(RistrettoSchnorr, RistrettoPublicKey)> {
-        let signature = RistrettoSchnorr::sign(&self.account_secret, prehash, &mut rand::thread_rng())
+        let signature = RistrettoSchnorr::sign(&self.account_secret, prehash, &mut rand::rng())
             .expect("sign is infallible (challenge is the correct length)");
         let public_key = self.verifying_key();
         Ok((signature, public_key))
@@ -89,7 +88,7 @@ impl StealthKeyPrehashSigner<(RistrettoSchnorr, RistrettoPublicKey)> for OotleSe
         prehash: &[u8],
     ) -> signer::Result<(RistrettoSchnorr, RistrettoPublicKey)> {
         let secret = kdfs::owner_stealth_dh_secret(self.network(), self.account_secret(), public_nonce);
-        let signature = RistrettoSchnorr::sign(&secret, prehash, &mut thread_rng())
+        let signature = RistrettoSchnorr::sign(&secret, prehash, &mut rand::rng())
             .expect("sign is infallible (challenge is the correct length)");
         let public_key = RistrettoPublicKey::from_secret_key(&secret);
         Ok((signature, public_key))
@@ -163,6 +162,6 @@ impl OutputMaskProvider for OotleSecretKey {
     async fn next_mask(&self) -> key_provider::Result<RistrettoSecretKey> {
         // For simplicity, just generate a random mask here. Another implementation may want to derive it in some
         // deterministic way.
-        Ok(RistrettoSecretKey::random(&mut rand::thread_rng()))
+        Ok(RistrettoSecretKey::random(&mut rand::rng()))
     }
 }

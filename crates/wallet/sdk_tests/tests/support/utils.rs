@@ -1,7 +1,6 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use digest::crypto_common::rand_core::OsRng;
 use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
@@ -15,7 +14,7 @@ pub fn random_keypair() -> (RistrettoSecretKey, RistrettoPublicKey) {
 }
 
 pub fn random_key() -> RistrettoSecretKey {
-    RistrettoSecretKey::random(&mut OsRng)
+    RistrettoSecretKey::random(&mut rand::rng())
 }
 
 pub fn resource_address_from_seed(seed: u8) -> ResourceAddress {

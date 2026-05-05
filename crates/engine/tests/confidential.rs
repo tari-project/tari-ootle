@@ -3,7 +3,6 @@
 
 use std::collections::BTreeMap;
 
-use rand::rngs::OsRng;
 use tari_crypto::{
     keys::PublicKey as _,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
@@ -498,7 +497,7 @@ where
 
 #[test]
 fn mint_with_view_key() {
-    let (view_key_secret, ref view_key) = RistrettoPublicKey::random_keypair(&mut OsRng);
+    let (view_key_secret, ref view_key) = RistrettoPublicKey::random_keypair(&mut rand::rng());
     let (confidential_proof, _mask, _change) = generate_confidential_proof_with_view_key(123, None, view_key);
     let (mut test, faucet, _faucet_resx) = setup(confidential_proof, Some(view_key));
     let faucet_entity_id = faucet.entity_id();

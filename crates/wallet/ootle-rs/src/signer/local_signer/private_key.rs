@@ -44,7 +44,7 @@ impl LocalSigner<OotleSecretKey> {
 
     /// Generate a new PrivateKeySigner with a (non-recoverable) random private key.
     pub fn random(network: Network) -> Self {
-        Self::random_with(network, &mut rand::thread_rng())
+        Self::random_with(network, &mut rand::rng())
     }
 
     pub fn random_with<R: Rng + CryptoRng>(network: Network, rng: &mut R) -> Self {

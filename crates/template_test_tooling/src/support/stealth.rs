@@ -4,7 +4,6 @@
 use std::iter;
 
 use ootle_byte_type::ToByteType;
-use rand::rngs::OsRng;
 use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
@@ -79,7 +78,7 @@ fn generate_stealth_statement_internal(
 ) -> (StealthOutputsStatement, Vec<RistrettoSecretKey>) {
     let masks = output_amounts
         .iter()
-        .map(|_| RistrettoSecretKey::random(&mut OsRng))
+        .map(|_| RistrettoSecretKey::random(&mut rand::rng()))
         .collect::<Vec<_>>();
     let output_statements = output_amounts
         .iter()
@@ -180,7 +179,7 @@ where
         .map(Into::into)
         .filter(|os| os.value() > 0)
         .map(|spec| {
-            let output_mask = RistrettoSecretKey::random(&mut OsRng);
+            let output_mask = RistrettoSecretKey::random(&mut rand::rng());
             let statement = OutputWitness {
                 amount: spec.value(),
                 mask: output_mask.clone(),
@@ -231,7 +230,7 @@ pub fn generate_value_proof_mask_knowledge(value: Amount, mask: &RistrettoSecret
     let commitment = commit_amount(mask, value).unwrap();
     let commitment_bytes = commitment.to_byte_type();
     let message = messages::value_proof_message(&commitment_bytes, &value);
-    let sig = RistrettoSchnorr::sign(mask, message, &mut OsRng).expect("Signing cannot fail");
+    let sig = RistrettoSchnorr::sign(mask, message, &mut rand::rng()).expect("Signing cannot fail");
 
     StealthValueProof {
         value,

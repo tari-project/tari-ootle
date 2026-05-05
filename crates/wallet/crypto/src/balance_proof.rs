@@ -1,7 +1,6 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use chacha20poly1305::aead::OsRng;
 use log::warn;
 use ootle_byte_type::{ConvertFromByteType, FromByteType, ToByteType};
 use tari_crypto::{
@@ -36,7 +35,7 @@ pub(crate) fn generate_confidential_balance_proof(
         return BalanceProofSignature::zero();
     }
     let excess = RistrettoPublicKey::from_secret_key(&secret_excess);
-    let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
+    let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
     let message =
         messages::confidential_withdraw64(&excess, &public_nonce, input_revealed_amount, output_reveal_amount);
 
@@ -56,7 +55,7 @@ pub fn generate_stealth_balance_proof_signature(
         return BalanceProofSignature::zero();
     }
     let public_excess = RistrettoPublicKey::from_secret_key(&secret_excess);
-    let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
+    let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
     let message = messages::stealth_balance_proof64(&public_excess, &public_nonce, inputs_statement, outputs_statement);
 
     let sig = EngineSchnorrSignature::sign_raw_uniform(&secret_excess, nonce, &message).unwrap();

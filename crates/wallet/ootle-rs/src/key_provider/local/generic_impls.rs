@@ -5,7 +5,6 @@ use std::mem;
 
 use async_trait::async_trait;
 use ootle_byte_type::{FromByteType, ToByteType};
-use rand::thread_rng;
 use signature::hazmat::PrehashSigner;
 use tari_crypto::{
     keys::PublicKey,
@@ -157,7 +156,7 @@ async fn create_output_witness<K: OutputMaskProvider>(
 
     let crypto_api = StealthCryptoApi::new();
 
-    let (nonce_secret, public_nonce) = RistrettoPublicKey::random_keypair(&mut thread_rng());
+    let (nonce_secret, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
     let encrypted_data = crypto_api.encrypt_value_and_mask(
         amount.get(),
         &mask,

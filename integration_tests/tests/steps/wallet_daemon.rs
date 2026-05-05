@@ -11,7 +11,7 @@ use integration_tests::{
     util::transaction_builder,
     wallet_daemon_client,
 };
-use rand::{Rng, rngs::OsRng};
+use rand::RngExt;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_transaction::args;
@@ -130,7 +130,7 @@ async fn when_i_run_up_fees(
     let mut fees_total = 0;
 
     loop {
-        let payload = Bytes::from(vec![OsRng.r#gen::<u8>(); 64 * 1024]);
+        let payload = Bytes::from(vec![rand::rng().random::<u8>(); 64 * 1024]);
 
         let transaction = transaction_builder()
             .pay_fee_from_component(*account.component_address(), 100_000u64)

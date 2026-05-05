@@ -1,7 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use rand::{CryptoRng, Rng, thread_rng};
+use rand::{CryptoRng, Rng};
 
 use crate::{Network, key_provider::local::LocalKeyProvider, keys::OotleSecretKey};
 
@@ -23,7 +23,7 @@ impl LocalKeyProvider<OotleSecretKey> {
 
     /// Generate a new PrivateKeySigner with a (non-recoverable) random private key.
     pub fn random(network: Network) -> Self {
-        Self::random_with(network, &mut thread_rng())
+        Self::random_with(network, &mut rand::rng())
     }
 
     pub fn random_with<R: Rng + CryptoRng>(network: Network, rng: &mut R) -> Self {

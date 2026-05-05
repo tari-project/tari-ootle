@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 
-use rand::Rng;
+use rand::RngExt;
 use reqwest::Client;
 use serde_json::json;
 use tari_indexer_client::types::{GetSubstateRequest, ListUtxosRequest};
@@ -193,12 +193,12 @@ impl TrafficSim {
             return Err(anyhow::anyhow!("Need at least 2 wallets to send transactions"));
         }
 
-        let mut rng = rand::thread_rng();
-        let sender_idx = rng.gen_range(0..self.accounts.len());
-        let mut receiver_idx = rng.gen_range(0..self.accounts.len());
+        let mut rng = rand::rng();
+        let sender_idx = rng.random_range(0..self.accounts.len());
+        let mut receiver_idx = rng.random_range(0..self.accounts.len());
 
         while receiver_idx == sender_idx {
-            receiver_idx = rng.gen_range(0..self.accounts.len());
+            receiver_idx = rng.random_range(0..self.accounts.len());
         }
 
         let sender_account = &self.accounts[sender_idx];
@@ -206,7 +206,7 @@ impl TrafficSim {
         let receiver_address = &self.accounts[receiver_idx];
         let receiver_wallet = &self.wallets[receiver_idx];
 
-        let amount_to_send = rng.gen_range(min_value..=max_value);
+        let amount_to_send = rng.random_range(min_value..=max_value);
 
         log::info!(
             "Sending {} ootle from {} to {}",
@@ -546,7 +546,7 @@ impl TrafficSim {
                 .await
             {
                 Ok(_) => {
-                    // let delay = rand::thread_rng().gen_range(1..=5);
+                    // let delay = rand::thread_rng().random_range(1..=5);
                     // sleep(Duration::from_secs(delay)).await;
                 },
                 Err(e) => {

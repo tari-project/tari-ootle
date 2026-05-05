@@ -915,7 +915,8 @@ impl IsNotFoundError for TransactionPoolError {
 
 #[cfg(test)]
 mod tests {
-    use rand::{Rng, rngs::OsRng};
+
+    use rand::RngExt;
 
     use super::*;
     use crate::consensus_models::LeaderFee;
@@ -932,6 +933,7 @@ mod tests {
     }
 
     mod calculate_leader_fee {
+
         use super::*;
 
         fn create_record_with_fee(fee: u64) -> TransactionPoolRecord {
@@ -1040,9 +1042,10 @@ mod tests {
         fn simple_fuzz() {
             let mut total_fees = 0;
             let mut total_burnt = 0;
+            let mut rng = rand::rng();
             for _ in 0..1_000_000 {
-                let fee = OsRng.gen_range(100..100000u64);
-                let involved = OsRng.gen_range(1..100u64);
+                let fee = rng.random_range(100..100000u64);
+                let involved = rng.random_range(1..100u64);
                 let fee = check_calculate_leader_fee(fee, involved, 20);
                 total_fees += fee.fee * involved;
                 total_burnt += fee.exhaust_burn;

@@ -20,7 +20,12 @@ impl TariSignatureService {
 
 impl ValidatorSignerService for TariSignatureService {
     fn sign<M: ToSignatureMessage>(&self, message: &M) -> ValidatorSchnorrSignature {
-        ValidatorSchnorrSignature::sign(self.keypair.secret_key(), message.to_signature_message(), &mut rand::rng()).unwrap()
+        ValidatorSchnorrSignature::sign(
+            self.keypair.secret_key(),
+            message.to_signature_message(),
+            &mut rand::rng(),
+        )
+        .unwrap()
     }
 
     fn public_key(&self) -> &RistrettoPublicKey {

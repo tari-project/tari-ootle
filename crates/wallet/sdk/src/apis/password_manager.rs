@@ -1,9 +1,9 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use rand::Rng;
 use ootle_network::NetworkParseError;
 use passwords::PasswordGenerator;
+use rand::Rng;
 use tari_crypto::tari_utilities::SafePassword;
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 

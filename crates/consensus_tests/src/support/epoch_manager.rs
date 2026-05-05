@@ -380,7 +380,7 @@ impl EpochManagerReader for TestEpochManager {
             None => state
                 .validator_nodes
                 .values()
-                .choose(&mut rand::thread_rng())
+                .choose(&mut rand::rng())
                 .map(|(vn, _)| vn)
                 .expect("No committees?"),
         };

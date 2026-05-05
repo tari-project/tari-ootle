@@ -286,14 +286,14 @@ mod tests {
         ops::{Bound, RangeBounds, RangeInclusive},
     };
 
-    use rand::{RngCore, rngs::OsRng};
+    use rand::Rng;
 
     use super::*;
 
     #[test]
     fn substate_addresses_to_from_u256_endianness_matches() {
         let mut buf = [0u8; SubstateAddress::LENGTH];
-        OsRng.fill_bytes(&mut buf[..ObjectKey::LENGTH]);
+        rand::rng().fill_bytes(&mut buf[..ObjectKey::LENGTH]);
         let s = SubstateAddress(buf);
         let result = SubstateAddress::from_u256_zero_version(s.to_u256());
         assert_eq!(result, s);

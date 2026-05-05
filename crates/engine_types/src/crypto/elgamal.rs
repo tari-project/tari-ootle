@@ -265,8 +265,10 @@ impl ToByteType for ElgamalVerifiableBalance {
 mod tests {
     use std::convert::Infallible;
 
-    use rand::rngs::OsRng;
-    use tari_crypto::keys::SecretKey;
+    use tari_crypto::{
+        keys::{PublicKey, SecretKey},
+        ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    };
 
     use super::*;
 
@@ -290,18 +292,15 @@ mod tests {
     }
 
     mod brute_force_balance {
-        use tari_crypto::{
-            keys::PublicKey,
-            ristretto::{RistrettoPublicKey, RistrettoSecretKey},
-        };
 
         use super::*;
 
         #[test]
         fn it_finds_the_value() {
             const VALUE: u64 = 5242;
-            let view_sk = &RistrettoSecretKey::random(&mut OsRng);
-            let (nonce_sk, nonce_pk) = RistrettoPublicKey::random_keypair(&mut OsRng);
+            let mut rng = rand::rng();
+            let view_sk = &RistrettoSecretKey::random(&mut rng);
+            let (nonce_sk, nonce_pk) = RistrettoPublicKey::random_keypair(&mut rng);
 
             let rp = nonce_sk * view_sk;
 
@@ -319,8 +318,9 @@ mod tests {
 
         #[test]
         fn it_returns_the_value_equal_to_max_value() {
-            let view_sk = &RistrettoSecretKey::random(&mut OsRng);
-            let (nonce_sk, nonce_pk) = RistrettoPublicKey::random_keypair(&mut OsRng);
+            let mut rng = rand::rng();
+            let view_sk = &RistrettoSecretKey::random(&mut rng);
+            let (nonce_sk, nonce_pk) = RistrettoPublicKey::random_keypair(&mut rng);
 
             let rp = nonce_sk * view_sk;
 
@@ -361,11 +361,12 @@ mod tests {
 
         #[test]
         fn it_brute_forces_a_batch() {
-            let view_sk = &RistrettoSecretKey::random(&mut OsRng);
+            let mut rng = rand::rng();
+            let view_sk = &RistrettoSecretKey::random(&mut rng);
 
             let subject = (0..100)
                 .map(|v| {
-                    let (nonce_sk, nonce_pk) = RistrettoPublicKey::random_keypair(&mut OsRng);
+                    let (nonce_sk, nonce_pk) = RistrettoPublicKey::random_keypair(&mut rng);
                     let rp = nonce_sk * view_sk;
                     ElgamalVerifiableBalance {
                         encrypted: RistrettoPublicKey::from_secret_key(&rp) +

@@ -3,7 +3,6 @@
 
 use indexmap::IndexSet;
 use ootle_byte_type::{ConvertFromByteType, FromByteType, ToByteType};
-use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use tari_crypto::{
     keys::PublicKey as PublicKeyT,
@@ -42,7 +41,7 @@ impl TransactionSealSignature {
 
         let message = Self::create_message_v1(transaction);
         Self {
-            signature: RistrettoSchnorr::sign(secret_key, message, &mut OsRng)
+            signature: RistrettoSchnorr::sign(secret_key, message, &mut rand::rng())
                 .expect("sign is infallible with Ristretto keys")
                 .to_byte_type(),
             public_key: public_key.to_byte_type(),
@@ -173,7 +172,7 @@ impl TransactionSignature {
         let message = Self::create_message_v1(seal_signer, transaction);
 
         Self {
-            signature: RistrettoSchnorr::sign(secret_key, message, &mut OsRng)
+            signature: RistrettoSchnorr::sign(secret_key, message, &mut rand::rng())
                 .expect("sign is infallible with Ristretto keys")
                 .to_byte_type(),
             public_key: public_key.to_byte_type(),
@@ -326,7 +325,7 @@ mod tests {
     use super::*;
 
     fn sample_seal_signer() -> RistrettoPublicKeyBytes {
-        RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::random(&mut OsRng)).to_byte_type()
+        RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::random(&mut rand::rng())).to_byte_type()
     }
 
     fn sample_unsigned() -> UnsignedTransactionV1 {
@@ -356,7 +355,7 @@ mod tests {
     }
 
     fn random_signature(tx: &UnsignedTransactionV1, seal_signer: &RistrettoPublicKeyBytes) -> TransactionSignature {
-        let sk = RistrettoSecretKey::random(&mut OsRng);
+        let sk = RistrettoSecretKey::random(&mut rand::rng());
         TransactionSignature::sign_v1(&sk, seal_signer, tx)
     }
 
@@ -473,7 +472,7 @@ mod tests {
 
     #[test]
     fn signature_is_bound_to_seal_signer_context() {
-        let signer_sk = RistrettoSecretKey::random(&mut OsRng);
+        let signer_sk = RistrettoSecretKey::random(&mut rand::rng());
         let seal_signer_pk = sample_seal_signer();
         let other_seal_signer_pk = sample_seal_signer();
         let tx = sample_unsigned();
@@ -613,7 +612,7 @@ mod tests {
 
     #[test]
     fn seal_signature_roundtrip() {
-        let sealer_sk = RistrettoSecretKey::random(&mut OsRng);
+        let sealer_sk = RistrettoSecretKey::random(&mut rand::rng());
         let seal_signer_pk: RistrettoPublicKeyBytes = RistrettoPublicKey::from_secret_key(&sealer_sk).to_byte_type();
 
         let unsigned = sample_unsigned();

@@ -1,7 +1,6 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use rand::rngs::OsRng;
 use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
@@ -31,8 +30,8 @@ pub struct OotlePublicKeyResult {
 
 /// Generate a new random pair of Ootle secret keys (owner + view).
 pub fn generate_ootle_secret_key() -> OotleSecretKeyResult {
-    let owner_key = RistrettoSecretKey::random(&mut OsRng);
-    let view_key = RistrettoSecretKey::random(&mut OsRng);
+    let owner_key = RistrettoSecretKey::random(&mut rand::rng());
+    let view_key = RistrettoSecretKey::random(&mut rand::rng());
     OotleSecretKeyResult {
         owner_key: owner_key.as_bytes().to_vec(),
         view_key: view_key.as_bytes().to_vec(),

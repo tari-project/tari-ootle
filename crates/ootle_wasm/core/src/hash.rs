@@ -42,7 +42,6 @@ pub(crate) fn public_key_bytes_from_bytes(bytes: &[u8]) -> Result<RistrettoPubli
 #[cfg(test)]
 mod tests {
     use ootle_byte_type::ToByteType;
-    use rand::rngs::OsRng;
     use tari_crypto::{
         keys::{PublicKey, SecretKey},
         ristretto::{RistrettoPublicKey, RistrettoSecretKey},
@@ -54,7 +53,7 @@ mod tests {
 
     #[test]
     fn hash_matches_transaction_crate() {
-        let secret = RistrettoSecretKey::random(&mut OsRng);
+        let secret = RistrettoSecretKey::random(&mut rand::rng());
         let public_key = RistrettoPublicKey::from_secret_key(&secret);
         let public_key_bytes = public_key.as_bytes().to_vec();
         let seal_signer_bytes: RistrettoPublicKeyBytes = public_key.to_byte_type();
@@ -72,7 +71,7 @@ mod tests {
 
     #[test]
     fn hash_from_json_round_trip() {
-        let secret = RistrettoSecretKey::random(&mut OsRng);
+        let secret = RistrettoSecretKey::random(&mut rand::rng());
         let public_key = RistrettoPublicKey::from_secret_key(&secret);
         let public_key_bytes = public_key.as_bytes().to_vec();
 

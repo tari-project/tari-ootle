@@ -23,7 +23,6 @@
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 
 use minotari_node::{BaseNodeConfig, GrpcMethod, run_base_node};
-use rand::rngs::OsRng;
 use tari_base_node_client::{BaseNodeClient, grpc::GrpcBaseNodeClient};
 use tari_common::{configuration::CommonConfig, exit_codes::ExitError};
 use tari_common_sqlite::connection::DbConnectionUrl;
@@ -67,7 +66,7 @@ pub async fn spawn_base_node(world: &mut TariWorld, bn_name: String) {
     // None => (19000, 19500), // default ports if it's the first base node to be spawned
     // };
     let base_node_address = Multiaddr::from_str(&format!("/ip4/127.0.0.1/tcp/{}", port)).unwrap();
-    let base_node_identity = NodeIdentity::random(&mut OsRng, base_node_address, PeerFeatures::COMMUNICATION_NODE);
+    let base_node_identity = NodeIdentity::random(&mut rand::rng(), base_node_address, PeerFeatures::COMMUNICATION_NODE);
     crate::cucumber_log!("Base node identity: {}", base_node_identity);
     let identity = base_node_identity.clone();
     let temp_dir = get_base_dir_for_scenario("base_node", world.current_scenario_name.as_ref().unwrap(), &bn_name);

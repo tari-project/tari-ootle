@@ -29,7 +29,6 @@ mod webrtc;
 
 use std::{fs, panic, pin, process};
 
-use jsonwebtoken::signature::rand_core::OsRng;
 use log::*;
 use tari_common_types::seeds::seed_words::SeedWords;
 use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
@@ -229,7 +228,7 @@ const fn get_epoch_birthday(network: Network) -> EpochBirthday {
 }
 
 fn create_secret_password() -> SafePassword {
-    let secret = RistrettoSecretKey::random(&mut OsRng);
+    let secret = RistrettoSecretKey::random(&mut rand::rng());
     // It is safe to use to_hex() since the String's underlying Vec is moved directly into SafePassword
     SafePassword::from(secret.to_hex())
 }

@@ -106,7 +106,7 @@ mod tests {
 
     #[test]
     fn check_conversions() {
-        let (_, pk) = RistrettoPublicKey::random_keypair(&mut rand::rngs::OsRng);
+        let (_, pk) = RistrettoPublicKey::random_keypair(&mut rand::rng());
         let peer_address = PeerAddress::try_from_public_key(&pk).unwrap();
         let peer_id = peer_address.as_peer_id();
         let peer_address2 = PeerAddress::from(peer_id);

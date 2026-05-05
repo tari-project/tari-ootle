@@ -60,7 +60,6 @@ pub fn add_transaction_signer_json(
 #[cfg(test)]
 mod tests {
     use ootle_byte_type::ToByteType;
-    use rand::rngs::OsRng;
     use tari_crypto::{
         keys::{PublicKey, SecretKey},
         ristretto::{RistrettoPublicKey, RistrettoSecretKey},
@@ -76,7 +75,7 @@ mod tests {
 
     #[test]
     fn seal_unsigned_transaction() {
-        let secret = RistrettoSecretKey::random(&mut OsRng);
+        let secret = RistrettoSecretKey::random(&mut rand::rng());
         let unsigned_json = serde_json::to_string(&make_unsigned_tx()).unwrap();
 
         let sealed_json = seal_transaction_json(&unsigned_json, secret.as_bytes()).unwrap();
@@ -86,8 +85,8 @@ mod tests {
 
     #[test]
     fn seal_unsealed_transaction() {
-        let seal_secret = RistrettoSecretKey::random(&mut OsRng);
-        let signer_secret = RistrettoSecretKey::random(&mut OsRng);
+        let seal_secret = RistrettoSecretKey::random(&mut rand::rng());
+        let signer_secret = RistrettoSecretKey::random(&mut rand::rng());
         let seal_pk = RistrettoPublicKey::from_secret_key(&seal_secret);
 
         // First add a signer to get an unsealed tx
@@ -103,9 +102,9 @@ mod tests {
 
     #[test]
     fn add_signer_to_unsigned_transaction() {
-        let seal_secret = RistrettoSecretKey::random(&mut OsRng);
+        let seal_secret = RistrettoSecretKey::random(&mut rand::rng());
         let seal_pk = RistrettoPublicKey::from_secret_key(&seal_secret);
-        let signer_secret = RistrettoSecretKey::random(&mut OsRng);
+        let signer_secret = RistrettoSecretKey::random(&mut rand::rng());
 
         let unsigned_json = serde_json::to_string(&make_unsigned_tx()).unwrap();
         let unsealed_json =
@@ -118,10 +117,10 @@ mod tests {
 
     #[test]
     fn add_multiple_signers() {
-        let seal_secret = RistrettoSecretKey::random(&mut OsRng);
+        let seal_secret = RistrettoSecretKey::random(&mut rand::rng());
         let seal_pk = RistrettoPublicKey::from_secret_key(&seal_secret);
-        let signer1 = RistrettoSecretKey::random(&mut OsRng);
-        let signer2 = RistrettoSecretKey::random(&mut OsRng);
+        let signer1 = RistrettoSecretKey::random(&mut rand::rng());
+        let signer2 = RistrettoSecretKey::random(&mut rand::rng());
 
         let unsigned_json = serde_json::to_string(&make_unsigned_tx()).unwrap();
 

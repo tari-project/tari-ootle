@@ -23,7 +23,7 @@ impl EphemeralKeySigner {
     }
 
     pub fn random() -> Self {
-        Self::random_with(&mut rand::thread_rng())
+        Self::random_with(&mut rand::rng())
     }
 
     pub fn seal_transaction(self, transaction: UnsealedTransaction) -> Transaction {

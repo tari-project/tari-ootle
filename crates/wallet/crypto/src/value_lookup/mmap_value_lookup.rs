@@ -120,7 +120,7 @@ impl ValueLookupTable for MMapValueLookup {
 
 #[cfg(test)]
 mod tests {
-    use rand::{Rng, rngs::OsRng};
+    use rand::RngExt;
 
     use super::*;
 
@@ -172,8 +172,9 @@ mod tests {
         const NUM: u64 = 1000u64;
         let lookup_data = generate_lookup_data(0, NUM);
         let mut lookup = MMapValueLookup::from_buf(&lookup_data).unwrap();
+        let mut rng = rand::rng();
         for _ in 0..=1000 {
-            let v = OsRng.gen_range(0..=NUM);
+            let v = rng.random_range(0..=NUM);
             let value = lookup.lookup(v).unwrap().unwrap();
             let byte = v % u64::from(u8::MAX);
             assert_eq!(value, [byte as u8; 32], "Failed at value {}", v);

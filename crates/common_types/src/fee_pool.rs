@@ -21,7 +21,6 @@ pub fn derive_fee_pool_address(
 #[cfg(test)]
 mod tests {
     use ootle_byte_type::ToByteType;
-    use rand::rngs::OsRng;
     use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 
     use super::*;
@@ -37,7 +36,7 @@ mod tests {
 
         assert_eq!(shard, Shard::from(1));
 
-        let (_, pk) = RistrettoPublicKey::random_keypair(&mut OsRng);
+        let (_, pk) = RistrettoPublicKey::random_keypair(&mut rand::rng());
         let fee_pool_address = derive_fee_pool_address(&pk.to_byte_type(), num_preshards, Shard::from(212));
         let addr = SubstateAddress::from_substate_id(&fee_pool_address.into(), 0);
         let shard = addr.to_shard(num_preshards);

@@ -114,7 +114,7 @@ impl<R: Read + Seek> ValueLookupTable for IoReaderValueLookup<'_, R> {
 mod tests {
     use std::io::Cursor;
 
-    use rand::{Rng, rngs::OsRng};
+    use rand::RngExt;
 
     use super::*;
     use crate::value_lookup::header::LOOKUP_HEADER_LEADING_BYTES;
@@ -174,7 +174,7 @@ mod tests {
         let mut reader = Cursor::new(lookup_data.as_slice());
         let mut lookup = IoReaderValueLookup::load(&mut reader).unwrap();
         for _ in 0..=1000 {
-            let v = OsRng.gen_range(0..=NUM);
+            let v = rand::rng().random_range(0..=NUM);
             let value = lookup.lookup(v).unwrap().unwrap();
             let byte = v % u64::from(u8::MAX);
             assert_eq!(value, [byte as u8; 32], "Failed at value {}", v);

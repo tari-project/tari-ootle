@@ -3,7 +3,7 @@
 
 use std::ops::RangeInclusive;
 
-use rand::{Rng, RngCore, rngs::OsRng};
+use rand::{Rng, RngExt};
 use tari_common_types::types::PrivateKey;
 use tari_crypto::{
     keys::{PublicKey, SecretKey},
@@ -24,7 +24,7 @@ pub(crate) fn random_substate_in_shard_group(shard_group: ShardGroup, num_shards
     let entity_id = EntityId::new(copy_fixed(
         &random_in_range.to_u256().to_be_bytes()[0..EntityId::LENGTH],
     ));
-    let rand_bytes = OsRng.r#gen::<[u8; ComponentKey::LENGTH]>();
+    let rand_bytes: [u8; ComponentKey::LENGTH] = rand::rng().random();
     let component_key = ComponentKey::new(copy_fixed(&rand_bytes));
     SubstateId::Component(ComponentAddress::new(ObjectKey::new(entity_id, component_key)))
 }
@@ -33,7 +33,7 @@ pub(crate) fn random_substate_in_shard_group(shard_group: ShardGroup, num_shards
 fn random_substate_address_range(range: RangeInclusive<SubstateAddress>) -> SubstateAddress {
     let start = range.start();
     let mut bytes = [0u8; 16];
-    OsRng.fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     let mut start = start.into_array();
     start[16..32].copy_from_slice(&bytes);
     SubstateAddress::from_bytes(&start).unwrap()

@@ -4,7 +4,6 @@
 use axum_extra::headers::authorization::Bearer;
 use blake2::{Blake2b512, Digest};
 use ootle_byte_type::ToByteType;
-use rand::rngs::OsRng;
 use tari_crypto::{
     keys::PublicKey as _,
     ristretto::{RistrettoPublicKey, RistrettoSchnorr},
@@ -92,7 +91,7 @@ pub async fn handle_sign_metadata(
     let metadata_hash = req.metadata.hash()?;
 
     // Generate random nonce keypair
-    let (nonce_secret, nonce_public) = RistrettoPublicKey::random_keypair(&mut OsRng);
+    let (nonce_secret, nonce_public) = RistrettoPublicKey::random_keypair(&mut rand::rng());
 
     // Compute Blake2b-512 challenge
     let challenge = Blake2b512::new()

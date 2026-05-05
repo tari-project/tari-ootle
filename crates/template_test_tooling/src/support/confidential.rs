@@ -1,7 +1,6 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use rand::rngs::OsRng;
 use tari_crypto::{
     keys::SecretKey,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey, pedersen::PedersenCommitment},
@@ -46,7 +45,8 @@ fn generate_confidential_proof_internal(
     RistrettoSecretKey,
     Option<RistrettoSecretKey>,
 ) {
-    let mask = RistrettoSecretKey::random(&mut OsRng);
+    let mut rng = rand::rng();
+    let mask = RistrettoSecretKey::random(&mut rng);
     let output_statement = OutputWitness {
         amount: output_amount,
         mask: mask.clone(),
@@ -56,7 +56,7 @@ fn generate_confidential_proof_internal(
         resource_view_key: view_key.clone(),
     };
 
-    let change_mask = RistrettoSecretKey::random(&mut OsRng);
+    let change_mask = RistrettoSecretKey::random(&mut rng);
     let change_statement = change.map(|amount| OutputWitness {
         amount,
         mask: change_mask.clone(),
@@ -156,13 +156,14 @@ fn generate_withdraw_proof_internal(
     revealed_output_amount: Amount,
     view_key: Option<RistrettoPublicKey>,
 ) -> ConfidentialWithdrawProofOutput {
+    let mut rng = rand::rng();
     // If the amount is zero, we omit the output UTXO, therefore the mask is zero
     let output_mask = if output_amount == 0 {
-        Default::default()
+        RistrettoSecretKey::default()
     } else {
-        RistrettoSecretKey::random(&mut OsRng)
+        RistrettoSecretKey::random(&mut rng)
     };
-    let change_mask = change_amount.map(|_| RistrettoSecretKey::random(&mut OsRng));
+    let change_mask = change_amount.map(|_| RistrettoSecretKey::random(&mut rng));
 
     let output_proof = OutputWitness {
         amount: output_amount,

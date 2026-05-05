@@ -605,7 +605,7 @@ fn get_value_by_path<'a>(value: &'a tari_bor::Value, path: &str) -> Option<&'a t
 mod tests {
     use std::collections::HashMap;
 
-    use rand::{RngCore, rngs::OsRng};
+    use rand::Rng;
     use tari_bor::cbor;
     use tari_template_lib::types::NonFungibleId;
 
@@ -614,7 +614,7 @@ mod tests {
 
     fn new_object_key() -> ObjectKey {
         hasher32(EngineHashDomainLabel::ComponentAddress)
-            .chain(&OsRng.next_u32())
+            .chain(&rand::rng().next_u32())
             .result()
             .trailing_bytes()
             .into()

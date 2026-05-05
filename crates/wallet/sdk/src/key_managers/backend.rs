@@ -1,7 +1,6 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use rand::rngs::OsRng;
 use tari_common_types::seeds::cipher_seed::CipherSeed;
 use tari_crypto::{
     keys::PublicKey,
@@ -28,7 +27,7 @@ pub trait WalletKeyStore {
         message: &M,
     ) -> Result<SignatureOutput, Self::Error> {
         let secret = self.derive_secret(key_branch, index)?;
-        let signature = RistrettoSchnorr::sign(&secret, message.to_signing_message(context), &mut OsRng)
+        let signature = RistrettoSchnorr::sign(&secret, message.to_signing_message(context), &mut rand::rng())
             .expect("RistrettoSchnorr::sign is infallible as it internally hashes the message into canonical form");
         Ok(SignatureOutput {
             signature,

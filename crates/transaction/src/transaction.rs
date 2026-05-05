@@ -428,7 +428,6 @@ impl From<Transaction> for PrunedTransaction {
 #[cfg(test)]
 mod tests {
     use ootle_byte_type::ToByteType;
-    use rand::rngs::OsRng;
     use tari_crypto::{
         keys::{PublicKey as _, SecretKey},
         ristretto::{RistrettoPublicKey, RistrettoSecretKey},
@@ -481,12 +480,12 @@ mod tests {
 
     #[test]
     fn it_correctly_signs_and_verifies() {
-        let secret = RistrettoSecretKey::random(&mut OsRng);
+        let secret = RistrettoSecretKey::random(&mut rand::rng());
         let public_key = RistrettoPublicKey::from_secret_key(&secret);
         let subject = create_transaction().build_and_seal(&secret);
         assert!(subject.verify_all_signatures());
 
-        let secret2 = RistrettoSecretKey::random(&mut OsRng);
+        let secret2 = RistrettoSecretKey::random(&mut rand::rng());
         let subject = create_transaction()
             .finish()
             .add_signer(&public_key.to_byte_type(), &secret2)

@@ -107,7 +107,7 @@ impl<'a> DbEncoder<&'a NodeKey> for NodeKeyCodec {
 mod tests {
     use std::iter;
 
-    use rand::Rng;
+    use rand::RngExt;
     use tari_state_tree::{
         JellyfishMerkleTree,
         LeafKey,
@@ -189,8 +189,6 @@ mod tests {
     }
 
     fn random_bytes<const L: usize>() -> [u8; L] {
-        let mut bytes = [0u8; L];
-        rand::thread_rng().fill(&mut bytes[..]);
-        bytes
+        rand::rng().random()
     }
 }

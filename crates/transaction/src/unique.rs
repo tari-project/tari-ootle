@@ -23,14 +23,14 @@ impl BuildHasher for FixedState {
 
 #[cfg(test)]
 mod tests {
-    use rand::{rngs::OsRng, Rng};
+    use rand::RngExt;
     use tari_ootle_common_types::{uint::U256, SubstateAddress};
 
     use super::*;
 
     pub fn random_substate_address() -> SubstateAddress {
-        let lsb: u128 = OsRng.gen();
-        let msb: u128 = OsRng.gen();
+        let lsb: u128 = rand::rng().random();
+        let msb: u128 = rand::rng().random();
         let mut bytes = [0u8; 32];
         bytes[..16].copy_from_slice(&lsb.to_le_bytes());
         bytes[16..].copy_from_slice(&msb.to_le_bytes());

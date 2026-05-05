@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use digest::crypto_common::rand_core::{OsRng, RngCore};
+use rand::Rng;
 use ootle_network::NetworkParseError;
 use passwords::PasswordGenerator;
 use tari_crypto::tari_utilities::SafePassword;
@@ -96,7 +96,7 @@ impl<'a, TStore: WalletStore> PasswordManagerApi<'a, TStore> {
 }
 
 fn generate_password_entry_key_nonce() -> u64 {
-    OsRng.next_u64()
+    rand::rng().next_u64()
 }
 
 /// Generate a new random password.

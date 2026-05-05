@@ -8,7 +8,6 @@ use axum_extra::headers::authorization::Bearer;
 use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use log::*;
 use ootle_byte_type::ToByteType;
-use rand::rngs::OsRng;
 use serde_json::json;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::crypto::{ValueLookupTable, get_commitment_factory};
@@ -89,7 +88,7 @@ pub async fn handle_create_transfer_proof(
     // TODO: Wrap up key/encrypted data handling in the wallet SDK
     let account_key = sdk.key_manager_api().get_key(account_owner_key_id)?;
     let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask)?;
-    let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
+    let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
 
     let confidential_amount = req.confidential_amount.to_u64_checked().ok_or_else(|| {
         invalid_request(format!(
@@ -139,7 +138,7 @@ pub async fn handle_create_transfer_proof(
 
     let maybe_change_statement = if change_amount_u64 > 0 {
         let change_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask)?;
-        let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
+        let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
 
         let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
             change_amount_u64,
@@ -271,7 +270,7 @@ pub async fn handle_create_output_proof(
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
     let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask)?;
-    let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
+    let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
     let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
         req.amount,
         &output_mask.key,

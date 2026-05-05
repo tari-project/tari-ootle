@@ -4,7 +4,7 @@
 use std::{io, path::PathBuf};
 
 use log::*;
-use rand::{RngCore, rngs::OsRng};
+use rand::Rng;
 use serde::Serialize;
 use tari_epoch_manager::traits::LayerOneTransactionSubmitter;
 use tari_ootle_common_types::layer_one_transaction::LayerOneTransactionDef;
@@ -32,7 +32,7 @@ impl LayerOneTransactionSubmitter for FileLayerOneSubmitter {
         transaction: LayerOneTransactionDef<T>,
     ) -> Result<Self::Output, Self::Error> {
         fs::create_dir_all(&self.path).await?;
-        let id = OsRng.next_u64();
+        let id = rand::rng().next_u64();
         let file_name = format!("{}-{}.json", transaction.payload_type, id);
         let path = self.path.join(file_name);
         info!(target: LOG_TARGET, "Saving layer transaction to {}", path.display());

@@ -3,7 +3,7 @@
 
 use std::{io::Write, ops::Deref};
 
-use rand::{Rng, RngCore, rngs::OsRng};
+use rand::{Rng, RngExt};
 use tari_bor::cbor;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, Decision, LeafBlock, PcId, ProposalCertificate, ShardGroupAccumulatedData};
@@ -75,7 +75,7 @@ pub fn create_rocksdb_with_opts(opts: DatabaseOptions) -> (RocksDbStateStore<Str
 
 pub fn create_tx_atom() -> TransactionAtom {
     let mut bytes = [0u8; 32];
-    OsRng.fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     TransactionAtom {
         id: TransactionId::new(bytes),
         decision: Decision::Commit,
@@ -93,13 +93,13 @@ pub fn create_random_substate_id() -> SubstateId {
 
 pub fn random_fixed<const SIZE: usize>() -> [u8; SIZE] {
     let mut bytes = [0u8; SIZE];
-    OsRng.fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     bytes
 }
 
 pub fn random_bytes(size: usize) -> Vec<u8> {
     let mut bytes = vec![0u8; size];
-    OsRng.fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     bytes
 }
 
@@ -213,7 +213,7 @@ pub fn random_substate_id_for_shard(shard: Shard) -> SubstateId {
     buf[..end].copy_from_slice(&seed.to_be_bytes()[..end]);
     let entity_id = EntityId::from_array(buf);
     let mut buf = [0u8; ComponentKey::LENGTH];
-    rand::thread_rng().fill_bytes(&mut buf);
+    rand::rng().fill_bytes(&mut buf);
     let component_key = ComponentKey::new(buf);
     SubstateId::Component(ComponentAddress::new(ObjectKey::new(entity_id, component_key)))
 }
@@ -284,7 +284,7 @@ pub fn create_random_block_id() -> BlockId {
 }
 
 pub fn create_random_hash() -> FixedHash {
-    let rand_bytes = OsRng.r#gen::<[u8; FixedHash::byte_size()]>();
+    let rand_bytes: [u8; FixedHash::byte_size()] = rand::rng().random();
     FixedHash::new(rand_bytes)
 }
 

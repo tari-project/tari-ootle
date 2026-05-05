@@ -1,7 +1,6 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use chacha20poly1305::aead::OsRng;
 use ootle_byte_type::ToByteType;
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
@@ -23,7 +22,8 @@ pub fn generate_elgamal_viewable_balance_proof(
     commitment: &PedersenCommitment,
     view_key: &RistrettoPublicKey,
 ) -> Result<ViewableBalanceProof, StealthProofError> {
-    let (elgamal_secret_nonce, elgamal_public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
+    let mut rng = rand::rng();
+    let (elgamal_secret_nonce, elgamal_public_nonce) = RistrettoPublicKey::random_keypair(&mut rng);
     let r = &elgamal_secret_nonce;
     let output_amount_as_secret = RistrettoSecretKey::from(output_amount);
 
@@ -31,9 +31,9 @@ pub fn generate_elgamal_viewable_balance_proof(
     let elgamal_encrypted = RistrettoPublicKey::from_secret_key(&output_amount_as_secret) + r * view_key;
 
     // Nonces
-    let x_v = RistrettoSecretKey::random(&mut OsRng);
-    let x_m = RistrettoSecretKey::random(&mut OsRng);
-    let x_r = RistrettoSecretKey::random(&mut OsRng);
+    let x_v = RistrettoSecretKey::random(&mut rng);
+    let x_m = RistrettoSecretKey::random(&mut rng);
+    let x_r = RistrettoSecretKey::random(&mut rng);
 
     // C' = x_m.G + x_v.H
     let c_prime = get_commitment_factory().commit(&x_m, &x_v);

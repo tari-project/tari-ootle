@@ -3,7 +3,7 @@
 
 use std::{cmp, fmt::Display, ops::RangeInclusive};
 
-use rand::{rngs::OsRng, seq::SliceRandom};
+use rand::seq::{IndexedRandom, SliceRandom};
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
@@ -111,17 +111,15 @@ impl<TAddr: PartialEq> Committee<TAddr> {
     }
 
     pub fn shuffle(&mut self) {
-        self.members.shuffle(&mut OsRng);
+        self.members.shuffle(&mut rand::rng());
     }
 
     pub fn shuffled(&self) -> impl Iterator<Item = &CommitteeMember<TAddr>> + '_ {
-        self.members.choose_multiple(&mut OsRng, self.len())
+        self.members.sample(&mut rand::rng(), self.len())
     }
 
     pub fn select_n_random(&self, n: usize) -> impl Iterator<Item = &TAddr> + '_ {
-        self.members
-            .choose_multiple(&mut OsRng, n)
-            .map(|member| &member.address)
+        self.members.sample(&mut rand::rng(), n).map(|member| &member.address)
     }
 
     pub fn index_of(&self, member: &TAddr) -> Option<usize> {

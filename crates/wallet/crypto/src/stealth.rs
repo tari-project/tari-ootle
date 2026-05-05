@@ -140,7 +140,6 @@ pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a StealthOutp
 
 #[cfg(test)]
 mod tests {
-    use rand::rngs::OsRng;
     use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
     use tari_engine_types::stealth::validate_stealth_outputs_statement;
     use tari_template_lib_types::{
@@ -154,7 +153,7 @@ mod tests {
     use crate::OutputWitness;
 
     fn create_valid_proof(amount: u64, minimum_value_promise: u64) -> StealthOutputsStatement {
-        let mask = RistrettoSecretKey::random(&mut OsRng);
+        let mask = RistrettoSecretKey::random(&mut rand::rng());
         create_outputs_statement(
             &[StealthOutputWitness {
                 witness: OutputWitness {

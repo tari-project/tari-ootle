@@ -26,7 +26,6 @@ ootle_byte_type = { workspace = true }
 ootle-network = { workspace = true }
 
 anyhow = { workspace = true }
-digest = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true, default-features = true }
 futures = { workspace = true }

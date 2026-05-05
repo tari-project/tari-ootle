@@ -11915,7 +11915,6 @@ name = "tari_ootle_wallet_sdk"
 version = "0.30.3"
 dependencies = [
  "anyhow",
- "digest 0.10.7",
  "futures 0.3.31",
  "keyring",
  "log",

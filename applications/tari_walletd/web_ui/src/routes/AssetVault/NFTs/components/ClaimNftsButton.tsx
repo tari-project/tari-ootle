@@ -21,6 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useMintTestnetFaucetNfts } from "@api/hooks/useAccounts";
+import { useWalletInfo } from "@api/hooks/useWalletInfo";
 import queryClient from "@api/queryClient";
 import Button from "@mui/material/Button";
 import { useTheme } from "@mui/material/styles";
@@ -33,9 +34,14 @@ function ClaimNftsButton() {
   const { mutate: claimTestnetFaucetNfts, isPending } = useMintTestnetFaucetNfts();
   const account = useAccountStore((state) => state.account);
   const { showError, showSuccess } = useErrorNotification();
+  const { data: walletInfo } = useWalletInfo();
   const theme = useTheme();
   const isLg = useMediaQuery(theme.breakpoints.up("md"));
   if (!account) {
+    return <></>;
+  }
+
+  if (!walletInfo || walletInfo.network === "mainnet") {
     return <></>;
   }
 

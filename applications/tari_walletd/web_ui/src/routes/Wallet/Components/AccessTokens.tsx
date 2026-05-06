@@ -20,15 +20,24 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useAuthRevokeToken, useGetAllTokens } from "@api/hooks/useTokens";
+import {
+  useAuthRevokeToken,
+  useCreateApiKey,
+  useGetAllTokens,
+  useListApiKeys,
+  useRevokeApiKey,
+} from "@api/hooks/useTokens";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import { AccordionIconButton, CodeBlock, DataTableCell } from "@components/StyledComponents";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import {
   Fade,
+  Checkbox,
+  FormControlLabel,
   List,
   ListItem,
+  Stack,
   Table,
   TableBody,
   TableCell,
@@ -36,6 +45,8 @@ import {
   TableHead,
   TablePagination,
   TableRow,
+  TextField,
+  Typography,
 } from "@mui/material";
 import Button from "@mui/material/Button";
 import Collapse from "@mui/material/Collapse";
@@ -54,6 +65,18 @@ import type {
 import { jrpcPermissionToString } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 import { IoCloseCircleOutline } from "react-icons/io5";
+
+const API_KEY_PERMISSIONS: JrpcPermission[] = [
+  "AccountInfo",
+  "AccountList",
+  "SubstatesRead",
+  "TemplatesRead",
+  "KeyList",
+  "TransactionGet",
+  "TransactionSend",
+  "GetNft",
+  "Admin",
+];
 
 function AlertDialog({ fn }: any) {
   const [open, setOpen] = useState(false);
@@ -191,8 +214,10 @@ export default function AccessTokens() {
   return (
     <FetchStatusCheck isLoading={isLoading} isError={isError} errorMessage={error?.message || "Error fetching data"}>
       <Fade in={!isLoading && !isError}>
-        <TableContainer>
-          <Table>
+        <Stack spacing={3}>
+          <ApiKeysSection />
+          <TableContainer>
+            <Table>
             <TableHead>
               <TableRow>
                 <TableCell>ID</TableCell>
@@ -218,20 +243,134 @@ export default function AccessTokens() {
                 </TableRow>
               )}
             </TableBody>
-          </Table>
-          {data?.sessions && (
-            <TablePagination
-              rowsPerPageOptions={[10, 25, 50]}
-              component="div"
-              count={data.sessions.length}
-              rowsPerPage={rowsPerPage}
-              page={page}
-              onPageChange={handleChangePage}
-              onRowsPerPageChange={handleChangeRowsPerPage}
-            />
-          )}
-        </TableContainer>
+            </Table>
+            {data?.sessions && (
+              <TablePagination
+                rowsPerPageOptions={[10, 25, 50]}
+                component="div"
+                count={data.sessions.length}
+                rowsPerPage={rowsPerPage}
+                page={page}
+                onPageChange={handleChangePage}
+                onRowsPerPageChange={handleChangeRowsPerPage}
+              />
+            )}
+          </TableContainer>
+        </Stack>
       </Fade>
     </FetchStatusCheck>
   );
+}
+
+function ApiKeysSection() {
+  const { data } = useListApiKeys();
+  const createApiKey = useCreateApiKey();
+  const revokeApiKey = useRevokeApiKey();
+  const [name, setName] = useState("");
+  const [selectedPermissions, setSelectedPermissions] = useState<JrpcPermission[]>(["AccountInfo"]);
+  const [createdApiKey, setCreatedApiKey] = useState<string | null>(null);
+
+  const togglePermission = (permission: JrpcPermission) => {
+    setSelectedPermissions((current) =>
+      current.includes(permission) ? current.filter((item) => item !== permission) : [...current, permission],
+    );
+  };
+
+  const create = () => {
+    createApiKey.mutate(
+      {
+        name,
+        permissions: selectedPermissions,
+        allow_admin: selectedPermissions.includes("Admin"),
+      },
+      {
+        onSuccess: (response) => {
+          setCreatedApiKey(response.api_key);
+          setName("");
+          setSelectedPermissions(["AccountInfo"]);
+        },
+      },
+    );
+  };
+
+  return (
+    <Stack spacing={2} sx={{ mb: 4 }}>
+      <Typography variant="h6">API Keys</Typography>
+      <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ xs: "stretch", md: "flex-start" }}>
+        <TextField label="Name" value={name} onChange={(event) => setName(event.target.value)} size="small" />
+        <Stack direction="row" flexWrap="wrap" gap={1}>
+          {API_KEY_PERMISSIONS.map((permission) => (
+            <FormControlLabel
+              key={jrpcPermissionToString(permission)}
+              control={
+                <Checkbox
+                  checked={selectedPermissions.includes(permission)}
+                  onChange={() => togglePermission(permission)}
+                  size="small"
+                />
+              }
+              label={jrpcPermissionToString(permission)}
+            />
+          ))}
+        </Stack>
+        <Button
+          variant="contained"
+          onClick={create}
+          disabled={!name.trim() || selectedPermissions.length === 0 || createApiKey.isPending}
+        >
+          Create
+        </Button>
+      </Stack>
+      {createdApiKey && (
+        <CodeBlock>
+          <Stack spacing={1}>
+            <Typography variant="body2">New API key</Typography>
+            <Typography variant="body2">{createdApiKey}</Typography>
+            <Button variant="outlined" onClick={() => setCreatedApiKey(null)}>
+              Dismiss
+            </Button>
+          </Stack>
+        </CodeBlock>
+      )}
+      <TableContainer>
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableCell>Name</TableCell>
+              <TableCell>ID</TableCell>
+              <TableCell>Created</TableCell>
+              <TableCell>Last Used</TableCell>
+              <TableCell>Permissions</TableCell>
+              <TableCell width="100" align="center">
+                Revoke
+              </TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {data?.api_keys.map((apiKey) => (
+              <TableRow key={apiKey.id}>
+                <DataTableCell>{apiKey.name}</DataTableCell>
+                <DataTableCell>{apiKey.id}</DataTableCell>
+                <DataTableCell>{formatTimestamp(apiKey.created_at)}</DataTableCell>
+                <DataTableCell>{apiKey.last_used_at ? formatTimestamp(apiKey.last_used_at) : ""}</DataTableCell>
+                <DataTableCell>
+                  {apiKey.permissions.map((permission: JrpcPermission) => jrpcPermissionToString(permission)).join(", ")}
+                </DataTableCell>
+                <DataTableCell sx={{ textAlign: "center" }}>
+                  <IconButton onClick={() => revokeApiKey.mutate(apiKey.id)} color="primary">
+                    <IoCloseCircleOutline />
+                  </IconButton>
+                </DataTableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Stack>
+  );
+}
+
+function formatTimestamp(timestamp: number) {
+  const date = new Date(Number(timestamp) * 1000);
+  return `${date.toISOString().slice(0, 10)} ${date.toISOString().slice(11, 16)}`;
 }

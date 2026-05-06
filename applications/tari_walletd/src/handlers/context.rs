@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use axum_extra::headers::authorization::Bearer;
 use tari_ootle_transaction::{Transaction, TransactionBuilder};
-use tari_ootle_wallet_sdk::models::WalletEvent;
+use tari_ootle_wallet_sdk::{models::WalletEvent, storage::{WalletStore, WalletStoreReader}};
 use tari_ootle_wallet_sdk_services::{
     account_monitor::AccountMonitorHandle,
     notify::Notify,
@@ -73,7 +73,14 @@ impl HandlerContext {
     }
 
     pub fn check_auth(&self, token: Option<&Bearer>, permissions: &[JrpcPermission]) -> Result<(), JwtApiError> {
-        self.jwt_api().check_auth(token, permissions)
+        let jwt = self.jwt_api();
+        let claims = jwt.decode_bearer(token)?;
+        if let Some(api_key_id) = &claims.api_key_id {
+            self.wallet_sdk
+                .store()
+                .with_read_tx(|tx| tx.api_keys_get_active(api_key_id))?;
+        }
+        jwt.check_claims_auth(&claims, permissions)
     }
 
     pub fn jwt_api(&self) -> JwtApi<'_> {

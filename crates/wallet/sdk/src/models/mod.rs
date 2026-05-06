@@ -3,6 +3,7 @@
 
 mod account;
 mod address_book_entry;
+mod api_key;
 mod authored_template;
 mod confidential_output;
 mod config;
@@ -22,6 +23,7 @@ mod webauthn_registration;
 
 pub use account::*;
 pub use address_book_entry::*;
+pub use api_key::*;
 pub use authored_template::*;
 pub use confidential_output::*;
 pub use config::Config;

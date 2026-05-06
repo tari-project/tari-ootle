@@ -25,7 +25,16 @@ use tari_ootle_common_types::displayable::Displayable;
 use tari_ootle_walletd_client::{
     WalletDaemonClient,
     permissions::JrpcPermission,
-    types::{AuthCredentials, AuthListSessionsRequest, AuthLoginRequest, AuthRevokeTokenRequest},
+    types::{
+        AuthApiKeyCredentials,
+        AuthCreateApiKeyRequest,
+        AuthListApiKeysRequest,
+        AuthListSessionsRequest,
+        AuthLoginRequest,
+        AuthRevokeApiKeyRequest,
+        AuthRevokeTokenRequest,
+        AuthCredentials,
+    },
 };
 
 #[derive(Debug, Subcommand, Clone)]
@@ -33,6 +42,16 @@ pub enum AuthSubcommand {
     Request(RequestArgs),
     Revoke(RevokeArgs),
     List,
+    #[command(subcommand)]
+    ApiKey(ApiKeySubcommand),
+}
+
+#[derive(Debug, Subcommand, Clone)]
+pub enum ApiKeySubcommand {
+    Create(CreateApiKeyArgs),
+    List,
+    Revoke(RevokeApiKeyArgs),
+    Authenticate(AuthenticateApiKeyArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -43,6 +62,27 @@ pub struct RequestArgs {
 #[derive(Debug, Args, Clone)]
 pub struct RevokeArgs {
     permission_token_id: String,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct CreateApiKeyArgs {
+    #[clap(long)]
+    name: String,
+    #[clap(long)]
+    allow_admin: bool,
+    permissions: Vec<JrpcPermission>,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct RevokeApiKeyArgs {
+    id: String,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct AuthenticateApiKeyArgs {
+    #[clap(long)]
+    api_key: String,
+    permissions: Vec<JrpcPermission>,
 }
 
 impl AuthSubcommand {
@@ -76,6 +116,43 @@ impl AuthSubcommand {
                 for session in &resp.sessions {
                     println!("Id {} name {}", session.id, session.permissions.display());
                 }
+            },
+            ApiKey(subcommand) => match subcommand {
+                ApiKeySubcommand::Create(args) => {
+                    let resp = client
+                        .auth_create_api_key(AuthCreateApiKeyRequest {
+                            name: args.name,
+                            permissions: args.permissions,
+                            allow_admin: args.allow_admin,
+                        })
+                        .await?;
+                    println!("API key id: {}", resp.id);
+                    println!("API key: {}", resp.api_key);
+                },
+                ApiKeySubcommand::List => {
+                    let resp = client.auth_list_api_keys(AuthListApiKeysRequest {}).await?;
+                    for key in &resp.api_keys {
+                        println!(
+                            "Id {} name {} permissions {}",
+                            key.id,
+                            key.name,
+                            key.permissions.display()
+                        );
+                    }
+                },
+                ApiKeySubcommand::Revoke(args) => {
+                    client.auth_revoke_api_key(AuthRevokeApiKeyRequest { id: args.id }).await?;
+                    println!("API key revoked!");
+                },
+                ApiKeySubcommand::Authenticate(args) => {
+                    let resp = client
+                        .auth_request(AuthLoginRequest {
+                            permissions: args.permissions,
+                            credentials: AuthCredentials::ApiKey(AuthApiKeyCredentials { api_key: args.api_key }),
+                        })
+                        .await?;
+                    println!("{}", resp.token);
+                },
             },
         }
         Ok(())

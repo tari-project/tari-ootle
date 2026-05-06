@@ -41,9 +41,15 @@ import type {
   AccountsRenameResponse,
   AccountsTransferRequest,
   AccountsTransferResponse,
+  AuthCreateApiKeyRequest,
+  AuthCreateApiKeyResponse,
   AuthGetMethodResponse,
+  AuthListApiKeysRequest,
+  AuthListApiKeysResponse,
   AuthListSessionsRequest,
   AuthListSessionsResponse,
+  AuthRevokeApiKeyRequest,
+  AuthRevokeApiKeyResponse,
   AuthRevokeTokenRequest,
   AuthRevokeTokenResponse,
   BurnProofsGetRequest,
@@ -188,6 +194,12 @@ export const authRevoke = (request: AuthRevokeTokenRequest): Promise<AuthRevokeT
   client().then((c) => c.authRevoke(request));
 export const authGetAllJwt = (request: AuthListSessionsRequest): Promise<AuthListSessionsResponse> =>
   client().then((c) => c.authListSessions(request));
+export const authCreateApiKey = (request: AuthCreateApiKeyRequest): Promise<AuthCreateApiKeyResponse> =>
+  client().then((c) => c.authCreateApiKey(request));
+export const authListApiKeys = (request: AuthListApiKeysRequest): Promise<AuthListApiKeysResponse> =>
+  client().then((c) => c.authListApiKeys(request));
+export const authRevokeApiKey = (request: AuthRevokeApiKeyRequest): Promise<AuthRevokeApiKeyResponse> =>
+  client().then((c) => c.authRevokeApiKey(request));
 
 // indexer
 export const indexerGetNetworkInfo = (indexerUrl: string) =>

@@ -24,12 +24,19 @@ import type {
   AccountsRenameResponse,
   AccountsTransferRequest,
   AccountsTransferResponse,
+  AuthApiKeyCredentials,
   AuthCredentials,
+  AuthCreateApiKeyRequest,
+  AuthCreateApiKeyResponse,
   AuthListSessionsRequest,
   AuthListSessionsResponse,
+  AuthListApiKeysRequest,
+  AuthListApiKeysResponse,
   AuthGetMethodResponse,
   AuthLoginRequest,
   AuthLoginResponse,
+  AuthRevokeApiKeyRequest,
+  AuthRevokeApiKeyResponse,
   AuthRevokeTokenRequest,
   AuthRevokeTokenResponse,
   BurnProofsGetRequest,
@@ -175,6 +182,18 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
     return this.sendRequest("auth.list_sessions", params);
   }
 
+  public authCreateApiKey(params: AuthCreateApiKeyRequest): Promise<AuthCreateApiKeyResponse> {
+    return this.sendRequest("auth.api_key_create", params);
+  }
+
+  public authListApiKeys(params: AuthListApiKeysRequest): Promise<AuthListApiKeysResponse> {
+    return this.sendRequest("auth.api_key_list", params);
+  }
+
+  public authRevokeApiKey(params: AuthRevokeApiKeyRequest): Promise<AuthRevokeApiKeyResponse> {
+    return this.sendRequest("auth.api_key_revoke", params);
+  }
+
   public async authRequest(permissions: JrpcPermission[], credentials: AuthCredentials): Promise<string> {
     let request: AuthLoginRequest = {
       permissions: permissions,
@@ -182,6 +201,13 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
     };
     let resp = await this.sendRequest<AuthLoginResponse>("auth.request", request);
     return resp.token;
+  }
+
+  public async authenticateWithApiKey(permissions: JrpcPermission[], apiKey: string): Promise<string> {
+    let credentials: AuthApiKeyCredentials = { api_key: apiKey };
+    const token = await this.authRequest(permissions, { ApiKey: credentials });
+    this.setToken(token);
+    return token;
   }
 
   public authRevoke(params: AuthRevokeTokenRequest): Promise<AuthRevokeTokenResponse> {

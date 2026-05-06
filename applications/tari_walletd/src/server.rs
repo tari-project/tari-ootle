@@ -92,7 +92,11 @@ async fn handler(
 ) -> Response {
     let token = authorization_header.map(|auth| auth.0.0);
     info!(target: LOG_TARGET, "🌐 JSON-RPC request: {}", value.method);
-    debug!(target: LOG_TARGET, "🌐 JSON-RPC request: {:?}", value);
+    if value.method == "auth.request" || value.method == "auth.api_key_create" {
+        debug!(target: LOG_TARGET, "🌐 JSON-RPC request: {} <credentials redacted>", value.method);
+    } else {
+        debug!(target: LOG_TARGET, "🌐 JSON-RPC request: {:?}", value);
+    }
     match value.method.as_str().split_once('.') {
         Some(("auth", method)) => match method {
             "request" => call_handler_any_response(context, value, token, auth::handle_login_request).await,
@@ -108,6 +112,9 @@ async fn handler(
             },
             "revoke" => call_handler(context, value, token, auth::handle_revoke).await,
             "list_sessions" => call_handler(context, value, token, auth::handle_list_sessions).await,
+            "api_key_create" => call_handler(context, value, token, auth::handle_create_api_key).await,
+            "api_key_list" => call_handler(context, value, token, auth::handle_list_api_keys).await,
+            "api_key_revoke" => call_handler(context, value, token, auth::handle_revoke_api_key).await,
             "method" => call_handler(context, value, token, auth::handle_get_auth_method).await,
             _ => value.method_not_found(&value.method).into_response(),
         },

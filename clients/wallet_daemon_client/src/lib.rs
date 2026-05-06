@@ -90,6 +90,9 @@ use crate::{
         AccountsListResponse,
         AccountsRenameRequest,
         AccountsRenameResponse,
+        AuthApiKeyCredentials,
+        AuthCreateApiKeyRequest,
+        AuthCreateApiKeyResponse,
         AddressBookAddRequest,
         AddressBookAddResponse,
         AddressBookDeleteRequest,
@@ -104,8 +107,12 @@ use crate::{
         AuthGetMethodResponse,
         AuthListSessionsRequest,
         AuthListSessionsResponse,
+        AuthListApiKeysRequest,
+        AuthListApiKeysResponse,
         AuthRevokeTokenRequest,
         AuthRevokeTokenResponse,
+        AuthRevokeApiKeyRequest,
+        AuthRevokeApiKeyResponse,
         BurnProofsGetRequest,
         BurnProofsGetResponse,
         BurnProofsListRequest,
@@ -598,6 +605,46 @@ impl WalletDaemonClient {
         req: T,
     ) -> Result<AuthListSessionsResponse, WalletDaemonClientError> {
         self.send_request("auth.list_sessions", req.borrow()).await
+    }
+
+    /// Creates a long-lived API key. Requires Admin authentication.
+    pub async fn auth_create_api_key<T: Borrow<AuthCreateApiKeyRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AuthCreateApiKeyResponse, WalletDaemonClientError> {
+        self.send_request("auth.api_key_create", req.borrow()).await
+    }
+
+    /// Lists active API keys. Requires Admin authentication.
+    pub async fn auth_list_api_keys<T: Borrow<AuthListApiKeysRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AuthListApiKeysResponse, WalletDaemonClientError> {
+        self.send_request("auth.api_key_list", req.borrow()).await
+    }
+
+    /// Revokes an active API key immediately. Requires Admin authentication.
+    pub async fn auth_revoke_api_key<T: Borrow<AuthRevokeApiKeyRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AuthRevokeApiKeyResponse, WalletDaemonClientError> {
+        self.send_request("auth.api_key_revoke", req.borrow()).await
+    }
+
+    /// Authenticates using a long-lived API key and stores the returned scoped JWT on this client.
+    pub async fn authenticate_with_api_key(
+        &mut self,
+        permissions: Vec<crate::permissions::JrpcPermission>,
+        api_key: String,
+    ) -> Result<EncodedJwtString, WalletDaemonClientError> {
+        let response = self
+            .auth_request(AuthLoginRequest {
+                permissions,
+                credentials: crate::types::AuthCredentials::ApiKey(AuthApiKeyCredentials { api_key }),
+            })
+            .await?;
+        self.set_auth_token(response.token.clone());
+        Ok(response.token)
     }
 
     /// Initiates a WebRTC signalling session with the wallet daemon.

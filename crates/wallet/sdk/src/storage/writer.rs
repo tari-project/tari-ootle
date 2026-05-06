@@ -31,6 +31,7 @@ use crate::{
         ImportedKeyId,
         KeyId,
         KeyType,
+        NewApiKeyModel,
         NewAccountData,
         NonFungibleToken,
         OutputStatus,
@@ -205,6 +206,11 @@ pub trait WalletStoreWriter: CommittableStore {
 
     // Webauthn registrations
     fn webauthn_reg_insert(&mut self, username: String, passkey: Passkey) -> Result<(), WalletStorageError>;
+
+    // API keys
+    fn api_keys_insert(&mut self, api_key: NewApiKeyModel) -> Result<(), WalletStorageError>;
+    fn api_keys_touch_last_used(&mut self, id: &str) -> Result<(), WalletStorageError>;
+    fn api_keys_revoke(&mut self, id: &str) -> Result<(), WalletStorageError>;
 
     // Authored templates
     fn authored_templates_insert(&mut self, model: AuthoredTemplateModel) -> Result<(), WalletStorageError>;

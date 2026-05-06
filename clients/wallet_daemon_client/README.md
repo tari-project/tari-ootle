@@ -23,6 +23,18 @@ let auth_resp = client.auth_request(AuthLoginRequest {
 }).await?;
 client.set_auth_token(auth_resp.token);
 
+// Create a permission-scoped API key for a non-interactive agent.
+let created = client.auth_create_api_key(AuthCreateApiKeyRequest {
+    name: "codex-agent".to_string(),
+    permissions: vec![JrpcPermission::AccountInfo, JrpcPermission::TransactionGet],
+    allow_admin: false,
+}).await?;
+
+// Authenticate later with the long-lived API key to receive a short-lived scoped JWT.
+client
+    .authenticate_with_api_key(vec![JrpcPermission::AccountInfo], created.api_key.to_string())
+    .await?;
+
 // Create an account
 let resp = client.create_account(AccountsCreateRequest {
     account_name: Some("my-account".to_string()),

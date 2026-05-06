@@ -29,6 +29,7 @@ use tari_ootle_wallet_sdk::{
     models::{
         Account,
         AddressBookEntry,
+        ApiKeyModel,
         AuthoredTemplateModel,
         ConfidentialOutputModel,
         Config,
@@ -62,7 +63,7 @@ use webauthn_rs::prelude::Passkey;
 
 use crate::{
     models,
-    models::{AuthoredTemplate, WebauthnRegistrationPasskey},
+    models::{ApiKey, AuthoredTemplate, WebauthnRegistrationPasskey},
     schema::accounts,
     serialization::{deserialize_hex_try_from, deserialize_json, serialize_hex},
 };
@@ -1393,6 +1394,76 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 Err(_) => None,
             })
             .collect::<Vec<Passkey>>())
+    }
+
+    fn api_keys_get(&mut self, id: &str) -> Result<ApiKeyModel, WalletStorageError> {
+        const OPERATION: &str = "api_keys_get";
+        use crate::schema::wallet_api_keys;
+
+        wallet_api_keys::table
+            .filter(wallet_api_keys::id.eq(id))
+            .select(ApiKey::as_select())
+            .first::<ApiKey>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "wallet_api_key".to_string(),
+                key: id.to_string(),
+            })
+            .and_then(|model| {
+                ApiKeyModel::try_from(model).map_err(|e| WalletStorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "wallet_api_keys.permissions",
+                    details: e.to_string(),
+                })
+            })
+    }
+
+    fn api_keys_get_active(&mut self, id: &str) -> Result<ApiKeyModel, WalletStorageError> {
+        const OPERATION: &str = "api_keys_get_active";
+        use crate::schema::wallet_api_keys;
+
+        wallet_api_keys::table
+            .filter(wallet_api_keys::id.eq(id))
+            .filter(wallet_api_keys::revoked_at.is_null())
+            .select(ApiKey::as_select())
+            .first::<ApiKey>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "active_wallet_api_key".to_string(),
+                key: id.to_string(),
+            })
+            .and_then(|model| {
+                ApiKeyModel::try_from(model).map_err(|e| WalletStorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "wallet_api_keys.permissions",
+                    details: e.to_string(),
+                })
+            })
+    }
+
+    fn api_keys_list_active(&mut self) -> Result<Vec<ApiKeyModel>, WalletStorageError> {
+        const OPERATION: &str = "api_keys_list_active";
+        use crate::schema::wallet_api_keys;
+
+        wallet_api_keys::table
+            .filter(wallet_api_keys::revoked_at.is_null())
+            .select(ApiKey::as_select())
+            .order(wallet_api_keys::created_at.desc())
+            .load::<ApiKey>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .into_iter()
+            .map(|model| {
+                ApiKeyModel::try_from(model).map_err(|e| WalletStorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "wallet_api_keys.permissions",
+                    details: e.to_string(),
+                })
+            })
+            .collect()
     }
 
     fn authored_templates_exists_by_address(&mut self, address: &TemplateAddress) -> Result<bool, WalletStorageError> {

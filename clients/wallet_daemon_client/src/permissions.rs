@@ -53,7 +53,9 @@ impl FromStr for JrpcPermission {
             Some(("TransactionSend", addr)) => Ok(JrpcPermission::TransactionSend(Some(
                 SubstateId::from_str(addr).map_err(|e| InvalidJrpcPermissionsFormat(e.to_string()))?,
             ))),
-            Some(("AddressBook", perm)) => Ok(JrpcPermission::AddressBook(perm.parse()?)),
+            Some(("AddressBook", perm)) => Ok(JrpcPermission::AddressBook(
+                perm.trim_matches(|c| c == '(' || c == ')').parse()?,
+            )),
             Some(_) => Err(InvalidJrpcPermissionsFormat(s.to_string())),
             None => match s {
                 "AccountInfo" => Ok(JrpcPermission::AccountInfo),
@@ -91,7 +93,7 @@ impl Display for JrpcPermission {
             JrpcPermission::Admin => write!(f, "Admin"),
             JrpcPermission::SubstatesRead => write!(f, "SubstatesRead"),
             JrpcPermission::TemplatesRead => write!(f, "TemplatesRead"),
-            JrpcPermission::AddressBook(perm) => write!(f, "AddressBook({})", perm),
+            JrpcPermission::AddressBook(perm) => write!(f, "AddressBook_{}", perm),
         }
     }
 }
@@ -124,6 +126,18 @@ impl JrpcPermissions {
 
     pub fn has_permission(&self, permission: &JrpcPermission) -> bool {
         self.0.contains(permission)
+    }
+
+    pub fn is_subset_of(&self, other: &Self) -> bool {
+        self.0.is_subset(&other.0)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &JrpcPermission> {
+        self.0.iter()
+    }
+
+    pub fn to_vec(&self) -> Vec<JrpcPermission> {
+        self.0.iter().cloned().collect()
     }
 
     pub fn into_vec(self) -> Vec<JrpcPermission> {
@@ -160,6 +174,8 @@ impl FromIterator<JrpcPermission> for JrpcPermissions {
 pub struct Claims {
     pub permissions: JrpcPermissions,
     pub exp: u64,
+    #[serde(default)]
+    pub api_key_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Hash, Eq, PartialEq)]
@@ -194,5 +210,29 @@ impl Display for AddressBookPermission {
             AddressBookPermission::Update => write!(f, "update"),
             AddressBookPermission::Delete => write!(f, "delete"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AddressBookPermission, JrpcPermission, JrpcPermissions};
+
+    #[test]
+    fn permissions_subset_requires_every_requested_permission() {
+        let granted = JrpcPermissions::from(vec![JrpcPermission::AccountInfo, JrpcPermission::TransactionGet]);
+        let allowed = JrpcPermissions::from(vec![JrpcPermission::AccountInfo]);
+        let denied = JrpcPermissions::from(vec![JrpcPermission::AccountInfo, JrpcPermission::TransactionSend(None)]);
+
+        assert!(allowed.is_subset_of(&granted));
+        assert!(!denied.is_subset_of(&granted));
+    }
+
+    #[test]
+    fn address_book_permission_round_trips_from_display() {
+        let permission = JrpcPermission::AddressBook(AddressBookPermission::Read);
+        let encoded = permission.to_string();
+        let decoded = encoded.parse::<JrpcPermission>().unwrap();
+
+        assert_eq!(decoded, permission);
     }
 }

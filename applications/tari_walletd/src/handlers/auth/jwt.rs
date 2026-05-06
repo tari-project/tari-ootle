@@ -33,10 +33,11 @@ impl<'a> JwtApi<'a> {
         Ok(Claims {
             permissions,
             exp: exp.as_secs(),
+            api_key_id: None,
         })
     }
 
-    fn decode_jwt(&self, token: &str) -> Result<TokenData<Claims>, JwtApiError> {
+    pub fn decode_jwt(&self, token: &str) -> Result<TokenData<Claims>, JwtApiError> {
         let token_data = jsonwebtoken::decode::<Claims>(
             token,
             &DecodingKey::from_secret(self.jwt_secret_key.reveal()),
@@ -55,10 +56,13 @@ impl<'a> JwtApi<'a> {
         Ok(permissions_token.into())
     }
 
-    pub fn check_auth(&self, token: Option<&Bearer>, req_permissions: &[JrpcPermission]) -> Result<(), JwtApiError> {
+    pub fn decode_bearer(&self, token: Option<&Bearer>) -> Result<Claims, JwtApiError> {
         let token = token.ok_or(JwtApiError::AccessDeniedNoBearerToken)?;
-        let token_data = self.decode_jwt(token.token())?;
-        let token_permissions = &token_data.claims.permissions;
+        Ok(self.decode_jwt(token.token())?.claims)
+    }
+
+    pub fn check_claims_auth(&self, claims: &Claims, req_permissions: &[JrpcPermission]) -> Result<(), JwtApiError> {
+        let token_permissions = &claims.permissions;
         if token_permissions.has_permission(&JrpcPermission::Admin) {
             return Ok(());
         }
@@ -70,6 +74,11 @@ impl<'a> JwtApi<'a> {
             }
         }
         Ok(())
+    }
+
+    pub fn check_auth(&self, token: Option<&Bearer>, req_permissions: &[JrpcPermission]) -> Result<(), JwtApiError> {
+        let claims = self.decode_bearer(token)?;
+        self.check_claims_auth(&claims, req_permissions)
     }
 }
 

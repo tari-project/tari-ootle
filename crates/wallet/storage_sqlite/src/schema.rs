@@ -235,6 +235,19 @@ diesel::table! {
 }
 
 diesel::table! {
+    wallet_api_keys (id) {
+        id -> Text,
+        name -> Text,
+        key_hash -> Binary,
+        permissions -> Binary,
+        last_used_at -> Nullable<Timestamp>,
+        revoked_at -> Nullable<Timestamp>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     wallet_events (id) {
         id -> Nullable<Integer>,
         account_id -> Nullable<Integer>,
@@ -305,6 +318,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     utxo_process_queue,
     vault_locks,
     vaults,
+    wallet_api_keys,
     wallet_events,
     webauthn_registration_passkeys,
     webauthn_registrations,

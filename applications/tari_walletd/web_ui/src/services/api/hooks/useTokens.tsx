@@ -23,14 +23,45 @@
 import { ApiError } from "@api/helpers/types";
 import queryClient from "@api/queryClient";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { RefreshTokenHash } from "@tari-project/ootle-ts-bindings";
-import { authGetAllJwt, authRevoke } from "@utils/json_rpc";
+import type { AuthCreateApiKeyRequest, RefreshTokenHash } from "@tari-project/ootle-ts-bindings";
+import { authCreateApiKey, authGetAllJwt, authListApiKeys, authRevoke, authRevokeApiKey } from "@utils/json_rpc";
 
 export const useGetAllTokens = () => {
   return useQuery({
     queryKey: ["jwts_list"],
     queryFn: () => {
       return authGetAllJwt({});
+    },
+  });
+};
+
+export const useCreateApiKey = () => {
+  return useMutation({
+    mutationFn: (request: AuthCreateApiKeyRequest) => authCreateApiKey(request),
+    onError: (error: ApiError) => {
+      console.error(error);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["api_keys_list"] });
+    },
+  });
+};
+
+export const useListApiKeys = () => {
+  return useQuery({
+    queryKey: ["api_keys_list"],
+    queryFn: () => authListApiKeys({}),
+  });
+};
+
+export const useRevokeApiKey = () => {
+  return useMutation({
+    mutationFn: (id: string) => authRevokeApiKey({ id }),
+    onError: (error: ApiError) => {
+      console.error(error);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["api_keys_list"] });
     },
   });
 };

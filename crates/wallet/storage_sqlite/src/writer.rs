@@ -45,6 +45,7 @@ use tari_ootle_wallet_sdk::{
         ImportedKeyId,
         KeyId,
         KeyType,
+        NewApiKeyModel,
         NewAccountData,
         NonFungibleToken,
         OutputStatus,
@@ -1551,6 +1552,71 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             ))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("webauthn_reg_passkeys_insert", e))?;
+
+        Ok(())
+    }
+
+    fn api_keys_insert(&mut self, api_key: NewApiKeyModel) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "api_keys_insert";
+        use crate::schema::wallet_api_keys;
+
+        let permissions = serde_json::to_vec(&api_key.permissions).map_err(|e| WalletStorageError::DecodingError {
+            operation: OPERATION,
+            item: "api_key.permissions",
+            details: e.to_string(),
+        })?;
+
+        diesel::insert_into(wallet_api_keys::table)
+            .values((
+                wallet_api_keys::id.eq(api_key.id),
+                wallet_api_keys::name.eq(api_key.name),
+                wallet_api_keys::key_hash.eq(api_key.key_hash),
+                wallet_api_keys::permissions.eq(permissions),
+            ))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(())
+    }
+
+    fn api_keys_touch_last_used(&mut self, id: &str) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "api_keys_touch_last_used";
+        use crate::schema::wallet_api_keys;
+
+        diesel::update(wallet_api_keys::table.filter(wallet_api_keys::id.eq(id)))
+            .set((
+                wallet_api_keys::last_used_at.eq(diesel::dsl::now),
+                wallet_api_keys::updated_at.eq(diesel::dsl::now),
+            ))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(())
+    }
+
+    fn api_keys_revoke(&mut self, id: &str) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "api_keys_revoke";
+        use crate::schema::wallet_api_keys;
+
+        let affected = diesel::update(
+            wallet_api_keys::table
+                .filter(wallet_api_keys::id.eq(id))
+                .filter(wallet_api_keys::revoked_at.is_null()),
+        )
+        .set((
+            wallet_api_keys::revoked_at.eq(diesel::dsl::now),
+            wallet_api_keys::updated_at.eq(diesel::dsl::now),
+        ))
+        .execute(self.connection())
+        .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        if affected == 0 {
+            return Err(WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "active_wallet_api_key".to_string(),
+                key: id.to_string(),
+            });
+        }
 
         Ok(())
     }

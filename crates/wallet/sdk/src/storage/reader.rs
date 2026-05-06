@@ -21,6 +21,7 @@ use crate::{
     models::{
         Account,
         AddressBookEntry,
+        ApiKeyModel,
         AuthoredTemplateModel,
         ConfidentialOutputModel,
         Config,
@@ -207,6 +208,11 @@ pub trait WalletStoreReader {
     // Webauthn registration
     fn webauthn_is_user_registered(&mut self, username: &str) -> Result<bool, WalletStorageError>;
     fn webauthn_reg_fetch_passkeys(&mut self, username: String) -> Result<Vec<Passkey>, WalletStorageError>;
+
+    // API keys
+    fn api_keys_get(&mut self, id: &str) -> Result<ApiKeyModel, WalletStorageError>;
+    fn api_keys_get_active(&mut self, id: &str) -> Result<ApiKeyModel, WalletStorageError>;
+    fn api_keys_list_active(&mut self) -> Result<Vec<ApiKeyModel>, WalletStorageError>;
 
     // Authored templates
     fn authored_templates_exists_by_address(&mut self, address: &TemplateAddress) -> Result<bool, WalletStorageError>;

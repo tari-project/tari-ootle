@@ -28,7 +28,7 @@ WebAuthn requires a browser-based passkey interaction (biometric, hardware key, 
 4. **Login:** `auth.request` with `{"permissions": [...], "credentials": {"WebAuthN": <response>}}`
 5. **Use token:** Same as above
 
-**For agents:** Ask the user to authenticate via the wallet daemon web UI and provide the JWT token. Once received, use it in `Authorization: Bearer <token>` headers. If the token expires, ask the user for a fresh one.
+**For agents:** Ask an Admin user to create a permission-scoped API key in the wallet UI or with `tari_wallet_cli auth api-key create`. Use the API key with `auth.request` credentials `{"ApiKey":{"api_key":"..."}}` to receive a short-lived JWT scoped to the key. If the JWT expires, repeat `auth.request` with the same API key.
 
 ### JWT Token Details
 
@@ -83,9 +83,39 @@ Authenticate and receive a JWT token.
 
 For WebAuthn: `"credentials": {"WebAuthN": <WebauthnFinishAuthRequest>}`
 
+For API keys: `"credentials": {"ApiKey": {"api_key": "twda_<id>_<secret>"}}`
+
 **Response:** `{"result":{"token":"eyJ..."}}`
 
 Also sets an HttpOnly `r-tkn` cookie for refresh.
+
+### auth.api_key_create
+
+Create a named API key. Requires `Admin` permission. The API key is returned only in this response; the wallet stores only its hash.
+
+**Request:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "auth.api_key_create",
+  "params": {
+    "name": "codex-agent",
+    "permissions": ["AccountInfo", "TransactionGet"],
+    "allow_admin": false
+  }
+}
+```
+
+Set `allow_admin` to `true` only when `permissions` includes `Admin`.
+
+### auth.api_key_list
+
+List active API keys. Requires `Admin` permission. Returns each key's `id`, `name`, `permissions`, `created_at`, and `last_used_at`.
+
+### auth.api_key_revoke
+
+Revoke an active API key by id. Requires `Admin` permission. Revocation is immediate for new and existing JWT checks.
 
 ### auth.refresh
 

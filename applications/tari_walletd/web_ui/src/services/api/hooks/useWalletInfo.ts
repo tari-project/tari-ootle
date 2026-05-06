@@ -27,5 +27,10 @@ export const useWalletInfo = () => {
   return useQuery({
     queryKey: ["wallet_info"],
     queryFn: () => walletGetInfo(),
+    staleTime: Infinity,
+    gcTime: Infinity,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 };

@@ -130,7 +130,7 @@ pub async fn spawn_services(
             ],
             swarm: SwarmConfig {
                 protocol_version: format!("/tari/{}/0.0.1", config.network).parse().expect("Failed to parse protocol version"),
-                user_agent: "/tari/indexer/0.0.1".to_string(),
+                user_agent: format!("/tari/indexer/{}", env!("CARGO_PKG_VERSION")),
                 enable_mdns: config.indexer.p2p.enable_mdns,
                 enable_relay: true,
                 relay_circuit_limits: RelayCircuitLimits::high(),

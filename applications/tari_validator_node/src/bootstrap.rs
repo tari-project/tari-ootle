@@ -178,7 +178,7 @@ pub async fn spawn_services(
             ],
             swarm: SwarmConfig {
                 protocol_version: format!("/tari/{}/0.0.1", config.network).parse()?,
-                user_agent: "/tari/validator/0.0.1".to_string(),
+                user_agent: format!("/tari/validator/{}", env!("CARGO_PKG_VERSION")),
                 enable_mdns: config.validator_node.p2p.enable_mdns,
                 enable_relay: true,
                 // TODO: allow node operator to configure

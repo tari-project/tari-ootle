@@ -3,7 +3,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::Arc,
+    sync::{Arc, Mutex as StdMutex},
     time::Instant,
 };
 
@@ -38,6 +38,12 @@ pub struct TestEpochManager {
     our_validator_node: Option<ValidatorNode<TestAddress>>,
     tx_epoch_events: broadcast::Sender<EpochManagerEvent>,
     current_epoch: Epoch,
+    /// Simulates a lagged base-layer oracle for this validator. When `Some(cap)`,
+    /// `get_epoch_hash(e)` returns `NoEpochFound(e)` for `e > cap`.
+    /// A fresh `Arc` is allocated by `clone_for` (so each validator has independent lag state),
+    /// while the cheap `Clone` impl shares it with downstream consumers — the worker, outbound
+    /// messaging, etc. — for the same validator.
+    oracle_visible_epoch: Arc<StdMutex<Option<Epoch>>>,
 }
 
 impl TestEpochManager {
@@ -47,7 +53,30 @@ impl TestEpochManager {
             our_validator_node: None,
             tx_epoch_events,
             current_epoch: Epoch(1),
+            oracle_visible_epoch: Arc::new(StdMutex::new(None)),
         }
+    }
+
+    /// Cap this validator's oracle view to `epoch`. After this, `get_epoch_hash(e)` returns
+    /// `NoEpochFound` for `e > epoch`. Mirrors a real validator whose base-layer scanner has
+    /// not yet observed the new epoch.
+    ///
+    /// NB: the cap intentionally does *not* override `current_epoch()` — that lets the worker
+    /// vote on the EOE block normally (so the chain progresses to a 3-chain commit on every
+    /// node) while still tripping `process_end_of_epoch` when it tries to look up the next
+    /// epoch's base-layer hash. That is exactly the failure mode the production bug exhibits
+    /// once a node catches up via sync.
+    pub fn set_oracle_visible_epoch(&self, epoch: Epoch) {
+        *self.oracle_visible_epoch.lock().unwrap() = Some(epoch);
+    }
+
+    /// Remove the oracle lag for this validator.
+    pub fn clear_oracle_lag(&self) {
+        *self.oracle_visible_epoch.lock().unwrap() = None;
+    }
+
+    fn oracle_visible_epoch(&self) -> Option<Epoch> {
+        *self.oracle_visible_epoch.lock().unwrap()
     }
 
     pub async fn set_current_epoch(&mut self, current_epoch: Epoch, shard_group: ShardGroup) -> &Self {
@@ -78,6 +107,9 @@ impl TestEpochManager {
         fee_claim_pk: RistrettoPublicKeyBytes,
     ) -> Self {
         let mut copy = self.clone();
+        // Each validator gets its own lag state — sibling clones (worker, outbound, etc.) for
+        // this same validator share via the cheap `Clone` impl.
+        copy.oracle_visible_epoch = Arc::new(StdMutex::new(None));
         if let Some(our_validator_node) = self.our_validator_node.clone() {
             copy.our_validator_node = Some(ValidatorNode {
                 address,
@@ -222,7 +254,12 @@ impl EpochManagerReader for TestEpochManager {
         Ok(self.inner.lock().await.last_epoch_hash)
     }
 
-    async fn get_epoch_hash(&self, _epoch: Epoch) -> Result<FixedHash, EpochManagerError> {
+    async fn get_epoch_hash(&self, epoch: Epoch) -> Result<FixedHash, EpochManagerError> {
+        if let Some(cap) = self.oracle_visible_epoch() &&
+            epoch > cap
+        {
+            return Err(EpochManagerError::NoEpochFound(epoch));
+        }
         Ok(self.inner.lock().await.last_epoch_hash)
     }
 

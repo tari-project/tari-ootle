@@ -1,14 +1,18 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tari_consensus::hotstuff::HotStuffError;
-use tari_consensus_types::Decision;
-use tari_ootle_common_types::{Epoch, NodeHeight};
-use tari_ootle_storage::{StateStore, StateStoreReadTransaction};
+use tari_consensus_types::{Decision, LeafBlock};
+use tari_ootle_common_types::{Epoch, NodeHeight, optional::Optional};
+use tari_ootle_storage::{
+    StateStore,
+    StateStoreReadTransaction,
+    consensus_models::{Block, BookkeepingModel},
+};
 
-use crate::support::{Test, logging::setup_logger};
+use crate::support::{Test, TestAddress, logging::setup_logger};
 
 async fn epoch_change(mut test: Test) {
     test.start_epoch(Epoch(1)).await;
@@ -104,4 +108,186 @@ async fn multishard_epoch_change() {
         .await;
 
     epoch_change(test).await;
+}
+
+/// Reproduces the wedge described in `consensus-epoch-change-race-cond`:
+///
+/// One validator's base-layer oracle is still behind when consensus commits the EndEpoch
+/// block. `process_end_of_epoch` then asks the local epoch manager for `next_epoch`'s hash to
+/// stamp into the new genesis; the lookup fails with `NoEpochFound`. Before the fix, that error
+/// killed the worker and left the node permanently stuck on the old epoch — even after the
+/// oracle eventually caught up, no code path retried the deferred work. After the fix, the
+/// work is parked in `pending_end_of_epoch`, the worker keeps running, and the next
+/// `EpochChanged` event (or the next worker startup) retries the transition.
+///
+/// The test:
+///   1. Runs four validators in a single committee.
+///   2. Caps validator "1"'s oracle at `Epoch(1)` so `get_epoch_hash(Epoch(2))` returns `NoEpochFound`. (The cap
+///      intentionally does NOT override `current_epoch()` — the vote-time check uses that, and we want the chain to
+///      commit the EOE on every node so `process_end_of_epoch` actually runs and trips the failure mode.)
+///   3. Drives an epoch change to `Epoch(2)`. All four nodes vote on the EOE, the chain commits it via 3-chain, and
+///      `process_end_of_epoch` runs on each. Three succeed and advance to Epoch(2); validator "1" defers instead of
+///      crashing.
+///   4. Asserts the other three have advanced to `Epoch(2)` while validator "1"'s pacemaker is still on `Epoch(1)` with
+///      a committed EOE block in its chain.
+///   5. Clears the lag and refires `EpochChanged(2)` (modeling the oracle catching up).
+///   6. Asserts validator "1" then advances to `Epoch(2)`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn epoch_change_with_lagging_oracle() {
+    setup_logger();
+    let mut test = Test::builder()
+        .modify_config(|cfg| {
+            cfg.epoch_end_grace_period = Duration::from_millis(10);
+        })
+        .modify_consensus_constants(|c| {
+            c.pacemaker_block_time = Duration::from_secs(2);
+        })
+        .with_test_timeout(Duration::from_secs(60))
+        // 4 validators so 3 honest votes-yes is enough for quorum without the lagged one.
+        .add_committee(0, vec!["1", "2", "3", "4"])
+        .start()
+        .await;
+
+    let lagging_addr = TestAddress::new("1");
+
+    test.start_epoch(Epoch(1)).await;
+
+    // A few transactions to get the chain moving in epoch 1.
+    for _ in 0..3 {
+        test.send_transaction_to_all(Decision::Commit, 1, 1, 1).await;
+    }
+
+    // Cap the lagged validator's oracle BEFORE the epoch transition. After this,
+    // `get_epoch_hash(Epoch(2))` returns `NoEpochFound` for this validator only.
+    test.get_validator(&lagging_addr)
+        .epoch_manager
+        .set_oracle_visible_epoch(Epoch(1));
+
+    // Trigger the epoch change. All four workers receive `EpochChanged(2)` and set
+    // `next_epoch`. Voting on the EOE block goes through normally (we deliberately do
+    // not cap `current_epoch()` so the lagged node still votes Yes), so quorum is
+    // reached and the chain commits the EOE on every node via the 3-chain rule. This
+    // is exactly the state the production bug ends up in once a lagged node catches
+    // up via sync — the EOE is committed locally, but `process_end_of_epoch` then
+    // tries to look up `next_epoch`'s hash and fails.
+    test.start_epoch(Epoch(2)).await;
+
+    // Drive the chain so the EOE 3-chain commits and the non-lagged validators run
+    // process_end_of_epoch successfully (creating the next epoch's genesis and advancing
+    // their pacemakers to Epoch(2)). Sending more transactions keeps the leaders proposing.
+    for _ in 0..3 {
+        test.send_transaction_to_all(Decision::Commit, 1, 1, 1).await;
+    }
+
+    // Wait until the three non-lagged validators have advanced to Epoch(2). Don't include
+    // the lagged validator — under the fix it stays on Epoch(1) until the oracle catches up.
+    wait_for_validators_at_epoch(&mut test, &lagging_addr, Epoch(2), Duration::from_secs(30)).await;
+
+    // Confirm the bug condition is reproduced on the lagged validator:
+    //   (a) its pacemaker is still on Epoch(1)
+    //   (b) the EOE block is committed in its chain (process_end_of_epoch was reached)
+    //   (c) it has no leaf in Epoch(2) (next genesis was deferred)
+    let lagged = test.get_validator(&lagging_addr);
+    assert_eq!(
+        lagged._current_view.get_epoch(),
+        Epoch(1),
+        "lagged validator's pacemaker must remain on Epoch(1) before recovery"
+    );
+
+    let has_committed_eoe = lagged
+        .state_store
+        .with_read_tx(|tx| chain_has_committed_epoch_end(tx, Epoch(1)))
+        .unwrap();
+    assert!(
+        has_committed_eoe,
+        "lagged validator should have committed the EOE block via 3-chain (process_end_of_epoch must have run and \
+         deferred)"
+    );
+
+    let leaf_at_2 = lagged
+        .state_store
+        .with_read_tx(|tx| LeafBlock::get(tx, Epoch(2)))
+        .optional()
+        .unwrap();
+    assert!(
+        leaf_at_2.is_none(),
+        "lagged validator must NOT have a leaf in Epoch(2) before the oracle catches up; got {leaf_at_2:?}"
+    );
+
+    log::info!("✅ bug condition reproduced: lagged validator stuck at Epoch(1) with committed EOE");
+
+    // Now simulate the oracle catching up: clear the lag and re-publish `EpochChanged(2)`.
+    // The worker's `on_epoch_manager_event` sees `has_pending_end_of_epoch` and calls
+    // `try_resume_pending_end_of_epoch`, which re-runs `process_end_of_epoch`. With the
+    // oracle now current, `get_epoch_hash(Epoch(2))` succeeds, the next genesis is created
+    // and the pacemaker advances.
+    let lagged_sg = lagged.shard_group;
+    lagged.epoch_manager.clear_oracle_lag();
+    test.get_validator_mut(&lagging_addr)
+        .epoch_manager
+        .set_current_epoch(Epoch(2), lagged_sg)
+        .await;
+
+    // Assert recovery: the lagged validator now reaches Epoch(2).
+    wait_for_single_validator_at_epoch(&mut test, &lagging_addr, Epoch(2), Duration::from_secs(15)).await;
+
+    log::info!("✅ recovery confirmed: lagged validator advanced to Epoch(2) after oracle caught up");
+
+    test.stop();
+    test.assert_clean_shutdown().await;
+}
+
+/// Walks the chain from the leaf of `epoch` looking for a committed `EndEpoch` block.
+fn chain_has_committed_epoch_end<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    epoch: Epoch,
+) -> Result<bool, HotStuffError> {
+    let leaf = LeafBlock::get(tx, epoch)?;
+    if leaf.is_genesis() {
+        return Ok(false);
+    }
+    let mut block = Block::get(tx, leaf.block_id())?;
+    loop {
+        if block.is_epoch_end() && block.is_committed() {
+            return Ok(true);
+        }
+        if block.height().is_zero() || block.parent().is_zero() {
+            return Ok(false);
+        }
+        block = block.get_parent(tx)?;
+    }
+}
+
+/// Waits until every validator EXCEPT `excluded` reaches `epoch` on its pacemaker.
+async fn wait_for_validators_at_epoch(test: &mut Test, excluded: &TestAddress, epoch: Epoch, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        // Drain block events so receiver buffers don't overflow.
+        let _unused = tokio::time::timeout(Duration::from_millis(100), test.on_block_committed()).await;
+
+        let all_advanced = test
+            .validators_iter()
+            .filter(|v| v.address != *excluded)
+            .all(|v| v._current_view.get_epoch() >= epoch);
+        if all_advanced {
+            return;
+        }
+    }
+    panic!("Timed out waiting for non-excluded validators to reach {epoch}");
+}
+
+/// Waits until `addr`'s pacemaker reaches `epoch`.
+async fn wait_for_single_validator_at_epoch(test: &mut Test, addr: &TestAddress, epoch: Epoch, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        let _unused = tokio::time::timeout(Duration::from_millis(100), test.on_block_committed()).await;
+
+        if test.get_validator(addr)._current_view.get_epoch() >= epoch {
+            return;
+        }
+    }
+    panic!(
+        "Timed out waiting for {addr} to reach {epoch} (currently on {})",
+        test.get_validator(addr)._current_view.get_epoch()
+    );
 }

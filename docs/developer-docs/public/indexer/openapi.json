@@ -10,7 +10,7 @@
       "name": "BSD-3-Clause",
       "identifier": "BSD-3-Clause"
     },
-    "version": "0.29.1"
+    "version": "0.30.4"
   },
   "paths": {
     "/epoch-checkpoints": {
@@ -1205,14 +1205,10 @@
         "required": [
           "connection_id",
           "peer_id",
-          "address",
           "direction",
           "age"
         ],
         "properties": {
-          "address": {
-            "type": "string"
-          },
           "age": {
             "type": "string"
           },

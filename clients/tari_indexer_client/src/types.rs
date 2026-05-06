@@ -455,7 +455,6 @@ pub struct GetEpochManagerStatsResponse {
 pub struct Connection {
     pub connection_id: String,
     pub peer_id: String,
-    pub address: String,
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub direction: ConnectionDirection,
     #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number}"))]

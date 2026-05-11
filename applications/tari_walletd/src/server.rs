@@ -109,6 +109,11 @@ async fn handler(
             "revoke" => call_handler(context, value, token, auth::handle_revoke).await,
             "list_sessions" => call_handler(context, value, token, auth::handle_list_sessions).await,
             "method" => call_handler(context, value, token, auth::handle_get_auth_method).await,
+            // API key management (issue #1957). All three require Admin and
+            // are gated by `check_auth` inside their handlers.
+            "create_api_key" => call_handler(context, value, token, auth::handle_create_api_key).await,
+            "list_api_keys" => call_handler(context, value, token, auth::handle_list_api_keys).await,
+            "revoke_api_key" => call_handler(context, value, token, auth::handle_revoke_api_key).await,
             _ => value.method_not_found(&value.method).into_response(),
         },
         Some(("webauthn", method)) => match method {

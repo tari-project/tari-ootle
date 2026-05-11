@@ -24,12 +24,18 @@ import type {
   AccountsRenameResponse,
   AccountsTransferRequest,
   AccountsTransferResponse,
+  AuthCreateApiKeyRequest,
+  AuthCreateApiKeyResponse,
   AuthCredentials,
+  AuthListApiKeysRequest,
+  AuthListApiKeysResponse,
   AuthListSessionsRequest,
   AuthListSessionsResponse,
   AuthGetMethodResponse,
   AuthLoginRequest,
   AuthLoginResponse,
+  AuthRevokeApiKeyRequest,
+  AuthRevokeApiKeyResponse,
   AuthRevokeTokenRequest,
   AuthRevokeTokenResponse,
   BurnProofsGetRequest,
@@ -190,6 +196,54 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
   public authRefresh(): Promise<AuthRefreshResponse> {
     return this.sendRequest("auth.refresh");
+  }
+
+  // ---------------------------------------------------------------------------
+  // API key management (issue #1957). All three methods require the active
+  // session to hold the `Admin` permission; the daemon rejects non-admin calls
+  // at the JSON-RPC layer.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Mint a new long-lived API key with the supplied permission scopes.
+   *
+   * The response contains the raw key material exactly once. The caller MUST
+   * persist it immediately — the daemon only stores a SHA-256 hash and the
+   * key cannot be retrieved later.
+   *
+   * If the granted permissions include `Admin`, the request must set
+   * `confirm_admin: true`.
+   */
+  public authCreateApiKey(params: AuthCreateApiKeyRequest): Promise<AuthCreateApiKeyResponse> {
+    return this.sendRequest("auth.create_api_key", params);
+  }
+
+  /** List all API keys (active and revoked). Never returns the raw key material. */
+  public authListApiKeys(params: AuthListApiKeysRequest = {}): Promise<AuthListApiKeysResponse> {
+    return this.sendRequest("auth.list_api_keys", params);
+  }
+
+  /**
+   * Revoke an API key by id. Revocation is immediate — the daemon's auth
+   * lookup filter excludes revoked rows so any in-flight request using the
+   * revoked key will fail.
+   */
+  public authRevokeApiKey(params: AuthRevokeApiKeyRequest): Promise<AuthRevokeApiKeyResponse> {
+    return this.sendRequest("auth.revoke_api_key", params);
+  }
+
+  /**
+   * Convenience: authenticate this client using an API key string.
+   *
+   * Sends `auth.request` with `AuthCredentials::ApiKey`, captures the
+   * issued JWT, and sets it as the bearer token for subsequent requests.
+   * The permissions encoded in the JWT come from the stored api_key row;
+   * the `permissions` parameter of the underlying login request is
+   * ignored by the daemon for API-key auth.
+   */
+  public async authenticateWithApiKey(apiKey: string): Promise<string> {
+    const credentials: AuthCredentials = { ApiKey: apiKey };
+    return await this.authRequest([], credentials);
   }
 
   public walletGetInfo(): Promise<WalletGetInfoResponse> {

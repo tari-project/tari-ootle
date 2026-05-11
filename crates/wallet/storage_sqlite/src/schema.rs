@@ -31,6 +31,18 @@ diesel::table! {
 }
 
 diesel::table! {
+    api_keys (id) {
+        id -> Integer,
+        name -> Text,
+        key_hash -> Text,
+        permissions -> Text,
+        created_at -> Timestamp,
+        last_used_at -> Nullable<Timestamp>,
+        revoked_at -> Nullable<Timestamp>,
+    }
+}
+
+diesel::table! {
     confidential_outputs (id) {
         id -> Integer,
         account_id -> Integer,
@@ -290,6 +302,7 @@ diesel::joinable!(webauthn_registration_passkeys -> webauthn_registrations (regi
 diesel::allow_tables_to_appear_in_same_query!(
     accounts,
     address_book,
+    api_keys,
     authored_templates,
     confidential_outputs,
     config,

@@ -40,6 +40,7 @@ use tari_ootle_wallet_sdk::{
     models::{
         AccountUpdate,
         AddressBookEntry,
+        ApiKey,
         AuthoredTemplateModel,
         ConfidentialOutputModel,
         ImportedKeyId,
@@ -1780,6 +1781,88 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         }
 
         Ok(())
+    }
+
+    fn api_key_insert(&mut self, name: &str, key_hash: &str, permissions: &str) -> Result<ApiKey, WalletStorageError> {
+        const OPERATION: &str = "api_key_insert";
+        use crate::schema::api_keys;
+
+        diesel::insert_into(api_keys::table)
+            .values((
+                api_keys::name.eq(name),
+                api_keys::key_hash.eq(key_hash),
+                api_keys::permissions.eq(permissions),
+            ))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        let row = api_keys::table
+            .filter(api_keys::key_hash.eq(key_hash))
+            .first::<models::ApiKey>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(api_key_from_row(row))
+    }
+
+    fn api_key_touch_last_used(&mut self, id: i32) -> Result<(), WalletStorageError> {
+        use crate::schema::api_keys;
+
+        let now = time::OffsetDateTime::now_utc();
+        let now = time::PrimitiveDateTime::new(now.date(), now.time());
+
+        // `affected = 0` is not an error here: a stale `last_used` bump on
+        // an already-revoked key is a harmless no-op. Auth has already
+        // succeeded so we must not surface a write failure to the caller.
+        let _ = diesel::update(api_keys::table.filter(api_keys::id.eq(id)))
+            .set(models::ApiKeyLastUsedChangeset {
+                last_used_at: Some(now),
+            })
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general("api_key_touch_last_used", e))?;
+
+        Ok(())
+    }
+
+    fn api_key_revoke(&mut self, id: i32) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "api_key_revoke";
+        use crate::schema::api_keys;
+
+        let now = time::OffsetDateTime::now_utc();
+        let now = time::PrimitiveDateTime::new(now.date(), now.time());
+
+        let num_affected = diesel::update(
+            api_keys::table
+                .filter(api_keys::id.eq(id))
+                .filter(api_keys::revoked_at.is_null()),
+        )
+        .set(models::ApiKeyRevocationChangeset { revoked_at: Some(now) })
+        .execute(self.connection())
+        .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        if num_affected == 0 {
+            return Err(WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "api_key".to_string(),
+                key: id.to_string(),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+/// Convert a storage-layer `ApiKey` row into the SDK's `ApiKey` model. Kept
+/// as a free function so it can be shared between the reader and writer
+/// modules without re-implementing the field-by-field map.
+fn api_key_from_row(row: models::ApiKey) -> ApiKey {
+    ApiKey {
+        id: row.id,
+        name: row.name,
+        key_hash: row.key_hash,
+        permissions: row.permissions,
+        created_at: row.created_at,
+        last_used_at: row.last_used_at,
+        revoked_at: row.revoked_at,
     }
 }
 

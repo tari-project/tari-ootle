@@ -10,6 +10,7 @@ use tari_ootle_wallet_sdk::models::AuthLoginRequestEvent;
 use tari_ootle_walletd_client::{
     permissions::JrpcPermission,
     types::{
+        AuthCredentials,
         AuthGetMethodRequest,
         AuthGetMethodResponse,
         AuthListSessionsRequest,
@@ -26,7 +27,11 @@ use tari_ootle_walletd_client::{
 
 use crate::{
     config::WalletDaemonAuth,
-    handlers::{HandlerContext, auth::Authenticator, helpers::unauthorized},
+    handlers::{
+        HandlerContext,
+        auth::{Authenticator, api_keys},
+        helpers::unauthorized,
+    },
 };
 
 pub const REFRESH_TOKEN_COOKIE: &str = "r-tkn";
@@ -37,9 +42,27 @@ pub async fn handle_login_request(
     request: (axum_jrpc::Id, AuthLoginRequest),
 ) -> Result<(CookieJar, JsonRpcResponse), anyhow::Error> {
     let (answer_id, request) = request;
-    context.authenticator().authenticate(&request.credentials).await?;
+
+    // API key credentials are handled out-of-band from the `Authenticator`
+    // trait: that trait returns `Result<(), _>` with no notion of "granted
+    // scopes" because for webauthn the scopes come from the request, not
+    // the credentials. With API keys it's the reverse — the scopes come
+    // from the stored key row and the client's `request.permissions` field
+    // is IGNORED. Doing this check before the `Authenticator` call lets us
+    // use a single `auth.request` JSON-RPC entry point for all credential
+    // types.
+    let granted_permissions = match &request.credentials {
+        AuthCredentials::ApiKey(raw_key) => {
+            api_keys::authenticate_api_key(context.wallet_sdk().store(), raw_key).await?
+        },
+        _ => {
+            context.authenticator().authenticate(&request.credentials).await?;
+            request.permissions.into()
+        },
+    };
+
     let jwt = context.jwt_api();
-    let claims = jwt.generate_auth_claims(request.permissions.into())?;
+    let claims = jwt.generate_auth_claims(granted_permissions)?;
     let token = jwt.grant(&claims)?;
     let refresh_token = context
         .refresh_token_store()

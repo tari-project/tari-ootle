@@ -33,6 +33,7 @@ tari_utilities = { workspace = true }
 
 async-trait = { workspace = true }
 anyhow = { workspace = true }
+base64 = "0.22.1"
 blake2 = { workspace = true }
 axum = { workspace = true }
 axum-extra = { workspace = true, features = ["typed-header", "cookie"] }
@@ -77,6 +78,7 @@ uuid = { workspace = true }
 wasm-opt = "0.116.1"
 tempfile.workspace = true
 sha2 = { workspace = true }
+time = { workspace = true }
 zeroize = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]

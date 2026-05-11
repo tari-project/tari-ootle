@@ -56,6 +56,34 @@ For a trading agent that needs to submit transactions from one specific account:
 Granting `Admin` to an API key is allowed (since you have it), but the daemon requires you to set
 `confirm_admin: true` in the create request so a UI checkbox can be the gate, not the JSON-RPC payload alone.
 
+### Mint a key (`tari_ootle_wallet_cli`)
+
+The CLI binary wraps the same JSON-RPC endpoints for shell-based admin workflows. Authenticate as an Admin first
+(via `auth request Admin` or the WebAuthn UI), then:
+
+```bash
+# Create a key with two scopes
+tari-wallet-cli auth api-key create \
+    --name monitoring-agent \
+    --permissions AccountInfo,TransactionGet
+
+# Granting Admin requires the explicit speed-bump flag
+tari-wallet-cli auth api-key create \
+    --name dangerous-full-access \
+    --permissions Admin \
+    --confirm-admin
+
+# List existing keys (active and revoked)
+tari-wallet-cli auth api-key list
+
+# Revoke by id
+tari-wallet-cli auth api-key revoke --id 7
+```
+
+The `create` command prints the raw key to stdout on its own line, prefixed with `KEY (shown ONCE — store immediately):`,
+so a shell pipeline can grep for and capture it once. Subsequent `list` calls will never include the raw key — the
+daemon only stored a hash.
+
 ### Mint a key (Rust client)
 
 ```rust

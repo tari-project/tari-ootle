@@ -343,3 +343,198 @@ mod tests {
         assert_eq!(format_permissions(&a), format_permissions(&b));
     }
 }
+
+/// End-to-end tests covering the five acceptance-criteria scenarios listed
+/// on issue #1957 (`admin key creation`, `non-admin attempt to create a
+/// key`, `authenticated calls within scope`, `rejection out of scope`, and
+/// `revocation`).
+///
+/// These tie the storage layer, `authenticate_api_key`, and the JWT layer
+/// together so they exercise the same code paths the JSON-RPC handlers
+/// invoke. They do not stand up a full `HandlerContext` — that would
+/// require the entire wallet daemon service stack — but they DO cover the
+/// invariants the handlers rely on (Admin-gated minting, scope-bounded
+/// JWT issuance, immediate revocation, etc.).
+#[cfg(test)]
+mod e2e_tests {
+    use std::time::Duration;
+
+    use axum_extra::headers::authorization::Bearer;
+    use tari_crypto::tari_utilities::SafePassword;
+    use tari_ootle_wallet_sdk::storage::{
+        CommittableStore,
+        WalletStoreReader,
+        WalletStoreWriter,
+        WriteableWalletStore,
+    };
+    use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
+    use tari_ootle_walletd_client::permissions::{JrpcPermission, JrpcPermissions};
+
+    use super::*;
+    use crate::handlers::auth::jwt::{JwtApi, JwtApiError};
+
+    fn open_store() -> SqliteWalletStore {
+        let db = SqliteWalletStore::try_open(":memory:").unwrap();
+        db.run_migrations().unwrap();
+        db
+    }
+
+    fn jwt_secret() -> SafePassword {
+        SafePassword::from("integration-test-secret-do-not-ship".to_string())
+    }
+
+    /// Issue a JWT with the given permission set. Equivalent to the path
+    /// a real `auth.request` call would take in production.
+    fn issue_jwt(secret: &SafePassword, permissions: JrpcPermissions) -> String {
+        let api = JwtApi::new(Duration::from_secs(60 * 5), secret);
+        let claims = api.generate_auth_claims(permissions).unwrap();
+        api.grant(&claims).unwrap().to_string()
+    }
+
+    /// Wrap a raw JWT string in a typed `Bearer` via the public
+    /// `Authorization::bearer` constructor (axum-extra's `headers`
+    /// re-export). Strips back down to the inner Bearer for use with
+    /// `JwtApi::check_auth(Some(&bearer))`.
+    fn bearer(s: &str) -> Bearer {
+        axum_extra::headers::Authorization::bearer(s)
+            .expect("test JWT string must be a valid bearer token")
+            .0
+    }
+
+    /// Helper: insert an API key with the given scope set, return the raw key.
+    /// Stand-in for what `handle_create_api_key` does after passing the
+    /// admin check + payload validation.
+    fn mint_key(store: &SqliteWalletStore, name: &str, perms: JrpcPermissions) -> (String, i32) {
+        let raw = mint_raw_api_key();
+        let hash = hash_api_key(&raw);
+        let perm_str = format_permissions(&perms);
+        let row = {
+            let mut tx = store.create_write_tx().unwrap();
+            let row = tx.api_key_insert(name, &hash, &perm_str).unwrap();
+            tx.commit().unwrap();
+            row
+        };
+        (raw, row.id)
+    }
+
+    /// Scenario 1: admin key creation produces a key that authenticates and
+    /// surfaces in the list endpoint.
+    #[tokio::test]
+    async fn admin_can_create_and_use_an_api_key() {
+        let store = open_store();
+        let perms: JrpcPermissions = vec![JrpcPermission::AccountInfo, JrpcPermission::TransactionGet].into();
+        let (raw, _id) = mint_key(&store, "agent-1", perms);
+
+        let granted = authenticate_api_key(&store, &raw).await.expect("auth must succeed");
+        assert_eq!(granted.len(), 2);
+        assert!(granted.has_permission(&JrpcPermission::AccountInfo));
+        assert!(granted.has_permission(&JrpcPermission::TransactionGet));
+        assert!(
+            !granted.has_permission(&JrpcPermission::Admin),
+            "key has no Admin scope"
+        );
+
+        // Lookup also populated last_used_at so the admin can audit it.
+        let mut tx = store.create_write_tx().unwrap();
+        let listed = tx.api_key_list_all().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert!(listed[0].last_used_at.is_some(), "auth must have stamped last_used_at");
+    }
+
+    /// Scenario 2: a non-admin JWT presented to a key-management endpoint
+    /// must be rejected with `InsufficientPermissions`. This is the same
+    /// `JwtApi::check_auth` call every Admin-gated handler makes.
+    #[test]
+    fn non_admin_jwt_is_rejected_at_key_management_endpoints() {
+        let secret = jwt_secret();
+        // A scoped-but-not-Admin JWT representing a partially-privileged user.
+        let token = issue_jwt(
+            &secret,
+            vec![JrpcPermission::AccountInfo, JrpcPermission::TransactionGet].into(),
+        );
+        let api = JwtApi::new(Duration::from_secs(60 * 5), &secret);
+        let result = api.check_auth(Some(&bearer(&token)), &[JrpcPermission::Admin]);
+        let err = result.expect_err("non-admin token must be rejected for Admin-gated endpoint");
+        assert!(
+            matches!(err, JwtApiError::InsufficientPermissions {
+                required: JrpcPermission::Admin
+            }),
+            "expected InsufficientPermissions(Admin), got {err:?}"
+        );
+    }
+
+    /// Scenario 3: an API key with scope `AccountInfo` produces a JWT
+    /// that passes the `check_auth` filter for `AccountInfo` endpoints.
+    #[tokio::test]
+    async fn in_scope_call_is_accepted() {
+        let store = open_store();
+        let secret = jwt_secret();
+        let (raw, _) = mint_key(&store, "info-only", vec![JrpcPermission::AccountInfo].into());
+
+        let granted = authenticate_api_key(&store, &raw).await.unwrap();
+        let token = issue_jwt(&secret, granted);
+        let api = JwtApi::new(Duration::from_secs(60 * 5), &secret);
+        api.check_auth(Some(&bearer(&token)), &[JrpcPermission::AccountInfo])
+            .expect("in-scope call must be accepted");
+    }
+
+    /// Scenario 4: same key, called against a scope NOT on the key. The
+    /// JWT-layer scope check must reject — proving an agent cannot escape
+    /// its granted scopes.
+    #[tokio::test]
+    async fn out_of_scope_call_is_rejected() {
+        let store = open_store();
+        let secret = jwt_secret();
+        let (raw, _) = mint_key(&store, "info-only", vec![JrpcPermission::AccountInfo].into());
+
+        let granted = authenticate_api_key(&store, &raw).await.unwrap();
+        // Sanity: granted scope set does not include the one we'll require below.
+        assert!(!granted.has_permission(&JrpcPermission::TransactionGet));
+        assert!(!granted.has_permission(&JrpcPermission::Admin));
+
+        let token = issue_jwt(&secret, granted);
+        let api = JwtApi::new(Duration::from_secs(60 * 5), &secret);
+        let err = api
+            .check_auth(Some(&bearer(&token)), &[JrpcPermission::TransactionGet])
+            .expect_err("out-of-scope call must be rejected");
+        assert!(
+            matches!(err, JwtApiError::InsufficientPermissions {
+                required: JrpcPermission::TransactionGet
+            }),
+            "expected InsufficientPermissions(TransactionGet), got {err:?}"
+        );
+    }
+
+    /// Scenario 5: revoke takes effect immediately — the same key that
+    /// authenticated before revocation must fail to authenticate after.
+    /// This is the most important security invariant of the entire flow:
+    /// a compromised key must be killable in real time.
+    #[tokio::test]
+    async fn revocation_is_immediate() {
+        let store = open_store();
+        let (raw, id) = mint_key(&store, "ephemeral", vec![JrpcPermission::AccountInfo].into());
+
+        // Pre-revoke: auth succeeds.
+        authenticate_api_key(&store, &raw)
+            .await
+            .expect("auth before revocation must succeed");
+
+        // Revoke.
+        {
+            let mut tx = store.create_write_tx().unwrap();
+            tx.api_key_revoke(id).unwrap();
+            tx.commit().unwrap();
+        }
+
+        // Post-revoke: same raw key, auth must fail.
+        let err = authenticate_api_key(&store, &raw)
+            .await
+            .expect_err("auth after revocation must fail");
+        // Generic error message — same wording for "unknown key" and "revoked
+        // key" so an attacker can't enumerate valid hashes via the error.
+        assert!(
+            err.to_string().contains("invalid or revoked"),
+            "expected revoked-key error, got {err}"
+        );
+    }
+}

@@ -203,8 +203,8 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
     /// Returns `None` when:
     /// - the message carries no embedded QC (e.g. `Vote`);
     /// - the QC's epoch is not strictly ahead of `current_epoch` (nothing to prove);
-    /// - the local oracle has not yet observed the QC's epoch (we can't verify, so we fall back to buffering or discard
-    ///   — peers will keep resending and the oracle will eventually catch up);
+    /// - the local oracle has not yet observed the QC's epoch or assigned its committee (both surface as `NoEpochFound`
+    ///   and are caught by `.optional()`) — buffer and re-probe on the next future-epoch message;
     /// - the QC is empty / justifies the zero block (no signatures to verify, so unforgeability doesn't hold — must not
     ///   promote on this);
     /// - signature verification fails (likely spam or a malicious peer trying to wedge us into sync mode — drop
@@ -226,17 +226,21 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
         // Did the local oracle observe `qc_epoch`? If not, we cannot fetch the committee or
         // verify the signatures; buffer and try again on the next incoming future-epoch
         // message (peers keep proposing in the new epoch, so this retries naturally).
-        match self.epoch_manager.get_epoch_hash(qc_epoch).await.optional()? {
-            Some(_) => {},
-            None => return Ok(None),
+        if self.epoch_manager.get_epoch_hash(qc_epoch).await.optional()?.is_none() {
+            return Ok(None);
         }
 
-        let committee = self
+        // `get_committee_by_shard_group` surfaces an unassigned committee as `NoEpochFound`
+        // (see `epoch_manager.rs:get_committee_for_shard_group`), so `.optional()` covers both
+        // the "oracle hasn't observed the epoch" and "committee not yet assigned for this
+        // shard group" cases. Returning `Ok(None)` here keeps the buffer / discard fall-through
+        // intact and avoids any reliance on cached empty committees.
+        let Some(committee) = self
             .epoch_manager
             .get_committee_by_shard_group(qc_epoch, qc.shard_group())
             .await
-            .optional()?;
-        let Some(committee) = committee else {
+            .optional()?
+        else {
             return Ok(None);
         };
 

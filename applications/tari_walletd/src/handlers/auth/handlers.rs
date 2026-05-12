@@ -51,6 +51,11 @@ pub async fn handle_login_request(
     // is IGNORED. Doing this check before the `Authenticator` call lets us
     // use a single `auth.request` JSON-RPC entry point for all credential
     // types.
+    //
+    // `is_api_key_auth` is captured separately so we can SKIP issuing the
+    // refresh cookie below for API-key sessions — see the discussion at
+    // the cookie-issuing site for why.
+    let is_api_key_auth = matches!(request.credentials, AuthCredentials::ApiKey(_));
     let granted_permissions = match &request.credentials {
         AuthCredentials::ApiKey(raw_key) => {
             api_keys::authenticate_api_key(context.wallet_sdk().store(), raw_key).await?
@@ -64,13 +69,32 @@ pub async fn handle_login_request(
     let jwt = context.jwt_api();
     let claims = jwt.generate_auth_claims(granted_permissions)?;
     let token = jwt.grant(&claims)?;
-    let refresh_token = context
-        .refresh_token_store()
-        .new_token(claims.permissions, claims.exp)
-        .await;
 
-    let refresh_cookie = refresh_token.into_cookie(REFRESH_TOKEN_COOKIE);
-    let cookie = CookieJar::new().add(refresh_cookie);
+    // For WebAuthn/anonymous sessions, the refresh cookie lets the client
+    // get fresh JWTs for up to `refresh_token_store.expiry` (1h default)
+    // without re-presenting credentials. The refresh-token store is
+    // in-memory; revoking a WebAuthn passkey wipes the user's only future
+    // path to authenticate at all.
+    //
+    // For API key sessions we deliberately DO NOT issue a refresh cookie.
+    // The refresh path only validates the refresh-token store, not the
+    // `api_keys` table, so a still-valid refresh cookie would let a
+    // revoked API key keep minting fresh JWTs until the cookie expired
+    // — breaking the issue's "revocation is immediate" guarantee. The
+    // agent must re-present its API key to renew its JWT (one extra DB
+    // lookup per `jwt_expiry`-sized window), which IS validated against
+    // the active-key filter on every call.
+    let cookie = if is_api_key_auth {
+        CookieJar::new()
+    } else {
+        let refresh_token = context
+            .refresh_token_store()
+            .new_token(claims.permissions, claims.exp)
+            .await;
+        let refresh_cookie = refresh_token.into_cookie(REFRESH_TOKEN_COOKIE);
+        CookieJar::new().add(refresh_cookie)
+    };
+
     context.notifier().notify(AuthLoginRequestEvent);
     Ok((cookie, JsonRpcResponse::success(answer_id, AuthLoginResponse { token })))
 }

@@ -2,6 +2,13 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 export * from "./types/wallet-types/AddressBookUpdateResponse";
+export * from "./types/wallet-types/AuthCreateApiKeyRequest";
+export * from "./types/wallet-types/AuthCreateApiKeyResponse";
+export * from "./types/wallet-types/AuthListApiKeysRequest";
+export * from "./types/wallet-types/AuthListApiKeysResponse";
+export * from "./types/wallet-types/AuthRevokeApiKeyRequest";
+export * from "./types/wallet-types/AuthRevokeApiKeyResponse";
+export * from "./types/wallet-types/IssuedApiKey";
 export * from "./types/wallet-types/ProofsFinalizeResponse";
 export * from "./types/wallet-types/WalletGetInfoResponse";
 export * from "./types/wallet-types/SwapPoolGetExchangeRateResponse";

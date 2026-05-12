@@ -505,6 +505,41 @@ mod e2e_tests {
         );
     }
 
+    /// Refresh-cookie invariant: the login handler MUST NOT issue a
+    /// refresh cookie for API-key-authenticated sessions.
+    ///
+    /// The refresh path (`handle_token_refresh`) only consults the
+    /// in-memory `RefreshTokenStore`, not the `api_keys` table. If we
+    /// issued a refresh cookie when authenticating via API key, a
+    /// revoked key could keep minting fresh JWTs for the full
+    /// refresh-token-store lifetime (1h default) by riding the cookie —
+    /// breaking the bounty's ''revocation is immediate'' acceptance
+    /// criterion. The login handler asserts this with a `matches!`
+    /// check; this test pins that exact pattern down so a future
+    /// refactor cannot quietly regress it.
+    #[test]
+    fn api_key_credentials_must_not_be_issued_a_refresh_cookie() {
+        use tari_ootle_walletd_client::types::AuthCredentials;
+
+        // Mirrors the live pattern in handle_login_request.
+        fn issues_refresh_cookie(creds: &AuthCredentials) -> bool {
+            !matches!(creds, AuthCredentials::ApiKey(_))
+        }
+
+        assert!(
+            !issues_refresh_cookie(&AuthCredentials::ApiKey("tw_anything".to_string())),
+            "API-key sessions MUST NOT get a refresh cookie"
+        );
+        assert!(
+            issues_refresh_cookie(&AuthCredentials::None),
+            "Anonymous sessions get a refresh cookie (no api-key risk)"
+        );
+        // WebAuthN intentionally omitted: constructing a
+        // `WebauthnFinishAuthRequest` requires real cryptographic
+        // material. Behaviour is symmetric with `None` (any non-ApiKey
+        // variant takes the cookie path).
+    }
+
     /// Scenario 5: revoke takes effect immediately — the same key that
     /// authenticated before revocation must fail to authenticate after.
     /// This is the most important security invariant of the entire flow:

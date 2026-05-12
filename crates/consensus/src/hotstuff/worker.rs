@@ -163,7 +163,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             rx_new_transactions,
             rx_missing_transactions,
 
-            on_inbound_message: OnInboundMessage::new(inbound_messaging, hooks.clone()),
+            on_inbound_message: OnInboundMessage::new(
+                inbound_messaging,
+                epoch_manager.clone(),
+                signing_service.clone(),
+                hooks.clone(),
+            ),
             on_message_validate: OnMessageValidate::new(
                 config.clone(),
                 state_store.clone(),

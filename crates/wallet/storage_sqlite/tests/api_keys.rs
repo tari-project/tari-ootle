@@ -177,12 +177,10 @@ fn touch_last_used_updates_timestamp() {
 fn touch_last_used_on_revoked_key_is_noop_not_error() {
     // The auth path calls touch_last_used AFTER successful credential
     // verification, so it can race a concurrent revoke. Two invariants:
-    //   1. The function must succeed silently even when the row has been
-    //      revoked from under it (the "auth succeeded" guarantee cannot
-    //      be undone by a write failure here).
-    //   2. The revoked row's last_used_at must NOT be bumped: an active
-    //      filter on the update query prevents the bump so the audit log
-    //      cannot show activity on a key after its revocation timestamp.
+    //   1. The function must succeed silently even when the row has been revoked from under it (the "auth succeeded"
+    //      guarantee cannot be undone by a write failure here).
+    //   2. The revoked row's last_used_at must NOT be bumped: an active filter on the update query prevents the bump so
+    //      the audit log cannot show activity on a key after its revocation timestamp.
     let db = open_store();
 
     let id = {

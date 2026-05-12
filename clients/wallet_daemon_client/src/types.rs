@@ -753,12 +753,21 @@ pub enum AuthCredentials {
     None,
     /// Credentials for WebAuthN auth mode. Contains the request from the client to finish the auth.
     WebAuthN(Box<WebauthnFinishAuthRequest>),
+    /// Credentials for API-key auth mode. Contains the raw `twda_...` key string.
+    ApiKey(String),
 }
 
 impl AuthCredentials {
     pub fn as_none(&self) -> Option<()> {
         match self {
             Self::None => Some(()),
+            _ => None,
+        }
+    }
+
+    pub fn as_api_key(&self) -> Option<&str> {
+        match self {
+            Self::ApiKey(k) => Some(k.as_str()),
             _ => None,
         }
     }
@@ -1461,6 +1470,58 @@ pub struct AddressBookGetRequest {
 pub struct AddressBookGetResponse {
     pub entry: AddressBookEntry,
 }
+
+// -------------------------------- ApiKey -------------------------------- //
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthCreateApiKeyRequest {
+    pub name: String,
+    #[serde(default)]
+    pub permissions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthCreateApiKeyResponse {
+    pub id: i32,
+    pub name: String,
+    /// The raw API key — only returned once. Store securely.
+    pub key: String,
+    pub permissions: Vec<String>,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ApiKeyInfo {
+    pub id: i32,
+    pub name: String,
+    pub permissions: Vec<String>,
+    pub created_at: i64,
+    pub last_used_at: Option<i64>,
+    pub revoked_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthListApiKeysRequest {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthListApiKeysResponse {
+    pub keys: Vec<ApiKeyInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthRevokeApiKeyRequest {
+    pub id: i32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthRevokeApiKeyResponse {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]

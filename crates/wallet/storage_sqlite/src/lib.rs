@@ -88,7 +88,7 @@ impl Debug for SqliteWalletStore {
     }
 }
 
-// ─── API-key storage extension ────────────────────────────────────────────────
+// ─── API-key storage extension ────────────────────────────────────────────────────────────────────────────────
 // Keeps api_key CRUD out of the SDK trait layer so no core trait changes needed.
 
 /// Re-export the raw DB row type for callers that need it (e.g. walletd handlers).
@@ -202,5 +202,111 @@ impl ApiKeyStore for ReadTransaction<'_> {
 
     fn api_keys_touch(&mut self, _id: i32, _now: i64) -> Result<(), WalletStorageError> {
         Err(WalletStorageError::general("api_keys_touch", "write operation on read transaction"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Each test gets its own fresh in-memory SQLite database — no shared state.
+    fn in_memory_store() -> SqliteWalletStore {
+        let mut conn = SqliteConnection::establish(":memory:").expect("in-memory db");
+        sql_query("PRAGMA foreign_keys = ON;")
+            .execute(&mut conn)
+            .expect("pragma");
+        let store = SqliteWalletStore {
+            connection: Arc::new(Mutex::new(conn)),
+        };
+        store.run_migrations().expect("migrations");
+        store
+    }
+
+    #[test]
+    fn api_key_insert_and_get_by_hash() {
+        let store = in_memory_store();
+        let hash = [0xab_u8; 32];
+        let mut tx = store.create_write_tx().unwrap();
+        let row = tx.api_keys_insert("my-agent", &hash, "[]").unwrap();
+        assert_eq!(row.name, "my-agent");
+        assert_eq!(row.key_hash, hash.as_slice());
+        assert_eq!(row.permissions, "[]");
+        assert!(row.revoked_at.is_none());
+        assert!(row.last_used_at.is_none());
+
+        let fetched = tx.api_keys_get_by_hash(&hash).unwrap();
+        assert_eq!(fetched.id, row.id);
+        assert_eq!(fetched.name, row.name);
+    }
+
+    #[test]
+    fn api_key_list_all_returns_all_inserted() {
+        let store = in_memory_store();
+        let mut tx = store.create_write_tx().unwrap();
+        tx.api_keys_insert("key-a", &[1u8; 32], "[]").unwrap();
+        tx.api_keys_insert("key-b", &[2u8; 32], "[]").unwrap();
+        let keys = tx.api_keys_list_all().unwrap();
+        assert_eq!(keys.len(), 2);
+    }
+
+    #[test]
+    fn api_key_get_by_hash_not_found_returns_not_found_error() {
+        let store = in_memory_store();
+        let mut tx = store.create_write_tx().unwrap();
+        let result = tx.api_keys_get_by_hash(&[0u8; 32]);
+        assert!(
+            matches!(result, Err(WalletStorageError::NotFound { .. })),
+            "expected NotFound, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn api_key_revoke_sets_revoked_at_timestamp() {
+        let store = in_memory_store();
+        let hash = [0xcd_u8; 32];
+        let mut tx = store.create_write_tx().unwrap();
+        let row = tx.api_keys_insert("revokable", &hash, "[]").unwrap();
+        assert!(row.revoked_at.is_none());
+
+        tx.api_keys_revoke(row.id, 1_000_000).unwrap();
+        let fetched = tx.api_keys_get_by_hash(&hash).unwrap();
+        assert_eq!(fetched.revoked_at, Some(1_000_000));
+        // Key is still retrievable (soft-delete; caller checks revoked_at)
+        assert_eq!(fetched.id, row.id);
+    }
+
+    #[test]
+    fn api_key_touch_updates_last_used_at() {
+        let store = in_memory_store();
+        let hash = [0xef_u8; 32];
+        let mut tx = store.create_write_tx().unwrap();
+        let row = tx.api_keys_insert("touchable", &hash, "[]").unwrap();
+        assert!(row.last_used_at.is_none());
+
+        tx.api_keys_touch(row.id, 9_999_999).unwrap();
+        let fetched = tx.api_keys_get_by_hash(&hash).unwrap();
+        assert_eq!(fetched.last_used_at, Some(9_999_999));
+    }
+
+    #[test]
+    fn api_key_read_tx_write_ops_return_error() {
+        let store = in_memory_store();
+        let mut rtx = store.create_read_tx().unwrap();
+        assert!(
+            rtx.api_keys_insert("fail", &[0u8; 32], "[]").is_err(),
+            "insert must fail on read tx"
+        );
+        assert!(
+            rtx.api_keys_revoke(1, 0).is_err(),
+            "revoke must fail on read tx"
+        );
+        assert!(
+            rtx.api_keys_touch(1, 0).is_err(),
+            "touch must fail on read tx"
+        );
+        // read ops work fine (empty list since nothing committed)
+        let keys = rtx.api_keys_list_all().unwrap();
+        assert!(keys.is_empty());
     }
 }

@@ -127,6 +127,17 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
         while let Some(result) = self.inbound_messaging.next_message().await {
             let (from, msg) = result?;
 
+            // Probe BEFORE the discard gate so a validator that has fallen many epochs behind
+            // (e.g., long network partition) can still escalate to state sync when *any*
+            // future-epoch message it receives carries a QC that validates against an
+            // oracle-observed committee. The probe is the only safe trigger for cross-epoch
+            // recovery — block-level catch-up cannot rescue a node from cross-epoch lag.
+            if msg.epoch() > current_epoch &&
+                let Some(reason) = self.probe_future_epoch_qc(&msg, current_epoch).await?
+            {
+                return Err(HotStuffError::NeedsSync { reason });
+            }
+
             // If the message is for two epochs or more ahead or behind, discard it.
             if msg.epoch() > current_epoch + Epoch(1) ||
                 current_epoch.checked_sub(Epoch(1)).is_some_and(|e| msg.epoch() < e)
@@ -149,16 +160,6 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
                     info!(target: LOG_TARGET, "🗑️ Discard message {} is for previous view {}/{}. Current view {}/{}", msg, epoch, height, current_epoch, current_height);
                 },
                 MessageRelativeView::Future { epoch, height } => {
-                    // Before buffering: if this message embeds a 2f+1 QC for an epoch ahead of us,
-                    // the network has rolled over without our committing the EOE locally — we
-                    // can't recover via block-level catch-up (peers won't serve us cross-epoch),
-                    // so escalate to state sync.
-                    if epoch > current_epoch &&
-                        let Some(reason) = self.probe_future_epoch_qc(&msg, current_epoch).await?
-                    {
-                        return Err(HotStuffError::NeedsSync { reason });
-                    }
-
                     if msg.proposal().is_some() {
                         info!(target: LOG_TARGET, "🔮 Proposal {msg} is for future view {height} (Current view: {current_epoch}, {current_height})");
                     } else {
@@ -194,11 +195,16 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
     /// unforgeable proof that the network has run consensus past the local view — so we need to
     /// state-sync rather than continue waiting on peers who have moved on.
     ///
+    /// The probe handles arbitrary epoch deltas: a validator that has fallen multiple epochs
+    /// behind (e.g. long network partition) still escalates correctly the first time any peer
+    /// delivers a future-epoch message whose QC validates against an oracle-observed committee.
+    /// The trust gate is the oracle + committee signatures, not the epoch delta.
+    ///
     /// Returns `None` when:
     /// - the message carries no embedded QC (e.g. `Vote`);
     /// - the QC's epoch is not strictly ahead of `current_epoch` (nothing to prove);
-    /// - the local oracle has not yet observed the QC's epoch (we can't verify, so we fall back to buffering — peers
-    ///   will keep resending);
+    /// - the local oracle has not yet observed the QC's epoch (we can't verify, so we fall back to buffering or discard
+    ///   — peers will keep resending and the oracle will eventually catch up);
     /// - the QC is empty / justifies the zero block (no signatures to verify, so unforgeability doesn't hold — must not
     ///   promote on this);
     /// - signature verification fails (likely spam or a malicious peer trying to wedge us into sync mode — drop

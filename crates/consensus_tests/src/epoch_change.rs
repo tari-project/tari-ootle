@@ -434,3 +434,106 @@ async fn epoch_change_no_vote_wedge_escalates_on_future_qc() {
         "escalation reason should reference the next-epoch QC; got: {outcome}"
     );
 }
+
+/// Companion to [`epoch_change_no_vote_wedge_escalates_on_future_qc`]: verifies the probe
+/// also escalates when the validator has fallen **multiple** epochs behind (e.g., a long
+/// network partition).
+///
+/// Without the lifted gate, `MessageBuffer::next` discards any message whose epoch is more
+/// than one ahead of `current_epoch` *before* the probe runs — so a validator stuck on
+/// Epoch(1) while peers reach Epoch(3) would silently drop every Epoch(3) message and
+/// remain wedged. The fix runs the probe before the discard, so the first authenticated
+/// future-epoch QC trips `NeedsSync` regardless of the epoch delta.
+///
+/// Test flow:
+/// 1. Run four validators through Epoch(1).
+/// 2. Take validator "1" offline and cap its `current_epoch()` at Epoch(1).
+/// 3. Drive the honest three through Epoch(1) → Epoch(2) → Epoch(3).
+/// 4. Bring validator "1" back online and clear the cap.
+/// 5. Assert that the probe fires on an Epoch(3) message — proving the multi-epoch path works end-to-end.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn epoch_change_multi_epoch_lag_escalates_on_future_qc() {
+    setup_logger();
+    let mut test = Test::builder()
+        .modify_config(|cfg| {
+            cfg.epoch_end_grace_period = Duration::from_millis(10);
+        })
+        .modify_consensus_constants(|c| {
+            c.pacemaker_block_time = Duration::from_secs(1);
+        })
+        .with_test_timeout(Duration::from_secs(90))
+        .add_committee(0, vec!["1", "2", "3", "4"])
+        .start()
+        .await;
+
+    let lagging_addr = TestAddress::new("1");
+
+    test.start_epoch(Epoch(1)).await;
+
+    for _ in 0..2 {
+        test.send_transaction_to_all(Decision::Commit, 1, 1, 1).await;
+    }
+
+    // Lag and remove validator "1" before peers cross any epoch boundaries.
+    test.get_validator(&lagging_addr)
+        .epoch_manager
+        .set_oracle_current_epoch_cap(Epoch(1));
+    test.network().go_offline(lagging_addr.clone()).await;
+
+    // First boundary: Epoch(1) → Epoch(2). The honest three commit and roll over.
+    test.start_epoch(Epoch(2)).await;
+    for _ in 0..3 {
+        test.send_transaction_to_all(Decision::Commit, 1, 1, 1).await;
+    }
+    wait_for_validators_at_epoch(&mut test, &lagging_addr, Epoch(2), Duration::from_secs(45)).await;
+
+    // Second boundary: Epoch(2) → Epoch(3). Now validator "1" is *two* epochs behind, which
+    // is what the pre-fix discard logic would have masked entirely.
+    test.start_epoch(Epoch(3)).await;
+    for _ in 0..3 {
+        test.send_transaction_to_all(Decision::Commit, 1, 1, 1).await;
+    }
+    wait_for_validators_at_epoch(&mut test, &lagging_addr, Epoch(3), Duration::from_secs(45)).await;
+
+    let lagged = test.get_validator(&lagging_addr);
+    assert_eq!(
+        lagged._current_view.get_epoch(),
+        Epoch(1),
+        "lagged validator's view must remain on Epoch(1) before recovery"
+    );
+
+    log::info!("✅ multi-epoch wedge reproduced: peers in Epoch(3), {lagging_addr} on Epoch(1)");
+
+    let mut events = lagged.events.resubscribe();
+
+    // Oracle catches up + network rejoins. From now on, the honest validators' Epoch(3)
+    // messages reach validator "1". Each carries a 2f+1 QC over Epoch(3) — which would
+    // have been discarded outright before the gate was lifted (3 > 1 + 1).
+    lagged.epoch_manager.clear_oracle_current_epoch_cap();
+    test.network().go_online(&lagging_addr).await;
+
+    for _ in 0..3 {
+        test.send_transaction_to_all(Decision::Commit, 1, 1, 1).await;
+    }
+
+    let outcome = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            match events.recv().await {
+                Ok(HotstuffEvent::Failure { message }) if message.contains("Received valid 2f+1 QC") => {
+                    return message;
+                },
+                Ok(_) => continue,
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => panic!("validator event channel closed"),
+            }
+        }
+    })
+    .await
+    .expect("Timed out waiting for QC-based NeedsSync escalation");
+
+    log::info!("✅ probe fired across multi-epoch gap: {outcome}");
+    assert!(
+        outcome.contains("Epoch(3)"),
+        "escalation reason should reference the Epoch(3) QC across the multi-epoch gap; got: {outcome}"
+    );
+}

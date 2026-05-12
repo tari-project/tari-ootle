@@ -6,21 +6,14 @@
 
 use axum_extra::{extract::CookieJar, headers::authorization::Bearer};
 use axum_jrpc::JsonRpcResponse;
+use log::warn;
 use tari_ootle_wallet_sdk::models::AuthLoginRequestEvent;
 use tari_ootle_walletd_client::{
-    permissions::JrpcPermission,
+    permissions::{JrpcPermission, JrpcPermissions},
     types::{
-        AuthGetMethodRequest,
-        AuthGetMethodResponse,
-        AuthListSessionsRequest,
-        AuthListSessionsResponse,
-        AuthLoginRequest,
-        AuthLoginResponse,
-        AuthMethod,
-        AuthRefreshRequest,
-        AuthRevokeTokenRequest,
-        AuthRevokeTokenResponse,
-        AuthSessionInfo,
+        AuthCredentials, AuthGetMethodRequest, AuthGetMethodResponse, AuthListSessionsRequest,
+        AuthListSessionsResponse, AuthLoginRequest, AuthLoginResponse, AuthMethod, AuthRefreshRequest,
+        AuthRevokeTokenRequest, AuthRevokeTokenResponse, AuthSessionInfo,
     },
 };
 
@@ -37,17 +30,40 @@ pub async fn handle_login_request(
     request: (axum_jrpc::Id, AuthLoginRequest),
 ) -> Result<(CookieJar, JsonRpcResponse), anyhow::Error> {
     let (answer_id, request) = request;
-    context.authenticator().authenticate(&request.credentials).await?;
+    let (permissions, issue_refresh_token, api_key_id) = match request.credentials {
+        AuthCredentials::ApiKey(raw_key) => match context.api_key_manager().authenticate(&raw_key).await {
+            Ok(key_info) => (JrpcPermissions::from(key_info.permissions), false, Some(key_info.id)),
+            Err(crate::services::ApiKeyError::InvalidKey) => {
+                warn!("API key authentication failed: key not found");
+                return Err(unauthorized("Authentication failed"));
+            },
+            Err(crate::services::ApiKeyError::Revoked) => {
+                warn!("API key authentication failed: key revoked");
+                return Err(unauthorized("Authentication failed"));
+            },
+            Err(err) => return Err(err.into()),
+        },
+        credentials => {
+            context.authenticator().authenticate(&credentials).await?;
+            (request.permissions.into(), true, None)
+        },
+    };
     let jwt = context.jwt_api();
-    let claims = jwt.generate_auth_claims(request.permissions.into())?;
+    let claims = match api_key_id {
+        Some(api_key_id) => jwt.generate_auth_claims_for_api_key(permissions, api_key_id)?,
+        None => jwt.generate_auth_claims(permissions)?,
+    };
     let token = jwt.grant(&claims)?;
-    let refresh_token = context
-        .refresh_token_store()
-        .new_token(claims.permissions, claims.exp)
-        .await;
-
-    let refresh_cookie = refresh_token.into_cookie(REFRESH_TOKEN_COOKIE);
-    let cookie = CookieJar::new().add(refresh_cookie);
+    let cookie = if issue_refresh_token {
+        let refresh_token = context
+            .refresh_token_store()
+            .new_token(claims.permissions, claims.exp)
+            .await;
+        let refresh_cookie = refresh_token.into_cookie(REFRESH_TOKEN_COOKIE);
+        CookieJar::new().add(refresh_cookie)
+    } else {
+        CookieJar::new()
+    };
     context.notifier().notify(AuthLoginRequestEvent);
     Ok((cookie, JsonRpcResponse::success(answer_id, AuthLoginResponse { token })))
 }

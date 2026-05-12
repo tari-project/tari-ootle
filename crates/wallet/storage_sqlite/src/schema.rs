@@ -18,6 +18,19 @@ diesel::table! {
 }
 
 diesel::table! {
+    api_keys (id) {
+        id -> Text,
+        name -> Text,
+        key_hash -> Text,
+        scopes -> Text,
+        created_at -> BigInt,
+        expires_at -> Nullable<BigInt>,
+        last_used -> Nullable<BigInt>,
+        revoked -> Integer,
+    }
+}
+
+diesel::table! {
     authored_templates (id) {
         id -> Integer,
         author_public_key -> Text,
@@ -290,6 +303,7 @@ diesel::joinable!(webauthn_registration_passkeys -> webauthn_registrations (regi
 diesel::allow_tables_to_appear_in_same_query!(
     accounts,
     address_book,
+    api_keys,
     authored_templates,
     confidential_outputs,
     config,

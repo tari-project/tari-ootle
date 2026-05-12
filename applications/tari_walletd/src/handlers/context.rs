@@ -7,9 +7,7 @@ use axum_extra::headers::authorization::Bearer;
 use tari_ootle_transaction::{Transaction, TransactionBuilder};
 use tari_ootle_wallet_sdk::models::WalletEvent;
 use tari_ootle_wallet_sdk_services::{
-    account_monitor::AccountMonitorHandle,
-    notify::Notify,
-    transaction_service::TransactionServiceHandle,
+    account_monitor::AccountMonitorHandle, notify::Notify, transaction_service::TransactionServiceHandle,
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_ootle_walletd_client::permissions::JrpcPermission;
@@ -24,7 +22,7 @@ use crate::{
         WalletAuthenticator,
         jwt::{JwtApi, JwtApiError},
     },
-    services::{RefreshTokenStore, WebauthnService},
+    services::{ApiKeyManager, RefreshTokenStore, WebauthnService},
 };
 
 #[derive(Debug, Clone)]
@@ -36,6 +34,7 @@ pub struct HandlerContext {
     config: WalletDaemonConfig,
     jwt_secret: SafePassword,
     authenticator: WalletAuthenticator,
+    api_key_manager: ApiKeyManager,
     refresh_token_store: RefreshTokenStore,
     shutdown_signal: ShutdownSignal,
 }
@@ -51,6 +50,7 @@ impl HandlerContext {
         jwt_secret: SafePassword,
         shutdown_signal: ShutdownSignal,
     ) -> Self {
+        let api_key_manager = ApiKeyManager::new(wallet_sdk.store().clone());
         Self {
             wallet_sdk,
             notifier,
@@ -58,6 +58,7 @@ impl HandlerContext {
             account_monitor,
             config,
             authenticator,
+            api_key_manager,
             refresh_token_store: RefreshTokenStore::new(Duration::from_secs(60 * 60)),
             jwt_secret,
             shutdown_signal,
@@ -77,7 +78,7 @@ impl HandlerContext {
     }
 
     pub fn jwt_api(&self) -> JwtApi<'_> {
-        JwtApi::new(self.config().jwt_expiry, &self.jwt_secret)
+        JwtApi::new(self.config().jwt_expiry, &self.jwt_secret, self.wallet_sdk.store().clone())
     }
 
     pub fn shutdown_signal(&self) -> &ShutdownSignal {
@@ -102,6 +103,10 @@ impl HandlerContext {
 
     pub fn refresh_token_store(&self) -> &RefreshTokenStore {
         &self.refresh_token_store
+    }
+
+    pub fn api_key_manager(&self) -> &ApiKeyManager {
+        &self.api_key_manager
     }
 
     pub fn webauthn_service(&self) -> Option<&WebauthnService<SqliteWalletStore>> {

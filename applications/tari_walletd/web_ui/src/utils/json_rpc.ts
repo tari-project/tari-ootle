@@ -127,6 +127,7 @@ import type {
   AddressBookUpdateResponse,
   AddressBookDeleteRequest,
   AddressBookDeleteResponse,
+  JrpcPermission,
 } from "@tari-project/ootle-ts-bindings";
 import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
 import { jwtDecode } from "jwt-decode";
@@ -188,6 +189,10 @@ export const authRevoke = (request: AuthRevokeTokenRequest): Promise<AuthRevokeT
   client().then((c) => c.authRevoke(request));
 export const authGetAllJwt = (request: AuthListSessionsRequest): Promise<AuthListSessionsResponse> =>
   client().then((c) => c.authListSessions(request));
+export const apiKeysCreate = (name: string, permissions: JrpcPermission[], grantAdmin: boolean) =>
+  client().then((c) => c.createApiKey(name, permissions, grantAdmin));
+export const apiKeysList = () => client().then((c) => c.listApiKeys());
+export const apiKeysRevoke = (id: string) => client().then((c) => c.revokeApiKey(id));
 
 // indexer
 export const indexerGetNetworkInfo = (indexerUrl: string) =>

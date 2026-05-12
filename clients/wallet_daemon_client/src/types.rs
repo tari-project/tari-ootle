@@ -31,11 +31,7 @@ use tari_engine_types::{
 };
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{
-    ShardGroup,
-    SubstateAddress,
-    SubstateRequirement,
-    shard::Shard,
-    substate_type::SubstateType,
+    ShardGroup, SubstateAddress, SubstateRequirement, shard::Shard, substate_type::SubstateType,
 };
 use tari_ootle_template_metadata::{MetadataHash, TemplateMetadata};
 use tari_ootle_transaction::{Instruction, PrunedTransaction, TransactionId, UnsignedTransaction};
@@ -46,33 +42,14 @@ use tari_ootle_wallet_sdk::{
     },
     crypto::{memo::Memo, pay_to::PayTo},
     models::{
-        Account,
-        AddressBookEntry,
-        AuthoredTemplateModel,
-        DerivedKeyIndex,
-        KeyBranch,
-        KeyId,
-        NonFungibleToken,
-        OutputStatus,
-        StealthUtxoSpendKeyId,
-        TransactionStatus,
-        WalletLockId,
-        WalletTransaction,
+        Account, AddressBookEntry, AuthoredTemplateModel, DerivedKeyIndex, KeyBranch, KeyId, NonFungibleToken,
+        OutputStatus, StealthUtxoSpendKeyId, TransactionStatus, WalletLockId, WalletTransaction,
     },
 };
 use tari_template_abi::{FunctionDef, TemplateDef, version::WasmAbiVersion};
 use tari_template_lib_types::{
-    Amount,
-    ComponentAddress,
-    EncryptedData,
-    NonFungibleId,
-    ResourceAddress,
-    ResourceType,
-    TemplateAddress,
-    UtxoAddress,
-    UtxoId,
-    ValidatorFeePoolAddress,
-    VaultId,
+    Amount, ComponentAddress, EncryptedData, NonFungibleId, ResourceAddress, ResourceType, TemplateAddress,
+    UtxoAddress, UtxoId, ValidatorFeePoolAddress, VaultId,
     confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
     stealth::{SpendCondition, StealthTransferStatement},
@@ -80,10 +57,7 @@ use tari_template_lib_types::{
 use time::PrimitiveDateTime;
 use url::Url;
 use webauthn_rs_proto::{
-    PublicKeyCredential,
-    PublicKeyCredentialCreationOptions,
-    RegisterPublicKeyCredential,
-    RequestChallengeResponse,
+    PublicKeyCredential, PublicKeyCredentialCreationOptions, RegisterPublicKeyCredential, RequestChallengeResponse,
 };
 use zeroize::Zeroizing;
 
@@ -753,6 +727,8 @@ pub enum AuthCredentials {
     None,
     /// Credentials for WebAuthN auth mode. Contains the request from the client to finish the auth.
     WebAuthN(Box<WebauthnFinishAuthRequest>),
+    /// Credentials for API key auth mode. Contains the raw plaintext API key.
+    ApiKey(String),
 }
 
 impl AuthCredentials {
@@ -779,6 +755,49 @@ pub type EncodedJwtString = Zeroizing<String>;
 pub struct AuthLoginResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub token: EncodedJwtString,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ApiKeyCreateRequest {
+    pub name: String,
+    pub permissions: Vec<JrpcPermission>,
+    pub grant_admin: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ApiKeyCreateResponse {
+    pub id: String,
+    pub name: String,
+    pub permissions: Vec<JrpcPermission>,
+    pub created_at: u64,
+    pub expires_at: Option<u64>,
+    pub key: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ApiKeyInfo {
+    pub id: String,
+    pub name: String,
+    pub permissions: Vec<JrpcPermission>,
+    pub created_at: u64,
+    pub expires_at: Option<u64>,
+    pub last_used: Option<u64>,
+    pub revoked: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ApiKeyListResponse {
+    pub keys: Vec<ApiKeyInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ApiKeyRevokeRequest {
+    pub id: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

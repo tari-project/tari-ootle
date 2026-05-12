@@ -43,6 +43,10 @@ use tari_crypto::keys::SecretKey;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::SubstateRequirement;
 use tari_ootle_wallet_sdk::models::AccountWithAddress;
+use tari_ootle_walletd_client::{
+    permissions::JrpcPermission,
+    types::{ApiKeyCreateResponse, ApiKeyListResponse},
+};
 use tari_sidechain::EvictionProof;
 use tari_transaction_components::{
     consensus::ConsensusManager,
@@ -70,6 +74,17 @@ pub mod wallet;
 pub mod wallet_daemon;
 pub mod wallet_daemon_client;
 
+#[derive(Debug, Default)]
+pub struct ApiKeyTestState {
+    pub session_permissions: Vec<JrpcPermission>,
+    pub plaintext_key: Option<String>,
+    pub created_key: Option<ApiKeyCreateResponse>,
+    pub last_list_response: Option<ApiKeyListResponse>,
+    pub last_error_code: Option<i64>,
+    pub last_error_message: Option<String>,
+    pub last_auth_token: Option<String>,
+}
+
 #[derive(cucumber::World)]
 #[world(init = Self::init)]
 pub struct TariWorld {
@@ -91,6 +106,7 @@ pub struct TariWorld {
     pub key_manager: KeyManager,
     pub wallet_accounts: IndexMap<String, AccountWithAddress>,
     pub wallet_daemons: IndexMap<String, TariWalletDaemonProcess>,
+    pub api_key_test_state: ApiKeyTestState,
     /// Used for all one-sided coinbase payments
     pub minotari_wallet_private_key: PrivateKey,
     /// A receiver wallet address that is used for default one-sided coinbase payments
@@ -127,6 +143,7 @@ impl TariWorld {
             key_manager: KeyManager::new_random().unwrap(),
             wallet_accounts: IndexMap::new(),
             wallet_daemons: IndexMap::new(),
+            api_key_test_state: ApiKeyTestState::default(),
             minotari_wallet_private_key: wallet_private_key,
             default_payment_address,
             consensus_manager: ConsensusManager::builder(L1Network::LocalNet).build(),

@@ -127,6 +127,39 @@ export * as transports from "./transports";
 
 export { substateIdToString, stringToSubstateId, rejectReasonToString };
 
+export interface ApiKeyCreateRequest {
+  name: string;
+  permissions: JrpcPermission[];
+  grant_admin: boolean;
+}
+
+export interface ApiKeyCreateResponse {
+  id: string;
+  name: string;
+  permissions: JrpcPermission[];
+  created_at: number;
+  expires_at: number | null;
+  key: string;
+}
+
+export interface ApiKeyInfo {
+  id: string;
+  name: string;
+  permissions: JrpcPermission[];
+  created_at: number;
+  expires_at: number | null;
+  last_used: number | null;
+  revoked: boolean;
+}
+
+export interface ApiKeyListResponse {
+  keys: ApiKeyInfo[];
+}
+
+export interface ApiKeyRevokeRequest {
+  id: string;
+}
+
 export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
   private token: string | null;
   private transport: T;
@@ -184,12 +217,37 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
     return resp.token;
   }
 
+  public async authenticateWithApiKey(apiKey: string): Promise<void> {
+    const token = await this.authRequest([], { ApiKey: apiKey });
+    this.token = token;
+  }
+
   public authRevoke(params: AuthRevokeTokenRequest): Promise<AuthRevokeTokenResponse> {
     return this.sendRequest("auth.revoke", params);
   }
 
   public authRefresh(): Promise<AuthRefreshResponse> {
     return this.sendRequest("auth.refresh");
+  }
+
+  public createApiKey(
+    name: string,
+    permissions: JrpcPermission[],
+    grantAdmin: boolean,
+  ): Promise<ApiKeyCreateResponse> {
+    return this.sendRequest("api_keys.create", {
+      name,
+      permissions,
+      grant_admin: grantAdmin,
+    } as ApiKeyCreateRequest);
+  }
+
+  public listApiKeys(): Promise<ApiKeyListResponse> {
+    return this.sendRequest("api_keys.list", {});
+  }
+
+  public async revokeApiKey(id: string): Promise<void> {
+    await this.sendRequest("api_keys.revoke", { id } as ApiKeyRevokeRequest);
   }
 
   public walletGetInfo(): Promise<WalletGetInfoResponse> {

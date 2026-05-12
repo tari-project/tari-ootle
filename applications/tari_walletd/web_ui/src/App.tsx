@@ -27,6 +27,7 @@ import Loading from "@components/Loading";
 import AccessTokensLayout from "@routes/AccessTokens/AccessTokens";
 import AccountDetails from "@routes/AccountDetails/AccountDetails";
 import Accounts from "@routes/Accounts/Accounts";
+import ApiKeysLayout from "@routes/ApiKeys/ApiKeys";
 import AddressBookPage from "@routes/AddressBook/AddressBookPage";
 import MyAssets from "@routes/AssetVault/Components/MyAssets";
 import ErrorPage from "@routes/ErrorPage";
@@ -120,6 +121,11 @@ export const breadcrumbRoutes = [
   {
     label: "Address Book",
     path: "/address-book",
+    dynamic: false,
+  },
+  {
+    label: "API Keys",
+    path: "/api-keys",
     dynamic: false,
   },
   // {
@@ -232,6 +238,7 @@ function App() {
             path="access-tokens"
             element={<GuardedRoute redirect="/access-tokens" component={AccessTokensLayout} />}
           />
+          <Route path="api-keys" element={<GuardedRoute redirect="/api-keys" component={ApiKeysLayout} />} />
           <Route path="transactions" element={<GuardedRoute redirect="/transactions" component={Transactions} />} />
           <Route path="wallet" element={<GuardedRoute redirect="/wallet" component={Wallet} />} />
           <Route

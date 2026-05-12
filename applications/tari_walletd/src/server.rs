@@ -11,9 +11,7 @@ use axum::{
 };
 use axum_extra::{TypedHeader, extract::CookieJar, headers, headers::authorization::Bearer};
 use axum_jrpc::{
-    JsonRpcAnswer,
-    JsonRpcExtractor,
-    JsonRpcResponse,
+    JsonRpcAnswer, JsonRpcExtractor, JsonRpcResponse,
     error::{JsonRpcError, JsonRpcErrorReason},
 };
 use log::*;
@@ -25,20 +23,8 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 use super::handlers::{HandlerContext, HandlerWithCookie, auth, stealth_utxos, substates, templates, wallet, webauthn};
 use crate::handlers::{
-    Handler,
-    accounts,
-    address_book,
-    auth::jwt::JwtApiError,
-    burn_proofs,
-    confidential,
-    error::HandlerError,
-    keys,
-    nfts,
-    settings,
-    swap_pools,
-    transaction,
-    validator,
-    webrtc,
+    Handler, accounts, address_book, api_keys, auth::jwt::JwtApiError, burn_proofs, confidential, error::HandlerError,
+    keys, nfts, settings, swap_pools, transaction, validator, webrtc,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::json_rpc";
@@ -118,6 +104,12 @@ async fn handler(
                 call_handler_any_response(context, value, token, webauthn::handle_finish_registration).await
             },
             "auth_start" => call_handler(context, value, token, webauthn::handle_start_auth).await,
+            _ => value.method_not_found(&value.method).into_response(),
+        },
+        Some(("api_keys", method)) => match method {
+            "create" => call_handler_any_response(context, value, token, api_keys::handle_api_key_create).await,
+            "list" => call_handler_any_response(context, value, token, api_keys::handle_api_key_list).await,
+            "revoke" => call_handler_any_response(context, value, token, api_keys::handle_api_key_revoke).await,
             _ => value.method_not_found(&value.method).into_response(),
         },
         Some(("settings", method)) => match method {

@@ -3,6 +3,7 @@
 
 pub mod accounts;
 pub mod address_book;
+pub mod api_keys;
 pub mod auth;
 pub mod burn_proofs;
 pub mod confidential;

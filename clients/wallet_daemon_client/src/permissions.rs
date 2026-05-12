@@ -160,6 +160,7 @@ impl FromIterator<JrpcPermission> for JrpcPermissions {
 pub struct Claims {
     pub permissions: JrpcPermissions,
     pub exp: u64,
+    pub api_key_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Hash, Eq, PartialEq)]

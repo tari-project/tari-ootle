@@ -89,3 +89,45 @@ Feature: Wallet Daemon
     When I transfer 1 tokens of resource ACC1/resources/tNFT from account ACC1 to account ACC2 via the wallet daemon WALLET_D named TRANSFER
     When I check the balance of ACC2 for resource ACC1/resources/tNFT on wallet daemon WALLET_D the amount is exactly 1
 
+  Scenario: Admin creates an API key
+    Given a network with registered validator VN and wallet daemon WALLET_D
+    And the user is authenticated as admin
+    When the admin creates an API key named "test-agent" with scopes ["AccountInfo"]
+    Then the response contains a plaintext key starting with "tak_"
+    And the API key list contains a key named "test-agent"
+    And the plaintext key is not in the list response
+
+  Scenario: Non-admin cannot manage API keys
+    Given a network with registered validator VN and wallet daemon WALLET_D
+    And the user is authenticated as non-admin
+    When the non-admin attempts to create an API key
+    Then the response is a permission denied error
+    When the non-admin attempts to list API keys
+    Then the response is a permission denied error
+
+  Scenario: Agent authenticates with API key
+    Given a network with registered validator VN and wallet daemon WALLET_D
+    And the admin has created an API key with scopes ["AccountInfo"]
+    When a new client authenticates using the API key
+    Then authentication succeeds and a JWT is returned
+    And the agent can call accounts.get_default successfully
+
+  Scenario: Agent is rejected for out-of-scope method
+    Given a network with registered validator VN and wallet daemon WALLET_D
+    And the admin has created an API key with scopes ["AccountInfo"] only
+    When the agent authenticates and calls a transfer method
+    Then the response is a permission denied error
+
+  Scenario: Revoking an API key blocks new authentication
+    Given a network with registered validator VN and wallet daemon WALLET_D
+    And the admin has created an API key
+    When the admin revokes the API key
+    And a client attempts to authenticate with the revoked key
+    Then the authentication is rejected
+
+  Scenario: Admin scope requires explicit confirmation
+    Given a network with registered validator VN and wallet daemon WALLET_D
+    And the user is authenticated as admin
+    When the admin creates an API key with Admin scope and grant_admin false
+    Then the response is an AdminScopeRequiresConfirmation error
+

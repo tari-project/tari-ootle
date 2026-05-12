@@ -58,7 +58,11 @@ impl RefreshTokenStore {
         let mut write = self.tokens.write().await;
         clear_expired_tokens(&mut write);
         let data = RefreshTokenData {
-            claims: Claims { permissions, exp },
+            claims: Claims {
+                permissions,
+                exp,
+                api_key_id: None,
+            },
             expires_at: Instant::now() + self.expiry,
         };
 
@@ -73,8 +77,8 @@ impl RefreshTokenStore {
             .map(|b| RefreshToken(Box::new(b.into_bytes())))?;
         let hashed_token = hash_token(&token);
         let read = self.tokens.read().await;
-        if let Some(data) = read.get(&hashed_token) &&
-            Instant::now() < data.expires_at
+        if let Some(data) = read.get(&hashed_token)
+            && Instant::now() < data.expires_at
         {
             return Some(data.claims.clone());
         }

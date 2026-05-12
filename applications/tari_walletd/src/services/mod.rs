@@ -6,9 +6,11 @@ pub use webauthn_session_store::*;
 
 pub mod wasm_optimizer;
 
+mod api_key_manager;
 mod auto_claim_burn_service;
 mod claim_burn_monitor;
 mod webauthn;
+pub use api_key_manager::*;
 pub use webauthn::*;
 
 mod refresh_token_store;
@@ -33,8 +35,7 @@ use tokio::task::JoinHandle;
 use crate::{
     OotleWalletDaemonSpec,
     services::{
-        auto_claim_burn_service::AutoClaimBurnService,
-        claim_burn_monitor::ClaimBurnMonitor,
+        auto_claim_burn_service::AutoClaimBurnService, claim_burn_monitor::ClaimBurnMonitor,
         template_monitor::TemplateMonitor,
     },
 };
@@ -102,7 +103,9 @@ pub struct Services {
 }
 
 async fn try_select_any<I>(handles: I) -> Result<(), anyhow::Error>
-where I: IntoIterator<Item = JoinHandle<Result<(), anyhow::Error>>> {
+where
+    I: IntoIterator<Item = JoinHandle<Result<(), anyhow::Error>>>,
+{
     let (res, _, _) = future::select_all(handles).await;
     res.unwrap_or_else(|e| Err(anyhow!("Task panicked: {}", e)))
 }

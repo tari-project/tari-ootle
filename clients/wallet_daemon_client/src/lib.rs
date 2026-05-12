@@ -30,8 +30,7 @@ use std::borrow::Borrow;
 
 use json::Value;
 use reqwest::{
-    IntoUrl,
-    Url,
+    IntoUrl, Url,
     header::{self, AUTHORIZATION, HeaderMap},
 };
 use serde::{Serialize, de::DeserializeOwned};
@@ -39,143 +38,49 @@ use serde_json as json;
 use serde_json::json;
 use tari_ootle_wallet_sdk::models::KeyBranch;
 use types::{
-    AccountsCreateFreeTestCoinsRequest,
-    AccountsCreateFreeTestCoinsResponse,
-    AccountsTransferRequest,
-    AccountsTransferResponse,
-    AuthLoginRequest,
-    AuthLoginResponse,
-    AuthRefreshRequest,
-    CallInstructionRequest,
-    ClaimBurnRequest,
-    ClaimBurnResponse,
-    GetNftRequest,
-    GetNftResponse,
-    ListNftsRequest,
-    ListNftsResponse,
-    MintFaucetNftRequest,
-    MintFaucetNftResponse,
-    ProofsCancelRequest,
-    ProofsCancelResponse,
-    ProofsFinalizeRequest,
-    ProofsFinalizeResponse,
-    ProofsGenerateRequest,
-    ProofsGenerateResponse,
-    TransferNftRequest,
-    TransferNftResponse,
-    WebRtcStartRequest,
+    AccountsCreateFreeTestCoinsRequest, AccountsCreateFreeTestCoinsResponse, AccountsTransferRequest,
+    AccountsTransferResponse, ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeyListResponse, ApiKeyRevokeRequest,
+    AuthLoginRequest, AuthLoginResponse, AuthRefreshRequest, CallInstructionRequest, ClaimBurnRequest,
+    ClaimBurnResponse, GetNftRequest, GetNftResponse, ListNftsRequest, ListNftsResponse, MintFaucetNftRequest,
+    MintFaucetNftResponse, ProofsCancelRequest, ProofsCancelResponse, ProofsFinalizeRequest, ProofsFinalizeResponse,
+    ProofsGenerateRequest, ProofsGenerateResponse, TransferNftRequest, TransferNftResponse, WebRtcStartRequest,
     WebRtcStartResponse,
 };
 
+use crate::permissions::JrpcPermission;
 use crate::{
     error::WalletDaemonClientError,
     types::{
-        AccountGetByKeyIndexRequest,
-        AccountGetDefaultRequest,
-        AccountGetRequest,
-        AccountGetResponse,
-        AccountSetDefaultRequest,
-        AccountSetDefaultResponse,
-        AccountsAssociateStealthResourceRequest,
-        AccountsAssociateStealthResourceResponse,
-        AccountsCreateOrGetRequest,
-        AccountsCreateOrGetResponse,
-        AccountsCreateRequest,
-        AccountsCreateResponse,
-        AccountsCreateStealthTransferStatementRequest,
-        AccountsCreateStealthTransferStatementResponse,
-        AccountsGetBalancesRequest,
-        AccountsGetBalancesResponse,
-        AccountsListRequest,
-        AccountsListResponse,
-        AccountsRenameRequest,
-        AccountsRenameResponse,
-        AddressBookAddRequest,
-        AddressBookAddResponse,
-        AddressBookDeleteRequest,
-        AddressBookDeleteResponse,
-        AddressBookGetRequest,
-        AddressBookGetResponse,
-        AddressBookListRequest,
-        AddressBookListResponse,
-        AddressBookUpdateRequest,
-        AddressBookUpdateResponse,
-        AuthGetMethodRequest,
-        AuthGetMethodResponse,
-        AuthListSessionsRequest,
-        AuthListSessionsResponse,
-        AuthRevokeTokenRequest,
-        AuthRevokeTokenResponse,
-        BurnProofsGetRequest,
-        BurnProofsGetResponse,
-        BurnProofsListRequest,
-        BurnProofsListResponse,
-        ClaimValidatorFeesRequest,
-        ClaimValidatorFeesResponse,
-        ConfidentialCreateOutputProofRequest,
-        ConfidentialCreateOutputProofResponse,
-        ConfidentialTransferRequest,
-        ConfidentialTransferResponse,
-        ConfidentialViewVaultBalanceRequest,
-        ConfidentialViewVaultBalanceResponse,
-        EncodedJwtString,
-        GetValidatorFeesRequest,
-        GetValidatorFeesResponse,
-        KeysCreateRequest,
-        KeysCreateResponse,
-        KeysListRequest,
-        KeysListResponse,
-        KeysSetActiveRequest,
-        KeysSetActiveResponse,
-        PublishTemplateRequest,
-        PublishTemplateResponse,
-        SettingsGetResponse,
-        SettingsSetRequest,
-        SettingsSetResponse,
-        SignTemplateMetadataRequest,
-        SignTemplateMetadataResponse,
-        StealthTransferRequest,
-        StealthTransferResponse,
-        StealthUtxosDecryptValueRequest,
-        StealthUtxosDecryptValueResponse,
-        StealthUtxosListRequest,
-        StealthUtxosListResponse,
-        SubstatesGetRequest,
-        SubstatesGetResponse,
-        SubstatesListRequest,
-        SubstatesListResponse,
-        SwapPoolGetExchangeRateRequest,
-        SwapPoolGetExchangeRateResponse,
-        SwapPoolsListRequest,
-        SwapPoolsListResponse,
-        TemplatesGetRequest,
-        TemplatesGetResponse,
-        TemplatesListAuthoredRequest,
-        TemplatesListAuthoredResponse,
-        TransactionGetAllRequest,
-        TransactionGetAllResponse,
-        TransactionGetRequest,
-        TransactionGetResponse,
-        TransactionGetResultRequest,
-        TransactionGetResultResponse,
-        TransactionSubmitDryRunRequest,
-        TransactionSubmitDryRunResponse,
-        TransactionSubmitManifestRequest,
-        TransactionSubmitManifestResponse,
-        TransactionSubmitRequest,
-        TransactionSubmitResponse,
-        TransactionWaitResultRequest,
-        TransactionWaitResultResponse,
-        WalletGetInfoRequest,
-        WalletGetInfoResponse,
-        WebauthnAlreadyRegisteredRequest,
-        WebauthnAlreadyRegisteredResponse,
-        WebauthnFinishRegisterRequest,
-        WebauthnFinishRegisterResponse,
-        WebauthnStartAuthRequest,
-        WebauthnStartAuthResponse,
-        WebauthnStartRegisterRequest,
-        WebauthnStartRegisterResponse,
+        AccountGetByKeyIndexRequest, AccountGetDefaultRequest, AccountGetRequest, AccountGetResponse,
+        AccountSetDefaultRequest, AccountSetDefaultResponse, AccountsAssociateStealthResourceRequest,
+        AccountsAssociateStealthResourceResponse, AccountsCreateOrGetRequest, AccountsCreateOrGetResponse,
+        AccountsCreateRequest, AccountsCreateResponse, AccountsCreateStealthTransferStatementRequest,
+        AccountsCreateStealthTransferStatementResponse, AccountsGetBalancesRequest, AccountsGetBalancesResponse,
+        AccountsListRequest, AccountsListResponse, AccountsRenameRequest, AccountsRenameResponse,
+        AddressBookAddRequest, AddressBookAddResponse, AddressBookDeleteRequest, AddressBookDeleteResponse,
+        AddressBookGetRequest, AddressBookGetResponse, AddressBookListRequest, AddressBookListResponse,
+        AddressBookUpdateRequest, AddressBookUpdateResponse, AuthCredentials, AuthGetMethodRequest,
+        AuthGetMethodResponse, AuthListSessionsRequest, AuthListSessionsResponse, AuthRevokeTokenRequest,
+        AuthRevokeTokenResponse, BurnProofsGetRequest, BurnProofsGetResponse, BurnProofsListRequest,
+        BurnProofsListResponse, ClaimValidatorFeesRequest, ClaimValidatorFeesResponse,
+        ConfidentialCreateOutputProofRequest, ConfidentialCreateOutputProofResponse, ConfidentialTransferRequest,
+        ConfidentialTransferResponse, ConfidentialViewVaultBalanceRequest, ConfidentialViewVaultBalanceResponse,
+        EncodedJwtString, GetValidatorFeesRequest, GetValidatorFeesResponse, KeysCreateRequest, KeysCreateResponse,
+        KeysListRequest, KeysListResponse, KeysSetActiveRequest, KeysSetActiveResponse, PublishTemplateRequest,
+        PublishTemplateResponse, SettingsGetResponse, SettingsSetRequest, SettingsSetResponse,
+        SignTemplateMetadataRequest, SignTemplateMetadataResponse, StealthTransferRequest, StealthTransferResponse,
+        StealthUtxosDecryptValueRequest, StealthUtxosDecryptValueResponse, StealthUtxosListRequest,
+        StealthUtxosListResponse, SubstatesGetRequest, SubstatesGetResponse, SubstatesListRequest,
+        SubstatesListResponse, SwapPoolGetExchangeRateRequest, SwapPoolGetExchangeRateResponse, SwapPoolsListRequest,
+        SwapPoolsListResponse, TemplatesGetRequest, TemplatesGetResponse, TemplatesListAuthoredRequest,
+        TemplatesListAuthoredResponse, TransactionGetAllRequest, TransactionGetAllResponse, TransactionGetRequest,
+        TransactionGetResponse, TransactionGetResultRequest, TransactionGetResultResponse,
+        TransactionSubmitDryRunRequest, TransactionSubmitDryRunResponse, TransactionSubmitManifestRequest,
+        TransactionSubmitManifestResponse, TransactionSubmitRequest, TransactionSubmitResponse,
+        TransactionWaitResultRequest, TransactionWaitResultResponse, WalletGetInfoRequest, WalletGetInfoResponse,
+        WebauthnAlreadyRegisteredRequest, WebauthnAlreadyRegisteredResponse, WebauthnFinishRegisterRequest,
+        WebauthnFinishRegisterResponse, WebauthnStartAuthRequest, WebauthnStartAuthResponse,
+        WebauthnStartRegisterRequest, WebauthnStartRegisterResponse,
     },
 };
 
@@ -224,10 +129,13 @@ impl WalletDaemonClient {
 
     /// Derives the next key for the given [`KeyBranch`].
     pub async fn create_key(&mut self, branch: KeyBranch) -> Result<KeysCreateResponse, WalletDaemonClientError> {
-        self.send_request("keys.create", &KeysCreateRequest {
-            branch,
-            specific_index: None,
-        })
+        self.send_request(
+            "keys.create",
+            &KeysCreateRequest {
+                branch,
+                specific_index: None,
+            },
+        )
         .await
     }
 
@@ -237,10 +145,13 @@ impl WalletDaemonClient {
         branch: KeyBranch,
         index: u64,
     ) -> Result<KeysCreateResponse, WalletDaemonClientError> {
-        self.send_request("keys.create", &KeysCreateRequest {
-            branch,
-            specific_index: Some(index),
-        })
+        self.send_request(
+            "keys.create",
+            &KeysCreateRequest {
+                branch,
+                specific_index: Some(index),
+            },
+        )
         .await
     }
 
@@ -577,6 +488,51 @@ impl WalletDaemonClient {
         req: T,
     ) -> Result<AuthLoginResponse, WalletDaemonClientError> {
         self.send_request("auth.request", req.borrow()).await
+    }
+
+    /// Authenticates using a long-lived API key and stores the returned JWT bearer token.
+    pub async fn authenticate_with_api_key(
+        &mut self,
+        api_key: &str,
+    ) -> Result<AuthLoginResponse, WalletDaemonClientError> {
+        let request = AuthLoginRequest {
+            permissions: vec![],
+            credentials: AuthCredentials::ApiKey(api_key.to_string()),
+        };
+        let response = self.auth_request(&request).await?;
+        self.set_auth_token(response.token.clone());
+        Ok(response)
+    }
+
+    /// Creates a named, permission-scoped API key.
+    pub async fn create_api_key(
+        &mut self,
+        name: impl Into<String>,
+        permissions: Vec<JrpcPermission>,
+        grant_admin: bool,
+    ) -> Result<ApiKeyCreateResponse, WalletDaemonClientError> {
+        self.send_request(
+            "api_keys.create",
+            &ApiKeyCreateRequest {
+                name: name.into(),
+                permissions,
+                grant_admin,
+            },
+        )
+        .await
+    }
+
+    /// Lists active API keys.
+    pub async fn list_api_keys(&mut self) -> Result<ApiKeyListResponse, WalletDaemonClientError> {
+        self.send_request("api_keys.list", &json!({})).await
+    }
+
+    /// Revokes an API key by ID.
+    pub async fn revoke_api_key(&mut self, id: impl Into<String>) -> Result<(), WalletDaemonClientError> {
+        let _: json::Value = self
+            .send_request("api_keys.revoke", &ApiKeyRevokeRequest { id: id.into() })
+            .await?;
+        Ok(())
     }
 
     /// Refreshes an authentication token using the refresh token cookie.

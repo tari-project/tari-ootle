@@ -21,6 +21,7 @@ use crate::{
     models::{
         Account,
         AddressBookEntry,
+        ApiKeyRecord,
         AuthoredTemplateModel,
         ConfidentialOutputModel,
         Config,
@@ -52,9 +53,6 @@ pub trait WalletStoreReader {
     fn config_exists(&mut self, key: &str) -> Result<bool, WalletStorageError>;
     // Transactions
     fn transactions_get(&mut self, transaction_id: TransactionId) -> Result<WalletTransaction, WalletStorageError>;
-    /// Read the *full* transaction (with blob payloads) — needed for re-submission and other
-    /// operations that require the original bytes. The plain `transactions_get` returns the
-    /// pruned, API-facing form.
     fn transactions_get_full(
         &mut self,
         transaction_id: TransactionId,
@@ -235,4 +233,8 @@ pub trait WalletStoreReader {
     // Address book
     fn address_book_get(&mut self, name: &str) -> Result<AddressBookEntry, WalletStorageError>;
     fn address_book_get_all(&mut self) -> Result<Vec<AddressBookEntry>, WalletStorageError>;
+
+    // API keys
+    fn api_keys_get_by_hash(&mut self, key_hash: &[u8]) -> Result<ApiKeyRecord, WalletStorageError>;
+    fn api_keys_list(&mut self) -> Result<Vec<ApiKeyRecord>, WalletStorageError>;
 }

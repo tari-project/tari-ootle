@@ -160,6 +160,9 @@ impl FromIterator<JrpcPermission> for JrpcPermissions {
 pub struct Claims {
     pub permissions: JrpcPermissions,
     pub exp: u64,
+    /// API-key ID embedded in JWT for revocation tracking. Absent for non-API-key sessions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kid: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Hash, Eq, PartialEq)]

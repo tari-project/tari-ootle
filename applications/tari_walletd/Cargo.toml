@@ -37,6 +37,7 @@ blake2 = { workspace = true }
 axum = { workspace = true }
 axum-extra = { workspace = true, features = ["typed-header", "cookie"] }
 axum-jrpc = { workspace = true, features = ["anyhow_error"] }
+base64 = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 dirs-next = { workspace = true }
 notify = "8.2.0"
@@ -62,6 +63,8 @@ rand = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true, default-features = true }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
+sha2 = { workspace = true }
+subtle = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = [
     "default",
@@ -76,7 +79,6 @@ webauthn-rs = { workspace = true }
 uuid = { workspace = true }
 wasm-opt = "0.116.1"
 tempfile.workspace = true
-sha2 = { workspace = true }
 zeroize = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]

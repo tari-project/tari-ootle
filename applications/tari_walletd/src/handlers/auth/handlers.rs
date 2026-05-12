@@ -6,23 +6,39 @@
 
 use axum_extra::{extract::CookieJar, headers::authorization::Bearer};
 use axum_jrpc::JsonRpcResponse;
-use tari_ootle_wallet_sdk::models::AuthLoginRequestEvent;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use rand::RngCore;
+use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
+use tari_ootle_wallet_sdk::{
+    models::AuthLoginRequestEvent,
+    storage::{ReadableWalletStore, WriteableWalletStore},
+};
+use tari_ootle_wallet_storage_sqlite::ApiKeyStore;
 use tari_ootle_walletd_client::{
     permissions::JrpcPermission,
     types::{
+        ApiKeyInfo,
+        AuthCreateApiKeyRequest,
+        AuthCreateApiKeyResponse,
         AuthGetMethodRequest,
         AuthGetMethodResponse,
+        AuthListApiKeysRequest,
+        AuthListApiKeysResponse,
         AuthListSessionsRequest,
         AuthListSessionsResponse,
         AuthLoginRequest,
         AuthLoginResponse,
         AuthMethod,
         AuthRefreshRequest,
+        AuthRevokeApiKeyRequest,
+        AuthRevokeApiKeyResponse,
         AuthRevokeTokenRequest,
         AuthRevokeTokenResponse,
         AuthSessionInfo,
     },
 };
+use zeroize::Zeroizing;
 
 use crate::{
     config::WalletDaemonAuth,
@@ -31,12 +47,58 @@ use crate::{
 
 pub const REFRESH_TOKEN_COOKIE: &str = "r-tkn";
 
+const API_KEY_PREFIX: &str = "twda_";
+
 pub async fn handle_login_request(
     context: &HandlerContext,
     _token: Option<&Bearer>,
     request: (axum_jrpc::Id, AuthLoginRequest),
 ) -> Result<(CookieJar, JsonRpcResponse), anyhow::Error> {
     let (answer_id, request) = request;
+
+    // API-key authentication path — handled before the regular authenticator.
+    if let Some(raw_key) = request.credentials.as_api_key() {
+        let raw_key = Zeroizing::new(raw_key.to_owned());
+        let hash: Vec<u8> = Sha256::digest(raw_key.as_bytes()).to_vec();
+
+        let kid = context.wallet_sdk().store().with_write_tx(|tx| {
+            let row = tx
+                .api_keys_get_by_hash(&hash)
+                .map_err(|_| anyhow::anyhow!("Invalid API key"))?;
+
+            // Constant-time comparison guards against timing side-channels.
+            if !bool::from(row.key_hash.as_slice().ct_eq(&hash)) {
+                return Err(anyhow::anyhow!("Invalid API key"));
+            }
+
+            if row.revoked_at.is_some() {
+                return Err(anyhow::anyhow!("API key has been revoked"));
+            }
+
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+            tx.api_keys_touch(row.id, now)
+                .map_err(|e| anyhow::anyhow!("Failed to record API key usage: {}", e))?;
+
+            Ok::<_, anyhow::Error>(row.id as i64)
+        })?;
+
+        let jwt = context.jwt_api();
+        let mut claims = jwt.generate_auth_claims(request.permissions.into())?;
+        claims.kid = Some(kid);
+        let token = jwt.grant(&claims)?;
+        let refresh_token = context
+            .refresh_token_store()
+            .new_token(claims.permissions, claims.exp)
+            .await;
+        let refresh_cookie = refresh_token.into_cookie(REFRESH_TOKEN_COOKIE);
+        let cookie = CookieJar::new().add(refresh_cookie);
+        context.notifier().notify(AuthLoginRequestEvent);
+        return Ok((cookie, JsonRpcResponse::success(answer_id, AuthLoginResponse { token })));
+    }
+
     context.authenticator().authenticate(&request.credentials).await?;
     let jwt = context.jwt_api();
     let claims = jwt.generate_auth_claims(request.permissions.into())?;
@@ -125,4 +187,84 @@ pub async fn handle_get_auth_method(
             WalletDaemonAuth::WebAuthn => AuthMethod::Webauthn,
         },
     })
+}
+
+pub async fn handle_create_api_key(
+    context: &HandlerContext,
+    token: Option<&Bearer>,
+    request: AuthCreateApiKeyRequest,
+) -> Result<AuthCreateApiKeyResponse, anyhow::Error> {
+    context.check_auth(token, &[JrpcPermission::Admin])?;
+
+    // 32 cryptographically-random bytes → `twda_{base64url-no-pad}`.
+    let mut raw_bytes = Zeroizing::new([0u8; 32]);
+    rand::rng().fill_bytes(raw_bytes.as_mut());
+    let encoded = Zeroizing::new(format!("{}{}", API_KEY_PREFIX, URL_SAFE_NO_PAD.encode(raw_bytes.as_ref())));
+
+    // Only the SHA-256 hash is stored; the raw key is never persisted.
+    let key_hash: Vec<u8> = Sha256::digest(encoded.as_bytes()).to_vec();
+    let permissions_str = request.permissions.join(",");
+
+    let row = context.wallet_sdk().store().with_write_tx(|tx| {
+        tx.api_keys_insert(&request.name, &key_hash, &permissions_str)
+            .map_err(anyhow::Error::from)
+    })?;
+
+    Ok(AuthCreateApiKeyResponse {
+        id: row.id,
+        name: row.name,
+        key: encoded.as_str().to_owned(),
+        permissions: request.permissions,
+        created_at: row.created_at,
+    })
+}
+
+pub async fn handle_list_api_keys(
+    context: &HandlerContext,
+    token: Option<&Bearer>,
+    _request: AuthListApiKeysRequest,
+) -> Result<AuthListApiKeysResponse, anyhow::Error> {
+    context.check_auth(token, &[JrpcPermission::Admin])?;
+
+    let rows = context.wallet_sdk().store().with_read_tx(|tx| {
+        Ok::<_, anyhow::Error>(tx.api_keys_list_all()?)
+    })?;
+
+    let keys = rows
+        .into_iter()
+        .map(|row| ApiKeyInfo {
+            id: row.id,
+            name: row.name,
+            permissions: row
+                .permissions
+                .split(',')
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect(),
+            created_at: row.created_at,
+            last_used_at: row.last_used_at,
+            revoked_at: row.revoked_at,
+        })
+        .collect();
+
+    Ok(AuthListApiKeysResponse { keys })
+}
+
+pub async fn handle_revoke_api_key(
+    context: &HandlerContext,
+    token: Option<&Bearer>,
+    request: AuthRevokeApiKeyRequest,
+) -> Result<AuthRevokeApiKeyResponse, anyhow::Error> {
+    context.check_auth(token, &[JrpcPermission::Admin])?;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    context.wallet_sdk().store().with_write_tx(|tx| {
+        tx.api_keys_revoke(request.id, now).map_err(anyhow::Error::from)
+    })?;
+
+    Ok(AuthRevokeApiKeyResponse {})
 }

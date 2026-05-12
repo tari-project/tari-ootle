@@ -69,13 +69,13 @@ pub async fn spawn_listener(
     let listener = try_bind_with_fallback(preferred_address).await?;
     let server = axum::serve(listener, router);
     let listen_addr = server.local_addr()?;
-    info!(target: LOG_TARGET, "🌐 JSON-RPC listening on {listen_addr}");
+    info!(target: LOG_TARGET, "\u{1f310} JSON-RPC listening on {listen_addr}");
     #[cfg(feature = "web_ui")]
-    info!(target: LOG_TARGET, "🕸️ Web interface available at http://{listen_addr}");
+    info!(target: LOG_TARGET, "\u{1f578}\u{fe0f} Web interface available at http://{listen_addr}");
     let server = server.with_graceful_shutdown(shutdown_signal);
     let task = tokio::spawn(async move {
         server.await?;
-        info!(target: LOG_TARGET, "💤 Stopping RPC");
+        info!(target: LOG_TARGET, "\u{1f4a4} Stopping RPC");
         Ok(())
     });
 
@@ -91,8 +91,8 @@ async fn handler(
     value: JsonRpcExtractor,
 ) -> Response {
     let token = authorization_header.map(|auth| auth.0.0);
-    info!(target: LOG_TARGET, "🌐 JSON-RPC request: {}", value.method);
-    debug!(target: LOG_TARGET, "🌐 JSON-RPC request: {:?}", value);
+    info!(target: LOG_TARGET, "\u{1f310} JSON-RPC request: {}", value.method);
+    debug!(target: LOG_TARGET, "\u{1f310} JSON-RPC request: {:?}", value);
     match value.method.as_str().split_once('.') {
         Some(("auth", method)) => match method {
             "request" => call_handler_any_response(context, value, token, auth::handle_login_request).await,
@@ -109,6 +109,9 @@ async fn handler(
             "revoke" => call_handler(context, value, token, auth::handle_revoke).await,
             "list_sessions" => call_handler(context, value, token, auth::handle_list_sessions).await,
             "method" => call_handler(context, value, token, auth::handle_get_auth_method).await,
+            "create_api_key" => call_handler(context, value, token, auth::handle_create_api_key).await,
+            "list_api_keys" => call_handler(context, value, token, auth::handle_list_api_keys).await,
+            "revoke_api_key" => call_handler(context, value, token, auth::handle_revoke_api_key).await,
             _ => value.method_not_found(&value.method).into_response(),
         },
         Some(("webauthn", method)) => match method {
@@ -255,7 +258,7 @@ where
     let answer_id = value.get_answer_id();
     match value.parse_params().inspect_err(|e| {
         if let JsonRpcAnswer::Error(e) = &e.result {
-            warn!(target: LOG_TARGET, "🌐 JSON-RPC params error: {}", e);
+            warn!(target: LOG_TARGET, "\u{1f310} JSON-RPC params error: {}", e);
         }
     }) {
         Ok(req) => handler
@@ -282,7 +285,7 @@ where
     let answer_id = value.get_answer_id();
     match value.parse_params().inspect_err(|e| {
         if let JsonRpcAnswer::Error(e) = &e.result {
-            warn!(target: LOG_TARGET, "🌐 JSON-RPC params error: {}", e);
+            warn!(target: LOG_TARGET, "\u{1f310} JSON-RPC params error: {}", e);
         }
     }) {
         Ok(req) => handler
@@ -323,7 +326,7 @@ pub fn resolve_handler_error(answer_id: axum_jrpc::Id, e: &HandlerError) -> Json
 }
 
 fn resolve_any_error(answer_id: axum_jrpc::Id, e: &anyhow::Error) -> JsonRpcResponse {
-    warn!(target: LOG_TARGET, "🌐 JSON-RPC error: {}", e);
+    warn!(target: LOG_TARGET, "\u{1f310} JSON-RPC error: {}", e);
     if let Some(handler_err) = e.downcast_ref::<HandlerError>() {
         return resolve_handler_error(answer_id, handler_err);
     }

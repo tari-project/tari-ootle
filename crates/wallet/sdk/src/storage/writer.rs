@@ -26,7 +26,6 @@ use crate::{
     models::{
         AccountUpdate,
         AddressBookEntry,
-        ApiKeyRecord,
         AuthoredTemplateModel,
         ConfidentialOutputModel,
         ImportedKeyId,
@@ -143,7 +142,9 @@ pub trait WalletStoreWriter: CommittableStore {
         lock_id: WalletLockId,
     ) -> Result<ConfidentialOutputModel, WalletStorageError>;
     fn confidential_outputs_insert(&mut self, output: ConfidentialOutputModel) -> Result<(), WalletStorageError>;
+    /// Mark outputs as finalized
     fn confidential_outputs_finalize_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
+    /// Release outputs that were locked and remove pending unconfirmed outputs for this proof
     fn confidential_outputs_release_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
 
     // Stealth Outputs
@@ -186,7 +187,12 @@ pub trait WalletStoreWriter: CommittableStore {
 
     fn locks_release_stale(&mut self) -> Result<usize, WalletStorageError>;
 
+    /// Release the lock including all outputs and vaults that were locked. Release is used when a transaction is
+    /// aborted.
     fn locks_release(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
+    /// Finalize the lock according to the provided diff. Any outputs and vaults locked by this lock and included in the
+    /// diff are finalised (marked as unspent/funds removed/added as necessary). Any objects not included in the diff
+    /// are reverted and released from the lock. This is used when a transaction is committed.
     fn locks_unlock_finalized(&mut self, lock_id: WalletLockId, diff: &SubstateDiff) -> Result<(), WalletStorageError>;
 
     // Non fungible tokens
@@ -236,16 +242,6 @@ pub trait WalletStoreWriter: CommittableStore {
         note: Option<&str>,
     ) -> Result<AddressBookEntry, WalletStorageError>;
     fn address_book_delete(&mut self, name: &str) -> Result<(), WalletStorageError>;
-
-    // API keys
-    fn api_keys_insert(
-        &mut self,
-        name: &str,
-        key_hash: &[u8],
-        permissions: &str,
-    ) -> Result<ApiKeyRecord, WalletStorageError>;
-    fn api_keys_revoke(&mut self, id: i64) -> Result<(), WalletStorageError>;
-    fn api_keys_touch(&mut self, id: i64, now: i64) -> Result<(), WalletStorageError>;
 }
 
 pub trait WalletEventStoreWriter {

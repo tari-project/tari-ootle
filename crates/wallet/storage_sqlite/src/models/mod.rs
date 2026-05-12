@@ -1,40 +1,38 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-pub mod account;
+mod account;
+mod address_book_entry;
 pub mod api_key;
-pub mod authored_template;
-pub mod confidential_output;
-pub mod config;
-pub mod key_manager;
-pub mod lock;
-pub mod non_fungible_token;
-pub mod resource;
-pub mod shard_state_version;
-pub mod stealth_output;
-pub mod substate;
-pub mod transaction;
-pub mod utxo_process_queue;
-pub mod vault;
-pub mod wallet_event;
-pub mod webauthn;
 
-pub use account::Account;
+mod config;
+
+mod confidential_output;
+
+mod substate;
+
+mod transaction;
+
+mod vault;
+
+mod authored_template;
+mod non_fungible_tokens;
+mod resource;
+mod stealth_output;
+mod utxo_process_queue;
+mod webauthn_registrations;
+
+pub use account::*;
+pub use address_book_entry::*;
 pub use api_key::{ApiKey, NewApiKey};
-pub use authored_template::AuthoredTemplate;
-pub use confidential_output::ConfidentialOutput;
-pub use config::Config;
-pub use key_manager::{KeyManagerImportedKey, KeyManagerState};
-pub use lock::Lock;
-pub use non_fungible_token::NonFungibleToken;
-pub use resource::ResourceModel;
-pub use shard_state_version::ShardStateVersion;
-pub use stealth_output::StealthOutput;
+pub use authored_template::*;
+pub use confidential_output::*;
+pub use config::*;
+pub use non_fungible_tokens::*;
+pub use resource::*;
+pub use stealth_output::*;
 pub use substate::Substate;
-pub use transaction::TransactionRecord;
-pub use utxo_process_queue::UtxoProcessQueue;
+pub use transaction::*;
+pub use utxo_process_queue::*;
 pub use vault::Vault;
-pub use wallet_event::WalletEvent;
-pub use webauthn::{WebauthnRegistration, WebauthnRegistrationPasskey};
-
-pub type AddressBookEntry = super::address_book::AddressBookEntry;
+pub use webauthn_registrations::*;

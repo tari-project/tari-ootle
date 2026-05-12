@@ -176,10 +176,13 @@ fn touch_last_used_updates_timestamp() {
 #[test]
 fn touch_last_used_on_revoked_key_is_noop_not_error() {
     // The auth path calls touch_last_used AFTER successful credential
-    // verification, so it can race a concurrent revoke. The "auth
-    // succeeded" guarantee must not be undone by a write failure here —
-    // the function must succeed silently even when the row is gone /
-    // revoked from under it.
+    // verification, so it can race a concurrent revoke. Two invariants:
+    //   1. The function must succeed silently even when the row has been
+    //      revoked from under it (the "auth succeeded" guarantee cannot
+    //      be undone by a write failure here).
+    //   2. The revoked row's last_used_at must NOT be bumped: an active
+    //      filter on the update query prevents the bump so the audit log
+    //      cannot show activity on a key after its revocation timestamp.
     let db = open_store();
 
     let id = {
@@ -195,10 +198,20 @@ fn touch_last_used_on_revoked_key_is_noop_not_error() {
         tx.commit().unwrap();
     }
 
+    {
+        let mut tx = db.create_write_tx().unwrap();
+        tx.api_key_touch_last_used(id)
+            .expect("touch on revoked id must succeed silently");
+        tx.commit().unwrap();
+    }
+
+    // Invariant 2: the revoked row's last_used_at is still None.
     let mut tx = db.create_write_tx().unwrap();
-    tx.api_key_touch_last_used(id)
-        .expect("touch on revoked id must succeed silently");
-    tx.commit().unwrap();
+    let row = tx.api_key_get_by_id(id).unwrap();
+    assert!(
+        row.last_used_at.is_none(),
+        "touch_last_used must not bump last_used_at on a revoked key",
+    );
 }
 
 #[test]

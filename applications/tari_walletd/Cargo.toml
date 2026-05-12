@@ -33,7 +33,7 @@ tari_utilities = { workspace = true }
 
 async-trait = { workspace = true }
 anyhow = { workspace = true }
-base64 = "0.22.1"
+base64 = { workspace = true }
 blake2 = { workspace = true }
 axum = { workspace = true }
 axum-extra = { workspace = true, features = ["typed-header", "cookie"] }

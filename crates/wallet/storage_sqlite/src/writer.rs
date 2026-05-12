@@ -1810,15 +1810,22 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         let now = time::OffsetDateTime::now_utc();
         let now = time::PrimitiveDateTime::new(now.date(), now.time());
 
-        // `affected = 0` is not an error here: a stale `last_used` bump on
-        // an already-revoked key is a harmless no-op. Auth has already
-        // succeeded so we must not surface a write failure to the caller.
-        let _ = diesel::update(api_keys::table.filter(api_keys::id.eq(id)))
-            .set(models::ApiKeyLastUsedChangeset {
-                last_used_at: Some(now),
-            })
-            .execute(self.connection())
-            .map_err(|e| WalletStorageError::general("api_key_touch_last_used", e))?;
+        // The active filter (`revoked_at IS NULL`) makes this a no-op on a
+        // revoked row. The auth path calls this AFTER credential verification,
+        // so it can race a concurrent revoke; in that race the row is gone
+        // from the active set and `affected = 0` is the correct outcome (not
+        // an error). Auth has already succeeded so we must not surface a
+        // write failure to the caller either way.
+        let _ = diesel::update(
+            api_keys::table
+                .filter(api_keys::id.eq(id))
+                .filter(api_keys::revoked_at.is_null()),
+        )
+        .set(models::ApiKeyLastUsedChangeset {
+            last_used_at: Some(now),
+        })
+        .execute(self.connection())
+        .map_err(|e| WalletStorageError::general("api_key_touch_last_used", e))?;
 
         Ok(())
     }

@@ -269,7 +269,7 @@ pub async fn handle_revoke_api_key(
 /// deterministic (sorted by display form) so a re-list returns the same
 /// string the user supplied at creation time.
 fn format_permissions(p: &JrpcPermissions) -> String {
-    let mut parts: Vec<String> = p.clone().into_vec().iter().map(|p| p.to_string()).collect();
+    let mut parts: Vec<String> = p.iter().map(|p| p.to_string()).collect();
     parts.sort();
     parts.join(", ")
 }

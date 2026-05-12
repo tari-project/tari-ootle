@@ -505,6 +505,162 @@ mod e2e_tests {
         );
     }
 
+    /// Wire-format tests — pin the JSON schema that real JSON-RPC clients
+    /// (curl, the JS client, untyped HTTP libraries) will send to / receive
+    /// from the daemon. If any of these regress, the JS/CLI/curl integration
+    /// breaks even when the in-process Rust calls still work. These are
+    /// cheaper and more reliable than spinning up the daemon for HTTP tests
+    /// but cover the same wire-format concern.
+    mod wire_format {
+        use serde_json::json;
+        use tari_ootle_walletd_client::{
+            permissions::JrpcPermission,
+            types::{
+                AuthCreateApiKeyRequest,
+                AuthCreateApiKeyResponse,
+                AuthCredentials,
+                AuthListApiKeysRequest,
+                AuthListApiKeysResponse,
+                AuthLoginRequest,
+                AuthRevokeApiKeyRequest,
+                AuthRevokeApiKeyResponse,
+                IssuedApiKey,
+            },
+        };
+
+        #[test]
+        fn auth_credentials_api_key_variant_serialises_as_externally_tagged_object() {
+            // External clients submit `{"ApiKey": "tw_..."}` and expect the
+            // enum to deserialise back. serde defaults to externally-tagged
+            // for this enum, so the variant name is the key. Pin that here.
+            let cred = AuthCredentials::ApiKey("tw_test123".to_string());
+            let v = serde_json::to_value(&cred).unwrap();
+            assert_eq!(v, json!({"ApiKey": "tw_test123"}));
+
+            let round_tripped: AuthCredentials = serde_json::from_value(v).unwrap();
+            assert_eq!(round_tripped.as_api_key(), Some("tw_test123"));
+        }
+
+        #[test]
+        fn auth_login_request_with_api_key_round_trips_through_json() {
+            // Exact shape an agent calling `auth.request` with an API key
+            // submits over the wire. Captures the contract the JS client +
+            // direct-curl users depend on.
+            let req = AuthLoginRequest {
+                permissions: vec![],
+                credentials: AuthCredentials::ApiKey("tw_secret".to_string()),
+            };
+            let v = serde_json::to_value(&req).unwrap();
+            assert_eq!(
+                v,
+                json!({
+                    "permissions": [],
+                    "credentials": {"ApiKey": "tw_secret"}
+                })
+            );
+            // And it round-trips: a JSON payload constructed by a non-Rust
+            // client must deserialise into the same shape.
+            let parsed: AuthLoginRequest = serde_json::from_value(v).unwrap();
+            assert_eq!(parsed.credentials.as_api_key(), Some("tw_secret"));
+        }
+
+        #[test]
+        fn create_request_confirm_admin_defaults_to_false_when_omitted() {
+            // `#[serde(default)]` on the field means JS / TS clients can
+            // omit it for the common non-admin case. Verify the wire-level
+            // contract: missing field deserialises to `false`.
+            let v = json!({
+                "name": "agent-1",
+                "permissions": ["AccountInfo"]
+                // confirm_admin omitted
+            });
+            let req: AuthCreateApiKeyRequest = serde_json::from_value(v).unwrap();
+            assert_eq!(req.name, "agent-1");
+            assert_eq!(req.permissions, vec!["AccountInfo".to_string()]);
+            assert!(!req.confirm_admin);
+        }
+
+        #[test]
+        fn create_request_explicit_confirm_admin_round_trips() {
+            let req = AuthCreateApiKeyRequest {
+                name: "dangerous".to_string(),
+                permissions: vec!["Admin".to_string()],
+                confirm_admin: true,
+            };
+            let v = serde_json::to_value(&req).unwrap();
+            // Order is deterministic for serde struct serialisation.
+            assert_eq!(v["confirm_admin"], true);
+            assert_eq!(v["name"], "dangerous");
+            let parsed: AuthCreateApiKeyRequest = serde_json::from_value(v).unwrap();
+            assert!(parsed.confirm_admin);
+        }
+
+        #[test]
+        fn create_response_carries_the_raw_key_and_metadata() {
+            // The create response is the only place the raw key surfaces.
+            // Make sure the JSON shape matches what the Rust + JS clients
+            // expect to parse.
+            let resp = AuthCreateApiKeyResponse {
+                id: 42,
+                name: "monitor".to_string(),
+                permissions: vec![JrpcPermission::AccountInfo, JrpcPermission::TransactionGet],
+                api_key: "tw_secretmaterial".to_string(),
+                created_at: 1_700_000_000,
+            };
+            let v = serde_json::to_value(&resp).unwrap();
+            assert_eq!(v["id"], 42);
+            assert_eq!(v["api_key"], "tw_secretmaterial");
+            assert_eq!(v["created_at"], 1_700_000_000);
+            // permissions is a typed array, not just strings — clients can
+            // pattern-match on it.
+            assert!(v["permissions"].is_array());
+        }
+
+        #[test]
+        fn list_request_is_an_empty_object_for_pnpm_clients() {
+            // The JS client passes `{}` for list. Verify the empty shape
+            // deserialises cleanly so we don't accidentally break the
+            // bog-standard list flow.
+            let parsed: AuthListApiKeysRequest = serde_json::from_value(json!({})).unwrap();
+            // No fields to assert — but the parse not panicking IS the test.
+            let _ = parsed;
+        }
+
+        #[test]
+        fn list_response_revoked_timestamp_is_null_for_active_keys() {
+            // The TS binding `revoked_at: bigint | null` — the JSON must
+            // emit `null` (not omit the field) for active keys so the
+            // JS client's null check works.
+            let resp = AuthListApiKeysResponse {
+                keys: vec![IssuedApiKey {
+                    id: 1,
+                    name: "active".to_string(),
+                    permissions: vec![JrpcPermission::AccountInfo],
+                    created_at: 1_700_000_000,
+                    last_used_at: None,
+                    revoked_at: None,
+                }],
+            };
+            let v = serde_json::to_value(&resp).unwrap();
+            // Field must be present and null for active keys.
+            assert!(v["keys"][0]["revoked_at"].is_null());
+            assert!(v["keys"][0]["last_used_at"].is_null());
+        }
+
+        #[test]
+        fn revoke_request_takes_only_an_id() {
+            let req = AuthRevokeApiKeyRequest { id: 99 };
+            let v = serde_json::to_value(&req).unwrap();
+            assert_eq!(v, json!({"id": 99}));
+
+            let resp = AuthRevokeApiKeyResponse {};
+            let v = serde_json::to_value(&resp).unwrap();
+            // Empty response object — `{}` not `null` so JS clients can
+            // dot-access without an undefined check.
+            assert_eq!(v, json!({}));
+        }
+    }
+
     /// Refresh-cookie invariant: the login handler MUST NOT issue a
     /// refresh cookie for API-key-authenticated sessions.
     ///

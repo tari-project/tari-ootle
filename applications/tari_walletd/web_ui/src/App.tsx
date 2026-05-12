@@ -25,6 +25,7 @@ import { useAuthMethod } from "@api/hooks/useAuth";
 import { AuthDialog } from "@components/auth";
 import Loading from "@components/Loading";
 import AccessTokensLayout from "@routes/AccessTokens/AccessTokens";
+import ApiKeysLayout from "@routes/ApiKeys/ApiKeys";
 import AccountDetails from "@routes/AccountDetails/AccountDetails";
 import Accounts from "@routes/Accounts/Accounts";
 import AddressBookPage from "@routes/AddressBook/AddressBookPage";
@@ -232,6 +233,7 @@ function App() {
             path="access-tokens"
             element={<GuardedRoute redirect="/access-tokens" component={AccessTokensLayout} />}
           />
+          <Route path="api-keys" element={<GuardedRoute redirect="/api-keys" component={ApiKeysLayout} />} />
           <Route path="transactions" element={<GuardedRoute redirect="/transactions" component={Transactions} />} />
           <Route path="wallet" element={<GuardedRoute redirect="/wallet" component={Wallet} />} />
           <Route

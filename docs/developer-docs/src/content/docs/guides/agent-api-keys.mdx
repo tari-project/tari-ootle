@@ -56,6 +56,19 @@ For a trading agent that needs to submit transactions from one specific account:
 Granting `Admin` to an API key is allowed (since you have it), but the daemon requires you to set
 `confirm_admin: true` in the create request so a UI checkbox can be the gate, not the JSON-RPC payload alone.
 
+### Mint a key (Wallet Web UI)
+
+Navigate to **API Keys** in the wallet daemon's web UI (`/api-keys` route, requires Admin auth):
+
+1. Click **Create API Key**.
+2. Enter a friendly name and the comma-separated scope list (`AccountInfo, TransactionGet, …`).
+3. If granting `Admin`, tick the explicit confirmation checkbox — the form refuses to submit Admin without it.
+4. The dialog shows the raw key exactly once with a copy-to-clipboard button. **Copy it before dismissing.** Once you
+   close the dialog the daemon cannot surface it again.
+
+The same page lists all active and revoked keys with last-used timestamps, with an inline **Revoke** action per row.
+Revocation is immediate.
+
 ### Mint a key (`tari_ootle_wallet_cli`)
 
 The CLI binary wraps the same JSON-RPC endpoints for shell-based admin workflows. Authenticate as an Admin first

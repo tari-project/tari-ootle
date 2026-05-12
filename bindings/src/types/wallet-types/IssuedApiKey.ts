@@ -6,18 +6,22 @@ import type { JrpcPermission } from "../JrpcPermission";
  * minus the hash (which the admin doesn't need to see) and the raw key
  * (which doesn't exist anywhere persistent).
  */
-export type IssuedApiKey = { id: number, name: string, permissions: Array<JrpcPermission>, 
-/**
- * Unix timestamp (seconds).
- */
-created_at: bigint, 
-/**
- * Unix timestamp (seconds). `None` if the key has never been used to
- * authenticate since creation.
- */
-last_used_at: bigint | null, 
-/**
- * Unix timestamp (seconds). `None` for an active key; non-null means
- * the key has been revoked and is no longer usable.
- */
-revoked_at: bigint | null, };
+export type IssuedApiKey = {
+  id: number;
+  name: string;
+  permissions: Array<JrpcPermission>;
+  /**
+   * Unix timestamp (seconds).
+   */
+  created_at: bigint;
+  /**
+   * Unix timestamp (seconds). `None` if the key has never been used to
+   * authenticate since creation.
+   */
+  last_used_at: bigint | null;
+  /**
+   * Unix timestamp (seconds). `None` for an active key; non-null means
+   * the key has been revoked and is no longer usable.
+   */
+  revoked_at: bigint | null;
+};

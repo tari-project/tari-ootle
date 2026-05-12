@@ -9,4 +9,4 @@
  * permission — this is a deliberate speed-bump so the UI can render an
  * explicit warning before issuing a fully-privileged credential.
  */
-export type AuthCreateApiKeyRequest = { name: string, permissions: Array<string>, confirm_admin: boolean, };
+export type AuthCreateApiKeyRequest = { name: string; permissions: Array<string>; confirm_admin: boolean };

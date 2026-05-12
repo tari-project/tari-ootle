@@ -100,10 +100,16 @@ use crate::{
         AddressBookListResponse,
         AddressBookUpdateRequest,
         AddressBookUpdateResponse,
+        AuthCreateApiKeyRequest,
+        AuthCreateApiKeyResponse,
         AuthGetMethodRequest,
         AuthGetMethodResponse,
+        AuthListApiKeysRequest,
+        AuthListApiKeysResponse,
         AuthListSessionsRequest,
         AuthListSessionsResponse,
+        AuthRevokeApiKeyRequest,
+        AuthRevokeApiKeyResponse,
         AuthRevokeTokenRequest,
         AuthRevokeTokenResponse,
         BurnProofsGetRequest,
@@ -598,6 +604,27 @@ impl WalletDaemonClient {
         req: T,
     ) -> Result<AuthListSessionsResponse, WalletDaemonClientError> {
         self.send_request("auth.list_sessions", req.borrow()).await
+    }
+
+    /// Creates a new API key. The raw key is returned only once — store it securely.
+    pub async fn auth_create_api_key<T: Borrow<AuthCreateApiKeyRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AuthCreateApiKeyResponse, WalletDaemonClientError> {
+        self.send_request("auth.create_api_key", req.borrow()).await
+    }
+
+    /// Lists all API keys (does not return raw key values).
+    pub async fn auth_list_api_keys(&mut self) -> Result<AuthListApiKeysResponse, WalletDaemonClientError> {
+        self.send_request("auth.list_api_keys", &AuthListApiKeysRequest {}).await
+    }
+
+    /// Revokes an API key by ID. Already-issued JWTs remain valid until expiry.
+    pub async fn auth_revoke_api_key<T: Borrow<AuthRevokeApiKeyRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AuthRevokeApiKeyResponse, WalletDaemonClientError> {
+        self.send_request("auth.revoke_api_key", req.borrow()).await
     }
 
     /// Initiates a WebRTC signalling session with the wallet daemon.

@@ -65,9 +65,10 @@ bitflags! {
         const VALIDATOR_FEE_POOL = 0x0000_0040;
         const UTXO = 0x0000_0080;
         const CLAIMED_OUTPUT_TOMBSTONE = 0x0000_0100;
-        /// Return only template metadata (name, author, hash, epoch) instead of the full WASM binary.
-        /// When set for a template substate, the sync response carries `SubstateData.template_metadata`
-        /// and `SubstateValueOrHash::Hash` (the state hash) rather than the full value.
+        /// Populate `SubstateData.template_metadata` for template substates.
+        /// On its own (without `TEMPLATE`), the response omits the WASM binary and carries
+        /// `SubstateValueOrHash::Hash` for templates. When combined with `TEMPLATE`, the full
+        /// binary is sent and the metadata field is populated alongside it.
         const TEMPLATE_METADATA = 0x0000_0200;
         /// Include all hashes for substates even if filtered out
         const ALL_HASHES = 0x1000_0000;

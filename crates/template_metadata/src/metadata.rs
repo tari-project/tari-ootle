@@ -70,9 +70,24 @@ pub struct TemplateMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     pub supersedes: Option<TemplateAddress>,
+    /// Rustdoc comments extracted from public functions of the template, keyed by source order.
     #[n(13)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub functions: Vec<FunctionMetadata>,
+    #[n(14)]
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, String>,
+}
+
+/// Off-chain documentation for a single public template function.
+#[derive(Debug, Clone, Encode, Decode, CborLen, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct FunctionMetadata {
+    #[n(0)]
+    pub name: String,
+    #[n(1)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub doc: String,
 }
 
 /// minicbor adapter for `Option<Url>`. Encodes `None` as CBOR null and `Some(url)` as a text string.
@@ -172,6 +187,7 @@ impl TemplateMetadata {
             license: None,
             logo_url: None,
             supersedes: None,
+            functions: Vec::new(),
             extra: BTreeMap::new(),
         }
     }
@@ -249,6 +265,10 @@ mod tests {
             supersedes: Some(
                 TemplateAddress::from_hex("0000000000000000000000000000000000000000000000000000000000000001").unwrap(),
             ),
+            functions: vec![FunctionMetadata {
+                name: "transfer".to_string(),
+                doc: "Move funds between accounts.".to_string(),
+            }],
             extra: BTreeMap::new(),
         };
 
@@ -316,6 +336,7 @@ mod tests {
             license: None,
             logo_url: None,
             supersedes: None,
+            functions: Vec::new(),
             extra: BTreeMap::new(),
         };
 

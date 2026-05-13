@@ -125,6 +125,7 @@ fn from_manifest(manifest: &Manifest) -> Result<TemplateMetadata, CargoTomlError
         license,
         logo_url,
         supersedes,
+        functions: Vec::new(),
         extra,
     })
 }

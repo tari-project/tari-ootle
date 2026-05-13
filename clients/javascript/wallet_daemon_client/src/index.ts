@@ -127,6 +127,35 @@ export * as transports from "./transports";
 
 export { substateIdToString, stringToSubstateId, rejectReasonToString };
 
+// API key types (pending TS bindings regeneration from Rust types)
+export interface AuthCreateApiKeyRequest {
+  name: string;
+  permissions: JrpcPermission[];
+}
+
+export interface AuthCreateApiKeyResponse {
+  id: number;
+  name: string;
+  key: string;
+}
+
+export interface ApiKeyInfo {
+  id: number;
+  name: string;
+  permissions: JrpcPermission[];
+  created_at: number;
+  last_used_at: number | null;
+  revoked_at: number | null;
+}
+
+export interface AuthListApiKeysResponse {
+  keys: ApiKeyInfo[];
+}
+
+export interface AuthRevokeApiKeyRequest {
+  id: number;
+}
+
 export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
   private token: string | null;
   private transport: T;
@@ -145,6 +174,21 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
   public static usingFetchTransport(url: string): WalletDaemonClient {
     return WalletDaemonClient.new(FetchRpcTransport.new(url));
+  }
+
+  /**
+   * Authenticate a client using an API key and return a ready-to-use client.
+   * The client's JWT is set automatically — no further auth call needed.
+   */
+  public static async authenticateWithApiKey(
+    url: string,
+    apiKey: string,
+    permissions: JrpcPermission[],
+  ): Promise<WalletDaemonClient> {
+    const client = WalletDaemonClient.usingFetchTransport(url);
+    const token = await client.authRequest(permissions, { ApiKey: apiKey } as AuthCredentials);
+    client.setToken(token);
+    return client;
   }
 
   public setReauthenticationEnabled(enabled: boolean) {
@@ -190,6 +234,20 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
   public authRefresh(): Promise<AuthRefreshResponse> {
     return this.sendRequest("auth.refresh");
+  }
+
+  // API key management
+
+  public authCreateApiKey(params: AuthCreateApiKeyRequest): Promise<AuthCreateApiKeyResponse> {
+    return this.sendRequest("auth.create_api_key", params);
+  }
+
+  public authListApiKeys(): Promise<AuthListApiKeysResponse> {
+    return this.sendRequest("auth.list_api_keys", {});
+  }
+
+  public authRevokeApiKey(params: AuthRevokeApiKeyRequest): Promise<void> {
+    return this.sendRequest("auth.revoke_api_key", params);
   }
 
   public walletGetInfo(): Promise<WalletGetInfoResponse> {

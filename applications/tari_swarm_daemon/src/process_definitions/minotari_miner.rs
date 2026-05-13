@@ -9,7 +9,7 @@ use minotari_node_grpc_client::grpc;
 use tari_common_types::tari_address::TariAddress;
 use tokio::process::Command;
 
-use crate::process_definitions::{ProcessContext, ProcessDefinition};
+use crate::process_definitions::{ARGS_SETTINGS_KEY, ProcessContext, ProcessDefinition};
 
 #[derive(Debug, Default)]
 pub struct MinotariMiner;
@@ -64,6 +64,12 @@ impl ProcessDefinition for MinotariMiner {
             ))
             .arg("-pminer.sha_p2pool_enabled=false")
             .arg("-pminer.num_mining_threads=1");
+
+        if let Some(args) = context.get_setting(ARGS_SETTINGS_KEY) {
+            for arg in args.split_whitespace() {
+                command.arg(arg);
+            }
+        }
 
         Ok(command)
     }

@@ -28,3 +28,5 @@ pub fn get_definition(instance_type: InstanceType) -> Box<dyn ProcessDefinition 
         InstanceType::TariWalletDaemonCreateKey => Box::new(wallet_daemon_create_key::WalletDaemonCreateAccount::new()),
     }
 }
+
+pub const ARGS_SETTINGS_KEY: &str = "args";

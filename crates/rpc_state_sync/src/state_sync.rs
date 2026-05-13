@@ -1,7 +1,10 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, time::Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Instant,
+};
 
 use anyhow::anyhow;
 use futures::StreamExt;
@@ -44,6 +47,7 @@ use tari_ootle_storage::{
 };
 use tari_rpc_framework::{RpcError, RpcStatusCode};
 use tari_state_tree::{SPARSE_MERKLE_PLACEHOLDER_HASH, SpreadPrefixStateTree, SubstateTreeChange, TreeHash, Version};
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_validator_node_rpc::{
     STATE_SYNC_MAX_BATCH_SIZE,
     client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory},
@@ -669,16 +673,13 @@ impl<TConsensusSpec> RpcStateSyncClientProtocol<TConsensusSpec>
 where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
 {
     /// Probe committee members for their highest QCs and classify the result. See `ProbeOutcome`.
+    #[expect(clippy::too_many_lines)]
     async fn probe_high_qcs_at_leaf(
         &self,
         committee: &Committee<PeerAddress>,
         leaf: &LeafBlock,
         our_addr: &PeerAddress,
     ) -> Result<ProbeOutcome, RpcStateSyncError> {
-        use std::collections::HashSet;
-
-        use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
-
         let leaf_epoch = leaf.epoch();
         let quorum_threshold = committee.quorum_threshold();
 
@@ -783,7 +784,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
 
             // QC is at our leaf's epoch — count this peer's attestation (by public key) toward
             // the "no-higher-QC" quorum.
-            if counted_pks.insert(member.public_key.clone()) {
+            if counted_pks.insert(member.public_key) {
                 attested_power += member.vote_power;
             }
 

@@ -1678,7 +1678,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                             None
                         };
 
-                        let is_metadata_only = metadata_mode && substate.substate_id.is_template();
+                        let is_metadata_only = metadata_mode &&
+                            !value_filter.contains(SubstateValueFilterFlags::TEMPLATE) &&
+                            substate.substate_id.is_template();
                         let resolved_value = value_filter
                                 .contains_substate(&substate.substate_id)
                                 // filter includes substate, return full value if available (unless metadata-only for templates), otherwise return hash

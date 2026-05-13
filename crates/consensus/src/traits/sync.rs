@@ -15,4 +15,8 @@ pub trait SyncManager {
 pub enum SyncStatus {
     UpToDate,
     Behind,
+    /// The sync manager could not determine whether we are behind or up to date — for example,
+    /// not enough committee members responded to a recovery probe. The state machine should
+    /// back off and retry [`SyncManager::check_sync`] without entering the syncing phase.
+    Inconclusive,
 }

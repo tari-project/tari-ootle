@@ -7,7 +7,13 @@ use anyhow::Context;
 use async_trait::async_trait;
 use tokio::process::Command;
 
-use crate::process_definitions::{ProcessContext, ProcessDefinition, wallet_daemon, wallet_daemon::WalletDaemon};
+use crate::process_definitions::{
+    ARGS_SETTINGS_KEY,
+    ProcessContext,
+    ProcessDefinition,
+    wallet_daemon,
+    wallet_daemon::WalletDaemon,
+};
 
 #[derive(Debug, Default)]
 pub struct WalletDaemonCreateAccount;
@@ -49,6 +55,12 @@ impl ProcessDefinition for WalletDaemonCreateAccount {
                 .to_str()
                 .context("Non-UTF8 output path in WalletDaemonCreateAccount")?,
         ]);
+
+        if let Some(args) = context.get_setting(ARGS_SETTINGS_KEY) {
+            for arg in args.split_whitespace() {
+                command.arg(arg);
+            }
+        }
 
         Ok(command)
     }

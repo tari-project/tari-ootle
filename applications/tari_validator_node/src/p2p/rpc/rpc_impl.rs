@@ -28,7 +28,7 @@ use std::{
 use log::*;
 use tari_bor::encode;
 use tari_consensus::hotstuff::ConsensusCurrentState;
-use tari_consensus_types::BlockId;
+use tari_consensus_types::{BlockId, HighPc, ProposalCertificate};
 use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
 use tari_ootle_common_types::{
@@ -49,6 +49,8 @@ use tari_ootle_p2p::{
         GetCheckpointsResponse,
         GetConsensusStateRequest,
         GetConsensusStateResponse,
+        GetHighQcRequest,
+        GetHighQcResponse,
         GetSubstateRequest,
         GetSubstateResponse,
         GetSubstatesBatchRequest,
@@ -65,7 +67,15 @@ use tari_ootle_p2p::{
 };
 use tari_ootle_storage::{
     StateStore,
-    consensus_models::{Block, EpochCheckpoint, SubstateRecord, SubstateValueFilterFlags, TransactionRecord},
+    StateStoreReadTransaction,
+    consensus_models::{
+        Block,
+        BookkeepingEpochAgnosticRead,
+        EpochCheckpoint,
+        SubstateRecord,
+        SubstateValueFilterFlags,
+        TransactionRecord,
+    },
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
@@ -471,6 +481,37 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             epoch: Some(epoch.into()),
             height: view.get_height().as_u64(),
             state: state as i32,
+        }))
+    }
+
+    async fn get_high_qc(&self, req: Request<GetHighQcRequest>) -> Result<Response<GetHighQcResponse>, RpcStatus> {
+        let req = req.into_message();
+        let from_epoch = req.from_epoch.map(Epoch::from).unwrap_or(Epoch::zero());
+
+        let store = self.state_store.clone();
+        let (high_pc, qc): (HighPc, ProposalCertificate) = task::spawn_blocking(move || {
+            store
+                .with_read_tx(|tx| {
+                    let high_pc = HighPc::get_any(tx)?;
+                    let qc = tx.proposal_certificates_get(high_pc.epoch(), high_pc.id())?;
+                    Ok::<_, tari_ootle_storage::StorageError>((high_pc, qc))
+                })
+                .map_err(RpcStatus::log_internal_error(LOG_TARGET))
+        })
+        .await
+        .map_err(RpcStatus::log_internal_error(LOG_TARGET))??;
+
+        // Reject if caller is genuinely ahead of us — no useful answer to give.
+        if from_epoch > high_pc.epoch() {
+            return Err(RpcStatus::not_found(format!(
+                "Our high QC epoch {} is behind caller's leaf epoch {}",
+                high_pc.epoch(),
+                from_epoch
+            )));
+        }
+
+        Ok(Response::new(GetHighQcResponse {
+            high_qc: Some((&qc).into()),
         }))
     }
 

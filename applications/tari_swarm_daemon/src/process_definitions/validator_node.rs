@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use log::debug;
 use tokio::process::Command;
 
-use crate::process_definitions::{ProcessContext, ProcessDefinition};
+use crate::process_definitions::{ARGS_SETTINGS_KEY, ProcessContext, ProcessDefinition};
 
 #[derive(Debug, Default)]
 pub struct ValidatorNode;
@@ -71,6 +71,12 @@ impl ProcessDefinition for ValidatorNode {
 
         if let Some(console_port) = context.get_setting("tokio_console_port") {
             command.arg(format!("--tokio-console-port={console_port}"));
+        }
+
+        if let Some(args) = context.get_setting(ARGS_SETTINGS_KEY) {
+            for arg in args.split_whitespace() {
+                command.arg(arg);
+            }
         }
 
         Ok(command)

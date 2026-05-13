@@ -54,4 +54,10 @@ pub trait ValidatorNodeRpcService: Send + Sync + 'static {
         &self,
         req: Request<proto::GetConsensusStateRequest>,
     ) -> Result<Response<proto::GetConsensusStateResponse>, RpcStatus>;
+
+    #[rpc(method = 9)]
+    async fn get_high_qc(
+        &self,
+        req: Request<proto::GetHighQcRequest>,
+    ) -> Result<Response<proto::GetHighQcResponse>, RpcStatus>;
 }

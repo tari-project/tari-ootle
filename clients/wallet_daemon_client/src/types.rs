@@ -1484,7 +1484,7 @@ pub struct AuthCreateApiKeyRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AuthCreateApiKeyResponse {
-    pub id: i32,
+    pub id: i64,
     pub name: String,
     /// The raw API key — only returned once. Store securely.
     pub key: String,
@@ -1495,7 +1495,7 @@ pub struct AuthCreateApiKeyResponse {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct ApiKeyInfo {
-    pub id: i32,
+    pub id: i64,
     pub name: String,
     pub permissions: Vec<String>,
     pub created_at: i64,
@@ -1516,7 +1516,7 @@ pub struct AuthListApiKeysResponse {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AuthRevokeApiKeyRequest {
-    pub id: i32,
+    pub id: i64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

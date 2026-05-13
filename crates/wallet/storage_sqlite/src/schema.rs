@@ -19,7 +19,7 @@ diesel::table! {
 
 diesel::table! {
     api_keys (id) {
-        id -> Integer,
+        id -> BigInt,
         name -> Text,
         key_hash -> Binary,
         permissions -> Text,

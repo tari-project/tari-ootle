@@ -98,8 +98,8 @@ pub trait ApiKeyStore {
     fn api_keys_insert(&mut self, name: &str, key_hash: &[u8], permissions: &str) -> Result<ApiKey, WalletStorageError>;
     fn api_keys_get_by_hash(&mut self, key_hash: &[u8]) -> Result<ApiKey, WalletStorageError>;
     fn api_keys_list_all(&mut self) -> Result<Vec<ApiKey>, WalletStorageError>;
-    fn api_keys_revoke(&mut self, id: i32, now: i64) -> Result<(), WalletStorageError>;
-    fn api_keys_touch(&mut self, id: i32, now: i64) -> Result<(), WalletStorageError>;
+    fn api_keys_revoke(&mut self, id: i64, now: i64) -> Result<(), WalletStorageError>;
+    fn api_keys_touch(&mut self, id: i64, now: i64) -> Result<(), WalletStorageError>;
 }
 
 fn now_unix() -> i64 {
@@ -107,6 +107,28 @@ fn now_unix() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+fn api_keys_get_by_hash_conn(conn: &mut SqliteConnection, key_hash: &[u8]) -> Result<ApiKey, WalletStorageError> {
+    use crate::schema::api_keys;
+    api_keys::table
+        .filter(api_keys::key_hash.eq(key_hash))
+        .first::<ApiKey>(conn)
+        .optional()
+        .map_err(|e| WalletStorageError::general("api_keys_get_by_hash", e))?
+        .ok_or_else(|| WalletStorageError::NotFound {
+            operation: "api_keys_get_by_hash",
+            entity: "api_key".to_string(),
+            key: "<hash>".to_string(),
+        })
+}
+
+fn api_keys_list_all_conn(conn: &mut SqliteConnection) -> Result<Vec<ApiKey>, WalletStorageError> {
+    use crate::schema::api_keys;
+    api_keys::table
+        .order(api_keys::created_at.desc())
+        .get_results::<ApiKey>(conn)
+        .map_err(|e| WalletStorageError::general("api_keys_list_all", e))
 }
 
 impl ApiKeyStore for WriteTransaction<'_> {
@@ -123,34 +145,20 @@ impl ApiKeyStore for WriteTransaction<'_> {
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("api_keys_insert", e))?;
         api_keys::table
-            .order(api_keys::id.desc())
+            .filter(api_keys::key_hash.eq(key_hash))
             .first::<ApiKey>(self.connection())
             .map_err(|e| WalletStorageError::general("api_keys_insert_fetch", e))
     }
 
     fn api_keys_get_by_hash(&mut self, key_hash: &[u8]) -> Result<ApiKey, WalletStorageError> {
-        use crate::schema::api_keys;
-        api_keys::table
-            .filter(api_keys::key_hash.eq(key_hash))
-            .first::<ApiKey>(self.connection())
-            .optional()
-            .map_err(|e| WalletStorageError::general("api_keys_get_by_hash", e))?
-            .ok_or_else(|| WalletStorageError::NotFound {
-                operation: "api_keys_get_by_hash",
-                entity: "api_key".to_string(),
-                key: "<hash>".to_string(),
-            })
+        api_keys_get_by_hash_conn(self.connection(), key_hash)
     }
 
     fn api_keys_list_all(&mut self) -> Result<Vec<ApiKey>, WalletStorageError> {
-        use crate::schema::api_keys;
-        api_keys::table
-            .order(api_keys::created_at.desc())
-            .get_results::<ApiKey>(self.connection())
-            .map_err(|e| WalletStorageError::general("api_keys_list_all", e))
+        api_keys_list_all_conn(self.connection())
     }
 
-    fn api_keys_revoke(&mut self, id: i32, now: i64) -> Result<(), WalletStorageError> {
+    fn api_keys_revoke(&mut self, id: i64, now: i64) -> Result<(), WalletStorageError> {
         use crate::schema::api_keys;
         diesel::update(api_keys::table.filter(api_keys::id.eq(id)))
             .set(api_keys::revoked_at.eq(Some(now)))
@@ -159,7 +167,7 @@ impl ApiKeyStore for WriteTransaction<'_> {
         Ok(())
     }
 
-    fn api_keys_touch(&mut self, id: i32, now: i64) -> Result<(), WalletStorageError> {
+    fn api_keys_touch(&mut self, id: i64, now: i64) -> Result<(), WalletStorageError> {
         use crate::schema::api_keys;
         diesel::update(api_keys::table.filter(api_keys::id.eq(id)))
             .set(api_keys::last_used_at.eq(Some(now)))
@@ -175,32 +183,18 @@ impl ApiKeyStore for ReadTransaction<'_> {
     }
 
     fn api_keys_get_by_hash(&mut self, key_hash: &[u8]) -> Result<ApiKey, WalletStorageError> {
-        use crate::schema::api_keys;
-        api_keys::table
-            .filter(api_keys::key_hash.eq(key_hash))
-            .first::<ApiKey>(self.connection())
-            .optional()
-            .map_err(|e| WalletStorageError::general("api_keys_get_by_hash", e))?
-            .ok_or_else(|| WalletStorageError::NotFound {
-                operation: "api_keys_get_by_hash",
-                entity: "api_key".to_string(),
-                key: "<hash>".to_string(),
-            })
+        api_keys_get_by_hash_conn(self.connection(), key_hash)
     }
 
     fn api_keys_list_all(&mut self) -> Result<Vec<ApiKey>, WalletStorageError> {
-        use crate::schema::api_keys;
-        api_keys::table
-            .order(api_keys::created_at.desc())
-            .get_results::<ApiKey>(self.connection())
-            .map_err(|e| WalletStorageError::general("api_keys_list_all", e))
+        api_keys_list_all_conn(self.connection())
     }
 
-    fn api_keys_revoke(&mut self, _id: i32, _now: i64) -> Result<(), WalletStorageError> {
+    fn api_keys_revoke(&mut self, _id: i64, _now: i64) -> Result<(), WalletStorageError> {
         Err(WalletStorageError::general("api_keys_revoke", "write operation on read transaction"))
     }
 
-    fn api_keys_touch(&mut self, _id: i32, _now: i64) -> Result<(), WalletStorageError> {
+    fn api_keys_touch(&mut self, _id: i64, _now: i64) -> Result<(), WalletStorageError> {
         Err(WalletStorageError::general("api_keys_touch", "write operation on read transaction"))
     }
 }

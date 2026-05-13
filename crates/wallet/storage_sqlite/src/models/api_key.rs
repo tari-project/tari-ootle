@@ -8,7 +8,7 @@ use crate::schema::api_keys;
 #[derive(Debug, Clone, Queryable, Identifiable, Selectable)]
 #[diesel(table_name = api_keys)]
 pub struct ApiKey {
-    pub id: i32,
+    pub id: i64,
     pub name: String,
     pub key_hash: Vec<u8>,
     pub permissions: String,

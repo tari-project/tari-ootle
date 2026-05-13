@@ -21,6 +21,7 @@ use tari_ootle_walletd_client::{
         ApiKeyInfo,
         AuthCreateApiKeyRequest,
         AuthCreateApiKeyResponse,
+        AuthCredentials,
         AuthGetMethodRequest,
         AuthGetMethodResponse,
         AuthListApiKeysRequest,
@@ -49,69 +50,77 @@ pub const REFRESH_TOKEN_COOKIE: &str = "r-tkn";
 
 const API_KEY_PREFIX: &str = "twda_";
 
+fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
 pub async fn handle_login_request(
     context: &HandlerContext,
     _token: Option<&Bearer>,
     request: (axum_jrpc::Id, AuthLoginRequest),
 ) -> Result<(CookieJar, JsonRpcResponse), anyhow::Error> {
     let (answer_id, request) = request;
+    // Destructure so each arm can move its field without a non-zeroized copy.
+    let AuthLoginRequest { credentials, permissions } = request;
 
-    // API-key authentication path — handled before the regular authenticator.
-    if let Some(raw_key) = request.credentials.as_api_key() {
-        let raw_key = Zeroizing::new(raw_key.to_owned());
-        let hash: Vec<u8> = Sha256::digest(raw_key.as_bytes()).to_vec();
+    match credentials {
+        // API-key path: move the raw key directly into Zeroizing — no intermediate copy.
+        AuthCredentials::ApiKey(raw_key) => {
+            let raw_key = Zeroizing::new(raw_key);
+            let hash: Vec<u8> = Sha256::digest(raw_key.as_bytes()).to_vec();
 
-        let kid = context.wallet_sdk().store().with_write_tx(|tx| {
-            let row = tx
-                .api_keys_get_by_hash(&hash)
-                .map_err(|_| anyhow::anyhow!("Invalid API key"))?;
+            let kid = context.wallet_sdk().store().with_write_tx(|tx| {
+                let row = tx
+                    .api_keys_get_by_hash(&hash)
+                    .map_err(|_| anyhow::anyhow!("Invalid API key"))?;
 
-            // Constant-time comparison guards against timing side-channels.
-            if !bool::from(row.key_hash.as_slice().ct_eq(&hash)) {
-                return Err(anyhow::anyhow!("Invalid API key"));
-            }
+                // Constant-time comparison guards against timing side-channels.
+                if !bool::from(row.key_hash.as_slice().ct_eq(&hash)) {
+                    return Err(anyhow::anyhow!("Invalid API key"));
+                }
 
-            if row.revoked_at.is_some() {
-                return Err(anyhow::anyhow!("API key has been revoked"));
-            }
+                if row.revoked_at.is_some() {
+                    return Err(anyhow::anyhow!("API key has been revoked"));
+                }
 
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i64;
-            tx.api_keys_touch(row.id, now)
-                .map_err(|e| anyhow::anyhow!("Failed to record API key usage: {}", e))?;
+                tx.api_keys_touch(row.id, now_unix())
+                    .map_err(|e| anyhow::anyhow!("Failed to record API key usage: {}", e))?;
 
-            Ok::<_, anyhow::Error>(row.id as i64)
-        })?;
+                Ok::<_, anyhow::Error>(row.id)
+            })?;
 
-        let jwt = context.jwt_api();
-        let mut claims = jwt.generate_auth_claims(request.permissions.into())?;
-        claims.kid = Some(kid);
-        let token = jwt.grant(&claims)?;
-        let refresh_token = context
-            .refresh_token_store()
-            .new_token(claims.permissions, claims.exp)
-            .await;
-        let refresh_cookie = refresh_token.into_cookie(REFRESH_TOKEN_COOKIE);
-        let cookie = CookieJar::new().add(refresh_cookie);
-        context.notifier().notify(AuthLoginRequestEvent);
-        return Ok((cookie, JsonRpcResponse::success(answer_id, AuthLoginResponse { token })));
+            let jwt = context.jwt_api();
+            let mut claims = jwt.generate_auth_claims(permissions.into())?;
+            claims.kid = Some(kid);
+            let token = jwt.grant(&claims)?;
+            let refresh_token = context
+                .refresh_token_store()
+                .new_token(claims.permissions, claims.exp)
+                .await;
+            let refresh_cookie = refresh_token.into_cookie(REFRESH_TOKEN_COOKIE);
+            let cookie = CookieJar::new().add(refresh_cookie);
+            context.notifier().notify(AuthLoginRequestEvent);
+            Ok((cookie, JsonRpcResponse::success(answer_id, AuthLoginResponse { token })))
+        },
+        other_credentials => {
+            context.authenticator().authenticate(&other_credentials).await?;
+            let jwt = context.jwt_api();
+            let claims = jwt.generate_auth_claims(permissions.into())?;
+            let token = jwt.grant(&claims)?;
+            let refresh_token = context
+                .refresh_token_store()
+                .new_token(claims.permissions, claims.exp)
+                .await;
+
+            let refresh_cookie = refresh_token.into_cookie(REFRESH_TOKEN_COOKIE);
+            let cookie = CookieJar::new().add(refresh_cookie);
+            context.notifier().notify(AuthLoginRequestEvent);
+            Ok((cookie, JsonRpcResponse::success(answer_id, AuthLoginResponse { token })))
+        },
     }
-
-    context.authenticator().authenticate(&request.credentials).await?;
-    let jwt = context.jwt_api();
-    let claims = jwt.generate_auth_claims(request.permissions.into())?;
-    let token = jwt.grant(&claims)?;
-    let refresh_token = context
-        .refresh_token_store()
-        .new_token(claims.permissions, claims.exp)
-        .await;
-
-    let refresh_cookie = refresh_token.into_cookie(REFRESH_TOKEN_COOKIE);
-    let cookie = CookieJar::new().add(refresh_cookie);
-    context.notifier().notify(AuthLoginRequestEvent);
-    Ok((cookie, JsonRpcResponse::success(answer_id, AuthLoginResponse { token })))
 }
 
 pub async fn handle_token_refresh(
@@ -210,10 +219,12 @@ pub async fn handle_create_api_key(
             .map_err(anyhow::Error::from)
     })?;
 
+    let key = encoded.as_str().to_owned();
+    drop(encoded); // zeroize the raw key before it leaves scope via response
     Ok(AuthCreateApiKeyResponse {
         id: row.id,
         name: row.name,
-        key: encoded.as_str().to_owned(),
+        key,
         permissions: request.permissions,
         created_at: row.created_at,
     })
@@ -257,13 +268,8 @@ pub async fn handle_revoke_api_key(
 ) -> Result<AuthRevokeApiKeyResponse, anyhow::Error> {
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
-
     context.wallet_sdk().store().with_write_tx(|tx| {
-        tx.api_keys_revoke(request.id, now).map_err(anyhow::Error::from)
+        tx.api_keys_revoke(request.id, now_unix()).map_err(anyhow::Error::from)
     })?;
 
     Ok(AuthRevokeApiKeyResponse {})

@@ -1,0 +1,132 @@
+---
+title: Agent API Key Authentication
+description: How to create and use API keys so AI agents can authenticate to the wallet daemon without interactive WebAuthn.
+---
+
+# Agent API Key Authentication
+
+The wallet daemon supports long-lived, permission-scoped API keys. An Admin user creates a key once; the agent uses the key to obtain a short-lived JWT without any further user interaction.
+
+## Overview
+
+```
+Admin                 walletd                  Agent
+  |--create_api_key-->|                           |
+  |<--{ key: "twda_...", id }------------------|   |
+  |                   |                           |
+  |                   |<--auth.request(ApiKey)----|
+  |                   |---{ token: JWT }---------->|
+  |                   |                           |
+  |                   |<--any JSON-RPC (Bearer)---|
+```
+
+## Step 1: Create an API key (Admin)
+
+You need an active Admin JWT first. Then call `auth.create_api_key`:
+
+```json
+// Request
+{
+  "jsonrpc": "2.0",
+  "method": "auth.create_api_key",
+  "id": 1,
+  "params": {
+    "name": "my-agent",
+    "permissions": ["AccountsRead", "TransactionSubmit"]
+  }
+}
+
+// Response — store this key; it is shown exactly once
+{
+  "result": {
+    "id": 1,
+    "name": "my-agent",
+    "key": "twda_..."
+  }
+}
+```
+
+Key properties:
+- Prefix `twda_` (visually distinct from JWT tokens)
+- 256 bits of entropy (32 random bytes, base64url-encoded)
+- Only the SHA-256 hash is stored; the raw key cannot be recovered
+
+## Step 2: Authenticate as an agent
+
+The agent calls the standard `auth.request` endpoint with an `ApiKey` credential:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "auth.request",
+  "id": 1,
+  "params": {
+    "permissions": ["AccountsRead"],
+    "credentials": { "ApiKey": "twda_..." }
+  }
+}
+```
+
+The returned JWT is scoped to the key's stored permissions. Requesting a scope the key was not granted with results in a permission error.
+
+## Step 3: Use the JWT
+
+All subsequent JSON-RPC calls use the JWT as a Bearer token. The flow is identical to WebAuthn-issued tokens.
+
+## Rust client
+
+```rust
+use tari_ootle_walletd_client::WalletDaemonClient;
+
+let mut client = WalletDaemonClient::connect("http://localhost:5100");
+let token = client
+    .auth_request(vec![JrpcPermission::AccountsRead], AuthCredentials::ApiKey("twda_...".into()))
+    .await?;
+client.set_token(token);
+
+// Now make calls normally
+let info = client.wallet_get_info().await?;
+```
+
+## JavaScript / TypeScript client
+
+```typescript
+import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
+
+// One-liner factory: authenticate and return a ready-to-use client
+const client = await WalletDaemonClient.authenticateWithApiKey(
+  "http://localhost:5100",
+  "twda_...",
+  ["AccountsRead"],
+);
+
+// Or manually
+const client = WalletDaemonClient.usingFetchTransport("http://localhost:5100");
+const token = await client.authRequest(["AccountsRead"], { ApiKey: "twda_..." });
+client.setToken(token);
+```
+
+## Key management
+
+### List active keys
+
+```json
+{ "method": "auth.list_api_keys", "params": {} }
+```
+
+Returns `id`, `name`, `permissions`, `created_at`, `last_used_at`, and `revoked_at` for each key.
+
+### Revoke a key
+
+```json
+{ "method": "auth.revoke_api_key", "params": { "id": 1 } }
+```
+
+Revocation is immediate: the key hash is soft-deleted (`revoked_at` set). Any JWT issued from the key remains valid until its own expiry — plan your JWT TTL accordingly.
+
+## Security notes
+
+- All key management endpoints (`create`, `list`, `revoke`) require an Admin-scoped session.
+- Hash comparison uses `subtle::ConstantTimeEq` to prevent timing attacks.
+- The raw key is zeroed from memory after hashing (`Zeroizing` wrapper).
+- Revoked keys are retained as audit rows; they are never returned as active.

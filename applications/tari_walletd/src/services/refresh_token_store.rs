@@ -58,7 +58,11 @@ impl RefreshTokenStore {
         let mut write = self.tokens.write().await;
         clear_expired_tokens(&mut write);
         let data = RefreshTokenData {
-            claims: Claims { permissions, exp },
+            claims: Claims {
+                permissions,
+                exp,
+                api_key_id: None,
+            },
             expires_at: Instant::now() + self.expiry,
         };
 

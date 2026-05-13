@@ -100,10 +100,17 @@ use crate::{
         AddressBookListResponse,
         AddressBookUpdateRequest,
         AddressBookUpdateResponse,
+        AuthCreateApiKeyRequest,
+        AuthCreateApiKeyResponse,
+        AuthCredentials,
         AuthGetMethodRequest,
         AuthGetMethodResponse,
+        AuthListApiKeysRequest,
+        AuthListApiKeysResponse,
         AuthListSessionsRequest,
         AuthListSessionsResponse,
+        AuthRevokeApiKeyRequest,
+        AuthRevokeApiKeyResponse,
         AuthRevokeTokenRequest,
         AuthRevokeTokenResponse,
         BurnProofsGetRequest,
@@ -215,6 +222,15 @@ impl WalletDaemonClient {
     pub fn set_auth_token(&mut self, token: EncodedJwtString) -> &mut Self {
         self.token = Some(token);
         self
+    }
+
+    pub async fn connect_with_api_key<T: IntoUrl, S: Into<String>>(
+        endpoint: T,
+        api_key: S,
+    ) -> Result<Self, WalletDaemonClientError> {
+        let mut client = Self::connect(endpoint, None)?;
+        client.authenticate_with_api_key(api_key).await?;
+        Ok(client)
     }
 
     /// Returns general information about the wallet, including the wallet's public key and network.
@@ -579,6 +595,20 @@ impl WalletDaemonClient {
         self.send_request("auth.request", req.borrow()).await
     }
 
+    pub async fn authenticate_with_api_key<S: Into<String>>(
+        &mut self,
+        api_key: S,
+    ) -> Result<AuthLoginResponse, WalletDaemonClientError> {
+        let response = self
+            .auth_request(AuthLoginRequest {
+                permissions: vec![],
+                credentials: AuthCredentials::ApiKey(EncodedJwtString::new(api_key.into())),
+            })
+            .await?;
+        self.set_auth_token(response.token.clone());
+        Ok(response)
+    }
+
     /// Refreshes an authentication token using the refresh token cookie.
     pub async fn auth_refresh(&mut self) -> Result<AuthLoginResponse, WalletDaemonClientError> {
         self.send_request("auth.refresh", &AuthRefreshRequest {}).await
@@ -598,6 +628,27 @@ impl WalletDaemonClient {
         req: T,
     ) -> Result<AuthListSessionsResponse, WalletDaemonClientError> {
         self.send_request("auth.list_sessions", req.borrow()).await
+    }
+
+    pub async fn auth_create_api_key<T: Borrow<AuthCreateApiKeyRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AuthCreateApiKeyResponse, WalletDaemonClientError> {
+        self.send_request("auth.create_api_key", req.borrow()).await
+    }
+
+    pub async fn auth_list_api_keys<T: Borrow<AuthListApiKeysRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AuthListApiKeysResponse, WalletDaemonClientError> {
+        self.send_request("auth.list_api_keys", req.borrow()).await
+    }
+
+    pub async fn auth_revoke_api_key<T: Borrow<AuthRevokeApiKeyRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AuthRevokeApiKeyResponse, WalletDaemonClientError> {
+        self.send_request("auth.revoke_api_key", req.borrow()).await
     }
 
     /// Initiates a WebRTC signalling session with the wallet daemon.

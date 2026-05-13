@@ -126,6 +126,10 @@ impl JrpcPermissions {
         self.0.contains(permission)
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = &JrpcPermission> {
+        self.0.iter()
+    }
+
     pub fn into_vec(self) -> Vec<JrpcPermission> {
         self.0.into_iter().collect()
     }
@@ -160,6 +164,8 @@ impl FromIterator<JrpcPermission> for JrpcPermissions {
 pub struct Claims {
     pub permissions: JrpcPermissions,
     pub exp: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key_id: Option<i32>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Hash, Eq, PartialEq)]

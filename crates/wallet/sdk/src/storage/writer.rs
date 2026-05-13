@@ -65,6 +65,16 @@ pub trait WalletStoreWriter: CommittableStore {
         is_encrypted: bool,
     ) -> Result<(), WalletStorageError>;
 
+    // API keys
+    fn api_keys_create(
+        &mut self,
+        name: &str,
+        key_hash: &str,
+        permissions: &str,
+    ) -> Result<crate::models::ApiKey, WalletStorageError>;
+    fn api_keys_revoke(&mut self, id: i32) -> Result<crate::models::ApiKey, WalletStorageError>;
+    fn api_keys_touch_last_used(&mut self, id: i32) -> Result<crate::models::ApiKey, WalletStorageError>;
+
     // Transactions
     fn transactions_insert(
         &mut self,

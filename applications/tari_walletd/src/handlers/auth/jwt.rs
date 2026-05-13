@@ -26,6 +26,14 @@ impl<'a> JwtApi<'a> {
     }
 
     pub fn generate_auth_claims(&self, permissions: JrpcPermissions) -> Result<Claims, JwtApiError> {
+        self.generate_auth_claims_for_api_key(permissions, None)
+    }
+
+    pub fn generate_auth_claims_for_api_key(
+        &self,
+        permissions: JrpcPermissions,
+        api_key_id: Option<i32>,
+    ) -> Result<Claims, JwtApiError> {
         let valid_till = SystemTime::now() + self.default_expiry;
         let exp = valid_till
             .duration_since(UNIX_EPOCH)
@@ -33,6 +41,7 @@ impl<'a> JwtApi<'a> {
         Ok(Claims {
             permissions,
             exp: exp.as_secs(),
+            api_key_id,
         })
     }
 
@@ -55,12 +64,16 @@ impl<'a> JwtApi<'a> {
         Ok(permissions_token.into())
     }
 
-    pub fn check_auth(&self, token: Option<&Bearer>, req_permissions: &[JrpcPermission]) -> Result<(), JwtApiError> {
+    pub fn check_auth(
+        &self,
+        token: Option<&Bearer>,
+        req_permissions: &[JrpcPermission],
+    ) -> Result<Claims, JwtApiError> {
         let token = token.ok_or(JwtApiError::AccessDeniedNoBearerToken)?;
         let token_data = self.decode_jwt(token.token())?;
         let token_permissions = &token_data.claims.permissions;
         if token_permissions.has_permission(&JrpcPermission::Admin) {
-            return Ok(());
+            return Ok(token_data.claims);
         }
         for permission in req_permissions {
             if !token_permissions.has_permission(permission) {
@@ -69,7 +82,7 @@ impl<'a> JwtApi<'a> {
                 });
             }
         }
-        Ok(())
+        Ok(token_data.claims)
     }
 }
 
@@ -85,6 +98,8 @@ pub enum JwtApiError {
     AccessDeniedInvalidBearerToken,
     #[error("Access denied. Expired token")]
     AccessDeniedExpiredToken,
+    #[error("Access denied. API key has been revoked")]
+    AccessDeniedApiKeyRevoked,
     #[error("Insufficient permissions. Required '{required:?}'")]
     InsufficientPermissions { required: JrpcPermission },
     #[error("Invalid expiry")]

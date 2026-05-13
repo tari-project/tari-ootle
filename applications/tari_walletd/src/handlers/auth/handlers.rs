@@ -26,7 +26,11 @@ use tari_ootle_walletd_client::{
 
 use crate::{
     config::WalletDaemonAuth,
-    handlers::{HandlerContext, auth::Authenticator, helpers::unauthorized},
+    handlers::{
+        auth::{api_keys, Authenticator},
+        helpers::unauthorized,
+        HandlerContext,
+    },
 };
 
 pub const REFRESH_TOKEN_COOKIE: &str = "r-tkn";
@@ -37,13 +41,26 @@ pub async fn handle_login_request(
     request: (axum_jrpc::Id, AuthLoginRequest),
 ) -> Result<(CookieJar, JsonRpcResponse), anyhow::Error> {
     let (answer_id, request) = request;
+    if let Some(raw_api_key) = request.credentials.as_api_key() {
+        let api_key = api_keys::authenticate_api_key(context.wallet_sdk().store(), raw_api_key)?;
+        let jwt = context.jwt_api();
+        let claims = jwt.generate_auth_claims_for_api_key(api_key.permissions, Some(api_key.id))?;
+        let token = jwt.grant(&claims)?;
+
+        context.notifier().notify(AuthLoginRequestEvent);
+        return Ok((
+            CookieJar::new(),
+            JsonRpcResponse::success(answer_id, AuthLoginResponse { token }),
+        ));
+    }
+
     context.authenticator().authenticate(&request.credentials).await?;
     let jwt = context.jwt_api();
     let claims = jwt.generate_auth_claims(request.permissions.into())?;
     let token = jwt.grant(&claims)?;
     let refresh_token = context
         .refresh_token_store()
-        .new_token(claims.permissions, claims.exp)
+        .new_token(claims.permissions.clone(), claims.exp)
         .await;
 
     let refresh_cookie = refresh_token.into_cookie(REFRESH_TOKEN_COOKIE);

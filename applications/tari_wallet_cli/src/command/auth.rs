@@ -25,7 +25,10 @@ use tari_ootle_common_types::displayable::Displayable;
 use tari_ootle_walletd_client::{
     WalletDaemonClient,
     permissions::JrpcPermission,
-    types::{AuthCredentials, AuthListSessionsRequest, AuthLoginRequest, AuthRevokeTokenRequest},
+    types::{
+        AuthCreateApiKeyRequest, AuthCredentials, AuthListApiKeysRequest, AuthListSessionsRequest, AuthLoginRequest,
+        AuthRevokeApiKeyRequest, AuthRevokeTokenRequest,
+    },
 };
 
 #[derive(Debug, Subcommand, Clone)]
@@ -33,6 +36,8 @@ pub enum AuthSubcommand {
     Request(RequestArgs),
     Revoke(RevokeArgs),
     List,
+    #[clap(subcommand, alias = "api-keys")]
+    ApiKey(ApiKeySubcommand),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -43,6 +48,32 @@ pub struct RequestArgs {
 #[derive(Debug, Args, Clone)]
 pub struct RevokeArgs {
     permission_token_id: String,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+pub enum ApiKeySubcommand {
+    /// Create a named API key and print the raw key once.
+    Create(ApiKeyCreateArgs),
+    /// List API keys and their current revocation state.
+    List,
+    /// Revoke an API key by id.
+    Revoke(ApiKeyRevokeArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct ApiKeyCreateArgs {
+    /// Human-readable key name shown in the wallet UI and audit output.
+    name: String,
+    /// Permission grants for the key. Admin requires --confirm-admin.
+    permissions: Vec<JrpcPermission>,
+    /// Explicitly confirm that an API key should receive Admin.
+    #[arg(long)]
+    confirm_admin: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct ApiKeyRevokeArgs {
+    api_key_id: i32,
 }
 
 impl AuthSubcommand {
@@ -77,7 +108,61 @@ impl AuthSubcommand {
                     println!("Id {} name {}", session.id, session.permissions.display());
                 }
             },
+            ApiKey(subcommand) => handle_api_key(subcommand, client).await?,
         }
         Ok(())
     }
+}
+
+async fn handle_api_key(subcommand: ApiKeySubcommand, mut client: WalletDaemonClient) -> anyhow::Result<()> {
+    match subcommand {
+        ApiKeySubcommand::Create(args) => {
+            let resp = client
+                .auth_create_api_key(AuthCreateApiKeyRequest {
+                    name: args.name,
+                    permissions: args.permissions,
+                    confirm_admin: args.confirm_admin,
+                })
+                .await?;
+            println!("API key created with id {}", resp.key.id);
+            println!("Name: {}", resp.key.name);
+            println!("Permissions: {}", resp.key.permissions.display());
+            println!("Raw key: {}", resp.api_key);
+            println!("Store this raw key now. It cannot be retrieved again.");
+        },
+        ApiKeySubcommand::List => {
+            let resp = client.auth_list_api_keys(AuthListApiKeysRequest {}).await?;
+            for key in resp.api_keys {
+                let state = if let Some(revoked_at) = key.revoked_at {
+                    format!("revoked at {revoked_at}")
+                } else {
+                    "active".to_string()
+                };
+                let last_used = key
+                    .last_used_at
+                    .map(|last_used_at| last_used_at.to_string())
+                    .unwrap_or_else(|| "never".to_string());
+                let expires = key
+                    .expires_at
+                    .map(|expires_at| expires_at.to_string())
+                    .unwrap_or_else(|| "no-expiry".to_string());
+                println!(
+                    "Id {} name {} state {} last-used {} expires {} permissions {}",
+                    key.id,
+                    key.name,
+                    state,
+                    last_used,
+                    expires,
+                    key.permissions.display()
+                );
+            }
+        },
+        ApiKeySubcommand::Revoke(args) => {
+            client
+                .auth_revoke_api_key(AuthRevokeApiKeyRequest { id: args.api_key_id })
+                .await?;
+            println!("API key revoked!");
+        },
+    }
+    Ok(())
 }

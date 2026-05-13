@@ -24,12 +24,18 @@ import type {
   AccountsRenameResponse,
   AccountsTransferRequest,
   AccountsTransferResponse,
+  AuthCreateApiKeyRequest,
+  AuthCreateApiKeyResponse,
   AuthCredentials,
+  AuthListApiKeysRequest,
+  AuthListApiKeysResponse,
   AuthListSessionsRequest,
   AuthListSessionsResponse,
   AuthGetMethodResponse,
   AuthLoginRequest,
   AuthLoginResponse,
+  AuthRevokeApiKeyRequest,
+  AuthRevokeApiKeyResponse,
   AuthRevokeTokenRequest,
   AuthRevokeTokenResponse,
   BurnProofsGetRequest,
@@ -147,6 +153,19 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
     return WalletDaemonClient.new(FetchRpcTransport.new(url));
   }
 
+  public static async withApiKey<T extends RpcTransport>(
+    transport: T,
+    apiKey: string,
+  ): Promise<WalletDaemonClient<T>> {
+    const client = WalletDaemonClient.new(transport);
+    await client.authenticateWithApiKey(apiKey);
+    return client;
+  }
+
+  public static async usingFetchTransportWithApiKey(url: string, apiKey: string): Promise<WalletDaemonClient> {
+    return WalletDaemonClient.withApiKey(FetchRpcTransport.new(url), apiKey);
+  }
+
   public setReauthenticationEnabled(enabled: boolean) {
     this.reauthEnabled = enabled;
   }
@@ -184,8 +203,26 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
     return resp.token;
   }
 
+  public async authenticateWithApiKey(apiKey: string): Promise<string> {
+    const token = await this.authRequest([], { ApiKey: apiKey });
+    this.setToken(token);
+    return token;
+  }
+
   public authRevoke(params: AuthRevokeTokenRequest): Promise<AuthRevokeTokenResponse> {
     return this.sendRequest("auth.revoke", params);
+  }
+
+  public authCreateApiKey(params: AuthCreateApiKeyRequest): Promise<AuthCreateApiKeyResponse> {
+    return this.sendRequest("auth.create_api_key", params);
+  }
+
+  public authListApiKeys(params: AuthListApiKeysRequest = {}): Promise<AuthListApiKeysResponse> {
+    return this.sendRequest("auth.list_api_keys", params);
+  }
+
+  public authRevokeApiKey(params: AuthRevokeApiKeyRequest): Promise<AuthRevokeApiKeyResponse> {
+    return this.sendRequest("auth.revoke_api_key", params);
   }
 
   public authRefresh(): Promise<AuthRefreshResponse> {

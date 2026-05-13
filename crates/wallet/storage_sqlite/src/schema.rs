@@ -274,6 +274,19 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    api_keys (id) {
+        id -> Integer,
+        name -> Text,
+        key_hash -> Text,
+        permissions -> Text,
+        created_at -> Timestamp,
+        last_used_at -> Nullable<Timestamp>,
+        expires_at -> Nullable<Timestamp>,
+        revoked_at -> Nullable<Timestamp>,
+    }
+}
+
 diesel::joinable!(confidential_outputs -> accounts (account_id));
 diesel::joinable!(confidential_outputs -> vaults (vault_id));
 diesel::joinable!(non_fungible_tokens -> vaults (vault_id));
@@ -290,6 +303,7 @@ diesel::joinable!(webauthn_registration_passkeys -> webauthn_registrations (regi
 diesel::allow_tables_to_appear_in_same_query!(
     accounts,
     address_book,
+    api_keys,
     authored_templates,
     confidential_outputs,
     config,

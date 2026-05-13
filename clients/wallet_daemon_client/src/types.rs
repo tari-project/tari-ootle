@@ -31,11 +31,7 @@ use tari_engine_types::{
 };
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{
-    ShardGroup,
-    SubstateAddress,
-    SubstateRequirement,
-    shard::Shard,
-    substate_type::SubstateType,
+    ShardGroup, SubstateAddress, SubstateRequirement, shard::Shard, substate_type::SubstateType,
 };
 use tari_ootle_template_metadata::{MetadataHash, TemplateMetadata};
 use tari_ootle_transaction::{Instruction, PrunedTransaction, TransactionId, UnsignedTransaction};
@@ -46,33 +42,14 @@ use tari_ootle_wallet_sdk::{
     },
     crypto::{memo::Memo, pay_to::PayTo},
     models::{
-        Account,
-        AddressBookEntry,
-        AuthoredTemplateModel,
-        DerivedKeyIndex,
-        KeyBranch,
-        KeyId,
-        NonFungibleToken,
-        OutputStatus,
-        StealthUtxoSpendKeyId,
-        TransactionStatus,
-        WalletLockId,
-        WalletTransaction,
+        Account, AddressBookEntry, AuthoredTemplateModel, DerivedKeyIndex, KeyBranch, KeyId, NonFungibleToken,
+        OutputStatus, StealthUtxoSpendKeyId, TransactionStatus, WalletLockId, WalletTransaction,
     },
 };
 use tari_template_abi::{FunctionDef, TemplateDef, version::WasmAbiVersion};
 use tari_template_lib_types::{
-    Amount,
-    ComponentAddress,
-    EncryptedData,
-    NonFungibleId,
-    ResourceAddress,
-    ResourceType,
-    TemplateAddress,
-    UtxoAddress,
-    UtxoId,
-    ValidatorFeePoolAddress,
-    VaultId,
+    Amount, ComponentAddress, EncryptedData, NonFungibleId, ResourceAddress, ResourceType, TemplateAddress,
+    UtxoAddress, UtxoId, ValidatorFeePoolAddress, VaultId,
     confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
     stealth::{SpendCondition, StealthTransferStatement},
@@ -80,10 +57,7 @@ use tari_template_lib_types::{
 use time::PrimitiveDateTime;
 use url::Url;
 use webauthn_rs_proto::{
-    PublicKeyCredential,
-    PublicKeyCredentialCreationOptions,
-    RegisterPublicKeyCredential,
-    RequestChallengeResponse,
+    PublicKeyCredential, PublicKeyCredentialCreationOptions, RegisterPublicKeyCredential, RequestChallengeResponse,
 };
 use zeroize::Zeroizing;
 
@@ -751,6 +725,8 @@ pub struct AuthLoginRequest {
 pub enum AuthCredentials {
     /// Credentials for 'none' auth mode
     None,
+    /// Long-lived API key credential for non-interactive agents.
+    ApiKey(EncodedJwtString),
     /// Credentials for WebAuthN auth mode. Contains the request from the client to finish the auth.
     WebAuthN(Box<WebauthnFinishAuthRequest>),
 }
@@ -766,6 +742,13 @@ impl AuthCredentials {
     pub fn as_webauthn(&self) -> Option<&WebauthnFinishAuthRequest> {
         match self {
             Self::WebAuthN(req) => Some(req),
+            _ => None,
+        }
+    }
+
+    pub fn as_api_key(&self) -> Option<&str> {
+        match self {
+            Self::ApiKey(req) => Some(req.as_str()),
             _ => None,
         }
     }
@@ -820,6 +803,59 @@ impl Display for RefreshTokenHash {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AuthRevokeTokenResponse {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthCreateApiKeyRequest {
+    pub name: String,
+    pub permissions: Vec<JrpcPermission>,
+    pub confirm_admin: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthCreateApiKeyResponse {
+    /// The raw API key secret. This is returned only once when the key is created.
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub api_key: EncodedJwtString,
+    pub key: AuthApiKeyInfo,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthListApiKeysRequest {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthListApiKeysResponse {
+    pub api_keys: Vec<AuthApiKeyInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthRevokeApiKeyRequest {
+    pub id: i32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthRevokeApiKeyResponse {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthApiKeyInfo {
+    pub id: i32,
+    pub name: String,
+    pub permissions: Vec<JrpcPermission>,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub created_at: PrimitiveDateTime,
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    pub last_used_at: Option<PrimitiveDateTime>,
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    pub expires_at: Option<PrimitiveDateTime>,
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    pub revoked_at: Option<PrimitiveDateTime>,
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]

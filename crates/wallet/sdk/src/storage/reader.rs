@@ -50,6 +50,11 @@ pub trait WalletStoreReader {
     fn config_get<T: serde::de::DeserializeOwned>(&mut self, key: &str) -> Result<Config<T>, WalletStorageError>;
     fn config_get_string(&mut self, key: &str) -> Result<Config<String>, WalletStorageError>;
     fn config_exists(&mut self, key: &str) -> Result<bool, WalletStorageError>;
+    // API keys
+    fn api_keys_find_active_by_hash(&mut self, key_hash: &str) -> Result<crate::models::ApiKey, WalletStorageError>;
+    fn api_keys_find_active_by_id(&mut self, id: i32) -> Result<crate::models::ApiKey, WalletStorageError>;
+    fn api_keys_get_by_id(&mut self, id: i32) -> Result<crate::models::ApiKey, WalletStorageError>;
+    fn api_keys_list(&mut self) -> Result<Vec<crate::models::ApiKey>, WalletStorageError>;
     // Transactions
     fn transactions_get(&mut self, transaction_id: TransactionId) -> Result<WalletTransaction, WalletStorageError>;
     /// Read the *full* transaction (with blob payloads) — needed for re-submission and other

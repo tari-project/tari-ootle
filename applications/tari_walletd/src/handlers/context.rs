@@ -5,7 +5,10 @@ use std::time::Duration;
 
 use axum_extra::headers::authorization::Bearer;
 use tari_ootle_transaction::{Transaction, TransactionBuilder};
-use tari_ootle_wallet_sdk::models::WalletEvent;
+use tari_ootle_wallet_sdk::{
+    models::WalletEvent,
+    storage::{ReadableWalletStore, WalletStorageError, WalletStoreReader},
+};
 use tari_ootle_wallet_sdk_services::{
     account_monitor::AccountMonitorHandle,
     notify::Notify,
@@ -21,6 +24,7 @@ use crate::{
     WalletSdk,
     config::WalletDaemonConfig,
     handlers::auth::{
+        api_keys,
         WalletAuthenticator,
         jwt::{JwtApi, JwtApiError},
     },
@@ -73,7 +77,37 @@ impl HandlerContext {
     }
 
     pub fn check_auth(&self, token: Option<&Bearer>, permissions: &[JrpcPermission]) -> Result<(), JwtApiError> {
-        self.jwt_api().check_auth(token, permissions)
+        if let Some(raw_api_key) = token
+            .map(|token| token.token())
+            .filter(|token| api_keys::is_api_key_secret(token))
+        {
+            let api_key = api_keys::authenticate_api_key(self.wallet_sdk.store(), raw_api_key)
+                .map_err(|_| JwtApiError::AccessDeniedApiKeyRevoked)?;
+            if api_key.permissions.has_permission(&JrpcPermission::Admin) {
+                return Ok(());
+            }
+            for permission in permissions {
+                if !api_key.permissions.has_permission(permission) {
+                    return Err(JwtApiError::InsufficientPermissions {
+                        required: permission.clone(),
+                    });
+                }
+            }
+            return Ok(());
+        }
+
+        let claims = self.jwt_api().check_auth(token, permissions)?;
+        if let Some(api_key_id) = claims.api_key_id {
+            self.wallet_sdk.store().with_read_tx(|tx| {
+                tx.api_keys_find_active_by_id(api_key_id)
+                    .map(|_| ())
+                    .map_err(|err| match err {
+                        WalletStorageError::NotFound { .. } => JwtApiError::AccessDeniedApiKeyRevoked,
+                        err => JwtApiError::StoreError(err),
+                    })
+            })?;
+        }
+        Ok(())
     }
 
     pub fn jwt_api(&self) -> JwtApi<'_> {

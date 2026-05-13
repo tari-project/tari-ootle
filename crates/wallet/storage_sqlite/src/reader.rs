@@ -8,17 +8,8 @@ use std::{
 };
 
 use diesel::{
-    BoolExpressionMethods,
-    ExpressionMethods,
-    JoinOnDsl,
-    NullableExpressionMethods,
-    OptionalExtension,
-    QueryDsl,
-    RunQueryDsl,
-    SelectableHelper,
-    SqliteConnection,
-    TextExpressionMethods,
-    sql_query,
+    BoolExpressionMethods, ExpressionMethods, JoinOnDsl, NullableExpressionMethods, OptionalExtension, QueryDsl,
+    RunQueryDsl, SelectableHelper, SqliteConnection, TextExpressionMethods, dsl, sql_query,
 };
 use log::{error, warn};
 use serde::de::DeserializeOwned;
@@ -27,35 +18,14 @@ use tari_ootle_common_types::{StateVersion, shard::Shard, substate_type::Substat
 use tari_ootle_transaction::TransactionId;
 use tari_ootle_wallet_sdk::{
     models::{
-        Account,
-        AddressBookEntry,
-        AuthoredTemplateModel,
-        ConfidentialOutputModel,
-        Config,
-        KeyType,
-        NonFungibleToken,
-        OutputStatus,
-        ResourceModel,
-        StealthBalance,
-        StealthOutputInfo,
-        StealthOutputModel,
-        SubstateModel,
-        TransactionStatus,
-        VaultModel,
-        WalletLockId,
-        WalletTransaction,
-        WebauthnRegistrationPasskeyModel,
+        Account, AddressBookEntry, AuthoredTemplateModel, ConfidentialOutputModel, Config, KeyType, NonFungibleToken,
+        OutputStatus, ResourceModel, StealthBalance, StealthOutputInfo, StealthOutputModel, SubstateModel,
+        TransactionStatus, VaultModel, WalletLockId, WalletTransaction, WebauthnRegistrationPasskeyModel,
     },
     storage::{TagAndPublicNoncePair, WalletStorageError, WalletStoreReader},
 };
 use tari_template_lib_types::{
-    Amount,
-    ComponentAddress,
-    NonFungibleId,
-    ResourceAddress,
-    ResourceType,
-    TemplateAddress,
-    VaultId,
+    Amount, ComponentAddress, NonFungibleId, ResourceAddress, ResourceType, TemplateAddress, VaultId,
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
 };
 use webauthn_rs::prelude::Passkey;
@@ -240,6 +210,85 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .map_err(|e| WalletStorageError::general("config_exists", e))?;
 
         Ok(exists > 0)
+    }
+
+    // -------------------------------- API keys -------------------------------- //
+    fn api_keys_find_active_by_hash(
+        &mut self,
+        key_hash: &str,
+    ) -> Result<tari_ootle_wallet_sdk::models::ApiKey, WalletStorageError> {
+        const OPERATION: &str = "api_keys_find_active_by_hash";
+        use crate::schema::api_keys;
+
+        let row = api_keys::table
+            .filter(api_keys::key_hash.eq(key_hash))
+            .filter(api_keys::revoked_at.is_null())
+            .filter(api_keys::expires_at.is_null().or(api_keys::expires_at.gt(dsl::now)))
+            .first::<models::ApiKey>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "api_key".to_string(),
+                key: key_hash.to_string(),
+            })?;
+
+        Ok(row.into())
+    }
+
+    fn api_keys_find_active_by_id(
+        &mut self,
+        id: i32,
+    ) -> Result<tari_ootle_wallet_sdk::models::ApiKey, WalletStorageError> {
+        const OPERATION: &str = "api_keys_find_active_by_id";
+        use crate::schema::api_keys;
+
+        let row = api_keys::table
+            .filter(api_keys::id.eq(id))
+            .filter(api_keys::revoked_at.is_null())
+            .filter(api_keys::expires_at.is_null().or(api_keys::expires_at.gt(dsl::now)))
+            .first::<models::ApiKey>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "api_key".to_string(),
+                key: id.to_string(),
+            })?;
+
+        Ok(row.into())
+    }
+
+    fn api_keys_get_by_id(&mut self, id: i32) -> Result<tari_ootle_wallet_sdk::models::ApiKey, WalletStorageError> {
+        const OPERATION: &str = "api_keys_get_by_id";
+        use crate::schema::api_keys;
+
+        let row = api_keys::table
+            .filter(api_keys::id.eq(id))
+            .first::<models::ApiKey>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "api_key".to_string(),
+                key: id.to_string(),
+            })?;
+
+        Ok(row.into())
+    }
+
+    fn api_keys_list(&mut self) -> Result<Vec<tari_ootle_wallet_sdk::models::ApiKey>, WalletStorageError> {
+        const OPERATION: &str = "api_keys_list";
+        use crate::schema::api_keys;
+
+        let rows = api_keys::table
+            .filter(api_keys::revoked_at.is_null())
+            .filter(api_keys::expires_at.is_null().or(api_keys::expires_at.gt(dsl::now)))
+            .order(api_keys::id.asc())
+            .load::<models::ApiKey>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(rows.into_iter().map(Into::into).collect())
     }
 
     // -------------------------------- Transactions -------------------------------- //
@@ -1594,8 +1643,8 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
 impl Drop for ReadTransaction<'_> {
     fn drop(&mut self) {
-        if !self.is_done &&
-            let Err(err) = self.rollback_internal()
+        if !self.is_done
+            && let Err(err) = self.rollback_internal()
         {
             error!(target: LOG_TARGET, "Failed to rollback transaction: {}", err);
         }

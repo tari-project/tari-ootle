@@ -1,0 +1,93 @@
+---
+title: Agent API Keys
+description: Create permission-scoped wallet daemon API keys for unattended tools and agents.
+---
+
+Wallet daemon API keys let an admin grant long-lived, scoped access to an automation without sharing the user's interactive WebAuthn session.
+
+## Create a key
+
+API keys are created by an authenticated admin from the wallet UI or CLI. The raw key is shown once; only a hash is stored in the wallet database. The database stores an optional `expires_at` timestamp for forward-compatible expiry support; keys created by the current UI and CLI are non-expiring and return `expires_at: null`.
+
+```bash
+tari_ootle_wallet_cli auth api-key create claude-agent AccountInfo TransactionGet
+```
+
+Granting `Admin` requires an explicit confirmation flag:
+
+```bash
+tari_ootle_wallet_cli auth api-key create wallet-operator Admin --confirm-admin
+```
+
+The same operation is available over JSON-RPC:
+
+```json
+{
+  "method": "auth.create_api_key",
+  "params": {
+    "name": "claude-agent",
+    "permissions": ["AccountInfo", "TransactionGet"],
+    "confirm_admin": false
+  }
+}
+```
+
+## Authenticate an agent
+
+Agents can exchange the raw key for a short-lived JWT:
+
+```json
+{
+  "method": "auth.request",
+  "params": {
+    "permissions": [],
+    "credentials": { "ApiKey": "twda_..." }
+  }
+}
+```
+
+They can also use the raw key directly as a bearer token:
+
+```text
+Authorization: Bearer twda_...
+```
+
+Both paths enforce the API key's stored permission grants. API-key JWTs include the key id, and the daemon verifies that id is still active on every authenticated request, so revocation invalidates already-issued API-key JWTs immediately.
+
+## Rust client
+
+```rust
+use tari_ootle_walletd_client::WalletDaemonClient;
+
+let mut client = WalletDaemonClient::connect_with_api_key(
+    "http://127.0.0.1:5100/json_rpc",
+    std::env::var("TARI_WALLET_API_KEY")?,
+)
+.await?;
+
+let info = client.get_wallet_info().await?;
+```
+
+## JavaScript client
+
+```ts
+import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
+
+const client = await WalletDaemonClient.usingFetchTransportWithApiKey(
+  "http://127.0.0.1:5100/json_rpc",
+  process.env.TARI_WALLET_API_KEY!,
+);
+
+const info = await client.walletGetInfo();
+```
+
+## List and revoke
+
+Admins can audit and revoke keys from the wallet UI or CLI.
+
+```bash
+tari_ootle_wallet_cli auth api-key list
+tari_ootle_wallet_cli auth api-key revoke 1
+```
+
+The list endpoint returns active keys. Revoked keys disappear from the active list and cannot authenticate, refresh, or be touched again. Expired keys are also treated as inactive when an expiry timestamp is present.

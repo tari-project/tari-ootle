@@ -11,34 +11,20 @@ use axum::{
 };
 use axum_extra::{TypedHeader, extract::CookieJar, headers, headers::authorization::Bearer};
 use axum_jrpc::{
-    JsonRpcAnswer,
-    JsonRpcExtractor,
-    JsonRpcResponse,
+    JsonRpcAnswer, JsonRpcExtractor, JsonRpcResponse,
     error::{JsonRpcError, JsonRpcErrorReason},
 };
 use log::*;
 use serde::{Serialize, de::DeserializeOwned};
-use serde_json::json;
+use serde_json::{Value, json};
 use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
 use tokio::task;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 use super::handlers::{HandlerContext, HandlerWithCookie, auth, stealth_utxos, substates, templates, wallet, webauthn};
 use crate::handlers::{
-    Handler,
-    accounts,
-    address_book,
-    auth::jwt::JwtApiError,
-    burn_proofs,
-    confidential,
-    error::HandlerError,
-    keys,
-    nfts,
-    settings,
-    swap_pools,
-    transaction,
-    validator,
-    webrtc,
+    Handler, accounts, address_book, auth::jwt::JwtApiError, burn_proofs, confidential, error::HandlerError, keys,
+    nfts, settings, swap_pools, transaction, validator, webrtc,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::json_rpc";
@@ -92,7 +78,7 @@ async fn handler(
 ) -> Response {
     let token = authorization_header.map(|auth| auth.0.0);
     info!(target: LOG_TARGET, "🌐 JSON-RPC request: {}", value.method);
-    debug!(target: LOG_TARGET, "🌐 JSON-RPC request: {:?}", value);
+    debug!(target: LOG_TARGET, "🌐 JSON-RPC request: {}", debug_json_rpc_request(&value));
     match value.method.as_str().split_once('.') {
         Some(("auth", method)) => match method {
             "request" => call_handler_any_response(context, value, token, auth::handle_login_request).await,
@@ -109,6 +95,9 @@ async fn handler(
             "revoke" => call_handler(context, value, token, auth::handle_revoke).await,
             "list_sessions" => call_handler(context, value, token, auth::handle_list_sessions).await,
             "method" => call_handler(context, value, token, auth::handle_get_auth_method).await,
+            "create_api_key" => call_handler(context, value, token, auth::handle_create_api_key).await,
+            "list_api_keys" => call_handler(context, value, token, auth::handle_list_api_keys).await,
+            "revoke_api_key" => call_handler(context, value, token, auth::handle_revoke_api_key).await,
             _ => value.method_not_found(&value.method).into_response(),
         },
         Some(("webauthn", method)) => match method {
@@ -240,6 +229,37 @@ async fn handler(
     }
 }
 
+fn debug_json_rpc_request(value: &JsonRpcExtractor) -> Value {
+    let mut params = value.parsed.clone();
+    if value.method == "auth.request" {
+        redact_api_key_secret(&mut params);
+    }
+    json!({
+        "id": &value.id,
+        "method": &value.method,
+        "params": params,
+    })
+}
+
+fn redact_api_key_secret(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            if let Some(api_key) = map.get_mut("ApiKey") {
+                *api_key = Value::String("<redacted>".to_string());
+            }
+            for value in map.values_mut() {
+                redact_api_key_secret(value);
+            }
+        },
+        Value::Array(values) => {
+            for value in values {
+                redact_api_key_secret(value);
+            }
+        },
+        _ => {},
+    }
+}
+
 async fn call_handler_with_cookies<H, TReq, TResp>(
     context: Arc<HandlerContext>,
     value: JsonRpcExtractor,
@@ -364,4 +384,45 @@ pub enum ApplicationErrorCode {
     TransactionRejected = 1000,
     FaucetAlreadyClaimed = 1001,
     GeneralError = 500,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auth_request_debug_log_redacts_api_key_secret() {
+        let request = JsonRpcExtractor {
+            parsed: json!({
+                "permissions": [],
+                "credentials": {
+                    "ApiKey": "twda_super_secret"
+                }
+            }),
+            method: "auth.request".to_string(),
+            id: axum_jrpc::Id::Num(1),
+        };
+
+        let logged = debug_json_rpc_request(&request).to_string();
+
+        assert!(!logged.contains("twda_super_secret"));
+        assert!(logged.contains("<redacted>"));
+    }
+
+    #[test]
+    fn debug_log_keeps_non_secret_params() {
+        let request = JsonRpcExtractor {
+            parsed: json!({
+                "permissions": ["AccountInfo"],
+                "credentials": "None"
+            }),
+            method: "auth.request".to_string(),
+            id: axum_jrpc::Id::Num(1),
+        };
+
+        let logged = debug_json_rpc_request(&request).to_string();
+
+        assert!(logged.contains("AccountInfo"));
+        assert!(logged.contains("None"));
+    }
 }

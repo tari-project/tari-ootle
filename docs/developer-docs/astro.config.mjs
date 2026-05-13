@@ -38,6 +38,7 @@ export default defineConfig({
             { label: "Play the Guessing Game", link: "/guides/play-the-guessing-game/" },
             { label: "Transaction Overview", link: "/guides/transaction-overview/" },
             { label: "Tari Cli", link: "/guides/cli/" },
+            { label: "Agent API Keys", link: "/guides/agent-api-keys/" },
             { label: "Resources", link: "/guides/resources/" },
             { label: "Authorization and Access", link: "/guides/authorization-and-access/" },
             { label: "Stealth Transfers", link: "/guides/stealth-resources/" },

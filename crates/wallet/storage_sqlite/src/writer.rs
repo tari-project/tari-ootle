@@ -11,14 +11,8 @@ use std::{
 };
 
 use diesel::{
-    BoolExpressionMethods,
-    JoinOnDsl,
-    NullableExpressionMethods,
-    OptionalExtension,
-    QueryDsl,
-    RunQueryDsl,
-    SqliteConnection,
-    dsl,
+    BoolExpressionMethods, JoinOnDsl, NullableExpressionMethods, OptionalExtension, QueryDsl, RunQueryDsl,
+    SqliteConnection, dsl,
 };
 use log::*;
 use serde::Serialize;
@@ -28,46 +22,19 @@ use tari_engine_types::{
     substate::{SubstateDiff, SubstateId},
 };
 use tari_ootle_common_types::{
-    Epoch,
-    StateVersion,
-    VersionedSubstateIdRef,
-    displayable::Displayable,
-    optional::Optional,
-    shard::Shard,
+    Epoch, StateVersion, VersionedSubstateIdRef, displayable::Displayable, optional::Optional, shard::Shard,
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_ootle_wallet_sdk::{
     models::{
-        AccountUpdate,
-        AddressBookEntry,
-        AuthoredTemplateModel,
-        ConfidentialOutputModel,
-        ImportedKeyId,
-        KeyId,
-        KeyType,
-        NewAccountData,
-        NonFungibleToken,
-        OutputStatus,
-        StealthOutputModel,
-        SubstateModel,
-        TransactionStatus,
-        UtxoUnspent,
-        VaultModel,
-        WalletEvent,
-        WalletLockId,
-        WalletTransactionUpdate,
+        AccountUpdate, AddressBookEntry, AuthoredTemplateModel, ConfidentialOutputModel, ImportedKeyId, KeyId, KeyType,
+        NewAccountData, NonFungibleToken, OutputStatus, StealthOutputModel, SubstateModel, TransactionStatus,
+        UtxoUnspent, VaultModel, WalletEvent, WalletLockId, WalletTransactionUpdate,
     },
     storage::{CommittableStore, WalletEventStoreWriter, WalletStorageError, WalletStoreReader, WalletStoreWriter},
 };
 use tari_template_lib_types::{
-    Amount,
-    ComponentAddress,
-    EncryptedData,
-    NonFungibleId,
-    ResourceAddress,
-    TemplateAddress,
-    UtxoAddress,
-    UtxoId,
+    Amount, ComponentAddress, EncryptedData, NonFungibleId, ResourceAddress, TemplateAddress, UtxoAddress, UtxoId,
     VaultId,
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
 };
@@ -415,6 +382,92 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         }
 
         Ok(())
+    }
+
+    // -------------------------------- API keys -------------------------------- //
+    fn api_keys_create(
+        &mut self,
+        name: &str,
+        key_hash: &str,
+        permissions: &str,
+    ) -> Result<tari_ootle_wallet_sdk::models::ApiKey, WalletStorageError> {
+        const OPERATION: &str = "api_keys_create";
+        use crate::schema::api_keys;
+
+        diesel::insert_into(api_keys::table)
+            .values((
+                api_keys::name.eq(name),
+                api_keys::key_hash.eq(key_hash),
+                api_keys::permissions.eq(permissions),
+                api_keys::expires_at.eq(None::<PrimitiveDateTime>),
+            ))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        let row = api_keys::table
+            .filter(api_keys::key_hash.eq(key_hash))
+            .first::<models::ApiKey>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(row.into())
+    }
+
+    fn api_keys_revoke(&mut self, id: i32) -> Result<tari_ootle_wallet_sdk::models::ApiKey, WalletStorageError> {
+        const OPERATION: &str = "api_keys_revoke";
+        use crate::schema::api_keys;
+
+        let num_affected = diesel::update(api_keys::table)
+            .filter(api_keys::id.eq(id))
+            .filter(api_keys::revoked_at.is_null())
+            .set(api_keys::revoked_at.eq(dsl::now))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        if num_affected == 0 {
+            return Err(WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "active_api_key".to_string(),
+                key: id.to_string(),
+            });
+        }
+
+        let row = api_keys::table
+            .filter(api_keys::id.eq(id))
+            .first::<models::ApiKey>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(row.into())
+    }
+
+    fn api_keys_touch_last_used(
+        &mut self,
+        id: i32,
+    ) -> Result<tari_ootle_wallet_sdk::models::ApiKey, WalletStorageError> {
+        const OPERATION: &str = "api_keys_touch_last_used";
+        use crate::schema::api_keys;
+
+        let num_affected = diesel::update(api_keys::table)
+            .filter(api_keys::id.eq(id))
+            .filter(api_keys::revoked_at.is_null())
+            .filter(api_keys::expires_at.is_null().or(api_keys::expires_at.gt(dsl::now)))
+            .set(api_keys::last_used_at.eq(dsl::now))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        if num_affected == 0 {
+            return Err(WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "active_api_key".to_string(),
+                key: id.to_string(),
+            });
+        }
+
+        let row = api_keys::table
+            .filter(api_keys::id.eq(id))
+            .first::<models::ApiKey>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(row.into())
     }
 
     // -------------------------------- Transactions -------------------------------- //

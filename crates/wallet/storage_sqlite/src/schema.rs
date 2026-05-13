@@ -39,6 +39,7 @@ diesel::table! {
         created_at -> Timestamp,
         last_used_at -> Nullable<Timestamp>,
         revoked_at -> Nullable<Timestamp>,
+        expires_at -> Nullable<Timestamp>,
     }
 }
 

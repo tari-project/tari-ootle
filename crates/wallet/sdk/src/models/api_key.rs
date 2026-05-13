@@ -35,6 +35,11 @@ pub struct ApiKey {
     /// Soft-delete: rows are retained for audit / historical "last_used"
     /// surfacing, but a non-null `revoked_at` makes the key unusable.
     pub revoked_at: Option<PrimitiveDateTime>,
+    /// Optional expiry timestamp. Always written as `None` for now; the
+    /// auth path's active-row filter does NOT yet enforce it. The field
+    /// exists so the enforcement can be added later without a follow-up
+    /// schema migration.
+    pub expires_at: Option<PrimitiveDateTime>,
 }
 
 impl ApiKey {

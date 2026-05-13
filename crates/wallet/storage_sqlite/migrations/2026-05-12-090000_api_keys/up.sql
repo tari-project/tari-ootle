@@ -10,6 +10,11 @@
 --     same format as `JrpcPermissions`'s `FromStr`/`Display`.
 --   * Revocation is soft (`revoked_at`) so we can still log a "last seen"
 --     timestamp for already-revoked credentials; queries filter on this.
+--   * `expires_at` is a forward-compatibility hook: the auth path will
+--     eventually treat any row whose `expires_at` lies in the past as
+--     unusable. For the initial implementation it is always written as
+--     NULL, but the column exists so adding the enforcement later is a
+--     pure code change rather than a follow-up migration.
 CREATE TABLE api_keys (
     id              INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
     name            TEXT     NOT NULL,
@@ -17,7 +22,8 @@ CREATE TABLE api_keys (
     permissions     TEXT     NOT NULL,
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_used_at    DATETIME NULL,
-    revoked_at      DATETIME NULL
+    revoked_at      DATETIME NULL,
+    expires_at      DATETIME NULL
 );
 
 CREATE UNIQUE INDEX api_keys_key_hash_idx ON api_keys (key_hash);

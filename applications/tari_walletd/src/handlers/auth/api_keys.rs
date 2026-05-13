@@ -239,6 +239,9 @@ pub async fn handle_list_api_keys(
                 revoked_at: k
                     .revoked_at
                     .map(|ts: time::PrimitiveDateTime| ts.assume_utc().unix_timestamp()),
+                expires_at: k
+                    .expires_at
+                    .map(|ts: time::PrimitiveDateTime| ts.assume_utc().unix_timestamp()),
             }
         })
         .collect();
@@ -639,12 +642,14 @@ mod e2e_tests {
                     created_at: 1_700_000_000,
                     last_used_at: None,
                     revoked_at: None,
+                    expires_at: None,
                 }],
             };
             let v = serde_json::to_value(&resp).unwrap();
-            // Field must be present and null for active keys.
+            // Field must be present and null for active keys / keys without expiry.
             assert!(v["keys"][0]["revoked_at"].is_null());
             assert!(v["keys"][0]["last_used_at"].is_null());
+            assert!(v["keys"][0]["expires_at"].is_null());
         }
 
         #[test]

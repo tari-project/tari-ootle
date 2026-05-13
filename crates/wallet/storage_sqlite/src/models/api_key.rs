@@ -29,6 +29,11 @@ pub struct ApiKey {
     pub created_at: PrimitiveDateTime,
     pub last_used_at: Option<PrimitiveDateTime>,
     pub revoked_at: Option<PrimitiveDateTime>,
+    /// Optional expiry timestamp. Always written as `None` for now; the
+    /// auth path's "active row" filter does NOT yet check this. The column
+    /// exists so the enforcement can be added later without a follow-up
+    /// migration. See the migration comment for the eventual semantics.
+    pub expires_at: Option<PrimitiveDateTime>,
 }
 
 impl ApiKey {

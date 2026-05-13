@@ -904,6 +904,11 @@ pub struct IssuedApiKey {
     /// Unix timestamp (seconds). `None` for an active key; non-null means
     /// the key has been revoked and is no longer usable.
     pub revoked_at: Option<i64>,
+    /// Unix timestamp (seconds). `None` means the key does not expire.
+    /// Always `None` for keys created by the current implementation; the
+    /// field exists so an expiry-enforcement feature can be added later
+    /// without a wire-format change.
+    pub expires_at: Option<i64>,
 }
 
 /// Admin → daemon: revoke an API key by its id. The row is soft-deleted

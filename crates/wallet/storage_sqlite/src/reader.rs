@@ -1648,6 +1648,7 @@ fn map_api_key_row(row: models::ApiKey) -> ApiKey {
         created_at: row.created_at,
         last_used_at: row.last_used_at,
         revoked_at: row.revoked_at,
+        expires_at: row.expires_at,
     }
 }
 

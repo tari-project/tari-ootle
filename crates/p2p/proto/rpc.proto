@@ -301,3 +301,15 @@ enum ConsensusState {
   Sleeping = 4;
   Shutdown = 5;
 }
+
+message GetHighQcRequest {
+  // Optional hint: the caller's leaf epoch. The responder may reject the request
+  // if its own high QC's epoch is lower (it has nothing useful to say).
+  // If zero, the responder returns its current high QC unconditionally.
+  tari.ootle.common.Epoch from_epoch = 1;
+}
+
+message GetHighQcResponse {
+  // The signed ProposalCertificate the responder considers its current high QC.
+  tari.ootle.consensus.QuorumCertificate high_qc = 1;
+}

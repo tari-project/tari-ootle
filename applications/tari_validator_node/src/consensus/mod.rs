@@ -94,7 +94,7 @@ pub async fn spawn(
         store.clone(),
         epoch_manager.clone(),
         leader_strategy,
-        signing_service,
+        signing_service.clone(),
         transaction_pool,
         transaction_executor,
         tx_hotstuff_events.clone(),
@@ -107,7 +107,7 @@ pub async fn spawn(
     let context = ConsensusWorkerContext {
         epoch_manager: epoch_manager.clone(),
         hotstuff: hotstuff_worker,
-        state_sync: RpcStateSyncClientProtocol::new(epoch_manager, store, client_factory)
+        state_sync: RpcStateSyncClientProtocol::new(epoch_manager, store, client_factory, signing_service)
             .with_skip_sync(consensus_config.skip_sync),
         tx_current_state,
     };

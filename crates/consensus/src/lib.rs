@@ -8,3 +8,6 @@ pub mod messages;
 mod tracing;
 pub mod traits;
 mod validations;
+
+// Re-export the QC signature check for recovery probes outside the consensus crate.
+pub use validations::check_quorum_certificate_signatures;

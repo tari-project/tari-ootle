@@ -40,6 +40,8 @@ pub enum RpcStateSyncError {
     NoCommittees(Epoch),
     #[error("Invariant error: {details}")]
     InvariantError { details: String },
+    #[error("Stall-recovery probe inconclusive: {reason}")]
+    StallProbeInconclusive { reason: String },
 }
 
 impl RpcStateSyncError {

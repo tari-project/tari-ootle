@@ -1707,7 +1707,7 @@ dependencies = [
 
 [[package]]
 name = "consensus_tests"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "fern",
  "futures 0.3.31",
@@ -2711,7 +2711,7 @@ dependencies = [
 
 [[package]]
 name = "db-inspector"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -5101,7 +5101,7 @@ checksum = "8bb03732005da905c88227371639bf1ad885cc712789c011c31c5fb3ab3ccf02"
 
 [[package]]
 name = "integration_tests"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "config",
@@ -5883,7 +5883,7 @@ dependencies = [
 
 [[package]]
 name = "libp2p-messaging"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "async-trait",
  "futures-bounded 0.2.4",
@@ -6061,7 +6061,7 @@ dependencies = [
 
 [[package]]
 name = "libp2p-substream"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "libp2p",
  "prometheus-client",
@@ -7646,7 +7646,7 @@ dependencies = [
 
 [[package]]
 name = "ootle-wasm"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.2.17",
@@ -7656,7 +7656,7 @@ dependencies = [
 
 [[package]]
 name = "ootle-wasm-core"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "base64 0.22.1",
  "ootle_byte_type",
@@ -8661,7 +8661,7 @@ dependencies = [
 
 [[package]]
 name = "proto_builder"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "prost-build 0.14.3",
  "sha2 0.10.9",
@@ -10539,7 +10539,7 @@ dependencies = [
 
 [[package]]
 name = "sqlite_message_logger"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "chrono",
  "diesel",
@@ -10911,7 +10911,7 @@ dependencies = [
 
 [[package]]
 name = "tari_base_node_client"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "futures-util",
  "log",
@@ -11138,7 +11138,7 @@ dependencies = [
 
 [[package]]
 name = "tari_consensus"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "indexmap 2.13.0",
@@ -11163,7 +11163,7 @@ dependencies = [
 
 [[package]]
 name = "tari_consensus_types"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "borsh",
  "ootle_serde",
@@ -11263,7 +11263,7 @@ dependencies = [
 
 [[package]]
 name = "tari_engine"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "blake2 0.10.6",
  "bytes",
@@ -11294,7 +11294,7 @@ dependencies = [
 
 [[package]]
 name = "tari_engine_types"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "bincode 2.0.1",
  "blake2 0.10.6",
@@ -11323,7 +11323,7 @@ dependencies = [
 
 [[package]]
 name = "tari_epoch_manager"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "log",
@@ -11343,7 +11343,7 @@ dependencies = [
 
 [[package]]
 name = "tari_epoch_oracles"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "blake2 0.10.6",
@@ -11397,7 +11397,7 @@ dependencies = [
 
 [[package]]
 name = "tari_indexer"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "async-graphql",
@@ -11499,7 +11499,7 @@ dependencies = [
 
 [[package]]
 name = "tari_indexer_lib"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "log",
  "prometheus-client",
@@ -11603,7 +11603,7 @@ dependencies = [
 
 [[package]]
 name = "tari_networking"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11656,7 +11656,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_app_utilities"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "bincode 2.0.1",
@@ -11696,7 +11696,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_common_types"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "blake2 0.10.6",
  "borsh",
@@ -11724,7 +11724,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_p2p"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "libp2p-identity 0.2.13 (git+https://github.com/tari-project/rust-libp2p.git?rev=76f31bc0ab4bd9f9f5383be6aa3fed873538e35a)",
@@ -11748,7 +11748,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_storage"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "bitflags 2.10.0",
@@ -11775,7 +11775,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_storage_sqlite"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "diesel",
  "diesel_migrations",
@@ -11826,7 +11826,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_transaction"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "bincode 2.0.1",
  "borsh",
@@ -11852,7 +11852,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_cli"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -11881,7 +11881,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_crypto"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "argon2 0.5.3",
  "blake2 0.10.6",
@@ -11911,7 +11911,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_sdk"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "futures 0.3.31",
@@ -11973,7 +11973,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_sdk_tests"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "digest 0.10.7",
  "ootle_byte_type",
@@ -11995,7 +11995,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_storage_sqlite"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "diesel",
  "diesel_migrations",
@@ -12018,7 +12018,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_walletd"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12136,7 +12136,7 @@ dependencies = [
 
 [[package]]
 name = "tari_rpc_framework"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "async-trait",
  "bitflags 2.10.0",
@@ -12160,7 +12160,7 @@ dependencies = [
 
 [[package]]
 name = "tari_rpc_macros"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -12169,7 +12169,7 @@ dependencies = [
 
 [[package]]
 name = "tari_rpc_state_sync"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "futures 0.3.31",
@@ -12246,7 +12246,7 @@ dependencies = [
 
 [[package]]
 name = "tari_state_store_rocksdb"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "bincode 2.0.1",
@@ -12278,7 +12278,7 @@ dependencies = [
 
 [[package]]
 name = "tari_state_tree"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "indexmap 2.13.0",
  "log",
@@ -12304,7 +12304,7 @@ dependencies = [
 
 [[package]]
 name = "tari_swarm"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "libp2p",
  "libp2p-messaging",
@@ -12315,7 +12315,7 @@ dependencies = [
 
 [[package]]
 name = "tari_swarm_daemon"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12426,7 +12426,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_test_tooling"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "cargo_toml 0.22.3",
@@ -12539,7 +12539,7 @@ dependencies = [
 
 [[package]]
 name = "tari_transaction_manifest"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "proc-macro2",
  "serde_json",
@@ -12574,7 +12574,7 @@ dependencies = [
 
 [[package]]
 name = "tari_validator_node"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -12640,7 +12640,7 @@ dependencies = [
 
 [[package]]
 name = "tari_validator_node_client"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "indexmap 2.13.0",
  "multiaddr 0.18.3",
@@ -12664,7 +12664,7 @@ dependencies = [
 
 [[package]]
 name = "tari_validator_node_rpc"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "futures 0.3.31",
@@ -12687,7 +12687,7 @@ dependencies = [
 
 [[package]]
 name = "tari_validator_rollback"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "borsh",
@@ -12722,7 +12722,7 @@ dependencies = [
 
 [[package]]
 name = "tari_watcher"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "clap 3.2.25",
@@ -12751,7 +12751,7 @@ dependencies = [
 
 [[package]]
 name = "tariswap_bench"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "clap 4.5.54",
@@ -13431,7 +13431,7 @@ dependencies = [
 
 [[package]]
 name = "traffic-sim"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "clap 4.5.54",
@@ -13453,7 +13453,7 @@ dependencies = [
 
 [[package]]
 name = "transaction_generator"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "bincode 2.0.1",
@@ -13472,7 +13472,7 @@ dependencies = [
 
 [[package]]
 name = "transaction_submitter"
-version = "0.30.6"
+version = "0.30.7"
 dependencies = [
  "anyhow",
  "clap 4.5.54",

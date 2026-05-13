@@ -24,7 +24,7 @@ use crate::{
         WalletAuthenticator,
         jwt::{JwtApi, JwtApiError},
     },
-    services::{RefreshTokenStore, WebauthnService},
+    services::{ApiKeyStore, RefreshTokenStore, WebauthnService},
 };
 
 #[derive(Debug, Clone)]
@@ -37,6 +37,7 @@ pub struct HandlerContext {
     jwt_secret: SafePassword,
     authenticator: WalletAuthenticator,
     refresh_token_store: RefreshTokenStore,
+    api_key_store: ApiKeyStore,
     shutdown_signal: ShutdownSignal,
 }
 
@@ -59,6 +60,7 @@ impl HandlerContext {
             config,
             authenticator,
             refresh_token_store: RefreshTokenStore::new(Duration::from_secs(60 * 60)),
+            api_key_store: ApiKeyStore::new(),
             jwt_secret,
             shutdown_signal,
         }
@@ -102,6 +104,10 @@ impl HandlerContext {
 
     pub fn refresh_token_store(&self) -> &RefreshTokenStore {
         &self.refresh_token_store
+    }
+
+    pub fn api_key_store(&self) -> &ApiKeyStore {
+        &self.api_key_store
     }
 
     pub fn webauthn_service(&self) -> Option<&WebauthnService<SqliteWalletStore>> {

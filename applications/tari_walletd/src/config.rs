@@ -177,6 +177,7 @@ pub enum WalletDaemonAuth {
     #[default]
     None,
     WebAuthn,
+    ApiKey,
 }
 
 impl Display for WalletDaemonAuth {
@@ -184,6 +185,7 @@ impl Display for WalletDaemonAuth {
         match self {
             WalletDaemonAuth::None => write!(f, "none"),
             WalletDaemonAuth::WebAuthn => write!(f, "webauthn"),
+            WalletDaemonAuth::ApiKey => write!(f, "api_key"),
         }
     }
 }
@@ -195,6 +197,7 @@ impl FromStr for WalletDaemonAuth {
         match s.to_lowercase().as_str() {
             "none" => Ok(WalletDaemonAuth::None),
             "webauthn" => Ok(WalletDaemonAuth::WebAuthn),
+            "api_key" | "apikey" => Ok(WalletDaemonAuth::ApiKey),
             _ => Err(anyhow!("Invalid authentication method: {}", s)),
         }
     }

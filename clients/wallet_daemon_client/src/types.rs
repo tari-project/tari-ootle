@@ -753,6 +753,8 @@ pub enum AuthCredentials {
     None,
     /// Credentials for WebAuthN auth mode. Contains the request from the client to finish the auth.
     WebAuthN(Box<WebauthnFinishAuthRequest>),
+    /// Credentials for API key auth mode. Contains the raw API key string.
+    ApiKey(String),
 }
 
 impl AuthCredentials {
@@ -766,6 +768,13 @@ impl AuthCredentials {
     pub fn as_webauthn(&self) -> Option<&WebauthnFinishAuthRequest> {
         match self {
             Self::WebAuthN(req) => Some(req),
+            _ => None,
+        }
+    }
+
+    pub fn as_api_key(&self) -> Option<&str> {
+        match self {
+            Self::ApiKey(key) => Some(key),
             _ => None,
         }
     }
@@ -1072,6 +1081,7 @@ pub struct AuthGetMethodRequest {}
 pub enum AuthMethod {
     None,
     Webauthn,
+    ApiKey,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1079,6 +1089,103 @@ pub enum AuthMethod {
 pub struct AuthGetMethodResponse {
     pub method: AuthMethod,
 }
+
+// ── API Key management types ─────────────────────────────────────────────
+
+/// Information about an API key (returned in listings, never exposes the raw key).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ApiKeyInfo {
+    pub id: ApiKeyId,
+    pub name: String,
+    pub scopes: Vec<JrpcPermission>,
+    pub created_at: PrimitiveDateTime,
+    pub last_used_at: Option<PrimitiveDateTime>,
+}
+
+/// Opaque identifier for an API key.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ApiKeyId(
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "ootle_serde::hex")]
+    [u8; 32],
+);
+
+impl ApiKeyId {
+    pub const fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl Display for ApiKeyId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "apikey_{}", hex::encode(self.0))
+    }
+}
+
+impl FromStr for ApiKeyId {
+    type Err = FromHexError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let stripped = s.strip_prefix("apikey_").unwrap_or(s);
+        let bytes = hex::decode(stripped)?;
+        let arr: [u8; 32] = bytes.try_into().map_err(|_| FromHexError::InvalidHexCharacter { c: 'x', index: 0 })?;
+        Ok(Self::new(arr))
+    }
+}
+
+/// Request to create a new API key. Only Admin users can call this.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct CreateApiKeyRequest {
+    /// Human-readable name for the key (e.g. "my-trading-agent").
+    pub name: String,
+    /// Permission scopes to grant. Must be a subset of the Admin's own permissions.
+    pub scopes: Vec<JrpcPermission>,
+    /// If true and scopes include Admin, requires explicit confirmation.
+    #[serde(default)]
+    pub grant_admin: bool,
+}
+
+/// Response to creating a new API key. The raw key is shown exactly once.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct CreateApiKeyResponse {
+    pub id: ApiKeyId,
+    /// The raw API key string. This is the **only** time it is returned.
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub key: EncodedJwtString,
+    pub info: ApiKeyInfo,
+}
+
+/// Request to list all active API keys.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ListApiKeysRequest {}
+
+/// Response listing all active API keys.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ListApiKeysResponse {
+    pub keys: Vec<ApiKeyInfo>,
+}
+
+/// Request to revoke an API key.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct RevokeApiKeyRequest {
+    pub id: ApiKeyId,
+}
+
+/// Response to revoking an API key.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct RevokeApiKeyResponse {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]

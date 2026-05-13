@@ -32,6 +32,12 @@ import type {
   AuthLoginResponse,
   AuthRevokeTokenRequest,
   AuthRevokeTokenResponse,
+  CreateApiKeyRequest,
+  CreateApiKeyResponse,
+  ListApiKeysRequest,
+  ListApiKeysResponse,
+  RevokeApiKeyRequest,
+  RevokeApiKeyResponse,
   BurnProofsGetRequest,
   BurnProofsGetResponse,
   BurnProofsListRequest,
@@ -190,6 +196,18 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
   public authRefresh(): Promise<AuthRefreshResponse> {
     return this.sendRequest("auth.refresh");
+  }
+
+  public createApiKey(params: CreateApiKeyRequest): Promise<CreateApiKeyResponse> {
+    return this.sendRequest("auth.api_key.create", params);
+  }
+
+  public listApiKeys(params: ListApiKeysRequest = {}): Promise<ListApiKeysResponse> {
+    return this.sendRequest("auth.api_key.list", params);
+  }
+
+  public revokeApiKey(params: RevokeApiKeyRequest): Promise<RevokeApiKeyResponse> {
+    return this.sendRequest("auth.api_key.revoke", params);
   }
 
   public walletGetInfo(): Promise<WalletGetInfoResponse> {

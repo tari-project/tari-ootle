@@ -7,7 +7,7 @@ use tari_ootle_walletd_client::types::AuthCredentials;
 use url::Url;
 use webauthn_rs::{Webauthn, WebauthnBuilder};
 
-use super::{anonym::AnonymousAuth, webauthn::WebAuthnAuth};
+use super::{anonym::AnonymousAuth, apikey::ApiKeyAuth, webauthn::WebAuthnAuth};
 use crate::{
     config::{WalletDaemonAuth, WalletDaemonConfig},
     services::WebauthnService,
@@ -48,6 +48,7 @@ pub fn create_authenticator(
                 webauthn_service,
             )))
         },
+        WalletDaemonAuth::ApiKey => Ok(WalletAuthenticator::ApiKey(ApiKeyAuth::new())),
     }
 }
 
@@ -55,6 +56,7 @@ pub fn create_authenticator(
 pub enum WalletAuthenticator {
     None(AnonymousAuth),
     WebAuthn(WebAuthnAuth<SqliteWalletStore>),
+    ApiKey(ApiKeyAuth),
 }
 
 impl WalletAuthenticator {
@@ -62,6 +64,7 @@ impl WalletAuthenticator {
         match self {
             WalletAuthenticator::None(_) => None,
             WalletAuthenticator::WebAuthn(auth) => Some(auth.webauthn()),
+            WalletAuthenticator::ApiKey(_) => None,
         }
     }
 
@@ -69,6 +72,7 @@ impl WalletAuthenticator {
         match self {
             WalletAuthenticator::None(_) => None,
             WalletAuthenticator::WebAuthn(auth) => Some(auth.webauthn_service()),
+            WalletAuthenticator::ApiKey(_) => None,
         }
     }
 }
@@ -78,6 +82,7 @@ impl Authenticator for WalletAuthenticator {
         match self {
             WalletAuthenticator::None(auth) => auth.authenticate(credentials).await,
             WalletAuthenticator::WebAuthn(auth) => auth.authenticate(credentials).await,
+            WalletAuthenticator::ApiKey(auth) => auth.authenticate(credentials).await,
         }
     }
 }

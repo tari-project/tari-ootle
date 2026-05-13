@@ -4,6 +4,7 @@
 pub use refresh_token_store::*;
 pub use webauthn_session_store::*;
 
+pub mod api_key_store;
 pub mod wasm_optimizer;
 
 mod auto_claim_burn_service;

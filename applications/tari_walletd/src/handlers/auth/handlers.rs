@@ -37,6 +37,27 @@ pub async fn handle_login_request(
     request: (axum_jrpc::Id, AuthLoginRequest),
 ) -> Result<(CookieJar, JsonRpcResponse), anyhow::Error> {
     let (answer_id, request) = request;
+
+    // For API key auth, validate against the store and use its scopes
+    if let Some(raw_key) = request.credentials.as_api_key() {
+        let scopes = context
+            .api_key_store()
+            .validate_key(raw_key)
+            .await
+            .ok_or_else(|| unauthorized("Invalid API key"))?;
+
+        let jwt = context.jwt_api();
+        let claims = jwt.generate_auth_claims(scopes)?;
+        let token = jwt.grant(&claims)?;
+
+        context.notifier().notify(AuthLoginRequestEvent);
+        return Ok((
+            CookieJar::new(),
+            JsonRpcResponse::success(answer_id, AuthLoginResponse { token }),
+        ));
+    }
+
+    // Standard auth flow (WebAuthn / None)
     context.authenticator().authenticate(&request.credentials).await?;
     let jwt = context.jwt_api();
     let claims = jwt.generate_auth_claims(request.permissions.into())?;
@@ -123,6 +144,7 @@ pub async fn handle_get_auth_method(
         method: match context.config().authentication {
             WalletDaemonAuth::None => AuthMethod::None,
             WalletDaemonAuth::WebAuthn => AuthMethod::Webauthn,
+            WalletDaemonAuth::ApiKey => AuthMethod::ApiKey,
         },
     })
 }

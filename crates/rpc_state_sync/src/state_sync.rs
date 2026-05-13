@@ -58,6 +58,7 @@ pub struct RpcStateSyncClientProtocol<TConsensusSpec: ConsensusSpec> {
     client_factory: TariValidatorNodeRpcClientFactory,
     valid_checkpoints: HashMap<ShardGroup, EpochCheckpoint>,
     stats: StateSyncStats,
+    skip_sync: bool,
 }
 
 impl<TConsensusSpec> RpcStateSyncClientProtocol<TConsensusSpec>
@@ -74,7 +75,13 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             client_factory,
             valid_checkpoints: HashMap::new(),
             stats: StateSyncStats::default(),
+            skip_sync: false,
         }
+    }
+
+    pub fn with_skip_sync(mut self, skip_sync: bool) -> Self {
+        self.skip_sync = skip_sync;
+        self
     }
 
     async fn establish_rpc_session(&self, addr: &PeerAddress) -> Result<ValidatorNodeRpcClient, RpcStateSyncError> {
@@ -646,6 +653,11 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
     type Error = RpcStateSyncError;
 
     async fn check_sync(&self) -> Result<SyncStatus, Self::Error> {
+        if self.skip_sync {
+            warn!(target: LOG_TARGET, "🛜 State sync is disabled (--skip-sync). Reporting as up to date without checking.");
+            return Ok(SyncStatus::UpToDate);
+        }
+
         let current_epoch = self.epoch_manager.current_epoch().await?;
 
         let leaf_block = self

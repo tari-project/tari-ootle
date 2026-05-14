@@ -428,9 +428,18 @@ where TSpec: EpochManagerSpec
     ) -> Result<Committee<TSpec::Addr>, EpochManagerError> {
         let mut tx = self.global_db.create_transaction()?;
         let mut validator_node_db = self.global_db.validator_nodes(&mut tx);
-        let committees =
+        let committee =
             validator_node_db.get_committee_for_shard_group(epoch, shard_group, limit.unwrap_or(usize::MAX))?;
-        Ok(committees)
+        // An empty committee means no validators have been assigned for `(epoch, shard_group)`
+        // — either the epoch is not yet known to the local oracle, or validator assignment is
+        // pending. Surfacing this as `NoEpochFound` (rather than the previous `Ok(empty)`)
+        // lets `.optional()` callers handle the missing-data case, prevents the shared
+        // `committee_cache` from caching a poisoned 0-of-0 quorum result, and surfaces a
+        // loud error to any caller that previously silently relied on an empty committee.
+        if committee.is_empty() {
+            return Err(EpochManagerError::NoEpochFound(epoch));
+        }
+        Ok(committee)
     }
 
     pub(crate) fn get_committees_overlapping_shard_group(

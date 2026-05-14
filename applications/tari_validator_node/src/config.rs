@@ -184,12 +184,19 @@ pub struct ConsensusConfig {
     /// proposals from other validators, including voting in the affirmative if applicable, but will never propose
     /// evictions itself.
     pub enable_eviction_proposal: bool,
+    /// Skip the state sync check on startup and go directly into consensus. This makes `check_sync` always report
+    /// up-to-date, so the node will never enter the syncing state. Intended for local development and recovery
+    /// scenarios — running with this enabled against a network where the node is actually behind will cause
+    /// consensus to misbehave.
+    #[serde(default)]
+    pub skip_sync: bool,
 }
 
 impl Default for ConsensusConfig {
     fn default() -> Self {
         Self {
             enable_eviction_proposal: true,
+            skip_sync: false,
         }
     }
 }

@@ -401,7 +401,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn leaf_block_get(&self, epoch: Epoch) -> Result<LeafBlock, StorageError> {
-        let leaf_block = self.db().cf(LeafBlockCf)?.get_by_default_key("leaf_block_get")?;
+        let leaf_block = self.leaf_block_get_any()?;
         if leaf_block.epoch() != epoch {
             return Err(StorageError::NotFound {
                 item: "LeafBlock",
@@ -409,6 +409,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             });
         }
         Ok(leaf_block)
+    }
+
+    fn leaf_block_get_any(&self) -> Result<LeafBlock, StorageError> {
+        Ok(self.db().cf(LeafBlockCf)?.get_by_default_key("leaf_block_get_any")?)
     }
 
     fn highest_seen_block_get(&self, epoch: Epoch) -> Result<HighestSeenBlock, StorageError> {
@@ -442,7 +446,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn high_pc_get(&self, epoch: Epoch) -> Result<HighPc, StorageError> {
-        let high_qc = self.db().cf(HighPcCf)?.get_by_default_key("high_qc_get")?;
+        let high_qc = self.high_pc_get_any()?;
         if high_qc.epoch != epoch {
             return Err(StorageError::NotFound {
                 item: "HighQc",
@@ -450,6 +454,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             });
         }
         Ok(high_qc)
+    }
+
+    fn high_pc_get_any(&self) -> Result<HighPc, StorageError> {
+        Ok(self.db().cf(HighPcCf)?.get_by_default_key("high_pc_get_any")?)
     }
 
     fn high_tc_get(&self, epoch: Epoch) -> Result<HighTc, StorageError> {
@@ -1678,7 +1686,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                             None
                         };
 
-                        let is_metadata_only = metadata_mode && substate.substate_id.is_template();
+                        let is_metadata_only = metadata_mode &&
+                            !value_filter.contains(SubstateValueFilterFlags::TEMPLATE) &&
+                            substate.substate_id.is_template();
                         let resolved_value = value_filter
                                 .contains_substate(&substate.substate_id)
                                 // filter includes substate, return full value if available (unless metadata-only for templates), otherwise return hash

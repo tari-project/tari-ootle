@@ -22,6 +22,24 @@ pub trait BookkeepingModel: Sized {
     fn set<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<(), StorageError>;
 }
 
+/// Helpers for reading bookkeeping records without specifying an epoch up-front.
+/// Used by recovery paths that need to discover the consensus epoch from disk.
+pub trait BookkeepingEpochAgnosticRead: Sized {
+    fn get_any<TTx: StateStoreReadTransaction>(tx: &TTx) -> Result<Self, StorageError>;
+}
+
+impl BookkeepingEpochAgnosticRead for LeafBlock {
+    fn get_any<TTx: StateStoreReadTransaction>(tx: &TTx) -> Result<Self, StorageError> {
+        tx.leaf_block_get_any()
+    }
+}
+
+impl BookkeepingEpochAgnosticRead for HighPc {
+    fn get_any<TTx: StateStoreReadTransaction>(tx: &TTx) -> Result<Self, StorageError> {
+        tx.high_pc_get_any()
+    }
+}
+
 impl BookkeepingModel for HighPc {
     fn get<TTx: StateStoreReadTransaction>(tx: &TTx, epoch: Epoch) -> Result<Self, StorageError> {
         tx.high_pc_get(epoch)

@@ -7,14 +7,13 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use tokio::process::Command;
 
-use crate::process_definitions::{ProcessContext, ProcessDefinition};
+use crate::process_definitions::{ARGS_SETTINGS_KEY, ProcessContext, ProcessDefinition};
 
 pub const WALLET_DAEMON_AUTH_SETTINGS_KEY: &str = "wallet_daemon_auth";
 pub const WALLET_DAEMON_SEED_WORDS_SETTINGS_KEY: &str = "wallet_daemon_seed_words";
 pub const WALLET_DAEMON_INDEXER_URL_SETTINGS_KEY: &str = "indexer_url";
 pub const OVERRIDE_KEYRING_PASSWORD_SETTINGS_KEY: &str = "override_keyring_password";
 pub const ENABLE_VITE_DEV_SETTINGS_KEY: &str = "enable_vite_dev";
-const ARGS_SETTINGS_KEY: &str = "args";
 const WALLET_DAEMON_AUTH_DEFAULT: &str = "none";
 
 #[derive(Debug, Default)]

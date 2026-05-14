@@ -69,6 +69,10 @@ pub struct Cli {
     pub debug_templates: Vec<String>,
     #[clap(long, env = "TARI_VN_TOKIO_CONSOLE_PORT")]
     pub tokio_console_port: Option<u16>,
+    /// Skip the startup state sync check and go directly into consensus. The sync check will always report up-to-date.
+    /// Intended for local development and recovery; do not use against a network where this node is actually behind.
+    #[clap(long)]
+    pub skip_sync: bool,
     #[clap(subcommand)]
     pub command: Option<Subcommand>,
 }
@@ -128,6 +132,9 @@ impl ConfigOverrideProvider for Cli {
         }
         if self.disable_mdns {
             overrides.push(("validator_node.p2p.enable_mdns".to_string(), "false".to_string()));
+        }
+        if self.skip_sync {
+            overrides.push(("validator_node.consensus.skip_sync".to_string(), "true".to_string()));
         }
         if let Some(url) = self.epoch_oracle_minotari_node_grpc_url.as_ref() {
             overrides.push((

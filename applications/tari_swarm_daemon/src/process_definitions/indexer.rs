@@ -7,7 +7,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use tokio::process::Command;
 
-use crate::process_definitions::{ProcessContext, ProcessDefinition};
+use crate::process_definitions::{ARGS_SETTINGS_KEY, ProcessContext, ProcessDefinition};
 
 #[derive(Debug, Default)]
 pub struct Indexer;
@@ -76,6 +76,12 @@ impl ProcessDefinition for Indexer {
 
         for seed in seed_peers {
             command.arg(format!("--peer-seeds={seed}"));
+        }
+
+        if let Some(args) = context.get_setting(ARGS_SETTINGS_KEY) {
+            for arg in args.split_whitespace() {
+                command.arg(arg);
+            }
         }
 
         Ok(command)

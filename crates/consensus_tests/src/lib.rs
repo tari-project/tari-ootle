@@ -9,7 +9,13 @@ mod epoch_change;
 #[cfg(test)]
 mod eviction_proof;
 #[cfg(test)]
+mod last_voted_persistence;
+#[cfg(test)]
 mod leader_failure;
+#[cfg(test)]
+mod safe_node_predicate;
+#[cfg(test)]
+mod stale_qc_carry_forward;
 #[cfg(test)]
 mod state_tree;
 #[cfg(test)]

@@ -66,6 +66,15 @@ pub struct RpcStateSyncClientProtocol<TConsensusSpec: ConsensusSpec> {
     valid_checkpoints: HashMap<ShardGroup, EpochCheckpoint>,
     stats: StateSyncStats,
     skip_sync: bool,
+    /// Epoch that the next `sync` call should anchor at, recorded by `check_sync` when the
+    /// stall-recovery probe sees a verified high QC at an epoch above our leaf but potentially
+    /// below the oracle's current epoch. Consumed (cleared) by `sync_inner`.
+    ///
+    /// The probed epoch is the one with a finalised checkpoint to fetch; the oracle's current
+    /// epoch may not yet have a checkpoint at all (it's just where the base layer thinks the
+    /// committee is) and anchoring sync there would reproduce the `CheckpointNotAvailable`
+    /// failure that motivated the probe in the first place.
+    next_sync_target_epoch: Option<Epoch>,
 }
 
 impl<TConsensusSpec> RpcStateSyncClientProtocol<TConsensusSpec>
@@ -85,6 +94,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             valid_checkpoints: HashMap::new(),
             stats: StateSyncStats::default(),
             skip_sync: false,
+            next_sync_target_epoch: None,
         }
     }
 
@@ -603,7 +613,20 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 
     async fn sync_inner(&mut self) -> Result<(), RpcStateSyncError> {
         let timer = Instant::now();
-        let current_epoch = self.epoch_manager.current_epoch().await?;
+        // If the stall-recovery probe recorded a target epoch in `check_sync`, anchor sync there
+        // (the highest epoch we've proven was finalised). Otherwise fall back to the oracle's
+        // current epoch — the standard "behind by an epoch boundary" path.
+        let current_epoch = match self.next_sync_target_epoch.take() {
+            Some(probed) => {
+                info!(
+                    target: LOG_TARGET,
+                    "🛜 Sync target from stall-recovery probe: epoch {probed} (oracle current: {})",
+                    self.epoch_manager.current_epoch().await?,
+                );
+                probed
+            },
+            None => self.epoch_manager.current_epoch().await?,
+        };
         let our_vn = self.epoch_manager.get_our_validator_node(current_epoch).await?;
         let local_info = self.epoch_manager.get_local_committee_info(current_epoch).await?;
         let prev_epoch_committees = match self.get_sync_committees(local_info.shard_group(), current_epoch).await {
@@ -820,7 +843,11 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
 {
     type Error = RpcStateSyncError;
 
-    async fn check_sync(&self) -> Result<SyncStatus, Self::Error> {
+    async fn check_sync(&mut self) -> Result<SyncStatus, Self::Error> {
+        // Always discard any stale target recorded by a previous `check_sync`. The probed epoch
+        // is a point-in-time observation and must not survive across re-checks.
+        self.next_sync_target_epoch = None;
+
         if self.skip_sync {
             warn!(target: LOG_TARGET, "🛜 State sync is disabled (--skip-sync). Reporting as up to date without checking.");
             return Ok(SyncStatus::UpToDate);
@@ -894,6 +921,10 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
                     "🛜 Peer presented verified high QC at epoch {} > our leaf {}; will state-sync.",
                     epoch, leaf.epoch(),
                 );
+                // Record the probed epoch so `sync_inner` anchors at it instead of the oracle's
+                // current epoch. The oracle may have rolled to an epoch with no checkpoint yet;
+                // the probed epoch is the most recent one we've proven was finalised.
+                self.next_sync_target_epoch = Some(epoch);
                 Ok(SyncStatus::Behind)
             },
             ProbeOutcome::QuorumAtLeaf { attested_power } => {

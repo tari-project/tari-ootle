@@ -180,7 +180,7 @@ pub async fn spawn_services(
                 protocol_version: format!("/tari/{}/0.0.1", config.network).parse()?,
                 user_agent: format!("/tari/validator/{}", env!("CARGO_PKG_VERSION")),
                 enable_mdns: config.validator_node.p2p.enable_mdns,
-                enable_relay: true,
+                enable_relay: config.validator_node.p2p.enable_relay,
                 // TODO: allow node operator to configure
                 relay_circuit_limits: RelayCircuitLimits::high(),
                 relay_reservation_limits: RelayReservationLimits::high(),

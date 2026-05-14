@@ -1,0 +1,122 @@
+//   Copyright 2026 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+//! Persistence regression test for `LastVoted`.
+//!
+//! HotStuff's safety argument requires that a node never votes twice at the same view. The
+//! voter checks this via `LastVoted::get(tx, epoch)` and refuses to vote if
+//! `candidate.height() <= last_voted.height()` (see
+//! `crates/consensus/src/hotstuff/on_ready_to_vote_on_local_block.rs:215-237`).
+//!
+//! If the validator restarts between sending a vote and seeing the resulting QC, the `LastVoted`
+//! record must still be on disk afterwards — otherwise the validator could legally vote a second
+//! time at the same height, equivocating across restarts. This test verifies the record survives
+//! a full RocksDB close/reopen cycle, and that the `should_vote` decision logic (height check)
+//! comes out the way the protocol requires.
+
+use tari_consensus_types::{BlockId, LastVoted};
+use tari_ootle_common_types::{Epoch, NodeHeight};
+use tari_ootle_p2p::PeerAddress;
+use tari_ootle_storage::{StateStore, consensus_models::BookkeepingModel};
+use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+
+type TestStore = RocksDbStateStore<PeerAddress>;
+
+const TEST_EPOCH: Epoch = Epoch(0);
+
+/// Mirror of the height-only safety check performed inside `OnReadyToVoteOnLocalBlock::should_vote`.
+/// Refusing to vote when `candidate_height <= last_voted.height()` is what prevents per-restart
+/// equivocation; if this predicate disagrees with the consensus code, the safety argument breaks.
+fn would_vote(last_voted: Option<&LastVoted>, candidate_height: NodeHeight) -> bool {
+    match last_voted {
+        None => true,
+        Some(lv) => candidate_height > lv.height(),
+    }
+}
+
+#[test]
+fn last_voted_survives_close_and_reopen() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let path = temp_dir.path().to_path_buf();
+    let block_id = BlockId::new(tari_common_types::types::FixedHash::new([7u8; 32]));
+    let height = NodeHeight(42);
+
+    // Open, write, drop.
+    {
+        let store: TestStore = RocksDbStateStore::open(&path, DatabaseOptions::default()).unwrap();
+        let last_voted = LastVoted {
+            block_id,
+            height,
+            epoch: TEST_EPOCH,
+        };
+        store.with_write_tx(|tx| last_voted.set(tx)).unwrap();
+    }
+
+    // Reopen.
+    let store: TestStore = RocksDbStateStore::open(&path, DatabaseOptions::default()).unwrap();
+    let reloaded = store
+        .with_read_tx(|tx| LastVoted::get(tx, TEST_EPOCH))
+        .expect("LastVoted record must persist across restart");
+
+    assert_eq!(reloaded.height(), height);
+    assert_eq!(*reloaded.block_id(), block_id);
+    assert_eq!(reloaded.epoch(), TEST_EPOCH);
+}
+
+/// After restart, the safety predicate must refuse to vote at any height the node has already
+/// voted at, and must allow voting at strictly higher heights. The classic equivocation surface
+/// is "voted at H, crashed before seeing QC, restarted, and now considering another candidate at
+/// H from a competing leader" — the answer must be NO VOTE.
+#[test]
+fn safety_predicate_respects_persisted_last_voted_after_reopen() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let path = temp_dir.path().to_path_buf();
+    let voted_block = BlockId::new(tari_common_types::types::FixedHash::new([1u8; 32]));
+    let voted_height = NodeHeight(10);
+
+    {
+        let store: TestStore = RocksDbStateStore::open(&path, DatabaseOptions::default()).unwrap();
+        let last_voted = LastVoted {
+            block_id: voted_block,
+            height: voted_height,
+            epoch: TEST_EPOCH,
+        };
+        store.with_write_tx(|tx| last_voted.set(tx)).unwrap();
+    }
+
+    let store: TestStore = RocksDbStateStore::open(&path, DatabaseOptions::default()).unwrap();
+    let reloaded = store.with_read_tx(|tx| LastVoted::get(tx, TEST_EPOCH)).unwrap();
+
+    // Same height as the prior vote — even for a different block_id — must be rejected.
+    assert!(
+        !would_vote(Some(&reloaded), voted_height),
+        "must not vote at the same height after restart (equivocation risk)"
+    );
+    // Lower height — must be rejected.
+    assert!(
+        !would_vote(Some(&reloaded), NodeHeight(voted_height.as_u64() - 1)),
+        "must not vote at a lower height after restart"
+    );
+    // Strictly higher height — must be allowed.
+    assert!(
+        would_vote(Some(&reloaded), NodeHeight(voted_height.as_u64() + 1)),
+        "voting at a higher height after restart is correct"
+    );
+}
+
+/// When no `LastVoted` record exists (e.g. first vote in an epoch, or fresh state store), the
+/// safety predicate has nothing to gate against and must allow the vote. Documents the "no prior
+/// vote" branch of `should_vote`.
+#[test]
+fn safety_predicate_allows_first_vote_when_no_record_exists() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let store: TestStore = RocksDbStateStore::open(temp_dir.path(), DatabaseOptions::default()).unwrap();
+
+    // No LastVoted written. Reading should return NotFound, not a phantom record.
+    let result = store.with_read_tx(|tx| LastVoted::get(tx, TEST_EPOCH));
+    assert!(result.is_err(), "no LastVoted record should exist on a fresh store");
+
+    // With no record, the safety predicate must permit a vote at any height.
+    assert!(would_vote(None, NodeHeight(0)));
+    assert!(would_vote(None, NodeHeight(1_000_000)));
+}

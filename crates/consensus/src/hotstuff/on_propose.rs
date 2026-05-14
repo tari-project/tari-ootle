@@ -335,22 +335,26 @@ where TConsensusSpec: ConsensusSpec
         };
 
         let mut total_leader_fee = 0u64;
-        // When filling a timeout gap with a dummy chain, the candidate's parent is the last dummy, which carries
-        // justify_block's accumulated_data forward (see `calculate_last_dummy_block`). Initialize from justify_block
-        // (not highest_seen_block) to match what validators compute starting from the reconstructed dummy chain.
-        // Otherwise speculative leader-fee burn that accumulated on a locally-stored fork above the high QC would be
-        // incorrectly carried into the new candidate and every validator would reject with an exhaust-burn mismatch.
+        // When filling a timeout gap with a dummy chain, the candidate effectively extends from justify_block (the
+        // dummies are empty blocks that carry justify_block's accumulated_data and state forward — see
+        // `calculate_last_dummy_block`). Anchor accumulated_data, the substate store, and the pending state tree
+        // diff lookup at justify_block to match what validators recompute from the reconstructed dummy chain.
+        // Otherwise speculative state and leader-fee burn that accumulated on a locally-stored fork above the high QC
+        // would be incorrectly carried into the new candidate and validators would reject with either an
+        // exhaust-burn mismatch or a state Merkle-root mismatch.
+        let state_anchor_leaf = if dummy_block.is_some() {
+            justify_block.as_leaf()
+        } else {
+            start_of_chain_block.as_leaf()
+        };
         let mut accumulated_data = if dummy_block.is_some() {
             *justify_block.header().accumulated_data()
         } else {
             *highest_seen_block.header().accumulated_data()
         };
 
-        let mut substate_store = PendingSubstateStore::new(
-            tx,
-            start_of_chain_block.as_leaf(),
-            self.config.consensus_constants.num_preshards,
-        );
+        let mut substate_store =
+            PendingSubstateStore::new(tx, state_anchor_leaf, self.config.consensus_constants.num_preshards);
 
         let mut executed_transactions = HashMap::new();
 
@@ -492,7 +496,7 @@ where TConsensusSpec: ConsensusSpec
 
         let timer = TraceTimer::info(LOG_TARGET, "Propose calculate state root");
         let pending_tree_diffs =
-            PendingShardStateTreeDiff::get_all_up_to_commit_block(tx, start_of_chain_block.block_id())?;
+            PendingShardStateTreeDiff::get_all_up_to_commit_block(tx, state_anchor_leaf.block_id())?;
         let (state_root, _) = calculate_state_merkle_root(
             tx,
             local_committee_info.shard_group(),

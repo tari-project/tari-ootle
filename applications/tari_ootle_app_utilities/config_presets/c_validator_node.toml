@@ -44,4 +44,5 @@ enable_eviction_proposal = false
 #enable_mdns = true
 #listener_port = 0
 #reachability_mode = "auto"
+#enable_relay = false
 

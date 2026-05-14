@@ -14,6 +14,7 @@ pub struct P2pConfig {
     pub enable_rendezvous: bool,
     pub listener_port: u16,
     pub reachability_mode: ReachabilityMode,
+    pub enable_relay: bool,
 }
 
 impl Default for P2pConfig {
@@ -23,6 +24,7 @@ impl Default for P2pConfig {
             enable_rendezvous: false,
             listener_port: 0,
             reachability_mode: ReachabilityMode::default(),
+            enable_relay: false,
         }
     }
 }

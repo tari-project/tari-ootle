@@ -39,7 +39,7 @@ where
         loop {
             match context.state_sync.check_sync().await? {
                 SyncStatus::UpToDate => return Ok(ConsensusStateEvent::Ready),
-                SyncStatus::Behind => return Ok(ConsensusStateEvent::NeedSync),
+                SyncStatus::Behind { target_epoch } => return Ok(ConsensusStateEvent::NeedSync { target_epoch }),
                 SyncStatus::Inconclusive => {
                     warn!(
                         target: LOG_TARGET,

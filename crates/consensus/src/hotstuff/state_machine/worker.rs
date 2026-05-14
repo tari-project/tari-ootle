@@ -15,6 +15,7 @@ use crate::{
             event::ConsensusStateEvent,
             idle::Idle,
             state::{ConsensusCurrentState, ConsensusState},
+            syncing::Syncing,
         },
     },
     traits::{ConsensusSpec, SyncManager},
@@ -87,13 +88,17 @@ where
             (ConsensusState::Idle(state), ConsensusStateEvent::RegisteredForEpoch { .. }) => {
                 ConsensusState::CheckSync(state.into())
             },
-            (ConsensusState::CheckSync(state), ConsensusStateEvent::NeedSync) => ConsensusState::Syncing(state.into()),
+            (ConsensusState::CheckSync(_), ConsensusStateEvent::NeedSync { target_epoch }) => {
+                ConsensusState::Syncing(Syncing::new(target_epoch))
+            },
             (ConsensusState::CheckSync(state), ConsensusStateEvent::Ready) => ConsensusState::Running(state.into()),
             (ConsensusState::Syncing(state), ConsensusStateEvent::SyncComplete) => {
                 ConsensusState::Running(state.into())
             },
             (ConsensusState::Sleeping, ConsensusStateEvent::Resume) => ConsensusState::Idle(Idle::new()),
-            (ConsensusState::Running(state), ConsensusStateEvent::NeedSync) => ConsensusState::CheckSync(state.into()),
+            (ConsensusState::Running(state), ConsensusStateEvent::NeedSync { .. }) => {
+                ConsensusState::CheckSync(state.into())
+            },
             (ConsensusState::Running(state), ConsensusStateEvent::NotRegisteredForEpoch { .. }) => {
                 ConsensusState::Idle(state.into())
             },

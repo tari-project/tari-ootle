@@ -1501,6 +1501,9 @@ pub struct ApiKeyInfo {
     pub created_at: i64,
     pub last_used_at: Option<i64>,
     pub revoked_at: Option<i64>,
+    /// Optional expiry (unix seconds). NULL means non-expiring. Deferred enforcement —
+    /// active-row filter will check this in a follow-up once the UI/CLI exposes it.
+    pub expires_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

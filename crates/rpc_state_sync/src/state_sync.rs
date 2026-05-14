@@ -609,8 +609,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             Some(probed) => {
                 info!(
                     target: LOG_TARGET,
-                    "🛜 Sync target from caller: epoch {probed} (oracle current: {})",
-                    self.epoch_manager.current_epoch().await?,
+                    "🛜 Sync target from caller: epoch {probed}",
                 );
                 probed
             },

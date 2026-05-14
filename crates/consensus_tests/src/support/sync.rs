@@ -5,6 +5,7 @@ use tari_consensus::{
     hotstuff::HotStuffError,
     traits::{SyncManager, SyncStatus},
 };
+use tari_engine_types::Epoch;
 
 #[derive(Clone)]
 pub struct AlwaysSyncedSyncManager;
@@ -16,7 +17,7 @@ impl SyncManager for AlwaysSyncedSyncManager {
         Ok(SyncStatus::UpToDate)
     }
 
-    async fn sync(&mut self) -> Result<(), Self::Error> {
+    async fn sync(&mut self, _target_epoch: Option<Epoch>) -> Result<(), Self::Error> {
         Ok(())
     }
 }

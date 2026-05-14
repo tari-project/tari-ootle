@@ -15,6 +15,7 @@ pub struct ApiKey {
     pub created_at: i64,
     pub last_used_at: Option<i64>,
     pub revoked_at: Option<i64>,
+    pub expires_at: Option<i64>,
 }
 
 #[derive(Debug, Insertable)]

@@ -96,14 +96,10 @@ pub async fn handle_login_request(
             let mut claims = jwt.generate_auth_claims(permissions.into())?;
             claims.kid = Some(kid);
             let token = jwt.grant(&claims)?;
-            let refresh_token = context
-                .refresh_token_store()
-                .new_token(claims.permissions, claims.exp)
-                .await;
-            let refresh_cookie = refresh_token.into_cookie(REFRESH_TOKEN_COOKIE);
-            let cookie = CookieJar::new().add(refresh_cookie);
+            // API-key sessions do not get a refresh cookie — agents re-present
+            // the key on JWT renewal so revocation takes effect immediately.
             context.notifier().notify(AuthLoginRequestEvent);
-            Ok((cookie, JsonRpcResponse::success(answer_id, AuthLoginResponse { token })))
+            Ok((CookieJar::new(), JsonRpcResponse::success(answer_id, AuthLoginResponse { token })))
         },
         other_credentials => {
             context.authenticator().authenticate(&other_credentials).await?;
@@ -255,6 +251,7 @@ pub async fn handle_list_api_keys(
             created_at: row.created_at,
             last_used_at: row.last_used_at,
             revoked_at: row.revoked_at,
+            expires_at: row.expires_at,
         })
         .collect();
 

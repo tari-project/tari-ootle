@@ -5,5 +5,6 @@ CREATE TABLE api_keys (
     permissions TEXT    NOT NULL,
     created_at BIGINT   NOT NULL,
     last_used_at BIGINT,
-    revoked_at BIGINT
+    revoked_at BIGINT,
+    expires_at BIGINT
 );

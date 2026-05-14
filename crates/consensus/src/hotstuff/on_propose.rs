@@ -335,7 +335,16 @@ where TConsensusSpec: ConsensusSpec
         };
 
         let mut total_leader_fee = 0u64;
-        let mut accumulated_data = *highest_seen_block.header().accumulated_data();
+        // When filling a timeout gap with a dummy chain, the candidate's parent is the last dummy, which carries
+        // justify_block's accumulated_data forward (see `calculate_last_dummy_block`). Initialize from justify_block
+        // (not highest_seen_block) to match what validators compute starting from the reconstructed dummy chain.
+        // Otherwise speculative leader-fee burn that accumulated on a locally-stored fork above the high QC would be
+        // incorrectly carried into the new candidate and every validator would reject with an exhaust-burn mismatch.
+        let mut accumulated_data = if dummy_block.is_some() {
+            *justify_block.header().accumulated_data()
+        } else {
+            *highest_seen_block.header().accumulated_data()
+        };
 
         let mut substate_store = PendingSubstateStore::new(
             tx,

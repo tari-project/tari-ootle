@@ -11,7 +11,7 @@ use tari_ootle_wallet_sdk_services::{
     notify::Notify,
     transaction_service::TransactionServiceHandle,
 };
-use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
+use tari_ootle_wallet_storage_sqlite::{ApiKeyStore, SqliteWalletStore};
 use tari_ootle_walletd_client::permissions::JrpcPermission;
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::SafePassword;
@@ -73,7 +73,23 @@ impl HandlerContext {
     }
 
     pub fn check_auth(&self, token: Option<&Bearer>, permissions: &[JrpcPermission]) -> Result<(), JwtApiError> {
-        self.jwt_api().check_auth(token, permissions)
+        let claims = self.jwt_api().check_auth_returning_claims(token, permissions)?;
+        // For API-key-backed JWTs, verify the key has not been revoked since this token was issued.
+        if let Some(kid) = claims.kid {
+            let active = self
+                .wallet_sdk()
+                .store()
+                .with_read_tx(|tx| {
+                    Ok::<bool, anyhow::Error>(
+                        tx.api_keys_list_all()?.into_iter().any(|k| k.id == kid && k.revoked_at.is_none()),
+                    )
+                })
+                .unwrap_or(false);
+            if !active {
+                return Err(JwtApiError::AccessDeniedInvalidBearerToken);
+            }
+        }
+        Ok(())
     }
 
     pub fn jwt_api(&self) -> JwtApi<'_> {

@@ -33,6 +33,7 @@ impl<'a> JwtApi<'a> {
         Ok(Claims {
             permissions,
             exp: exp.as_secs(),
+            kid: None,
         })
     }
 
@@ -55,21 +56,29 @@ impl<'a> JwtApi<'a> {
         Ok(permissions_token.into())
     }
 
-    pub fn check_auth(&self, token: Option<&Bearer>, req_permissions: &[JrpcPermission]) -> Result<(), JwtApiError> {
+    /// Verifies the token and required permissions, returning the decoded claims on success.
+    pub fn check_auth_returning_claims(
+        &self,
+        token: Option<&Bearer>,
+        req_permissions: &[JrpcPermission],
+    ) -> Result<Claims, JwtApiError> {
         let token = token.ok_or(JwtApiError::AccessDeniedNoBearerToken)?;
         let token_data = self.decode_jwt(token.token())?;
-        let token_permissions = &token_data.claims.permissions;
-        if token_permissions.has_permission(&JrpcPermission::Admin) {
-            return Ok(());
-        }
-        for permission in req_permissions {
-            if !token_permissions.has_permission(permission) {
-                return Err(JwtApiError::InsufficientPermissions {
-                    required: permission.clone(),
-                });
+        let claims = token_data.claims;
+        if !claims.permissions.has_permission(&JrpcPermission::Admin) {
+            for permission in req_permissions {
+                if !claims.permissions.has_permission(permission) {
+                    return Err(JwtApiError::InsufficientPermissions {
+                        required: permission.clone(),
+                    });
+                }
             }
         }
-        Ok(())
+        Ok(claims)
+    }
+
+    pub fn check_auth(&self, token: Option<&Bearer>, req_permissions: &[JrpcPermission]) -> Result<(), JwtApiError> {
+        self.check_auth_returning_claims(token, req_permissions).map(|_| ())
     }
 }
 

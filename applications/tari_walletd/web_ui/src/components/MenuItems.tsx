@@ -30,23 +30,15 @@ import { useTheme } from "@mui/material/styles";
 import Tooltip from "@mui/material/Tooltip";
 import useSettingsStore from "@store/settingsStore";
 import { IoHome, IoHomeOutline, IoSettings, IoSettingsOutline, IoTerminal, IoTerminalOutline } from "react-icons/io5";
-import { LuBookOpen, LuLayoutTemplate } from "react-icons/lu";
+import { LuBookOpen, LuKey, LuLayoutTemplate } from "react-icons/lu";
 import { NavLink } from "react-router";
 
 function MainListItems() {
   const theme = useTheme();
   const advancedUiFeatures = useSettingsStore((s) => s.advancedUiFeatures);
 
-  const iconStyle = {
-    height: 22,
-    width: 22,
-  };
-
-  const activeIconStyle = {
-    height: 22,
-    width: 22,
-    color: theme.palette.primary.main,
-  };
+  const iconStyle = { height: 22, width: 22 };
+  const activeIconStyle = { height: 22, width: 22, color: theme.palette.primary.main };
 
   const mainItems = [
     {
@@ -61,7 +53,12 @@ function MainListItems() {
       activeIcon: <LuLayoutTemplate style={activeIconStyle} />,
       link: "templates",
     },
-
+    {
+      title: "API Keys",
+      icon: <LuKey style={iconStyle} />,
+      activeIcon: <LuKey style={activeIconStyle} />,
+      link: "api-keys",
+    },
     {
       title: "Address Book",
       icon: <LuBookOpen style={iconStyle} />,
@@ -84,14 +81,6 @@ function MainListItems() {
       link: "manifest",
     });
   }
-  // if (advancedUiFeatures.enable_flow_editor) {
-  //   mainItems.push({
-  //     title: "Flow Editor",
-  //     icon: <IoGitMerge style={iconStyle} />,
-  //     activeIcon: <IoGitMerge style={activeIconStyle} />,
-  //     link: "flow-editor",
-  //   });
-  // }
 
   return (
     <Box
@@ -104,21 +93,9 @@ function MainListItems() {
     >
       <Box>
         {mainItems.map(({ title, icon, activeIcon, link }) => (
-          <NavLink
-            to={link}
-            key={title}
-            style={{
-              textDecoration: "none",
-              color: "inherit",
-            }}
-          >
+          <NavLink to={link} key={title} style={{ textDecoration: "none", color: "inherit" }}>
             {({ isActive }) => (
-              <ListItemButton
-                sx={{
-                  paddingLeft: "22px",
-                  paddingRight: "22px",
-                }}
-              >
+              <ListItemButton sx={{ paddingLeft: "22px", paddingRight: "22px" }}>
                 <Tooltip
                   TransitionComponent={Fade}
                   TransitionProps={{ timeout: 300 }}

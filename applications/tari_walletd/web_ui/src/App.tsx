@@ -25,6 +25,7 @@ import { useAuthMethod } from "@api/hooks/useAuth";
 import { AuthDialog } from "@components/auth";
 import Loading from "@components/Loading";
 import AccessTokensLayout from "@routes/AccessTokens/AccessTokens";
+import ApiKeysLayout from "@routes/ApiKeys/ApiKeys";
 import AccountDetails from "@routes/AccountDetails/AccountDetails";
 import Accounts from "@routes/Accounts/Accounts";
 import AddressBookPage from "@routes/AddressBook/AddressBookPage";
@@ -47,97 +48,28 @@ import { Route, Routes } from "react-router";
 import { ErrorNotificationProvider } from "./contexts/ErrorNotificationContext";
 
 export const breadcrumbRoutes = [
-  {
-    label: "Home",
-    path: "/",
-    dynamic: false,
-  },
-  {
-    label: "Authentication",
-    path: "/auth",
-    dynamic: false,
-  },
-  {
-    label: "Webauthn",
-    path: "/auth/webauthn",
-    dynamic: false,
-  },
-  {
-    label: "Accounts",
-    path: "/accounts",
-    dynamic: false,
-  },
-  {
-    label: "Keys",
-    path: "/keys",
-    dynamic: false,
-  },
-  {
-    label: "Access Tokens",
-    path: "/access-tokens",
-    dynamic: false,
-  },
-  {
-    label: "Get access token",
-    path: "/access-token",
-    dynamic: false,
-  },
-  {
-    label: "Account Details",
-    path: "/accounts/:id",
-    dynamic: true,
-  },
-  {
-    label: "Transactions",
-    path: "/transactions",
-    dynamic: false,
-  },
-  {
-    label: "Transaction Details",
-    path: "/transactions/:id",
-    dynamic: true,
-  },
-  {
-    label: "Wallet",
-    path: "/wallet",
-    dynamic: false,
-  },
-  {
-    label: "Settings",
-    path: "/settings",
-    dynamic: false,
-  },
-  {
-    label: "Templates",
-    path: "/templates",
-    dynamic: false,
-  },
-  {
-    label: "Manifest",
-    path: "/manifest",
-    dynamic: false,
-  },
-  {
-    label: "Address Book",
-    path: "/address-book",
-    dynamic: false,
-  },
-  // {
-  //   label: "Flow Editor",
-  //   path: "/flow-editor",
-  //   dynamic: false,
-  // },
-  {
-    label: "Stealth UTXOs",
-    path: "/stealth-utxos/:resource_address",
-    dynamic: true,
-  },
+  { label: "Home", path: "/", dynamic: false },
+  { label: "Authentication", path: "/auth", dynamic: false },
+  { label: "Webauthn", path: "/auth/webauthn", dynamic: false },
+  { label: "Accounts", path: "/accounts", dynamic: false },
+  { label: "Keys", path: "/keys", dynamic: false },
+  { label: "Access Tokens", path: "/access-tokens", dynamic: false },
+  { label: "Get access token", path: "/access-token", dynamic: false },
+  { label: "API Keys", path: "/api-keys", dynamic: false },
+  { label: "Account Details", path: "/accounts/:id", dynamic: true },
+  { label: "Transactions", path: "/transactions", dynamic: false },
+  { label: "Transaction Details", path: "/transactions/:id", dynamic: true },
+  { label: "Wallet", path: "/wallet", dynamic: false },
+  { label: "Settings", path: "/settings", dynamic: false },
+  { label: "Templates", path: "/templates", dynamic: false },
+  { label: "Manifest", path: "/manifest", dynamic: false },
+  { label: "Address Book", path: "/address-book", dynamic: false },
+  { label: "Stealth UTXOs", path: "/stealth-utxos/:resource_address", dynamic: true },
 ];
 
 interface GuardedRouteProps {
   component: React.ComponentType<any>;
   redirect?: string;
-
   [key: string]: any;
 }
 
@@ -160,12 +92,8 @@ const GuardedRoute = ({ component: Component, redirect = "/", ...rest }: Guarded
         return;
       }
 
-      // We only want to reauth after page refresh, or if a reauth is needed (we had a previous auth 401 error)
-      if (!needsReauth && hasToken !== null) {
-        return;
-      }
-      // No valid JWT in memory (e.g. page reload). Try a silent refresh using
-      // the server-side refresh token cookie before falling back to the dialog.
+      if (!needsReauth && hasToken !== null) return;
+
       try {
         const response = await client.authRefresh();
         if (response.token) {
@@ -189,9 +117,7 @@ const GuardedRoute = ({ component: Component, redirect = "/", ...rest }: Guarded
 
   useEffect(() => {
     if (hasToken && loggedIn) {
-      settingsGet().then((res) => {
-        setAdvancedUiFeatures(res.advanced_ui_features);
-      });
+      settingsGet().then((res) => setAdvancedUiFeatures(res.advanced_ui_features));
     }
   }, [hasToken, loggedIn, setAdvancedUiFeatures]);
 
@@ -201,9 +127,7 @@ const GuardedRoute = ({ component: Component, redirect = "/", ...rest }: Guarded
     setNeedsReauth(false);
   };
 
-  if (isLoading || !authMethod || hasToken === null) {
-    return <Loading />;
-  }
+  if (isLoading || !authMethod || hasToken === null) return <Loading />;
 
   if (authMethodsIsError) {
     console.error("Error fetching auth method:", authMethodsError);
@@ -228,25 +152,17 @@ function App() {
           <Route path="accounts" element={<GuardedRoute redirect="/accounts" component={Accounts} />} />
           <Route path="accounts/:id" element={<GuardedRoute redirect="/accounts" component={AccountDetails} />} />
           <Route path="keys" element={<GuardedRoute redirect="/keys" component={Keys} />} />
-          <Route
-            path="access-tokens"
-            element={<GuardedRoute redirect="/access-tokens" component={AccessTokensLayout} />}
-          />
+          <Route path="access-tokens" element={<GuardedRoute redirect="/access-tokens" component={AccessTokensLayout} />} />
+          <Route path="api-keys" element={<GuardedRoute redirect="/api-keys" component={ApiKeysLayout} />} />
           <Route path="transactions" element={<GuardedRoute redirect="/transactions" component={Transactions} />} />
           <Route path="wallet" element={<GuardedRoute redirect="/wallet" component={Wallet} />} />
-          <Route
-            path="transactions/:id"
-            element={<GuardedRoute redirect="/transactions" component={TransactionDetails} />}
-          />
+          <Route path="transactions/:id" element={<GuardedRoute redirect="/transactions" component={TransactionDetails} />} />
           <Route path="settings" element={<GuardedRoute redirect="/settings" component={SettingsPage} />} />
           <Route path="templates" element={<GuardedRoute redirect="/templates" component={Templates} />} />
           <Route path="manifest" element={<GuardedRoute redirect="/manifest" component={Manifest} />} />
           <Route path="address-book" element={<GuardedRoute redirect="/address-book" component={AddressBookPage} />} />
           {/*<Route path="flow-editor" element={<GuardedRoute redirect="/flow-editor" component={FlowEditor} />} />*/}
-          <Route
-            path="stealth-utxos/:resource_address"
-            element={<GuardedRoute redirect="/stealth-utxos" component={StealthUtxoListPage} />}
-          />
+          <Route path="stealth-utxos/:resource_address" element={<GuardedRoute redirect="/stealth-utxos" component={StealthUtxoListPage} />} />
           <Route path="*" element={<ErrorPage />} />
         </Route>
       </Routes>

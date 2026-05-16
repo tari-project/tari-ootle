@@ -160,7 +160,9 @@ impl ApiKeyStore for WriteTransaction<'_> {
 
     fn api_keys_revoke(&mut self, id: i64, now: i64) -> Result<(), WalletStorageError> {
         use crate::schema::api_keys;
-        diesel::update(api_keys::table.filter(api_keys::id.eq(id)))
+        // Filter on revoked_at IS NULL so double-revoke is idempotent:
+        // the second call affects 0 rows and the original timestamp is preserved.
+        diesel::update(api_keys::table.filter(api_keys::id.eq(id).and(api_keys::revoked_at.is_null())))
             .set(api_keys::revoked_at.eq(Some(now)))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("api_keys_revoke", e))?;
@@ -169,7 +171,9 @@ impl ApiKeyStore for WriteTransaction<'_> {
 
     fn api_keys_touch(&mut self, id: i64, now: i64) -> Result<(), WalletStorageError> {
         use crate::schema::api_keys;
-        diesel::update(api_keys::table.filter(api_keys::id.eq(id)))
+        // Filter on revoked_at IS NULL so a revoked key's last_used_at is
+        // never updated by a concurrent in-flight request that raced with revocation.
+        diesel::update(api_keys::table.filter(api_keys::id.eq(id).and(api_keys::revoked_at.is_null())))
             .set(api_keys::last_used_at.eq(Some(now)))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("api_keys_touch", e))?;
@@ -203,7 +207,6 @@ impl ApiKeyStore for ReadTransaction<'_> {
 mod tests {
     use super::*;
 
-    // Each test gets its own fresh in-memory SQLite database — no shared state.
     fn in_memory_store() -> SqliteWalletStore {
         let mut conn = SqliteConnection::establish(":memory:").expect("in-memory db");
         sql_query("PRAGMA foreign_keys = ON;")
@@ -266,8 +269,25 @@ mod tests {
         tx.api_keys_revoke(row.id, 1_000_000).unwrap();
         let fetched = tx.api_keys_get_by_hash(&hash).unwrap();
         assert_eq!(fetched.revoked_at, Some(1_000_000));
-        // Key is still retrievable (soft-delete; caller checks revoked_at)
         assert_eq!(fetched.id, row.id);
+    }
+
+    #[test]
+    fn api_key_double_revoke_preserves_original_timestamp() {
+        let store = in_memory_store();
+        let hash = [0xdc_u8; 32];
+        let mut tx = store.create_write_tx().unwrap();
+        let row = tx.api_keys_insert("double-revoke", &hash, "[]").unwrap();
+        tx.api_keys_revoke(row.id, 1_000_000).unwrap();
+        // Second revoke with a later timestamp — original must win because
+        // the UPDATE filters revoked_at IS NULL.
+        tx.api_keys_revoke(row.id, 9_999_999).unwrap();
+        let fetched = tx.api_keys_get_by_hash(&hash).unwrap();
+        assert_eq!(
+            fetched.revoked_at,
+            Some(1_000_000),
+            "double-revoke must preserve the original timestamp",
+        );
     }
 
     #[test]
@@ -281,6 +301,22 @@ mod tests {
         tx.api_keys_touch(row.id, 9_999_999).unwrap();
         let fetched = tx.api_keys_get_by_hash(&hash).unwrap();
         assert_eq!(fetched.last_used_at, Some(9_999_999));
+    }
+
+    #[test]
+    fn api_key_touch_on_revoked_key_does_not_update_last_used_at() {
+        let store = in_memory_store();
+        let hash = [0xfe_u8; 32];
+        let mut tx = store.create_write_tx().unwrap();
+        let row = tx.api_keys_insert("race-target", &hash, "[]").unwrap();
+        tx.api_keys_revoke(row.id, 1_000).unwrap();
+        // Touch after revoke must not error, but must not update last_used_at.
+        tx.api_keys_touch(row.id, 2_000).unwrap();
+        let fetched = tx.api_keys_get_by_hash(&hash).unwrap();
+        assert!(
+            fetched.last_used_at.is_none(),
+            "touch on revoked key must not update last_used_at",
+        );
     }
 
     #[test]
@@ -299,7 +335,6 @@ mod tests {
             rtx.api_keys_touch(1, 0).is_err(),
             "touch must fail on read tx"
         );
-        // read ops work fine (empty list since nothing committed)
         let keys = rtx.api_keys_list_all().unwrap();
         assert!(keys.is_empty());
     }

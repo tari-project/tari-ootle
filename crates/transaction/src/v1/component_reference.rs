@@ -9,11 +9,23 @@ use tari_template_lib_types::ComponentAddress;
 use crate::args::WorkspaceId;
 
 /// A reference to a component, either by its address or by a workspace ID.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    borsh::BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum ComponentReference {
-    Address(ComponentAddress),
-    Workspace(WorkspaceId),
+    #[n(0)]
+    Address(#[n(0)] ComponentAddress),
+    #[n(1)]
+    Workspace(#[n(0)] WorkspaceId),
 }
 
 impl ComponentReference {

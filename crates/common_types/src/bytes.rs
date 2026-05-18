@@ -118,6 +118,36 @@ impl<const MAX: usize> BorshSerialize for MaxSizeBytes<MAX> {
     }
 }
 
+// minicbor `Encode`/`Decode`/`CborLen`: wire-equivalent to a CBOR byte string, matching the
+// serde `transparent` representation as `Vec<u8>` bytes.
+impl<C, const MAX: usize> minicbor::Encode<C> for MaxSizeBytes<MAX> {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        _ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.bytes(self.inner.as_slice())?;
+        Ok(())
+    }
+}
+
+impl<'b, C, const MAX: usize> minicbor::Decode<'b, C> for MaxSizeBytes<MAX> {
+    fn decode(d: &mut minicbor::Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let bytes = d.bytes()?;
+        MaxSizeBytes::from_bytes_checked(bytes).ok_or_else(|| {
+            minicbor::decode::Error::message(format!("MaxSizeBytes<{MAX}> exceeded: got {} bytes", bytes.len()))
+        })
+    }
+}
+
+impl<C, const MAX: usize> minicbor::CborLen<C> for MaxSizeBytes<MAX> {
+    fn cbor_len(&self, ctx: &mut C) -> usize {
+        let len = self.inner.as_slice().len();
+        // CBOR major type 2 (byte string): length-prefix bytes for the length, then the bytes.
+        <u64 as minicbor::CborLen<C>>::cbor_len(&(len as u64), ctx) + len
+    }
+}
+
 impl<const MAX: usize> PartialOrd for MaxSizeBytes<MAX> {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))

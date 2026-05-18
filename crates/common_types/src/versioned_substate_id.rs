@@ -10,11 +10,15 @@ use tari_template_lib_types::TransactionReceiptAddress;
 
 use crate::{NumPreshards, ShardGroup, SubstateAddress, ToSubstateAddress, displayable::Displayable, shard::Shard};
 
-#[derive(Debug, Clone, Deserialize, Serialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, Deserialize, Serialize, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SubstateRequirement {
+    #[n(0)]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub substate_id: SubstateId,
+    #[n(1)]
     pub version: Option<u32>,
 }
 
@@ -296,10 +300,25 @@ impl Display for SubstateRequirementRef<'_> {
 #[error("Failed to parse substate requirement {0}")]
 pub struct SubstateRequirementParseError(String);
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize, BorshSerialize, BorshDeserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Hash,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    BorshSerialize,
+    BorshDeserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct VersionedSubstateId {
+    #[n(0)]
     substate_id: SubstateId,
+    #[n(1)]
     version: u32,
 }
 

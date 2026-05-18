@@ -28,9 +28,30 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, BorshSerialize)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Deserialize,
+    Serialize,
+    BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
+#[cbor(transparent)]
 #[cfg_attr(feature = "ts", derive(TS), ts(export))]
-pub struct Epoch(#[cfg_attr(feature = "ts", ts(type = "number"))] pub u64);
+pub struct Epoch(
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    #[n(0)]
+    pub u64,
+);
 
 impl Epoch {
     pub const fn zero() -> Self {

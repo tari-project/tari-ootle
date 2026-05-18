@@ -23,6 +23,7 @@ tari_jellyfish = { workspace = true }
 libp2p-identity = { workspace = true, features = ["sr25519", "serde", "peerid"] }
 
 anyhow = { workspace = true }
+minicbor-serde = { workspace = true, features = ["alloc"] }
 serde = { workspace = true, default-features = true }
 prost = { workspace = true }
 ts-rs = { workspace = true, optional = true }

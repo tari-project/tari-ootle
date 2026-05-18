@@ -20,7 +20,7 @@ pub enum ManifestValue {
 }
 
 impl ManifestValue {
-    pub fn new_value<T: Serialize>(value: &T) -> Result<Self, BorError> {
+    pub fn new_value<T: Serialize + tari_bor::Encode<()>>(value: &T) -> Result<Self, BorError> {
         Ok(Self::Value(tari_bor::to_value(value)?))
     }
 
@@ -66,12 +66,19 @@ pub fn lit_to_arg(lit: &Lit) -> Result<InstructionArg, ManifestError> {
             "u16" => Ok(call_arg!(i.base10_parse::<u16>()?)),
             "u32" => Ok(call_arg!(i.base10_parse::<u32>()?)),
             "u64" => Ok(call_arg!(i.base10_parse::<u64>()?)),
-            "u128" => Ok(call_arg!(i.base10_parse::<u128>()?)),
             "i8" => Ok(call_arg!(i.base10_parse::<i8>()?)),
             "i16" => Ok(call_arg!(i.base10_parse::<i16>()?)),
             "i32" => Ok(call_arg!(i.base10_parse::<i32>()?)),
             "i64" => Ok(call_arg!(i.base10_parse::<i64>()?)),
-            "" | "i128" => Ok(call_arg!(i.base10_parse::<i128>()?)),
+            "" => Ok(call_arg!(i.base10_parse::<i64>()?)),
+            // 128-bit integer literals can't currently round-trip: minicbor 2.2 does not implement
+            // `Encode`/`Decode` for `u128`/`i128`, so neither manifest emission nor on-chain decode
+            // is wired up. Reject with a clear error until the engine grows native bignum support.
+            "u128" | "i128" => Err(ManifestError::UnsupportedExpr(format!(
+                "128-bit integer literals are not yet supported in manifests: {}{}",
+                i.base10_digits(),
+                i.suffix()
+            ))),
             _ => Err(ManifestError::UnsupportedExpr(format!(
                 r#"Unsupported integer suffix "{}""#,
                 i.suffix()

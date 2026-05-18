@@ -21,8 +21,9 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 use tari_template_lib::prelude::*;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, Default, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 pub struct Ticket {
+    #[n(0)]
     pub is_redeemed: bool,
 }
 

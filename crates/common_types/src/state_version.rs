@@ -6,10 +6,29 @@ use std::fmt::Display;
 use tari_bor::{Deserialize, Serialize};
 
 // TODO: use this new-type where appropriate in the codebase
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize, Serialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Ord,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
+#[cbor(transparent)]
 #[serde(transparent)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct StateVersion(#[cfg_attr(feature = "ts", ts(type = "number | bigint"))] u64);
+pub struct StateVersion(
+    #[n(0)]
+    #[cfg_attr(feature = "ts", ts(type = "number | bigint"))]
+    u64,
+);
 
 impl StateVersion {
     pub const fn new(version: u64) -> Self {

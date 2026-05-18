@@ -34,7 +34,7 @@ impl NamedArg {
         Ok(Self::Literal(encode(&value)?))
     }
 
-    pub fn from_type<T: Serialize>(val: &T) -> Result<Self, tari_bor::BorError> {
+    pub fn from_type<T: Serialize + tari_bor::Encode<()>>(val: &T) -> Result<Self, tari_bor::BorError> {
         Ok(Self::Literal(encode(val)?))
     }
 
@@ -69,7 +69,7 @@ impl IntoArg for NamedArg {
     }
 }
 
-impl<T: Serialize> IntoArg for T {
+impl<T: Serialize + tari_bor::Encode<()>> IntoArg for T {
     /// Converts a serializable type to a `NamedArg::Literal` by CBOR-encoding it.
     ///
     /// ## Panics

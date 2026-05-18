@@ -117,7 +117,7 @@ where T: minicbor::Encode<C>
         ctx: &mut C,
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
         e.array(self.elems.len() as u64)?;
-        for elem in self.elems.iter() {
+        for elem in self.elems.as_ref() {
             elem.encode(e, ctx)?;
         }
         Ok(())
@@ -174,7 +174,7 @@ where T: minicbor::CborLen<C>
     fn cbor_len(&self, ctx: &mut C) -> usize {
         let n = self.elems.len() as u64;
         let mut total = <u64 as minicbor::CborLen<C>>::cbor_len(&n, ctx);
-        for elem in self.elems.iter() {
+        for elem in self.elems.as_ref() {
             total += elem.cbor_len(ctx);
         }
         total

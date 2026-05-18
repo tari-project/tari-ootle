@@ -63,10 +63,12 @@ use crate::{
     vault::Vault,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Substate {
+    #[n(0)]
     substate: SubstateValue,
+    #[n(1)]
     version: u32,
 }
 
@@ -127,18 +129,40 @@ pub fn hash_substate(substate: &SubstateValue, version: u32, epoch: Epoch) -> Ha
 
 // BorshDeserialize is implemented for this struct because we de/encode keys in the database using this format
 /// Base object address, version tuples
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, BorshSerialize, BorshDeserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    BorshSerialize,
+    BorshDeserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, type = "string"))]
 pub enum SubstateId {
-    Component(ComponentAddress),
-    Resource(ResourceAddress),
-    Vault(VaultId),
-    ClaimedOutputTombstone(ClaimedOutputTombstoneAddress),
-    NonFungible(NonFungibleAddress),
-    TransactionReceipt(TransactionReceiptAddress),
-    Template(PublishedTemplateAddress),
-    ValidatorFeePool(ValidatorFeePoolAddress),
-    Utxo(UtxoAddress),
+    #[n(0)]
+    Component(#[n(0)] ComponentAddress),
+    #[n(1)]
+    Resource(#[n(0)] ResourceAddress),
+    #[n(2)]
+    Vault(#[n(0)] VaultId),
+    #[n(3)]
+    ClaimedOutputTombstone(#[n(0)] ClaimedOutputTombstoneAddress),
+    #[n(4)]
+    NonFungible(#[n(0)] NonFungibleAddress),
+    #[n(5)]
+    TransactionReceipt(#[n(0)] TransactionReceiptAddress),
+    #[n(6)]
+    Template(#[n(0)] PublishedTemplateAddress),
+    #[n(7)]
+    ValidatorFeePool(#[n(0)] ValidatorFeePoolAddress),
+    #[n(8)]
+    Utxo(#[n(0)] UtxoAddress),
 }
 
 impl SubstateId {
@@ -580,18 +604,29 @@ impl_partial_eq!(PublishedTemplateAddress, Template);
 impl_partial_eq!(ValidatorFeePoolAddress, ValidatorFeePool);
 impl_partial_eq!(UtxoAddress, Utxo);
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum SubstateValue {
-    Component(Component),
-    Resource(Box<Resource>),
-    Vault(Vault),
-    NonFungible(NonFungibleContainer),
-    ClaimedOutputTombstone(ClaimedOutputTombstone),
-    TransactionReceipt(TransactionReceipt),
-    Template(PublishedTemplate),
-    ValidatorFeePool(ValidatorFeePool),
-    Utxo(Utxo),
+    #[n(0)]
+    Component(#[n(0)] Component),
+    #[n(1)]
+    Resource(#[n(0)] Box<Resource>),
+    #[n(2)]
+    Vault(#[n(0)] Vault),
+    #[n(3)]
+    NonFungible(#[n(0)] NonFungibleContainer),
+    #[n(4)]
+    ClaimedOutputTombstone(#[n(0)] ClaimedOutputTombstone),
+    #[n(5)]
+    TransactionReceipt(#[n(0)] TransactionReceipt),
+    #[n(6)]
+    Template(#[n(0)] PublishedTemplate),
+    #[n(7)]
+    ValidatorFeePool(#[n(0)] ValidatorFeePool),
+    #[n(8)]
+    Utxo(#[n(0)] Utxo),
 }
 
 impl SubstateValue {
@@ -862,11 +897,14 @@ impl From<Utxo> for SubstateValue {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SubstateDiff {
+    #[n(0)]
     up_substates: Vec<(SubstateId, Substate)>,
+    #[n(1)]
     down_substates: Vec<(SubstateId, u32)>,
+    #[n(2)]
     fee_withdrawals: Vec<ValidatorFeeWithdrawal>,
 }
 

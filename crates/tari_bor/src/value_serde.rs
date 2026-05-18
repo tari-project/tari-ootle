@@ -145,7 +145,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
     }
 
     fn visit_i64<E: de::Error>(self, v: i64) -> Result<Value, E> {
-        Ok(Value::Integer(v as i128))
+        Ok(Value::Integer(i128::from(v)))
     }
 
     fn visit_i128<E: de::Error>(self, v: i128) -> Result<Value, E> {
@@ -153,7 +153,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
     }
 
     fn visit_u64<E: de::Error>(self, v: u64) -> Result<Value, E> {
-        Ok(Value::Integer(v as i128))
+        Ok(Value::Integer(i128::from(v)))
     }
 
     fn visit_u128<E: de::Error>(self, v: u128) -> Result<Value, E> {
@@ -287,7 +287,7 @@ fn hex_digit(n: u8) -> char {
 }
 
 fn decode_hex(s: &str) -> Result<Vec<u8>, &'static str> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return Err("odd-length hex string");
     }
     let mut out = Vec::with_capacity(s.len() / 2);

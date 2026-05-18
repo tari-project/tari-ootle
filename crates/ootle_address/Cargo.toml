@@ -25,4 +25,4 @@ bincode = { workspace = true, features = ["serde"] }
 
 [features]
 ts = ["ts-rs"]
-serde = ["dep:serde"]
+serde = ["dep:serde", "tari_template_lib_types/serde"]

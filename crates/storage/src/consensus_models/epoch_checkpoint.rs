@@ -6,6 +6,7 @@ use std::{fmt::Display, iter};
 use anyhow::anyhow;
 use borsh::{BorshDeserialize, BorshSerialize};
 use indexmap::IndexMap;
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::{CompressedPublicKey, FixedHash};
 use tari_crypto::tari_utilities::ByteArray;
@@ -22,15 +23,22 @@ use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct EpochCheckpoint {
+    #[n(0)]
+    #[cbor(with = "tari_bor::adapters::serde_bridge")]
     proof: CommandCommitProof<EndOfEpochCommand>,
+    #[n(1)]
+    #[cbor(with = "tari_bor::adapters::indexmap_codec")]
     shard_tree_summary: IndexMap<Shard, TreeRootSummary>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct TreeRootSummary {
+    #[n(0)]
+    #[cbor(with = "tari_bor::adapters::serde_bridge")]
     pub root_hash: TreeHash,
+    #[n(1)]
     pub state_version: Version,
 }
 
@@ -239,7 +247,9 @@ fn convert_sidechain_shard_group_to_shard_group(
     })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, BorshSerialize, BorshDeserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Deserialize, Serialize, BorshSerialize, BorshDeserialize, Encode, Decode, CborLen,
+)]
 pub struct EndOfEpochCommand;
 
 impl ToCommand for EndOfEpochCommand {

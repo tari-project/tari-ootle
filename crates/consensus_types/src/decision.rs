@@ -7,16 +7,19 @@ use std::{
 };
 
 use borsh::BorshSerialize;
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_engine_types::commit_result::{AbortReason, TransactionResult};
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize, BorshSerialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize, BorshSerialize, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Decision {
     /// Decision to COMMIT the transaction
+    #[n(0)]
     Commit,
     /// Decision to ABORT the transaction
-    Abort(AbortReason),
+    #[n(1)]
+    Abort(#[n(0)] AbortReason),
 }
 
 impl Decision {

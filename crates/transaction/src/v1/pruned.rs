@@ -36,24 +36,38 @@ const LOG_TARGET: &str = "tari::ootle::transaction::pruned";
 ///
 /// All non-blob fields are preserved verbatim so the field projection used in the signing /
 /// id digest is byte-identical to the full form.
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PrunedUnsignedTransactionV1 {
+    #[n(0)]
     pub network: u8,
+    #[n(1)]
     pub fee_instructions: Vec<Instruction>,
+    #[n(2)]
     pub instructions: Vec<Instruction>,
+    #[n(3)]
+    #[cbor(with = "tari_bor::adapters::indexset_codec")]
     pub inputs: IndexSet<SubstateRequirement>,
+    #[n(4)]
     pub min_epoch: Option<Epoch>,
+    #[n(5)]
     pub max_epoch: Option<Epoch>,
+    #[n(6)]
     pub is_seal_signer_authorized: bool,
+    #[n(7)]
     pub dry_run: bool,
     /// Per-blob commitments. Mirrors `UnsignedTransactionV1::blobs.hashes()` of the full form.
+    #[n(8)]
     pub blob_hashes: BlobHashes,
     /// Byte size of each blob, parallel to `blob_hashes`. **Not part of the signing/id domain**
     /// — populated at conversion time from `Blobs` so that API consumers and UIs can show
     /// blob sizes without downloading payloads. May be empty when deserialised from older
     /// archives that didn't record sizes.
+    #[n(9)]
     #[serde(default)]
+    #[cbor(default)]
     #[borsh(skip)]
     pub blob_sizes: Vec<u32>,
 }
@@ -100,10 +114,14 @@ impl From<UnsignedTransactionV1> for PrunedUnsignedTransactionV1 {
 }
 
 /// Mirror of `UnsealedTransactionV1` for the pruned form.
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PrunedUnsealedTransactionV1 {
+    #[n(0)]
     transaction: PrunedUnsignedTransactionV1,
+    #[n(1)]
     signatures: Vec<TransactionSignature>,
 }
 
@@ -168,10 +186,14 @@ impl From<UnsealedTransactionV1> for PrunedUnsealedTransactionV1 {
 /// Constructed only via `From<TransactionV1>` (which derives blob commitments from the full
 /// blobs and drops the payloads) or via deserialization of bytes previously written by the
 /// storage layer.
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PrunedTransactionV1 {
+    #[n(0)]
     body: PrunedUnsealedTransactionV1,
+    #[n(1)]
     seal_signature: TransactionSealSignature,
 }
 

@@ -40,17 +40,27 @@ use tari_template_lib::{
 
 use crate::ownership::Ownership;
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize, borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Resource {
+    #[n(0)]
     resource_type: ResourceType,
+    #[n(1)]
     owner_rule: SubstateOwnerRule,
+    #[n(2)]
     access_rules: ResourceAccessRules,
+    #[n(3)]
     metadata: Metadata,
     /// The total supply of the resource. None means total_supply tracking is disabled.
+    #[n(4)]
     total_supply: Option<Amount>,
+    #[n(5)]
     view_key: Option<RistrettoPublicKeyBytes>,
+    #[n(6)]
     auth_hook: Option<AuthHook>,
+    #[n(7)]
     divisibility: u8,
 }
 

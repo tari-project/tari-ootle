@@ -90,7 +90,7 @@ fn manifest_smoke_test() {
                     "component_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
                 )
                 .unwrap(),
-                cbor!({"some" => {"data" => [1, 2, 3]}}).unwrap()
+                cbor!({"some" => {"data" => [1, 2, 3]}})
             ],
         },
         Instruction::CallMethod {

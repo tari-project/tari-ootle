@@ -30,10 +30,14 @@ const LOG_TARGET: &str = "tari::ootle::transaction::transaction";
 
 static XTR_REQUIREMENT: SubstateRequirement = SubstateRequirement::new(SubstateId::Resource(TARI_TOKEN), None);
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionV1 {
+    #[n(0)]
     body: UnsealedTransactionV1,
+    #[n(1)]
     seal_signature: TransactionSealSignature,
 }
 

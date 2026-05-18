@@ -17,11 +17,15 @@ use crate::{
     resource_container::{ResourceContainer, ResourceError},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize, borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ValidatorFeePool {
+    #[n(0)]
     #[cfg_attr(feature = "ts", ts(type = "ArrayBuffer"))]
     pub claim_public_key: RistrettoPublicKeyBytes,
+    #[n(1)]
     pub amount: u64,
 }
 
@@ -96,9 +100,13 @@ impl ValidatorFeePool {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize, borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ValidatorFeeWithdrawal {
+    #[n(0)]
     pub address: ValidatorFeePoolAddress,
+    #[n(1)]
     pub amount: u64,
 }

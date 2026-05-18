@@ -339,8 +339,9 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             })?;
         // Enforce that the return type is actually empty. We cannot rely on InstructionResult::return_type field
         // because that comes from the template definition which is defined by the template author and may not reflect
-        // actual behaviour.
-        if !ret.indexed.value().is_null() {
+        // actual behaviour. `is_unit` accepts either `Value::Null` (ciborium/serde encoding of `()`) or
+        // `Value::Array([])` (minicbor encoding of `()`).
+        if !ret.indexed.value().is_unit() {
             return Err(RuntimeError::UnexpectedNonNullInAuthHookReturn);
         }
         Ok(())

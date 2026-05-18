@@ -34,7 +34,7 @@ impl<'b, C> minicbor::Decode<'b, C> for Amount {
                         if len != 2 {
                             return Err(minicbor::decode::Error::message("Amount: expected 2-element array"));
                         }
-                        for slot in digits.iter_mut() {
+                        for slot in &mut digits {
                             *slot = d.u64()?;
                         }
                     },

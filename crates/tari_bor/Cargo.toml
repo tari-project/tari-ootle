@@ -9,9 +9,11 @@ license.workspace = true
 
 [dependencies]
 minicbor = { workspace = true, default-features = false, features = ["alloc"] }
+minicbor-serde = { workspace = true, optional = true, default-features = false, features = ["alloc"] }
 serde = { workspace = true, default-features = false, optional = true }
 ts-rs = { workspace = true, optional = true }
 borsh = { workspace = true, optional = true, default-features = false }
+indexmap = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
@@ -20,7 +22,11 @@ bincode = { workspace = true, features = ["serde"] }
 [features]
 default = ["std"]
 borsh = ["dep:borsh"]
-std = ["minicbor/std", "serde?/std", "borsh?/std"]
-alloc = ["minicbor/alloc", "serde?/alloc"]
-serde = ["dep:serde"]
+std = ["minicbor/std", "minicbor-serde?/std", "serde?/std", "borsh?/std"]
+alloc = ["minicbor/alloc", "minicbor-serde?/alloc", "serde?/alloc"]
+# The `serde` feature also enables `minicbor-serde` so the `adapters::serde_bridge` module
+# (which lets foreign serde-only types ride inside minicbor-encoded structs) is available
+# wherever serde is.
+serde = ["dep:serde", "dep:minicbor-serde"]
 ts = ["dep:ts-rs"]
+indexmap = ["dep:indexmap"]

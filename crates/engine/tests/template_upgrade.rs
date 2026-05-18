@@ -111,9 +111,10 @@ fn it_migrates_to_a_new_template_with_args() {
         .remove(0);
     assert_eq!(*component.template_address(), v2_template);
 
+    // TemplateV2 fields: 0=signers, 1=current_id, 2=new_data, 3=manager, 4=supply_vault, 5=another_vault.
     let new_data = IndexedValue::from_value(component.into_state())
         .unwrap()
-        .get_value::<String>("$.new_data")
+        .get_value::<String>("$.2")
         .unwrap()
         .unwrap();
 
@@ -179,9 +180,10 @@ fn it_fails_when_a_migration_drops_a_vault() {
         .unwrap()
         .remove(0);
 
+    // The migration aborts, so the component still has the V1 layout: 0=signers, 1=manager, 2=supply_vault.
     let vault_id = IndexedValue::from_value(component.into_state())
         .unwrap()
-        .get_value::<VaultId>("$.supply_vault")
+        .get_value::<VaultId>("$.2")
         .unwrap()
         .unwrap();
 

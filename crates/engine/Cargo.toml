@@ -47,6 +47,7 @@ tari_ootle_transaction = { workspace = true }
 tari_template_builtin = { workspace = true, features = ["templates"] }
 
 criterion = { version = "0.8.1", features = ["html_reports"] }
+minicbor = { workspace = true, default-features = false, features = ["alloc", "derive"] }
 tempfile = { workspace = true }
 
 

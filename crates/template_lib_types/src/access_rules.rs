@@ -3,67 +3,10 @@
 //! Access control rules for template-related data like component methods and resources
 
 use minicbor::{CborLen, Decode, Encode};
+use tari_bor::adapters::boxed_slice;
 use tari_template_abi::rust::{collections::BTreeMap, prelude::*};
 
 use crate::{ComponentAddress, NonFungibleAddress, ResourceAddress, TemplateAddress, crypto::RistrettoPublicKeyBytes};
-
-/// Adapter that lets `Box<[T]>` participate in minicbor derives via `#[cbor(with = "boxed_slice")]`.
-/// It forwards encoding/decoding through `Vec<T>`.
-mod boxed_slice {
-    use minicbor::{CborLen, Decode, Decoder, Encode, Encoder};
-    use tari_template_abi::rust::{boxed::Box, vec::Vec};
-
-    pub fn encode<C, T, W>(
-        xs: &Box<[T]>,
-        e: &mut Encoder<W>,
-        ctx: &mut C,
-    ) -> Result<(), minicbor::encode::Error<W::Error>>
-    where
-        T: Encode<C>,
-        W: minicbor::encode::Write,
-    {
-        e.array(xs.len() as u64)?;
-        for x in xs.iter() {
-            x.encode(e, ctx)?;
-        }
-        Ok(())
-    }
-
-    pub fn decode<'b, C, T>(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Box<[T]>, minicbor::decode::Error>
-    where T: Decode<'b, C> {
-        let len = d.array()?;
-        match len {
-            Some(n) => {
-                let mut out = Vec::with_capacity(n as usize);
-                for _ in 0..n {
-                    out.push(T::decode(d, ctx)?);
-                }
-                Ok(out.into_boxed_slice())
-            },
-            None => {
-                let mut out: Vec<T> = Vec::new();
-                loop {
-                    if matches!(d.datatype()?, minicbor::data::Type::Break) {
-                        d.skip()?;
-                        break;
-                    }
-                    out.push(T::decode(d, ctx)?);
-                }
-                Ok(out.into_boxed_slice())
-            },
-        }
-    }
-
-    pub fn cbor_len<C, T>(xs: &Box<[T]>, ctx: &mut C) -> usize
-    where T: CborLen<C> {
-        let n = xs.len() as u64;
-        let mut total = <u64 as CborLen<C>>::cbor_len(&n, ctx);
-        for x in xs.iter() {
-            total += x.cbor_len(ctx);
-        }
-        total
-    }
-}
 
 /// Represents the types of possible access control rules over a component method or resource
 #[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]

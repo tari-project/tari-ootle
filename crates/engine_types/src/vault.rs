@@ -44,10 +44,15 @@ use crate::{
     resource_container::{ResourceContainer, ResourceError},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize, borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Vault {
+    #[n(0)]
     resource_container: ResourceContainer,
+    #[n(1)]
+    #[cbor(default)]
     #[serde(default)]
     freeze_flags: VaultFreezeFlags,
 }

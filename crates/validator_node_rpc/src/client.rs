@@ -68,11 +68,20 @@ pub struct FinalizedResult {
     pub abort_details: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 pub enum SubstateResult {
+    #[n(0)]
     DoesNotExist,
-    Up { substate: Box<Substate> },
-    Down { version: u32 },
+    #[n(1)]
+    Up {
+        #[n(0)]
+        substate: Box<Substate>,
+    },
+    #[n(2)]
+    Down {
+        #[n(0)]
+        version: u32,
+    },
 }
 
 impl SubstateResult {

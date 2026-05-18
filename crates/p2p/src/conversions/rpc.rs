@@ -174,14 +174,20 @@ impl TryFrom<proto::rpc::EpochCheckpoint> for EpochCheckpoint {
             .map(|(k, v)| v.try_into().map(|s| (Shard::from(k), s)))
             .collect::<Result<_, _>>()?;
 
-        Ok(Self::new(decode_from_slice(&value.proof)?, shard_tree_summary))
+        Ok(Self::new(
+            // `CommandCommitProof` is a foreign serde-only type; serialize/deserialize via minicbor-serde directly
+            // to match the encoding produced by `encode_to_vec`/`tari_bor::adapters::serde_bridge`.
+            minicbor_serde::from_slice(&value.proof)
+                .map_err(|e| anyhow!("Failed to decode CommandCommitProof: {e}"))?,
+            shard_tree_summary,
+        ))
     }
 }
 
 impl From<EpochCheckpoint> for proto::rpc::EpochCheckpoint {
     fn from(value: EpochCheckpoint) -> Self {
         Self {
-            proof: encode_to_vec(value.proof()).unwrap(),
+            proof: minicbor_serde::to_vec(value.proof()).expect("Failed to encode CommandCommitProof"),
             shard_tree_summary: value
                 .shard_tree_summary()
                 .iter()

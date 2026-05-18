@@ -4,14 +4,35 @@
 use std::{fmt::Display, ops::RangeInclusive};
 
 use borsh::BorshSerialize;
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 
 use crate::{NumPreshards, ShardGroup, SubstateAddress, uint::U256};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    Encode,
+    Decode,
+    CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(transparent)]
-pub struct Shard(#[cfg_attr(feature = "ts", ts(type = "number"))] u32);
+#[cbor(transparent)]
+pub struct Shard(
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    #[n(0)]
+    u32,
+);
 
 impl Shard {
     pub const fn from_u32(v: u32) -> Self {

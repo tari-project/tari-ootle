@@ -22,14 +22,30 @@ use crate::{
     consensus_models::evidence::Evidence,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionAtom {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[n(0)]
     pub id: TransactionId,
+    #[n(1)]
     pub decision: Decision,
+    #[n(2)]
     pub evidence: Evidence,
+    #[n(3)]
     pub transaction_fee: u64,
+    #[n(4)]
     pub leader_fee: Option<LeaderFee>,
 }
 
@@ -58,25 +74,44 @@ impl Display for TransactionAtom {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Command {
     // Transaction Commands
     /// Request validators to prepare a local-only transaction
-    LocalOnly(TransactionAtom),
+    #[n(0)]
+    LocalOnly(#[n(0)] TransactionAtom),
     /// Request validators to prepare a transaction.
-    LocalPrepare(TransactionAtom),
+    #[n(1)]
+    LocalPrepare(#[n(0)] TransactionAtom),
     /// Request validators to  agree that all involved shard groups prepared the transaction and
     /// accept (i.e. accept COMMIT/ABORT decision) a transaction. All foreign inputs are received
     /// and the transaction is executed with the same decision.
-    LocalAccept(TransactionAtom),
+    #[n(2)]
+    LocalAccept(#[n(0)] TransactionAtom),
     /// Request validators to agree that all involved shard groups agreed to ACCEPT the transaction.
-    AllAccept(TransactionAtom),
+    #[n(3)]
+    AllAccept(#[n(0)] TransactionAtom),
     /// Request validators to agree that one or more involved shard groups did not agreed to ACCEPT the transaction.
-    SomeAccept(TransactionAtom),
+    #[n(4)]
+    SomeAccept(#[n(0)] TransactionAtom),
     // Validator node commands
-    ForeignProposal(ForeignProposalAtom),
-    EvictNode(EvictNodeAtom),
+    #[n(5)]
+    ForeignProposal(#[n(0)] ForeignProposalAtom),
+    #[n(6)]
+    EvictNode(#[n(0)] EvictNodeAtom),
+    #[n(7)]
     EndEpoch,
 }
 
@@ -235,10 +270,22 @@ impl Display for Command {
 }
 
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 pub struct EvictNodeAtom {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "ootle_serde::hex")]
+    #[n(0)]
     pub public_key: RistrettoPublicKeyBytes,
 }
 

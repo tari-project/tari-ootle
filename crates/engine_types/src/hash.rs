@@ -12,10 +12,28 @@ use serde::{Deserialize, Serialize};
 use tari_template_lib::types::hex::write_hex_fmt;
 
 /// Representation of a 64-byte hash value
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+    Hash,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+    Serialize,
+    Deserialize,
+    borsh::BorshSerialize,
+)]
+#[cbor(transparent)]
 #[serde(transparent)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Hash64(
+    #[n(0)]
+    #[cbor(with = "minicbor::bytes")]
     #[serde(with = "ootle_serde::hex")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     [u8; Self::LENGTH],

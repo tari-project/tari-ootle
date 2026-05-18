@@ -38,19 +38,39 @@ impl core::fmt::Display for ByteCounterError {
 #[cfg(feature = "std")]
 impl std::error::Error for ByteCounterError {}
 
-impl minicbor::encode::Write for ByteCounter {
-    type Error = ByteCounterError;
-
-    fn write_all(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+impl ByteCounter {
+    fn add(&mut self, n: usize) -> Result<(), ByteCounterError> {
         self.count = self
             .count
-            .checked_add(buf.len())
+            .checked_add(n)
             .ok_or(ByteCounterError("ByteCounter overflow"))?;
         if let Some(limit) = self.limit &&
             self.count > limit
         {
             return Err(ByteCounterError("ByteCounter limit exceeded"));
         }
+        Ok(())
+    }
+}
+
+impl minicbor::encode::Write for ByteCounter {
+    type Error = ByteCounterError;
+
+    fn write_all(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+        self.add(buf.len())
+    }
+}
+
+/// Lets `ByteCounter` stand in for any `std::io::Write` sink — useful when host-side code calls
+/// [`crate::encode_into_writer`] purely to measure the encoded length.
+#[cfg(feature = "std")]
+impl std::io::Write for ByteCounter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.add(buf.len()).map_err(|e| std::io::Error::other(e.0))?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }
 }

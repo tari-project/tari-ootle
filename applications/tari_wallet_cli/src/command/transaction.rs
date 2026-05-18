@@ -657,7 +657,17 @@ fn display_vec<W: fmt::Write>(writer: &mut W, ty: &Type, result: &InstructionRes
             write!(writer, "{}", stringify_slice(&result.decode::<Vec<i64>>().unwrap()))?;
         },
         Type::I128 => {
-            write!(writer, "{}", stringify_slice(&result.decode::<Vec<i128>>().unwrap()))?;
+            // u128/i128 are not natively encodable via minicbor; pull them out of the dynamic Value tree
+            // (they round-trip as `Value::Integer(i128)`).
+            let vs: Vec<i128> = result
+                .indexed
+                .value()
+                .as_array()
+                .unwrap_or(&[])
+                .iter()
+                .filter_map(|v| v.as_integer())
+                .collect();
+            write!(writer, "{}", stringify_slice(&vs))?;
         },
         Type::U8 => {
             write!(writer, "{}", stringify_slice(&result.decode::<Vec<u8>>().unwrap()))?;
@@ -672,7 +682,16 @@ fn display_vec<W: fmt::Write>(writer: &mut W, ty: &Type, result: &InstructionRes
             write!(writer, "{}", stringify_slice(&result.decode::<Vec<u64>>().unwrap()))?;
         },
         Type::U128 => {
-            write!(writer, "{}", stringify_slice(&result.decode::<Vec<u128>>().unwrap()))?;
+            // u128/i128 are not natively encodable via minicbor; pull them out of the dynamic Value tree.
+            let vs: Vec<u128> = result
+                .indexed
+                .value()
+                .as_array()
+                .unwrap_or(&[])
+                .iter()
+                .filter_map(|v| v.as_integer().and_then(|i| u128::try_from(i).ok()))
+                .collect();
+            write!(writer, "{}", stringify_slice(&vs))?;
         },
         Type::String => {
             write!(writer, "{}", result.decode::<Vec<String>>().unwrap().join(", "))?;
@@ -739,7 +758,9 @@ pub fn print_execution_results(results: &[InstructionResult]) {
                 println!("i64: {}", result.decode::<i64>().unwrap());
             },
             Type::I128 => {
-                println!("i128: {}", result.decode::<i128>().unwrap());
+                // u128/i128 are not natively encodable via minicbor; read straight from Value.
+                let v = result.indexed.value().as_integer().unwrap_or(0);
+                println!("i128: {}", v);
             },
             Type::U8 => {
                 println!("u8: {}", result.decode::<u8>().unwrap());
@@ -754,7 +775,14 @@ pub fn print_execution_results(results: &[InstructionResult]) {
                 println!("u64: {}", result.decode::<u64>().unwrap());
             },
             Type::U128 => {
-                println!("u128: {}", result.decode::<u128>().unwrap());
+                // u128/i128 are not natively encodable via minicbor; read straight from Value.
+                let v = result
+                    .indexed
+                    .value()
+                    .as_integer()
+                    .and_then(|i| u128::try_from(i).ok())
+                    .unwrap_or(0);
+                println!("u128: {}", v);
             },
             Type::String => {
                 println!("string: {}", result.decode::<String>().unwrap());

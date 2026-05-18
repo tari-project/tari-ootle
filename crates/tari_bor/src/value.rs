@@ -39,6 +39,18 @@ impl Value {
         matches!(self, Value::Null)
     }
 
+    /// Returns true if this value represents the CBOR encoding of a unit value (no payload).
+    /// Either explicit `Value::Null` (what ciborium / `serde` produce for `()`) or `Value::Array(empty)`
+    /// (what `minicbor` produces for `()` — see `impl Encode for ()`). Treating both as unit lets
+    /// callers check "function returned nothing" without coupling to the encoder choice.
+    pub fn is_unit(&self) -> bool {
+        match self {
+            Value::Null => true,
+            Value::Array(items) => items.is_empty(),
+            _ => false,
+        }
+    }
+
     pub fn as_bool(&self) -> Option<bool> {
         if let Value::Bool(b) = self { Some(*b) } else { None }
     }
@@ -74,6 +86,14 @@ impl Value {
             None
         }
     }
+
+    /// Decode this dynamic value into a concrete minicbor-decodable type.
+    ///
+    /// Round-trips through `encode` + `decode`, so it's an O(N) operation in the size of the
+    /// encoded form. Prefer decoding the original bytes directly when you have them.
+    pub fn decoded<T: for<'b> minicbor::Decode<'b, ()>>(&self) -> Result<T, crate::BorError> {
+        crate::from_value(self)
+    }
 }
 
 // `From` impls for common literal types — these power the `cbor!` macro.
@@ -83,14 +103,31 @@ macro_rules! impl_from_int {
         $(
             impl From<$t> for Value {
                 fn from(v: $t) -> Self {
-                    Value::Integer(v as i128)
+                    Value::Integer(i128::from(v))
                 }
             }
         )*
     };
 }
 
-impl_from_int!(i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
+impl_from_int!(i8, i16, i32, i64, u8, u16, u32, u64);
+
+// `usize`/`isize` are platform-width, so `i128: From<{u,i}size>` is not provided. On every
+// platform the workspace targets (16/32/64-bit) the cast is lossless, but the compiler can't
+// prove it generically — fall back to `as` with an explicit allow.
+impl From<usize> for Value {
+    fn from(v: usize) -> Self {
+        #[allow(clippy::cast_lossless, clippy::cast_possible_wrap)]
+        Value::Integer(v as i128)
+    }
+}
+
+impl From<isize> for Value {
+    fn from(v: isize) -> Self {
+        #[allow(clippy::cast_lossless)]
+        Value::Integer(v as i128)
+    }
+}
 
 impl From<i128> for Value {
     fn from(v: i128) -> Self {
@@ -106,7 +143,7 @@ impl From<bool> for Value {
 
 impl From<f32> for Value {
     fn from(v: f32) -> Self {
-        Value::Float(v as f64)
+        Value::Float(f64::from(v))
     }
 }
 

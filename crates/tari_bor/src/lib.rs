@@ -9,6 +9,7 @@ extern crate alloc;
 #[cfg(not(feature = "std"))]
 use alloc::{format, vec::Vec};
 
+pub mod adapters;
 mod error;
 mod macros;
 mod tag;

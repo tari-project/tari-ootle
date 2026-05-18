@@ -30,7 +30,7 @@ impl<C> minicbor::Encode<C> for PrecisionAmount {
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
         let digits = self.to_le_digits();
         e.array(Self::NUM_DIGITS as u64)?;
-        for d in digits.iter() {
+        for d in &digits {
             e.u64(*d)?;
         }
         Ok(())
@@ -52,7 +52,7 @@ impl<'b, C> minicbor::Decode<'b, C> for PrecisionAmount {
                                 "PrecisionAmount: unexpected array length",
                             ));
                         }
-                        for slot in digits.iter_mut() {
+                        for slot in &mut digits {
                             *slot = d.u64()?;
                         }
                     },
@@ -89,7 +89,7 @@ impl<'b, C> minicbor::Decode<'b, C> for PrecisionAmount {
 impl<C> minicbor::CborLen<C> for PrecisionAmount {
     fn cbor_len(&self, ctx: &mut C) -> usize {
         let mut total = <u64 as minicbor::CborLen<C>>::cbor_len(&(Self::NUM_DIGITS as u64), ctx);
-        for d in self.to_le_digits().iter() {
+        for d in &self.to_le_digits() {
             total += <u64 as minicbor::CborLen<C>>::cbor_len(d, ctx);
         }
         total

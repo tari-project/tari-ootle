@@ -31,7 +31,10 @@ mod template {
 
     #[derive(Debug, Default)]
     pub struct NoStdCounter {
-        value: u128,
+        // u64 rather than u128: minicbor 2.2 does not impl Encode/Decode for u128/i128 and the
+        // workspace's bignum bridge (`Value::Integer(i128)` via `serde_bridge`) doesn't apply to
+        // bare template struct fields. The test exists to exercise no_std + allocator, not 128-bit.
+        value: u64,
     }
 
     impl NoStdCounter {
@@ -57,7 +60,7 @@ mod template {
             self.value += 1;
         }
 
-        pub fn reset_to(&mut self, value: u128) {
+        pub fn reset_to(&mut self, value: u64) {
             debug!("Changing value from {:?} to {}", self.value, value);
             self.value = value;
         }

@@ -3,16 +3,23 @@
 
 use tari_template_lib::{prelude::*, types::MaxVec};
 
-#[derive(serde::Deserialize)]
+// Stripped to minicbor-only: template_lib's serde feature is off in this crate (templates ship
+// WASM, no JSON), so MaxVec / ResourceManager / Vault no longer implement serde here.
+#[derive(minicbor::Decode, minicbor::Encode, minicbor::CborLen)]
 pub struct TemplateV1 {
+    #[n(0)]
     signers: MaxVec<10, RistrettoPublicKeyBytes>,
+    #[n(1)]
     manager: ResourceManager,
+    #[n(2)]
     supply_vault: Vault,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 pub struct User {
+    #[n(0)]
     pub public_key: RistrettoPublicKeyBytes,
+    #[n(1)]
     pub id: u32,
 }
 
@@ -126,16 +133,21 @@ mod template {
 
     use super::*;
 
-    /// This struct is compatible with V1 so no migration function is necessary
+    /// This struct is compatible with V1 so no migration function is necessary.
+    ///
+    /// Field ORDER matters: minicbor encodes structs as positional arrays indexed by `#[n(N)]`,
+    /// so adding fields is forwards-compatible ONLY when they're appended at the end with
+    /// `#[cbor(default)]` (or `Option<T>`). V1 declared `signers, manager, supply_vault` in that
+    /// order; V2 keeps those in the same positions and appends `current_id`/`new_data`.
     pub struct TemplateV2 {
         signers: MaxVec<20, RistrettoPublicKeyBytes>,
-        // Set to 0 if not specified
-        #[serde(default)]
-        current_id: u32,
-        // Will be None if not specified (note that serde does this without #[serde(default)] with Option)
-        new_data: Option<MaxString<50>>,
         manager: ResourceManager,
         supply_vault: Vault,
+        // Set to 0 if not present in the encoded V1 state.
+        #[cbor(default)]
+        current_id: u32,
+        // Option<T> decodes from a trailing null without an explicit cbor(default).
+        new_data: Option<MaxString<50>>,
     }
 
     impl TemplateV2 {

@@ -6650,6 +6650,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "minicbor-serde"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80047f75e28e3b38f6ab2ec3c2c7669f6b411fa6f8424e1a90a3fd784b19a3f4"
+dependencies = [
+ "minicbor",
+ "serde",
+]
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10962,7 +10972,9 @@ version = "0.13.0"
 dependencies = [
  "bincode 2.0.1",
  "borsh",
+ "indexmap 2.13.0",
  "minicbor",
+ "minicbor-serde",
  "serde",
  "serde_json",
  "ts-rs",
@@ -11191,6 +11203,7 @@ name = "tari_consensus_types"
 version = "0.30.13"
 dependencies = [
  "borsh",
+ "minicbor",
  "ootle_serde",
  "serde",
  "tari_common_types",
@@ -11296,6 +11309,7 @@ dependencies = [
  "indexmap 2.13.0",
  "log",
  "memmap2 0.9.9",
+ "minicbor",
  "ootle_byte_type",
  "rand 0.10.1",
  "serde",
@@ -11330,6 +11344,7 @@ dependencies = [
  "indexmap 2.13.0",
  "lazy_static",
  "log",
+ "minicbor",
  "newtype-ops",
  "ootle_byte_type",
  "ootle_serde",
@@ -11527,6 +11542,7 @@ name = "tari_indexer_lib"
 version = "0.30.13"
 dependencies = [
  "log",
+ "minicbor",
  "prometheus-client",
  "serde",
  "tari_engine_types",
@@ -11729,6 +11745,7 @@ dependencies = [
  "digest 0.10.7",
  "ethnum",
  "indexmap 2.13.0",
+ "minicbor",
  "newtype-ops",
  "ootle-network",
  "ootle_byte_type",
@@ -11753,6 +11770,7 @@ version = "0.30.13"
 dependencies = [
  "anyhow",
  "libp2p-identity 0.2.13 (git+https://github.com/tari-project/rust-libp2p.git?rev=76f31bc0ab4bd9f9f5383be6aa3fed873538e35a)",
+ "minicbor-serde",
  "prost 0.14.3",
  "proto_builder",
  "rand 0.10.1",
@@ -11780,9 +11798,11 @@ dependencies = [
  "borsh",
  "indexmap 2.13.0",
  "log",
+ "minicbor",
  "ootle_serde",
  "rand 0.10.1",
  "serde",
+ "tari_bor",
  "tari_common_types",
  "tari_consensus_types",
  "tari_crypto",
@@ -11837,6 +11857,7 @@ dependencies = [
  "cargo_toml 0.22.3",
  "gix-hash",
  "hex",
+ "minicbor",
  "multihash",
  "serde",
  "serde_json",
@@ -11858,6 +11879,7 @@ dependencies = [
  "hex",
  "indexmap 2.13.0",
  "log",
+ "minicbor",
  "ootle-network",
  "ootle_byte_type",
  "ootle_serde",
@@ -12697,6 +12719,7 @@ version = "0.30.13"
 dependencies = [
  "anyhow",
  "futures 0.3.31",
+ "minicbor",
  "prost 0.14.3",
  "proto_builder",
  "serde",

@@ -14,7 +14,7 @@ alloc = ["minicbor/alloc", "serde?/alloc", "tari_template_abi/alloc"]
 precision = ["dep:bnum"]
 extra-arith = ["dep:num-integer", "bnum?/numtraits"]
 borsh = ["dep:borsh", "tari_bor/borsh", "bnum?/borsh"]
-extra-maps = ["dep:indexmap", "dep:xxhash-rust"]
+extra-maps = ["dep:indexmap", "dep:xxhash-rust", "tari_bor/indexmap"]
 serde = ["dep:serde", "tari_bor/serde", "tari_template_abi/serde"]
 ts = ["std", "ts-rs", "tari_template_abi/ts", "tari_bor/ts"]
 # This feature removes the ability to deserialize Amounts as an integer/string (using deserialize_any), as formats like bincode do not support this.

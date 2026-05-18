@@ -8,11 +8,23 @@ use tari_template_lib_types::ResourceAddress;
 
 use crate::args::{WorkspaceId, WorkspaceOffsetId};
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    borsh::BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum ResourceAddressRef {
-    Address(ResourceAddress),
-    Workspace(WorkspaceOffsetId),
+    #[n(0)]
+    Address(#[n(0)] ResourceAddress),
+    #[n(1)]
+    Workspace(#[n(0)] WorkspaceOffsetId),
 }
 
 impl ResourceAddressRef {

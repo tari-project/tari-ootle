@@ -30,17 +30,23 @@ use tari_validator_node_rpc::client::SubstateResult;
 #[error("Failed substate cache operation {0}")]
 pub struct SubstateCacheError(pub String);
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, minicbor::Decode, minicbor::CborLen)]
 pub struct SubstateCacheEntry {
+    #[n(0)]
     pub version: u32,
+    #[n(1)]
     pub substate_result: SubstateResult,
+    #[n(2)]
     pub cached_at: u64,
 }
 
-#[derive(Debug, Serialize, Clone, Copy)]
+#[derive(Debug, Serialize, Clone, Copy, minicbor::Encode, minicbor::CborLen)]
 pub struct SubstateCacheEntryRef<'a> {
+    #[n(0)]
     pub version: u32,
+    #[n(1)]
     pub substate_result: &'a SubstateResult,
+    #[n(2)]
     pub cached_at: u64,
 }
 

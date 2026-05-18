@@ -30,8 +30,9 @@ mod account_template {
     use super::*;
 
     pub struct Account {
+        #[cbor(with = "indexmap_codec")]
         vaults: VaultMap,
-        #[serde(default)]
+        #[cbor(with = "indexmap_codec", default)]
         /// Approvals for other accounts to withdraw from this account. The key is a tuple of (approved resource,
         /// required spender_badge), and the value is the approved amount.
         approvals: ApprovalMap,

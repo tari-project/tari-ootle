@@ -33,7 +33,8 @@ fn it_freezes_vaults_containing_a_freezable_resource() {
 
     let component: ComponentAddress = result.finalize.execution_results[1].get_value("$.0").unwrap().unwrap();
     let resource: ResourceAddress = result.finalize.execution_results[1].get_value("$.1").unwrap().unwrap();
-    let vaults: BTreeMap<ResourceAddress, VaultId> = test.extract_component_value(account, "$.vaults");
+    // Account fields: 0=vaults, 1=approvals.
+    let vaults: BTreeMap<ResourceAddress, VaultId> = test.extract_component_value(account, "$.0");
     let vault_id = vaults[&resource];
 
     // Freeze the account's vault

@@ -219,11 +219,27 @@ impl Display for ForeignProposalRecord {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, PartialOrd, Ord, BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Eq,
+    PartialEq,
+    Hash,
+    Serialize,
+    Deserialize,
+    PartialOrd,
+    Ord,
+    BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ForeignProposalAtom {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[n(0)]
     pub block_id: BlockId,
+    #[n(1)]
     pub shard_group: ShardGroup,
 }
 

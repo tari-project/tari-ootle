@@ -233,12 +233,12 @@ fn inject_field_tags(fields: &mut Fields) -> Result<()> {
     };
     match fields {
         Fields::Named(named) => {
-            for f in named.named.iter_mut() {
+            for f in &mut named.named {
                 visit(f)?;
             }
         },
         Fields::Unnamed(unnamed) => {
-            for f in unnamed.unnamed.iter_mut() {
+            for f in &mut unnamed.unnamed {
                 visit(f)?;
             }
         },

@@ -32,76 +32,134 @@ use crate::{
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
 };
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    borsh::BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Instruction {
+    #[n(0)]
     CreateAccount {
+        #[n(0)]
         owner_public_key: RistrettoPublicKeyBytes,
+        #[n(1)]
         owner_rule: Option<OwnerRule>,
+        #[n(2)]
         access_rules: Option<ComponentAccessRules>,
+        #[n(3)]
         bucket_workspace_id: Option<WorkspaceOffsetId>,
     },
+    #[n(1)]
     CallFunction {
+        #[n(0)]
         address: TemplateAddress,
+        #[n(1)]
         #[cfg_attr(feature = "ts", ts(type = "string"))]
         function: FunctionName,
+        #[n(2)]
         args: Vec<InstructionArg>,
     },
+    #[n(2)]
     CallMethod {
+        #[n(0)]
         call: ComponentReference,
+        #[n(1)]
         #[cfg_attr(feature = "ts", ts(type = "string"))]
         method: FunctionName,
+        #[n(2)]
         args: Vec<InstructionArg>,
     },
+    #[n(3)]
     PutLastInstructionOutputOnWorkspace {
+        #[n(0)]
         key: WorkspaceId,
     },
+    #[n(4)]
     EmitLog {
+        #[n(0)]
         level: LogLevel,
+        #[n(1)]
         #[cfg_attr(feature = "ts", ts(type = "string"))]
         message: MaxString<{ limits::ENGINE_LIMITS.max_log_size_bytes }>,
     },
+    #[n(5)]
     ClaimBurn {
+        #[n(0)]
         claim: Box<MinotariBurnClaimProof>,
+        #[n(1)]
         output_data: ClaimBurnOutputData,
     },
+    #[n(6)]
     ClaimValidatorFees {
+        #[n(0)]
         address: ValidatorFeePoolAddress,
     },
+    #[n(7)]
     DropAllProofsInWorkspace,
+    #[n(8)]
     Assert {
+        #[n(0)]
         key: WorkspaceOffsetId,
+        #[n(1)]
         assertion: Assertion,
     },
+    #[n(9)]
     TakeFromBucket {
+        #[n(0)]
         input_bucket: WorkspaceOffsetId,
+        #[n(1)]
         amount: Amount,
+        #[n(2)]
         output_bucket: WorkspaceId,
     },
+    #[n(10)]
     PublishTemplate {
         /// Index into the transaction's `blobs` list. The referenced blob's bytes are the WASM
         /// binary, which the engine resolves via the surrounding `Blobs` at execution time.
+        #[n(0)]
         binary: BlobIndex,
         /// Optional multihash of off-chain CBOR metadata
+        #[n(1)]
         #[serde(default)]
+        #[cbor(default)]
         #[cfg_attr(feature = "ts", ts(type = "string | null"))]
         metadata_hash: Option<MetadataHash>,
     },
+    #[n(11)]
     AllocateAddress {
+        #[n(0)]
         allocatable_type: AllocatableAddressType,
+        #[n(1)]
         workspace_id: WorkspaceId,
     },
+    #[n(12)]
     StealthTransfer {
+        #[n(0)]
         resource_address_ref: ResourceAddressRef,
+        #[n(1)]
         statement: StealthTransferStatement,
+        #[n(2)]
         revealed_input_bucket: Option<WorkspaceOffsetId>,
     },
+    #[n(13)]
     PayFeeFromBucket {
+        #[n(0)]
         bucket: WorkspaceOffsetId,
     },
+    #[n(14)]
     UpdateComponentTemplate {
+        #[n(0)]
         component: ComponentReference,
+        #[n(1)]
         migrate: Option<MigrateFunction>,
+        #[n(2)]
         new_template: TemplateAddress,
     },
 }
@@ -430,11 +488,23 @@ fn collect_arg_blob_ids(args: &[InstructionArg], out: &mut Vec<BlobIndex>) {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    borsh::BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct MigrateFunction {
+    #[n(0)]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub name: FunctionName,
+    #[n(1)]
     pub args: Vec<InstructionArg>,
 }
 

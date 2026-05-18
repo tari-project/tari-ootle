@@ -18,6 +18,7 @@ tari_ootle_common_types = { workspace = true }
 tari_shutdown = { workspace = true }
 tari_sidechain = { workspace = true }
 tari_template_lib_types = { workspace = true }
+ootle-network = { workspace = true }
 
 clap = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }

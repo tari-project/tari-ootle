@@ -18,16 +18,17 @@ use crate::{
         signer_service::TariSignatureService,
         // template_metadata_hooks::TemplateMetadataHooks,
     },
+    memory_cache_template_provider::MemoryCacheTemplateProvider,
     p2p::{
         NopLogger,
         services::messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
     },
-    state_store_template_provider::StateStoreTemplateProvider,
 };
 
 pub type ValidatorNodeStateStore = tari_state_store_rocksdb::RocksDbStateStore<PeerAddress>;
-pub type ValidatorTransactionProcessor =
-    TariTransactionProcessor<ReadOnlyMemoryStateStore, StateStoreTemplateProvider<ValidatorNodeStateStore>>;
+pub type ValidatorTemplateProvider =
+    MemoryCacheTemplateProvider<tari_engine::wasm::DiskCachedWasmTemplateProvider<ValidatorNodeStateStore>>;
+pub type ValidatorTransactionProcessor = TariTransactionProcessor<ReadOnlyMemoryStateStore, ValidatorTemplateProvider>;
 #[derive(Clone)]
 pub struct TariConsensusSpec;
 

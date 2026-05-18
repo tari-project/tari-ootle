@@ -6,6 +6,7 @@ use std::fmt::Display;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::{Substate, SubstateId};
 use tari_ootle_common_types::{
+    Epoch,
     SubstateAddress,
     ToSubstateAddress,
     VersionedSubstateId,
@@ -109,34 +110,25 @@ impl SubstateChange {
             SubstateChange::Down { id, .. } => SubstateTransition::Down { id },
         }
     }
+
+    pub fn to_tree_change(&self, epoch: Epoch) -> SubstateTreeChange {
+        match self {
+            SubstateChange::Up { id, substate, .. } => SubstateTreeChange::Up {
+                id: VersionedSubstateId::new(id.clone(), substate.version()),
+                value_hash: substate.to_value_hash(epoch),
+            },
+            SubstateChange::Down { id, .. } => SubstateTreeChange::Down { id: id.clone() },
+        }
+    }
 }
 
 impl Display for SubstateChange {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SubstateChange::Up { id, shard, substate } => {
-                write!(
-                    f,
-                    "Up: {}v{}, {}, substate hash: {}",
-                    id,
-                    substate.version(),
-                    shard,
-                    substate.to_value_hash()
-                )
+                write!(f, "Up: {}v{}, {}", id, substate.version(), shard)
             },
             SubstateChange::Down { id, shard } => write!(f, "Down: {}, {}", id, shard),
-        }
-    }
-}
-
-impl From<&SubstateChange> for SubstateTreeChange {
-    fn from(value: &SubstateChange) -> Self {
-        match value {
-            SubstateChange::Up { id, substate, .. } => SubstateTreeChange::Up {
-                id: VersionedSubstateId::new(id.clone(), substate.version()),
-                value_hash: substate.to_value_hash(),
-            },
-            SubstateChange::Down { id, .. } => SubstateTreeChange::Down { id: id.clone() },
         }
     }
 }

@@ -7,7 +7,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use tokio::process::Command;
 
-use crate::process_definitions::{ProcessContext, ProcessDefinition};
+use crate::process_definitions::{ARGS_SETTINGS_KEY, ProcessContext, ProcessDefinition};
 
 #[derive(Debug, Default)]
 pub struct Indexer;
@@ -32,6 +32,11 @@ impl ProcessDefinition for Indexer {
         let api_listener_address = format!("{listen_ip}:{api_port}");
         let graphql_listener_address = format!("{listen_ip}:{graphql_port}");
         let web_ui_listener_address = format!("{listen_ip}:{web_ui_port}");
+
+        let rate_limit = context
+            .get_setting("enable_rate_limit")
+            .map(|s| s == "true")
+            .unwrap_or(false);
 
         let base_node = context
             .minotari_nodes()
@@ -60,6 +65,7 @@ impl ProcessDefinition for Indexer {
             .arg(format!("-pindexer.web_ui_public_api_url={api_public_url}"))
             .arg(format!("-pindexer.web_ui_public_graphql_url={graphql_public_url}"))
             .arg("-pepoch_oracle.base_layer.scanning_interval=1")
+            .arg(format!("-pindexer.rate_limits.enabled={rate_limit}"))
             .env("API_DEBUG", "1"); // Enable detailed API error messages
 
         // mDNS is not guaranteed to work, so we'll explicitly set the seed peers for the indexer.
@@ -70,6 +76,12 @@ impl ProcessDefinition for Indexer {
 
         for seed in seed_peers {
             command.arg(format!("--peer-seeds={seed}"));
+        }
+
+        if let Some(args) = context.get_setting(ARGS_SETTINGS_KEY) {
+            for arg in args.split_whitespace() {
+                command.arg(arg);
+            }
         }
 
         Ok(command)

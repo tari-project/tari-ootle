@@ -7,6 +7,6 @@ export type IndexerGetEpochManagerStatsResponse = {
    * The current epoch according to the indexer's epoch oracle view
    */
   current_epoch: Epoch;
-  current_block_height: number;
+  current_block_height: bigint;
   current_block_hash: Hash32;
 };

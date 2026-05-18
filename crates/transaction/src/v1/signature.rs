@@ -3,7 +3,6 @@
 
 use indexmap::IndexSet;
 use ootle_byte_type::{ConvertFromByteType, FromByteType, ToByteType};
-use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use tari_crypto::{
     keys::PublicKey as PublicKeyT,
@@ -15,12 +14,14 @@ use tari_ootle_common_types::{Epoch, SubstateRequirement, signature::SignatureOu
 use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
 use crate::{
+    BlobHashes,
     Instruction,
     UnsealedTransactionV1,
     UnsignedTransaction,
     UnsignedTransactionV1,
     hashing::transaction_hasher_v1,
     unsealed::UnsealedTransaction,
+    v1::pruned::{PrunedUnsealedTransactionV1, PrunedUnsignedTransactionV1},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, borsh::BorshSerialize)]
@@ -40,7 +41,7 @@ impl TransactionSealSignature {
 
         let message = Self::create_message_v1(transaction);
         Self {
-            signature: RistrettoSchnorr::sign(secret_key, message, &mut OsRng)
+            signature: RistrettoSchnorr::sign(secret_key, message, &mut rand::rng())
                 .expect("sign is infallible with Ristretto keys")
                 .to_byte_type(),
             public_key: public_key.to_byte_type(),
@@ -83,10 +84,51 @@ impl TransactionSealSignature {
     }
 
     pub fn create_message_v1(transaction: &UnsealedTransactionV1) -> [u8; 64] {
+        let unsigned = transaction.unsigned_transaction();
+        let blob_hashes = unsigned.blobs.hashes();
+        Self::create_message_v1_inner(
+            transaction.schema_version(),
+            TransactionSignatureFields::from(unsigned),
+            &blob_hashes,
+            transaction.signatures(),
+        )
+    }
+
+    /// Pruned-form seal message. Uses the stored `BlobHashes` and produces the same digest as
+    /// the equivalent full form would.
+    pub fn create_message_v1_pruned(transaction: &PrunedUnsealedTransactionV1) -> [u8; 64] {
+        Self::create_message_v1_inner(
+            transaction.schema_version(),
+            TransactionSignatureFields::from(transaction.unsigned_transaction()),
+            transaction.blob_hashes(),
+            transaction.signatures(),
+        )
+    }
+
+    fn create_message_v1_inner(
+        schema_version: u16,
+        fields: TransactionSignatureFields<'_>,
+        blob_hashes: &BlobHashes,
+        signatures: &[TransactionSignature],
+    ) -> [u8; 64] {
+        // Project explicitly so blob bytes never enter the digest — only their commitments do.
         transaction_hasher_v1("SealSignature")
-            .chain(&transaction.schema_version())
-            .chain(transaction)
+            .chain(&schema_version)
+            .chain(&fields)
+            .chain(blob_hashes)
+            .chain(signatures)
             .result()
+    }
+
+    pub fn verify_v1_pruned(&self, transaction: &PrunedUnsealedTransactionV1) -> bool {
+        let message = Self::create_message_v1_pruned(transaction);
+        let Ok(public_key) = self.public_key.try_from_byte_type() else {
+            return false;
+        };
+        let Ok(signature) = RistrettoSchnorr::convert_from_byte_type(&self.signature) else {
+            return false;
+        };
+        signature.verify(&public_key, message)
     }
 }
 
@@ -130,7 +172,7 @@ impl TransactionSignature {
         let message = Self::create_message_v1(seal_signer, transaction);
 
         Self {
-            signature: RistrettoSchnorr::sign(secret_key, message, &mut OsRng)
+            signature: RistrettoSchnorr::sign(secret_key, message, &mut rand::rng())
                 .expect("sign is infallible with Ristretto keys")
                 .to_byte_type(),
             public_key: public_key.to_byte_type(),
@@ -163,12 +205,57 @@ impl TransactionSignature {
     }
 
     pub fn create_message_v1(seal_signer: &RistrettoPublicKeyBytes, transaction: &UnsignedTransactionV1) -> [u8; 64] {
-        let signature_fields = TransactionSignatureFields::from(transaction);
+        let blob_hashes = transaction.blobs.hashes();
+        Self::create_message_v1_inner(
+            seal_signer,
+            transaction.schema_version(),
+            TransactionSignatureFields::from(transaction),
+            &blob_hashes,
+        )
+    }
+
+    /// Pruned-form extra-signer message. Uses the stored `BlobHashes`.
+    pub fn create_message_v1_pruned(
+        seal_signer: &RistrettoPublicKeyBytes,
+        transaction: &PrunedUnsignedTransactionV1,
+        blob_hashes: &BlobHashes,
+    ) -> [u8; 64] {
+        Self::create_message_v1_inner(
+            seal_signer,
+            transaction.schema_version(),
+            TransactionSignatureFields::from(transaction),
+            blob_hashes,
+        )
+    }
+
+    fn create_message_v1_inner(
+        seal_signer: &RistrettoPublicKeyBytes,
+        schema_version: u16,
+        fields: TransactionSignatureFields<'_>,
+        blob_hashes: &BlobHashes,
+    ) -> [u8; 64] {
         transaction_hasher_v1("Signature")
-            .chain(&transaction.schema_version())
+            .chain(&schema_version)
             .chain(seal_signer)
-            .chain(&signature_fields)
+            .chain(&fields)
+            .chain(blob_hashes)
             .result()
+    }
+
+    pub fn verify_v1_pruned(
+        &self,
+        seal_signer: &RistrettoPublicKeyBytes,
+        transaction: &PrunedUnsignedTransactionV1,
+        blob_hashes: &BlobHashes,
+    ) -> bool {
+        let message = Self::create_message_v1_pruned(seal_signer, transaction, blob_hashes);
+        let Ok(public_key) = self.public_key.try_from_byte_type() else {
+            return false;
+        };
+        let Ok(signature) = RistrettoSchnorr::convert_from_byte_type(&self.signature) else {
+            return false;
+        };
+        signature.verify(&public_key, message)
     }
 }
 
@@ -181,8 +268,12 @@ impl From<SignatureOutput> for TransactionSignature {
     }
 }
 
+/// Field-by-field projection of `UnsignedTransactionV1` used in the signing/id hashing domains.
+///
+/// Notably *does not* include `blobs` — raw blob bytes never enter signing/id digests. Blob
+/// commitments are chained separately as a `BlobHashes` after these fields.
 #[derive(Debug, Clone, borsh::BorshSerialize)]
-struct TransactionSignatureFields<'a> {
+pub(crate) struct TransactionSignatureFields<'a> {
     network: u8,
     fee_instructions: &'a [Instruction],
     instructions: &'a [Instruction],
@@ -208,6 +299,23 @@ impl<'a> From<&'a UnsignedTransactionV1> for TransactionSignatureFields<'a> {
     }
 }
 
+/// Pruned-form projection. Field-by-field identical to the full-form `From` so the borsh
+/// encoding (and therefore the digest) is byte-identical.
+impl<'a> From<&'a PrunedUnsignedTransactionV1> for TransactionSignatureFields<'a> {
+    fn from(transaction: &'a PrunedUnsignedTransactionV1) -> Self {
+        Self {
+            network: transaction.network,
+            fee_instructions: &transaction.fee_instructions,
+            instructions: &transaction.instructions,
+            inputs: &transaction.inputs,
+            min_epoch: transaction.min_epoch,
+            max_epoch: transaction.max_epoch,
+            is_seal_signer_authorized: transaction.is_seal_signer_authorized,
+            dry_run: transaction.dry_run,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use tari_crypto::keys::SecretKey;
@@ -217,7 +325,7 @@ mod tests {
     use super::*;
 
     fn sample_seal_signer() -> RistrettoPublicKeyBytes {
-        RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::random(&mut OsRng)).to_byte_type()
+        RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::random(&mut rand::rng())).to_byte_type()
     }
 
     fn sample_unsigned() -> UnsignedTransactionV1 {
@@ -242,11 +350,12 @@ mod tests {
             max_epoch: Some(Epoch(200)),
             is_seal_signer_authorized: false,
             dry_run: true,
+            blobs: crate::Blobs::empty(),
         }
     }
 
     fn random_signature(tx: &UnsignedTransactionV1, seal_signer: &RistrettoPublicKeyBytes) -> TransactionSignature {
-        let sk = RistrettoSecretKey::random(&mut OsRng);
+        let sk = RistrettoSecretKey::random(&mut rand::rng());
         TransactionSignature::sign_v1(&sk, seal_signer, tx)
     }
 
@@ -347,11 +456,23 @@ mod tests {
         let mut tx = base.clone();
         tx.dry_run = !tx.dry_run;
         assert_ne!(sig_msg(&signer, &tx), base_msg, "dry_run");
+
+        // blobs: payload contents must influence the digest via per-blob commitments
+        let mut tx = base.clone();
+        tx.blobs.push(crate::Blob::from(vec![1, 2, 3])).unwrap();
+        assert_ne!(sig_msg(&signer, &tx), base_msg, "blobs (added)");
+
+        // Two transactions with the same blob count but different bytes must differ.
+        let mut a = base.clone();
+        a.blobs.push(crate::Blob::from(vec![1])).unwrap();
+        let mut b = base.clone();
+        b.blobs.push(crate::Blob::from(vec![2])).unwrap();
+        assert_ne!(sig_msg(&signer, &a), sig_msg(&signer, &b), "blobs (contents)");
     }
 
     #[test]
     fn signature_is_bound_to_seal_signer_context() {
-        let signer_sk = RistrettoSecretKey::random(&mut OsRng);
+        let signer_sk = RistrettoSecretKey::random(&mut rand::rng());
         let seal_signer_pk = sample_seal_signer();
         let other_seal_signer_pk = sample_seal_signer();
         let tx = sample_unsigned();
@@ -459,6 +580,11 @@ mod tests {
         let mut u = base_unsigned.clone();
         u.dry_run = !u.dry_run;
         assert_ne!(seal_msg(&with_body(u)), base_msg, "dry_run");
+
+        // blobs: changes to the payload must alter the seal digest via per-blob commitments
+        let mut u = base_unsigned.clone();
+        u.blobs.push(crate::Blob::from(vec![9, 9, 9])).unwrap();
+        assert_ne!(seal_msg(&with_body(u)), base_msg, "blobs (added)");
     }
 
     /// The seal signature binds the prior signatures — their presence, content and order must all
@@ -486,7 +612,7 @@ mod tests {
 
     #[test]
     fn seal_signature_roundtrip() {
-        let sealer_sk = RistrettoSecretKey::random(&mut OsRng);
+        let sealer_sk = RistrettoSecretKey::random(&mut rand::rng());
         let seal_signer_pk: RistrettoPublicKeyBytes = RistrettoPublicKey::from_secret_key(&sealer_sk).to_byte_type();
 
         let unsigned = sample_unsigned();

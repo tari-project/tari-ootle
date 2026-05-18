@@ -1,6 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_template_lib::types::TemplateAddress;
+
 use crate::runtime::StateTracker;
 
 pub trait RuntimeModule<TStore>: Send + Sync {
@@ -16,9 +18,15 @@ pub trait RuntimeModule<TStore>: Send + Sync {
         Ok(())
     }
 
+    /// Invoked once for every entry into a template within the current transaction (e.g. each
+    /// `call_function` / `call_method` / `update_component_template`). Modules that want to dedupe
+    /// per-transaction (notably the fee module) must do so themselves via
+    /// [`StateTracker::record_template_load_charge`]; the runtime intentionally does not dedupe
+    /// here so observer-style modules can see every load.
     fn on_template_loaded(
         &self,
         _track: &mut StateTracker<TStore>,
+        _template_address: &TemplateAddress,
         _bytes_loaded: usize,
     ) -> Result<(), RuntimeModuleError> {
         Ok(())
@@ -48,4 +56,6 @@ pub enum RuntimeModuleError {
     Bor(#[from] tari_bor::BorError),
     #[error("Overflow error: {0}")]
     Overflow(String),
+    #[error("Runtime error: {0}")]
+    Runtime(String),
 }

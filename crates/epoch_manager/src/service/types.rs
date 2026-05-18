@@ -1,7 +1,10 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{
@@ -47,14 +50,11 @@ pub enum EpochManagerRequest<TAddr> {
         deactivation_epoch: Epoch,
         reply: Reply<()>,
     },
-    GetCommittees {
-        epoch: Epoch,
-        reply: Reply<HashMap<ShardGroup, Committee<TAddr>>>,
-    },
+
     GetCommitteeForSubstate {
         epoch: Epoch,
         substate_address: SubstateAddress,
-        reply: Reply<Committee<TAddr>>,
+        reply: Reply<Arc<Committee<TAddr>>>,
     },
     GetCommitteeInfoByAddress {
         epoch: Epoch,
@@ -96,9 +96,7 @@ pub enum EpochManagerRequest<TAddr> {
     GetCommitteeForShardGroup {
         epoch: Epoch,
         shard_group: ShardGroup,
-        shuffled: bool,
-        limit: Option<usize>,
-        reply: Reply<Committee<TAddr>>,
+        reply: Reply<Arc<Committee<TAddr>>>,
     },
     GetCommitteesOverlappingShardGroup {
         epoch: Epoch,
@@ -128,5 +126,8 @@ pub enum EpochManagerRequest<TAddr> {
     IsWithinEpochEndSpread {
         current_epoch: Epoch,
         reply: Reply<bool>,
+    },
+    GetBirthdayEpoch {
+        reply: Reply<Option<Epoch>>,
     },
 }

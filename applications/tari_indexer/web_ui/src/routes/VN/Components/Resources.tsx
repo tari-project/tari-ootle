@@ -73,8 +73,6 @@ function Resources() {
     error: nftErrorMessage,
   } = useGetNonFungibles({
     address: resourceAddress,
-    start_index: 0,
-    end_index: 10,
     enabled: !!resourceAddress && isNonFungible,
   });
 

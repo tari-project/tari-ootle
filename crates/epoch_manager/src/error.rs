@@ -54,7 +54,7 @@ impl EpochManagerError {
 impl IsNotFoundError for EpochManagerError {
     fn is_not_found_error(&self) -> bool {
         match self {
-            Self::ValidatorNodeNotRegistered { .. } => true,
+            Self::ValidatorNodeNotRegistered { .. } | Self::NoEpochFound(_) => true,
             Self::StorageError(err) => err.is_not_found_error(),
             _ => false,
         }

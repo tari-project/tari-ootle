@@ -15,6 +15,7 @@ tari_engine_types = { workspace = true }
 tari_hashing = { workspace = true }
 ootle_serde = { workspace = true }
 ootle_byte_type = { workspace = true, features = ["crypto"] }
+ootle-network = { workspace = true, features = ["serde"] }
 tari_ootle_template_metadata = { workspace = true }
 
 borsh = { workspace = true }
@@ -35,4 +36,4 @@ thiserror = { workspace = true }
 ignored = ["prost", "prost-types"] # false positive, used in OUT_DIR structs
 
 [features]
-ts = ["ts-rs", "tari_bor/ts", "tari_template_lib_types/ts", "tari_engine_types/ts"]
+ts = ["ts-rs", "tari_bor/ts", "tari_template_lib_types/ts", "tari_engine_types/ts", "ootle-network/ts"]

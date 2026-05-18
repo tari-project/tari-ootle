@@ -25,7 +25,7 @@ use std::{
     convert::{TryFrom, TryInto},
     fmt::{Debug, Formatter},
     marker::PhantomData,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 use diesel::{
@@ -101,7 +101,11 @@ impl<TAddr> SqliteGlobalDbAdapter<TAddr> {
         }
     }
 
-    fn exists(&self, tx: &mut SqliteTransaction<'_>, key: &[u8]) -> Result<bool, SqliteStorageError> {
+    fn exists(
+        &self,
+        tx: &mut SqliteTransaction<MutexGuard<'_, SqliteConnection>>,
+        key: &[u8],
+    ) -> Result<bool, SqliteStorageError> {
         use crate::global::schema::metadata;
         let result = metadata::table
             .filter(metadata::key_name.eq(key))
@@ -127,7 +131,7 @@ impl<TAddr> SqliteGlobalDbAdapter<TAddr> {
 }
 
 impl<TAddr> AtomicDb for SqliteGlobalDbAdapter<TAddr> {
-    type DbTransaction<'a> = SqliteTransaction<'a>;
+    type DbTransaction<'a> = SqliteTransaction<MutexGuard<'a, SqliteConnection>>;
     type Error = SqliteStorageError;
 
     fn create_transaction(&self) -> Result<Self::DbTransaction<'_>, Self::Error> {
@@ -635,24 +639,16 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         tx: &mut Self::DbTransaction<'_>,
         epoch: Epoch,
         shard_group: ShardGroup,
-        shuffle: bool,
         limit: usize,
     ) -> Result<Committee<Self::Addr>, Self::Error> {
         use crate::global::schema::{committees, validator_nodes};
 
-        let mut query = validator_nodes::table
+        let validators = validator_nodes::table
             .inner_join(committees::table.on(committees::validator_node_id.eq(validator_nodes::id)))
             .select(validator_nodes::all_columns)
             .filter(committees::epoch.eq(epoch.as_u64() as i64))
             .filter(committees::shard_start.eq(shard_group.start().as_u32() as i32))
             .filter(committees::shard_end.eq(shard_group.end().as_u32() as i32))
-            .into_boxed();
-
-        if shuffle {
-            query = query.order_by(sql_random());
-        }
-
-        let validators = query
             .limit(i64::try_from(limit).unwrap_or(i64::MAX))
             .get_results::<DbValidatorNode>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {

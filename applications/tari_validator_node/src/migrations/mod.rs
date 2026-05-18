@@ -3,7 +3,8 @@
 
 use log::*;
 use tari_consensus::consensus_constants::ConsensusConstants;
-use tari_ootle_common_types::{Network, NodeAddressable, optional::Optional};
+use tari_ootle_common_types::{NodeAddressable, optional::Optional};
+use tari_ootle_transaction::Network;
 use tari_state_store_rocksdb::{
     codecs::ByteColumn,
     column_families::bookkeeping::DatabaseMigrationVersion,

@@ -256,7 +256,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingS
             }
             let vid = VersionedSubstateIdRef::new(id, substate.version());
             let shard = vid.to_shard(self.num_preshards);
-            debug!(target: LOG_TARGET, "🔼️ Up: {} v{} {} value hash: {}", id, substate.version(), shard, substate.to_value_hash());
+            debug!(target: LOG_TARGET, "🔼️ Up: {} v{} {}", id, substate.version(), shard);
             self.put(SubstateChange::Up {
                 id: id.clone(),
                 shard,

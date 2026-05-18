@@ -10,7 +10,6 @@ use ootle_rs::{
     default_indexer_url,
     displayable::Displayable,
     key_provider::PrivateKeyProvider,
-    keys::HasViewOnlyKeySecret,
     provider::{PendingTransaction, Provider, ProviderBuilder, WalletProvider},
     stealth::{Output, StealthTransfer},
     template_types::{

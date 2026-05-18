@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::sync::MutexGuard;
+use std::ops::DerefMut;
 
 use diesel::{RunQueryDsl, SqliteConnection, sql_query};
 
@@ -28,18 +28,31 @@ use crate::error::SqliteStorageError;
 
 const _LOG_TARGET: &str = "tari::ootle::storage::sqlite::transaction";
 
-pub struct SqliteTransaction<'a> {
-    connection: MutexGuard<'a, SqliteConnection>,
+pub struct SqliteTransaction<C: DerefMut<Target = SqliteConnection>> {
+    connection: C,
     is_done: bool,
 }
 
-impl<'a> SqliteTransaction<'a> {
-    pub fn begin(connection: MutexGuard<'a, SqliteConnection>) -> Result<Self, SqliteStorageError> {
+impl<C> SqliteTransaction<C>
+where C: DerefMut<Target = SqliteConnection>
+{
+    /// Begins a deferred transaction. Locks are acquired lazily on first read/write.
+    pub fn begin(connection: C) -> Result<Self, SqliteStorageError> {
+        Self::begin_with(connection, "BEGIN DEFERRED")
+    }
+
+    /// Begins an immediate transaction, acquiring the write lock up front. Use this for writers
+    /// when multiple connections share the database to avoid deadlock on lock upgrade.
+    pub fn begin_immediate(connection: C) -> Result<Self, SqliteStorageError> {
+        Self::begin_with(connection, "BEGIN IMMEDIATE")
+    }
+
+    fn begin_with(connection: C, sql: &str) -> Result<Self, SqliteStorageError> {
         let mut this = Self {
             connection,
             is_done: false,
         };
-        this.execute_sql("BEGIN TRANSACTION")?;
+        this.execute_sql(sql)?;
         Ok(this)
     }
 
@@ -75,7 +88,9 @@ impl<'a> SqliteTransaction<'a> {
     }
 }
 
-impl Drop for SqliteTransaction<'_> {
+impl<C> Drop for SqliteTransaction<C>
+where C: DerefMut<Target = SqliteConnection>
+{
     fn drop(&mut self) {
         if !self.is_done {
             let _ignore = self.rollback_inner();

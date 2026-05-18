@@ -3,7 +3,6 @@
 
 use std::iter;
 
-use chacha20poly1305::aead::OsRng;
 use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
@@ -128,7 +127,7 @@ mod stealth_tests {
             .iter()
             .filter(|amount| **amount > 0)
             .map(|&amount| {
-                let output_mask = RistrettoSecretKey::random(&mut OsRng);
+                let output_mask = RistrettoSecretKey::random(&mut rand::rng());
                 // For testing purposes, we use the mask as the owner key
                 let output_owner_public_key = RistrettoPublicKey::from_secret_key(&output_mask);
                 let statement = OutputWitness {

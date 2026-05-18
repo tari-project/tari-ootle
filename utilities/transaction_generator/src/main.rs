@@ -13,9 +13,8 @@ use std::{
 
 use anyhow::anyhow;
 use cli::Cli;
-use rand::rngs::OsRng;
 use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey, tari_utilities::hex::Hex};
-use tari_ootle_common_types::Network;
+use tari_ootle_transaction::Network;
 use tari_transaction_manifest::ManifestValue;
 use transaction_generator::{
     BoxedTransactionBuilder,
@@ -89,7 +88,7 @@ fn get_transaction_builder(args: &WriteArgs) -> anyhow::Result<BoxedTransactionB
                 .map(|s| RistrettoSecretKey::from_hex(s))
                 .transpose()
                 .map_err(|_| anyhow!("Failed to parse secret"))?
-                .unwrap_or_else(|| RistrettoSecretKey::random(&mut OsRng));
+                .unwrap_or_else(|| RistrettoSecretKey::random(&mut rand::rng()));
             let mut manifest_args = parse_args(&args.manifest_args)?;
             if let Some(args_file) = &args.manifest_args_file {
                 let file = io::BufReader::new(fs::File::open(args_file)?);

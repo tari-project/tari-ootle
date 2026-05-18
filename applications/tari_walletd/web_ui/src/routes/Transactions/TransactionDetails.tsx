@@ -80,7 +80,18 @@ export default function TransactionDetails() {
   };
 
   const expandAll = () => {
-    setExpandedPanels(["panel1", "panel2", "panel3", "panel4", "panel5", "panel6", "panel7", "panel8", "panel9"]);
+    setExpandedPanels([
+      "panel1",
+      "panel2",
+      "panel3",
+      "panel4",
+      "panel5",
+      "panel6",
+      "panel7",
+      "panel8",
+      "panel9",
+      "panel10",
+    ]);
   };
 
   const collapseAll = () => {
@@ -339,6 +350,16 @@ export default function TransactionDetails() {
               <Signers seal_signature={seal_signature} transaction_body={transaction_body} />
             </AccordionDetails>
           </Accordion>
+          <Accordion expanded={expandedPanels.includes("panel10")} onChange={handleChange("panel10")}>
+            <AccordionSummary aria-controls="panel10bh-content" id="panel10bh-header">
+              <Typography variant="h5">
+                Blobs ({transaction?.blob_hashes?.length ?? 0})
+              </Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Blobs hashes={transaction?.blob_hashes || []} sizes={transaction?.blob_sizes || []} />
+            </AccordionDetails>
+          </Accordion>
         </div>
       </Fade>
     );
@@ -353,5 +374,50 @@ export default function TransactionDetails() {
         <StyledPaper>{renderContent()}</StyledPaper>
       </Grid>
     </>
+  );
+}
+
+function formatBlobSize(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MiB`;
+}
+
+/**
+ * Renders the blob commitments carried by a (pruned) transaction. Only blob hashes and sizes
+ * are available — raw payloads are omitted from the API response.
+ */
+function Blobs({ hashes, sizes }: { hashes: string[]; sizes: number[] }) {
+  if (hashes.length === 0) {
+    return (
+      <Stack alignItems="center" sx={{ p: 3 }}>
+        <Typography variant="body2" color="text.secondary">
+          This transaction has no blobs.
+        </Typography>
+      </Stack>
+    );
+  }
+  return (
+    <Table size="small">
+      <TableBody>
+        <TableRow>
+          <TableCell sx={{ fontWeight: 600 }}>Index</TableCell>
+          <TableCell sx={{ fontWeight: 600 }}>Hash</TableCell>
+          <TableCell sx={{ fontWeight: 600 }}>Size</TableCell>
+        </TableRow>
+        {hashes.map((hash, i) => {
+          const size = sizes[i];
+          return (
+            <TableRow key={`${i}-${hash}`}>
+              <DataTableCell sx={{ width: "10%" }}>{i}</DataTableCell>
+              <DataTableCell sx={{ fontFamily: "monospace", fontSize: "0.8rem", wordBreak: "break-all" }}>
+                {hash}
+              </DataTableCell>
+              <DataTableCell sx={{ width: "15%" }}>{size != null ? formatBlobSize(size) : "—"}</DataTableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
   );
 }

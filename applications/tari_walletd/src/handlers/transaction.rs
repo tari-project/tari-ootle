@@ -62,17 +62,8 @@ pub async fn handle_submit_instruction(
 ) -> Result<TransactionSubmitResponse, anyhow::Error> {
     // TODO: fine-grained checks of individual addresses involved (resources, components, etc)
     context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
-    let mut builder = context.transaction_builder().with_instructions(req.instructions);
     let sdk = context.wallet_sdk();
 
-    if let Some(ref dump_account) = req.dump_outputs_into {
-        let dump_account = get_account(dump_account, &sdk.accounts_api())?;
-        builder = builder.put_last_instruction_output_on_workspace("bucket").call_method(
-            *dump_account.component_address(),
-            "deposit",
-            args![Workspace("bucket")],
-        );
-    }
     let fee_account = get_account(&req.fee_account, &sdk.accounts_api())?;
     let owner_key_id = fee_account.owner_key_id().ok_or_else(|| {
         invalid_params(
@@ -80,9 +71,10 @@ pub async fn handle_submit_instruction(
             Some("Fee account does not have an owner key set".to_string()),
         )
     })?;
-
-    let transaction = builder
-        .pay_fee_from_component(*fee_account.component_address(), req.max_fee)
+    let transaction = context
+        .transaction_builder()
+        .with_instructions(req.instructions)
+        .pay_fee_from_component(*fee_account.component_address(), req.max_fee.max(1))
         .with_min_epoch(req.min_epoch.map(Epoch))
         .with_max_epoch(req.max_epoch.map(Epoch))
         .build_unsigned();
@@ -106,6 +98,9 @@ pub async fn handle_submit(
     // TODO: fine-grained checks of individual addresses involved (resources, components, etc)
     context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
     let sdk = context.wallet_sdk();
+    req.transaction
+        .validate_blob_references()
+        .map_err(|e| invalid_params("transaction.blobs", Some(e.to_string())))?;
     let detected_inputs = if req.detect_inputs {
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
         let substates = req.transaction.to_referenced_substates()?;
@@ -205,6 +200,9 @@ pub async fn handle_submit_dry_run(
     // TODO: fine-grained checks of individual addresses involved (resources, components, etc)
     context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
     let sdk = context.wallet_sdk();
+    req.transaction
+        .validate_blob_references()
+        .map_err(|e| invalid_params("transaction.blobs", Some(e.to_string())))?;
     let key_api = sdk.key_manager_api();
     // Fetch the key to sign the transaction
     let key = key_api.get_public_key(req.seal_signer)?;
@@ -285,7 +283,12 @@ pub async fn handle_submit_manifest(
         })
         .collect::<Result<_, _>>()?;
 
-    let instructions = parse_manifest(&req.manifest, variables, Default::default())
+    let blob_inputs = req
+        .blobs
+        .iter()
+        .map(|(name, blob)| (name.clone(), blob.clone()))
+        .collect();
+    let instructions = parse_manifest(&req.manifest, variables, Default::default(), blob_inputs)
         .map_err(|e| invalid_params("manifest", Some(format!("Failed to parse manifest: {}", e))))?;
 
     let default_account = sdk
@@ -303,9 +306,10 @@ pub async fn handle_submit_manifest(
 
     let seal_signer_key_id = req.seal_signer_key_id.unwrap_or(default_owner_key_id);
 
-    let fee_amount = req.max_fee;
+    // Fee of zero is never valid
+    let fee_amount = req.max_fee.max(1);
 
-    let transaction = context
+    let mut transaction = context
         .transaction_builder()
         .with_dry_run(req.dry_run)
         .with_fee_instructions_builder(|builder| {
@@ -317,6 +321,15 @@ pub async fn handle_submit_manifest(
         })
         .with_instructions(instructions.instructions)
         .build_unsigned();
+
+    // Attach blobs from the manifest (in the order they were first referenced) to the
+    // unsigned transaction. The manifest generator already assigned `BlobIndex`es matching
+    // this ordering, so the indices in instructions resolve correctly.
+    for blob in instructions.blobs.iter().cloned() {
+        transaction
+            .add_blob(blob)
+            .map_err(|e| invalid_params("blobs", Some(e.to_string())))?;
+    }
 
     // Detect inputs
     let substates = transaction.to_referenced_substates()?.into_iter().collect::<Vec<_>>();
@@ -518,6 +531,9 @@ pub async fn handle_publish_template(
         )
     })?;
 
+    // A max_fee of zero will fail, since paying zero fees is never valid
+    let max_fee = req.max_fee.max(1);
+
     // trying to optimize WASM binary
     let wasm_binary = match optimize_wasm_template(req.binary.as_slice()).await {
         Ok(optimized) => {
@@ -530,15 +546,15 @@ pub async fn handle_publish_template(
         },
     };
 
-    let wasm_binary = wasm_binary
-        .try_into()
-        .map_err(|_| invalid_params("binary", Some("WASM binary too large".to_string())))?;
+    if wasm_binary.len() > tari_engine_types::limits::ENGINE_LIMITS.max_template_binary_size_bytes {
+        return Err(invalid_params("binary", Some("WASM binary too large".to_string())));
+    }
 
     let metadata_hash = req.metadata.map(resolve_metadata_hash).transpose()?;
 
     let builder = context
         .transaction_builder()
-        .pay_fee_from_component(*fee_account.component_address(), req.max_fee);
+        .pay_fee_from_component(*fee_account.component_address(), max_fee);
     let builder = match metadata_hash {
         Some(hash) => builder.publish_template_with_metadata(wasm_binary, hash),
         None => builder.publish_template(wasm_binary),

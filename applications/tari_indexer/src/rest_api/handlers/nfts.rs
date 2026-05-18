@@ -37,6 +37,7 @@ pub async fn get_non_fungibles(
     let non_fungibles = context
         .substate_manager()
         .get_non_fungibles_by_resource_address(req.address, limit, offset)
+        .await
         .map_err(ErrorResponse::anyhow)?;
 
     Ok(Json(GetNonFungiblesResponse { non_fungibles }))

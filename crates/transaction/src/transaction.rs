@@ -4,17 +4,16 @@
 use std::{collections::HashSet, fmt::Display};
 
 use indexmap::IndexSet;
+use ootle_network::Network;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{
     confidential::MinotariBurnClaimProof,
-    hashing::{EngineHashDomainLabel, hasher32},
     indexed_value::IndexedValueError,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
 };
 use tari_ootle_common_types::{
     Epoch,
-    Network,
     SubstateAddress,
     SubstateRequirement,
     SubstateRequirementRef,
@@ -25,6 +24,7 @@ use tari_ootle_common_types::{
 use tari_template_lib_types::{ClaimedOutputTombstoneAddress, ComponentAddress, TemplateAddress};
 
 use crate::{
+    Blobs,
     Instruction,
     TransactionSealSignature,
     TransactionSignature,
@@ -61,11 +61,9 @@ impl Transaction {
     }
 
     pub fn calculate_id(&self) -> TransactionId {
-        hasher32(EngineHashDomainLabel::Transaction)
-            .chain(&self)
-            .result()
-            .into_array()
-            .into()
+        match self {
+            Self::V1(tx) => tx.calculate_id(),
+        }
     }
 
     pub fn calculate_transaction_weight(&self) -> TransactionWeight {
@@ -104,6 +102,12 @@ impl Transaction {
         }
     }
 
+    pub fn blobs(&self) -> &Blobs {
+        match self {
+            Self::V1(tx) => tx.blobs(),
+        }
+    }
+
     pub fn signatures(&self) -> &[TransactionSignature] {
         match self {
             Self::V1(tx) => tx.signatures(),
@@ -138,6 +142,17 @@ impl Transaction {
     pub fn into_instruction_parts(self) -> (Vec<Instruction>, Vec<Instruction>) {
         match self {
             Self::V1(tx) => tx.into_unsealed_transaction().into_instruction_parts(),
+        }
+    }
+
+    /// Returns (fee instructions, main instructions, blobs).
+    pub fn into_instructions_and_blobs(self) -> (Vec<Instruction>, Vec<Instruction>, crate::Blobs) {
+        match self {
+            Self::V1(tx) => {
+                let unsealed = tx.into_unsealed_transaction();
+                let (unsigned, _signatures) = unsealed.into_parts();
+                (unsigned.fee_instructions, unsigned.instructions, unsigned.blobs)
+            },
         }
     }
 
@@ -224,14 +239,23 @@ impl Transaction {
     }
 
     pub fn publish_templates_iter(&self) -> impl Iterator<Item = &[u8]> + '_ {
-        self.instructions().iter().filter_map(|i| match i {
-            Instruction::PublishTemplate { binary, .. } => Some(binary.as_slice()),
+        let blobs = self.unsealed_transaction().unsigned_transaction().blobs();
+        self.instructions().iter().filter_map(move |i| match i {
+            Instruction::PublishTemplate { binary, .. } => blobs.get(*binary).map(|b| b.as_bytes()),
             _ => None,
         })
     }
 
     pub fn num_inputs(&self) -> usize {
         self.all_inputs_substate_ids_iter().count()
+    }
+
+    /// Validate the blob side of the transaction: every `BlobIndex` is in bounds and every
+    /// blob is referenced. See `TransactionV1::validate_blob_references`.
+    pub fn validate_blob_references(&self) -> Result<(), crate::v1::BlobValidationError> {
+        match self {
+            Self::V1(tx) => tx.validate_blob_references(),
+        }
     }
 
     pub fn min_epoch(&self) -> Option<Epoch> {
@@ -301,10 +325,109 @@ impl Display for Transaction {
     }
 }
 
+/// Pruned, archive-only counterpart of `Transaction`. Carries blob commitments instead of
+/// blob payloads, so API responses can omit the raw bytes while preserving the `TransactionId`,
+/// signature verifiability, and the structural shape the UI needs to display.
+///
+/// Constructed only via `From<Transaction>` (which derives commitments from the full blobs and
+/// drops the payloads) or via deserialization of bytes previously written by the storage layer.
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum PrunedTransaction {
+    V1(crate::v1::PrunedTransactionV1),
+}
+
+impl PrunedTransaction {
+    pub fn calculate_id(&self) -> TransactionId {
+        match self {
+            Self::V1(tx) => tx.calculate_id(),
+        }
+    }
+
+    pub fn schema_version(&self) -> u16 {
+        match self {
+            Self::V1(tx) => tx.schema_version(),
+        }
+    }
+
+    pub fn fee_instructions(&self) -> &[Instruction] {
+        match self {
+            Self::V1(tx) => tx.fee_instructions(),
+        }
+    }
+
+    pub fn instructions(&self) -> &[Instruction] {
+        match self {
+            Self::V1(tx) => tx.instructions(),
+        }
+    }
+
+    pub fn blob_hashes(&self) -> &crate::BlobHashes {
+        match self {
+            Self::V1(tx) => tx.blob_hashes(),
+        }
+    }
+
+    pub fn signatures(&self) -> &[TransactionSignature] {
+        match self {
+            Self::V1(tx) => tx.signatures(),
+        }
+    }
+
+    pub fn seal_signature(&self) -> &TransactionSealSignature {
+        match self {
+            Self::V1(tx) => tx.seal_signature(),
+        }
+    }
+
+    pub fn verify_all_signatures(&self) -> bool {
+        match self {
+            Self::V1(tx) => tx.verify_all_signatures(),
+        }
+    }
+
+    pub fn network(&self) -> u8 {
+        match self {
+            Self::V1(tx) => tx.network(),
+        }
+    }
+
+    pub fn min_epoch(&self) -> Option<Epoch> {
+        match self {
+            Self::V1(tx) => tx.min_epoch(),
+        }
+    }
+
+    pub fn max_epoch(&self) -> Option<Epoch> {
+        match self {
+            Self::V1(tx) => tx.max_epoch(),
+        }
+    }
+
+    pub fn is_seal_signer_authorized(&self) -> bool {
+        match self {
+            Self::V1(tx) => tx.is_seal_signer_authorized(),
+        }
+    }
+
+    pub fn is_dry_run(&self) -> bool {
+        match self {
+            Self::V1(tx) => tx.is_dry_run(),
+        }
+    }
+}
+
+impl From<Transaction> for PrunedTransaction {
+    fn from(tx: Transaction) -> Self {
+        match tx {
+            Transaction::V1(tx) => Self::V1(tx.into()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use ootle_byte_type::ToByteType;
-    use rand::rngs::OsRng;
     use tari_crypto::{
         keys::{PublicKey as _, SecretKey},
         ristretto::{RistrettoPublicKey, RistrettoSecretKey},
@@ -333,7 +456,7 @@ mod tests {
                 ComponentAddress::from_array([1; 32])
             ])
             .put_last_instruction_output_on_workspace("workspace")
-            .publish_template(b"template".to_vec().try_into().unwrap())
+            .publish_template(b"template".to_vec())
             .add_input(SubstateRequirement::versioned(
                 SubstateId::Component(ComponentAddress::from_array([1; 32])),
                 1,
@@ -357,12 +480,12 @@ mod tests {
 
     #[test]
     fn it_correctly_signs_and_verifies() {
-        let secret = RistrettoSecretKey::random(&mut OsRng);
+        let secret = RistrettoSecretKey::random(&mut rand::rng());
         let public_key = RistrettoPublicKey::from_secret_key(&secret);
         let subject = create_transaction().build_and_seal(&secret);
         assert!(subject.verify_all_signatures());
 
-        let secret2 = RistrettoSecretKey::random(&mut OsRng);
+        let secret2 = RistrettoSecretKey::random(&mut rand::rng());
         let subject = create_transaction()
             .finish()
             .add_signer(&public_key.to_byte_type(), &secret2)

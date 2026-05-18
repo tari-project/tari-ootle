@@ -4,8 +4,7 @@
 use std::{collections::HashMap, fs, path::Path};
 
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_ootle_common_types::Network;
-use tari_ootle_transaction::Transaction;
+use tari_ootle_transaction::{Network, Transaction};
 use tari_template_lib_types::TemplateAddress;
 use tari_transaction_manifest::ManifestValue;
 
@@ -19,7 +18,7 @@ pub fn builder<P: AsRef<Path>>(
     templates: HashMap<String, TemplateAddress>,
 ) -> anyhow::Result<BoxedTransactionBuilder> {
     let contents = fs::read_to_string(manifest).unwrap();
-    let instructions = tari_transaction_manifest::parse_manifest(&contents, globals, templates)?;
+    let instructions = tari_transaction_manifest::parse_manifest(&contents, globals, templates, Default::default())?;
     Ok(Box::new(move |_| {
         Transaction::builder(network.as_byte())
             .with_fee_instructions(instructions.fee_instructions.clone())

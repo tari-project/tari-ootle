@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use tari_bor::encode;
 use tari_template_lib_types::bytes::Bytes;
 
+use crate::BlobIndex;
+
 pub type WorkspaceId = u16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, borsh::BorshSerialize)]
@@ -64,7 +66,7 @@ impl fmt::Display for WorkspaceOffsetId {
 }
 
 /// Represents an argument that can be passed to a transaction instruction. Either a literal value or a reference to a
-/// item on the runtime's workspace.
+/// item on the runtime's workspace, or a reference to a transaction blob by index.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum InstructionArg {
@@ -80,7 +82,10 @@ pub enum InstructionArg {
         #[cfg_attr(feature = "ts", ts(type = "string"))]
         Bytes,
     ),
-    // Literal(tari_bor::Value),
+    /// The argument is the contents of a transaction blob, referenced by index. The engine
+    /// resolves the index against the surrounding `Blobs` at execution time and passes the raw
+    /// bytes to the call. Use `Blob` for large/opaque data; prefer `Literal` for small values.
+    Blob(BlobIndex),
 }
 
 impl InstructionArg {
@@ -106,10 +111,21 @@ impl InstructionArg {
         Self::Workspace(id)
     }
 
+    pub fn blob(idx: BlobIndex) -> Self {
+        Self::Blob(idx)
+    }
+
     pub fn as_literal_bytes(&self) -> Option<&[u8]> {
         match self {
             Self::Literal(bytes) => Some(bytes),
-            Self::Workspace(_) => None,
+            Self::Workspace(_) | Self::Blob(_) => None,
+        }
+    }
+
+    pub fn as_blob_index(&self) -> Option<BlobIndex> {
+        match self {
+            Self::Blob(idx) => Some(*idx),
+            Self::Workspace(_) | Self::Literal(_) => None,
         }
     }
 
@@ -117,6 +133,16 @@ impl InstructionArg {
     pub fn remap_workspace_id(&mut self, id_offset: WorkspaceId) {
         if let Self::Workspace(id) = self {
             id.remap_id(id_offset);
+        }
+    }
+
+    /// Shift any blob index by the given amount. Used when merging transaction builders so that
+    /// concatenated blob lists keep their references aligned, mirroring `remap_workspace_id`.
+    ///
+    /// Panics on overflow.
+    pub fn remap_blob_id(&mut self, id_offset: BlobIndex) {
+        if let Self::Blob(idx) = self {
+            *idx = idx.checked_add(id_offset).expect("BlobIndex overflow during merge");
         }
     }
 }

@@ -69,7 +69,6 @@ function Connections() {
         <TableHead>
           <TableRow>
             <TableCell>Peer ID</TableCell>
-            <TableCell>CopyAddress</TableCell>
             <TableCell>Age</TableCell>
             <TableCell>Direction</TableCell>
             <TableCell>Latency</TableCell>
@@ -78,7 +77,7 @@ function Connections() {
         </TableHead>
         <TableBody>
           {connections &&
-            connections.map(({ connection_id, address, age, direction, peer_id, ping_latency, user_agent }) => (
+            connections.map(({ connection_id, age, direction, peer_id, ping_latency, user_agent }) => (
               <TableRow key={connection_id}>
                 <DataTableCell>
                   <Stack direction="row" alignItems="center">
@@ -86,7 +85,6 @@ function Connections() {
                     <CopyToClipboard copy={peer_id} />
                   </Stack>
                 </DataTableCell>
-                <DataTableCell>{address}</DataTableCell>
                 <DataTableCell>{displayDuration(age)}</DataTableCell>
                 <DataTableCell>{direction}</DataTableCell>
                 <DataTableCell>{ping_latency ? displayDuration(ping_latency) : "--"}</DataTableCell>

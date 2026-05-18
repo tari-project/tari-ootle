@@ -55,6 +55,56 @@ fn test_hello_world() {
     assert_eq!(result, "Hello World!");
 }
 
+/// A `Blob`-typed argument should be resolved by the runtime against the surrounding
+/// transaction's `Blobs` and decoded as CBOR — semantically identical to `Literal` but with
+/// the bytes carried in the prunable side-channel.
+///
+/// Calls `HelloWorld::custom_greeting(&self, name: String)` with the `name` argument supplied
+/// via a blob registered under the name `"name"`. Expected result: `"Hello World!"`.
+#[test]
+fn instruction_arg_blob_resolves_to_template_method_arg() {
+    use tari_bor::encode;
+    use tari_ootle_transaction::args;
+
+    let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/hello_world"]);
+    let component: ComponentAddress = test.call_function("HelloWorld", "new", args!["Hello".to_string()], vec![]);
+
+    let name_bytes = encode(&"World".to_string()).expect("encode String");
+    let result = test.execute_expect_success(
+        test.transaction()
+            .add_blob("name", name_bytes)
+            .call_method(component, "custom_greeting", args![Blob("name")])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    let greeting: String = result
+        .finalize
+        .execution_results
+        .first()
+        .expect("single instruction result")
+        .decode()
+        .unwrap();
+    assert_eq!(greeting, "Hello World!");
+}
+
+/// Referencing a blob name that hasn't been registered must surface a builder error at
+/// instruction construction time, not silently produce a malformed transaction.
+#[test]
+#[should_panic(expected = "Invalid named arguments")]
+fn instruction_arg_blob_unknown_name_panics_in_builder() {
+    use tari_ootle_transaction::args;
+
+    let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/hello_world"]);
+    let component: ComponentAddress = test.call_function("HelloWorld", "new", args!["Hello".to_string()], vec![]);
+
+    // No `add_blob("name", ...)` call → builder must panic when resolving the args.
+    let _unused = test
+        .transaction()
+        .call_method(component, "custom_greeting", args![Blob("name")])
+        .build_and_seal(test.secret_key());
+}
+
 #[test]
 fn test_state() {
     let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/state"]);
@@ -71,13 +121,15 @@ fn test_state() {
     let component_address2: ComponentAddress = template_test.call_function("State", "new", args![], vec![]);
     assert_ne!(component_address1, component_address2);
 
+    let template_addr = template_test.get_template_address("State");
+
     let store = template_test.read_only_state_store();
     let component = store.get_component(component_address1).unwrap();
-    assert_eq!(component.module_name, "State");
+    assert_eq!(*component.template_address(), template_addr);
 
     let component = store.get_component(component_address2).unwrap();
     assert_eq!(component.owner_public_key(), Some(&template_test.to_public_key_bytes()));
-    assert_eq!(component.module_name, "State");
+    assert_eq!(*component.template_address(), template_addr);
 
     // call the "set" method to update the instance value
     let new_value = 20_u32;
@@ -103,7 +155,7 @@ fn state_create_multiple_in_one_call() {
         .with_substates(|_, s| {
             if s.substate_value()
                 .component()
-                .filter(|a| a.template_address == template_address)
+                .filter(|a| *a.template_address() == template_address)
                 .is_some()
             {
                 count += 1;
@@ -489,7 +541,6 @@ mod consensus {
 }
 
 mod fungible {
-
     use super::*;
 
     #[test]
@@ -553,7 +604,6 @@ mod fungible {
 }
 
 mod basic_nft {
-
     use super::*;
 
     fn setup() -> (
@@ -1193,8 +1243,15 @@ fn test_builtin_templates() {
 
 #[test]
 fn all_builtin_templates_are_correct() {
-    for (address, wasm_bytes) in all_builtin_templates() {
-        WasmModule::load_template_from_code(wasm_bytes)
-            .unwrap_or_else(|e| panic!("Failed to load builtin template at address {}: {}", address, e));
+    // To prevent cyclic dev-deps on publish, we add this test here instead of inside template builtin
+    for template in all_builtin_templates() {
+        let loaded = WasmModule::load_template_from_code(template.binary)
+            .unwrap_or_else(|e| panic!("Failed to load builtin template at address {}: {}", template.address, e));
+        assert_eq!(
+            loaded.template_name(),
+            template.name,
+            "Template name mismatch for address {}",
+            template.address
+        );
     }
 }

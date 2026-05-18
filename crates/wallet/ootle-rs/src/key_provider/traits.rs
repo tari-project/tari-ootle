@@ -16,6 +16,6 @@ pub trait OutputMaskProvider {
 
 /// Provider of Diffie-Hellman KDF-derived secret keys for stealth address derivation.
 #[async_trait]
-pub trait DiffieHellmanKdfKeyProvider<H> {
-    async fn create_kdf_dh_key(&self, hasher: H, public_key: &RistrettoPublicKey) -> Result<RistrettoSecretKey>;
+pub trait DiffieHellmanKdfKeyProvider {
+    async fn create_kdf_dh_encrypted_data_key(&self, public_key: &RistrettoPublicKey) -> Result<RistrettoSecretKey>;
 }

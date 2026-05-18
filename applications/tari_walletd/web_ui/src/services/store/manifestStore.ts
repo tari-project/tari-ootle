@@ -39,6 +39,11 @@ export interface ManifestTab {
   code: string;
   variables: Record<string, string>;
   signingKeys: KeyId[];
+  /**
+   * Blob payloads referenced from the manifest via `blob!(name)`. Keys are blob names; values
+   * are base64-encoded byte payloads (matching the Blob TS binding).
+   */
+  blobs: Record<string, string>;
 }
 
 interface Store {
@@ -49,6 +54,7 @@ interface Store {
   code: string;
   variables: Record<string, string>;
   signingKeys: KeyId[];
+  blobs: Record<string, string>;
 
   // Tab management
   addTab: () => void;
@@ -63,6 +69,9 @@ interface Store {
   renameVariable: (oldKey: string, newKey: string) => void;
   addSigningKey: (key: KeyId) => void;
   removeSigningKey: (index: number) => void;
+  /** Add or update a blob payload under `name`. `base64` is base64-encoded bytes. */
+  setBlob: (name: string, base64: string) => void;
+  removeBlob: (name: string) => void;
   loadTabs: (tabs: ManifestTab[]) => void;
 }
 
@@ -72,7 +81,7 @@ function generateId(): string {
 }
 
 function createTab(name: string): ManifestTab {
-  return { id: generateId(), name, code: DEFAULT_CODE, variables: {}, signingKeys: [] };
+  return { id: generateId(), name, code: DEFAULT_CODE, variables: {}, signingKeys: [], blobs: {} };
 }
 
 function nextTabName(tabs: ManifestTab[]): string {
@@ -85,7 +94,13 @@ function nextTabName(tabs: ManifestTab[]): string {
 function updateActiveTab(state: Store, patch: Partial<ManifestTab>): Partial<Store> {
   const tabs = state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, ...patch } : t));
   const active = tabs.find((t) => t.id === state.activeTabId)!;
-  return { tabs, code: active.code, variables: active.variables, signingKeys: active.signingKeys };
+  return {
+    tabs,
+    code: active.code,
+    variables: active.variables,
+    signingKeys: active.signingKeys,
+    blobs: active.blobs,
+  };
 }
 
 const defaultTab = createTab("Manifest 1");
@@ -98,6 +113,7 @@ const useManifestCodeStore = create<Store>()(
       code: defaultTab.code,
       variables: defaultTab.variables,
       signingKeys: defaultTab.signingKeys,
+      blobs: defaultTab.blobs,
 
       addTab: () =>
         set((state) => {
@@ -108,6 +124,7 @@ const useManifestCodeStore = create<Store>()(
             code: tab.code,
             variables: tab.variables,
             signingKeys: tab.signingKeys,
+            blobs: tab.blobs,
           };
         }),
 
@@ -122,14 +139,27 @@ const useManifestCodeStore = create<Store>()(
             activeTabId = tabs[newIdx].id;
           }
           const active = tabs.find((t) => t.id === activeTabId)!;
-          return { tabs, activeTabId, code: active.code, variables: active.variables, signingKeys: active.signingKeys };
+          return {
+            tabs,
+            activeTabId,
+            code: active.code,
+            variables: active.variables,
+            signingKeys: active.signingKeys,
+            blobs: active.blobs,
+          };
         }),
 
       setActiveTab: (id: string) =>
         set((state) => {
           const tab = state.tabs.find((t) => t.id === id);
           if (!tab) return state;
-          return { activeTabId: id, code: tab.code, variables: tab.variables, signingKeys: tab.signingKeys };
+          return {
+            activeTabId: id,
+            code: tab.code,
+            variables: tab.variables,
+            signingKeys: tab.signingKeys,
+            blobs: tab.blobs,
+          };
         }),
 
       renameTab: (id: string, name: string) =>
@@ -175,10 +205,28 @@ const useManifestCodeStore = create<Store>()(
           return updateActiveTab(state, { signingKeys: active.signingKeys.filter((_, i) => i !== index) });
         }),
 
+      setBlob: (name: string, base64: string) =>
+        set((state) => {
+          const active = state.tabs.find((t) => t.id === state.activeTabId)!;
+          return updateActiveTab(state, { blobs: { ...active.blobs, [name]: base64 } });
+        }),
+
+      removeBlob: (name: string) =>
+        set((state) => {
+          const active = state.tabs.find((t) => t.id === state.activeTabId)!;
+          const { [name]: _removed, ...rest } = active.blobs;
+          return updateActiveTab(state, { blobs: rest });
+        }),
+
       loadTabs: (loaded: ManifestTab[]) =>
         set(() => {
           // Assign fresh IDs to avoid collisions with existing tabs
-          const tabs = loaded.map((t) => ({ ...t, id: generateId(), signingKeys: t.signingKeys || [] }));
+          const tabs = loaded.map((t) => ({
+            ...t,
+            id: generateId(),
+            signingKeys: t.signingKeys || [],
+            blobs: t.blobs || {},
+          }));
           const first = tabs[0];
           return {
             tabs,
@@ -186,6 +234,7 @@ const useManifestCodeStore = create<Store>()(
             code: first.code,
             variables: first.variables,
             signingKeys: first.signingKeys,
+            blobs: first.blobs,
           };
         }),
     }),
@@ -197,7 +246,14 @@ const useManifestCodeStore = create<Store>()(
         if (version < 1 && state && !state.tabs) {
           const code = (state.code as string) || DEFAULT_CODE;
           const variables = (state.variables as Record<string, string>) || {};
-          const tab: ManifestTab = { id: generateId(), name: "Manifest 1", code, variables, signingKeys: [] };
+          const tab: ManifestTab = {
+            id: generateId(),
+            name: "Manifest 1",
+            code,
+            variables,
+            signingKeys: [],
+            blobs: {},
+          };
           return {
             ...state,
             tabs: [tab],
@@ -205,6 +261,7 @@ const useManifestCodeStore = create<Store>()(
             code: tab.code,
             variables: tab.variables,
             signingKeys: tab.signingKeys,
+            blobs: tab.blobs,
           } as Store;
         }
         // Add signingKeys to existing tabs
@@ -221,9 +278,23 @@ const useManifestCodeStore = create<Store>()(
             signingKeys: active?.signingKeys || [],
           } as unknown as Store;
         }
+        // Add blobs map to existing tabs
+        if (version < 3 && state && state.tabs) {
+          const tabs = (state.tabs as ManifestTab[]).map((t) => ({
+            ...t,
+            blobs: t.blobs || {},
+          }));
+          const activeTabId = state.activeTabId as string;
+          const active = tabs.find((t) => t.id === activeTabId) || tabs[0];
+          return {
+            ...state,
+            tabs,
+            blobs: active?.blobs || {},
+          } as unknown as Store;
+        }
         return state as unknown as Store;
       },
-      version: 2,
+      version: 3,
     },
   ),
 );

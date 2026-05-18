@@ -1,13 +1,19 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, time::Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Instant,
+};
 
 use anyhow::anyhow;
 use futures::StreamExt;
 use log::*;
-use tari_consensus::traits::{ConsensusSpec, SyncManager, SyncStatus};
-use tari_consensus_types::LeafBlock;
+use tari_consensus::{
+    check_quorum_certificate_signatures,
+    traits::{ConsensusSpec, SyncManager, SyncStatus},
+};
+use tari_consensus_types::{LeafBlock, ProposalCertificate};
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     Epoch,
@@ -15,13 +21,12 @@ use tari_ootle_common_types::{
     VersionedSubstateId,
     VotePower,
     committee::Committee,
-    displayable::Displayable,
     optional::Optional,
     shard::Shard,
 };
 use tari_ootle_p2p::{
     PeerAddress,
-    proto::rpc::{GetCheckpointsRequest, GetCheckpointsResponse, SyncStateRequest},
+    proto::rpc::{GetCheckpointsRequest, GetCheckpointsResponse, GetHighQcRequest, SyncStateRequest},
 };
 use tari_ootle_storage::{
     ShardScopedTreeStoreReader,
@@ -31,7 +36,7 @@ use tari_ootle_storage::{
     StateStoreWriteTransaction,
     StorageError,
     consensus_models::{
-        BookkeepingModel,
+        BookkeepingEpochAgnosticRead,
         EpochCheckpoint,
         SubstateRecord,
         SubstateTransition,
@@ -40,8 +45,9 @@ use tari_ootle_storage::{
         SubstateValueFilterFlags,
     },
 };
-use tari_rpc_framework::RpcError;
+use tari_rpc_framework::{RpcError, RpcStatusCode};
 use tari_state_tree::{SPARSE_MERKLE_PLACEHOLDER_HASH, SpreadPrefixStateTree, SubstateTreeChange, TreeHash, Version};
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_validator_node_rpc::{
     STATE_SYNC_MAX_BATCH_SIZE,
     client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory},
@@ -56,8 +62,10 @@ pub struct RpcStateSyncClientProtocol<TConsensusSpec: ConsensusSpec> {
     epoch_manager: TConsensusSpec::EpochManager,
     state_store: TConsensusSpec::StateStore,
     client_factory: TariValidatorNodeRpcClientFactory,
+    signer_service: TConsensusSpec::SignerService,
     valid_checkpoints: HashMap<ShardGroup, EpochCheckpoint>,
     stats: StateSyncStats,
+    skip_sync: bool,
 }
 
 impl<TConsensusSpec> RpcStateSyncClientProtocol<TConsensusSpec>
@@ -67,14 +75,22 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         epoch_manager: TConsensusSpec::EpochManager,
         state_store: TConsensusSpec::StateStore,
         client_factory: TariValidatorNodeRpcClientFactory,
+        signer_service: TConsensusSpec::SignerService,
     ) -> Self {
         Self {
             epoch_manager,
             state_store,
             client_factory,
+            signer_service,
             valid_checkpoints: HashMap::new(),
             stats: StateSyncStats::default(),
+            skip_sync: false,
         }
+    }
+
+    pub fn with_skip_sync(mut self, skip_sync: bool) -> Self {
+        self.skip_sync = skip_sync;
+        self
     }
 
     async fn establish_rpc_session(&self, addr: &PeerAddress) -> Result<ValidatorNodeRpcClient, RpcStateSyncError> {
@@ -113,6 +129,12 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             Ok(GetCheckpointsResponse { mut checkpoints }) => {
                 match EpochCheckpoint::try_from(checkpoints.pop().expect("checked is_empty")) {
                     Ok(checkpoint) => {
+                        checkpoint.checked_shard_group().map_err(|err| {
+                            RpcStateSyncError::InvalidResponse(anyhow!(
+                                "Fetched checkpoint for epoch {} has invalid shard group: {err}",
+                                checkpoint.epoch()
+                            ))
+                        })?;
                         info!(target: LOG_TARGET, "🛜 Checkpoint: {checkpoint}");
                         self.validate_checkpoint(&checkpoint, prev_committee, prev_epoch)?;
                         self.state_store.with_write_tx(|tx| checkpoint.save(tx))?;
@@ -160,9 +182,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                 start_state_version,
                 shard: shard.as_u32(),
                 until_epoch: Some(checkpoint.epoch().into()),
-                value_filters: (SubstateValueFilterFlags::all_substates() |
-                    SubstateValueFilterFlags::TEMPLATE_METADATA)
-                    .bits(),
+                value_filters: SubstateValueFilterFlags::all_substates().bits(),
             })
             .await?;
 
@@ -229,7 +249,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             info!(target: LOG_TARGET, "🛜 Buffering {} state update(s) (state version: v{})", updates_for_state_version.len(), state_version);
             for result in updates_for_state_version {
                 let update = result?;
-                let tree_change = extract_tree_change(&update)?;
+                let tree_change = extract_tree_change(&update, msg_epoch)?;
 
                 debug!(target: LOG_TARGET, "🛜 -> state update (v{}) {}", state_version, update);
                 tree_changes.push(tree_change);
@@ -410,6 +430,24 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         Ok(())
     }
 
+    fn is_checkpoint_temporarily_unavailable_error(err: &RpcStateSyncError, prev_epoch: Epoch) -> bool {
+        match err {
+            RpcStateSyncError::CheckpointNotAvailable { epoch } => *epoch == prev_epoch,
+            RpcStateSyncError::RpcError(RpcError::RequestFailed(status)) => {
+                let details = status.details();
+                // Remote node count be behind in syncing the epoch oracle
+                (status.as_status_code() == RpcStatusCode::BadRequest &&
+                    details.contains(&format!("Peer requested checkpoint with epoch {}", prev_epoch))) ||
+                    // Remote node is syncing
+                    (status.as_status_code() == RpcStatusCode::General &&
+                        (details.contains("Consensus is not running on this node") ||
+                            details.contains("Node is still catching up to the epoch") ||
+                            details.contains("Node is not in sync with the consensus epoch")))
+            },
+            _ => false,
+        }
+    }
+
     /// Synchronizes the given [`Shard`].
     async fn sync_shard(
         &mut self,
@@ -419,13 +457,15 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         prev_committee: &Committee<PeerAddress>,
         our_vn_addr: &PeerAddress,
     ) -> Result<Option<Version>, RpcStateSyncError> {
-        let mut remaining_members = prev_committee.len();
         let prev_epoch = epoch
             .checked_sub(Epoch(1))
             .ok_or_else(|| RpcStateSyncError::InvalidResponse(anyhow!("Epoch is zero")))?;
         info!(target: LOG_TARGET, "🛜 Syncing state for shard {shard} and epoch {}", prev_epoch);
+
+        let mut last_hard_error = None;
+        let mut saw_unavailable_checkpoint = false;
+
         for member in prev_committee.shuffled() {
-            remaining_members = remaining_members.saturating_sub(1);
             if *our_vn_addr == member.address {
                 continue;
             }
@@ -436,9 +476,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                         target: LOG_TARGET,
                         "Failed to establish RPC session with vn {member}: {err}. Attempting another VN if available"
                     );
-                    if remaining_members == 0 {
-                        return Err(err);
-                    }
+                    last_hard_error = Some(err);
                     continue;
                 },
             };
@@ -450,25 +488,30 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             {
                 Ok(Some(cp)) => cp,
                 Ok(None) => {
-                    // TODO: we should check with f + 1 validators in this case. If a single validator reports
-                    // this falsely, this will prevent us from continuing with consensus for a long time (state
-                    // root will mismatch).
-                    // TODO: we should instead ask the epoch manager if this is the first epoch in the network (NOTE:
-                    // first epoch is not 0 but the first epoch where validators become active).
                     warn!(
                         target: LOG_TARGET,
-                        "❓️ No checkpoint for epoch {prev_epoch}. This may mean that this is the first epoch in the network or the epoch has not yet been finalized.",
+                        "❓️ No checkpoint for epoch {prev_epoch} from {member}. Previous committee exists, so state \
+                         sync will retry instead of proceeding without a checkpoint.",
                     );
-                    return Ok(None);
+                    saw_unavailable_checkpoint = true;
+                    continue;
                 },
                 Err(err) => {
+                    if Self::is_checkpoint_temporarily_unavailable_error(&err, prev_epoch) {
+                        saw_unavailable_checkpoint = true;
+                        warn!(
+                            target: LOG_TARGET,
+                            "⚠️Checkpoint for epoch {prev_epoch} is not yet available from {member}: {err}. \
+                             Attempting another peer if available"
+                        );
+                        continue;
+                    }
+
                     warn!(
                         target: LOG_TARGET,
                         "⚠️Failed to fetch checkpoint from {member}: {err}. Attempting another peer if available"
                     );
-                    if remaining_members == 0 {
-                        return Err(err);
-                    }
+                    last_hard_error = Some(err);
                     continue;
                 },
             };
@@ -489,13 +532,18 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                         target: LOG_TARGET,
                         "⚠️Failed to sync state from {member}: {err}. Attempting another peer if available"
                     );
-
-                    if remaining_members == 0 {
-                        return Err(err);
-                    }
+                    last_hard_error = Some(err);
                     continue;
                 },
             }
+        }
+
+        if let Some(err) = last_hard_error {
+            return Err(err);
+        }
+
+        if saw_unavailable_checkpoint {
+            return Err(RpcStateSyncError::CheckpointNotAvailable { epoch: prev_epoch });
         }
 
         Err(RpcStateSyncError::SyncFailedAllPeers {
@@ -553,9 +601,20 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         })
     }
 
-    async fn sync_inner(&mut self) -> Result<(), RpcStateSyncError> {
+    async fn sync_inner(&mut self, target_epoch: Option<Epoch>) -> Result<(), RpcStateSyncError> {
         let timer = Instant::now();
-        let current_epoch = self.epoch_manager.current_epoch().await?;
+        // Use the caller-provided target if any (typically the highest epoch resolved by a
+        // stall-recovery probe), otherwise fall back to the oracle's current epoch.
+        let current_epoch = match target_epoch {
+            Some(probed) => {
+                info!(
+                    target: LOG_TARGET,
+                    "🛜 Sync target from caller: epoch {probed}",
+                );
+                probed
+            },
+            None => self.epoch_manager.current_epoch().await?,
+        };
         let our_vn = self.epoch_manager.get_our_validator_node(current_epoch).await?;
         let local_info = self.epoch_manager.get_local_committee_info(current_epoch).await?;
         let prev_epoch_committees = match self.get_sync_committees(local_info.shard_group(), current_epoch).await {
@@ -608,29 +667,290 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
     }
 }
 
+enum ProbeOutcome {
+    /// At least one peer returned a verified QC for an epoch strictly higher than our leaf.
+    HigherQcSeen { epoch: Epoch },
+    /// A quorum of distinct committee members (by stake-weighted power) attested no higher QC
+    /// than our leaf's epoch.
+    QuorumAtLeaf { attested_power: VotePower },
+    /// Not enough committee power responded to make either decision.
+    Inconclusive {
+        attested_power: VotePower,
+        quorum_threshold: VotePower,
+    },
+}
+
+impl<TConsensusSpec> RpcStateSyncClientProtocol<TConsensusSpec>
+where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
+{
+    /// Probe committee members for their highest QCs and classify the result. See `ProbeOutcome`.
+    #[expect(clippy::too_many_lines)]
+    async fn probe_high_qcs_at_leaf(
+        &self,
+        committee: &Committee<PeerAddress>,
+        leaf: &LeafBlock,
+        our_addr: &PeerAddress,
+    ) -> Result<ProbeOutcome, RpcStateSyncError> {
+        let leaf_epoch = leaf.epoch();
+        let quorum_threshold = committee.quorum_threshold();
+
+        // Track the highest verified QC we see so we never decide "no higher QC exists" based
+        // on weaker evidence than what we already hold locally.
+        let mut highest_height_seen = leaf.height();
+        let mut highest_epoch_seen = leaf_epoch;
+
+        let mut counted_pks: HashSet<RistrettoPublicKeyBytes> = HashSet::new();
+        let mut attested_power = VotePower::zero();
+
+        // Pre-credit our own attestation. We hold the leaf QC ourselves and by definition have no
+        // QC higher than our leaf's epoch — that's the question the probe is asking. Excluding
+        // ourselves makes the quorum unreachable on any committee where total power equals
+        // quorum threshold (e.g. 4 members with one zero-power node: total=3, threshold=3, and
+        // peer responses can never reach 3 without including us).
+        if let Some(self_member) = committee.iter().find(|m| &m.address == our_addr) {
+            counted_pks.insert(self_member.public_key);
+            attested_power += self_member.vote_power;
+        }
+
+        // Iterate committee members in a randomised order so that under repeated probes we
+        // sample broadly across the committee rather than always hitting the same f peers.
+        for member in committee.shuffled() {
+            if &member.address == our_addr {
+                continue;
+            }
+
+            let mut client = match self.establish_rpc_session(&member.address).await {
+                Ok(c) => c,
+                Err(e) => {
+                    debug!(target: LOG_TARGET, "🛜 Probe: skipping {} (rpc session failed: {})", member.address, e);
+                    continue;
+                },
+            };
+
+            let response = match client
+                .get_high_qc(GetHighQcRequest {
+                    from_epoch: Some(leaf_epoch.into()),
+                })
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    debug!(target: LOG_TARGET, "🛜 Probe: {} returned error: {}", member.address, e);
+                    continue;
+                },
+            };
+
+            let Some(proto_qc) = response.high_qc else {
+                debug!(target: LOG_TARGET, "🛜 Probe: {} returned no QC", member.address);
+                continue;
+            };
+
+            let qc = match ProposalCertificate::try_from(proto_qc) {
+                Ok(qc) => qc,
+                Err(e) => {
+                    debug!(target: LOG_TARGET, "🛜 Probe: {} returned malformed QC: {}", member.address, e);
+                    continue;
+                },
+            };
+
+            // Stale peer: their QC is older than what we already know finalised. Don't count.
+            if qc.epoch() < leaf_epoch {
+                continue;
+            }
+
+            // Verify QC against the committee that COULD have signed at qc.epoch().
+            let verify_committee = if qc.epoch() == leaf_epoch {
+                committee.clone()
+            } else {
+                let group = qc.shard_group();
+                match self.epoch_manager.get_committee_by_shard_group(qc.epoch(), group).await {
+                    Ok(c) => c.as_ref().clone(),
+                    Err(e) => {
+                        debug!(
+                            target: LOG_TARGET,
+                            "🛜 Probe: no committee for QC epoch {} ({}); skipping {}",
+                            qc.epoch(), e, member.address,
+                        );
+                        continue;
+                    },
+                }
+            };
+
+            if let Err(e) = check_quorum_certificate_signatures::<TConsensusSpec>(
+                (&qc).into(),
+                &verify_committee,
+                &self.signer_service,
+            ) {
+                debug!(
+                    target: LOG_TARGET,
+                    "🛜 Probe: {} returned QC with invalid signatures: {}",
+                    member.address, e,
+                );
+                continue;
+            }
+
+            // Track the highest verified QC we've seen.
+            if qc.epoch() > highest_epoch_seen ||
+                (qc.epoch() == highest_epoch_seen && qc.height() > highest_height_seen)
+            {
+                highest_epoch_seen = qc.epoch();
+                highest_height_seen = qc.height();
+            }
+
+            // Any verified QC at an epoch beyond our leaf is sufficient evidence that consensus
+            // progressed — short-circuit and tell the caller to state-sync.
+            if qc.epoch() > leaf_epoch {
+                return Ok(ProbeOutcome::HigherQcSeen { epoch: qc.epoch() });
+            }
+
+            // QC is at our leaf's epoch — count this peer's attestation (by public key) toward
+            // the "no-higher-QC" quorum.
+            if counted_pks.insert(member.public_key) {
+                attested_power += member.vote_power;
+            }
+
+            if attested_power >= quorum_threshold {
+                // We have a quorum at the leaf epoch and have not (yet) seen a higher QC.
+                // Continue iterating remaining peers anyway so that a higher QC from a peer we
+                // haven't asked yet still trumps the quorum result. This is bounded by the
+                // committee size.
+                continue;
+            }
+        }
+
+        if highest_epoch_seen > leaf_epoch {
+            // Defensive: we should have returned above as soon as the higher QC was verified.
+            return Ok(ProbeOutcome::HigherQcSeen {
+                epoch: highest_epoch_seen,
+            });
+        }
+
+        if attested_power >= quorum_threshold {
+            Ok(ProbeOutcome::QuorumAtLeaf { attested_power })
+        } else {
+            Ok(ProbeOutcome::Inconclusive {
+                attested_power,
+                quorum_threshold,
+            })
+        }
+    }
+}
+
 impl<TConsensusSpec> SyncManager for RpcStateSyncClientProtocol<TConsensusSpec>
 where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
 {
     type Error = RpcStateSyncError;
 
     async fn check_sync(&self) -> Result<SyncStatus, Self::Error> {
-        let current_epoch = self.epoch_manager.current_epoch().await?;
-
-        let leaf_block = self
-            .state_store
-            .with_read_tx(|tx| LeafBlock::get(tx, current_epoch).optional())?;
-
-        // We only sync if we're behind by an epoch. The current epoch is replayed in consensus.
-        if current_epoch > leaf_block.map_or(Epoch::zero(), |b| b.epoch()) {
-            info!(target: LOG_TARGET, "🛜Our current leaf block {} is behind the current epoch {}. Syncing...", leaf_block.display(), current_epoch);
-            return Ok(SyncStatus::Behind);
+        if self.skip_sync {
+            warn!(target: LOG_TARGET, "🛜 State sync is disabled (--skip-sync). Reporting as up to date without checking.");
+            return Ok(SyncStatus::UpToDate);
         }
 
-        Ok(SyncStatus::UpToDate)
+        let oracle_epoch = self.epoch_manager.current_epoch().await?;
+
+        // Load the persisted leaf regardless of which epoch it was written under. The previous
+        // implementation looked up by oracle_epoch, which returns NotFound for any stalled-leaf
+        // case and conflates "no leaf at this epoch" with "no leaf at all".
+        let leaf_block = self.state_store.with_read_tx(|tx| LeafBlock::get_any(tx).optional())?;
+
+        // Cold-start: no leaf has ever been written. Sync iff the oracle has moved past the
+        // birthday epoch — replicates pre-existing behaviour.
+        let Some(leaf) = leaf_block else {
+            let Some(birthday_epoch) = self.epoch_manager.get_birthday_epoch().await? else {
+                return Err(RpcStateSyncError::InvariantError {
+                    details: "Check sync called before epoch birthday was determined".to_string(),
+                });
+            };
+            return Ok(if oracle_epoch > birthday_epoch {
+                // Cold start: no leaf, no probe — fall back to the oracle's current epoch.
+                SyncStatus::Behind { target_epoch: None }
+            } else {
+                SyncStatus::UpToDate
+            });
+        };
+
+        // Fast path: oracle hasn't advanced past our leaf — nothing to do.
+        if oracle_epoch <= leaf.epoch() {
+            return Ok(SyncStatus::UpToDate);
+        }
+
+        // Fast path: we have a finalised epoch checkpoint at our leaf's epoch. The committee
+        // finalised cleanly; this is the normal "behind by one epoch" case that today's
+        // state-sync handles. Proceed.
+        let has_local_checkpoint = self
+            .state_store
+            .with_read_tx(|tx| EpochCheckpoint::get_by_shard_group(tx, leaf.epoch(), leaf.shard_group()).optional())?
+            .is_some();
+        if has_local_checkpoint {
+            info!(
+                target: LOG_TARGET,
+                "🛜 Our leaf {} is behind oracle epoch {}; checkpoint at leaf epoch present, will state-sync.",
+                leaf,
+                oracle_epoch,
+            );
+            // No probe was run on this path — fall back to the oracle's current epoch.
+            return Ok(SyncStatus::Behind { target_epoch: None });
+        }
+
+        // Stall-recovery probe: no checkpoint at our leaf's epoch and oracle has moved on. Ask
+        // the leaf-epoch committee for their high QCs and decide based on what they hold.
+        info!(
+            target: LOG_TARGET,
+            "🛜 No checkpoint at leaf epoch {} (oracle at {}); probing committee for highest QCs.",
+            leaf.epoch(), oracle_epoch,
+        );
+
+        let committee = self
+            .epoch_manager
+            .get_committee_by_shard_group(leaf.epoch(), leaf.shard_group())
+            .await?;
+        let our_vn = self.epoch_manager.get_our_validator_node(leaf.epoch()).await?;
+
+        match self
+            .probe_high_qcs_at_leaf(committee.as_ref(), &leaf, &our_vn.address)
+            .await?
+        {
+            ProbeOutcome::HigherQcSeen { epoch } => {
+                info!(
+                    target: LOG_TARGET,
+                    "🛜 Peer presented verified high QC at epoch {} > our leaf {}; will state-sync.",
+                    epoch, leaf.epoch(),
+                );
+                // Anchor sync at the probed epoch — the most recent one we've proven was
+                // finalised. The oracle may have rolled past it to an epoch with no checkpoint
+                // yet; anchoring there would reproduce the `CheckpointNotAvailable` failure that
+                // motivated the probe in the first place.
+                Ok(SyncStatus::Behind {
+                    target_epoch: Some(epoch),
+                })
+            },
+            ProbeOutcome::QuorumAtLeaf { attested_power } => {
+                info!(
+                    target: LOG_TARGET,
+                    "🛜 Committee stalled at our leaf epoch {} (attested power {} ≥ quorum {}). Suppressing state-sync; joining consensus directly.",
+                    leaf.epoch(),
+                    attested_power,
+                    committee.quorum_threshold(),
+                );
+                Ok(SyncStatus::UpToDate)
+            },
+            ProbeOutcome::Inconclusive {
+                attested_power,
+                quorum_threshold,
+            } => {
+                warn!(
+                    target: LOG_TARGET,
+                    "🛜 Stall-recovery probe inconclusive: only {} of {} required power attested at leaf epoch {}.",
+                    attested_power, quorum_threshold, leaf.epoch(),
+                );
+                Ok(SyncStatus::Inconclusive)
+            },
+        }
     }
 
-    async fn sync(&mut self) -> Result<(), Self::Error> {
-        if let Err(err) = self.sync_inner().await {
+    async fn sync(&mut self, target_epoch: Option<Epoch>) -> Result<(), Self::Error> {
+        if let Err(err) = self.sync_inner(target_epoch).await {
             warn!(target: LOG_TARGET, "🛜State sync failed: {err} (stats: {})", self.stats);
             // Clear the valid checkpoints cache
             self.valid_checkpoints = HashMap::new();
@@ -647,13 +967,13 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
     }
 }
 
-fn extract_tree_change(update: &SubstateUpdateProof) -> Result<SubstateTreeChange, RpcStateSyncError> {
+fn extract_tree_change(update: &SubstateUpdateProof, epoch: Epoch) -> Result<SubstateTreeChange, RpcStateSyncError> {
     match update {
         SubstateUpdateProof::Create(create) => {
             let id = create.substate.as_versioned_substate_id_ref();
             Ok(SubstateTreeChange::Up {
                 id: id.to_owned(),
-                value_hash: create.substate.to_value_hash(),
+                value_hash: create.substate.to_value_hash(epoch),
             })
         },
         SubstateUpdateProof::Destroy(destroy) => Ok(SubstateTreeChange::Down {

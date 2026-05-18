@@ -47,14 +47,14 @@ import { Form } from "react-router";
 
 interface FormState {
   account: string | null;
-  fee: number | null;
+  fee: string;
   shards: Array<number>;
   keyIndex: number | null;
 }
 
 const INITIAL_VALUES = {
   account: null,
-  fee: null,
+  fee: "",
   shards: [],
   keyIndex: null,
 };
@@ -132,12 +132,12 @@ export default function ClaimFees() {
       return;
     }
 
-    const isFeeSet = Boolean(formState.fee) && !isNaN(formState.fee || 0);
+    const isFeeSet = Boolean(formState.fee) && BigInt(formState.fee) > 0n;
     setDisabled(true);
     validatorsClaimFees({
       account: formState.account ? { ComponentAddress: formState.account } : null,
       claim_key_index: formState.keyIndex,
-      max_fee: 3000,
+      max_fee: isFeeSet ? BigInt(formState.fee) : 1n,
       shards: formState.shards,
       dry_run: !isFeeSet,
     })
@@ -149,7 +149,7 @@ export default function ClaimFees() {
             setOpen(false);
             setPopup({ title: "Claim successful", error: false });
           } else {
-            setFormState({ ...formState, fee: resp.fee });
+            setFormState({ ...formState, fee: resp.fee.toString() });
           }
         } else {
           setPopup({
@@ -268,16 +268,16 @@ export default function ClaimFees() {
               <Box>
                 Found fees in {Object.entries(scannedFees.fees).length} shards. Total:{" "}
                 {Object.values(scannedFees.fees)
-                  .map((info) => info!.amount)
-                  .reduce((acc, amt) => acc + amt, 0)}{" "}
-                XTR
+                  .map((info) => BigInt(info!.amount))
+                  .reduce((acc, amt) => acc + amt, 0n)}{" "}
+                TARI
               </Box>
             ) : null}
+            <InputLabel>Max Fee</InputLabel>
             <TextField
               name="fee"
-              label="Max Transaction Fee"
               placeholder="Press Estimate Fee to calculate"
-              value={formState.fee === null ? "" : formState.fee}
+              value={formState.fee}
               onChange={setFormValue}
               style={{ flexGrow: 1 }}
               disabled={disabled}

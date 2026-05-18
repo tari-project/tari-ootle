@@ -34,7 +34,7 @@ fn publish_template_success() {
     let result = test.execute_expect_success(
         Transaction::builder_localnet()
             .pay_fee_from_component(account_address, 200_000u64)
-            .publish_template(template.into_code().try_into().unwrap())
+            .publish_template(template.into_code())
             .build_and_seal(&account_key),
         vec![owner_proof],
     );
@@ -66,7 +66,7 @@ fn publish_template_invalid_binary() {
         Transaction::builder_localnet()
             .pay_fee_from_component(account_address, 200_000u64)
             // Main intent instruction #1
-            .publish_template(vec![1, 2, 3].try_into().unwrap())
+            .publish_template(vec![1u8, 2, 3])
             .build_and_seal(&account_key),
         vec![owner_proof],
     );

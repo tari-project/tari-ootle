@@ -75,7 +75,7 @@ export default function TemplateList() {
       <TablePagination
         rowsPerPageOptions={[10, 25, 50]}
         component="div"
-        count={data?.total_templates || 0}
+        count={Number(data?.total_templates) || 0}
         rowsPerPage={rowsPerPage}
         page={page}
         onPageChange={(event, newPage) => handleChangePage(event, newPage, setPage)}

@@ -37,6 +37,7 @@ pub async fn list_epoch_checkpoints(
     let checkpoints = context
         .read_only_store()
         .epoch_checkpoint_get_all(from_epoch, u64::from(limit))
+        .await
         .map_err(ErrorResponse::anyhow)?;
 
     let checkpoints = checkpoints
@@ -64,6 +65,7 @@ pub async fn get_latest_epoch_checkpoint(
     let checkpoint = context
         .read_only_store()
         .epoch_checkpoint_get_latest()
+        .await
         .map_err(ErrorResponse::anyhow)?;
 
     let checkpoint = serde_json::to_value(checkpoint).map_err(ErrorResponse::anyhow)?;

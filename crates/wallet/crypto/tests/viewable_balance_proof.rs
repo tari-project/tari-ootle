@@ -3,7 +3,6 @@
 
 use std::time::Instant;
 
-use rand::rngs::OsRng;
 use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey, pedersen::PedersenCommitment},
@@ -14,7 +13,7 @@ use tari_template_lib_types::{Amount, EncryptedData};
 use tari_utilities::ByteArray;
 
 fn create_output_statement(value: u64, view_key: &RistrettoPublicKey) -> OutputWitness {
-    let mask = RistrettoSecretKey::random(&mut OsRng);
+    let mask = RistrettoSecretKey::random(&mut rand::rng());
     OutputWitness {
         amount: value,
         mask,

@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use log::warn;
-use tari_ootle_common_types::Network;
-use tari_ootle_transaction::Transaction;
+use tari_ootle_transaction::{Network, Transaction};
 
 use crate::{transaction_validators::TransactionValidationError, validator::Validator};
 
@@ -46,8 +45,8 @@ impl Validator<Transaction> for TransactionNetworkValidator {
 #[cfg(test)]
 mod tests {
     use indexmap::IndexSet;
-    use tari_ootle_common_types::Network;
     use tari_ootle_transaction::{
+        Network,
         Transaction,
         TransactionSealSignature,
         TransactionSignature,

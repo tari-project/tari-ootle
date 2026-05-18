@@ -163,6 +163,7 @@ pub async fn list_recent_transactions(
     let transactions = context
         .transaction_manager()
         .list_recent_transactions(req.last_id, limit as usize)
+        .await
         .map_err(ErrorResponse::anyhow)?;
 
     Ok(context.apply_cache_control(Json(ListRecentTransactionsResponse { transactions }), 30))
@@ -247,6 +248,7 @@ pub async fn query_transaction_events(
             offset,
             limit,
         )
+        .await
         .map_err(|e| {
             error!(target: LOG_TARGET, "DB error when fetching events: {}", e);
             ErrorResponse::internal_error("DB error when fetching events")

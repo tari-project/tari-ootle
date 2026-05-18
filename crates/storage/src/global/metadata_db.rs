@@ -55,17 +55,20 @@ pub enum MetadataKey {
     /// Highest epoch whose hash has been locked in by a committed EndEpoch block.
     /// Epochs <= this value can no longer have their hash corrected by the oracle.
     EpochManagerHighestLockedEpoch,
+    /// The "birthday" epoch of the network
+    EpochManagerBirthdayEpoch,
 }
 
 impl MetadataKey {
-    pub fn as_key_bytes(self) -> &'static [u8] {
+    pub const fn as_key_bytes(self) -> &'static [u8] {
         match self {
-            MetadataKey::EpochManagerCurrentEpoch => b"epoch_manager.current_epoch",
-            MetadataKey::EpochManagerCurrentShardKey => b"epoch_manager.current_shard_key",
-            MetadataKey::EpochManagerLastSyncedEpoch => b"epoch_manager.last_synced_epoch",
-            MetadataKey::EpochManagerFeeClaimPublicKey => b"epoch_manager.fee_claim_public_key",
-            MetadataKey::EpochManagerLastEpochHash => b"epoch_manager.last_epoch_hash",
-            MetadataKey::EpochManagerHighestLockedEpoch => b"epoch_manager.highest_locked_epoch",
+            Self::EpochManagerCurrentEpoch => b"epoch_manager.current_epoch",
+            Self::EpochManagerCurrentShardKey => b"epoch_manager.current_shard_key",
+            Self::EpochManagerLastSyncedEpoch => b"epoch_manager.last_synced_epoch",
+            Self::EpochManagerFeeClaimPublicKey => b"epoch_manager.fee_claim_public_key",
+            Self::EpochManagerLastEpochHash => b"epoch_manager.last_epoch_hash",
+            Self::EpochManagerHighestLockedEpoch => b"epoch_manager.highest_locked_epoch",
+            Self::EpochManagerBirthdayEpoch => b"epoch_manager.birthday_epoch",
         }
     }
 }

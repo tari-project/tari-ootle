@@ -17,7 +17,6 @@ use integration_tests::{
     validator_node::{ValidatorNodeProcess, spawn_validator_node},
 };
 use libp2p::Multiaddr;
-use log::warn;
 use minotari_app_grpc::tari_rpc::{RegisterValidatorNodeRequest, Signature};
 use notify::Watcher;
 use tari_base_node_client::{BaseNodeClient, grpc::GrpcBaseNodeClient};
@@ -123,7 +122,7 @@ async fn given_validator_connects_to_other_vns(world: &mut TariWorld, step: &Ste
         {
             // TODO: investigate why this can fail. This call failing ("cannot assign requested address (os error 99)")
             // doesnt cause the rest of the test test to fail, so ignoring for now.
-            eprintln!("Failed to add peer: {}", err);
+            cucumber_log!("Failed to add peer: {}", err);
         }
     }
 }
@@ -165,6 +164,10 @@ pub async fn send_vn_registration(world: &mut TariWorld, step: &Step, vn_name: S
         response.failure_message
     );
     integration_tests::cucumber_log!("Validator node registration tx id: {}", response.transaction_id);
+
+    world
+        .wait_until_base_nodes_have_transaction_in_mempool(1, Duration::from_secs(10))
+        .await;
     world.mark_point_in_logs("after register_validator_node");
 }
 
@@ -182,7 +185,7 @@ async fn publish_template(
         match template::publish_template(world, wallet_daemon_name, account_name, template_name.clone()).await {
             Ok(resp) => resp,
             Err(e) => {
-                println!("publish_template error = {}", e);
+                cucumber_log!("publish_template error = {}", e);
                 panic!("publish_template error = {}", e);
             },
         };
@@ -205,7 +208,7 @@ async fn register_template(world: &mut TariWorld, step: &Step, wallet_name: Stri
     let template_address = match send_template_registration(world, template_name.clone(), wallet_name).await {
         Ok(resp) => resp,
         Err(e) => {
-            println!("register_template error = {}", e);
+            cucumber_log!("register_template error = {}", e);
             panic!("register_template error = {}", e);
         },
     };
@@ -277,17 +280,21 @@ pub async fn assert_vn_is_registered(world: &mut TariWorld, step: &Step, vn_name
     // check that the vn's public key is in the list of registered vns
     assert!(vns.iter().any(|vn| vn.public_key == identity.public_key));
 
+    // The VN scanner lags behind the tip by base_layer_confirmations blocks,
+    // so the scanned height will never reach the actual tip height.
+    let lagged_height = height.saturating_sub(world.consensus_constants.base_layer_confirmations);
     let mut count = 0;
     loop {
         // wait for the validator to pick up the registration
         let stats = client.get_epoch_manager_stats().await.unwrap();
-        if stats.current_block_height >= height || stats.committee_info.is_some() {
+        if stats.current_block_height >= lagged_height || stats.committee_info.is_some() {
             break;
         }
-        if count > 20 {
+        if count > 40 {
             panic!(
-                "Timed out waiting for validator node to pick up registration (current block height: {})",
-                stats.current_block_height
+                "Timed out waiting for validator node to pick up registration (current block height: {}, target \
+                 lagged height: {})",
+                stats.current_block_height, lagged_height
             );
         }
         count += 1;
@@ -403,27 +410,49 @@ async fn then_validator_node_has_state_at(
 #[then(expr = "I wait for {word} to have at least {int} blocks for the current epoch")]
 async fn vn_has_blocks_for_current_epoch(world: &mut TariWorld, step: &Step, vn_name: String, num_blocks: u64) {
     cucumber_log!("==== Step: {}", step.value);
+    const TIMEOUT_SECS: u64 = 60;
+
     let vn = world.get_validator_node(&vn_name);
     let mut client = vn.create_client();
-    for _ in 0..10 {
-        let status = client.get_consensus_status().await.unwrap();
+    let mut last_status = None;
+
+    for _ in 0..TIMEOUT_SECS {
+        let status = match client.get_consensus_status().await {
+            Ok(status) => status,
+            Err(err) => {
+                integration_tests::cucumber_log!(
+                    "Failed to get consensus status for validator node {} while waiting for at least {} blocks: {}",
+                    vn_name,
+                    num_blocks,
+                    err
+                );
+                panic!("Failed to get consensus status for validator node {vn_name}: {err}");
+            },
+        };
+        last_status = Some(format!(
+            "epoch={}, state={}, height={}",
+            status.epoch, status.state, status.height
+        ));
+
         if status.state != "Running" {
-            warn!("Validator node {} is not running yet", vn_name);
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
             continue;
         }
+
         if status.height.as_u64() >= num_blocks {
             return;
         }
-        integration_tests::cucumber_log!(
-            "Validator node {} has height {} ({}), waiting for at least {}",
-            vn_name,
-            status.height,
-            status.state,
-            num_blocks
-        );
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
+
+    let last_status = last_status.unwrap_or_else(|| "no consensus status was observed".to_string());
+    let message = format!(
+        "Validator node {} did not reach at least {} blocks for the current epoch within {}s. Last status: {}",
+        vn_name, num_blocks, TIMEOUT_SECS, last_status
+    );
+    integration_tests::cucumber_log!("{}", message);
+    panic!("{}", message);
 }
 
 #[then(expr = "{word} is on epoch {int} within {int} seconds")]
@@ -499,8 +528,10 @@ async fn when_i_wait_for_validator_leaf_block_at_least(
     cucumber_log!("==== Step: {}", step.value);
     let vn = world.get_validator_node(&name);
     let mut client = vn.create_client();
-    let epoch_stats = client.get_epoch_manager_stats().await.unwrap();
-    for _ in 0..40 {
+
+    // Allow enough time for force_beat to trigger (block_time=10s + delta + latency)
+    for _ in 0..120 {
+        let epoch_stats = client.get_epoch_manager_stats().await.unwrap();
         let resp = client
             .list_blocks_paginated(GetBlocksRequest {
                 limit: 1,
@@ -508,22 +539,24 @@ async fn when_i_wait_for_validator_leaf_block_at_least(
                 ordering_index: Some(2),
                 ordering: Some(Ordering::Descending),
                 filter_index: Some(1),
-                filter: Some(epoch_stats.current_epoch.as_u64().to_string()),
+                filter: Some(epoch.to_string()),
             })
             .await
             .unwrap();
 
+        let block_height = resp.blocks.first().map(|b| b.height().as_u64()).unwrap_or(0);
+
         integration_tests::cucumber_log!(
             "Validator {name} leaf block height at epoch {} is {} (current epoch is {})",
             epoch,
-            resp.blocks.first().map(|b| b.height().as_u64()).unwrap_or(0),
+            block_height,
             epoch_stats.current_epoch.as_u64()
         );
 
         if let Some(block) = resp.blocks.first() {
             assert!(block.epoch().as_u64() <= epoch);
             if block.epoch().as_u64() < epoch {
-                eprintln!("VN {name} is in {}. Waiting for epoch {epoch}", block.epoch())
+                cucumber_log!("VN {name} is in {}. Waiting for epoch {epoch}", block.epoch())
             }
             if block.epoch().as_u64() == epoch && block.height().as_u64() >= height {
                 return;
@@ -532,32 +565,23 @@ async fn when_i_wait_for_validator_leaf_block_at_least(
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 
-    let resp = client
+    let consensus_status = client.get_consensus_status().await.unwrap();
+    let block_height = client
         .list_blocks_paginated(GetBlocksRequest {
             limit: 1,
             offset: 0,
             ordering_index: Some(2),
             ordering: Some(Ordering::Descending),
             filter_index: Some(1),
-            filter: Some(epoch_stats.current_epoch.as_u64().to_string()),
+            filter: Some(epoch.to_string()),
         })
         .await
-        .unwrap();
-    let block = resp
-        .blocks
-        .first()
-        .unwrap_or_else(|| panic!("Validator {name} has no blocks"));
-    if block.epoch().as_u64() < epoch {
-        panic!("Validator {} at {} is less than epoch {}", name, block.epoch(), epoch);
-    }
-    if block.height().as_u64() < height {
-        panic!(
-            "Validator {} leaf block height {} is less than {}",
-            name,
-            block.height().as_u64(),
-            height
-        );
-    }
+        .map(|r| r.blocks.first().map(|b| b.height().as_u64()).unwrap_or(0))
+        .unwrap_or(0);
+    panic!(
+        "Validator {} leaf block height {} is less than {} at epoch {} (consensus: epoch={}, height={}, state={})",
+        name, block_height, height, epoch, consensus_status.epoch, consensus_status.height, consensus_status.state,
+    );
 }
 
 #[when(expr = "Block height on VN {word} is at least {int}")]
@@ -693,7 +717,7 @@ fn scan_for_eviction_proof(
             Err(_) => continue,
         };
         if def.payload.node_to_evict().as_bytes() == evict_vn.public_key.as_bytes() {
-            eprintln!("Found eviction proof file: {}", path.display());
+            cucumber_log!("Found eviction proof file: {}", path.display());
             return Some(def.payload);
         }
     }
@@ -701,26 +725,55 @@ fn scan_for_eviction_proof(
 }
 
 #[when(expr = "all validator nodes have started epoch {int}")]
-async fn all_validators_have_started_epoch(world: &mut TariWorld, step: &Step, epoch: u64) {
+pub async fn all_validators_have_started_epoch(world: &mut TariWorld, step: &Step, epoch: u64) {
     cucumber_log!("==== Step: {}", step.value);
-    let mut remaining_attempts = 60;
-    for vn in world.all_running_validators_iter().cycle() {
-        let mut client = vn.create_client();
-        let status = client.get_consensus_status().await.unwrap();
-        if status.epoch.as_u64() >= epoch {
-            println!(
-                "Validator {} has started epoch {} (consensus state {}, height {})",
-                vn.name, epoch, status.state, status.height
+    let validators = world.all_running_validators_iter().collect::<Vec<_>>();
+    if validators.is_empty() {
+        panic!("No running validator nodes found while waiting for epoch {epoch}");
+    }
+
+    let timeout_at = Instant::now() + Duration::from_secs(60);
+    loop {
+        let mut statuses = Vec::with_capacity(validators.len());
+        let mut pending = Vec::new();
+
+        for vn in &validators {
+            let mut client = vn.create_client();
+            match client.get_consensus_status().await {
+                Ok(status) => {
+                    statuses.push(format!(
+                        "{}: epoch {}, state {}, height {}",
+                        vn.name, status.epoch, status.state, status.height
+                    ));
+                    if status.epoch.as_u64() < epoch {
+                        pending.push(vn.name.as_str());
+                    }
+                },
+                Err(err) => {
+                    statuses.push(format!("{}: status unavailable ({err})", vn.name));
+                    pending.push(vn.name.as_str());
+                },
+            }
+        }
+
+        if pending.is_empty() {
+            cucumber_log!(
+                "All validator nodes have started epoch {} ({})",
+                epoch,
+                statuses.join("; ")
             );
             return;
         }
-        if remaining_attempts == 0 {
+
+        if Instant::now() >= timeout_at {
             panic!(
-                "Validator {} did not start epoch {} (at epoch: {}, status: {})",
-                vn.name, epoch, status.epoch, status.state
+                "Validator nodes did not all start epoch {} within 60 seconds. Pending: {}. Last statuses: {}",
+                epoch,
+                pending.join(", "),
+                statuses.join("; ")
             );
         }
-        remaining_attempts -= 1;
+
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }

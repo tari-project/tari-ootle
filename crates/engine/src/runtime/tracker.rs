@@ -24,7 +24,7 @@ use indexmap::IndexMap;
 use log::*;
 use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason, TransactionResult},
-    component::{ComponentBody, ComponentHeader},
+    component::{Component, ComponentBody, ComponentHeader},
     events::Event,
     fees::FeeSource,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
@@ -121,6 +121,14 @@ impl<TStore: StateReader> StateTracker<TStore> {
         self.write_with(|state| state.push_log(log))
     }
 
+    /// Returns `true` the first time a given template address is seen within this transaction's
+    /// state, `false` thereafter. Callers use this to dedupe `FeeSource::TemplateLoad` charges:
+    /// the validator pays the cold compile/deserialise cost at most once per template per
+    /// process, so charging it on every entry over-bills the user.
+    pub fn record_template_load_charge(&mut self, address: TemplateAddress) -> bool {
+        self.write_with(|state| state.record_template_load_charge(address))
+    }
+
     pub fn take_events(&mut self) -> Vec<Event> {
         self.write_with(|state| state.take_events())
     }
@@ -149,8 +157,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         address_allocation: Option<ComponentAddressAllocation>,
     ) -> Result<ComponentAddress, RuntimeError> {
         self.write_with(|state| {
-            let (template_address, module_name) =
-                state.current_template().map(|(addr, name)| (*addr, name.to_string()))?;
+            let template_address = state.current_template().map(|(addr, _)| *addr)?;
 
             let component_address = match address_allocation {
                 Some(address_allocation) => {
@@ -165,17 +172,16 @@ impl<TStore: StateReader> StateTracker<TStore> {
                 None => state.id_provider()?.new_component_address()?,
             };
 
-            let component = ComponentBody { state: component_state };
-            let component = ComponentHeader {
+            let body = ComponentBody { state: component_state };
+            let header = ComponentHeader {
                 template_address,
-                module_name: module_name.clone(),
                 access_rules,
                 owner_rule,
                 entity_id: component_address.entity_id(),
-                body: component,
             };
-            let substate_id = SubstateId::Component(component_address);
 
+            let component = Component { header, body };
+            let substate_id = SubstateId::Component(component_address);
             // The template address/component_id combination will not necessarily be unique so we need to check this.
             if state.substate_exists(&substate_id)? {
                 return Err(RuntimeError::ComponentAlreadyExists {
@@ -193,7 +199,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
                 template_address,
                 "component",
                 "created",
-                Metadata::from([("module_name".to_string(), module_name)]),
+                Metadata::new(),
             ))?;
 
             debug!(target: LOG_TARGET, "New component created: {}", component_address);
@@ -258,11 +264,17 @@ impl<TStore: StateReader> StateTracker<TStore> {
         })
     }
 
+    pub fn set_fee_state_dry_run(&mut self, dry_run: bool) {
+        self.write_with(|state| {
+            state.fee_state_mut().set_dry_run(dry_run);
+        })
+    }
+
     pub fn finalize(&mut self, failure: Option<RejectReason>) -> Result<FinalizeResult, RuntimeError> {
         let failure = failure.or_else(|| {
             self.read_with(|state| {
                 let fee_state = state.fee_state();
-                if fee_state.is_paid_in_full() {
+                if fee_state.is_dry_run() || fee_state.is_paid_in_full() {
                     None
                 } else {
                     Some(RejectReason::InsufficientFeesPaid(format!(
@@ -349,6 +361,23 @@ impl<TStore: StateReader> StateTracker<TStore> {
         self.write_with(|state| f(state.mutated_substates()))
     }
 
+    /// Counts substates in the to-persist set that did not previously exist in the state store.
+    /// Used by the fee module to charge a slot-allocation premium on top of per-byte storage.
+    pub fn count_newly_created_substates(&self) -> Result<usize, RuntimeError> {
+        self.read_with(|state| {
+            let store = state.store();
+            let mut count = 0;
+            for id in store.mutated_substates().keys() {
+                match store.get_unmodified_substate(id) {
+                    Ok(_) => {},
+                    Err(RuntimeError::SubstateNotFound { .. }) => count += 1,
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok(count)
+        })
+    }
+
     pub fn are_fees_paid_in_full(&self) -> bool {
         self.read_with(|state| {
             let total_payments = state.fee_state().total_payments();
@@ -363,6 +392,10 @@ impl<TStore: StateReader> StateTracker<TStore> {
 
     pub fn total_fee_charges(&self) -> u64 {
         self.read_with(|state| state.fee_state().total_charges())
+    }
+
+    pub fn is_fee_state_dry_run(&self) -> bool {
+        self.read_with(|state| state.fee_state().is_dry_run())
     }
 
     pub(super) fn read_with<R, F: FnOnce(&WorkingState<TStore>) -> R>(&self, f: F) -> R {

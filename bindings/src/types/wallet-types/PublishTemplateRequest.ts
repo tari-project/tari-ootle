@@ -5,7 +5,7 @@ import type { PublishTemplateMetadata } from "./PublishTemplateMetadata";
 export type PublishTemplateRequest = {
   binary: string;
   fee_account: ComponentAddressOrName | null;
-  max_fee: number;
+  max_fee: bigint;
   /**
    * Attempt to infer inputs and their dependencies from instructions. If false, the provided transaction must
    * contain the required inputs.

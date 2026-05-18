@@ -125,9 +125,8 @@ function PublishTemplateDialog(props: DialogProps) {
 
   const hasFile = formState.binary !== null;
   const hasAccount = Boolean(formState.account);
-  const maxFeeNum = formState.maxFee ? Number(formState.maxFee) : null;
+  const maxFeeNum = formState.maxFee ? BigInt(formState.maxFee) : 0n;
   const feeIsBelowEstimate = estimatedFee !== null && maxFeeNum !== null && maxFeeNum > 0 && maxFeeNum < estimatedFee;
-  const canEstimate = hasFile && hasAccount && !formState.maxFee;
   const canSubmit = hasFile && hasAccount && maxFeeNum !== null && maxFeeNum > 0;
 
   // Set default account when accounts load
@@ -311,7 +310,7 @@ function PublishTemplateDialog(props: DialogProps) {
       const resp: PublishTemplateResponse = await publishTemplate({
         fee_account: { ComponentAddress: formState.account },
         binary: base64FromArrayBuffer(formState.binary),
-        max_fee: 1_000_000,
+        max_fee: 1n, // Dry run requires no fees
         detect_inputs: true,
         dry_run: true,
         metadata: buildMetadataPayload(),
@@ -479,10 +478,10 @@ function PublishTemplateDialog(props: DialogProps) {
               <Tooltip
                 title={
                   <>
-                    Optionally attach a JSON or CBOR metadata file describing your template (name, version,
-                    description, tags, etc.). A cryptographic hash of this metadata will be published on-chain alongside
-                    the template, allowing clients to verify the authenticity of off-chain metadata. This cannot be
-                    changed after publishing.
+                    Optionally attach a JSON or CBOR metadata file describing your template (name, version, description,
+                    tags, etc.). A cryptographic hash of this metadata will be published on-chain alongside the
+                    template, allowing clients to verify the authenticity of off-chain metadata. This cannot be changed
+                    after publishing.
                     <br />
                     <br />
                     When publishing with{" "}
@@ -517,12 +516,7 @@ function PublishTemplateDialog(props: DialogProps) {
                 <Typography variant="body2" sx={{ flex: 1 }}>
                   {formState.metadataFileName}
                 </Typography>
-                <Button
-                  size="small"
-                  color="error"
-                  onClick={handleRemoveMetadata}
-                  disabled={disabled || isEstimating}
-                >
+                <Button size="small" color="error" onClick={handleRemoveMetadata} disabled={disabled || isEstimating}>
                   Remove
                 </Button>
               </Box>

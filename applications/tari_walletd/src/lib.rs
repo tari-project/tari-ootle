@@ -29,12 +29,12 @@ mod webrtc;
 
 use std::{fs, panic, pin, process};
 
-use jsonwebtoken::signature::rand_core::OsRng;
 use log::*;
 use tari_common_types::seeds::seed_words::SeedWords;
 use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
+use tari_ootle_address::Network;
 use tari_ootle_app_utilities::genesis_resources::{get_public_identity_resource, get_stealth_tari_resource};
-use tari_ootle_common_types::{Network, NumPreshards, optional::Optional};
+use tari_ootle_common_types::{NumPreshards, optional::Optional};
 use tari_ootle_wallet_sdk::{
     WalletSdk as Sdk,
     WalletSdkConfig,
@@ -62,7 +62,6 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon";
 
-const DEFAULT_FEE: u64 = 1500;
 // TODO: must match the global network value. All testnets currently have 256 pre-shards.
 const NUM_PRESHARDS: NumPreshards = NumPreshards::current();
 
@@ -229,7 +228,7 @@ const fn get_epoch_birthday(network: Network) -> EpochBirthday {
 }
 
 fn create_secret_password() -> SafePassword {
-    let secret = RistrettoSecretKey::random(&mut OsRng);
+    let secret = RistrettoSecretKey::random(&mut rand::rng());
     // It is safe to use to_hex() since the String's underlying Vec is moved directly into SafePassword
     SafePassword::from(secret.to_hex())
 }

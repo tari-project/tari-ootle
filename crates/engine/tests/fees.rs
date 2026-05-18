@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::commit_result::RejectReason;
+use tari_engine_types::{commit_result::RejectReason, fees::FeeSource};
 use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::types::{Amount, ComponentAddress, constants::STEALTH_TARI_RESOURCE_ADDRESS};
 use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason, xtr_faucet_component};
@@ -438,4 +438,54 @@ fn dangling_bucket_pay_fees() {
         .balance();
     assert_ne!(payment.total_fees_paid(), 0);
     assert_eq!(orig_balance - new_balance, payment.total_fees_paid());
+}
+
+#[test]
+fn template_load_fee_charged_once_per_template_per_transaction() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+
+    let (account, owner_token, private_key) = test.create_funded_account();
+    let state: ComponentAddress = test.call_function("State", "new", args![], vec![]);
+
+    test.enable_fees();
+
+    // Single State call — establishes the baseline TemplateLoad fee for {Account, State}.
+    let single = test.execute_expect_success(
+        Transaction::builder_localnet()
+            .pay_fee_from_component(account, 1000u64)
+            .call_method(state, "set", args![1u32])
+            .build_and_seal(&private_key),
+        vec![owner_token.clone()],
+    );
+
+    // Five State calls — same template touched five extra times. Without dedup, TemplateLoad
+    // would scale with call count; with dedup it must match the single-call baseline.
+    let many = test.execute_expect_success(
+        Transaction::builder_localnet()
+            .pay_fee_from_component(account, 1000u64)
+            .call_method(state, "set", args![1u32])
+            .call_method(state, "set", args![2u32])
+            .call_method(state, "set", args![3u32])
+            .call_method(state, "get", args![])
+            .call_method(state, "get", args![])
+            .build_and_seal(&private_key),
+        vec![owner_token],
+    );
+
+    let template_load = |result: &tari_engine_types::commit_result::FinalizeResult| -> u64 {
+        result
+            .fee_receipt
+            .fee_breakdown()
+            .iter()
+            .find_map(|(s, amount)| (*s == FeeSource::TemplateLoad).then_some(*amount))
+            .expect("TemplateLoad charge present")
+    };
+
+    let single_load = template_load(&single.finalize);
+    let many_load = template_load(&many.finalize);
+    assert!(single_load > 0, "TemplateLoad fee should be non-zero");
+    assert_eq!(
+        single_load, many_load,
+        "TemplateLoad fee must be deduped per (template, transaction); single={single_load} many={many_load}",
+    );
 }

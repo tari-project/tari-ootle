@@ -46,8 +46,10 @@ tari_ootle_wallet_sdk = { workspace = true }
 ootle_byte_type = { workspace = true }
 
 # Minotari
-minotari_console_wallet = { workspace = true }
-minotari_node = { workspace = true }
+#minotari_console_wallet = { workspace = true }
+#minotari_node = { workspace = true }
+minotari_console_wallet = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.1-pre.0" }
+minotari_node = { git = "https://github.com/tari-project/tari.git", tag = "v5.3.1-pre.0" }
 minotari_wallet = { workspace = true }
 tari_comms = { workspace = true }
 tari_comms_dht = { workspace = true }

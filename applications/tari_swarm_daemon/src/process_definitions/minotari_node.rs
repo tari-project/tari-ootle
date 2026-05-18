@@ -6,7 +6,7 @@ use std::{path::PathBuf, time::Duration};
 use async_trait::async_trait;
 use tokio::process::Command;
 
-use crate::process_definitions::{ProcessContext, ProcessDefinition};
+use crate::process_definitions::{ARGS_SETTINGS_KEY, ProcessContext, ProcessDefinition};
 
 #[derive(Debug, Default)]
 pub struct MinotariNode;
@@ -55,10 +55,12 @@ impl ProcessDefinition for MinotariNode {
                 "-pbase_node.report_grpc_error=true",
                 "-pbase_node.grpc_tls_enabled=false",
             ]);
-        // TODO: seed nodes?
-        // # "-p",
-        // # f'{NETWORK}.p2p.seeds.peer_seeds="369ae9a89c3fc2804d6ec07e20bf10e5d0e72f565a71821fc7c611ae5bee0116::/ip4/
-        // 34.252.174.111/tcp/18000"',
+
+        if let Some(args) = context.get_setting(ARGS_SETTINGS_KEY) {
+            for arg in args.split_whitespace() {
+                command.arg(arg);
+            }
+        }
 
         Ok(command)
     }

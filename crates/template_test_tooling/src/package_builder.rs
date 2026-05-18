@@ -24,11 +24,11 @@ use crate::compile::compile_template_with_envs;
 static BUILTIN_TEMPLATES: LazyLock<Vec<(TemplateAddress, LoadedTemplate)>> = LazyLock::new(|| {
     all_builtin_templates()
         .iter()
-        .map(|(addr, code)| {
-            let template = WasmModule::from_code(*code)
+        .map(|t| {
+            let template = WasmModule::from_code(t.binary)
                 .load_template()
                 .expect("failed to load builtin template");
-            (*addr, template)
+            (t.address, template)
         })
         .collect()
 });

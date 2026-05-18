@@ -36,14 +36,10 @@ use tari_engine_types::{
     substate::{SubstateDiff, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId},
 };
-use tari_ootle_common_types::{
-    Network,
-    SubstateRequirement,
-    crypto::create_key_pair_from_seed,
-    substate_type::SubstateType,
-};
+use tari_ootle_common_types::{SubstateRequirement, crypto::create_key_pair_from_seed, substate_type::SubstateType};
 use tari_ootle_transaction::{
     Instruction,
+    Network,
     Transaction,
     TransactionBuilder,
     args,
@@ -237,6 +233,7 @@ impl TemplateTest {
                 per_log_cost: 1,
                 per_signature_verification_cost: 1,
                 per_template_load_cost_unit: 1,
+                per_substate_create_cost: 1,
             },
             key_seed: 1,
             auto_add_proofs_from_signers: true,
@@ -686,7 +683,7 @@ impl TemplateTest {
         modules.push(Box::new(self.track_calls.clone()));
 
         if self.enable_fees {
-            modules.push(Box::new(FeeModule::new(0, self.fee_table.clone())));
+            modules.push(Box::new(FeeModule::new(0, self.fee_table.clone(), false)));
         }
 
         if self.auto_add_proofs_from_signers && proofs.is_empty() {
@@ -877,6 +874,7 @@ impl TemplateTest {
         let instructions = parse_manifest(
             &manifest,
             variables.into_iter().map(|(a, b)| (a.to_string(), b)).collect(),
+            Default::default(),
             Default::default(),
         )?;
         self.execute_and_commit(instructions.instructions, proofs)

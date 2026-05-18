@@ -1,7 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{pin::Pin, sync::Arc};
+use std::pin::Pin;
 
 use axum::{
     Extension,
@@ -11,7 +11,10 @@ use axum::{
 };
 use futures::Stream;
 use log::*;
+use tari_engine_types::substate::SubstateId;
 use tari_indexer_client::{event::TransactionEvent, types::StreamTransactionEventsRequest};
+use tari_ootle_transaction::TransactionId;
+use tari_template_lib_types::{Metadata, TemplateAddress};
 use tokio_stream::StreamExt;
 
 use crate::{
@@ -136,16 +139,19 @@ async fn run_replay_then_live(
     let mut total_replayed = 0u32;
 
     loop {
-        let batch = store.get_events_after_id(
-            highest_id,
-            filter.topic.as_deref(),
-            filter.substate_id.as_ref(),
-            filter.template_address.as_ref(),
-            filter.resource_address.as_ref(),
-            REPLAY_PAGE_SIZE,
-        )?;
+        let batch = store
+            .get_events_after_id(
+                highest_id,
+                filter.topic.as_deref(),
+                filter.substate_id.as_ref(),
+                filter.template_address.as_ref(),
+                filter.resource_address.as_ref(),
+                REPLAY_PAGE_SIZE,
+            )
+            .await?;
 
-        if batch.is_empty() {
+        let len = batch.len();
+        if len == 0 {
             break;
         }
 
@@ -160,7 +166,7 @@ async fn run_replay_then_live(
             }
         }
 
-        if batch.len() < REPLAY_PAGE_SIZE as usize || total_replayed >= MAX_REPLAY_EVENTS {
+        if len < REPLAY_PAGE_SIZE as usize || total_replayed >= MAX_REPLAY_EVENTS {
             break;
         }
     }
@@ -189,14 +195,16 @@ async fn run_replay_then_live(
                 warn!(target: LOG_TARGET, "SSE broadcast lagged by {} events, catching up from DB (highest_id={})", n, highest_id);
                 // Iteratively catch up from DB in pages until we've replayed everything
                 loop {
-                    let batch = store.get_events_after_id(
-                        highest_id,
-                        filter.topic.as_deref(),
-                        filter.substate_id.as_ref(),
-                        filter.template_address.as_ref(),
-                        filter.resource_address.as_ref(),
-                        REPLAY_PAGE_SIZE,
-                    )?;
+                    let batch = store
+                        .get_events_after_id(
+                            highest_id,
+                            filter.topic.as_deref(),
+                            filter.substate_id.as_ref(),
+                            filter.template_address.as_ref(),
+                            filter.resource_address.as_ref(),
+                            REPLAY_PAGE_SIZE,
+                        )
+                        .await?;
 
                     if batch.is_empty() {
                         break;
@@ -228,22 +236,55 @@ fn encode_transaction_event(event: &TransactionEvent) -> Result<sse::Event, axum
     sse::Event::default()
         .event(event.event.topic())
         .id(event.id.to_string())
-        .json_data(event)
+        .json_data(TransactionEventMinimal::from(event))
 }
 
 /// Encode a replayed event from the DB as an SSE event.
 fn encode_replay_event(
     id: i64,
-    transaction_id: &tari_ootle_transaction::TransactionId,
+    transaction_id: &TransactionId,
     event: &tari_engine_types::events::Event,
 ) -> Result<sse::Event, axum::Error> {
-    let tx_event = TransactionEvent {
-        id,
-        transaction_id: *transaction_id,
-        event: Arc::new(event.clone()),
+    let tx_event = TransactionEventMinimal {
+        transaction_id,
+        event: event.into(),
     };
     sse::Event::default()
         .event(event.topic())
         .id(id.to_string())
         .json_data(&tx_event)
+}
+
+#[derive(serde::Serialize)]
+struct TransactionEventMinimal<'a> {
+    pub transaction_id: &'a TransactionId,
+    pub event: EventMinimal<'a>,
+}
+
+impl<'a> From<&'a TransactionEvent> for TransactionEventMinimal<'a> {
+    fn from(tx_event: &'a TransactionEvent) -> Self {
+        let event = &*tx_event.event;
+        Self {
+            transaction_id: &tx_event.transaction_id,
+            event: event.into(),
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+struct EventMinimal<'a> {
+    substate_id: Option<&'a SubstateId>,
+    template_address: &'a TemplateAddress,
+    payload: &'a Metadata,
+    // no topic since it is already emitted in the SSE event
+}
+
+impl<'a> From<&'a tari_engine_types::events::Event> for EventMinimal<'a> {
+    fn from(event: &'a tari_engine_types::events::Event) -> Self {
+        Self {
+            substate_id: event.substate_id(),
+            template_address: event.template_address(),
+            payload: event.payload(),
+        }
+    }
 }

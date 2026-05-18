@@ -224,7 +224,6 @@ impl Display for ForeignProposalRecord {
 pub struct ForeignProposalAtom {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub block_id: BlockId,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub shard_group: ShardGroup,
 }
 

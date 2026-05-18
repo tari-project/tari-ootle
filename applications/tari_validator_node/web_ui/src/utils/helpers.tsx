@@ -122,9 +122,3 @@ export function displayDuration(duration: Duration) {
   return `${duration.secs}s`;
 }
 
-
-export function decodeShardGroup(sg: number): ShardGroup {
-  const start = sg >> 8;
-  const end_inclusive = sg & 0xff;
-  return { start, end_inclusive };
-}

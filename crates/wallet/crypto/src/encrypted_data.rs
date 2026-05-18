@@ -224,10 +224,10 @@ mod tests {
 
     #[test]
     fn it_encrypts_and_decrypts() {
-        let key = RistrettoSecretKey::random(&mut OsRng);
+        let key = RistrettoSecretKey::random(&mut rand::rng());
         let amount = 100;
         let commitment = get_commitment_factory().commit_value(&key, amount).to_byte_type();
-        let mask = RistrettoSecretKey::random(&mut OsRng);
+        let mask = RistrettoSecretKey::random(&mut rand::rng());
         let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, None).unwrap();
 
         let (value, msk, memo) = decrypt_inner(&key, &commitment, &encrypted, false).unwrap();
@@ -239,10 +239,10 @@ mod tests {
 
     #[test]
     fn it_encrypts_and_decrypts_with_memo() {
-        let key = RistrettoSecretKey::random(&mut OsRng);
+        let key = RistrettoSecretKey::random(&mut rand::rng());
         let amount = 100;
         let commitment = get_commitment_factory().commit_value(&key, amount).to_byte_type();
-        let mask = RistrettoSecretKey::random(&mut OsRng);
+        let mask = RistrettoSecretKey::random(&mut rand::rng());
         let memo = Memo::new_message("The quick brown fox jumps over the lazy dog").unwrap();
         let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo)).unwrap();
         assert!(!String::from_utf8_lossy(encrypted.as_bytes()).contains("the lazy dog"));
@@ -279,10 +279,10 @@ mod tests {
 
     #[test]
     fn it_always_returns_a_none_memo_if_skip_memo_is_true() {
-        let key = RistrettoSecretKey::random(&mut OsRng);
+        let key = RistrettoSecretKey::random(&mut rand::rng());
         let amount = 100;
         let commitment = get_commitment_factory().commit_value(&key, amount).to_byte_type();
-        let mask = RistrettoSecretKey::random(&mut OsRng);
+        let mask = RistrettoSecretKey::random(&mut rand::rng());
         let memo = Memo::new_message("The quick brown fox jumps over the lazy dog").unwrap();
         let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo)).unwrap();
 

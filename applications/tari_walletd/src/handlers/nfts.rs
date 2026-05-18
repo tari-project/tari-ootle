@@ -37,8 +37,13 @@ use tari_template_lib_types::{
 
 use super::{context::HandlerContext, helpers::get_account_or_default};
 use crate::{
-    DEFAULT_FEE,
-    handlers::helpers::{application_error, get_account, get_account_with_inputs, invalid_params, wait_for_result},
+    handlers::helpers::{
+        application_error,
+        get_account,
+        get_account_with_inputs,
+        invalid_params,
+        wait_for_result_and_account,
+    },
     server::ApplicationErrorCode,
 };
 
@@ -75,7 +80,7 @@ pub async fn handle_list(
     let non_fungible_api = sdk.non_fungible_api();
 
     let non_fungibles = non_fungible_api
-        .get_all(account.component_address, limit, offset)
+        .get_all(account.component_address, limit.into(), offset.into())
         .map_err(|e| anyhow!("Failed to list all non fungibles, with error: {}", e))?;
     Ok(ListNftsResponse { nfts: non_fungibles })
 }
@@ -107,7 +112,7 @@ pub async fn handle_mint_faucet(
         .substate_api()
         .locate_dependent_substates(slice::from_ref(&account.component_address.into()), true)
         .await?;
-    let fee = req.max_fee.unwrap_or(DEFAULT_FEE);
+    let fee = req.max_fee.unwrap_or(1500);
     let transaction = context
         .transaction_builder()
         .pay_fee_from_component(account.component_address, fee)
@@ -127,7 +132,8 @@ pub async fn handle_mint_faucet(
     let mut events = context.notifier().subscribe();
     let tx_id = context.transaction_service().submit_transaction(transaction).await?;
 
-    let finalize_event = wait_for_result(&mut events, tx_id).await?;
+    // Wait for the account monitor to observe the newly deposited NFT before returning.
+    let (finalize_event, _) = wait_for_result_and_account(&mut events, &tx_id, &account.component_address).await?;
     if let Some(reject) = finalize_event.finalize.any_reject() {
         return Err(application_error(
             ApplicationErrorCode::TransactionRejected,
@@ -317,8 +323,13 @@ pub async fn handle_transfer(
         let finalize = execute_result.finalize;
         return Ok(TransferNftResponse {
             transaction_id,
-            fee: finalize.fee_receipt.total_fees_paid(),
-            fee_refunded: finalize.fee_receipt.total_fee_payment() - finalize.fee_receipt.total_fees_paid(),
+            // Dry-run callers commonly pass a placeholder max_fee that clamps `total_fees_paid`. Report
+            // the uncapped estimate so the response is usable for fee selection.
+            fee: finalize.fee_receipt.required_fees(),
+            fee_refunded: finalize
+                .fee_receipt
+                .total_fee_payment()
+                .saturating_sub(finalize.fee_receipt.total_fees_paid()),
             result: finalize,
         });
     }
@@ -348,7 +359,7 @@ pub async fn handle_transfer(
     Ok(TransferNftResponse {
         transaction_id: tx_id,
         fee: finalized.final_fee,
-        fee_refunded: req.max_fee - finalized.final_fee,
+        fee_refunded: req.max_fee.saturating_sub(finalized.final_fee),
         result: finalized.finalize,
     })
 }

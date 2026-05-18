@@ -19,6 +19,7 @@ use helpers::{
     create_random_substate_id,
     create_rocksdb,
 };
+use tari_engine_types::Epoch;
 
 #[test]
 fn block_diffs_rocksdb() {
@@ -47,7 +48,12 @@ fn block_diffs_operations(db: impl StateStore) {
     };
     tx.block_diffs_insert(&block_id8, &[change]).unwrap();
     let value2 = build_substate_value(Some(
-        substate_record.substate_value().unwrap().component().unwrap().entity_id,
+        *substate_record
+            .substate_value()
+            .unwrap()
+            .component()
+            .unwrap()
+            .entity_id(),
     ));
     let versioned_substate_id = VersionedSubstateId::new(substate_id.clone(), version);
     let changes = &[
@@ -75,7 +81,11 @@ fn block_diffs_operations(db: impl StateStore) {
             assert_eq!(id, versioned_substate_id.substate_id());
             assert_eq!(*shard, block9.shard_group().end());
             assert_eq!(substate.version(), version + 1);
-            assert_eq!(substate.to_value_hash(), hash_substate(&value2, version + 1));
+            let at_epoch = Epoch::zero();
+            assert_eq!(
+                substate.to_value_hash(at_epoch),
+                hash_substate(&value2, version + 1, at_epoch)
+            );
         },
         SubstateChange::Down { .. } => panic!("Expected SubstateChange::Up but got {change}"),
     }

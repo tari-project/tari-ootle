@@ -43,8 +43,8 @@ use tari_indexer_client::{
         TemplateCatalogueItem,
     },
 };
+use tari_ootle_address::Network;
 use tari_ootle_app_utilities::{epoch_oracle_config::EpochOracleConfig, p2p_config::PeerSeedsConfig};
-use tari_ootle_common_types::Network;
 use tari_shutdown::Shutdown;
 use tari_template_lib_types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
 use tokio::task;
@@ -52,6 +52,7 @@ use tonic::codegen::tokio_stream;
 
 use crate::{
     TariWorld,
+    cucumber_log,
     helpers::{check_join_handle, get_address_from_output, get_os_assigned_ports, wait_listener_on_local_port},
     logging::get_base_dir_for_scenario,
 };
@@ -183,7 +184,7 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
         };
 
         // temporal folder for the VN files (e.g. sqlite file, json files, etc.)
-        println!("Using indexer temp_dir: {}", base_dir.display());
+        cucumber_log!("Using indexer temp_dir: {}", base_dir.display());
         config.common.base_path = base_dir.to_path_buf();
         config.indexer.data_dir = base_dir.to_path_buf();
         config.indexer.identity_file = base_dir.join("indexer_id.json");

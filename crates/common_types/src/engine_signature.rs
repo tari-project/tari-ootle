@@ -81,7 +81,6 @@ impl Verifier for RistrettoSchnorrBlake2bVerifier {
 
 #[cfg(test)]
 mod tests {
-    use rand::rngs::OsRng;
     use tari_crypto::{
         keys::PublicKey as _,
         ristretto::{RistrettoPublicKey, RistrettoSchnorr},
@@ -91,12 +90,13 @@ mod tests {
 
     #[test]
     fn it_verifies_a_valid_signature() {
-        let (secret_key, public_key) = RistrettoPublicKey::random_keypair(&mut OsRng);
+        let mut rng = rand::rng();
+        let (secret_key, public_key) = RistrettoPublicKey::random_keypair(&mut rng);
 
         let message = b"Hello, world!";
         let domain = b"Test domain";
 
-        let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
+        let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut rng);
 
         let hashed_message = RistrettoSchnorrBlake2bVerifier::compute_challenge(
             domain,

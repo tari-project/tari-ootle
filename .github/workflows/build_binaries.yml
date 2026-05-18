@@ -101,6 +101,8 @@ jobs:
     name: Building ${{ matrix.builds.name }} on ${{ matrix.builds.runs-on }}
     needs: matrix-prep
     continue-on-error: ${{ startsWith(github.ref, 'refs/tags/') || matrix.builds.best_effort || false }}
+    permissions:
+      contents: write
     outputs:
       TARI_VERSION: ${{ steps.set-tari-vars.outputs.TARI_VERSION }}
       VSHA_SHORT: ${{ steps.set-tari-vars.outputs.VSHA_SHORT }}
@@ -596,7 +598,7 @@ jobs:
         if: ${{ ( startsWith(runner.os,'Windows') ) && ( env.AZURE_TENANT_ID != '' ) }}
         env:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-        uses: azure/trusted-signing-action@v1.2.0
+        uses: azure/trusted-signing-action@v2.0.0
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -642,7 +644,7 @@ jobs:
         # if: ${{ ( startsWith(runner.os,'Windows') ) && ( env.AZURE_TENANT_ID != '' ) }}
         env:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-        uses: azure/trusted-signing-action@v1.2.0
+        uses: azure/trusted-signing-action@v2.0.0
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -735,6 +737,24 @@ jobs:
         with:
           name: tari_ootle_walletd-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}
           path: "${{ github.workspace }}${{ env.TS_DIST }}/tari_ootle_walletd-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}${{ env.TS_EXT }}*"
+
+      - name: Publish linux-x86_64 binary to draft release early
+        if: ${{ startsWith(github.ref, 'refs/tags/v') && matrix.builds.name == 'linux-x86_64' }}
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: |
+            ${{ github.workspace }}${{ env.TS_DIST }}/${{ env.BINFILE }}.zip
+            ${{ github.workspace }}${{ env.TS_DIST }}/${{ env.BINFILE }}.zip.sha256
+            ${{ github.workspace }}${{ env.TS_DIST }}/tari_ootle_walletd-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}${{ env.TS_EXT }}
+            ${{ github.workspace }}${{ env.TS_DIST }}/tari_ootle_walletd-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}${{ env.TS_EXT }}.sha256
+          token: ${{ secrets.GITHUB_TOKEN }}
+          prerelease: true
+          draft: true
+          allowUpdates: true
+          updateOnlyUnreleased: true
+          replacesArtifacts: true
+          omitBodyDuringUpdate: true
+          omitNameDuringUpdate: true
 
   macOS-universal-assemble:
     name: macOS universal assemble

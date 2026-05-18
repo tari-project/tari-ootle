@@ -26,7 +26,7 @@ impl Runner {
 
         let transaction = self
             .new_transaction_builder()
-            .pay_fee_from_component(in_account.component_address, 1000u64)
+            .pay_fee_from_component(in_account.component_address, 2000u64)
             .call_function(self.faucet_template, "mint", args![1_000_000_000])
             .with_inputs([
                 SubstateRequirement::unversioned(in_account.component_address),
@@ -42,7 +42,7 @@ impl Runner {
             .up_iter()
             .find_map(|(addr, s)| {
                 addr.as_component_address()
-                    .filter(|_| s.substate_value().component().unwrap().template_address == self.faucet_template)
+                    .filter(|_| *s.substate_value().component().unwrap().template_address() == self.faucet_template)
             })
             .ok_or_else(|| anyhow::anyhow!("Faucet Component address not found"))?;
         let resource_address = diff

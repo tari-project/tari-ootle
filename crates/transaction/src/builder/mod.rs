@@ -1,6 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+mod blob_ids;
 mod error;
 pub mod named_args;
 mod named_component_call;
@@ -14,7 +15,6 @@ use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::{
     confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
     indexed_value::IndexedValue,
-    published_template::TemplateBlob,
     substate::SubstateId,
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
@@ -35,6 +35,8 @@ use tari_template_lib_types::{
 use crate::{
     AllocatableAddressType,
     Assertion,
+    Blob,
+    BlobIndex,
     CheckOrd,
     ComponentReference,
     Instruction,
@@ -48,7 +50,9 @@ use crate::{
     TransactionSignature,
     args,
     args::{InstructionArg, WorkspaceOffsetId},
+    blobs::BlobIndexOverflow,
     builder::{
+        blob_ids::BlobIds,
         error::BuilderError,
         named_args::{BuilderWorkspaceKey, NamedArg, parse_workspace_key},
         named_resource_ref::NamedResourceRef,
@@ -68,6 +72,7 @@ pub enum FeeIntent {}
 pub struct TransactionBuilder<D = MainIntent> {
     unsigned_transaction: UnsignedTransaction,
     workspace_ids: WorkspaceIds,
+    blob_ids: BlobIds,
     fee_instruction_builder: Option<Box<TransactionBuilder<FeeIntent>>>,
     _discriminator: std::marker::PhantomData<D>,
     fill_inputs: bool,
@@ -79,6 +84,7 @@ impl TransactionBuilder<MainIntent> {
         Self {
             unsigned_transaction: UnsignedTransaction::new(network),
             workspace_ids: WorkspaceIds::new(),
+            blob_ids: BlobIds::new(),
             fee_instruction_builder: Some(Box::new(Self::new_fee_builder(network))),
             _discriminator: std::marker::PhantomData,
             fill_inputs: false,
@@ -91,6 +97,7 @@ impl TransactionBuilder<MainIntent> {
             fee_instruction_builder: Some(Box::new(Self::new_fee_builder(unsigned_transaction.network()))),
             unsigned_transaction,
             workspace_ids: WorkspaceIds::new(),
+            blob_ids: BlobIds::new(),
             _discriminator: std::marker::PhantomData,
             fill_inputs: false,
         }
@@ -100,6 +107,7 @@ impl TransactionBuilder<MainIntent> {
         TransactionBuilder {
             unsigned_transaction: UnsignedTransaction::new(network),
             workspace_ids: WorkspaceIds::new(),
+            blob_ids: BlobIds::new(),
             fee_instruction_builder: None,
             _discriminator: std::marker::PhantomData,
             fill_inputs: false,
@@ -299,32 +307,90 @@ impl<D> TransactionBuilder<D> {
         f(self)
     }
 
-    /// Merge another builder's instructions and inputs into this builder.
+    /// Convenience method for chaining multiple operations that produce a builder, e.g. when building fee instructions
+    /// with `with_fee_instructions_builder`.
     ///
-    /// Workspace IDs from `other` are remapped to avoid collisions with this builder's
-    /// workspace IDs. Fee instructions from `other` are NOT merged — fees should be
-    /// managed on the outer builder.
+    /// ## Example
+    ///
+    /// ```rust,ignore
+    /// let accounts = [account1, account2, account3];
+    ///
+    /// builder.fold(accounts, |builder, account| builder.pay_fee_from_component(account.component_address, 1000u64))
+    /// ```
+    pub fn fold<F, T>(self, items: impl IntoIterator<Item = T>, f: F) -> Self
+    where F: FnMut(Self, T) -> Self {
+        items.into_iter().fold(self, f)
+    }
+
+    /// Merge another builder's instructions, inputs and blobs into this builder.
+    ///
+    /// Workspace IDs and blob indices from `other` are remapped to avoid collisions with this
+    /// builder's. Fee instructions from `other` are NOT merged — fees should be managed on the
+    /// outer builder.
     ///
     /// This is the low-level primitive behind the higher-level `chain` method on
     /// `OotleInvoke`.
+    ///
+    /// # Panics
+    ///
+    /// - If the combined blob count would exceed the `BlobIndex` range (256 blobs total).
+    /// - If a named blob in `other` collides with one already registered on `self`.
     pub fn merge(mut self, other: TransactionBuilder<D>) -> Self {
-        let id_offset = self.workspace_ids.next_id();
-        let other_next_id = other.workspace_ids.next_id();
-        let other_tx = other.unsigned_transaction;
+        let workspace_id_offset = self.workspace_ids.next_id();
+        let other_next_workspace_id = other.workspace_ids.next_id();
+        let blob_id_offset: BlobIndex = self
+            .unsigned_transaction
+            .blobs()
+            .len()
+            .try_into()
+            .expect("self blob count exceeds BlobIndex range");
+        let other_blob_count = other.unsigned_transaction.blobs().len();
+        let combined = (blob_id_offset as usize) + other_blob_count;
+        assert!(
+            combined <= BlobIndex::MAX as usize + 1,
+            "merged blob count {combined} exceeds BlobIndex range",
+        );
+
+        let TransactionBuilder {
+            unsigned_transaction: mut other_tx,
+            blob_ids: other_blob_ids,
+            ..
+        } = other;
 
         // Merge inputs first (before consuming the transaction)
         self.unsigned_transaction
             .inputs_mut()
             .extend(other_tx.inputs().iter().cloned());
 
-        // Remap workspace IDs in other's instructions and append them
+        // Move other's blobs over, appending in order so existing indices on `other`'s
+        // instructions just shift by `blob_id_offset` after remapping.
+        let other_blobs = std::mem::take(other_tx.blobs_mut());
+        for blob in other_blobs.as_slice().iter().cloned() {
+            self.unsigned_transaction
+                .add_blob(blob)
+                .expect("blob count checked above");
+        }
+
+        // Merge other's blob name map with the offset applied. Duplicate names panic since
+        // silently overriding would be a footgun for callers.
+        for (name, idx) in other_blob_ids.iter() {
+            assert!(
+                self.blob_ids.get(name).is_none(),
+                "blob name '{name}' collides during merge",
+            );
+            self.blob_ids.insert(name.clone(), idx + blob_id_offset);
+        }
+
+        // Remap workspace IDs and blob indices in other's instructions, then append.
         for mut instruction in other_tx.into_instructions() {
-            instruction.remap_workspace_ids(id_offset);
+            instruction.remap_workspace_ids(workspace_id_offset);
+            instruction.remap_blob_ids(blob_id_offset);
             self.unsigned_transaction.instructions_mut().push(instruction);
         }
 
         // Advance workspace ID counter past merged IDs
-        self.workspace_ids.set_next_id(id_offset + other_next_id);
+        self.workspace_ids
+            .set_next_id(workspace_id_offset + other_next_workspace_id);
 
         self
     }
@@ -598,19 +664,95 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
-    /// Publishing a WASM template.
-    pub fn publish_template(self, binary: TemplateBlob) -> Self {
+    /// Register a blob under a caller-supplied name. The name can later be used to reference
+    /// the blob from `publish_template_from_blob(name)` or `args![Blob(name)]`, mirroring the
+    /// workspace item pattern.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the transaction's blob count would exceed the `BlobIndex` range (256 blobs
+    /// maximum). Use `add_blob_checked` for the fallible variant.
+    pub fn add_blob<N: Into<String>, B: Into<Blob>>(self, name: N, bytes: B) -> Self {
+        self.add_blob_checked(name, bytes)
+            .expect("transaction blob count exceeds BlobIndex range")
+    }
+
+    /// Fallible counterpart of `add_blob`. Returns `BlobIndexOverflow` if the transaction
+    /// already has the maximum number of blobs.
+    pub fn add_blob_checked<N: Into<String>, B: Into<Blob>>(
+        mut self,
+        name: N,
+        bytes: B,
+    ) -> Result<Self, BlobIndexOverflow> {
+        let idx = self.unsigned_transaction.add_blob(bytes.into())?;
+        self.blob_ids.insert(name.into(), idx);
+        Ok(self)
+    }
+
+    /// Publish a WASM template by passing the binary directly. The binary is auto-registered
+    /// as an unnamed blob (no entry in the named blob map). Use this for the common one-shot
+    /// case where the binary is referenced only by `PublishTemplate`.
+    ///
+    /// To register a named blob that can be referenced from args (or from multiple
+    /// instructions), use `add_blob(name, bytes).publish_template_from_blob(name)`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the transaction's blob count would exceed the `BlobIndex` range.
+    pub fn publish_template<B: Into<Blob>>(mut self, binary: B) -> Self {
+        let idx = self
+            .unsigned_transaction
+            .add_blob(binary.into())
+            .expect("transaction blob count exceeds BlobIndex range");
         self.add_instruction(Instruction::PublishTemplate {
-            binary,
+            binary: idx,
             metadata_hash: None,
         })
     }
 
-    /// Publishing a WASM template with an off-chain metadata hash.
-    pub fn publish_template_with_metadata(self, binary: TemplateBlob, metadata_hash: MetadataHash) -> Self {
+    /// Publish a WASM template by passing the binary directly, with an off-chain metadata
+    /// hash. See `publish_template` for the named-blob variant.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the transaction's blob count would exceed the `BlobIndex` range.
+    pub fn publish_template_with_metadata<B: Into<Blob>>(mut self, binary: B, metadata_hash: MetadataHash) -> Self {
+        let idx = self
+            .unsigned_transaction
+            .add_blob(binary.into())
+            .expect("transaction blob count exceeds BlobIndex range");
         self.add_instruction(Instruction::PublishTemplate {
-            binary,
+            binary: idx,
             metadata_hash: Some(metadata_hash),
+        })
+    }
+
+    /// Publish a WASM template from a previously-registered named blob.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no blob has been registered under `name`.
+    pub fn publish_template_from_blob<N: AsRef<str>>(self, name: N) -> Self {
+        self.publish_template_from_blob_inner(name.as_ref(), None)
+    }
+
+    /// Publish a WASM template from a named blob with an off-chain metadata hash.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no blob has been registered under `name`.
+    pub fn publish_template_from_blob_with_metadata<N: AsRef<str>>(self, name: N, metadata_hash: MetadataHash) -> Self {
+        self.publish_template_from_blob_inner(name.as_ref(), Some(metadata_hash))
+    }
+
+    fn publish_template_from_blob_inner(self, name: &str, metadata_hash: Option<MetadataHash>) -> Self {
+        let idx = self
+            .blob_ids
+            .get(name)
+            .unwrap_or_else(|| panic!("Blob name '{}' not registered. Call add_blob first.", name));
+        self.add_instruction(Instruction::PublishTemplate {
+            binary: idx,
+            metadata_hash,
         })
     }
 
@@ -820,6 +962,13 @@ impl<D> TransactionBuilder<D> {
                 Ok(InstructionArg::Workspace(
                     WorkspaceOffsetId::new(id).with_offset_opt(parsed.offset),
                 ))
+            },
+            NamedArg::Blob(key) => {
+                let idx = self
+                    .blob_ids
+                    .get(key.as_ref())
+                    .ok_or(BuilderError::BlobKeyNotFound(key))?;
+                Ok(InstructionArg::Blob(idx))
             },
         }
     }

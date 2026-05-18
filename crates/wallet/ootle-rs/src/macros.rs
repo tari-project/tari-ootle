@@ -412,7 +412,7 @@ macro_rules! const_nonzero_u64 {
 mod tests {
     use tari_template_lib_types::Amount;
 
-    use crate::builtin_templates::component::TransactionBuildable;
+    use crate::{Network, builtin_templates::component::TransactionBuildable};
 
     #[test]
     fn it_generates_a_non_zero() {
@@ -441,14 +441,12 @@ mod tests {
             sync::Weak,
         };
 
-        use tari_ootle_common_types::{
-            Network,
-            engine_types::substate::{Substate, SubstateId},
-        };
+        use tari_ootle_common_types::engine_types::substate::{Substate, SubstateId};
         use tari_ootle_transaction::UnsignedTransaction;
 
         use crate::{
             Address,
+            Network,
             provider::{Provider, ProviderResult, WantInput},
         };
 
@@ -492,7 +490,7 @@ mod tests {
     fn ootle_template_macro_generates_component_methods() {
         use crate::keys::OotleSecretKey;
 
-        let secret = OotleSecretKey::random(tari_ootle_common_types::Network::LocalNet);
+        let secret = OotleSecretKey::random(Network::LocalNet);
         let provider = mock_provider::MockProvider {
             address: secret.to_address(),
         };
@@ -523,7 +521,7 @@ mod tests {
     fn ootle_template_chain_across_templates() {
         use crate::keys::OotleSecretKey;
 
-        let secret = OotleSecretKey::random(tari_ootle_common_types::Network::LocalNet);
+        let secret = OotleSecretKey::random(Network::LocalNet);
         let provider = mock_provider::MockProvider {
             address: secret.to_address(),
         };
@@ -545,7 +543,7 @@ mod tests {
     fn ootle_template_macro_generates_template_functions() {
         use crate::keys::OotleSecretKey;
 
-        let secret = OotleSecretKey::random(tari_ootle_common_types::Network::LocalNet);
+        let secret = OotleSecretKey::random(Network::LocalNet);
         let provider = mock_provider::MockProvider {
             address: secret.to_address(),
         };

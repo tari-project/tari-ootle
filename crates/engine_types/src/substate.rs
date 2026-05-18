@@ -47,14 +47,17 @@ use tari_template_lib::types::{
 };
 
 use crate::{
+    Epoch,
+    ProtocolVersion,
     ValidatorFeePool,
     ValidatorFeeWithdrawal,
-    component::ComponentHeader,
+    component::Component,
     confidential::ClaimedOutputTombstone,
     hashing::{EngineHashDomainLabel, hasher32, substate_value_hasher32},
     non_fungible::NonFungibleContainer,
     published_template::{PublishedTemplate, PublishedTemplateAddress},
     resource::Resource,
+    substate_hasher::SubstateHashMessage,
     transaction_receipt::TransactionReceipt,
     utxo::Utxo,
     vault::Vault,
@@ -99,8 +102,8 @@ impl Substate {
         decode(bytes)
     }
 
-    pub fn to_value_hash(&self) -> Hash32 {
-        hash_substate(self.substate_value(), self.version)
+    pub fn to_value_hash(&self, epoch: Epoch) -> Hash32 {
+        hash_substate(self.substate_value(), self.version, epoch)
     }
 
     pub fn previous_version(&self) -> Option<u32> {
@@ -108,10 +111,15 @@ impl Substate {
     }
 }
 
-pub fn hash_substate(substate: &SubstateValue, version: u32) -> Hash32 {
+/// Hashes a substate into its canonical value hash. The `epoch` argument binds the schema version
+/// (derived from epoch via `ProtocolVersion::at`) into the hash preimage, so substates produced
+/// under different schema versions can never collide in the JMT.
+pub fn hash_substate(substate: &SubstateValue, version: u32, epoch: Epoch) -> Hash32 {
+    let proto_version = ProtocolVersion::at(epoch);
     substate_value_hasher32()
-        .chain(substate)
+        .chain(&substate.as_hash_message(proto_version))
         .chain(&version)
+        .chain(&epoch)
         .result()
         .into_array()
         .into()
@@ -575,7 +583,7 @@ impl_partial_eq!(UtxoAddress, Utxo);
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum SubstateValue {
-    Component(ComponentHeader),
+    Component(Component),
     Resource(Box<Resource>),
     Vault(Vault),
     NonFungible(NonFungibleContainer),
@@ -587,21 +595,21 @@ pub enum SubstateValue {
 }
 
 impl SubstateValue {
-    pub fn into_component(self) -> Option<ComponentHeader> {
+    pub fn into_component(self) -> Option<Component> {
         match self {
             SubstateValue::Component(component) => Some(component),
             _ => None,
         }
     }
 
-    pub fn component(&self) -> Option<&ComponentHeader> {
+    pub fn component(&self) -> Option<&Component> {
         match self {
             SubstateValue::Component(component) => Some(component),
             _ => None,
         }
     }
 
-    pub fn component_mut(&mut self) -> Option<&mut ComponentHeader> {
+    pub fn component_mut(&mut self) -> Option<&mut Component> {
         match self {
             SubstateValue::Component(component) => Some(component),
             _ => None,
@@ -678,7 +686,7 @@ impl SubstateValue {
         }
     }
 
-    pub fn as_component(&self) -> Option<&ComponentHeader> {
+    pub fn as_component(&self) -> Option<&Component> {
         match self {
             SubstateValue::Component(component) => Some(component),
             _ => None,
@@ -783,8 +791,8 @@ impl SubstateValue {
         }
     }
 
-    pub fn related_template_address(&self) -> Option<TemplateAddress> {
-        self.as_component().map(|c| c.template_address)
+    pub fn component_template_address(&self) -> Option<&TemplateAddress> {
+        self.as_component().map(|c| c.template_address())
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -794,10 +802,14 @@ impl SubstateValue {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, BorError> {
         decode_exact(bytes)
     }
+
+    pub fn as_hash_message(&self, proto_version: ProtocolVersion) -> SubstateHashMessage<'_> {
+        SubstateHashMessage::new(proto_version, self)
+    }
 }
 
-impl From<ComponentHeader> for SubstateValue {
-    fn from(component: ComponentHeader) -> Self {
+impl From<Component> for SubstateValue {
+    fn from(component: Component) -> Self {
         Self::Component(component)
     }
 }
@@ -985,6 +997,35 @@ mod tests {
             check(
                 "utxo_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff",
             );
+        }
+    }
+
+    mod hash_substate_epoch_binding {
+        use super::*;
+        use crate::confidential::ClaimedOutputTombstone;
+
+        fn sample_value() -> SubstateValue {
+            SubstateValue::ClaimedOutputTombstone(ClaimedOutputTombstone { value: 1 })
+        }
+
+        #[test]
+        fn different_epochs_yield_different_hashes() {
+            let v = sample_value();
+            let h0 = hash_substate(&v, 0, Epoch::zero());
+            let h1 = hash_substate(&v, 0, Epoch(1));
+            assert_ne!(h0, h1, "epoch must bind into the hash preimage");
+        }
+
+        #[test]
+        fn same_epoch_same_inputs_stable() {
+            let v = sample_value();
+            assert_eq!(hash_substate(&v, 0, Epoch(42)), hash_substate(&v, 0, Epoch(42)));
+        }
+
+        #[test]
+        fn version_still_binds() {
+            let v = sample_value();
+            assert_ne!(hash_substate(&v, 0, Epoch::zero()), hash_substate(&v, 1, Epoch::zero()));
         }
     }
 }

@@ -4,12 +4,15 @@
 mod transaction;
 
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_transaction::{Instruction, TransactionId, TransactionWeight};
+use tari_ootle_transaction::{Blobs, Instruction, TransactionId, TransactionWeight};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 pub struct Instructions {
     pub fee: Vec<Instruction>,
     pub main: Vec<Instruction>,
+    /// Blob payloads referenced by `BlobIndex` from instructions and args. Resolved by the
+    /// processor before executing each instruction.
+    pub blobs: Blobs,
 }
 
 pub trait Executable {

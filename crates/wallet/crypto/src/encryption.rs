@@ -1,9 +1,8 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use argon2::password_hash::rand_core::RngCore;
 use chacha20poly1305::{AeadInPlace, Key, KeyInit, Nonce, Tag};
-use rand::rngs::OsRng;
+use rand::Rng;
 use subtle::ConstantTimeEq;
 use tari_crypto::tari_utilities::safe_array::SafeArray;
 use zeroize::Zeroizing;
@@ -99,7 +98,7 @@ pub fn decrypt_with_password(cipher_text: &[u8], passphrase: &[u8]) -> Result<Ze
 
 pub fn encrypt_with_password(plain_text: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, CipherError> {
     let mut salt = [0u8; SALT_LENGTH];
-    OsRng.fill_bytes(salt.as_mut());
+    rand::rng().fill_bytes(salt.as_mut());
     let key = derive_keys(passphrase, salt.as_slice())?;
     let (encryption_key, mac_key) = key.split_at(ENCRYPTION_KEY_BYTES_LEN);
 

@@ -37,7 +37,7 @@ use tari_ootle_common_types::{
     ShardGroup,
     SubstateAddress,
     VotePower,
-    committee::{Committee, CommitteeInfo, CommitteeMember},
+    committee::{Committee, CommitteeInfo},
     layer_one_transaction::{LayerOnePayloadType, LayerOneTransactionDef},
     optional::Optional,
 };
@@ -62,6 +62,7 @@ pub struct EpochManager<TSpec: EpochManagerSpec> {
     current_shard_key: Option<SubstateAddress>,
     layer_one_submitter: TSpec::LayerOneSubmitter,
     current_epoch: Arc<AtomicU64>,
+    birthday_epoch: Option<Epoch>,
     /// Highest epoch whose hash has been locked by a committed EndEpoch block in consensus.
     /// Oracle-driven activations for epochs <= this value are ignored.
     highest_locked_epoch: Epoch,
@@ -81,6 +82,7 @@ where TSpec: EpochManagerSpec
             global_db,
             config,
             current_epoch_hash: FixedHash::zero(),
+            birthday_epoch: None,
             node_public_key,
             current_shard_key: None,
             layer_one_submitter,
@@ -108,6 +110,7 @@ where TSpec: EpochManagerSpec
         self.highest_locked_epoch = metadata
             .get_metadata(MetadataKey::EpochManagerHighestLockedEpoch.as_key_bytes())?
             .unwrap_or_else(Epoch::zero);
+        self.birthday_epoch = metadata.get_metadata(MetadataKey::EpochManagerBirthdayEpoch.as_key_bytes())?;
         Ok(())
     }
 
@@ -295,15 +298,6 @@ where TSpec: EpochManagerSpec
         Ok(vn)
     }
 
-    pub fn get_committees(
-        &self,
-        epoch: Epoch,
-    ) -> Result<HashMap<ShardGroup, Committee<TSpec::Addr>>, EpochManagerError> {
-        let mut tx = self.global_db.create_transaction()?;
-        let mut validator_node_db = self.global_db.validator_nodes(&mut tx);
-        Ok(validator_node_db.get_committees(epoch)?)
-    }
-
     pub fn get_committee_info_by_validator_address(
         &self,
         epoch: Epoch,
@@ -318,11 +312,11 @@ where TSpec: EpochManagerSpec
         self.get_committee_info_for_substate(epoch, vn.shard_key)
     }
 
-    pub(crate) fn get_committee_vns_from_shard_key(
+    pub(crate) fn get_committee_for_substate(
         &self,
         epoch: Epoch,
         substate_address: SubstateAddress,
-    ) -> Result<Vec<ValidatorNode<TSpec::Addr>>, EpochManagerError> {
+    ) -> Result<Committee<TSpec::Addr>, EpochManagerError> {
         let num_vns = self.get_total_validator_count(epoch)?;
         if num_vns == 0 {
             return Err(EpochManagerError::NoCommitteeVns {
@@ -332,52 +326,10 @@ where TSpec: EpochManagerSpec
         }
 
         let num_committees = calculate_num_committees(num_vns, self.config.committee_size);
-        if num_committees == 1 {
-            // retrieve the validator nodes for this epoch from database, sorted by shard_key
-            return self.get_validator_nodes_per_epoch(epoch);
-        }
-
         let shard_group = substate_address.to_shard_group(self.config.num_preshards, num_committees);
 
-        // TODO(perf): fetch full validator node records for the shard group in single query (current O(n + 1) queries)
-        let committees = self.get_committee_for_shard_group(epoch, shard_group, false, None)?;
-
-        let mut res = vec![];
-        for member in committees {
-            let vn = self
-                .get_validator_node_by_public_key(epoch, &member.public_key)?
-                .ok_or_else(|| EpochManagerError::ValidatorNodeNotRegistered {
-                    address: member
-                        .public_key
-                        .try_from_byte_type()
-                        .ok()
-                        .and_then(|pk| TSpec::Addr::try_from_public_key(&pk))
-                        .map(|a| a.to_string())
-                        .unwrap_or_else(|| format!("PARSE FAIL for pk bytes {}", member.public_key)),
-                    epoch,
-                })?;
-            res.push(vn);
-        }
-        res.sort_by_key(|a| a.shard_key);
-        Ok(res)
-    }
-
-    pub(crate) fn get_committee_for_substate(
-        &self,
-        epoch: Epoch,
-        substate_address: SubstateAddress,
-    ) -> Result<Committee<TSpec::Addr>, EpochManagerError> {
-        let result = self.get_committee_vns_from_shard_key(epoch, substate_address)?;
-        Ok(Committee::new(
-            result
-                .into_iter()
-                .map(|v| CommitteeMember {
-                    public_key: v.public_key,
-                    address: v.address,
-                    vote_power: v.vote_power,
-                })
-                .collect(),
-        ))
+        let committee = self.get_committee_for_shard_group(epoch, shard_group, None)?;
+        Ok(committee)
     }
 
     pub fn get_number_of_committees(&self, epoch: Epoch) -> Result<u32, EpochManagerError> {
@@ -472,18 +424,22 @@ where TSpec: EpochManagerSpec
         &self,
         epoch: Epoch,
         shard_group: ShardGroup,
-        shuffle: bool,
         limit: Option<usize>,
     ) -> Result<Committee<TSpec::Addr>, EpochManagerError> {
         let mut tx = self.global_db.create_transaction()?;
         let mut validator_node_db = self.global_db.validator_nodes(&mut tx);
-        let committees = validator_node_db.get_committee_for_shard_group(
-            epoch,
-            shard_group,
-            shuffle,
-            limit.unwrap_or(usize::MAX),
-        )?;
-        Ok(committees)
+        let committee =
+            validator_node_db.get_committee_for_shard_group(epoch, shard_group, limit.unwrap_or(usize::MAX))?;
+        // An empty committee means no validators have been assigned for `(epoch, shard_group)`
+        // — either the epoch is not yet known to the local oracle, or validator assignment is
+        // pending. Surfacing this as `NoEpochFound` (rather than the previous `Ok(empty)`)
+        // lets `.optional()` callers handle the missing-data case, prevents the shared
+        // `committee_cache` from caching a poisoned 0-of-0 quorum result, and surfaces a
+        // loud error to any caller that previously silently relied on an empty committee.
+        if committee.is_empty() {
+            return Err(EpochManagerError::NoEpochFound(epoch));
+        }
+        Ok(committee)
     }
 
     pub(crate) fn get_committees_overlapping_shard_group(
@@ -561,6 +517,22 @@ where TSpec: EpochManagerSpec
             shard_groups,
             num_preshards: self.config.num_preshards,
         })
+    }
+
+    pub fn set_birthday_epoch_if_unset(&mut self, epoch: Epoch) -> Result<bool, EpochManagerError> {
+        if self.birthday_epoch.is_none() {
+            let mut tx = self.global_db.create_transaction()?;
+            let mut metadata = self.global_db.metadata(&mut tx);
+            metadata.set_metadata(MetadataKey::EpochManagerBirthdayEpoch.as_key_bytes(), &epoch)?;
+            self.birthday_epoch = Some(epoch);
+            tx.commit()?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    pub fn birthday_epoch(&self) -> Option<Epoch> {
+        self.birthday_epoch
     }
 }
 

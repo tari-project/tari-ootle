@@ -17,7 +17,7 @@ use tari_engine_types::{
     UtxoOutput,
     ValidatorFeeWithdrawal,
     bucket::Bucket,
-    component::ComponentHeader,
+    component::Component,
     events::Event,
     fees::{FeeReceipt, FeeReceiptBuilder},
     id_provider::{IdProvider, ObjectIds},
@@ -32,7 +32,7 @@ use tari_engine_types::{
     stealth,
     stealth::ValidatedStealthTransfer,
     substate::{Substate, SubstateDiff, SubstateId, SubstateValue},
-    transaction_receipt::{FinalizeOutcome, TransactionReceipt},
+    transaction_receipt::{DiffSummary, FinalizeOutcome, TransactionReceipt},
     vault::Vault,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
@@ -106,6 +106,12 @@ pub(super) struct WorkingState<TStore> {
     initial_call_scope: CallScope,
 
     fee_state: FeeState,
+    /// Template addresses for which a load fee has already been charged in this transaction.
+    /// Used to dedupe `FeeSource::TemplateLoad` charges across repeated calls into the same
+    /// template (cross-template invocations, multiple instructions on the same component, etc.):
+    /// the validator pays the cold compile/deserialise cost at most once per template per process,
+    /// so charging it on every entry over-bills the user.
+    loaded_template_charges: HashSet<TemplateAddress>,
 }
 
 impl<TStore: StateReader> WorkingState<TStore> {
@@ -135,6 +141,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
             call_frames: Vec::new(),
             initial_call_scope,
             fee_state: FeeState::new(),
+            loaded_template_charges: HashSet::new(),
             object_ids: ObjectIds::new(limits::ENGINE_LIMITS.max_substate_outputs),
         }
     }
@@ -157,6 +164,10 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     fn enforce_substate_size_limit(&self, value: &SubstateValue) -> Result<(), RuntimeError> {
+        // Published template has its own size restriction
+        if value.published_template().is_some() {
+            return Ok(());
+        }
         let size = encoded_len(value)?;
         if size > limits::ENGINE_LIMITS.max_substate_size {
             return Err(LimitError::SubstateSizeExceeded { size }.into());
@@ -195,7 +206,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(())
     }
 
-    pub fn get_component(&self, locked: &LockedSubstate) -> Result<&ComponentHeader, RuntimeError> {
+    pub fn get_component(&self, locked: &LockedSubstate) -> Result<&Component, RuntimeError> {
         let (address, substate) = self.store.get_locked_substate(locked.lock_id())?;
         let component = substate.component().ok_or_else(|| RuntimeError::LockSubstateMismatch {
             lock_id: locked.lock_id(),
@@ -205,7 +216,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(component)
     }
 
-    pub fn get_component_mut(&mut self, locked: &LockedSubstate) -> Result<&mut ComponentHeader, RuntimeError> {
+    pub fn get_component_mut(&mut self, locked: &LockedSubstate) -> Result<&mut Component, RuntimeError> {
         let (address, substate) = self.store.get_locked_substate_mut(locked.lock_id())?;
         let component_mut = substate
             .component_mut()
@@ -217,7 +228,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(component_mut)
     }
 
-    pub fn modify_component_with<F: FnOnce(&mut ComponentHeader) -> bool>(
+    pub fn modify_component_with<F: FnOnce(&mut Component) -> bool>(
         &mut self,
         locked: &LockedSubstate,
         f: F,
@@ -895,7 +906,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 .ok_or(RuntimeError::AddressAllocationNoTemplate)?),
             None => {
                 let component = self.store.load_and_cache_component(component_address)?;
-                Ok(component.template_address)
+                Ok(*component.template_address())
             },
         }
     }
@@ -1035,6 +1046,13 @@ impl<TStore: StateReader> WorkingState<TStore> {
         &mut self.fee_state
     }
 
+    /// Records that a template-load charge is being applied for `address`. Returns `true` if this
+    /// is the first time within the transaction (caller should charge), `false` if already
+    /// recorded (caller should skip).
+    pub fn record_template_load_charge(&mut self, address: TemplateAddress) -> bool {
+        self.loaded_template_charges.insert(address)
+    }
+
     pub fn set_last_instruction_output(&mut self, output: IndexedValue) {
         self.last_instruction_output = Some(output);
     }
@@ -1048,12 +1066,12 @@ impl<TStore: StateReader> WorkingState<TStore> {
         let epoch = self.get_current_epoch()?;
         Ok(TransactionReceipt {
             outcome,
-            diff_summary: diff.into(),
+            diff_summary: DiffSummary::from_diff(diff, epoch),
             fee_withdrawals: diff.validator_fee_withdrawals().to_vec().into_boxed_slice(),
             events: self.events.clone().into_boxed_slice(),
             logs: self.logs.clone().into_boxed_slice(),
             fee_receipt,
-            epoch: epoch.as_u64(),
+            epoch,
         })
     }
 
@@ -1333,7 +1351,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
     pub fn load_and_cache_component(
         &mut self,
         component_address: ComponentAddress,
-    ) -> Result<&ComponentHeader, RuntimeError> {
+    ) -> Result<&Component, RuntimeError> {
         self.store.load_and_cache_component(component_address)
     }
 

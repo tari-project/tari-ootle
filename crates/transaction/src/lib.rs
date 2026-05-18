@@ -21,6 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 pub mod args;
+mod blobs;
 pub mod builder;
 mod envelope;
 mod hashing;
@@ -32,10 +33,11 @@ mod unsigned_transaction;
 mod v1;
 mod weight;
 
+pub use blobs::*;
 pub use builder::TransactionBuilder;
 pub use envelope::*;
+pub use ootle_network::Network;
 pub use signable::*;
-pub use tari_ootle_common_types::Network;
 pub use transaction::*;
 pub use transaction_id::*;
 pub use unsealed::*;

@@ -3,6 +3,6 @@ import type { WorkspaceOffsetId } from "./WorkspaceOffsetId";
 
 /**
  * Represents an argument that can be passed to a transaction instruction. Either a literal value or a reference to a
- * item on the runtime's workspace.
+ * item on the runtime's workspace, or a reference to a transaction blob by index.
  */
-export type InstructionArg = { Workspace: WorkspaceOffsetId } | { Literal: string };
+export type InstructionArg = { Workspace: WorkspaceOffsetId } | { Literal: string } | { Blob: number };

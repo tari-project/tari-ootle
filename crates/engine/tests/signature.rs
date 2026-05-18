@@ -2,7 +2,6 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use ootle_byte_type::ToByteType;
-use rand::rngs::OsRng;
 use tari_crypto::{
     keys::PublicKey as _,
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
@@ -36,7 +35,7 @@ fn sign_it(secret: &RistrettoSecretKey) -> Signature<NoSignatureDomain> {
 }
 
 fn sign_it_with(secret: &RistrettoSecretKey, message: &[u8]) -> Signature<NoSignatureDomain> {
-    let (nonce, nonce_pub) = RistrettoPublicKey::random_keypair(&mut OsRng);
+    let (nonce, nonce_pub) = RistrettoPublicKey::random_keypair(&mut rand::rng());
     let public_key = RistrettoPublicKey::from_secret_key(secret);
     let challenge = RistrettoSchnorrBlake2bVerifier::compute_challenge(
         TEST_DOMAIN,

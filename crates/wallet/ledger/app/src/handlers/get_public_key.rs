@@ -3,9 +3,9 @@
 
 use ootle_ledger_common::arg_types::{GetPublicKeyRequest, GetPublicKeyResponse};
 
-use crate::{crypto::public_key_from_scalar, key_derive::derive_from_bip32_key, status::AppStatus};
+use crate::{crypto::public_key_from_scalar, key_derive::derive_from_bip32_key, state::State, status::AppStatus};
 
-pub fn get_public_key(request: GetPublicKeyRequest) -> Result<GetPublicKeyResponse, AppStatus> {
+pub fn get_public_key(_state_mut: &mut State, request: GetPublicKeyRequest) -> Result<GetPublicKeyResponse, AppStatus> {
     let k = derive_from_bip32_key(request.account, request.index, request.key_type)?;
     let pk = public_key_from_scalar(&k);
 

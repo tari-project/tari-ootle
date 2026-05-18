@@ -22,7 +22,8 @@
 
 use std::{env, time::Duration};
 
-use tari_ootle_common_types::{Network, NumPreshards};
+use tari_ootle_common_types::NumPreshards;
+use tari_ootle_transaction::Network;
 
 #[derive(Clone, Debug)]
 pub struct ConsensusConstants {

@@ -24,8 +24,8 @@ impl Executable for Transaction {
     }
 
     fn into_instructions(self) -> Instructions {
-        let (fee, main) = self.into_instruction_parts();
-        Instructions { fee, main }
+        let (fee, main, blobs) = self.into_instructions_and_blobs();
+        Instructions { fee, main, blobs }
     }
 }
 

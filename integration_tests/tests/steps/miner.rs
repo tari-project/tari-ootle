@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use cucumber::{gherkin::Step, given, then, when};
+use integration_tests::cucumber_log;
 use tari_base_node_client::BaseNodeClient;
 
 use crate::{TariWorld, mine_blocks, register_miner_process};
@@ -67,9 +68,10 @@ async fn wait_for_all_base_nodes_to_reach_tip(world: &mut TariWorld, height: u64
             }
             iter_count += 1;
         }
-        eprintln!(
+        cucumber_log!(
             "Base node {} reached tip height {}",
-            bn.name, tip.height_of_longest_chain
+            bn.name,
+            tip.height_of_longest_chain
         );
     }
 }

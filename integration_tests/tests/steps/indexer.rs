@@ -13,7 +13,7 @@ use integration_tests::{
     indexer::{IndexerProcess, spawn_indexer},
 };
 use libp2p::Multiaddr;
-use tari_ootle_common_types::{Epoch, displayable::Displayable};
+use tari_ootle_common_types::{Epoch, displayable::Displayable, optional::Optional};
 
 #[when(expr = "indexer {word} connects to all other validators")]
 async fn given_validator_connects_to_other_vns(world: &mut TariWorld, name: String) {
@@ -147,7 +147,7 @@ async fn indexer_scans_network_events(
             );
         }
 
-        eprintln!(
+        cucumber_log!(
             "Waiting for events for {} ({} attempts remaining, found: {})",
             account_addr,
             remaining_attempts,
@@ -193,7 +193,7 @@ async fn indexer_scans_network_events_for_resource(world: &mut TariWorld, indexe
     let events = res.get("getEvents").unwrap();
 
     // TODO: assert the results
-    eprintln!("{:?}", events);
+    cucumber_log!("{:?}", events);
 }
 
 #[then(expr = "the indexer {word} returns version {int} for substate {word}")]
@@ -206,11 +206,11 @@ async fn assert_indexer_substate_version(
     let indexer = world.indexers.get(&indexer_name).unwrap();
     assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
 
-    let mut remaining_attempts = 10;
+    let mut remaining_attempts = 30usize;
     loop {
         match indexer.get_substate(world, output_ref.clone(), version).await {
             Ok(substate) => {
-                eprintln!(
+                cucumber_log!(
                     "indexer.get_substate result: {}",
                     serde_json::to_string_pretty(&substate).unwrap()
                 );
@@ -225,9 +225,13 @@ async fn assert_indexer_substate_version(
                     );
                 }
                 remaining_attempts -= 1;
-                eprintln!(
+                cucumber_log!(
                     "Waiting for indexer {} to sync substate {} (version {}), {} attempts remaining. Error: {}",
-                    indexer_name, output_ref, version, remaining_attempts, e
+                    indexer_name,
+                    output_ref,
+                    version,
+                    remaining_attempts,
+                    e
                 );
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             },
@@ -245,7 +249,7 @@ async fn assert_indexer_non_fungible_list(
     let indexer = world.indexers.get(&indexer_name).unwrap();
     assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
     let nfts = indexer.get_non_fungibles(world, output_ref, 0, count as u64).await;
-    eprintln!("indexer.get_non_fungibles result: {:?}", nfts);
+    cucumber_log!("indexer.get_non_fungibles result: {:?}", nfts);
     assert_eq!(
         nfts.len(),
         count,
@@ -385,10 +389,10 @@ async fn assert_catalogue_entry_not_found(world: &mut TariWorld, indexer_name: S
     let indexer = world.get_indexer(&indexer_name);
     assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
     let client = indexer.get_indexer_client();
-    let result = client.get_template_catalogue_entry(address).await;
+    let item = client.get_template_catalogue_entry(address).await.optional().unwrap();
     assert!(
-        result.is_err(),
-        "Expected 404 for address {} but got a result",
+        item.is_none(),
+        "Expected not found for address {} but got a result",
         address_str
     );
 }

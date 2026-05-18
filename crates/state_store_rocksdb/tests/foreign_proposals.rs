@@ -6,13 +6,14 @@ pub mod helpers;
 use helpers::{assert_eq_debug, create_foreign_proposal, create_random_block_id, create_rocksdb};
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::ShardGroupAccumulatedData;
-use tari_ootle_common_types::{Epoch, ExtraData, Network, NodeHeight, NumPreshards, ShardGroup};
+use tari_ootle_common_types::{Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     consensus_models::{Block, BookkeepingModel, Command, ForeignProposalStatus},
 };
+use tari_ootle_transaction::Network;
 use tari_template_lib_types::crypto::SchnorrSignatureBytes;
 use tari_utilities::epoch_time::EpochTime;
 

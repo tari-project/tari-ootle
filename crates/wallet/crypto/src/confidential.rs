@@ -136,7 +136,6 @@ pub fn create_output_statement(
 
 #[cfg(test)]
 mod tests {
-    use rand::rngs::OsRng;
     use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
     use tari_engine_types::confidential::validate_confidential_statement;
     use tari_template_lib_types::EncryptedData;
@@ -144,7 +143,7 @@ mod tests {
     use super::*;
 
     fn create_valid_proof(amount: u64, minimum_value_promise: u64) -> ConfidentialOutputStatement {
-        let mask = RistrettoSecretKey::random(&mut OsRng);
+        let mask = RistrettoSecretKey::random(&mut rand::rng());
         create_output_statement(
             Some(&OutputWitness {
                 amount,

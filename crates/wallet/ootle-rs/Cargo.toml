@@ -1,6 +1,6 @@
 [package]
 name = "ootle-rs"
-version = "0.6.2"
+version = "0.6.6"
 description = "A Rust library for interacting with the Tari Ootle network."
 edition.workspace = true
 authors.workspace = true
@@ -30,7 +30,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 async-stream = { workspace = true }
-signature = "3.0.0-rc.8"
+signature = "3.0.0"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }

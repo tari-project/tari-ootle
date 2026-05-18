@@ -29,7 +29,7 @@ use tari_engine_types::{
     Utxo,
     UtxoOutput,
     commit_result::{FinalizeResult, RejectReason},
-    component::ComponentHeader,
+    component::Component,
     confidential::{ClaimBurnOutputData, ClaimedOutputTombstone, MinotariBurnClaimProof},
     crypto::OutputBody,
     entity_id_provider::EntityIdProvider,
@@ -156,6 +156,9 @@ pub struct RuntimeInterfaceImpl<TStore, TTemplateProvider> {
     seal_signer_public_key: RistrettoPublicKeyBytes,
     modules: ModulesCollection<TStore>,
     claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
+    /// Transaction blob payloads, immutable for the duration of execution. Used to resolve
+    /// `InstructionArg::Blob(idx)` references against the surrounding transaction's blobs.
+    blobs: Arc<tari_ootle_transaction::Blobs>,
     /// A pointer to the runtime that is set after initialization to allow for cross-template calls.
     /// This is using an atomic pointer simply to make RuntimeInterfaceImpl Send + Sync to satisfy wasmer trait bounds.
     runtime_pointer: Option<AtomicPtr<Box<dyn RuntimeInterface>>>,
@@ -171,6 +174,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         entity_id_provider: EntityIdProvider,
         modules: ModulesCollection<TStore>,
         claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
+        blobs: Arc<tari_ootle_transaction::Blobs>,
     ) -> Result<Self, RuntimeError> {
         let mut runtime = Self {
             tracker,
@@ -179,6 +183,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             seal_signer_public_key: signer_public_key,
             modules,
             claim_burn_proof_verifier,
+            blobs,
             runtime_pointer: None,
         };
         runtime.invoke_modules_on_initialize()?;
@@ -505,10 +510,7 @@ where
         Ok(())
     }
 
-    fn load_component(
-        &mut self,
-        call: ComponentReference,
-    ) -> Result<(ComponentAddress, ComponentHeader), RuntimeError> {
+    fn load_component(&mut self, call: ComponentReference) -> Result<(ComponentAddress, Component), RuntimeError> {
         self.invoke_modules_on_runtime_call("load_component")?;
         match call {
             ComponentReference::Address(address) => self.tracker.write_with(|state_mut| {
@@ -743,7 +745,7 @@ where
                         .require_ownership(ComponentAction::SetAccessRules, component.as_ownership())?;
 
                     state.modify_component_with(&component_lock, |component| {
-                        if access_rules == component.access_rules {
+                        if access_rules == *component.access_rules() {
                             return false;
                         }
                         component.set_access_rules(access_rules);
@@ -769,7 +771,7 @@ where
                 self.tracker.write_with(|state| {
                     let locked = state.read_lock_substate(SubstateId::Component(component_address))?;
                     let component = state.get_component(&locked)?;
-                    let template_address = component.template_address;
+                    let template_address = *component.template_address();
                     state.unlock_substate(locked)?;
                     Ok(InvokeResult::encode(&template_address)?)
                 })
@@ -796,7 +798,7 @@ where
                             details: format!("Substate at {} is not a component", component_address),
                         })?;
 
-                    let Some(owner) = component.owner_rule.owned_by_public_key().copied() else {
+                    let Some(owner) = component.owner_rule().owned_by_public_key().copied() else {
                         return Ok(InvokeResult::encode(&None::<tari_template_lib::models::Proof>)?);
                     };
 
@@ -1795,12 +1797,6 @@ where
                 })?;
 
                 let arg: PayFeeArg = args.assert_one_arg()?;
-                if arg.amount.is_negative() {
-                    return Err(RuntimeError::InvalidArgument {
-                        argument: "amount",
-                        reason: "Amount must be positive".to_string(),
-                    });
-                }
 
                 if self.tracker.is_fee_intent_checkpointed() {
                     return Err(RuntimeError::FeePaymentInMainIntent);
@@ -2675,7 +2671,8 @@ where
     }
 
     fn checkpoint_fee_intent(&mut self) -> Result<(), RuntimeError> {
-        if self.tracker.total_fee_payments() < self.tracker.total_fee_charges() {
+        if !self.tracker.is_fee_state_dry_run() && self.tracker.total_fee_payments() < self.tracker.total_fee_charges()
+        {
             return Err(RuntimeError::InsufficientFeesPaid {
                 required_fee: self.tracker.total_fee_charges(),
                 fees_paid: self.tracker.total_fee_payments(),
@@ -2882,7 +2879,7 @@ where
                 })?;
 
             let component_mut = state_mut.get_component_mut(&locked)?;
-            let prev_template = component_mut.template_address;
+            let prev_template = *component_mut.template_address();
             component_mut.set_template_address(new_template);
 
             state_mut.push_event(Event::std(
@@ -3083,8 +3080,10 @@ where
             return Ok(());
         }
 
+        // Note: per-transaction dedup is intentionally pushed into the modules that want it (see
+        // `FeeModule::on_template_loaded`), so observer-style modules continue to see every load.
         for module in self.modules.iter() {
-            module.on_template_loaded(&mut self.tracker, bytes_loaded)?;
+            module.on_template_loaded(&mut self.tracker, template_address, bytes_loaded)?;
         }
         Ok(())
     }
@@ -3110,6 +3109,19 @@ where
             .map(|arg| match arg {
                 InstructionArg::Workspace(id) => self.resolve_workspace_id(id),
                 InstructionArg::Literal(v) => Ok(decode_exact(v)?),
+                // A blob arg's value is the raw bytes of the referenced blob, decoded as CBOR
+                // by the same path as `Literal`. Lookup is against the surrounding transaction's
+                // `Blobs`, set on the runtime at construction time.
+                InstructionArg::Blob(idx) => {
+                    let blob = self
+                        .blobs
+                        .get(*idx)
+                        .ok_or(ArgumentValidationError::BlobIndexOutOfBounds {
+                            index: *idx,
+                            count: self.blobs.len(),
+                        })?;
+                    Ok(decode_exact(blob.as_bytes())?)
+                },
             })
             .collect()
     }

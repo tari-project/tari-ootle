@@ -82,7 +82,10 @@ where
             }));
         }
 
-        let resp = self.network_interface.submit_transaction(transaction.transaction).await;
+        // Re-submission needs the full transaction (blob payloads); the WalletTransaction
+        // returned above is the pruned API view.
+        let full = self.store.with_read_tx(|tx| tx.transactions_get_full(transaction_id))?;
+        let resp = self.network_interface.submit_transaction(full).await;
 
         match resp {
             Ok(_) => {
@@ -148,15 +151,15 @@ where
                         warn!(target: LOG_TARGET, "⚠️ Transaction ID mismatch in dry run response. Expected {}, got {}. Updating transaction status to DryRunFailed.", tx_id, query.transaction_id);
                     }
 
+                    let final_fee = execution_result
+                        .as_ref()
+                        .map(|e| e.finalize.fee_receipt.required_fees());
+
                     self.store.with_write_tx(|tx| {
                         tx.transactions_update(
                             WalletTransactionUpdate::new(tx_id)
                                 .with_result(execution_result.as_ref().map(|e| &e.finalize))
-                                .with_final_fee(
-                                    execution_result
-                                        .as_ref()
-                                        .map(|e| e.finalize.fee_receipt.required_fees()),
-                                )
+                                .with_final_fee(final_fee)
                                 .with_new_status(TransactionStatus::DryRun)
                                 .with_execution_time(*execution_time)
                                 .with_finalized_time(*finalized_time),
@@ -258,14 +261,13 @@ where
                         self.commit_diff(tx, diff)?;
                     }
 
+                    let final_fee =
+                        execution_result.as_ref().map(|e| e.finalize.fee_receipt.required_fees());
+
                     tx.transactions_update(
                         WalletTransactionUpdate::new(transaction_id)
                             .with_result(execution_result.as_ref().map(|e| &e.finalize))
-                            .with_final_fee(
-                                execution_result
-                                    .as_ref()
-                                    .map(|e| e.finalize.fee_receipt.total_fees_charged()),
-                            )
+                            .with_final_fee(final_fee)
                             .with_new_status(new_status)
                             .with_execution_time(execution_time)
                             .with_finalized_time(finalized_time),
@@ -365,8 +367,9 @@ where
             tx.substates_upsert_root(
                 VersionedSubstateIdRef::new(component_addr, substate.version()),
                 indexed.referenced_substates().collect(),
-                Some(component.module_name.clone()),
-                Some(component.template_address),
+                // TODO: we can clean out module name, this is never populated
+                None,
+                Some(*component.template_address()),
             )?;
 
             for owned_id in indexed.referenced_substates() {

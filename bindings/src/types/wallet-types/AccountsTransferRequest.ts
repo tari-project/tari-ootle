@@ -9,7 +9,7 @@ export type AccountsTransferRequest = {
   amount: Amount;
   resource_address: ResourceAddress;
   destination_public_key: RistrettoPublicKeyBytes;
-  max_fee: number | null;
+  max_fee: bigint;
   proof_from_badge_resource: ResourceAddress | null;
   dry_run: boolean;
 };

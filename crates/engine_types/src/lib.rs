@@ -28,17 +28,22 @@ pub mod virtual_substate;
 pub mod template;
 
 pub mod entity_id_provider;
+mod epoch;
 pub mod id_provider;
 
 mod borsh;
 mod hash;
 pub mod json_cbor;
+mod protocol_version;
 pub mod published_template;
+mod substate_hasher;
 mod substate_serde;
 mod utxo;
 mod validator_fee;
 
+pub use epoch::*;
 pub use hash::*;
+pub use protocol_version::*;
 pub use tari_template_lib::types::parse_template_address;
 pub use template::calculate_template_binary_hash;
 pub use utxo::*;

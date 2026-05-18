@@ -36,6 +36,8 @@ pub enum TemplateLoaderError {
     ExportError(#[from] wasmer::ExportError),
     #[error("Runtime error: {0}")]
     RuntimeError(#[from] wasmer::RuntimeError),
+    #[error("Deserialize error: {0}")]
+    DeserializeError(#[from] wasmer::DeserializeError),
 }
 
 impl From<wasmer::InstantiationError> for TemplateLoaderError {

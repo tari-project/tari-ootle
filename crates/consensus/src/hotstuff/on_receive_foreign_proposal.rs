@@ -161,26 +161,14 @@ where TConsensusSpec: ConsensusSpec
             return Ok(());
         }
 
-        let committee = self
+        let selected = self
             .epoch_manager
-            .get_committee_by_shard_group(
+            .get_random_committee_member(
                 current_epoch,
-                foreign_committee_info.shard_group(),
-                // We only request from one
-                Some(1),
-                // Shuffle to select a random peer
-                true,
+                Some(foreign_committee_info.shard_group()),
+                Default::default(),
             )
             .await?;
-
-        let Some(selected) = committee.iter().next() else {
-            warn!(
-                target: LOG_TARGET,
-                "FOREIGN PROPOSAL: No validator selected for the shard group {}",
-                foreign_committee_info.shard_group(),
-            );
-            return Ok(());
-        };
 
         info!(
             target: LOG_TARGET,

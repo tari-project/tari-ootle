@@ -23,7 +23,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use crate::{
     EpochManagerEvent,
     error::EpochManagerError,
-    service::{NetworkDescription, types::EpochManagerRequest},
+    service::{CommitteeCache, NetworkDescription, types::EpochManagerRequest},
     traits::{EpochManagerReader, EpochManagerWriter},
 };
 
@@ -32,6 +32,7 @@ pub struct EpochManagerHandle<TAddr> {
     tx_request: mpsc::Sender<EpochManagerRequest<TAddr>>,
     current_epoch: Arc<AtomicU64>,
     events: broadcast::WeakSender<EpochManagerEvent>,
+    committee_cache: CommitteeCache<TAddr>,
 }
 
 impl<TAddr: NodeAddressable> EpochManagerHandle<TAddr> {
@@ -39,11 +40,13 @@ impl<TAddr: NodeAddressable> EpochManagerHandle<TAddr> {
         tx_request: mpsc::Sender<EpochManagerRequest<TAddr>>,
         events: broadcast::WeakSender<EpochManagerEvent>,
         current_epoch: Arc<AtomicU64>,
+        committee_cache: CommitteeCache<TAddr>,
     ) -> Self {
         Self {
             tx_request,
             events,
             current_epoch,
+            committee_cache,
         }
     }
 
@@ -161,24 +164,11 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
         rx.await.map_err(|_| EpochManagerError::ReceiveError)?
     }
 
-    async fn get_committees(
-        &self,
-        epoch: Epoch,
-    ) -> Result<HashMap<ShardGroup, Committee<Self::Addr>>, EpochManagerError> {
-        let (tx, rx) = oneshot::channel();
-        self.tx_request
-            .send(EpochManagerRequest::GetCommittees { epoch, reply: tx })
-            .await
-            .map_err(|_| EpochManagerError::SendError)?;
-
-        rx.await.map_err(|_| EpochManagerError::ReceiveError)?
-    }
-
     async fn get_committee_for_substate(
         &self,
         epoch: Epoch,
         substate_address: SubstateAddress,
-    ) -> Result<Committee<Self::Addr>, EpochManagerError> {
+    ) -> Result<Arc<Committee<Self::Addr>>, EpochManagerError> {
         let (tx, rx) = oneshot::channel();
         self.tx_request
             .send(EpochManagerRequest::GetCommitteeForSubstate {
@@ -323,22 +313,21 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
         &self,
         epoch: Epoch,
         shard_group: ShardGroup,
-        limit: Option<usize>,
-        shuffled: bool,
-    ) -> Result<Committee<Self::Addr>, EpochManagerError> {
-        let (tx, rx) = oneshot::channel();
-        self.tx_request
-            .send(EpochManagerRequest::GetCommitteeForShardGroup {
-                epoch,
-                shard_group,
-                shuffled,
-                limit,
-                reply: tx,
+    ) -> Result<Arc<Committee<Self::Addr>>, EpochManagerError> {
+        self.committee_cache
+            .get_or_try_init((epoch, shard_group), || async {
+                let (tx, rx) = oneshot::channel();
+                self.tx_request
+                    .send(EpochManagerRequest::GetCommitteeForShardGroup {
+                        epoch,
+                        shard_group,
+                        reply: tx,
+                    })
+                    .await
+                    .map_err(|_| EpochManagerError::SendError)?;
+                rx.await.map_err(|_| EpochManagerError::ReceiveError)?
             })
             .await
-            .map_err(|_| EpochManagerError::SendError)?;
-
-        rx.await.map_err(|_| EpochManagerError::ReceiveError)?
     }
 
     async fn get_committees_overlapping_shard_group(
@@ -407,6 +396,15 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
                 current_epoch,
                 reply: tx,
             })
+            .await
+            .map_err(|_| EpochManagerError::SendError)?;
+        rx.await.map_err(|_| EpochManagerError::ReceiveError)?
+    }
+
+    async fn get_birthday_epoch(&self) -> Result<Option<Epoch>, EpochManagerError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx_request
+            .send(EpochManagerRequest::GetBirthdayEpoch { reply: tx })
             .await
             .map_err(|_| EpochManagerError::SendError)?;
         rx.await.map_err(|_| EpochManagerError::ReceiveError)?

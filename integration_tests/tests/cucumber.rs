@@ -27,6 +27,7 @@ use anyhow::bail;
 use cucumber::{ScenarioType, World, WriterExt, gherkin::Step, given, then, when, writer, writer::Verbosity};
 use integration_tests::{
     TariWorld,
+    cucumber_log,
     http_server::MockHttpServer,
     logging::{create_log_config_file, get_base_dir},
     miner::{mine_blocks, register_miner_process},
@@ -639,7 +640,7 @@ async fn given_all_validator_connects_to_other_vns(world: &mut TariWorld) {
 
     for vn in world.validator_nodes.values() {
         if vn.handle.is_finished() {
-            eprintln!("Skipping validator node {} that is not running", vn.name);
+            cucumber_log!("Skipping validator node {} that is not running", vn.name);
             continue;
         }
         let mut cli = vn.create_client();
@@ -661,7 +662,7 @@ async fn given_all_validator_connects_to_other_vns(world: &mut TariWorld) {
 #[when(expr = "I wait {int} seconds")]
 #[then(expr = "I wait {int} seconds")]
 async fn wait_seconds(_world: &mut TariWorld, seconds: u64) {
-    // println!("NOT Waiting {} seconds", seconds);
+    // cucumber_log!("NOT Waiting {} seconds", seconds);
     tokio::time::sleep(Duration::from_secs(seconds)).await;
 }
 

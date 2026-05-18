@@ -120,6 +120,7 @@ pub async fn fetch_utxos(
     let utxos = context
         .substate_manager()
         .get_unspent_utxos(&req.resource_address, &req.tag_and_nonce_pairs)
+        .await
         .map_err(ErrorResponse::anyhow)?;
 
     Ok(Json(GetUtxosResponse { utxos }))
@@ -144,6 +145,7 @@ pub async fn list_utxos(
     let utxos = context
         .substate_manager()
         .list_utxos(&req.resource_address, req.from_id, req.limit)
+        .await
         .map_err(ErrorResponse::anyhow)?;
 
     Ok(Json(ListUtxosResponse { utxos }))

@@ -8,7 +8,7 @@ use std::{
 
 use anyhow::bail;
 use log::*;
-use tari_ootle_common_types::Network;
+use ootle_network::Network;
 use tokio::{
     fs::{self, OpenOptions},
     io::AsyncWriteExt,

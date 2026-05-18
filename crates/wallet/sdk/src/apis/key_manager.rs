@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use ootle_byte_type::FromByteType;
-use rand::rngs::OsRng;
+use ootle_network::Network;
 use tari_common_types::seeds::cipher_seed;
 use tari_crypto::{
     keys::{PublicKey as _, SecretKey},
@@ -12,7 +12,6 @@ use tari_crypto::{
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::{
     Epoch,
-    Network,
     optional::{IsNotFoundError, Optional},
     signature::SignatureOutput,
 };
@@ -306,7 +305,7 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
     }
 
     pub fn create_throwaway_nonce(&self) -> RistrettoSecretKey {
-        RistrettoSecretKey::random(&mut OsRng)
+        RistrettoSecretKey::random(&mut rand::rng())
     }
 
     pub fn set_active_key<B: AsRef<str>>(&self, branch: B, index: u64) -> Result<(), KeyManagerApiError> {
@@ -400,7 +399,7 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
         T: Signable<C>,
         T::Signature: From<SignatureOutput>,
     {
-        let signature = RistrettoSchnorr::sign(secret_key, item.to_signing_message(context), &mut OsRng)
+        let signature = RistrettoSchnorr::sign(secret_key, item.to_signing_message(context), &mut rand::rng())
             .expect("RistrettoSchnorr::sign is infallible as it internally hashes the message into canonical form");
         let public_key = RistrettoPublicKey::from_secret_key(secret_key);
         Ok(SignatureOutput { public_key, signature }.into())

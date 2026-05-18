@@ -25,7 +25,7 @@ use std::{sync::Arc, time::Instant};
 use log::*;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult},
-    component::{ComponentHeader, derive_component_address_from_public_key},
+    component::{Component, derive_component_address_from_public_key},
     entity_id_provider::EntityIdProvider,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     instruction_result::InstructionResult,
@@ -172,6 +172,9 @@ where
                     details: "Transaction must have at least one authorized signature".to_string(),
                 })?;
 
+        let instructions = executable.into_instructions();
+        let blobs = std::sync::Arc::new(instructions.blobs);
+
         let mut runtime_interface = Box::new(RuntimeInterfaceImpl::initialize(
             tracker,
             template_provider.clone(),
@@ -179,6 +182,7 @@ where
             entity_id_provider,
             modules,
             claim_burn_proof_verifier,
+            std::sync::Arc::clone(&blobs),
         )?) as Box<dyn RuntimeInterface>;
 
         let runtime = Runtime::from_mut(&mut runtime_interface);
@@ -186,9 +190,8 @@ where
 
         let transaction_hash = id.as_hash();
 
-        let instructions = executable.into_instructions();
-
-        let (mut runtime, fee_exec_results) = Self::process_instructions(&template_provider, runtime, instructions.fee);
+        let (mut runtime, fee_exec_results) =
+            Self::process_instructions(&template_provider, runtime, instructions.fee, &blobs);
 
         let fee_exec_result = match fee_exec_results {
             Ok(execution_results) => {
@@ -200,7 +203,7 @@ where
                     return Ok(ExecuteResult {
                         finalize,
                         execution_time: timer.elapsed(),
-                        execute_epoch,
+                        execute_epoch: execute_epoch.map(Into::into),
                     });
                 }
                 execution_results
@@ -215,7 +218,7 @@ where
                 return Ok(ExecuteResult {
                     finalize: FinalizeResult::new_rejected(transaction_hash, err.to_reject_reason()),
                     execution_time: timer.elapsed(),
-                    execute_epoch,
+                    execute_epoch: execute_epoch.map(Into::into),
                 });
             },
         };
@@ -226,7 +229,7 @@ where
             .workspace_invoke(WorkspaceAction::DropAll, invoke_args![].into())?;
 
         let (mut runtime, instruction_result) =
-            Self::process_instructions(&template_provider, runtime, instructions.main);
+            Self::process_instructions(&template_provider, runtime, instructions.main, &blobs);
 
         match instruction_result {
             Ok(execution_results) => {
@@ -235,7 +238,7 @@ where
                 Ok(ExecuteResult {
                     finalize,
                     execution_time: timer.elapsed(),
-                    execute_epoch,
+                    execute_epoch: execute_epoch.map(Into::into),
                 })
             },
             // This can happen e.g if you have dangling buckets after running the instructions
@@ -248,7 +251,7 @@ where
                 Ok(ExecuteResult {
                     finalize,
                     execution_time: timer.elapsed(),
-                    execute_epoch,
+                    execute_epoch: execute_epoch.map(Into::into),
                 })
             },
         }
@@ -258,12 +261,13 @@ where
         template_provider: &TTemplateProvider,
         mut runtime: Runtime,
         instructions: Vec<Instruction>,
+        blobs: &tari_ootle_transaction::Blobs,
     ) -> (Runtime, Result<Vec<InstructionResult>, TransactionError>) {
         let result: Result<_, _> = instructions
             .into_iter()
             .enumerate()
             .map(|(idx, instruction)| {
-                Self::process_instruction(template_provider, &mut runtime, instruction)
+                Self::process_instruction(template_provider, &mut runtime, instruction, blobs)
                     .map_err(|e| TransactionError::new(idx + 1, e))
             })
             .collect();
@@ -282,6 +286,7 @@ where
         template_provider: &TTemplateProvider,
         runtime: &mut Runtime,
         instruction: Instruction,
+        blobs: &tari_ootle_transaction::Blobs,
     ) -> Result<InstructionResult, TransactionErrorKind> {
         debug!(target: LOG_TARGET, "instruction = {:?}", instruction);
         match instruction {
@@ -360,7 +365,11 @@ where
                 Ok(InstructionResult::empty())
             },
             Instruction::PublishTemplate { binary, metadata_hash } => {
-                Self::publish_template(runtime, binary, metadata_hash)
+                let bytes = blobs.get(binary).ok_or(TransactionErrorKind::BlobIndexOutOfBounds {
+                    index: binary,
+                    count: blobs.len(),
+                })?;
+                Self::publish_template(runtime, bytes, metadata_hash)
             },
             Instruction::AllocateAddress {
                 allocatable_type: substate_type,
@@ -454,7 +463,7 @@ where
                 component_scope,
                 component_lock,
                 arg_scope: Box::new(arg_scope),
-                entity_id: component.entity_id,
+                entity_id: *component.entity_id(),
             };
             (frame, resolved_args)
         } else {
@@ -464,7 +473,7 @@ where
                 component_scope,
                 component_lock,
                 arg_scope: Box::new(IndexedWellKnownTypes::new()),
-                entity_id: component.entity_id,
+                entity_id: *component.entity_id(),
             };
             (frame, vec![])
         };
@@ -567,12 +576,10 @@ where
     /// Adds a template artifact if successful
     fn publish_template(
         runtime: &mut Runtime,
-        binary: TemplateBlob,
+        binary: &[u8],
         metadata_hash: Option<MetadataHash>,
     ) -> Result<InstructionResult, TransactionErrorKind> {
         if binary.len() > limits::ENGINE_LIMITS.max_template_binary_size_bytes {
-            // Technically, not possible, but this check is kept in to make a test pass, and potentially for additional
-            // safety.
             return Err(TransactionErrorKind::WasmBinaryTooBig {
                 size: binary.len(),
                 max: limits::ENGINE_LIMITS.max_template_binary_size_bytes,
@@ -580,11 +587,12 @@ where
         }
 
         // validate binary
-        let template_def = WasmModule::validate_code(&binary)?;
-        // creating new substate
+        let template_def = WasmModule::validate_code(binary)?;
+        // The size cap above is enforced; constructing TemplateBlob is therefore infallible.
+        let blob = TemplateBlob::new_checked(binary).expect("template binary size verified above");
         runtime
             .interface_mut()
-            .publish_template(binary, metadata_hash, template_def)?;
+            .publish_template(blob, metadata_hash, template_def)?;
 
         Ok(InstructionResult::empty())
     }
@@ -619,13 +627,14 @@ where
                 // Component exists, we'll attempt deposit funds into it as necessary
 
                 // Ensure that the existing component is indeed an Account
-                if component.template_address != ACCOUNT_TEMPLATE_ADDRESS {
+                if *component.template_address() != ACCOUNT_TEMPLATE_ADDRESS {
                     return Err(TransactionErrorKind::InvalidCreateAccount {
                         component_address: account_address,
                         details: format!(
                             "A component already exists at the derived account address {}, but it is not an Account \
                              (template address: {})",
-                            account_address, component.template_address
+                            account_address,
+                            component.template_address()
                         ),
                     });
                 }
@@ -772,7 +781,7 @@ where
         args: Vec<InstructionArg>,
     ) -> Result<InstructionResult, TransactionErrorKind> {
         let (component_address, component) = runtime.interface_mut().load_component(call)?;
-        let template_address = component.template_address;
+        let template_address = *component.template_address();
 
         let template = template_provider
             .get_template(&template_address)
@@ -795,7 +804,7 @@ where
         template: LoadedTemplate,
         runtime: &mut Runtime,
         component_address: ComponentAddress,
-        component: &ComponentHeader,
+        component: &Component,
         method: &str,
         args: Vec<InstructionArg>,
     ) -> Result<InstructionResult, TransactionErrorKind> {
@@ -831,12 +840,12 @@ where
         let component_scope = IndexedWellKnownTypes::from_value(component.state())?;
 
         runtime.interface_mut().push_call_frame(PushCallFrame::ForComponent {
-            template_address: component.template_address,
+            template_address: component.header.template_address,
             module_name: template.template_name().to_string(),
             component_scope,
             component_lock,
             arg_scope: Box::new(arg_scope),
-            entity_id: component.entity_id,
+            entity_id: component.header.entity_id,
         })?;
 
         // This must come after the call frame as that defines the authorization scope

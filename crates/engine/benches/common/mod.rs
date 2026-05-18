@@ -4,7 +4,7 @@
 use tari_bor::cbor;
 use tari_engine::state_store::{StateWriter, memory::MemoryStateStore};
 use tari_engine_types::{
-    component::{ComponentBody, ComponentHeader},
+    component::{Component, ComponentBody, ComponentHeader},
     resource::Resource,
     resource_container::ResourceContainer,
     substate::Substate,
@@ -75,12 +75,13 @@ pub fn setup_store() -> MemoryStateStore {
         )
         .unwrap();
 
-    let component = ComponentHeader {
-        template_address: XTR_FAUCET_TEMPLATE_ADDRESS,
-        module_name: "XtrFaucet".to_string(),
-        owner_rule: SubstateOwnerRule::None,
-        access_rules: ComponentAccessRules::allow_all(),
-        entity_id: Default::default(),
+    let component = Component {
+        header: ComponentHeader {
+            template_address: XTR_FAUCET_TEMPLATE_ADDRESS,
+            owner_rule: SubstateOwnerRule::None,
+            access_rules: ComponentAccessRules::allow_all(),
+            entity_id: Default::default(),
+        },
         body: ComponentBody::from_cbor_value(
             cbor!({
                 "vault" => FAUCET_VAULT_ID,

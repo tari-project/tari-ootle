@@ -3,7 +3,6 @@
 
 use diesel::{Connection, SqliteConnection};
 use ootle_byte_type::ToByteType;
-use rand::rngs::OsRng;
 use tari_common_types::types::FixedHash;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, SubstateAddress, VotePower};
@@ -20,7 +19,7 @@ fn create_db() -> GlobalDb<SqliteGlobalDbAdapter<PeerAddress>> {
 }
 
 fn new_public_key() -> RistrettoPublicKey {
-    RistrettoPublicKey::random_keypair(&mut OsRng).1
+    RistrettoPublicKey::random_keypair(&mut rand::rng()).1
 }
 
 fn derived_substate_address(public_key: &RistrettoPublicKey) -> SubstateAddress {
@@ -102,7 +101,7 @@ fn change_committee_shard_group() {
     let count = validator_nodes.count(Epoch(3)).unwrap();
     assert_eq!(count, 2);
     let vns = validator_nodes
-        .get_committee_for_shard_group(Epoch(3), ShardGroup::new(4, 5), false, 100)
+        .get_committee_for_shard_group(Epoch(3), ShardGroup::new(4, 5), 100)
         .unwrap();
     assert_eq!(vns.len(), 2);
 }

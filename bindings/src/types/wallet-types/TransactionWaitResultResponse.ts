@@ -7,6 +7,6 @@ export type TransactionWaitResultResponse = {
   transaction_id: TransactionId;
   result: FinalizeResult | null;
   status: TransactionStatus;
-  final_fee: number;
+  final_fee: bigint;
   timed_out: boolean;
 };

@@ -80,18 +80,18 @@ impl OutboundMessaging for TestOutboundMessaging {
 
     async fn broadcast<T>(&mut self, shard_group: ShardGroup, message: T) -> Result<(), OutboundMessagingError>
     where T: Into<HotstuffMessage> + Send {
-        // TODO: technically we should use the consensus epoch here, but current tests will not cause this issue
+        // TODO: technically we should use the consensus epoch here, but current tests will not trigger this bug
         let epoch = self
             .epoch_manager
             .current_epoch()
             .await
             .map_err(|e| OutboundMessagingError::UpstreamError(e.into()))?;
-        let peers = self
+        let committee = self
             .epoch_manager
-            .get_committee_by_shard_group(epoch, shard_group, None, false)
+            .get_committee_by_shard_group(epoch, shard_group)
             .await
-            .map_err(|e| OutboundMessagingError::UpstreamError(e.into()))?
-            .into_addresses();
+            .map_err(|e| OutboundMessagingError::UpstreamError(e.into()))?;
+        let peers = committee.address_iter().cloned();
         self.multicast(peers, message).await
     }
 }

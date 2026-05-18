@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use log::*;
 use tokio::process::Command;
 
-use crate::process_definitions::{ProcessContext, ProcessDefinition};
+use crate::process_definitions::{ARGS_SETTINGS_KEY, ProcessContext, ProcessDefinition};
 
 #[derive(Debug, Default)]
 pub struct MinotariWallet;
@@ -74,6 +74,11 @@ impl ProcessDefinition for MinotariWallet {
                 context.network(),
                 base_node_addresses.join(",")
             ));
+        if let Some(args) = context.get_setting(ARGS_SETTINGS_KEY) {
+            for arg in args.split_whitespace() {
+                command.arg(arg);
+            }
+        }
 
         debug!("Command: {:?}", command);
 

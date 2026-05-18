@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use tari_template_lib::types::Hash32;
 
 use crate::{
+    Epoch,
     ValidatorFeeWithdrawal,
     events::Event,
     fees::FeeReceipt,
@@ -21,8 +22,7 @@ pub struct TransactionReceipt {
     pub events: Box<[Event]>,
     pub logs: Box<[LogEntry]>,
     pub fee_receipt: FeeReceipt,
-    #[serde(default)]
-    pub epoch: u64,
+    pub epoch: Epoch,
 }
 
 impl TransactionReceipt {
@@ -50,7 +50,7 @@ impl TransactionReceipt {
         &self.fee_receipt
     }
 
-    pub fn epoch(&self) -> u64 {
+    pub fn epoch(&self) -> Epoch {
         self.epoch
     }
 }
@@ -78,15 +78,15 @@ pub struct DiffSummary {
     pub upped: Box<[UpSubstate]>,
 }
 
-impl From<&SubstateDiff> for DiffSummary {
-    fn from(diff: &SubstateDiff) -> Self {
+impl DiffSummary {
+    pub fn from_diff(diff: &SubstateDiff, epoch: Epoch) -> Self {
         Self {
             upped: diff
                 .up_iter()
                 .map(|(id, s)| UpSubstate {
                     substate_id: id.clone(),
                     version: s.version(),
-                    value_hash: hash_substate(s.substate_value(), s.version()),
+                    value_hash: hash_substate(s.substate_value(), s.version(), epoch),
                 })
                 .collect(),
         }

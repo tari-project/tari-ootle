@@ -28,7 +28,6 @@ pub struct UnspentOutput {
     pub sender_public_nonce: RistrettoPublicKeyBytes,
     /// Encrypted mask and value for the recipient.
     pub encrypted_data: EncryptedData,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub minimum_value_promise: u64,
     /// If the view key is enabled for a given resource, this proof MUST be provided, otherwise it MUST NOT.
     pub viewable_balance_proof: Option<ViewableBalanceProof>,

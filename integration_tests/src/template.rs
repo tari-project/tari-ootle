@@ -22,7 +22,7 @@ use tari_template_test_tooling::compile::compile_template;
 
 use crate::{TariWorld, wallet_daemon_client::get_auth_wallet_daemon_client};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RegisteredTemplate {
     pub name: String,
     pub address: TemplateAddress,

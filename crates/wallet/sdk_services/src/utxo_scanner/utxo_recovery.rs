@@ -6,10 +6,10 @@ use std::{array, time::Duration};
 use log::*;
 use tari_engine_types::UtxoOutput;
 use tari_ootle_common_types::{
-    Network,
     optional::{IsNotFoundError, Optional},
     response_status::TransactionStatusResponseError,
 };
+use tari_ootle_transaction::Network;
 use tari_ootle_wallet_sdk::{
     WalletSdk,
     WalletSdkSpec,

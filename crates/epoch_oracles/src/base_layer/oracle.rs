@@ -9,6 +9,7 @@ use std::{
 };
 
 use log::*;
+use ootle_network::Network;
 use tari_base_node_client::{
     BaseNodeClient,
     BaseNodeClientError,
@@ -19,7 +20,7 @@ use tari_base_node_client::{
 use tari_common_types::types::FixedHash;
 use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle};
 use tari_node_components::blocks::BlockHeader;
-use tari_ootle_common_types::{Epoch, Network, displayable::Displayable, optional::Optional};
+use tari_ootle_common_types::{Epoch, displayable::Displayable, optional::Optional};
 use tokio::time;
 
 use crate::{
@@ -296,33 +297,9 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
                 self.header_buf.push((current_epoch, header_hash, header));
             }
 
-            if header_height % constants.epoch_length() == 0 {
-                info!(
-                    target: LOG_TARGET,
-                    "🟩 New epoch block {} {} {}", current_epoch, header_height, header_hash
-                );
-                self.last_epoch_hash = Some(header_hash);
-
-                // TODO: we do not handle consensus constants changing during scan here for performance reasons.
-                // constants = self.base_node_client.get_consensus_constants(header_height).await?;
-
-                // Emit EpochChanged for every boundary so every (epoch, epoch_hash) pair is persisted
-                // by the epoch manager. Consensus's get_epoch_hash(epoch) lookup depends on that
-                // row being present for any epoch it may transition into — including epochs
-                // crossed during a long catch-up.
-                info!(
-                    target: LOG_TARGET,
-                    "🟩 epoch change {}->{} (height({}) hash({}))", scan_epoch, current_epoch, header_height, header_hash
-                );
-                self.pending_events.push_back(EpochEvent::EpochChanged {
-                    epoch: current_epoch,
-                    // Set above
-                    epoch_hash: self.last_epoch_hash.unwrap_or_default(),
-                });
-                scan_epoch = current_epoch;
-            }
-
-            // if the validator node MR has changed, we need to update the active validator node set
+            // Check validator node MR changes BEFORE epoch changes so that new registrations
+            // are processed before assign_validators_for_epoch runs. This matters when the base
+            // layer updates the validator_node_mr at epoch boundary blocks.
             if self.last_scanned_validator_node_mr != Some(current_validator_node_mr) {
                 debug!(
                     target: LOG_TARGET,
@@ -357,6 +334,33 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
                 }
                 self.last_scanned_validator_node_mr = Some(current_validator_node_mr);
             }
+
+            if header_height % constants.epoch_length() == 0 {
+                info!(
+                    target: LOG_TARGET,
+                    "🟩 New epoch block {} {} {}", current_epoch, header_height, header_hash
+                );
+                self.last_epoch_hash = Some(header_hash);
+
+                // TODO: we do not handle consensus constants changing during scan here for performance reasons.
+                // constants = self.base_node_client.get_consensus_constants(header_height).await?;
+
+                // Emit EpochChanged for every boundary so every (epoch, epoch_hash) pair is persisted
+                // by the epoch manager. Consensus's get_epoch_hash(epoch) lookup depends on that
+                // row being present for any epoch it may transition into — including epochs
+                // crossed during a long catch-up.
+                info!(
+                    target: LOG_TARGET,
+                    "🟩 epoch change {}->{} (height({}) hash({}))", scan_epoch, current_epoch, header_height, header_hash
+                );
+                self.pending_events.push_back(EpochEvent::EpochChanged {
+                    epoch: current_epoch,
+                    // Set above
+                    epoch_hash: self.last_epoch_hash.unwrap_or_default(),
+                });
+                scan_epoch = current_epoch;
+            }
+
             // Track incremental progress of hash/height so a mid-loop failure can resume from the
             // last processed header. `last_scanned_tip` is intentionally NOT updated here — it
             // represents the un-lagged tip we've fully caught up to, and is set only by

@@ -78,7 +78,7 @@ impl RelayState {
     }
 
     pub fn select_random_relay(&mut self) {
-        let Some((peer, addrs)) = self.possible_relays.iter().choose(&mut rand::thread_rng()) else {
+        let Some((peer, addrs)) = self.possible_relays.iter().choose(&mut rand::rng()) else {
             return;
         };
         self.selected_relay = Some(RelayPeer {

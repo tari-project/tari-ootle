@@ -8,12 +8,12 @@ use digest::{
     Digest,
     consts::{U32, U64},
 };
+use ootle_network::Network;
 use tari_crypto::{
     hash_domain,
     hashing::{DomainSeparatedHasher, DomainSeparation},
 };
 use tari_hashing::DomainSeparatedBorshHasher;
-use tari_ootle_common_types::Network;
 
 use crate::kdfs::SafeKey64;
 
@@ -36,6 +36,16 @@ pub fn stealth_output_tag_hasher64(network: Network) -> OotleWalletHasher64<Ootl
 pub trait KdfHasher<T: ?Sized> {
     type HashOutput;
     fn kdf_digest(self, data: &T) -> Self::HashOutput;
+}
+
+impl<F, T, O> KdfHasher<T> for F
+where F: Fn(&T) -> O
+{
+    type HashOutput = O;
+
+    fn kdf_digest(self, data: &T) -> Self::HashOutput {
+        self(data)
+    }
 }
 
 impl<M: DomainSeparation, T: BorshSerialize + ?Sized> KdfHasher<T> for OotleWalletHasher64<M> {

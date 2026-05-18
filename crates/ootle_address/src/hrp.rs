@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use bech32::Hrp;
-use tari_ootle_common_types::Network;
+use ootle_network::Network;
 
 pub(crate) const HRP_MAINNET: Hrp = Hrp::parse_unchecked("otl_");
 pub(crate) const HRP_LOCALNET: Hrp = Hrp::parse_unchecked("otl_loc_");
@@ -11,7 +11,7 @@ pub(crate) const HRP_IGOR: Hrp = Hrp::parse_unchecked("otl_igr_");
 pub(crate) const HRP_NEXTNET: Hrp = Hrp::parse_unchecked("otl_nxt_");
 pub(crate) const HRP_STAGENET: Hrp = Hrp::parse_unchecked("otl_stg_");
 
-pub const fn hrp_from_network(network: Network) -> Hrp {
+pub(crate) const fn hrp_from_network(network: Network) -> Hrp {
     match network {
         Network::MainNet => HRP_MAINNET,
         Network::LocalNet => HRP_LOCALNET,
@@ -22,7 +22,7 @@ pub const fn hrp_from_network(network: Network) -> Hrp {
     }
 }
 
-pub fn network_from_hrp(hrp: &Hrp) -> Option<Network> {
+pub(crate) fn network_from_hrp(hrp: &Hrp) -> Option<Network> {
     if *hrp == HRP_MAINNET {
         Some(Network::MainNet)
     } else if *hrp == HRP_LOCALNET {

@@ -22,7 +22,8 @@ use tari_consensus_types::{
     ToSignatureMessage,
 };
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
-use tari_ootle_common_types::{Epoch, ExtraData, Network, NodeHeight, NumPreshards, ShardGroup, hashing};
+use tari_ootle_common_types::{Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup, hashing};
+use tari_ootle_transaction::Network;
 use tari_sidechain::{BlockHeaderHashFields, BlockHeaderHashFieldsV1};
 use tari_state_tree::{TreeHash, compute_merkle_root_for_hashes};
 use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
@@ -53,7 +54,6 @@ pub struct BlockHeader {
     /// The public key of the proposer.
     proposed_by: RistrettoPublicKeyBytes,
     /// The total leader fee for this block. This should match the sum of the leader fees in the block's body.
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     total_leader_fee: u64,
     /// A Merkle root hash committing to all state after this block has been applied.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
@@ -67,7 +67,6 @@ pub struct BlockHeader {
     signature: Option<SchnorrSignatureBytes>,
     /// The Unix Epoch timestamp indicating the creation time of the block. Currently, this can be chosen arbitrarily
     /// and is only informational/used for metrics.
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     timestamp: u64,
     /// The epoch hash is a hash given by the epoch oracle. E.g. the base layer epoch oracle gives the first block hash
     /// of the epoch.

@@ -33,9 +33,9 @@ use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleConfig,
     p2p_config::{P2pConfig, PeerSeedsConfig, RpcConfig},
 };
-use tari_ootle_common_types::Network;
+use tari_ootle_transaction::Network;
 
-use crate::state_store_template_provider::TemplateConfig;
+use crate::memory_cache_template_provider::TemplateConfig;
 
 #[derive(Debug, Clone)]
 pub struct ApplicationConfig {
@@ -184,12 +184,19 @@ pub struct ConsensusConfig {
     /// proposals from other validators, including voting in the affirmative if applicable, but will never propose
     /// evictions itself.
     pub enable_eviction_proposal: bool,
+    /// Skip the state sync check on startup and go directly into consensus. This makes `check_sync` always report
+    /// up-to-date, so the node will never enter the syncing state. Intended for local development and recovery
+    /// scenarios — running with this enabled against a network where the node is actually behind will cause
+    /// consensus to misbehave.
+    #[serde(default)]
+    pub skip_sync: bool,
 }
 
 impl Default for ConsensusConfig {
     fn default() -> Self {
         Self {
             enable_eviction_proposal: true,
+            skip_sync: false,
         }
     }
 }

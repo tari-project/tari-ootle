@@ -23,6 +23,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useErrorNotification } from "@/contexts/ErrorNotificationContext";
 import { useAccountsCreateFreeTestCoins } from "@api/hooks/useAccounts";
+import { useWalletInfo } from "@api/hooks/useWalletInfo";
 import queryClient from "@api/queryClient";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import Button from "@mui/material/Button";
@@ -37,6 +38,7 @@ function ClaimCoinsButton() {
   const account = useAccountStore((s) => s.account);
   const { showError, showSuccess } = useErrorNotification();
   const [hasClaimed, setHasClaimed] = useState(false);
+  const { data: walletInfo } = useWalletInfo();
 
   const theme = useTheme();
   const isLg = useMediaQuery(theme.breakpoints.up("md"));
@@ -78,6 +80,10 @@ function ClaimCoinsButton() {
   }, [accountAddress]);
 
   if (!account || !accountAddress) {
+    return <></>;
+  }
+
+  if (!walletInfo || walletInfo.network === "mainnet") {
     return <></>;
   }
 

@@ -29,7 +29,6 @@ use tari_ootle_common_types::{
     Epoch,
     ExtraData,
     ExtraFieldKey,
-    Network,
     NodeHeight,
     NumPreshards,
     ShardGroup,
@@ -40,7 +39,7 @@ use tari_ootle_common_types::{
     optional::Optional,
     shard::Shard,
 };
-use tari_ootle_transaction::TransactionId;
+use tari_ootle_transaction::{Network, TransactionId};
 use tari_state_tree::{SparseMerkleProofExt, StateTreeError, TreeHash, Version, compute_proof_for_hashes};
 use tari_template_lib_types::{
     TransactionReceiptAddress,

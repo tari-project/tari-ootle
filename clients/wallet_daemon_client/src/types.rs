@@ -38,7 +38,7 @@ use tari_ootle_common_types::{
     substate_type::SubstateType,
 };
 use tari_ootle_template_metadata::{MetadataHash, TemplateMetadata};
-use tari_ootle_transaction::{Instruction, Transaction, TransactionId, UnsignedTransaction};
+use tari_ootle_transaction::{Instruction, PrunedTransaction, TransactionId, UnsignedTransaction};
 use tari_ootle_wallet_sdk::{
     apis::{
         confidential_transfer::UtxoInputSelection,
@@ -99,9 +99,6 @@ pub struct CallInstructionRequest {
     pub instructions: Vec<Instruction>,
     #[serde(deserialize_with = "string_or_struct")]
     pub fee_account: ComponentAddressOrName,
-    #[serde(default, deserialize_with = "opt_string_or_struct")]
-    pub dump_outputs_into: Option<ComponentAddressOrName>,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub max_fee: u64,
     #[serde(default)]
     pub inputs: Vec<SubstateRequirement>,
@@ -158,7 +155,6 @@ pub struct TransactionSubmitDryRunResponse {
     /// and actual submission (the vault balance changes with a different max_fee, which can shift
     /// `floor(total_bytes / 4)` by 1 at a rounding boundary). Non-refundable overcharge is
     /// subtracted since it won't recur with a tighter max_fee.
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub required_fees: u64,
     pub result: ExecuteResult,
 }
@@ -173,9 +169,12 @@ pub struct TransactionSubmitManifestRequest {
     /// Additional signing keys for accounts involved in the transaction (e.g. for multi-account manifests).
     #[serde(default)]
     pub signing_key_ids: Vec<KeyId>,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub max_fee: u64,
     pub dry_run: bool,
+    /// Blob payloads referenced from the manifest via `blob!(name)`. Keys are the names used
+    /// in the manifest text; values are base64-encoded byte payloads in JSON.
+    #[serde(default)]
+    pub blobs: HashMap<String, tari_ootle_transaction::Blob>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -198,7 +197,6 @@ pub struct PublishTemplateRequest {
     pub binary: Vec<u8>,
     #[serde(deserialize_with = "opt_string_or_struct")]
     pub fee_account: Option<ComponentAddressOrName>,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub max_fee: u64,
     /// Attempt to infer inputs and their dependencies from instructions. If false, the provided transaction must
     /// contain the required inputs.
@@ -245,7 +243,9 @@ pub struct TransactionGetRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct TransactionGetResponse {
-    pub transaction: Transaction,
+    /// Pruned transaction — blob commitments are present but raw blob bytes are omitted to
+    /// keep API responses small. Use a separate endpoint to fetch blob payloads if required.
+    pub transaction: PrunedTransaction,
     pub result: Option<FinalizeResult>,
     pub status: TransactionStatus,
     /// The estimated fee required for the transaction. For dry runs, this is the minimum fee
@@ -299,7 +299,6 @@ pub struct TransactionWaitResultResponse {
     pub transaction_id: TransactionId,
     pub result: Option<FinalizeResult>,
     pub status: TransactionStatus,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub final_fee: u64,
     pub timed_out: bool,
 }
@@ -363,7 +362,6 @@ pub struct KeysListResponse {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct KeysSetActiveRequest {
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub index: u64,
 }
 
@@ -384,7 +382,6 @@ pub struct KeysCreateRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct KeysCreateResponse {
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub id: u64,
     pub public_key: RistrettoPublicKeyBytes,
 }
@@ -425,10 +422,8 @@ pub struct AccountsCreateOrGetResponse {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AccountsListRequest {
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub offset: u64,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub limit: u64,
+    pub offset: u32,
+    pub limit: u32,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -442,7 +437,6 @@ pub struct AccountInfo {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AccountsListResponse {
     pub accounts: Vec<AccountInfo>,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub total: u64,
 }
 
@@ -557,8 +551,7 @@ pub struct AccountsTransferRequest {
     pub amount: Amount,
     pub resource_address: ResourceAddress,
     pub destination_public_key: RistrettoPublicKeyBytes,
-    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
-    pub max_fee: Option<u64>,
+    pub max_fee: u64,
     pub proof_from_badge_resource: Option<ResourceAddress>,
     pub dry_run: bool,
 }
@@ -585,7 +578,6 @@ pub struct ProofsGenerateRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct ProofsGenerateResponse {
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub proof_id: WalletLockId,
     pub proof: ConfidentialWithdrawProof,
 }
@@ -604,7 +596,6 @@ pub struct ProofsFinalizeResponse {}
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct ProofsCancelRequest {
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub proof_id: WalletLockId,
 }
 
@@ -631,8 +622,7 @@ pub struct ConfidentialTransferRequest {
     pub input_selection: UtxoInputSelection,
     pub resource_address: ResourceAddress,
     pub destination_address: OotleAddress,
-    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
-    pub max_fee: Option<u64>,
+    pub max_fee: u64,
     pub output_to_revealed: bool,
     pub proof_from_badge_resource: Option<ResourceAddress>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -654,7 +644,6 @@ pub struct ConfidentialViewVaultBalanceRequest {
     pub minimum_expected_value: Option<u64>,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub maximum_expected_value: Option<u64>,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub view_key_id: u64,
 }
 
@@ -670,8 +659,7 @@ pub struct ConfidentialViewVaultBalanceResponse {
 pub struct ClaimBurnRequest {
     pub account: ComponentAddressOrName,
     pub claim_proof: ClaimBurnProof,
-    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
-    pub max_fee: Option<u64>,
+    pub max_fee: u64,
     pub is_dry_run: bool,
 }
 
@@ -708,8 +696,7 @@ pub struct ProofsCancelResponse {}
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AccountsCreateFreeTestCoinsRequest {
     pub account: ComponentAddressOrName,
-    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
-    pub max_fee: Option<u64>,
+    pub max_fee: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -718,7 +705,6 @@ pub struct AccountsCreateFreeTestCoinsResponse {
     pub account: Account,
     pub transaction_id: TransactionId,
     pub amount: Amount,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub fee: u64,
     pub result: FinalizeResult,
     pub address: OotleAddress,
@@ -842,7 +828,6 @@ pub struct MintFaucetNftRequest {
     #[cfg_attr(feature = "ts", ts(type = "object"))]
     pub mutable_data: serde_json::Value,
     pub number_to_mint: u64,
-    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub max_fee: Option<u64>,
 }
 
@@ -868,10 +853,8 @@ pub type GetNftResponse = NonFungibleToken;
 pub struct ListNftsRequest {
     #[serde(deserialize_with = "opt_string_or_struct")]
     pub account: Option<ComponentAddressOrName>,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub limit: u64,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub offset: u64,
+    pub limit: u32,
+    pub offset: u32,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -924,7 +907,6 @@ pub struct GetValidatorFeesResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct FeePoolDetails {
     pub address: ValidatorFeePoolAddress,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub amount: u64,
 }
 
@@ -935,8 +917,7 @@ pub struct ClaimValidatorFeesRequest {
     pub account: Option<ComponentAddressOrName>,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub claim_key_index: Option<u64>,
-    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
-    pub max_fee: Option<u64>,
+    pub max_fee: u64,
     pub shards: Vec<Shard>,
     pub dry_run: bool,
 }
@@ -945,7 +926,6 @@ pub struct ClaimValidatorFeesRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct ClaimValidatorFeesResponse {
     pub transaction_id: TransactionId,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub fee: u64,
     pub result: FinalizeResult,
 }
@@ -1049,10 +1029,8 @@ pub struct TemplatesGetResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct TemplatesListAuthoredRequest {
     pub author_public_key: Option<RistrettoPublicKeyBytes>,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub page: u64,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub page_size: u64,
+    pub page: u32,
+    pub page_size: u32,
 }
 
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
@@ -1081,7 +1059,6 @@ impl From<AuthoredTemplateModel> for AuthoredTemplate {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct TemplatesListAuthoredResponse {
     pub templates: Vec<AuthoredTemplate>,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub total_templates: u64,
 }
 
@@ -1198,7 +1175,6 @@ pub struct TransferNftRequest {
     #[serde(deserialize_with = "string_or_struct")]
     pub source_account: ComponentAddressOrName,
     pub target_account_address: OotleAddress,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub max_fee: u64,
     pub dry_run: bool,
 }
@@ -1207,9 +1183,7 @@ pub struct TransferNftRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct TransferNftResponse {
     pub transaction_id: TransactionId,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub fee: u64,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub fee_refunded: u64,
     pub result: FinalizeResult,
 }
@@ -1281,7 +1255,6 @@ pub struct StealthTransferRequest {
     #[serde(default, skip_serializing_if = "BadgeUsage::is_none")]
     pub badge_usage: BadgeUsage,
     pub transfers: Vec<StealthTransfer>,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub max_fee: u64,
     pub dry_run: bool,
 }

@@ -25,7 +25,6 @@ use tokio::{
 };
 
 use crate::{
-    DEFAULT_FEE,
     WalletSdk,
     handlers::{accounts::execute_claim_burn, helpers::complete_burn_proof_to_contents},
 };
@@ -362,6 +361,38 @@ impl AutoClaimBurnService {
                 ))
             })?;
 
+        let resp = execute_claim_burn(
+            &self.sdk,
+            &self.transaction_service,
+            &account,
+            proof_contents.clone(),
+            1,
+            true,
+            Some(file_name.to_string()),
+        )
+        .await
+        .map_err(ClaimError::Permanent)?;
+
+        let Some(result) = resp.dry_run_result else {
+            return Err(ClaimError::Permanent(anyhow::anyhow!(
+                "NEVER HAPPEN: Dry run failed for '{}', cannot submit claim: no result returned for dry run.",
+                file_name,
+            )));
+        };
+        if let Some(reason) = result.finalize.any_reject() {
+            return Err(ClaimError::Permanent(anyhow::anyhow!(
+                "Dry run rejected for '{}': {}. Cannot submit claim.",
+                file_name,
+                reason,
+            )));
+        }
+        let Some(required_fees) = resp.required_fees else {
+            return Err(ClaimError::Permanent(anyhow::anyhow!(
+                "NEVER HAPPEN: Dry run failed for '{}', cannot submit claim: no required fees for dry run.",
+                file_name,
+            )));
+        };
+
         // Delegate all crypto work and submission to the shared handler function.
         // Any error here is treated as permanent: by this point the file is readable and the account
         // is known, so failures indicate a bad proof (wrong key, ownership check failed, fee too high,
@@ -371,7 +402,7 @@ impl AutoClaimBurnService {
             &self.transaction_service,
             &account,
             proof_contents,
-            DEFAULT_FEE,
+            required_fees,
             false,
             Some(file_name.to_string()),
         )

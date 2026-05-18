@@ -63,11 +63,11 @@ use tari_ootle_app_utilities::{
     seed_peer::SeedPeer,
     transaction_executor::TariTransactionProcessor,
 };
-use tari_ootle_common_types::{Network, services::template_provider::TemplateProvider};
+use tari_ootle_common_types::services::template_provider::TemplateProvider;
 use tari_ootle_p2p::{PeerAddress, TariMessagingSpec};
 use tari_ootle_storage::{StateStore, global::GlobalDb};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_ootle_transaction::Transaction;
+use tari_ootle_transaction::{Network, Transaction};
 use tari_rpc_framework::RpcServer;
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_rocksdb::DatabaseOptions;
@@ -84,8 +84,15 @@ use crate::{
     ValidatorNodeEpochManagerSpec,
     ValidatorNodeStateStore,
     base_layer::verify_correct_network,
-    consensus::{self, ConsensusHandle, TariBlockTransactionExecutor, ValidationContext},
+    consensus::{
+        self,
+        ConsensusHandle,
+        TariBlockTransactionExecutor,
+        ValidationContext,
+        spec::ValidatorTemplateProvider,
+    },
     file_l1_submitter::FileLayerOneSubmitter,
+    memory_cache_template_provider::MemoryCacheTemplateProvider,
     migrations,
     p2p::{
         NopLogger,
@@ -96,7 +103,6 @@ use crate::{
             messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
         },
     },
-    state_store_template_provider::StateStoreTemplateProvider,
     transaction_validators::{
         BasicValidations,
         EpochRangeValidator,
@@ -172,9 +178,9 @@ pub async fn spawn_services(
             ],
             swarm: SwarmConfig {
                 protocol_version: format!("/tari/{}/0.0.1", config.network).parse()?,
-                user_agent: "/tari/validator/0.0.1".to_string(),
+                user_agent: format!("/tari/validator/{}", env!("CARGO_PKG_VERSION")),
                 enable_mdns: config.validator_node.p2p.enable_mdns,
-                enable_relay: true,
+                enable_relay: config.validator_node.p2p.enable_relay,
                 // TODO: allow node operator to configure
                 relay_circuit_limits: RelayCircuitLimits::high(),
                 relay_reservation_limits: RelayReservationLimits::high(),
@@ -260,7 +266,11 @@ pub async fn spawn_services(
 
     info!(target: LOG_TARGET, "Template manager initializing");
     // Template manager
-    let template_provider = StateStoreTemplateProvider::new(state_store.clone(), &config.validator_node.templates);
+    let wasm_cache_dir = config.validator_node.data_dir.join("wasm_cache");
+    let template_provider = MemoryCacheTemplateProvider::new(
+        tari_engine::wasm::DiskCachedWasmTemplateProvider::open(state_store.clone(), wasm_cache_dir)?,
+        &config.validator_node.templates,
+    );
 
     info!(target: LOG_TARGET, "Payload processor initializing");
     // Payload processor
@@ -298,6 +308,7 @@ pub async fn spawn_services(
     let transaction_processor = TariTransactionProcessor::new(
         template_provider.clone(),
         fee_table.clone(),
+        false,
         Arc::new(TariClaimBurnProofVerifier::new(config.network, global_db.clone())),
     );
     let transaction_executor = TariBlockTransactionExecutor::new(
@@ -397,7 +408,7 @@ pub struct Services<TStore> {
     pub networking: NetworkingHandle<TariMessagingSpec>,
     pub mempool: MempoolHandle,
     pub epoch_manager: EpochManagerHandle<PeerAddress>,
-    pub template_provider: StateStoreTemplateProvider<ValidatorNodeStateStore>,
+    pub template_provider: ValidatorTemplateProvider,
     pub consensus_handle: ConsensusHandle,
     pub state_store: TStore,
     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,

@@ -11,9 +11,9 @@ use tari_engine_types::{
     substate::{Substate, SubstateId},
 };
 use tari_indexer_client::types::WatchedSubstateItem;
+use tari_ootle_address::Network;
 use tari_ootle_common_types::{
     Epoch,
-    Network,
     StateVersion,
     optional::{IsNotFoundError, Optional},
     response_status::{ResponseErrorStatus, TransactionStatusResponseError},

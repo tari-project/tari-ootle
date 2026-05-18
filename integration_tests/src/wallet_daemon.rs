@@ -27,7 +27,7 @@ use std::{
 
 use reqwest::Url;
 use tari_common::configuration::CommonConfig;
-use tari_ootle_common_types::Network;
+use tari_ootle_address::Network;
 use tari_ootle_transaction::TransactionId;
 use tari_ootle_walletd::{
     config::{ApplicationConfig, WalletDaemonAuth, WalletDaemonConfig},
@@ -156,7 +156,7 @@ impl TariWalletDaemonProcess {
         let req = ClaimBurnRequest {
             account: ComponentAddressOrName::Name(account_name.into()),
             claim_proof,
-            max_fee: Some(5000),
+            max_fee: 5000,
             is_dry_run: false,
         };
 

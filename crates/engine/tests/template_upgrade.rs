@@ -82,7 +82,7 @@ fn it_migrates_to_a_new_template() {
         .get_components_by_template_address(v2_template)
         .unwrap()
         .remove(0);
-    assert_eq!(component.template_address, v2_template);
+    assert_eq!(*component.template_address(), v2_template);
 }
 
 #[test]
@@ -109,7 +109,7 @@ fn it_migrates_to_a_new_template_with_args() {
         .get_components_by_template_address(v2_template)
         .unwrap()
         .remove(0);
-    assert_eq!(component.template_address, v2_template);
+    assert_eq!(*component.template_address(), v2_template);
 
     let new_data = IndexedValue::from_value(component.into_state())
         .unwrap()
@@ -151,7 +151,7 @@ fn it_denies_migration_if_not_owner() {
         .get_components_by_template_address(v1_template)
         .unwrap()
         .remove(0);
-    assert_eq!(component.template_address, v1_template);
+    assert_eq!(*component.template_address(), v1_template);
 }
 
 #[test]
@@ -237,7 +237,7 @@ fn it_migrates_to_a_new_template_without_migration_call() {
         .get_components_by_template_address(v2_template)
         .unwrap()
         .remove(0);
-    assert_eq!(component.template_address, v2_template);
+    assert_eq!(*component.template_address(), v2_template);
 }
 
 #[test]

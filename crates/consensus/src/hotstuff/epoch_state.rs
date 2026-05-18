@@ -1,6 +1,8 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::sync::Arc;
+
 use tari_common_types::types::FixedHash;
 use tari_epoch_manager::{EpochManagerError, EpochManagerReader};
 use tari_ootle_common_types::{
@@ -15,7 +17,7 @@ pub struct EpochState<TAddr> {
     // /// The shard group for the local validator in the current epoch
     // pub registered_shard_group: Option<ShardGroup>,
     pub local_committee_info: CommitteeInfo,
-    pub local_committee: Committee<TAddr>,
+    pub local_committee: Arc<Committee<TAddr>>,
 }
 
 impl<TAddr> EpochState<TAddr> {

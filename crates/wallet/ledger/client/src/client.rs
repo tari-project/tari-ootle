@@ -92,7 +92,7 @@ mod tests {
     use crate::speculos_transport::SpeculosTransport;
 
     #[tokio::test]
-    #[ignore = "Requires Speculos to be running with the minotari_ledger_wallet app."]
+    #[ignore = "Requires Speculos to be running with the ootle ledger app."]
     async fn basic_instructions() {
         let transport = SpeculosTransport::new();
         let client = LedgerClient::new(transport);

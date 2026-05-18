@@ -51,7 +51,7 @@ pub struct SqliteStoreWriteTransaction<'a> {
 }
 
 impl<'a> SqliteStoreWriteTransaction<'a> {
-    pub fn new(transaction: SqliteTransaction<'a>) -> Self {
+    pub fn new(transaction: SqliteTransaction<&'a mut SqliteConnection>) -> Self {
         Self {
             transaction: Some(SqliteStoreReadTransaction::new(transaction)),
         }
@@ -113,7 +113,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                             substate_transitions::is_up.eq(proof.is_create()),
                             substate_transitions::value_hash.eq(proof
                                 .as_create()
-                                .map(|v| serialize_hex(v.substate.value.to_value_hash(proof.version())))),
+                                .map(|v| serialize_hex(v.substate.value.to_value_hash(proof.version(), epoch)))),
                         )
                     })
                     .collect::<Vec<_>>(),
@@ -191,12 +191,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             .value
             .value()
             .and_then(|s| s.component())
-            .map(|c| c.template_address.to_string());
-        let module_name = substate
-            .value
-            .value()
-            .and_then(|s| s.component())
-            .map(|c| c.module_name.clone());
+            .map(|c| c.template_address().to_string());
         let new_substate = NewSubstate {
             address: substate.substate_id.to_string(),
             version: substate.version as i32,
@@ -207,7 +202,8 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                 .transpose()?
                 .unwrap_or_default(),
             template_address,
-            module_name,
+            // Never set
+            module_name: None,
         };
 
         let address = &new_substate.address;

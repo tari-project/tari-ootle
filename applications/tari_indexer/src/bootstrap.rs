@@ -30,7 +30,7 @@ use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common::configuration::bootstrap::{ApplicationType, grpc_default_port};
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_engine::wasm::WasmModule;
+use tari_engine::wasm::WasmModuleCache;
 use tari_engine_types::{calculate_template_binary_hash, published_template::PublishedTemplateMetadata};
 use tari_epoch_manager::service::{EpochManagerConfig, EpochManagerHandle};
 use tari_epoch_oracles::{
@@ -57,14 +57,16 @@ use tari_ootle_app_utilities::{
     seed_peer::SeedPeer,
     shared_consts::TXTR_FAUCET_INITIAL_SUPPLY,
 };
-use tari_ootle_common_types::{Network, optional::Optional};
+use tari_ootle_common_types::optional::Optional;
 use tari_ootle_p2p::{PeerAddress, TariMessagingSpec};
 use tari_ootle_storage::global::GlobalDb;
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
+use tari_ootle_transaction::Network;
 use tari_shutdown::ShutdownSignal;
 use tari_template_builtin::all_builtin_templates;
 use tari_template_lib_types::{Amount, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
+use tokio::task;
 
 use crate::{
     ApplicationConfig,
@@ -128,7 +130,7 @@ pub async fn spawn_services(
             ],
             swarm: SwarmConfig {
                 protocol_version: format!("/tari/{}/0.0.1", config.network).parse().expect("Failed to parse protocol version"),
-                user_agent: "/tari/indexer/0.0.1".to_string(),
+                user_agent: format!("/tari/indexer/{}", env!("CARGO_PKG_VERSION")),
                 enable_mdns: config.indexer.p2p.enable_mdns,
                 enable_relay: true,
                 relay_circuit_limits: RelayCircuitLimits::high(),
@@ -168,13 +170,13 @@ pub async fn spawn_services(
 
     // Connect to substate db
     let store = SqliteIndexerStore::try_create(config.state_db_path())?;
-    check_store(config, &store)?;
+    check_store(config, &store).await?;
 
-    seed_builtin_template_catalogue(&store)?;
+    seed_builtin_template_catalogue(&store).await?;
 
     if config.network.is_testnet() {
         // TODO: We happen to know that the testnet faucet mints u64::MAX tXTR. This is hacky.
-        hack_xtr_initial_supply(&store)?;
+        hack_xtr_initial_supply(&store).await?;
     }
 
     // Epoch event oracle
@@ -243,7 +245,25 @@ pub async fn spawn_services(
     let substate_manager = substate_manager.with_metrics(metrics_registry);
 
     // Template manager
-    let template_manager = TemplateManager::initialize(global_db.clone(), substate_manager.clone())?;
+    let wasm_cache_dir = config.indexer.data_dir.join("wasm_cache");
+
+    let template_manager = task::spawn_blocking({
+        let global_db = global_db.clone();
+        let substate_manager = substate_manager.clone();
+        move || {
+            let wasm_cache = WasmModuleCache::open(&wasm_cache_dir).map_err(|e| {
+                anyhow!(
+                    "Failed to open WASM module cache at {}: {}",
+                    wasm_cache_dir.display(),
+                    e,
+                )
+            })?;
+            let manager = TemplateManager::initialize(global_db, substate_manager, wasm_cache)?;
+            anyhow::Ok(manager)
+        }
+    })
+    .await
+    .context("template manager init thread panicked")??;
 
     // Dry run - use a shorter cache TTL for more accurate fee estimates
     let dry_run_substate_manager = substate_manager
@@ -402,56 +422,61 @@ async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHea
     Ok(HybridEpochOracle::new(configured_oracle, base_layer_oracle, trigger))
 }
 
-fn check_store<TStore: IndexerStore>(config: &ApplicationConfig, store: &TStore) -> anyhow::Result<()> {
-    store.with_write_tx(|tx| {
-        match tx.key_value_get_value::<_, Network>(Key::Network).optional()? {
-            Some(network) => {
-                if network != config.network {
-                    return Err(anyhow!(
-                        "The network in the database ({}) does not match the configured network ({})",
-                        network,
-                        config.network
-                    ));
-                }
-                Ok(())
-            },
-            None => {
-                // If the network is not set, we can assume this is a new store and we can set it
-                tx.key_value_set(Key::Network, config.network)
-                    .map_err(|e| anyhow!("Failed to set network in the store: {}", e))
-            },
-        }
-    })
+async fn check_store<TStore: IndexerStore>(config: &ApplicationConfig, store: &TStore) -> anyhow::Result<()> {
+    let configured_network = config.network;
+    store
+        .with_write_tx(move |tx| {
+            match tx.key_value_get_value::<_, Network>(Key::Network).optional()? {
+                Some(network) => {
+                    if network != configured_network {
+                        return Err(anyhow!(
+                            "The network in the database ({}) does not match the configured network ({})",
+                            network,
+                            configured_network
+                        ));
+                    }
+                    Ok(())
+                },
+                None => {
+                    // If the network is not set, we can assume this is a new store and we can set it
+                    tx.key_value_set(Key::Network, configured_network)
+                        .map_err(|e| anyhow!("Failed to set network in the store: {}", e))
+                },
+            }
+        })
+        .await
 }
 
-fn seed_builtin_template_catalogue<TStore: IndexerStore>(store: &TStore) -> anyhow::Result<()> {
-    store.with_write_tx(|tx| {
-        for (address, code) in all_builtin_templates() {
-            let loaded = WasmModule::load_template_from_code(code)
-                .map_err(|e| anyhow!("Failed to load built-in template: {e}"))?;
-            let binary_hash = calculate_template_binary_hash(code);
-            let metadata = PublishedTemplateMetadata {
-                template_name: loaded.template_name().to_string(),
-                author_public_key: RistrettoPublicKeyBytes::default(),
-                binary_hash,
-                at_epoch: 0,
-                metadata_hash: None,
-            };
-            tx.upsert_template_catalogue(address, &metadata)?;
-        }
-        Ok(())
-    })
+async fn seed_builtin_template_catalogue<TStore: IndexerStore>(store: &TStore) -> anyhow::Result<()> {
+    store
+        .with_write_tx(|tx| {
+            for template in all_builtin_templates() {
+                let binary_hash = calculate_template_binary_hash(template.binary);
+                let metadata = PublishedTemplateMetadata {
+                    template_name: template.name.to_string(),
+                    author_public_key: RistrettoPublicKeyBytes::default(),
+                    binary_hash,
+                    at_epoch: 0,
+                    metadata_hash: None,
+                };
+                tx.upsert_template_catalogue(&template.address, &metadata)?;
+            }
+            Ok(())
+        })
+        .await
 }
 
-fn hack_xtr_initial_supply<TStore: IndexerStore>(store: &TStore) -> anyhow::Result<()> {
-    store.with_write_tx(|tx| {
-        // Check if the initial supply is already set
-        let existing_supply: Option<Amount> = tx.key_value_get_value(Key::XtrAccumulatedClaimed).optional()?;
-        if existing_supply.is_some() {
-            return Ok(());
-        }
+async fn hack_xtr_initial_supply<TStore: IndexerStore>(store: &TStore) -> anyhow::Result<()> {
+    store
+        .with_write_tx(|tx| {
+            // Check if the initial supply is already set
+            let existing_supply: Option<Amount> = tx.key_value_get_value(Key::XtrAccumulatedClaimed).optional()?;
+            if existing_supply.is_some() {
+                return Ok(());
+            }
 
-        tx.key_value_set(Key::XtrAccumulatedClaimed, TXTR_FAUCET_INITIAL_SUPPLY)
-            .map_err(|e| anyhow!("Failed to set XTR initial supply in the store: {}", e))
-    })
+            tx.key_value_set(Key::XtrAccumulatedClaimed, TXTR_FAUCET_INITIAL_SUPPLY)
+                .map_err(|e| anyhow!("Failed to set XTR initial supply in the store: {}", e))
+        })
+        .await
 }

@@ -13,6 +13,7 @@ pub enum Instruction {
     GetVersion = 0x01,
     GetAppName = 0x02,
     GetPublicKey = 0x03,
+    SignTransaction = 0x04,
 }
 
 impl TryFrom<u8> for Instruction {
@@ -23,6 +24,7 @@ impl TryFrom<u8> for Instruction {
             0x01 => Ok(Instruction::GetVersion),
             0x02 => Ok(Instruction::GetAppName),
             0x03 => Ok(Instruction::GetPublicKey),
+            0x04 => Ok(Instruction::SignTransaction),
 
             _ => Err(()),
         }

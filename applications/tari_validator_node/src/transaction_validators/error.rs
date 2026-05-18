@@ -2,9 +2,9 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use tari_networking::NetworkingError;
-use tari_ootle_common_types::{Epoch, Network};
+use tari_ootle_common_types::Epoch;
 use tari_ootle_storage::{StorageError, consensus_models::TransactionPoolError};
-use tari_ootle_transaction::TransactionId;
+use tari_ootle_transaction::{Network, TransactionId};
 use tari_template_lib::types::TemplateAddress;
 
 #[derive(thiserror::Error, Debug)]

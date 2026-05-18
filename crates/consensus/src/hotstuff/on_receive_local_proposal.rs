@@ -5,6 +5,7 @@ use std::{collections::HashSet, time::Duration};
 
 use log::*;
 use ootle_byte_type::ToByteType;
+use tari_common_types::types::FixedHash;
 use tari_consensus_types::{
     Decision,
     HighPc,
@@ -16,7 +17,7 @@ use tari_consensus_types::{
     TimeoutVoteMessage,
     ValidatorSignatureBytes,
 };
-use tari_epoch_manager::EpochManagerReader;
+use tari_epoch_manager::{EpochManagerError, EpochManagerReader};
 use tari_ootle_common_types::{
     Epoch,
     NodeHeight,
@@ -77,6 +78,17 @@ pub struct OnReceiveLocalProposalHandler<TConsensusSpec: ConsensusSpec> {
     on_receive_foreign_proposal: OnReceiveForeignProposalHandler<TConsensusSpec>,
     tx_events: broadcast::WeakSender<HotstuffEvent>,
     hooks: TConsensusSpec::Hooks,
+    /// EOE block whose `next_epoch` could not be looked up locally (oracle is lagging).
+    /// We commit the EOE on disk (peers attest with 2f+1) but defer next-genesis creation
+    /// until the local oracle observes the new epoch.
+    pending_end_of_epoch: Option<PendingEndOfEpoch>,
+}
+
+#[derive(Debug, Clone)]
+struct PendingEndOfEpoch {
+    eoe_block: Block,
+    commit_qc: ProposalCertificate,
+    next_genesis_state_merkle_root: FixedHash,
 }
 
 impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec> {
@@ -122,6 +134,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 transaction_manager,
             ),
             change_set: None,
+            pending_end_of_epoch: None,
         }
     }
 
@@ -433,7 +446,13 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
         // THere should only be one committed block with end of epoch
         if let Some(eoe_block) = block_decision.take_end_of_epoch_block() {
-            self.process_end_of_epoch(eoe_block, valid_block).await?;
+            // The QC of the block we're processing is the QC that committed the EOE via the
+            // 3-chain rule. Use it as the commit proof and the tip's state merkle root as the
+            // genesis state.
+            let commit_qc = valid_block.justify().clone();
+            let next_genesis_state_merkle_root = *valid_block.block().state_merkle_root();
+            self.process_end_of_epoch(eoe_block, commit_qc, next_genesis_state_merkle_root)
+                .await?;
         }
 
         self.propose_foreign_proposals(local_committee_info, block_decision.commit_blocks);
@@ -449,18 +468,38 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
     async fn process_end_of_epoch(
         &mut self,
         eoe_block: Block,
-        valid_tip_block: ValidBlock,
+        commit_qc: ProposalCertificate,
+        next_genesis_state_merkle_root: FixedHash,
     ) -> Result<(), HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "process-end-of-epoch");
         let prev_epoch = eoe_block.epoch();
         let next_epoch = prev_epoch + Epoch(1);
 
+        // Pre-flight: confirm the local oracle has observed `next_epoch`. If not, the EOE has been
+        // committed (peers attest with 2f+1) but we cannot stamp a deterministic genesis yet.
+        // Defer until the oracle catches up; `try_resume_pending_end_of_epoch` will retry from
+        // `on_epoch_manager_event` or worker startup.
+        let epoch_hash = match self.epoch_manager.get_epoch_hash(next_epoch).await {
+            Ok(hash) => hash,
+            Err(EpochManagerError::NoEpochFound(_)) => {
+                warn!(
+                    target: LOG_TARGET,
+                    "⏳ EOE block {} committed but local oracle has not observed {next_epoch}. \
+                     Deferring next-epoch genesis until oracle catches up.",
+                    eoe_block.id()
+                );
+                self.pending_end_of_epoch = Some(PendingEndOfEpoch {
+                    eoe_block,
+                    commit_qc,
+                    next_genesis_state_merkle_root,
+                });
+                return Ok(());
+            },
+            Err(err) => return Err(err.into()),
+        };
+
         // We're registered for the next epoch. Checkpoint and create a new genesis block.
         let num_committees = self.epoch_manager.get_num_committees(next_epoch).await?;
-        // Must look up the hash for `next_epoch` specifically. The oracle's "current" hash can
-        // race ahead when the base-layer scanner catches up across multiple epoch boundaries,
-        // which would stamp a later epoch's hash into this genesis block and wedge consensus.
-        let epoch_hash = self.epoch_manager.get_epoch_hash(next_epoch).await?;
         // Now that EndEpoch has committed and we're about to stamp `epoch_hash` into the genesis
         // block for `next_epoch`, prevent the oracle from later rewriting this epoch's stored hash
         // if a base-layer reorg surfaces a different view.
@@ -475,9 +514,8 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         let sidechain_id = self.config.sidechain_id;
         task::spawn_blocking(move || {
             store.with_write_tx(|tx| {
-                let tip_qc = valid_tip_block.justify();
                 // Generate checkpoint
-                let checkpoint = generate_epoch_checkpoint(&**tx, &eoe_block, tip_qc)?;
+                let checkpoint = generate_epoch_checkpoint(&**tx, &eoe_block, &commit_qc)?;
                 // Technically not needed, but this will make it clear for debugging purposes if the checkpoint is
                 // invalid To validate the entire proof requires the quorum threshold and the committee,
                 // so we'll just skip it
@@ -513,7 +551,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                         next_epoch,
                         epoch_hash,
                         next_shard_group,
-                        *valid_tip_block.block().state_merkle_root(),
+                        next_genesis_state_merkle_root,
                         sidechain_id,
                     );
                     info!(target: LOG_TARGET, "⭐️ Creating new genesis block {genesis}");
@@ -551,6 +589,49 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             // Exit consensus and transition to idle
             Err(HotStuffError::NotRegisteredForCurrentEpoch { epoch: next_epoch })
         }
+    }
+
+    /// Seed pending state from disk so a worker that restarts after a deferred EOE can resume
+    /// once the local oracle catches up. `commit_qc` must be the QC that committed `eoe_block`
+    /// (typically `eoe_block.get_commit_qc(tx)`); `next_genesis_state_merkle_root` is the state
+    /// root to stamp into the next epoch's genesis (the EOE's own root suffices when no state
+    /// changes follow it).
+    pub fn set_pending_end_of_epoch(
+        &mut self,
+        eoe_block: Block,
+        commit_qc: ProposalCertificate,
+        next_genesis_state_merkle_root: FixedHash,
+    ) {
+        self.pending_end_of_epoch = Some(PendingEndOfEpoch {
+            eoe_block,
+            commit_qc,
+            next_genesis_state_merkle_root,
+        });
+    }
+
+    pub fn has_pending_end_of_epoch(&self) -> bool {
+        self.pending_end_of_epoch.is_some()
+    }
+
+    /// Retry deferred end-of-epoch processing. Called by the worker when the local oracle
+    /// observes the new epoch (via `EpochManagerEvent::EpochChanged`). If the oracle is still
+    /// not ready, `process_end_of_epoch` will re-defer.
+    pub async fn try_resume_pending_end_of_epoch(&mut self) -> Result<bool, HotStuffError> {
+        let Some(pending) = self.pending_end_of_epoch.take() else {
+            return Ok(false);
+        };
+        info!(
+            target: LOG_TARGET,
+            "▶️ Resuming deferred end-of-epoch processing for EOE block {}",
+            pending.eoe_block.id()
+        );
+        self.process_end_of_epoch(
+            pending.eoe_block,
+            pending.commit_qc,
+            pending.next_genesis_state_merkle_root,
+        )
+        .await?;
+        Ok(true)
     }
 
     fn publish_event(&self, event: HotstuffEvent) {

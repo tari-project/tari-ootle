@@ -6,7 +6,7 @@ use std::collections::HashSet;
 
 use helpers::{assert_eq_debug, build_substate_record, create_rocksdb, create_substate_update_batch};
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::{Epoch, Network, VersionedSubstateId, VersionedSubstateIdRef, shard::Shard};
+use tari_ootle_common_types::{Epoch, VersionedSubstateId, VersionedSubstateIdRef, shard::Shard};
 use tari_ootle_storage::{
     ShardScopedTreeStoreWriter,
     StateStore,
@@ -14,6 +14,7 @@ use tari_ootle_storage::{
     StateStoreWriteTransaction,
     consensus_models::{Block, SubstateTransition, SubstateUpdateBatch, SubstateValueFilterFlags},
 };
+use tari_ootle_transaction::Network;
 use tari_state_store_rocksdb::DatabaseOptions;
 use tari_state_tree::{StateTree, SubstateTreeChange, key_mapper::SpreadPrefixKeyMapper};
 use tari_template_lib::types::{ComponentAddress, ObjectKey};

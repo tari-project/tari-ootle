@@ -129,4 +129,6 @@ pub enum TransactionErrorKind {
         component_address: ComponentAddress,
         details: String,
     },
+    #[error("Blob index {index} out of bounds (transaction has {count} blob(s))")]
+    BlobIndexOutOfBounds { index: u8, count: usize },
 }

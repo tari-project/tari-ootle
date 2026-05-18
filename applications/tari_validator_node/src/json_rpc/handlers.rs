@@ -109,11 +109,13 @@ use tari_validator_node_client::types::{
 use crate::{
     ApplicationConfig,
     bootstrap::Services,
-    consensus::{ConsensusHandle, spec::ValidatorNodeStateStore},
+    consensus::{
+        ConsensusHandle,
+        spec::{ValidatorNodeStateStore, ValidatorTemplateProvider},
+    },
     file_l1_submitter::FileLayerOneSubmitter,
     json_rpc::jrpc_errors::{general_error, internal_error, invalid_operation, not_found},
     p2p::services::mempool::MempoolHandle,
-    state_store_template_provider::StateStoreTemplateProvider,
 };
 
 const LOG_TARGET: &str = "tari::validator_node::json_rpc::handlers";
@@ -122,7 +124,7 @@ pub struct JsonRpcHandlers {
     config: ApplicationConfig,
     keypair: RistrettoKeypair,
     mempool: MempoolHandle,
-    template_provider: StateStoreTemplateProvider<ValidatorNodeStateStore>,
+    template_provider: ValidatorTemplateProvider,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     layer_one_transaction_submitter: FileLayerOneSubmitter,
     global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
@@ -418,8 +420,8 @@ impl JsonRpcHandlers {
             .state_store
             .with_read_tx(|tx| {
                 tx.blocks_get_paginated(
-                    req.limit,
-                    req.offset,
+                    req.limit.into(),
+                    req.offset.into(),
                     req.filter_index,
                     req.filter,
                     req.ordering_index,

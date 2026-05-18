@@ -62,6 +62,7 @@ impl Executable for CreateAndFundAccountExecutable {
                 },
             ],
             main: vec![],
+            blobs: Default::default(),
         }
     }
 }
@@ -96,10 +97,13 @@ fn criterion_benchmark(c: &mut Criterion) {
     let mut package = Package::builder();
     package.add_all_builtin_templates();
     let state_store = setup_store();
-    let virtual_substates = VirtualSubstates::from_iter(iter::once((
-        VirtualSubstateId::CurrentEpoch,
-        VirtualSubstate::CurrentEpoch(1),
-    )));
+    let virtual_substates = VirtualSubstates::from_iter([
+        (VirtualSubstateId::CurrentEpoch, VirtualSubstate::CurrentEpoch(1)),
+        (
+            VirtualSubstateId::CurrentEpochHash,
+            VirtualSubstate::CurrentEpochHash([0u8; 32].into()),
+        ),
+    ]);
     let claim_burn_proof_verifier = Arc::new(AlwaysPassesProofVerifier);
     let shared = SharedState {
         package: Arc::new(package.build()),

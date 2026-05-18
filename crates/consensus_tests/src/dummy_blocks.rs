@@ -1,6 +1,8 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::collections::BTreeSet;
+
 use ootle_byte_type::ToByteType;
 use tari_common_types::types::FixedHash;
 use tari_consensus::hotstuff::{
@@ -13,7 +15,7 @@ use tari_crypto::tari_utilities::hex::Hex;
 use tari_ootle_common_types::{
     DerivableFromPublicKey,
     Epoch,
-    Network,
+    ExtraData,
     NodeHeight,
     NumPreshards,
     ShardGroup,
@@ -22,7 +24,8 @@ use tari_ootle_common_types::{
     crypto::create_key_pair_from_seed,
 };
 use tari_ootle_p2p::PeerAddress;
-use tari_ootle_storage::consensus_models::Block;
+use tari_ootle_storage::consensus_models::{Block, BlockHeader};
+use tari_ootle_transaction::Network;
 
 use crate::support::{RoundRobinLeaderStrategy, load_json_fixture};
 
@@ -229,5 +232,128 @@ fn dummy_blocks_from_epoch_genesis_vs_zero_block() {
         validator_dummies.last().unwrap().id(),
         &fixed_proposer_last.block_id,
         "epoch genesis should produce matching dummy chains between proposer and validator"
+    );
+}
+
+/// Regression test: when the proposer fills a timeout gap with a dummy chain, the candidate's
+/// `accumulated_data` must be initialized from the justify block — which the dummies carry
+/// forward — and NOT from `highest_seen_block`. This was the second-stage failure observed
+/// after the template-sync recovery: HighestSeenBlock had drifted above the high QC because
+/// speculative blocks with leader fees had been locally stored on an abandoned fork, so
+/// `highest_seen.accumulated > justify.accumulated`. Initialising the proposer candidate from
+/// `highest_seen` produced a block header that disagreed with every validator's
+/// recomputation from the dummy parent (`Exhaust burn disagreement. Leader proposed N,
+/// we calculated M`), and no proposal could ever be voted in.
+#[test]
+fn proposer_accumulated_data_must_come_from_justify_on_timeout_recovery() {
+    let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+    let committee: Committee<PeerAddress> = (0u8..4)
+        .map(create_key_pair_from_seed)
+        .map(|(_, pk)| CommitteeMember {
+            address: PeerAddress::derive_from_public_key(&pk),
+            public_key: pk.to_byte_type(),
+            vote_power: VotePower::of(1),
+        })
+        .collect();
+
+    // The high QC's referenced block. Its accumulated_data is the canonical baseline
+    // for dummy-chain recovery.
+    let justify_accumulated = ShardGroupAccumulatedData { total_exhaust_burn: 18 };
+    let justify_height = NodeHeight(534);
+    let justify_header = BlockHeader::create_unsigned(
+        Network::LocalNet,
+        BlockId::zero(),
+        Block::genesis(
+            Network::LocalNet,
+            Epoch(7991),
+            FixedHash::zero(),
+            shard_group,
+            FixedHash::zero(),
+            None,
+        )
+        .justify()
+        .calculate_id(),
+        justify_height,
+        Epoch(7991),
+        shard_group,
+        committee.shuffled().next().unwrap().public_key,
+        FixedHash::zero(),
+        &BTreeSet::new(),
+        0,
+        0,
+        FixedHash::zero(),
+        justify_accumulated,
+        ExtraData::new(),
+    )
+    .unwrap();
+    let justify_block = Block::new(
+        justify_header,
+        Block::genesis(
+            Network::LocalNet,
+            Epoch(7991),
+            FixedHash::zero(),
+            shard_group,
+            FixedHash::zero(),
+            None,
+        )
+        .justify()
+        .clone(),
+        BTreeSet::new(),
+        None,
+    );
+
+    // A locally-stored speculative block on an abandoned fork above the high QC. Its
+    // accumulated_data is *higher* than the justify because leader fees got tallied into
+    // its header when it was proposed, but it never finalised. HighestSeenBlock follows
+    // the local fork, not the QC chain.
+    let speculative_accumulated = ShardGroupAccumulatedData {
+        total_exhaust_burn: 710,
+    };
+    assert_ne!(
+        speculative_accumulated.total_exhaust_burn, justify_accumulated.total_exhaust_burn,
+        "test premise: speculative leaf must disagree with justify"
+    );
+
+    // The validator's dummy chain: built from the justify block, so every dummy carries
+    // justify's accumulated_data forward — including the last dummy, which becomes the
+    // parent of the next candidate.
+    let candidate_height = NodeHeight(5304);
+    let dummies = calculate_dummy_blocks(
+        justify_block.height(),
+        candidate_height,
+        Network::LocalNet,
+        justify_block.epoch(),
+        justify_block.shard_group(),
+        *justify_block.id(),
+        justify_block.justify(),
+        // expected_parent_block_id is only used to short-circuit iteration; we want
+        // the full chain so pass a placeholder that won't be matched.
+        &BlockId::zero(),
+        *justify_block.state_merkle_root(),
+        &RoundRobinLeaderStrategy,
+        &committee,
+        justify_block.timestamp(),
+        *justify_block.header().accumulated_data(),
+        *justify_block.epoch_hash(),
+    );
+
+    let last_dummy = dummies.last().expect("dummy chain non-empty");
+
+    // The proposer initialises the candidate's accumulated_data from this value (after
+    // the fix). Validators compute total_exhaust_burn starting from this same value
+    // (via `parent.header().total_accumulated_exhaust_burn()`). Both sides agree.
+    assert_eq!(
+        last_dummy.header().accumulated_data().total_exhaust_burn,
+        justify_accumulated.total_exhaust_burn,
+        "last dummy must carry justify's accumulated_data, not the speculative leaf's"
+    );
+
+    // The buggy proposer would have initialised from `highest_seen.accumulated_data`
+    // (the speculative leaf), producing a header that disagrees with what every
+    // validator computes from the dummy chain.
+    assert_ne!(
+        last_dummy.header().accumulated_data().total_exhaust_burn,
+        speculative_accumulated.total_exhaust_burn,
+        "regression: initialising candidate from highest_seen would not match validators"
     );
 }

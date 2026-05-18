@@ -30,7 +30,9 @@ use log::*;
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{
     Epoch,
+    SubstateAddress,
     VotePower,
+    committee::Committee,
     displayable::Displayable,
     optional::{IsNotFoundError, Optional},
 };
@@ -48,6 +50,7 @@ use crate::{
     epoch_event_oracle::{EpochEvent, EpochEventOracle, ValidatorNodeChange},
     error::EpochManagerError,
     service::{
+        CommitteeCache,
         EpochManagerHandle,
         config::EpochManagerConfig,
         epoch_manager::EpochManager,
@@ -68,6 +71,10 @@ pub struct EpochManagerService<TSpec: EpochManagerSpec> {
     has_epoch_changed: bool,
     waiting_for_scanning_complete: Vec<oneshot::Sender<Result<(), EpochManagerError>>>,
 
+    /// Shared with the [`EpochManagerHandle`] so handle clones see the same
+    /// cache. Cleared on every epoch advance — see `activate_epoch`.
+    committee_cache: CommitteeCache<TSpec::Addr>,
+
     shutdown: ShutdownSignal,
 }
 
@@ -83,7 +90,13 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
         let (tx_request, rx_request) = mpsc::channel(10);
         let (events, _) = broadcast::channel(100);
         let current_epoch = Arc::new(AtomicU64::new(0));
-        let epoch_manager_handle = EpochManagerHandle::new(tx_request, events.downgrade(), current_epoch.clone());
+        let committee_cache = CommitteeCache::<TSpec::Addr>::new();
+        let epoch_manager_handle = EpochManagerHandle::new(
+            tx_request,
+            events.downgrade(),
+            current_epoch.clone(),
+            committee_cache.clone(),
+        );
 
         let task_handle = tokio::spawn(async move {
             Self {
@@ -100,6 +113,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                 is_initial_epoch_sync_complete: false,
                 waiting_for_scanning_complete: Vec::new(),
                 epoch_events,
+                committee_cache,
                 shutdown,
             }
             .run()
@@ -159,6 +173,8 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     target: LOG_TARGET,
                     "⛓️ {} validator node change(s) for epoch {}", node_changes.len(), epoch,
                 );
+                // Mark it as a birthday epoch if not already set
+                self.inner.set_birthday_epoch_if_unset(epoch + Epoch(1))?;
 
                 for node_change in node_changes {
                     match node_change {
@@ -225,7 +241,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     target: LOG_TARGET,
                     "🌟 new epoch {epoch} with hash {epoch_hash}",
                 );
-                self.activate_epoch(epoch, epoch_hash)?;
+                self.activate_epoch(epoch, epoch_hash).await?;
             },
 
             EpochEvent::DoneForNow { epoch, .. } => {
@@ -237,7 +253,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
         Ok(())
     }
 
-    fn activate_epoch(&mut self, epoch: Epoch, epoch_hash: FixedHash) -> Result<(), EpochManagerError> {
+    async fn activate_epoch(&mut self, epoch: Epoch, epoch_hash: FixedHash) -> Result<(), EpochManagerError> {
         use std::cmp::Ordering;
         match epoch.cmp(&self.current_epoch()) {
             Ordering::Less => Ok(()),
@@ -276,6 +292,9 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                 // persist the epoch data including the validator node set
                 self.inner.insert_current_epoch(epoch, epoch_hash)?;
                 self.inner.assign_validators_for_epoch(epoch)?;
+                // Committees are immutable within an epoch; bust the shared cache so subsequent
+                // handle reads pick up the freshly assigned committee rows for the new epoch.
+                self.committee_cache.clear().await;
                 Ok(())
             },
         }
@@ -334,6 +353,23 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
         }
     }
 
+    async fn get_committee_for_substate(
+        &mut self,
+        epoch: Epoch,
+        substate_address: SubstateAddress,
+    ) -> Result<Arc<Committee<TSpec::Addr>>, EpochManagerError> {
+        let num_committees = self.inner.get_number_of_committees(epoch)?;
+        let shard_group = substate_address.to_shard_group(self.inner.config().num_preshards, num_committees);
+
+        self.committee_cache
+            .get_or_try_init((epoch, shard_group), || async {
+                Ok(Arc::new(
+                    self.inner.get_committee_for_substate(epoch, substate_address)?,
+                ))
+            })
+            .await
+    }
+
     #[allow(clippy::too_many_lines)]
     async fn handle_request(&mut self, req: EpochManagerRequest<TSpec::Addr>) {
         trace!(target: LOG_TARGET, "Received request: {:?}", req);
@@ -359,9 +395,6 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     }),
                 context,
             ),
-            EpochManagerRequest::GetCommittees { epoch, reply } => {
-                handle(reply, self.inner.get_committees(epoch), context);
-            },
             EpochManagerRequest::GetCommitteeInfoByAddress { epoch, address, reply } => handle(
                 reply,
                 self.inner.get_committee_info_by_validator_address(epoch, address),
@@ -374,7 +407,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
             } => {
                 handle(
                     reply,
-                    self.inner.get_committee_for_substate(epoch, substate_address),
+                    self.get_committee_for_substate(epoch, substate_address).await,
                     context,
                 );
             },
@@ -441,13 +474,12 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
             EpochManagerRequest::GetCommitteeForShardGroup {
                 epoch,
                 shard_group,
-                shuffled,
-                limit,
                 reply,
             } => handle(
                 reply,
                 self.inner
-                    .get_committee_for_shard_group(epoch, shard_group, shuffled, limit),
+                    .get_committee_for_shard_group(epoch, shard_group, None)
+                    .map(Arc::new),
                 context,
             ),
             EpochManagerRequest::GetCommitteesOverlappingShardGroup {
@@ -489,6 +521,9 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     Ok(self.epoch_events.is_within_epoch_end_spread(current_epoch)),
                     context,
                 );
+            },
+            EpochManagerRequest::GetBirthdayEpoch { reply } => {
+                handle(reply, Ok(self.inner.birthday_epoch()), context);
             },
         }
     }

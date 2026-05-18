@@ -13,11 +13,13 @@ mod status;
 
 use ledger_device_sdk::io::Comm;
 
+use crate::state::State;
+
 mod device;
 
 mod crypto;
 mod key_derive;
-// mod state;
+mod state;
 
 #[cfg(not(any(
     target_os = "nanosplus",
@@ -38,9 +40,11 @@ extern "C" fn sample_main() {
 
     device::show_menu_main(&mut comm);
 
+    let mut state = State::default();
+
     loop {
         if let Some(req) = device::next_command(&mut comm) {
-            device::handle_apdu_request(req);
+            device::handle_apdu_request(&mut state, req);
         }
     }
 }

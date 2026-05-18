@@ -3,7 +3,6 @@
 
 use std::cmp;
 
-use digest::crypto_common::rand_core::OsRng;
 use log::*;
 use ootle_byte_type::{FromByteType, ToByteType};
 use tari_bor::{Deserialize, Serialize};
@@ -433,7 +432,7 @@ where TSpec: WalletSdkSpec
                         .to_string(),
                 })?;
 
-        let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
+        let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
         let encrypted_data =
             self.crypto_api
                 .encrypt_value_and_mask(amount, &mask.key, dest_public_key, &nonce, memo)?;

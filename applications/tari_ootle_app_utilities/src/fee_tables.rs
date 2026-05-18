@@ -59,7 +59,7 @@
 //! 3. **Before Finalize**: Storage costs, event costs, log costs
 
 use tari_engine::fees::FeeTable;
-use tari_ootle_common_types::Network;
+use tari_ootle_transaction::Network;
 
 /// Testnet fee table with low, development-friendly fees.
 ///
@@ -73,7 +73,12 @@ const TESTNET_FEE_TABLE: FeeTable = FeeTable {
     per_event_cost: 1,
     per_log_cost: 1,
     per_signature_verification_cost: 10,
-    per_template_load_cost_unit: 1,
+    // Bumped from 1 to better reflect worst-case cold wasmer instantiation: a 2 MiB template (the
+    // current cap) costs ~7000 µT to load vs ~700 µT previously.
+    per_template_load_cost_unit: 10,
+    // Slot-allocation premium for newly-created substates, on top of `per_byte_storage_cost`.
+    // ~25 µT per new substate (~equivalent to 100 bytes of storage at the effective per-byte rate).
+    per_substate_create_cost: 25,
 };
 
 /// MainNet fee table - production values.
@@ -96,7 +101,8 @@ const MAINNET_FEE_TABLE: FeeTable = FeeTable {
     per_event_cost: 1,
     per_log_cost: 1,
     per_signature_verification_cost: 10,
-    per_template_load_cost_unit: 1,
+    per_template_load_cost_unit: 10,
+    per_substate_create_cost: 25,
 };
 
 /// Returns the appropriate fee table for the specified network.

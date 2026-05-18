@@ -32,8 +32,8 @@ impl Validator<Transaction> for TransactionDryRunValidator {
 #[cfg(test)]
 mod tests {
     use indexmap::IndexSet;
-    use tari_ootle_common_types::Network;
     use tari_ootle_transaction::{
+        Network,
         Transaction,
         TransactionSealSignature,
         TransactionSignature,

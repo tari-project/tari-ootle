@@ -12,6 +12,7 @@ use integration_tests::{
     wallet_daemon_client,
 };
 use multiaddr::multiaddr;
+use tari_base_node_client::BaseNodeClient;
 use tari_validator_node_client::types::AddPeerRequest;
 
 use crate::{
@@ -94,12 +95,8 @@ async fn create_network(world: &mut TariWorld, step: &Step, spec: NetworkSpec) {
         integration_tests::cucumber_log!("Validator node {} sent registration", vn_name);
     }
 
-    let scan_height = 20 + num_blocks;
-    let blocks_to_mine = 20 + world.consensus_constants.base_layer_confirmations;
-    miner::miner_mines_new_blocks(world, step, spec.miner.name.clone(), blocks_to_mine).await;
-    integration_tests::cucumber_log!("Mined {blocks_to_mine} blocks");
-    indexer::indexer_has_scanned_to_at_least_height(world, step, spec.indexer.name.clone(), scan_height).await;
-    integration_tests::cucumber_log!("Indexer has scanned up to or past height {}", scan_height);
+    miner::miner_mines_to_next_epoch(world, step, spec.miner.name.clone()).await;
+    integration_tests::cucumber_log!("Mined to validator activation epoch");
 
     for vn_spec in &spec.validators {
         let vn_name = vn_spec.name().to_string();
@@ -111,6 +108,26 @@ async fn create_network(world: &mut TariWorld, step: &Step, spec: NetworkSpec) {
             .wait_for_consensus_to_start()
             .await;
     }
+
+    validator_node::all_validators_have_started_epoch(world, step, 2).await;
+
+    miner::miner_mines_to_next_epoch(world, step, spec.miner.name.clone()).await;
+    integration_tests::cucumber_log!("Mined to post-activation epoch");
+    let scan_height = lagged_base_node_tip_height(world).await;
+    indexer::indexer_has_scanned_to_at_least_height(world, step, spec.indexer.name.clone(), scan_height).await;
+    integration_tests::cucumber_log!("Indexer has scanned up to or past height {}", scan_height);
+    validator_node::all_validators_have_started_epoch(world, step, 3).await;
+}
+
+async fn lagged_base_node_tip_height(world: &TariWorld) -> u64 {
+    let base_node = world
+        .base_nodes
+        .values()
+        .next()
+        .expect("Cannot get tip height because there are no base nodes");
+    let mut client = base_node.create_client();
+    let tip = client.get_tip_info().await.unwrap().height_of_longest_chain;
+    tip.saturating_sub(world.consensus_constants.base_layer_confirmations)
 }
 
 #[given(expr = "a network with spec")]

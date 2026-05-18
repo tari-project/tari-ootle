@@ -107,7 +107,6 @@ pub fn validate_value_proof(
 #[cfg(test)]
 mod tests {
     use ootle_byte_type::ToByteType;
-    use rand::rngs::OsRng;
     use tari_crypto::keys::SecretKey;
     use tari_template_lib::types::crypto::{StealthValueProof, ValueKnowledgeProof};
 
@@ -115,14 +114,15 @@ mod tests {
 
     #[test]
     fn it_proves_knowledge_of_the_value() {
-        let mask = RistrettoSecretKey::random(&mut OsRng);
+        let mut rng = rand::rng();
+        let mask = RistrettoSecretKey::random(&mut rng);
         let value = 100_321_123u128.into();
         let commitment = commit_amount(&mask, value).unwrap();
         let commitment_bytes = commitment.to_byte_type();
 
         // Create the proof of knowledge of the value
         let message = messages::value_proof_message(&commitment_bytes, &value);
-        let sig = RistrettoSchnorr::sign(&mask, message, &mut OsRng).unwrap();
+        let sig = RistrettoSchnorr::sign(&mask, message, &mut rng).unwrap();
 
         let proof = StealthValueProof {
             value,
@@ -138,7 +138,8 @@ mod tests {
 
     #[test]
     fn it_fails_if_the_value_differs() {
-        let mask = RistrettoSecretKey::random(&mut OsRng);
+        let mut rng = rand::rng();
+        let mask = RistrettoSecretKey::random(&mut rng);
         let value = 100_321_123u128.into();
         let commitment = commit_amount(&mask, value).unwrap();
         let commitment_bytes = commitment.to_byte_type();
@@ -147,7 +148,7 @@ mod tests {
 
         // Create the proof of knowledge of the value
         let message = messages::value_proof_message(&commitment_bytes, &other_value);
-        let sig = RistrettoSchnorr::sign(&mask, message, &mut OsRng).unwrap();
+        let sig = RistrettoSchnorr::sign(&mask, message, &mut rng).unwrap();
 
         let proof = StealthValueProof {
             value: other_value,

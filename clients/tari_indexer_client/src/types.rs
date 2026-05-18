@@ -14,9 +14,9 @@ use tari_engine_types::{
     substate::{Substate, SubstateId, SubstateValue},
     transaction_receipt::TransactionReceipt,
 };
-use tari_ootle_common_types::{Epoch, Network, NumPreshards, ShardGroup, StateVersion, shard::Shard};
+use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, StateVersion, shard::Shard};
 use tari_ootle_template_metadata::MetadataHash;
-use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
+use tari_ootle_transaction::{Network, PrunedTransaction, TransactionEnvelope, TransactionId};
 use tari_template_abi::TemplateDef;
 use tari_template_lib_types::{
     Amount,
@@ -346,8 +346,10 @@ pub struct ListRecentTransactionsResponse {
 pub struct TransactionEntry {
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub transaction_id: TransactionId,
+    /// Pruned transaction — blob commitments retained, raw blob bytes omitted to keep the
+    /// response size bounded. The transaction id and signatures remain verifiable.
     #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
-    pub transaction: Transaction,
+    pub transaction: PrunedTransaction,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub created_at: PrimitiveDateTime,
 }
@@ -390,9 +392,7 @@ pub struct GetIdentityResponse {
 pub struct GetNonFungiblesRequest {
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub address: ResourceAddress,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub start_index: u64,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub end_index: u64,
 }
 
@@ -440,7 +440,6 @@ pub struct GetEpochManagerStatsResponse {
     #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
     /// The current epoch according to the indexer's epoch oracle view
     pub current_epoch: Epoch,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub current_block_height: u64,
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub current_block_hash: Hash32,
@@ -456,7 +455,6 @@ pub struct GetEpochManagerStatsResponse {
 pub struct Connection {
     pub connection_id: String,
     pub peer_id: String,
-    pub address: String,
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub direction: ConnectionDirection,
     #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number}"))]

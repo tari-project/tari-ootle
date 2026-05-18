@@ -34,7 +34,7 @@ impl EventFilter {
         if self
             .template_address
             .as_ref()
-            .is_some_and(|t| *t != event.template_address())
+            .is_some_and(|t| t != event.template_address())
         {
             return false;
         }

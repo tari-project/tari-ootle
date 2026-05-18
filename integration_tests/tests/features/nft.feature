@@ -30,7 +30,7 @@ Feature: NFTs
     # Submit a transaction with NFT operations
     When I submit a transaction manifest via wallet daemon WALLET_D with inputs "NFT, ACC1, ACC2" named "TX1"
   """
-  let sparkle_nft = global!["NFT/components/SparkleNft"];
+  let sparkle_nft = global!["NFT/components/basic_nft"];
   let sparkle_res = global!["NFT/resources/SPKL"];
   let mut acc1 = global!["ACC1/accounts/ACC1"];
   let mut acc2 = global!["ACC2/accounts/ACC2"];
@@ -57,7 +57,6 @@ Feature: NFTs
   sparkle_nft.burn(acc_bucket);
   """
 
-
   Scenario: Create resource and mint in one transaction
     Given a network with registered validator VN and wallet daemon WALLET_D
 
@@ -69,14 +68,14 @@ Feature: NFTs
     # Create an account to deposit the minted NFT
     When I create an account ACC1 via the wallet daemon WALLET_D with 10000 XTR
 
-    # Create a new BasicNft component and mint in the same transaction.
+    # Create a new basic_nft component and mint in the same transaction.
     # Note the updated NFT address format or parsing the manifest will fail.
     When I call function "new_with_initial_nft" on template "basic_nft" using account ACC1 to pay fees via wallet daemon WALLET_D with args "nft_str_1000" named "NFT"
 
     # Check that the initial NFT was actually minted by trying to deposit it into an account
     When I submit a transaction manifest via wallet daemon WALLET_D with inputs "NFT, ACC1" named "TX1"
   """
-  let sparkle_nft = global!["NFT/components/SparkleNft"];
+  let sparkle_nft = global!["NFT/components/basic_nft"];
   let mut acc1 = global!["ACC1/accounts/ACC1"];
 
   // get the initially NFT from the component's vault

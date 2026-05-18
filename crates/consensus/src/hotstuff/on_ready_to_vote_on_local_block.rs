@@ -452,6 +452,7 @@ where TConsensusSpec: ConsensusSpec
                 .iter()
                 // Calculate for local shards only or the global shard
                 .filter(|ch| block.shard_group().contains_or_global(&ch.shard())),
+            block.epoch(),
         )?;
         if expected_merkle_root != *block.state_merkle_root() {
             warn!(

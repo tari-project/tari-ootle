@@ -86,7 +86,7 @@ pub async fn claim_fees(
     let request = ClaimValidatorFeesRequest {
         account: Some(ComponentAddressOrName::Name(account_name)),
         claim_key_index: None,
-        max_fee: None,
+        max_fee: 1500,
         shards: vec![
             stats
                 .committee_info
@@ -262,7 +262,7 @@ pub async fn create_account_with_free_coins(world: &mut TariWorld, account_name:
 
     let request = AccountsCreateFreeTestCoinsRequest {
         account: account.account.component_address.into(),
-        max_fee: None,
+        max_fee: 1500,
     };
 
     let resp = client.create_free_test_coins(request).await.unwrap();
@@ -305,7 +305,7 @@ pub async fn mint_new_nft_on_account(
         account: ComponentAddressOrName::Name(account_name.clone()),
         mutable_data: metadata,
         number_to_mint: 1,
-        max_fee: None,
+        max_fee: Some(1500),
     };
     let resp = client
         .mint_faucet_nft(request)
@@ -438,7 +438,7 @@ pub async fn submit_manifest_with_signing_keys(
     let AccountGetResponse { account, .. } = client.accounts_get(account_name).await.unwrap();
     let owner_key_id = account.owner_key_id.expect("Account has no owner key id for signing");
 
-    let instructions = parse_manifest(&manifest_content, globals, HashMap::new()).unwrap();
+    let instructions = parse_manifest(&manifest_content, globals, HashMap::new(), Default::default()).unwrap();
 
     let transaction = transaction_builder()
         .pay_fee_from_component(account.component_address, 5000u64)
@@ -519,7 +519,7 @@ pub async fn submit_manifest(
         .map(|(_, addr)| addr.clone().into_unversioned())
         .collect::<Vec<_>>();
 
-    let instructions = parse_manifest(&manifest_content, globals, HashMap::new())
+    let instructions = parse_manifest(&manifest_content, globals, HashMap::new(), HashMap::new())
         .unwrap_or_else(|err| panic!("Attempted to parse manifest but failed: {err}"));
 
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
@@ -842,14 +842,13 @@ pub async fn transfer(
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let account = Some(ComponentAddressOrName::Name(account_name));
-    let max_fee = Some(5000);
 
     let request = AccountsTransferRequest {
         account,
         amount,
         resource_address,
         destination_public_key,
-        max_fee,
+        max_fee: 5000,
         proof_from_badge_resource: None,
         dry_run: false,
     };
@@ -881,13 +880,12 @@ pub async fn confidential_transfer(
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let account = Some(ComponentAddressOrName::Name(account_name));
-    let max_fee = Some(5000);
 
     let request = ConfidentialTransferRequest {
         account,
         amount,
         destination_address,
-        max_fee,
+        max_fee: 5000,
         resource_address,
         proof_from_badge_resource: None,
         memo: None,

@@ -93,9 +93,10 @@ impl<TStore: StateReader + 'static, TTemplateProvider> TariTransactionProcessor<
     pub fn new(
         template_provider: TTemplateProvider,
         fee_table: FeeTable,
+        dry_run: bool,
         claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
     ) -> Self {
-        let modules = vec![Box::new(FeeModule::new(0, fee_table)) as Box<dyn RuntimeModule<TStore>>];
+        let modules = vec![Box::new(FeeModule::new(0, fee_table, dry_run)) as Box<dyn RuntimeModule<TStore>>];
         Self {
             template_provider: Arc::new(template_provider),
             modules: Arc::from(modules),

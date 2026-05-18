@@ -151,7 +151,6 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         tx: &mut Self::DbTransaction<'_>,
         epoch: Epoch,
         shard_group: ShardGroup,
-        shuffle: bool,
         limit: usize,
     ) -> Result<Committee<Self::Addr>, Self::Error>;
 

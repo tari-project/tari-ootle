@@ -22,7 +22,7 @@ tari_common = { workspace = true }
 tari_consensus = { workspace = true }
 tari_template_builtin = { workspace = true, features = ["templates"] }
 tari_crypto = { workspace = true }
-tari_engine = { workspace = true }
+tari_engine = { workspace = true, features = ["wasm-cache"] }
 tari_engine_types = { workspace = true }
 tari_epoch_manager = { workspace = true, features = ["service"] }
 tari_epoch_oracles = { workspace = true, features = ["base_layer"] }
@@ -43,13 +43,17 @@ tari_validator_node_rpc = { workspace = true }
 ootle_byte_type = { workspace = true, features = ["crypto"] }
 
 anyhow = { workspace = true }
+async-trait = { workspace = true }
 axum = { workspace = true, features = ["query", "matched-path"] }
+dashmap = { workspace = true }
 async-graphql = { workspace = true }
 async-graphql-axum = { workspace = true }
+async-stream = { workspace = true }
 bytes = { workspace = true }
 bincode = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive", "env"] }
 config = { workspace = true }
+deadpool-diesel = { workspace = true, default-features = false, features = ["sqlite", "rt_tokio_1"] }
 diesel = { workspace = true, default-features = false, features = [
     "sqlite",
     "returning_clauses_for_sqlite_3_35",
@@ -84,7 +88,6 @@ tokio = { workspace = true, features = [
     "rt-multi-thread",
 ] }
 tokio-stream = { workspace = true }
-tower = { workspace = true, features = ["limit"] }
 tower-http = { workspace = true, features = ["default", "cors", "limit", "trace"] }
 url = { workspace = true, features = ["serde"] }
 cacache = { version = "13.1.0", default-features = false, features = ["mmap", "tokio-runtime"] }

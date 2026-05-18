@@ -72,11 +72,13 @@ impl Runner {
                 let addr = addr.as_component_address().filter(|_| {
                     *value.substate_value().component().unwrap().template_address() == self.tariswap_template
                 })?;
-                let vaults = decode_value_at_path(value.substate_value().component().unwrap().state(), "$.pools")
+                // TariSwapPool fields are minicbor-tagged in declaration order:
+                // 0 = pools, 1 = lp_resource (see templates/tariswap/src/lib.rs).
+                let vaults = decode_value_at_path(value.substate_value().component().unwrap().state(), "$.0")
                     .unwrap()
                     .unwrap();
                 let lp_resource_address =
-                    decode_value_at_path(value.substate_value().component().unwrap().state(), "$.lp_resource")
+                    decode_value_at_path(value.substate_value().component().unwrap().state(), "$.1")
                         .unwrap()
                         .unwrap();
                 Some(TariSwap {

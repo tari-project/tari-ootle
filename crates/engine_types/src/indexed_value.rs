@@ -727,7 +727,8 @@ mod tests {
         assert!(indexed.bucket_ids().contains(&2.into()));
         assert_eq!(indexed.bucket_ids().len(), 6);
 
-        let buckets: Vec<BucketId> = indexed.get_value("$.sub_structs.1.buckets").unwrap().unwrap();
+        // TestStruct.sub_structs = #[n(5)], Vec index 1, then SubStruct.buckets = #[n(0)]
+        let buckets: Vec<BucketId> = indexed.get_value("$.5.1.0").unwrap().unwrap();
         assert_eq!(buckets, vec![1.into(), 2.into()]);
     }
 

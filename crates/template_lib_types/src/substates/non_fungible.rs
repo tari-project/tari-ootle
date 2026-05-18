@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use serde::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
 use tari_bor::BorTag;
 use tari_template_abi::{
     EngineOp,
@@ -16,24 +16,38 @@ use crate::{
     constants::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
     crypto::RistrettoPublicKeyBytes,
     hex::{fixed_bytes_from_hex, write_hex_fmt},
-    serde_helpers,
 };
 
 const NON_FUNGIBLE_ID_STR_MAX_LEN: usize = 64;
 
 /// The unique identification of a non-fungible token inside it's parent resource
-#[derive(Debug, Clone, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize, Hash)]
+#[derive(Debug, Clone, Ord, PartialOrd, PartialEq, Eq, Hash, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub enum NonFungibleId {
+    #[n(0)]
     U256(
         #[cfg_attr(feature = "ts", ts(type = "string"))]
-        #[serde(with = "serde_helpers::fixed_hex")]
+        #[cfg_attr(feature = "serde", serde(with = "crate::serde_helpers::fixed_hex"))]
+        #[n(0)]
+        #[cbor(with = "minicbor::bytes")]
         [u8; 32],
     ),
-    String(#[cfg_attr(feature = "ts", ts(type = "string"))] MaxString<NON_FUNGIBLE_ID_STR_MAX_LEN>),
-    Uint32(u32),
-    Uint64(#[cfg_attr(feature = "ts", ts(type = "number"))] u64),
+    #[n(1)]
+    String(
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        #[n(0)]
+        MaxString<NON_FUNGIBLE_ID_STR_MAX_LEN>,
+    ),
+    #[n(2)]
+    Uint32(#[n(0)] u32),
+    #[n(3)]
+    Uint64(
+        #[cfg_attr(feature = "ts", ts(type = "number"))]
+        #[n(0)]
+        u64,
+    ),
 }
 
 impl NonFungibleId {
@@ -221,17 +235,22 @@ impl Display for NonFungibleId {
 const TAG: u64 = BinaryTag::NonFungibleAddress.as_u64();
 
 /// The unique identifier of a non-fungible index in the Tari network
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct NonFungibleAddress(BorTag<NonFungibleAddressContents, TAG>);
 
 /// A NonFungibleId namespaced by a ResourceAddress.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct NonFungibleAddressContents {
+    #[n(0)]
     resource_address: ResourceAddress,
+    #[n(1)]
     id: NonFungibleId,
 }
 

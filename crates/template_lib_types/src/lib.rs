@@ -45,8 +45,10 @@ mod max_bytes;
 mod max_string;
 mod max_vec;
 mod misc;
+#[cfg(feature = "serde")]
 mod newtype_serde_macros;
 mod resource_type;
+#[cfg(feature = "serde")]
 pub mod serde_helpers;
 #[macro_use]
 mod substates;

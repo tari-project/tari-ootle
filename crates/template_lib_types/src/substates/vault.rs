@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use minicbor::{CborLen, Decode, Encode};
 use tari_bor::BorTag;
 use tari_template_abi::rust::{
     fmt,
@@ -29,12 +30,13 @@ use tari_template_abi::rust::{
 };
 
 use super::BinaryTag;
-use crate::{EntityId, KeyParseError, ObjectKey, address_prefixes, newtype_struct_serde_impl};
+use crate::{EntityId, KeyParseError, ObjectKey, address_prefixes};
 
 const TAG: u64 = BinaryTag::VaultId as u64;
 
 /// A vault's unique identification in the Tari network
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Encode, Decode, CborLen)]
+#[cbor(transparent)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct VaultId(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
@@ -94,4 +96,5 @@ impl TryFrom<&[u8]> for VaultId {
     }
 }
 
-newtype_struct_serde_impl!(VaultId, BorTag<ObjectKey, TAG>);
+#[cfg(feature = "serde")]
+crate::newtype_struct_serde_impl!(VaultId, BorTag<ObjectKey, TAG>);

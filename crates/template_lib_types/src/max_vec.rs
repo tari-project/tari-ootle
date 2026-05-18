@@ -8,9 +8,9 @@ use tari_template_abi::rust::{
     vec,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize), serde(transparent))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
-#[serde(transparent)]
 pub struct MaxVec<const N: usize, T> {
     elems: Box<[T]>,
 }
@@ -97,6 +97,7 @@ impl<const N: usize, T> From<MaxVec<N, T>> for Vec<T> {
     }
 }
 
+#[cfg(feature = "serde")]
 impl<'de, const N: usize, T: serde::Deserialize<'de>> serde::Deserialize<'de> for MaxVec<N, T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where D: serde::Deserializer<'de> {
@@ -104,6 +105,79 @@ impl<'de, const N: usize, T: serde::Deserialize<'de>> serde::Deserialize<'de> fo
         let len = elems.len();
         Self::new_checked(elems)
             .ok_or_else(|| serde::de::Error::custom(format!("sequence length exceeds maximum of {}: got {}", N, len)))
+    }
+}
+
+impl<C, const N: usize, T> minicbor::Encode<C> for MaxVec<N, T>
+where T: minicbor::Encode<C>
+{
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.array(self.elems.len() as u64)?;
+        for elem in self.elems.iter() {
+            elem.encode(e, ctx)?;
+        }
+        Ok(())
+    }
+}
+
+impl<'b, C, const N: usize, T> minicbor::Decode<'b, C> for MaxVec<N, T>
+where T: minicbor::Decode<'b, C>
+{
+    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let len = d.array()?;
+        match len {
+            Some(n) => {
+                if n as usize > N {
+                    return Err(minicbor::decode::Error::message(format!(
+                        "sequence length exceeds maximum of {}: got {}",
+                        N, n
+                    )));
+                }
+                let mut elems = Vec::with_capacity(n as usize);
+                for _ in 0..n {
+                    elems.push(T::decode(d, ctx)?);
+                }
+                Ok(MaxVec {
+                    elems: elems.into_boxed_slice(),
+                })
+            },
+            None => {
+                let mut elems: Vec<T> = Vec::new();
+                loop {
+                    if matches!(d.datatype()?, minicbor::data::Type::Break) {
+                        d.skip()?;
+                        break;
+                    }
+                    if elems.len() == N {
+                        return Err(minicbor::decode::Error::message(format!(
+                            "sequence length exceeds maximum of {}",
+                            N
+                        )));
+                    }
+                    elems.push(T::decode(d, ctx)?);
+                }
+                Ok(MaxVec {
+                    elems: elems.into_boxed_slice(),
+                })
+            },
+        }
+    }
+}
+
+impl<C, const N: usize, T> minicbor::CborLen<C> for MaxVec<N, T>
+where T: minicbor::CborLen<C>
+{
+    fn cbor_len(&self, ctx: &mut C) -> usize {
+        let n = self.elems.len() as u64;
+        let mut total = <u64 as minicbor::CborLen<C>>::cbor_len(&n, ctx);
+        for elem in self.elems.iter() {
+            total += elem.cbor_len(ctx);
+        }
+        total
     }
 }
 

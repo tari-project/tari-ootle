@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use serde::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
 use tari_template_abi::rust::{
     fmt,
     fmt::{Display, Formatter},
@@ -12,17 +12,18 @@ use crate::{
     KeyParseError,
     crypto::{InvalidByteLengthError, RistrettoPublicKeyBytes},
     hex::fixed_bytes_from_hex,
-    serde_helpers,
 };
 
 /// A Pedersen Commitment byte contents
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, Encode, Decode, CborLen)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PedersenCommitmentBytes(
-    #[serde(with = "serde_helpers::fixed_hex")]
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_helpers::fixed_hex"))]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[cbor(with = "minicbor::bytes")]
     [u8; PedersenCommitmentBytes::length()],
 );
 

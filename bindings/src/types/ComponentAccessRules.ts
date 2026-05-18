@@ -4,4 +4,4 @@ import type { AccessRule } from "./AccessRule";
 /**
  * Information needed to specify access rules to methods of a component
  */
-export type ComponentAccessRules = { method_access: Record<string, AccessRule>; default: AccessRule };
+export type ComponentAccessRules = { method_access: Record<string, AccessRule>, default: AccessRule, };

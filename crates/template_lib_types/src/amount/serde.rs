@@ -181,7 +181,7 @@ mod tests {
             let cbor = encode(&amount).unwrap();
             let decoded: Amount = decode_exact(&cbor).unwrap();
             assert_eq!(decoded, amount);
-            let amount = 1234567890u128;
+            let amount = 1234567890u64;
             let cbor = encode(&amount).unwrap();
             let decoded: Amount = decode_exact(&cbor).unwrap();
             assert_eq!(decoded, amount);

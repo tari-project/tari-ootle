@@ -60,6 +60,7 @@ impl<const N: usize> Default for MaxString<N> {
     }
 }
 
+#[cfg(feature = "serde")]
 impl<const N: usize> serde::Serialize for MaxString<N> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where S: serde::Serializer {
@@ -67,6 +68,7 @@ impl<const N: usize> serde::Serialize for MaxString<N> {
     }
 }
 
+#[cfg(feature = "serde")]
 impl<'de, const N: usize> serde::Deserialize<'de> for MaxString<N> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where D: serde::Deserializer<'de> {
@@ -74,6 +76,37 @@ impl<'de, const N: usize> serde::Deserialize<'de> for MaxString<N> {
         let len = s.len();
         Self::new_checked(s)
             .ok_or_else(|| serde::de::Error::custom(format!("string length exceeds maximum of {}: got {}", N, len)))
+    }
+}
+
+impl<C, const N: usize> minicbor::Encode<C> for MaxString<N> {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        _ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.str(&self.0)?;
+        Ok(())
+    }
+}
+
+impl<'b, C, const N: usize> minicbor::Decode<'b, C> for MaxString<N> {
+    fn decode(d: &mut minicbor::Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let s = d.str()?;
+        if s.len() > N {
+            return Err(minicbor::decode::Error::message(format!(
+                "string length exceeds maximum of {}: got {}",
+                N,
+                s.len()
+            )));
+        }
+        Ok(MaxString::new_checked(Box::<str>::from(s)).expect("length checked above"))
+    }
+}
+
+impl<C, const N: usize> minicbor::CborLen<C> for MaxString<N> {
+    fn cbor_len(&self, ctx: &mut C) -> usize {
+        <str as minicbor::CborLen<C>>::cbor_len(&self.0, ctx)
     }
 }
 

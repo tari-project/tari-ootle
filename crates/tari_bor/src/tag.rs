@@ -87,6 +87,13 @@ impl<'b, C, T: minicbor::Decode<'b, C>, const TAG: u64> minicbor::Decode<'b, C> 
     }
 }
 
+impl<C, T: minicbor::CborLen<C>, const TAG: u64> minicbor::CborLen<C> for BorTag<T, TAG> {
+    fn cbor_len(&self, ctx: &mut C) -> usize {
+        <minicbor::data::Tag as minicbor::CborLen<C>>::cbor_len(&minicbor::data::Tag::new(TAG), ctx) +
+            self.0.cbor_len(ctx)
+    }
+}
+
 impl<T, const TAG: u64> Deref for BorTag<T, TAG> {
     type Target = T;
 

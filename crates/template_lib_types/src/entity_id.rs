@@ -1,6 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use minicbor::{CborLen, Decode, Encode};
 use tari_template_abi::rust::{
     fmt,
     fmt::{Display, Formatter},
@@ -9,17 +10,17 @@ use tari_template_abi::rust::{
     str::FromStr,
 };
 
-use crate::{
-    hex::{fixed_bytes_from_hex, write_hex_fmt},
-    serde_helpers,
-};
+use crate::hex::{fixed_bytes_from_hex, write_hex_fmt};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, Encode, Decode, CborLen)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct EntityId(
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "serde_helpers::fixed_hex")]
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_helpers::fixed_hex"))]
+    #[cbor(with = "minicbor::bytes")]
     [u8; Self::LENGTH],
 );
 
@@ -115,11 +116,14 @@ impl Display for EntityId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, Encode, Decode, CborLen)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ComponentKey(
-    #[serde(with = "serde_helpers::fixed_hex")]
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_helpers::fixed_hex"))]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[cbor(with = "minicbor::bytes")]
     [u8; Self::LENGTH],
 );
 
@@ -144,10 +148,15 @@ impl From<[u8; Self::LENGTH]> for ComponentKey {
 }
 
 /// Representation of a 32-byte object key
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, serde::Serialize, serde::Deserialize)]
-#[serde(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, Encode, Decode, CborLen)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
-pub struct ObjectKey(#[serde(with = "serde_helpers::fixed_hex")] [u8; Self::LENGTH]);
+pub struct ObjectKey(
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_helpers::fixed_hex"))]
+    #[cbor(with = "minicbor::bytes")]
+    [u8; Self::LENGTH],
+);
 
 impl ObjectKey {
     pub const LENGTH: usize = EntityId::LENGTH + ComponentKey::LENGTH;

@@ -6,20 +6,43 @@ use tari_template_abi::rust::{
     prelude::*,
 };
 
+#[cfg(feature = "serde")]
 use crate::serde_helpers::BytesVisitor;
 
-/// A wrapper around a byte buffer that implements efficient serde serialisation.
+/// A wrapper around a byte buffer that encodes as CBOR major type 2 (Bytes).
 ///
-/// Unfortunately, because we cannot implement a specialized version of serde::Serialize (impl serde::Serialize for
-/// `Vec<u8>`) ciborium will represent bytes as `Array(vec![Integer(u8), ....])` instead of `Bytes(vec![u8, ...])`.
-/// which results in a significant size overhead. This wrapper uses the `Value::Bytes` variant (similar to `serde_as(as
-/// = "Bytes")`).
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// Without this wrapper, deriving `Encode`/`Decode` on a `Vec<u8>` field would serialise as
+/// `Array(Integer(u8), ...)`, which is much larger than the dedicated `Bytes` representation.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
-#[serde(transparent)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, type = "Uint8Array"))]
 #[cfg_attr(feature = "std", derive(Hash))]
-pub struct Bytes(#[serde(with = "self")] Box<[u8]>);
+pub struct Bytes(#[cfg_attr(feature = "serde", serde(with = "self"))] Box<[u8]>);
+
+impl<C> minicbor::Encode<C> for Bytes {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        _ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.bytes(&self.0)?;
+        Ok(())
+    }
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for Bytes {
+    fn decode(d: &mut minicbor::Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let bytes = d.bytes()?;
+        Ok(Self(bytes.to_vec().into_boxed_slice()))
+    }
+}
+
+impl<C> minicbor::CborLen<C> for Bytes {
+    fn cbor_len(&self, ctx: &mut C) -> usize {
+        minicbor::bytes::cbor_len(self.0.as_ref(), ctx)
+    }
+}
 
 impl Bytes {
     pub fn from_vec(data: Vec<u8>) -> Self {
@@ -78,10 +101,12 @@ impl AsRef<[u8]> for Bytes {
 }
 
 /// Serialize using the optimal byte format. i.e. `Bytes` in ciborium instead of `Array(Integer(u8), ....])`
+#[cfg(feature = "serde")]
 pub fn serialize<S: serde::Serializer, T: AsRef<[u8]>>(v: &T, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_bytes(v.as_ref())
 }
 
+#[cfg(feature = "serde")]
 pub fn deserialize<'de, D, T>(d: D) -> Result<T, D::Error>
 where
     D: serde::Deserializer<'de>,

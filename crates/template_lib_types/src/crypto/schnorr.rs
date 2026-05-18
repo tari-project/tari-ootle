@@ -1,16 +1,19 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use serde::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
 use tari_template_abi::rust::{fmt, prelude::*};
 
 use crate::crypto::{InvalidByteLengthError, RistrettoPublicKeyBytes, scalar::Scalar32Bytes};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SchnorrSignatureBytes {
+    #[n(0)]
     public_nonce: RistrettoPublicKeyBytes,
+    #[n(1)]
     signature: Scalar32Bytes,
 }
 

@@ -1,26 +1,54 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use serde::{Deserialize, Serialize};
 use tari_template_abi::rust::{fmt, prelude::*};
-
-use crate::serde_helpers;
 
 /// A range proof is a cryptographic proof that a value is within a certain range without revealing the value itself.
 /// This struct is used to represent the range proof bytes in a serialized format.
 /// The length of the range proof is limited to a maximum size (1024 bytes) to mitigate potential denial-of-service
 /// attacks.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct RangeProofBytes(
-    #[serde(
-        serialize_with = "serde_helpers::dynamic_hex::serialize",
-        deserialize_with = "serde_validated_range_proof_deserialize_impl"
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            serialize_with = "crate::serde_helpers::dynamic_hex::serialize",
+            deserialize_with = "serde_validated_range_proof_deserialize_impl"
+        )
     )]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     Vec<u8>,
 );
+
+impl<C> minicbor::Encode<C> for RangeProofBytes {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        _ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.bytes(&self.0)?;
+        Ok(())
+    }
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for RangeProofBytes {
+    fn decode(d: &mut minicbor::Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let bytes = d.bytes()?;
+        if bytes.len() > Self::MAX_LENGTH {
+            return Err(minicbor::decode::Error::message("range proof exceeds maximum length"));
+        }
+        Ok(Self(bytes.to_vec()))
+    }
+}
+
+impl<C> minicbor::CborLen<C> for RangeProofBytes {
+    fn cbor_len(&self, ctx: &mut C) -> usize {
+        minicbor::bytes::cbor_len(self.0.as_slice(), ctx)
+    }
+}
 
 impl RangeProofBytes {
     // TODO: is this sufficiently large? How many outputs can we aggregate before we hit this limit?
@@ -62,9 +90,10 @@ impl TryFrom<Vec<u8>> for RangeProofBytes {
 }
 
 /// Ensures deserialized bytes are a valid size
+#[cfg(feature = "serde")]
 fn serde_validated_range_proof_deserialize_impl<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
 where D: serde::Deserializer<'de> {
-    let bytes: Vec<u8> = serde_helpers::dynamic_hex::deserialize::<'_, D, _>(deserializer)?;
+    let bytes: Vec<u8> = crate::serde_helpers::dynamic_hex::deserialize::<'_, D, _>(deserializer)?;
     if bytes.len() > RangeProofBytes::MAX_LENGTH {
         return Err(serde::de::Error::custom(RangeProofSizeExceeded { size: bytes.len() }));
     }

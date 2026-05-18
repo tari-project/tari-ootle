@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use minicbor::{CborLen, Decode, Encode};
 use tari_bor::{BorTag, Tagged};
 use tari_template_abi::rust::{
     fmt,
@@ -35,13 +36,13 @@ use crate::{
     ObjectKey,
     address_prefixes,
     constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS},
-    newtype_struct_serde_impl,
 };
 
 const TAG: u64 = BinaryTag::ResourceAddress.as_u64();
 
 /// The globally-unique identifier of a resource.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Encode, Decode, CborLen)]
+#[cbor(transparent)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct ResourceAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
@@ -104,7 +105,8 @@ impl AsRef<[u8]> for ResourceAddress {
     }
 }
 
-newtype_struct_serde_impl!(ResourceAddress, BorTag<ObjectKey, TAG>);
+#[cfg(feature = "serde")]
+crate::newtype_struct_serde_impl!(ResourceAddress, BorTag<ObjectKey, TAG>);
 
 impl Tagged for ResourceAddress {
     const TAG: u64 = TAG;

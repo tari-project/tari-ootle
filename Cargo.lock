@@ -12429,6 +12429,7 @@ dependencies = [
  "bnum",
  "borsh",
  "indexmap 2.13.0",
+ "minicbor",
  "num-integer",
  "serde",
  "serde_json",

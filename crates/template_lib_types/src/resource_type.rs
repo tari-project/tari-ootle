@@ -1,6 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use minicbor::{Decode, Encode};
 use tari_template_abi::rust::{fmt, prelude::*};
 
 /// Represents every possible type of resource in the Tari network.
@@ -15,21 +16,26 @@ use tari_template_abi::rust::{fmt, prelude::*};
 /// - **Stealth** A fungible resource using the highest level of confidentiality. Funds are not kept in vaults, and each
 ///   output is an independent confidential substate (kind of like creating a new unlinked vault for each currency
 ///   note).
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Encode, Decode)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub enum ResourceType {
     /// Fungible tokens do not have individual identity, making them interchangeable.
     /// Examples include monetary units, liquidity pool tokens, or tokenized shares.
+    #[n(0)]
     Fungible,
     /// A resource (i.e., collection) of non-fungible tokens.
     /// Each NFT is uniquely identifiable within the parent resource and indivisible.
+    #[n(1)]
     NonFungible,
     /// A type of fungible resource that uses cryptographic privacy to keep balances confidential. Funds are placed in
     /// vaults and can therefore be associated with a component that contains them, typically an Account.
+    #[n(2)]
     Confidential,
     /// A fungible resource using the highest level of confidentiality. Funds are not kept in vaults, and each output
     /// is an independent confidential substate (kind of like creating a new unlinked vault for each currency note).
+    #[n(3)]
     Stealth,
 }
 
@@ -96,8 +102,11 @@ mod parsing {
 pub use parsing::ParseResourceTypeError;
 
 /// Info for a resource, including its type and divisibility.
-#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Encode, Decode)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ResourceInfo {
+    #[n(0)]
     pub resource_type: ResourceType,
+    #[n(1)]
     pub divisibility: u8,
 }

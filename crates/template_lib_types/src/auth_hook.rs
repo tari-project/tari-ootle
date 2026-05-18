@@ -1,15 +1,19 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use minicbor::{Decode, Encode};
 use tari_template_abi::rust::{fmt, prelude::*};
 
 use crate::{ComponentAddress, FunctionName, TemplateAddress};
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Encode, Decode)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct AuthHook {
+    #[n(0)]
     pub component_address: ComponentAddress,
+    #[n(1)]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub method: FunctionName,
 }
@@ -29,10 +33,14 @@ impl fmt::Display for AuthHook {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Encode, Decode)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AuthHookCaller {
+    #[n(0)]
     component_address: Option<ComponentAddress>,
+    #[n(1)]
     template_address: TemplateAddress,
+    #[n(2)]
     component_state: Option<tari_bor::Value>,
 }
 

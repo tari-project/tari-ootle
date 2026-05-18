@@ -18,19 +18,19 @@ mod template {
     impl Burn {
         pub fn new(confidential_supply: ConfidentialOutputStatement) -> Component<Self> {
             let fungible = ResourceBuilder::public_fungible()
-                .burnable(rule!(allow_all))
+                .burnable(rule!(allow_all), OWNER)
                 .initial_supply(1_000_000u32);
 
             let non_fungible = ResourceBuilder::non_fungible()
-                .burnable(rule!(allow_all))
+                .burnable(rule!(allow_all), OWNER)
                 .initial_supply((1..=10).map(NonFungibleId::from_u32));
 
             let confidential = ResourceBuilder::confidential()
-                .burnable(rule!(allow_all))
+                .burnable(rule!(allow_all), OWNER)
                 .initial_supply(confidential_supply);
 
             let stealth = ResourceBuilder::stealth()
-                .burnable(rule!(allow_all))
+                .burnable(rule!(allow_all), OWNER)
                 .initial_supply(1_000_000u32);
 
             Component::new(Self {

@@ -37,7 +37,7 @@ mod sparkle_nft_template {
         pub fn new() -> Component<Self> {
             let resource_address = ResourceBuilder::non_fungible()
                 .with_token_symbol("sparkle")
-                .mintable(rule!(allow_all))
+                .mintable(rule!(allow_all), OWNER)
                 .build();
 
             Component::new(Self { resource_address })

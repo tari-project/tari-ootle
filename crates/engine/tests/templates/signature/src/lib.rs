@@ -24,7 +24,7 @@ mod template {
             let bucket = ResourceBuilder::stealth()
                 .with_token_symbol("SIGCOIN")
                 .with_divisibility(9)
-                .mintable(rule!(allow_all))
+                .mintable(rule!(allow_all), OWNER)
                 .initial_supply(amount!(1000000000000000000000));
 
             let resource_address = bucket.resource_address();

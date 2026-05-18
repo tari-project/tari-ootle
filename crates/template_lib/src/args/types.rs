@@ -19,7 +19,7 @@
 //   SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-use serde::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
 use tari_template_abi::rust::{
     collections::{BTreeMap, BTreeSet},
     fmt,
@@ -58,38 +58,55 @@ use crate::{
 // -------------------------------- LOGS -------------------------------- //
 
 /// Data needed for log emission from templates
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EmitLogArg {
+    #[n(0)]
     pub message: String,
+    #[n(1)]
     pub level: LogLevel,
 }
 
 // -------------------------------- Component -------------------------------- //
 
 /// An operation over a component
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ComponentInvokeArg {
+    #[n(0)]
     pub component_ref: ComponentRef,
+    #[n(1)]
     pub action: ComponentAction,
+    #[n(2)]
     pub args: Vec<Bytes>,
 }
 
 /// The possible actions that can be performed on components
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ComponentAction {
+    #[n(0)]
     Create,
+    #[n(1)]
     GetState,
+    #[n(2)]
     SetState,
+    #[n(3)]
     SetAccessRules,
+    #[n(4)]
     GetTemplateAddress,
+    #[n(5)]
     GetOwnerProof,
 }
 
 /// Encapsulates all the ways that a component can be referenced
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ComponentRef {
+    #[n(0)]
     Component,
-    Ref(ComponentAddress),
+    #[n(1)]
+    Ref(#[n(0)] ComponentAddress),
 }
 
 impl ComponentRef {
@@ -111,38 +128,53 @@ impl Display for ComponentRef {
 }
 
 /// A component creation operation
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CreateComponentArg {
+    #[n(0)]
     pub encoded_state: tari_bor::Value,
+    #[n(1)]
     pub owner_rule: OwnerRule,
+    #[n(2)]
     pub access_rules: ComponentAccessRules,
+    #[n(3)]
     pub address_allocation: Option<ComponentAddressAllocation>,
 }
 
 // -------------------------------- Events -------------------------------- //
 
 /// An event emission operation
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EmitEventArg {
+    #[n(0)]
     pub topic: String,
+    #[n(1)]
     pub payload: Metadata,
 }
 
 // -------------------------------- Resource -------------------------------- //
 
 /// An operation over a resource
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ResourceInvokeArg {
+    #[n(0)]
     pub resource_ref: ResourceRef,
+    #[n(1)]
     pub action: ResourceAction,
+    #[n(2)]
     pub args: Vec<Bytes>,
 }
 
 /// Encapsulates all the ways that a resource can be referenced
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ResourceRef {
+    #[n(0)]
     Resource,
-    Ref(ResourceAddress),
+    #[n(1)]
+    Ref(#[n(0)] ResourceAddress),
 }
 
 impl ResourceRef {
@@ -170,51 +202,73 @@ impl Display for ResourceRef {
 }
 
 /// An action performed on a Resource
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ResourceAction {
     /// Create a new resource
+    #[n(0)]
     Create,
     /// Mint more of a resource
+    #[n(1)]
     Mint,
     /// Recall an amount resource from a vault
+    #[n(2)]
     Recall,
     /// Update on a non-fungible
+    #[n(3)]
     UpdateNonFungibleData,
     /// Get the total supply of a resource
+    #[n(4)]
     GetTotalSupply,
     /// Get the [ResourceInfo](tari_template_lib_types::ResourceType) of a resource
+    #[n(5)]
     GetResourceInfo,
     /// Gets a non-fungible resource by its ID
+    #[n(6)]
     GetNonFungible,
     /// Update a single access rule of a resource. Authorization is gated by the field's
     /// [`UpdateRule`](tari_template_lib_types::access_rules::UpdateRule).
+    #[n(7)]
     UpdateAccessRule,
     /// Sets the freeze flags on a vault of a resource.
+    #[n(8)]
     SetVaultFreeze,
     /// Executes a stealth transfer for the resource
+    #[n(9)]
     StealthTransfer,
     /// Un/freezes one or more stealth UTXOs of a resource
+    #[n(10)]
     SetStealthUtxosFreeze,
     /// Burns a stealth UTXO of a resource
+    #[n(11)]
     StealthUtxoBurn,
     /// Update the metadata of a resource (token symbol remains immutable once set).
-    /// Appended at the end to keep bincode discriminants stable for prior variants.
+    #[n(12)]
     UpdateMetadata,
 }
 
 /// All the possible minting operation types
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MintArg {
+    #[n(0)]
     Fungible {
+        #[n(0)]
         amount: Amount,
     },
+    #[n(1)]
     NonFungible {
+        #[n(0)]
         tokens: BTreeMap<NonFungibleId, (tari_bor::Value, tari_bor::Value)>,
     },
+    #[n(2)]
     Confidential {
+        #[n(0)]
         statement: Box<ConfidentialOutputStatement>,
     },
+    #[n(3)]
     Stealth {
+        #[n(0)]
         amount: Amount,
     },
 }
@@ -231,65 +285,102 @@ impl MintArg {
 }
 
 /// A resource creation operation
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CreateResourceArg {
+    #[n(0)]
     pub resource_type: ResourceType,
+    #[n(1)]
     pub owner_rule: OwnerRule,
+    #[n(2)]
     pub access_rules: ResourceAccessRules,
+    #[n(3)]
     pub metadata: Metadata,
+    #[n(4)]
     pub mint_arg: Option<MintArg>,
+    #[n(5)]
     pub view_key: Option<RistrettoPublicKeyBytes>,
+    #[n(6)]
     pub authorize_hook: Option<AuthHook>,
+    #[n(7)]
     pub address_allocation: Option<ResourceAddressAllocation>,
+    #[n(8)]
     pub divisibility: u8,
+    #[n(9)]
     pub is_total_supply_tracking_enabled: bool,
 }
 
 /// A resource minting operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MintResourceArg {
+    #[n(0)]
     pub mint_arg: MintArg,
 }
 
 /// Stealth transfer operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StealthTransferResourceArg {
+    #[n(0)]
     pub transfer: StealthTransferStatement,
+    #[n(1)]
     pub input_bucket: Option<BucketId>,
 }
 
 /// A resource minting operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ResourceGetNonFungibleArg {
+    #[n(0)]
     pub id: NonFungibleId,
 }
 
 /// A non-fungible resource update operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ResourceUpdateNonFungibleDataArg {
+    #[n(0)]
     pub id: NonFungibleId,
+    #[n(1)]
     pub data: tari_bor::Value,
 }
 
 /// An argument used to update a single field of a resource's [`ResourceAccessRules`].
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct UpdateAccessRuleArg {
+    #[n(0)]
     pub action: ResourceAuthAction,
+    #[n(1)]
     pub new_rule: AccessRule,
 }
 
 /// A convenience enum that allows to specify resource types
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ResourceDiscriminator {
     /// Select all tokens
+    #[n(0)]
     Everything,
     /// Select a specific amount of fungible (public or stealth) tokens
-    Fungible { amount: Amount },
+    #[n(1)]
+    Fungible {
+        #[n(0)]
+        amount: Amount,
+    },
     /// Select specific non-fungible tokens
-    NonFungible { tokens: BTreeSet<NonFungibleId> },
+    #[n(2)]
+    NonFungible {
+        #[n(0)]
+        tokens: BTreeSet<NonFungibleId>,
+    },
     /// Select specific confidential commitments and a revealed amount
+    #[n(3)]
     Confidential {
+        #[n(0)]
         commitments: BTreeSet<PedersenCommitmentBytes>,
+        #[n(1)]
         revealed_amount: Amount,
     },
 }
@@ -316,45 +407,70 @@ impl Display for ResourceDiscriminator {
 }
 
 /// A resource recall operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RecallResourceArg {
+    #[n(0)]
     pub vault_id: VaultId,
+    #[n(1)]
     pub resource: ResourceDiscriminator,
 }
 
 /// A resource freeze operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FreezeResourceArg {
+    #[n(0)]
     pub vault_id: VaultId,
+    #[n(1)]
     pub flags: VaultFreezeFlags,
 }
 
 // -------------------------------- Vault -------------------------------- //
 
 /// A vault operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct VaultInvokeArg {
+    #[n(0)]
     pub vault_ref: VaultRef,
+    #[n(1)]
     pub action: VaultAction,
+    #[n(2)]
     pub args: Vec<Bytes>,
 }
 
 /// The possible actions that can be performed on vaults
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum VaultAction {
+    #[n(0)]
     Create,
+    #[n(1)]
     Deposit,
+    #[n(2)]
     Withdraw,
+    #[n(3)]
     GetBalance,
+    #[n(4)]
     GetLockedBalance,
+    #[n(5)]
     GetResourceAddress,
+    #[n(6)]
     GetNonFungibleIds,
+    #[n(7)]
     GetCommitmentCount,
+    #[n(8)]
     PayFee,
+    #[n(9)]
     CreateProofByResource,
+    #[n(10)]
     CreateProofByFungibleAmount,
+    #[n(11)]
     CreateProofByNonFungibles,
+    #[n(12)]
     CreateProofByConfidentialResource,
+    #[n(13)]
     GetNonFungibles,
 }
 
@@ -374,38 +490,65 @@ impl VaultAction {
 }
 
 /// A vault withdraw operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum VaultWithdrawArg {
-    Fungible { amount: Amount },
-    NonFungible { ids: BTreeSet<NonFungibleId> },
-    Confidential { proof: Box<ConfidentialWithdrawProof> },
-    Stealth { amount: Amount },
+    #[n(0)]
+    Fungible {
+        #[n(0)]
+        amount: Amount,
+    },
+    #[n(1)]
+    NonFungible {
+        #[n(0)]
+        ids: BTreeSet<NonFungibleId>,
+    },
+    #[n(2)]
+    Confidential {
+        #[n(0)]
+        proof: Box<ConfidentialWithdrawProof>,
+    },
+    #[n(3)]
+    Stealth {
+        #[n(0)]
+        amount: Amount,
+    },
 }
 
 // -------------------------------- Fees -------------------------------- //
 
 /// A fee payment operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PayFeeArg {
+    #[n(0)]
     pub amount: Amount,
+    #[n(1)]
     pub statement: Option<StealthTransferStatement>,
 }
 
 // -------------------------------- Bucket -------------------------------- //
 
 /// A bucket operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BucketInvokeArg {
+    #[n(0)]
     pub bucket_ref: BucketRef,
+    #[n(1)]
     pub action: BucketAction,
+    #[n(2)]
     pub args: Vec<Bytes>,
 }
 
 /// Encapsulates all the ways that a bucket can be referenced
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BucketRef {
-    Bucket(ResourceAddress),
-    Ref(BucketId),
+    #[n(0)]
+    Bucket(#[n(0)] ResourceAddress),
+    #[n(1)]
+    Ref(#[n(0)] BucketId),
 }
 
 impl BucketRef {
@@ -434,34 +577,54 @@ impl Display for BucketRef {
 }
 
 /// The possible actions that can be performed on buckets
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BucketAction {
+    #[n(0)]
     GetResourceAddress,
+    #[n(1)]
     GetResourceType,
+    #[n(2)]
     GetAmount,
+    #[n(3)]
     Take,
+    #[n(4)]
     TakeConfidential,
+    #[n(5)]
     Join,
+    #[n(6)]
     Burn,
+    #[n(7)]
     CreateProof,
+    #[n(8)]
     GetNonFungibleIds,
+    #[n(9)]
     GetNonFungibles,
+    #[n(10)]
     CountConfidentialCommitments,
+    #[n(11)]
     DropEmpty,
 }
 
 /// A bucket burn operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BucketBurnArg {
+    #[n(0)]
     pub bucket_id: BucketId,
 }
 
 /// BucketAction::GetAmount argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BucketGetAmountArg {
+    #[n(0)]
     AmountOnly,
+    #[n(1)]
     LockedOnly,
+    #[n(2)]
     AmountAndLocked,
+    #[n(3)]
     Everything,
 }
 
@@ -480,134 +643,189 @@ pub enum WorkspaceAction {
 // -------------------------------- NonFungible -------------------------------- //
 
 /// A non-fungible operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NonFungibleInvokeArg {
+    #[n(0)]
     pub address: NonFungibleAddress,
+    #[n(1)]
     pub action: NonFungibleAction,
+    #[n(2)]
     pub args: Vec<Bytes>,
 }
 
 /// The possible actions that can be performed on non-fungible resources
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum NonFungibleAction {
+    #[n(0)]
     GetData,
+    #[n(1)]
     GetMutableData,
 }
 
 // -------------------------------- Consensus -------------------------------- //
 
 /// A consensus operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ConsensusInvokeArg {
+    #[n(0)]
     pub action: ConsensusAction,
 }
 
 /// The possible actions that can be performed related to consensus
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ConsensusAction {
+    #[n(0)]
     GetCurrentEpoch,
+    #[n(1)]
     GetCurrentEpochHash,
 }
 
 // -------------------------------- GenerateRandom -------------------------------- //
 
 /// A random generation operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GenerateRandomInvokeArg {
+    #[n(0)]
     pub action: GenerateRandomAction,
 }
 
 /// The possible actions that can be performed related to random generation
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum GenerateRandomAction {
-    GetRandomBytes { len: u32 },
+    #[n(0)]
+    GetRandomBytes {
+        #[n(0)]
+        len: u32,
+    },
 }
 
 // -------------------------------- CallerContext -------------------------------- //
 
 /// The possible actions that can be performed related to the caller context
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum CallerContextAction {
+    #[n(0)]
     GetCallerPublicKey,
+    #[n(1)]
     GetComponentAddress,
+    #[n(2)]
     GetSignerProof,
 }
 
 /// A caller context operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CallerContextInvokeArg {
+    #[n(0)]
     pub action: CallerContextAction,
+    #[n(1)]
     pub args: Vec<Bytes>,
 }
 
 // -------------------------------- AddressAllocation -------------------------------- //
 
 /// The possible actions that can be performed related to the caller context
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AddressAllocationInvokeArg {
-    GetAddress(AddressAllocationId),
+    #[n(0)]
+    GetAddress(#[n(0)] AddressAllocationId),
+    #[n(1)]
     CreateComponentAllocation {
+        #[n(0)]
         public_key: Option<RistrettoPublicKeyBytes>,
     },
+    #[n(2)]
     CreateResourceAllocation,
 }
 
 /// Result af an address allocation based on the input substate type
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AllocateAddressResult {
-    ComponentAddress(ComponentAddressAllocation),
-    ResourceAddress(ResourceAddressAllocation),
+    #[n(0)]
+    ComponentAddress(#[n(0)] ComponentAddressAllocation),
+    #[n(1)]
+    ResourceAddress(#[n(0)] ResourceAddressAllocation),
 }
 
 // -------------------------------- CallInvoke -------------------------------- //
 
 /// A call operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CallInvokeArg {
+    #[n(0)]
     pub action: CallAction,
+    #[n(1)]
     pub args: Vec<Bytes>,
 }
 
 /// All the possible call operation types
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum CallAction {
     /// Call to a template's function
+    #[n(0)]
     CallFunction,
     /// Call to a component's method
+    #[n(1)]
     CallMethod,
 }
 
 /// A template's function call operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CallFunctionArg {
+    #[n(0)]
     pub template_address: TemplateAddress,
+    #[n(1)]
     pub function: String,
+    #[n(2)]
     pub args: Vec<Bytes>,
 }
 
 /// A component's method call operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CallMethodArg {
+    #[n(0)]
     pub component_address: ComponentAddress,
+    #[n(1)]
     pub method: String,
+    #[n(2)]
     pub args: Vec<Bytes>,
 }
 
 // -------------------------------- ProofInvoke -------------------------------- //
 
 /// A proof-related operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ProofInvokeArg {
+    #[n(0)]
     pub proof_ref: ProofRef,
+    #[n(1)]
     pub action: ProofAction,
+    #[n(2)]
     pub args: Vec<Bytes>,
 }
 
 /// All the possible ways to reference a proof
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ProofRef {
-    Proof(ResourceAddress),
-    Ref(ProofId),
+    #[n(0)]
+    Proof(#[n(0)] ResourceAddress),
+    #[n(1)]
+    Ref(#[n(0)] ProofId),
 }
 
 impl ProofRef {
@@ -636,31 +854,44 @@ impl Display for ProofRef {
 }
 
 /// All the possible actions that can be performed on proofs
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ProofAction {
+    #[n(0)]
     GetAmount,
+    #[n(1)]
     GetResourceAddress,
+    #[n(2)]
     GetResourceType,
+    #[n(3)]
     GetNonFungibles,
+    #[n(4)]
     Authorize,
+    #[n(5)]
     DropAuthorize,
+    #[n(6)]
     Drop,
 }
 
 /// An argument to represent a proof of a vault's fungible amount
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct VaultCreateProofByFungibleAmountArg {
+    #[n(0)]
     pub amount: Amount,
 }
 
 /// An argument to represent a proof of a vault's non-fungible presence
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct VaultCreateProofByNonFungiblesArg {
+    #[n(0)]
     pub ids: BTreeSet<NonFungibleId>,
 }
 
 /// TODO: confidential. Zero knowledge proof of commitment factors
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CreateProofOfResourceByConfidentialArg {
     // pub proof: ConfidentialProofOfKnowledge
 }
@@ -668,27 +899,40 @@ pub struct CreateProofOfResourceByConfidentialArg {
 // -------------------------------- BuiltinTemplate -------------------------------- //
 
 /// A template builtin operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BuiltinTemplateInvokeArg {
+    #[n(0)]
     pub action: BuiltinTemplateAction,
 }
 
 /// The possible actions that can be performed related to builtin templates
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BuiltinTemplateAction {
-    GetTemplateAddress { bultin: BuiltinTemplate },
+    #[n(0)]
+    GetTemplateAddress {
+        #[n(0)]
+        bultin: BuiltinTemplate,
+    },
 }
 
 // -------------------------------- UTXOs -------------------------------- //
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SetFreezeStealthUtxosArg {
+    #[n(0)]
     pub utxos: Vec<UtxoId>,
+    #[n(1)]
     pub freeze: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BurnStealthUtxoArg {
+    #[n(0)]
     pub utxo_id: UtxoId,
+    #[n(1)]
     pub value_proof: Option<StealthValueProof>,
 }

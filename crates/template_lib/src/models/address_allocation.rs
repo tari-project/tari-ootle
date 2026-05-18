@@ -1,6 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use minicbor::{CborLen, Decode, Encode};
 use tari_bor::{BorTag, Tagged};
 use tari_template_abi::{EngineOp, call_engine};
 use tari_template_lib_types::{BinaryTag, ComponentAddress, ResourceAddress};
@@ -13,8 +14,9 @@ pub type AddressAllocationId = u32;
 const COMPONENT_ALLOC_TAG: u64 = BinaryTag::AllocatedComponentAddress.as_u64();
 
 /// Represents an allocation of an address for a component.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-#[serde(transparent)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
 pub struct ComponentAddressAllocation(BorTag<AddressAllocationId, COMPONENT_ALLOC_TAG>);
 
 impl Tagged for ComponentAddressAllocation {
@@ -48,8 +50,9 @@ impl ComponentAddressAllocation {
 const RESOURCE_TAG: u64 = BinaryTag::AllocatedResourceAddress.as_u64();
 
 /// Represents an allocation of an address for a resource.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-#[serde(transparent)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
 pub struct ResourceAddressAllocation(BorTag<AddressAllocationId, RESOURCE_TAG>);
 
 impl ResourceAddressAllocation {

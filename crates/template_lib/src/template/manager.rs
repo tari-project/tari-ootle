@@ -19,7 +19,7 @@
 //   SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-use serde::de::DeserializeOwned;
+use minicbor::Decode;
 use tari_template_abi::{EngineOp, call_engine, rust::prelude::*};
 use tari_template_lib_types::{TemplateAddress, bytes::Bytes};
 
@@ -39,7 +39,7 @@ impl TemplateManager {
 
     /// Executes a function in the template.
     /// Template functions can be called from another template function or from component methods.
-    pub fn call<F: Into<String>, T: DeserializeOwned, B: Into<Bytes>>(&self, function: F, args: Vec<B>) -> T {
+    pub fn call<F: Into<String>, T: for<'b> Decode<'b, ()>, B: Into<Bytes>>(&self, function: F, args: Vec<B>) -> T {
         self.call_internal(CallFunctionArg {
             template_address: self.template_address,
             function: function.into(),
@@ -47,7 +47,7 @@ impl TemplateManager {
         })
     }
 
-    fn call_internal<T: DeserializeOwned>(&self, arg: CallFunctionArg) -> T {
+    fn call_internal<T: for<'b> Decode<'b, ()>>(&self, arg: CallFunctionArg) -> T {
         let result = call_engine::<_, InvokeResult>(EngineOp::CallInvoke, &CallInvokeArg {
             action: CallAction::CallFunction,
             args: invoke_args![arg],

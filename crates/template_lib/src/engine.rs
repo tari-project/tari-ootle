@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use serde::Serialize;
+use minicbor::Encode;
 use tari_bor::to_value;
 use tari_template_abi::{EngineOp, call_engine, rust::prelude::*};
 use tari_template_lib_types::{ComponentAddress, LogLevel, OwnerRule, access_rules::ComponentAccessRules};
@@ -44,14 +44,14 @@ impl TariEngine {
         Self {}
     }
 
-    pub fn create_component<T: Serialize>(
+    pub fn create_component<T: Encode<()>>(
         &self,
         initial_state: T,
         owner_rule: OwnerRule,
         access_rules: ComponentAccessRules,
         address_allocation: Option<ComponentAddressAllocation>,
     ) -> ComponentAddress {
-        let encoded_state = to_value(&initial_state).unwrap();
+        let encoded_state = to_value(&initial_state).expect("failed to encode component state");
 
         let result = call_engine::<_, InvokeResult>(EngineOp::ComponentInvoke, &ComponentInvokeArg {
             component_ref: ComponentRef::Component,

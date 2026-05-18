@@ -19,7 +19,7 @@
 //  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-use serde::{Serialize, de::DeserializeOwned};
+use minicbor::{CborLen, Decode, Encode};
 use tari_bor::to_value;
 use tari_template_abi::{EngineOp, call_engine, rust::prelude::*};
 use tari_template_lib_types::{ComponentAddress, TemplateAddress, access_rules::ComponentAccessRules, bytes::Bytes};
@@ -32,9 +32,10 @@ use crate::{
 };
 
 /// Utility for managing components inside templates
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
-#[serde(transparent)]
-pub struct ComponentManager(ComponentAddress);
+#[derive(Clone, Encode, Decode, CborLen)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
+pub struct ComponentManager(#[n(0)] ComponentAddress);
 
 impl ComponentManager {
     /// Returns a new `ComponentManager` for the component specified by `address`
@@ -56,7 +57,7 @@ impl ComponentManager {
     /// Calls a method of another component and returns the result.
     /// This is used to call external component methods and can be used in a component method or template function
     /// context.
-    pub fn call<T: Into<String>, R: DeserializeOwned, B: Into<Bytes>>(&self, method: T, args: Vec<B>) -> R {
+    pub fn call<T: Into<String>, R: for<'b> Decode<'b, ()>, B: Into<Bytes>>(&self, method: T, args: Vec<B>) -> R {
         self.call_internal(CallMethodArg {
             component_address: self.0,
             method: method.into(),
@@ -64,7 +65,7 @@ impl ComponentManager {
         })
     }
 
-    fn call_internal<T: DeserializeOwned>(&self, arg: CallMethodArg) -> T {
+    fn call_internal<T: for<'b> Decode<'b, ()>>(&self, arg: CallMethodArg) -> T {
         let result = call_engine::<_, InvokeResult>(EngineOp::CallInvoke, &CallInvokeArg {
             action: CallAction::CallMethod,
             args: invoke_args![arg],
@@ -80,7 +81,7 @@ impl ComponentManager {
     }
 
     /// Get the component state
-    pub fn get_state<T: DeserializeOwned>(&self) -> T {
+    pub fn get_state<T: for<'b> Decode<'b, ()>>(&self) -> T {
         let result = call_engine::<_, InvokeResult>(EngineOp::ComponentInvoke, &ComponentInvokeArg {
             component_ref: ComponentRef::Ref(self.0),
             action: ComponentAction::GetState,
@@ -96,7 +97,7 @@ impl ComponentManager {
     }
 
     /// Update the component state
-    pub fn set_state<T: Serialize>(&self, state: T) {
+    pub fn set_state<T: Encode<()>>(&self, state: T) {
         let state = to_value(&state).expect("Failed to encode component state");
         let _result = call_engine::<_, InvokeResult>(EngineOp::ComponentInvoke, &ComponentInvokeArg {
             component_ref: ComponentRef::Ref(self.0),

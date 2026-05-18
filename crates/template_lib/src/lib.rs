@@ -176,7 +176,9 @@ pub use engine::engine;
 pub mod panic_hook;
 pub mod prelude;
 // Re-export for macro
-pub use tari_bor::{serde, to_value};
+#[cfg(feature = "serde")]
+pub use tari_bor::serde;
+pub use tari_bor::to_value;
 
 #[macro_use]
 pub mod macros;

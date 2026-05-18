@@ -72,8 +72,7 @@ mod tests {
             pub mod Foo_template {
                 use ::tari_template_lib::template_macro_deps::*;
                 use std::collections::HashMap as _;
-                #[derive(serde :: Serialize, serde :: Deserialize)]
-                #[serde(crate = "self::serde")]
+                #[derive(minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
                 pub struct Foo { }
                 impl Foo {}
             }

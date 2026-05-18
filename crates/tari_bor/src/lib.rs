@@ -22,7 +22,7 @@ mod byte_counter;
 pub use byte_counter::ByteCounter;
 pub use error::BorError;
 pub use macros::__cbor_macro;
-pub use minicbor::{self, Decode, Encode};
+pub use minicbor::{self, CborLen, Decode, Encode};
 #[cfg(feature = "serde")]
 pub use serde::{self, Deserialize, Serialize, de::DeserializeOwned};
 pub use tag::*;
@@ -31,9 +31,7 @@ pub use walker::*;
 
 /// Encode a value into a freshly allocated `Vec<u8>`.
 pub fn encode<T: Encode<()> + ?Sized>(val: &T) -> Result<Vec<u8>, BorError> {
-    let mut buf = Vec::with_capacity(encoded_len(val)?);
-    encode_into_writer(val, &mut buf)?;
-    Ok(buf)
+    minicbor::to_vec(val).map_err(BorError::from)
 }
 
 /// Encode a value into a [`std::io::Write`] sink (std feature).
@@ -58,16 +56,31 @@ where
     minicbor::encode(val, writer).map_err(BorError::from)
 }
 
-/// Pre-calculate the encoded length in bytes of a value, without allocating a buffer.
-pub fn encoded_len<T: Encode<()> + ?Sized>(val: &T) -> Result<usize, BorError> {
-    let mut counter = ByteCounter::new();
-    minicbor::encode(val, &mut counter).map_err(|e| BorError::new(format!("encoded_len failed: {e}")))?;
-    Ok(counter.get())
+/// Pre-calculate the encoded length in bytes of a value via [`minicbor::CborLen`].
+///
+/// Types should `#[derive(CborLen)]` alongside `Encode`/`Decode` so this is O(1) over
+/// the type structure. The fallback path through [`ByteCounter`] is still available for
+/// types that haven't derived `CborLen` yet (see [`encoded_len_via_writer`]).
+///
+/// The `Result` return type is preserved for API compatibility — this function cannot
+/// actually fail today.
+pub fn encoded_len<T: CborLen<()> + ?Sized>(val: &T) -> Result<usize, BorError> {
+    Ok(minicbor::len(val))
 }
 
 /// Pre-calculate the encoded length in bytes, returning an error if it exceeds `limit`.
-pub fn encoded_len_with_limit<T: Encode<()> + ?Sized>(val: &T, limit: usize) -> Result<usize, BorError> {
-    let mut counter = ByteCounter::with_limit(limit);
+pub fn encoded_len_with_limit<T: CborLen<()> + ?Sized>(val: &T, limit: usize) -> Result<usize, BorError> {
+    let n = minicbor::len(val);
+    if n > limit {
+        return Err(BorError::new(format!("encoded length {n} exceeds limit {limit}")));
+    }
+    Ok(n)
+}
+
+/// Fallback length calculation that drives the encoder. Use this for types that haven't
+/// derived [`CborLen`] yet (during the in-progress migration). Prefer [`encoded_len`].
+pub fn encoded_len_via_writer<T: Encode<()> + ?Sized>(val: &T) -> Result<usize, BorError> {
+    let mut counter = ByteCounter::new();
     minicbor::encode(val, &mut counter).map_err(|e| BorError::new(format!("encoded_len failed: {e}")))?;
     Ok(counter.get())
 }

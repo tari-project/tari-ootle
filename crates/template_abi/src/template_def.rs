@@ -1,7 +1,7 @@
 //  Copyright 2022. The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
-use minicbor::{Decode, Encode};
+use minicbor::{CborLen, Decode, Encode};
 
 #[cfg(feature = "serde")]
 use crate::rust::ops;
@@ -10,7 +10,7 @@ use crate::{
     version::WasmAbiVersion,
 };
 
-#[derive(Debug, Clone, Encode, Decode)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum TemplateDef {
@@ -65,7 +65,7 @@ impl TemplateDef {
     }
 }
 
-#[derive(Debug, Clone, Default, Encode, Decode)]
+#[derive(Debug, Clone, Default, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TemplateDefV1 {
@@ -83,7 +83,7 @@ impl TemplateDefV1 {
     }
 }
 
-#[derive(Debug, Clone, Encode, Decode)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct FunctionDef {
@@ -101,7 +101,7 @@ pub struct FunctionDef {
     pub is_migration: bool,
 }
 
-#[derive(Debug, Clone, Encode, Decode)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ArgDef {
@@ -111,7 +111,7 @@ pub struct ArgDef {
     pub arg_type: Type,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Encode, Decode)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Type {

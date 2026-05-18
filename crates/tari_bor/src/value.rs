@@ -5,6 +5,7 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
 
 use minicbor::{
+    CborLen,
     Decode,
     Decoder,
     Encoder,
@@ -264,6 +265,43 @@ impl<'b, C> minicbor::Decode<'b, C> for Value {
     }
 }
 
+/// `CborLen` for the dynamic `Value` tree.
+///
+/// Computes length recursively over the structure. For static types prefer `#[derive(CborLen)]`
+/// which is O(1) per field.
+impl<C> CborLen<C> for Value {
+    fn cbor_len(&self, ctx: &mut C) -> usize {
+        match self {
+            Value::Null | Value::Bool(_) => 1,
+            Value::Integer(i) => {
+                if *i >= 0 {
+                    u64::try_from(*i).map(|u| u.cbor_len(ctx)).unwrap_or(9)
+                } else {
+                    i64::try_from(*i).map(|n| n.cbor_len(ctx)).unwrap_or(9)
+                }
+            },
+            Value::Float(_) => 9,
+            Value::Bytes(b) => {
+                let n = b.len();
+                n.cbor_len(ctx) + n
+            },
+            Value::Text(s) => {
+                let n = s.len();
+                n.cbor_len(ctx) + n
+            },
+            Value::Array(arr) => {
+                let n = arr.len();
+                n.cbor_len(ctx) + arr.iter().map(|v| v.cbor_len(ctx)).sum::<usize>()
+            },
+            Value::Map(m) => {
+                let n = m.len();
+                n.cbor_len(ctx) + m.iter().map(|(k, v)| k.cbor_len(ctx) + v.cbor_len(ctx)).sum::<usize>()
+            },
+            Value::Tag(t, v) => t.cbor_len(ctx) + v.cbor_len(ctx),
+        }
+    }
+}
+
 #[cfg(not(feature = "std"))]
 use alloc::string::ToString;
 
@@ -321,6 +359,7 @@ mod tests {
 
     fn roundtrip(v: &Value) -> Value {
         let bytes = minicbor::to_vec(v).unwrap();
+        assert_eq!(bytes.len(), minicbor::len(v), "CborLen mismatch");
         minicbor::decode::<Value>(&bytes).unwrap()
     }
 

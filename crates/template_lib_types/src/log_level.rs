@@ -1,7 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use minicbor::{Decode, Encode};
+use minicbor::{CborLen, Decode, Encode};
 use tari_template_abi::rust::{
     fmt,
     fmt::{Display, Formatter},
@@ -10,7 +10,7 @@ use tari_template_abi::rust::{
 };
 
 /// All the possible log levels
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Encode, Decode)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]

@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use minicbor::{Decode, Encode};
+use minicbor::{CborLen, Decode, Encode};
 use tari_template_abi::rust::{fmt, prelude::*};
 
 /// Represents every possible type of resource in the Tari network.
@@ -16,7 +16,7 @@ use tari_template_abi::rust::{fmt, prelude::*};
 /// - **Stealth** A fungible resource using the highest level of confidentiality. Funds are not kept in vaults, and each
 ///   output is an independent confidential substate (kind of like creating a new unlinked vault for each currency
 ///   note).
-#[derive(Clone, Copy, Debug, PartialEq, Encode, Decode)]
+#[derive(Clone, Copy, Debug, PartialEq, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
@@ -102,7 +102,7 @@ mod parsing {
 pub use parsing::ParseResourceTypeError;
 
 /// Info for a resource, including its type and divisibility.
-#[derive(Clone, Copy, Encode, Decode)]
+#[derive(Clone, Copy, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ResourceInfo {
     #[n(0)]

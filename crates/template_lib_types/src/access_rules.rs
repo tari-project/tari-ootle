@@ -203,7 +203,6 @@ pub enum ResourceAuthAction {
     Deposit,
     UpdateNonFungibleData,
     Freeze,
-    /// Appended at the end to keep bincode discriminants stable for prior variants.
     UpdateMetadata,
 }
 
@@ -250,9 +249,6 @@ pub struct ResourceAccessRules {
     nft_data_updater: UpdateRule,
     freeze: AccessRule,
     freeze_updater: UpdateRule,
-    /// Added post-launch. Appended last to keep bincode field positions stable for prior fields;
-    /// this is still a breaking change for pre-existing substates because bincode cannot read a
-    /// missing trailing field, so the chain must be reset or data migrated on upgrade.
     update_metadata: AccessRule,
     metadata_updater: UpdateRule,
 }

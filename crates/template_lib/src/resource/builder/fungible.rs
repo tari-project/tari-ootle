@@ -207,7 +207,27 @@ impl FungibleResourceBuilder {
         self
     }
 
-    /// Sets up who can freeze vaults containing this resource, and who may later change the freeze rule.
+    /// Sets up who can freeze vaults containing this resource, and who may later change the freeze
+    /// rule.
+    ///
+    /// Allows you to pass an [`AccessRule`] that defines who can freeze a vault holding this
+    /// resource, together with an [`UpdateRule`] that controls who can update the freeze rule after
+    /// creation. Pass [`UpdateRule::Locked`] to permanently prevent the freeze rule from being
+    /// changed, which gives holders a binding guarantee that vaults of this resource can never be
+    /// frozen later.
+    ///
+    /// By default, freezing is disabled for all users and the rule is [`UpdateRule::Locked`].
+    ///
+    /// # Examples
+    ///
+    /// ```rust, ignore
+    /// use tari_template_lib::auth::AccessRule;
+    /// use tari_template_lib::prelude::{LOCKED, rule};
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::public_fungible()
+    ///     .freezable(rule!(deny_all), LOCKED)
+    ///     .build();
+    /// ```
     pub fn freezable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
         self.access_rules = self.access_rules.freezable(rule, updater);
         self
@@ -259,8 +279,26 @@ impl FungibleResourceBuilder {
         self
     }
 
-    /// Sets up who can update the resource's metadata, and who may later change that rule. The token
-    /// symbol remains immutable once set.
+    /// Sets up who can update the resource's metadata, and who may later change that rule. The
+    /// token symbol remains immutable once set.
+    ///
+    /// Allows you to pass an [`AccessRule`] that defines who can replace the resource's metadata,
+    /// together with an [`UpdateRule`] that controls who can update the metadata rule after
+    /// creation.
+    ///
+    /// By default, updating the metadata is disabled for all users and the updater rule is
+    /// [`UpdateRule::Owner`].
+    ///
+    /// # Examples
+    ///
+    /// ```rust, ignore
+    /// use tari_template_lib::auth::AccessRule;
+    /// use tari_template_lib::prelude::{OWNER, rule};
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::public_fungible()
+    ///     .update_metadata(rule!(allow_all), OWNER)
+    ///     .build();
+    /// ```
     pub fn update_metadata<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
         self.access_rules = self.access_rules.update_metadata(rule, updater);
         self

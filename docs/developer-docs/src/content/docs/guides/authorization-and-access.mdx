@@ -65,7 +65,13 @@ mod template {
 
 #### Resource Access Rules
 
-Resources can also have access rules, typically governing who can mint, burn, or access their metadata.
+Resources can also have access rules, typically governing who can mint, burn, recall, freeze, or update metadata.
+Each builder method takes **two** arguments:
+
+1. The [`AccessRule`] that gates the action right now.
+2. An [`UpdateRule`] that gates **who, if anyone, can later change that access rule**. The updater is fixed
+   at creation time and cannot itself be changed afterwards — this lets holders trust a `Locked` rule will
+   stay locked forever.
 
 ```rust
 use tari_template_lib::prelude::*;
@@ -74,33 +80,98 @@ use tari_template_lib::prelude::*;
 mod template {
 
     pub struct MyComponent {
-        resource: ResourceManager
+        resource: ResourceManager,
     }
 
-impl MyComponent {
-    pub fn create_with_restricted_resource(
-        minter_badge: ResourceAddress,
-    ) -> ResourceAddress {
-        let resource_address = ResourceBuilder::public_fungible()
-            .with_token_symbol("RTK")
-            .divisibility(10) // Set to 10 decimal places
-            // Mint an initial supply of 100 million tokens
-            .initial_supply(amount!["1000000000000000000000"])
-            // Only minter_address can mint more tokens
-            .mintable(AccessRule::Restricted(vec![minter_address.into()]))
-            .burnable(rule![deny_all]) // No one can burn these tokens
-            .build();
+    impl MyComponent {
+        pub fn create_with_restricted_resource(
+            minter_badge: NonFungibleAddress,
+        ) -> ResourceAddress {
+            let resource_address = ResourceBuilder::public_fungible()
+                .with_token_symbol("RTK")
+                .with_divisibility(10)
+                .initial_supply(amount!["1000000000000000000000"])
+                // Only the minter badge can mint, and only the owner may
+                // change who can mint later.
+                .mintable(rule!(non_fungible(minter_badge)), OWNER)
+                // Nobody can burn, and the rule is locked forever.
+                .burnable(rule!(deny_all), LOCKED)
+                .build();
 
-        MyComponent { resource: resource_address.into() }
+            MyComponent { resource: resource_address.into() }.create()
+        }
     }
 }
 ```
 
--   `.mintable(AccessRule)`: Controls who can mint new units of this resource.
--   `.burnable(AccessRule)`: Controls who can burn units of this resource.
--   `.withdrawable(AccessRule)`: Controls who can withdraw this resource from vaults.
--   `.depositable(AccessRule)`: Controls who can deposit this resource into vaults.
--   `.metadata_access(AccessRule)`: Controls who can read/write resource metadata.
+Each `ResourceBuilder` exposes one method per action. All accept `(rule, updater)`:
+
+-   `.mintable(rule, updater)` — who can mint new units of this resource.
+-   `.burnable(rule, updater)` — who can burn units.
+-   `.recallable(rule, updater)` — who can recall units from any external vault.
+-   `.freezable(rule, updater)` — who can freeze a vault holding this resource.
+-   `.withdrawable(rule, updater)` — who can withdraw this resource from vaults.
+-   `.depositable(rule, updater)` — who can deposit this resource into vaults.
+-   `.update_metadata(rule, updater)` — who can change the metadata (the token symbol always stays immutable).
+-   `.update_non_fungible_data(rule, updater)` — who can change the mutable data on individual NFTs (non-fungible only).
+
+##### UpdateRule
+
+`UpdateRule` controls who can later change an access rule, and has three variants:
+
+| `UpdateRule`             | Constant   | Behaviour                                                                   |
+|--------------------------|------------|-----------------------------------------------------------------------------|
+| `UpdateRule::Locked`     | `LOCKED`   | Nobody — not even the resource owner — can change the rule.                 |
+| `UpdateRule::Owner`      | `OWNER`    | Only the resource owner (per the `OwnerRule`) can change the rule.          |
+| `UpdateRule::AccessRule` | _n/a_      | Anyone satisfying the inner `AccessRule` can change the rule. No implicit owner override. |
+
+Why `Locked` matters — it is the only way to make a trust promise to holders that **cannot be quietly retracted
+later**. If `recall` is `DenyAll` but the updater is `Owner`, the owner can flip recall back on after users have
+already accepted the token; the same goes for `freeze`, `mint` (inflation), `withdraw`, and so on. Issuing a token
+with the recall/freeze/mint rules `Locked` is what lets a user verify, by reading the substate once, that those
+powers can never be granted to anyone — not even the issuer. Use `LOCKED` for any property you want holders to be
+able to rely on indefinitely, and reserve `OWNER` (or a more permissive updater) for rules you genuinely expect
+to govern over time.
+
+Pass an `AccessRule` directly where an `UpdateRule` is expected and it is converted to
+`UpdateRule::AccessRule(rule)`:
+
+```rust
+let admin = rule!(non_fungible(admin_badge));
+let resource = ResourceBuilder::public_fungible()
+    // Recall is denied today, but the admin badge holder can re-enable it later.
+    .recallable(rule!(deny_all), admin.clone())
+    // Withdrawals are open, but only the owner can ever change that.
+    .withdrawable(rule!(allow_all), OWNER)
+    .build();
+```
+
+##### Defaults
+
+Calling `ResourceAccessRules::new()` (the default) yields safe baseline rules:
+
+- `mint`, `burn`, `recall`, `freeze`, `update_metadata`: `DenyAll`, updater `Locked`.
+- `withdraw`, `deposit`: `AllowAll`, updater `Locked`.
+- `update_non_fungible_data`: `AllowAll`, updater `Owner`.
+
+Locked-by-default means a resource issued with `ResourceAccessRules::new()` and no overrides can never have its
+`recall`, `mint`, etc. silently re-enabled later. To leave room for future tightening or relaxation, pass `OWNER`
+(or an explicit access rule) as the updater on the actions you want to keep editable.
+
+##### Updating an access rule later
+
+Once a resource exists, use `ResourceManager::update_access_rule` to change a single field. The engine consults
+the field's `UpdateRule` to decide whether the caller is allowed:
+
+```rust
+ResourceManager::get(my_resource)
+    .update_access_rule(ResourceAuthAction::Withdraw, rule!(non_fungible(user_badge)));
+```
+
+The action is one of `ResourceAuthAction::{Mint, Burn, Recall, Withdraw, Deposit, UpdateNonFungibleData, UpdateMetadata, Freeze}`.
+If the field's updater is `Locked`, this call fails even for the owner. If the updater is `Owner`, only the resource
+owner can succeed. If the updater is `AccessRule(rule)`, only a caller satisfying `rule` can succeed — the owner
+has **no implicit override**.
 
 ### Identity Management
 

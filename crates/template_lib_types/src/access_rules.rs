@@ -194,7 +194,7 @@ impl Default for ComponentAccessRules {
 }
 
 /// An enum that represents all the possible actions that can be performed on a resource
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ResourceAuthAction {
     Mint,
     Burn,
@@ -202,7 +202,6 @@ pub enum ResourceAuthAction {
     Withdraw,
     Deposit,
     UpdateNonFungibleData,
-    UpdateAccessRules,
     Freeze,
     /// Appended at the end to keep bincode discriminants stable for prior variants.
     UpdateMetadata,
@@ -214,23 +213,48 @@ impl ResourceAuthAction {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum UpdateRule {
+    Locked,
+    Owner,
+    AccessRule(AccessRule),
+}
+
+impl From<AccessRule> for UpdateRule {
+    fn from(rule: AccessRule) -> Self {
+        Self::AccessRule(rule)
+    }
+}
+
+pub const LOCKED: UpdateRule = UpdateRule::Locked;
+pub const OWNER: UpdateRule = UpdateRule::Owner;
+
 /// Information needed to specify access rules to a resource
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ResourceAccessRules {
-    mintable: AccessRule,
-    burnable: AccessRule,
-    recallable: AccessRule,
-    withdrawable: AccessRule,
-    depositable: AccessRule,
-    update_non_fungible_data: AccessRule,
-    update_access_rules: AccessRule,
+    mint: AccessRule,
+    mint_updater: UpdateRule,
+    burn: AccessRule,
+    burn_updater: UpdateRule,
+    recall: AccessRule,
+    recall_updater: UpdateRule,
+    withdraw: AccessRule,
+    withdraw_updater: UpdateRule,
+    deposit: AccessRule,
+    deposit_updater: UpdateRule,
+    update_nft_data: AccessRule,
+    nft_data_updater: UpdateRule,
     freeze: AccessRule,
+    freeze_updater: UpdateRule,
     /// Added post-launch. Appended last to keep bincode field positions stable for prior fields;
     /// this is still a breaking change for pre-existing substates because bincode cannot read a
     /// missing trailing field, so the chain must be reset or data migrated on upgrade.
     update_metadata: AccessRule,
+    metadata_updater: UpdateRule,
 }
 
 impl ResourceAccessRules {
@@ -243,102 +267,147 @@ impl ResourceAccessRules {
     pub const fn new() -> Self {
         Self {
             // User should explicitly enable minting, burning etc
-            mintable: AccessRule::DenyAll,
-            burnable: AccessRule::DenyAll,
-            recallable: AccessRule::DenyAll,
-            update_access_rules: AccessRule::DenyAll,
-            update_metadata: AccessRule::DenyAll,
+            mint: AccessRule::DenyAll,
+            mint_updater: UpdateRule::Locked,
+            burn: AccessRule::DenyAll,
+            burn_updater: UpdateRule::Locked,
+            recall: AccessRule::DenyAll,
+            recall_updater: UpdateRule::Locked,
             freeze: AccessRule::DenyAll,
+            freeze_updater: UpdateRule::Locked,
+            update_metadata: AccessRule::DenyAll,
+            metadata_updater: UpdateRule::Owner,
             // But explicitly disable withdrawing, updating and/or depositing
-            withdrawable: AccessRule::AllowAll,
-            depositable: AccessRule::AllowAll,
-            update_non_fungible_data: AccessRule::AllowAll,
+            withdraw: AccessRule::AllowAll,
+            withdraw_updater: UpdateRule::Locked,
+            deposit: AccessRule::AllowAll,
+            deposit_updater: UpdateRule::Locked,
+            update_nft_data: AccessRule::AllowAll,
+            nft_data_updater: UpdateRule::Owner,
         }
     }
 
     /// Update the access rules so no one can perform any action on the resource after its creation
     pub fn deny_all() -> Self {
         Self {
-            mintable: AccessRule::DenyAll,
-            burnable: AccessRule::DenyAll,
-            recallable: AccessRule::DenyAll,
-            update_access_rules: AccessRule::DenyAll,
-            update_metadata: AccessRule::DenyAll,
-            withdrawable: AccessRule::DenyAll,
-            depositable: AccessRule::DenyAll,
-            update_non_fungible_data: AccessRule::DenyAll,
+            mint: AccessRule::DenyAll,
+            mint_updater: UpdateRule::Locked,
+            burn: AccessRule::DenyAll,
+            burn_updater: UpdateRule::Locked,
+            recall: AccessRule::DenyAll,
+            recall_updater: UpdateRule::Locked,
+            withdraw: AccessRule::DenyAll,
+            withdraw_updater: UpdateRule::Locked,
+            deposit: AccessRule::DenyAll,
+            deposit_updater: UpdateRule::Locked,
+            update_nft_data: AccessRule::DenyAll,
+            nft_data_updater: UpdateRule::Locked,
             freeze: AccessRule::DenyAll,
+            freeze_updater: UpdateRule::Locked,
+            update_metadata: AccessRule::DenyAll,
+            metadata_updater: UpdateRule::Locked,
         }
     }
 
     /// Sets up who can mint new tokens of the resource
-    pub fn mintable(mut self, rule: AccessRule) -> Self {
-        self.mintable = rule;
+    pub fn mintable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.mint = rule;
+        self.mint_updater = updater.into();
         self
     }
 
     /// Sets up who can burn (destroy) tokens of the resource
-    pub fn burnable(mut self, rule: AccessRule) -> Self {
-        self.burnable = rule;
+    pub fn burnable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.burn = rule;
+        self.burn_updater = updater.into();
         self
     }
 
     /// Sets up who can recall tokens of the resource.
     /// A recall is the forceful withdrawal of tokens from any external vault
-    pub fn recallable(mut self, rule: AccessRule) -> Self {
-        self.recallable = rule;
+    pub fn recallable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.recall = rule;
+        self.recall_updater = updater.into();
         self
     }
 
     /// Sets up who can freeze a vault (or UTXO in the case of stealth) containing this resource, preventing
     /// withdrawals.
-    pub fn freezable(mut self, rule: AccessRule) -> Self {
+    pub fn freezable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
         self.freeze = rule;
+        self.freeze_updater = updater.into();
         self
     }
 
     /// Sets up who can withdraw tokens of the resource from any vault
-    pub fn withdrawable(mut self, rule: AccessRule) -> Self {
-        self.withdrawable = rule;
+    pub fn withdrawable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.withdraw = rule;
+        self.withdraw_updater = updater.into();
         self
     }
 
     /// Sets up who can deposit tokens of the resource into any vault
-    pub fn depositable(mut self, rule: AccessRule) -> Self {
-        self.depositable = rule;
-        self
-    }
-
-    /// Sets up who can update the access rules of the resource
-    pub fn update_access_rules(mut self, rule: AccessRule) -> Self {
-        self.update_access_rules = rule;
+    pub fn depositable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.deposit = rule;
+        self.deposit_updater = updater.into();
         self
     }
 
     /// Sets up who can update the mutable data of the tokens in the resource
-    pub fn update_non_fungible_data(mut self, rule: AccessRule) -> Self {
-        self.update_non_fungible_data = rule;
+    pub fn update_non_fungible_data<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.update_nft_data = rule;
+        self.nft_data_updater = updater.into();
         self
     }
 
     /// Sets up who can update the resource's metadata. The token symbol remains immutable once set.
-    pub fn update_metadata(mut self, rule: AccessRule) -> Self {
+    pub fn update_metadata<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
         self.update_metadata = rule;
+        self.metadata_updater = updater.into();
         self
     }
 
     /// Returns a reference to the access rule for the specified action
     pub fn get_access_rule(&self, action: &ResourceAuthAction) -> &AccessRule {
         match action {
-            ResourceAuthAction::Mint => &self.mintable,
-            ResourceAuthAction::Burn => &self.burnable,
-            ResourceAuthAction::Recall => &self.recallable,
-            ResourceAuthAction::Withdraw => &self.withdrawable,
-            ResourceAuthAction::Deposit => &self.depositable,
-            ResourceAuthAction::UpdateNonFungibleData => &self.update_non_fungible_data,
-            ResourceAuthAction::UpdateAccessRules => &self.update_access_rules,
+            ResourceAuthAction::Mint => &self.mint,
+            ResourceAuthAction::Burn => &self.burn,
+            ResourceAuthAction::Recall => &self.recall,
+            ResourceAuthAction::Withdraw => &self.withdraw,
+            ResourceAuthAction::Deposit => &self.deposit,
+            ResourceAuthAction::UpdateNonFungibleData => &self.update_nft_data,
             ResourceAuthAction::UpdateMetadata => &self.update_metadata,
             ResourceAuthAction::Freeze => &self.freeze,
+        }
+    }
+
+    /// Returns a reference to the updater rule that governs who may change the access rule for the
+    /// specified action.
+    pub fn get_updater(&self, action: &ResourceAuthAction) -> &UpdateRule {
+        match action {
+            ResourceAuthAction::Mint => &self.mint_updater,
+            ResourceAuthAction::Burn => &self.burn_updater,
+            ResourceAuthAction::Recall => &self.recall_updater,
+            ResourceAuthAction::Withdraw => &self.withdraw_updater,
+            ResourceAuthAction::Deposit => &self.deposit_updater,
+            ResourceAuthAction::UpdateNonFungibleData => &self.nft_data_updater,
+            ResourceAuthAction::UpdateMetadata => &self.metadata_updater,
+            ResourceAuthAction::Freeze => &self.freeze_updater,
+        }
+    }
+
+    /// Replaces the access rule for the specified action without changing its updater rule.
+    /// The caller is responsible for verifying that the change is authorized.
+    pub fn set_access_rule(&mut self, action: ResourceAuthAction, rule: AccessRule) {
+        match action {
+            ResourceAuthAction::Mint => self.mint = rule,
+            ResourceAuthAction::Burn => self.burn = rule,
+            ResourceAuthAction::Recall => self.recall = rule,
+            ResourceAuthAction::Withdraw => self.withdraw = rule,
+            ResourceAuthAction::Deposit => self.deposit = rule,
+            ResourceAuthAction::UpdateNonFungibleData => self.update_nft_data = rule,
+            ResourceAuthAction::UpdateMetadata => self.update_metadata = rule,
+            ResourceAuthAction::Freeze => self.freeze = rule,
         }
     }
 }

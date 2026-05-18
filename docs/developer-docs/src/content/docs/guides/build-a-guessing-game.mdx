@@ -232,7 +232,9 @@ impl GuessingGame {
 
 <Aside type="tip">
   By default, only the resource owner can mint new tokens for a resource. You can change this,
-  by setting an access rule (`.mintable(rule![require(bob)])`) but for this example, we only want the owner to mint.
+  by setting an access rule (`.mintable(rule![non_fungible(bob)], OWNER)`) but for this example, we only want the
+  owner to mint. The second argument is an [`UpdateRule`] that controls who, if anyone, can later change the mint
+  rule — see the <a href={basePath("/guides/authorization-and-access/")}>Authorization guide</a> for details.
 </Aside>
 
 <Aside type="note">

@@ -29,7 +29,7 @@ use tari_template_lib::types::{
     Metadata,
     ResourceType,
     SubstateOwnerRule,
-    access_rules::{ComponentAccessRules, ResourceAccessRules},
+    access_rules::{ComponentAccessRules, LOCKED, ResourceAccessRules},
     constants::{
         NFT_FAUCET_COMPONENT_ADDRESS,
         NFT_FAUCET_RESOURCE_ADDRESS,
@@ -117,8 +117,8 @@ where
         ResourceType::NonFungible,
         SubstateOwnerRule::None,
         ResourceAccessRules::new()
-            .mintable(rule!(component(XTR_FAUCET_COMPONENT_ADDRESS)))
-            .burnable(rule!(component(XTR_FAUCET_COMPONENT_ADDRESS))),
+            .mintable(rule!(component(XTR_FAUCET_COMPONENT_ADDRESS)), LOCKED)
+            .burnable(rule!(component(XTR_FAUCET_COMPONENT_ADDRESS)), LOCKED),
         Metadata::new(),
         None,
         None,
@@ -151,7 +151,7 @@ where
 
     let metadata = Metadata::from([("name", "NFT Faucet"), (TOKEN_SYMBOL, "tNFT")]);
 
-    let access_rules = ResourceAccessRules::new().mintable(rule!(component(NFT_FAUCET_COMPONENT_ADDRESS)));
+    let access_rules = ResourceAccessRules::new().mintable(rule!(component(NFT_FAUCET_COMPONENT_ADDRESS)), LOCKED);
     let value = Resource::new(
         ResourceType::NonFungible,
         SubstateOwnerRule::None,

@@ -8,7 +8,7 @@ use tari_template_lib_types::{
     Metadata,
     OwnerRule,
     ResourceAddress,
-    access_rules::{AccessRule, ResourceAccessRules},
+    access_rules::{AccessRule, ResourceAccessRules, UpdateRule},
     confidential::ConfidentialOutputStatement,
     constants::{DEFAULT_DIVISIBILITY, IMAGE_URL, TOKEN_SYMBOL},
 };
@@ -129,53 +129,42 @@ impl ConfidentialResourceBuilder {
         self
     }
 
-    /// Sets up who can mint new tokens of the resource
-    pub fn mintable(mut self, rule: AccessRule) -> Self {
-        self.access_rules = self.access_rules.mintable(rule);
+    /// Sets up who can mint new tokens of the resource, and who may later change the mint rule.
+    pub fn mintable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.access_rules = self.access_rules.mintable(rule, updater);
         self
     }
 
-    /// Sets up who can burn (destroy) tokens of the resource
-    pub fn burnable(mut self, rule: AccessRule) -> Self {
-        self.access_rules = self.access_rules.burnable(rule);
+    /// Sets up who can burn (destroy) tokens of the resource, and who may later change the burn rule.
+    pub fn burnable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.access_rules = self.access_rules.burnable(rule, updater);
         self
     }
 
-    /// Sets up who can recall tokens of the resource.
-    /// A recall is the forceful withdrawal of tokens from any external vault
-    pub fn recallable(mut self, rule: AccessRule) -> Self {
-        self.access_rules = self.access_rules.recallable(rule);
+    /// Sets up who can recall tokens of the resource, and who may later change the recall rule.
+    /// A recall is the forceful withdrawal of tokens from any external vault.
+    pub fn recallable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.access_rules = self.access_rules.recallable(rule, updater);
         self
     }
 
-    /// Sets up who can freeze vaults containing this resource.
-    pub fn freezable(mut self, rule: AccessRule) -> Self {
-        self.access_rules = self.access_rules.freezable(rule);
+    /// Sets up who can freeze vaults containing this resource, and who may later change the freeze rule.
+    pub fn freezable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.access_rules = self.access_rules.freezable(rule, updater);
         self
     }
 
-    /// Sets up who can withdraw tokens of the resource from any vault
-    pub fn withdrawable(mut self, rule: AccessRule) -> Self {
-        self.access_rules = self.access_rules.withdrawable(rule);
+    /// Sets up who can withdraw tokens of the resource from any vault, and who may later change the
+    /// withdraw rule.
+    pub fn withdrawable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.access_rules = self.access_rules.withdrawable(rule, updater);
         self
     }
 
-    /// Sets up who can deposit tokens of the resource into any vault
-    pub fn depositable(mut self, rule: AccessRule) -> Self {
-        self.access_rules = self.access_rules.depositable(rule);
-        self
-    }
-
-    /// Sets up who (apart from the owner) can update the access rules of the resource.
-    pub fn update_access_rules(mut self, rule: AccessRule) -> Self {
-        self.access_rules = self.access_rules.update_access_rules(rule);
-        self
-    }
-
-    /// Sets up who (apart from the owner) can update the resource's metadata. The token symbol
-    /// remains immutable once set.
-    pub fn update_metadata(mut self, rule: AccessRule) -> Self {
-        self.access_rules = self.access_rules.update_metadata(rule);
+    /// Sets up who can deposit tokens of the resource into any vault, and who may later change the
+    /// deposit rule.
+    pub fn depositable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.access_rules = self.access_rules.depositable(rule, updater);
         self
     }
 

@@ -9,7 +9,7 @@ use tari_template_lib_types::{
     OwnerRule,
     ResourceAddress,
     ResourceType,
-    access_rules::{AccessRule, ResourceAccessRules},
+    access_rules::{AccessRule, ResourceAccessRules, UpdateRule},
     constants::{DEFAULT_DIVISIBILITY, IMAGE_URL, TOKEN_SYMBOL},
 };
 
@@ -137,138 +137,132 @@ impl FungibleResourceBuilder {
         self
     }
 
-    /// Sets up who can mint new tokens of the resource
+    /// Sets up who can mint new tokens of the resource, and who may later change the mint rule.
     ///
-    /// Allows you to pass an [`AccessRule`] that defines who can mint new tokens of the resource.
+    /// Allows you to pass an [`AccessRule`] that defines who can mint new tokens of the resource,
+    /// together with an [`UpdateRule`] that controls who can update the mint rule after creation.
     ///
-    /// By default, minting is disabled for all users.
-    ///
-    /// #Examples
-    ///
-    /// ```rust, ignore
-    /// use tari_template_lib::auth::AccessRule;
-    /// use tari_template_lib::resource::builder::ResourceBuilder;
-    /// ResourceBuilder::public_fungible()
-    ///     .mintable(rule!(allow_all))
-    ///     .build();
-    /// ```
-    pub fn mintable(mut self, rule: AccessRule) -> Self {
-        self.access_rules = self.access_rules.mintable(rule);
-        self
-    }
-
-    /// Sets up who can burn (destroy) tokens of the resource
-    ///
-    /// Allows you to pass an [`AccessRule`] that defines who can burn tokens of the resource.
-    /// By default, burning is disabled for all users.
+    /// By default, minting is disabled for all users and the rule is [`UpdateRule::Locked`].
     ///
     /// #Examples
     ///
     /// ```rust, ignore
     /// use tari_template_lib::auth::AccessRule;
+    /// use tari_template_lib::prelude::{OWNER, rule};
     /// use tari_template_lib::resource::builder::ResourceBuilder;
     /// ResourceBuilder::public_fungible()
-    ///     .burnable(rule!(allow_all))
+    ///     .mintable(rule!(allow_all), OWNER)
     ///     .build();
     /// ```
-    pub fn burnable(mut self, rule: AccessRule) -> Self {
-        self.access_rules = self.access_rules.burnable(rule);
+    pub fn mintable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.access_rules = self.access_rules.mintable(rule, updater);
         self
     }
 
-    /// Sets up who can recall tokens of the resource.
+    /// Sets up who can burn (destroy) tokens of the resource, and who may later change the burn rule.
+    ///
+    /// Allows you to pass an [`AccessRule`] that defines who can burn tokens of the resource,
+    /// together with an [`UpdateRule`] that controls who can update the burn rule after creation.
+    ///
+    /// By default, burning is disabled for all users and the rule is [`UpdateRule::Locked`].
+    ///
+    /// #Examples
+    ///
+    /// ```rust, ignore
+    /// use tari_template_lib::auth::AccessRule;
+    /// use tari_template_lib::prelude::{LOCKED, rule};
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::public_fungible()
+    ///     .burnable(rule!(allow_all), LOCKED)
+    ///     .build();
+    /// ```
+    pub fn burnable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.access_rules = self.access_rules.burnable(rule, updater);
+        self
+    }
+
+    /// Sets up who can recall tokens of the resource, and who may later change the recall rule.
     ///
     /// A recall is the forceful withdrawal of **ALL** tokens from any external vault.
     ///
-    /// Allows you to pass an [`AccessRule`] that defines who can recall tokens from a vault.
+    /// Allows you to pass an [`AccessRule`] that defines who can recall tokens from a vault, together
+    /// with an [`UpdateRule`] that controls who can update the recall rule after creation. Pass
+    /// [`UpdateRule::Locked`] to permanently prevent the recall rule from being changed, which can
+    /// give holders strong guarantees that recall cannot be enabled later.
     ///
-    /// By default, recalling is disabled for all users.
+    /// By default, recalling is disabled for all users and the rule is [`UpdateRule::Locked`].
     ///
     /// # Examples
     ///
     /// ```rust, ignore
     /// use tari_template_lib::auth::AccessRule;
+    /// use tari_template_lib::prelude::{LOCKED, rule};
     /// use tari_template_lib::resource::builder::ResourceBuilder;
     /// ResourceBuilder::public_fungible()
-    ///    .recallable(rule!(allow_all))
+    ///    .recallable(rule!(allow_all), LOCKED)
     ///   .build();
     /// ```
-    pub fn recallable(mut self, rule: AccessRule) -> Self {
-        self.access_rules = self.access_rules.recallable(rule);
+    pub fn recallable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.access_rules = self.access_rules.recallable(rule, updater);
         self
     }
 
-    /// Sets up who can freeze vaults containing this resource.
-    pub fn freezable(mut self, rule: AccessRule) -> Self {
-        self.access_rules = self.access_rules.freezable(rule);
+    /// Sets up who can freeze vaults containing this resource, and who may later change the freeze rule.
+    pub fn freezable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.access_rules = self.access_rules.freezable(rule, updater);
         self
     }
 
-    /// Sets up who can withdraw tokens of the resource from any vault
+    /// Sets up who can withdraw tokens of the resource from any vault, and who may later change the
+    /// withdraw rule.
     ///
-    /// Allows you to pass an [`AccessRule`] that defines who can withdraw tokens (via a specified amount) from a vault.
+    /// Allows you to pass an [`AccessRule`] that defines who can withdraw tokens (via a specified amount) from a vault,
+    /// together with an [`UpdateRule`] that controls who can update the withdraw rule after creation.
     ///
-    /// By default, withdrawal is allowed for all users.
+    /// By default, withdrawal is allowed for all users and the rule is [`UpdateRule::Locked`].
     ///
     /// # Examples
     ///
     /// ```rust, ignore
     /// use tari_template_lib::auth::AccessRule;
+    /// use tari_template_lib::prelude::LOCKED;
     /// use tari_template_lib::resource::builder::ResourceBuilder;
     /// ResourceBuilder::public_fungible()
-    ///     .withdrawable(AccessRule::DenyAll)
+    ///     .withdrawable(AccessRule::DenyAll, LOCKED)
     ///     .build();
     /// ```
-    pub fn withdrawable(mut self, rule: AccessRule) -> Self {
-        self.access_rules = self.access_rules.withdrawable(rule);
+    pub fn withdrawable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.access_rules = self.access_rules.withdrawable(rule, updater);
         self
     }
 
-    /// Sets up who can deposit tokens of the resource into any vault
+    /// Sets up who can deposit tokens of the resource into any vault, and who may later change the
+    /// deposit rule.
     ///
-    /// Allows you to pass an [`AccessRule`] that defines who can deposit tokens (via a specified amount) into a vault.
+    /// Allows you to pass an [`AccessRule`] that defines who can deposit tokens (via a specified amount) into a vault,
+    /// together with an [`UpdateRule`] that controls who can update the deposit rule after creation.
     ///
-    /// By default, deposit is allowed for all users.
+    /// By default, deposit is allowed for all users and the rule is [`UpdateRule::Locked`].
     ///
     /// # Examples
     ///
     /// ```rust, ignore
     /// use tari_template_lib::auth::AccessRule;
+    /// use tari_template_lib::prelude::{LOCKED, rule};
     /// use tari_template_lib::resource::builder::ResourceBuilder;
     /// ResourceBuilder::public_fungible()
-    ///    .depositable(rule!(allow_all))
+    ///    .depositable(rule!(allow_all), LOCKED)
     ///     .build();
     /// ```
-    pub fn depositable(mut self, rule: AccessRule) -> Self {
-        self.access_rules = self.access_rules.depositable(rule);
+    pub fn depositable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.access_rules = self.access_rules.depositable(rule, updater);
         self
     }
 
-    /// Sets up who can update the access rules of the resource.
-    ///
-    /// Allows you to pass an [`AccessRule`] that defines who can update the access rules of the resource.
-    ///
-    /// By default, the ability to update access rules is denied for all users. If you want to allow the owner to update
-    /// the access rules, you can use `.update_access_rules(AccessRule::require_owner())`
-    ///
-    /// # Examples
-    ///
-    /// ```rust, ignore
-    /// use tari_template_lib::auth::AccessRule;
-    /// use tari_template_lib::resource::builder::ResourceBuilder;
-    /// ResourceBuilder::public_fungible()
-    ///     .update_access_rules(AccessRule::require_owner())
-    ///     .build();
-    /// ```
-    pub fn update_access_rules(mut self, rule: AccessRule) -> Self {
-        self.access_rules = self.access_rules.update_access_rules(rule);
-        self
-    }
-
-    /// Sets up who (apart from the owner) can update the resource's metadata. The token symbol
-    /// remains immutable once set.
-    pub fn update_metadata(mut self, rule: AccessRule) -> Self {
-        self.access_rules = self.access_rules.update_metadata(rule);
+    /// Sets up who can update the resource's metadata, and who may later change that rule. The token
+    /// symbol remains immutable once set.
+    pub fn update_metadata<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.access_rules = self.access_rules.update_metadata(rule, updater);
         self
     }
 

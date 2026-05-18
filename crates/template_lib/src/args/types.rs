@@ -38,7 +38,7 @@ use tari_template_lib_types::{
     ResourceType,
     UtxoId,
     VaultId,
-    access_rules::{ComponentAccessRules, ResourceAccessRules},
+    access_rules::{AccessRule, ComponentAccessRules, ResourceAccessRules, ResourceAuthAction},
     bytes::Bytes,
     confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     crypto::StealthValueProof,
@@ -186,8 +186,9 @@ pub enum ResourceAction {
     GetResourceInfo,
     /// Gets a non-fungible resource by its ID
     GetNonFungible,
-    /// Update the access rules of a resource
-    UpdateAccessRules,
+    /// Update a single access rule of a resource. Authorization is gated by the field's
+    /// [`UpdateRule`](tari_template_lib_types::access_rules::UpdateRule).
+    UpdateAccessRule,
     /// Sets the freeze flags on a vault of a resource.
     SetVaultFreeze,
     /// Executes a stealth transfer for the resource
@@ -268,6 +269,13 @@ pub struct ResourceGetNonFungibleArg {
 pub struct ResourceUpdateNonFungibleDataArg {
     pub id: NonFungibleId,
     pub data: tari_bor::Value,
+}
+
+/// An argument used to update a single field of a resource's [`ResourceAccessRules`].
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UpdateAccessRuleArg {
+    pub action: ResourceAuthAction,
+    pub new_rule: AccessRule,
 }
 
 /// A convenience enum that allows to specify resource types

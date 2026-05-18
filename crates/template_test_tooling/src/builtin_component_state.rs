@@ -16,7 +16,7 @@ use tari_template_lib::types::{
     EntityId,
     Metadata,
     ResourceType,
-    access_rules::{ComponentAccessRules, ResourceAccessRules},
+    access_rules::{ComponentAccessRules, LOCKED, ResourceAccessRules},
     constants::{
         NFT_FAUCET_COMPONENT_ADDRESS,
         NFT_FAUCET_RESOURCE_ADDRESS,
@@ -114,8 +114,8 @@ pub fn initialize_builtin_faucet_state<TStore: StateWriter>(store: &mut TStore) 
         ResourceType::NonFungible,
         SubstateOwnerRule::None,
         ResourceAccessRules::new()
-            .mintable(rule!(component(xtr_faucet_component())))
-            .burnable(rule!(allow_all)),
+            .mintable(rule!(component(xtr_faucet_component())), LOCKED)
+            .burnable(rule!(allow_all), LOCKED),
         Metadata::new(),
         None,
         None,
@@ -134,7 +134,7 @@ pub fn initialize_builtin_nft_faucet_state<TStore: StateWriter>(store: &mut TSto
     let resource = Resource::new(
         ResourceType::NonFungible,
         SubstateOwnerRule::None,
-        ResourceAccessRules::new().mintable(rule!(component(NFT_FAUCET_COMPONENT_ADDRESS))),
+        ResourceAccessRules::new().mintable(rule!(component(NFT_FAUCET_COMPONENT_ADDRESS)), LOCKED),
         metadata!(TOKEN_SYMBOL => "tNFT"),
         None,
         None,

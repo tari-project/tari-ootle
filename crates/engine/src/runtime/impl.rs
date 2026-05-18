@@ -92,6 +92,7 @@ use tari_template_lib::{
         ResourceUpdateNonFungibleDataArg,
         SetFreezeStealthUtxosArg,
         StealthTransferResourceArg,
+        UpdateAccessRuleArg,
         VaultAction,
         VaultCreateProofByFungibleAmountArg,
         VaultCreateProofByNonFungiblesArg,
@@ -119,7 +120,7 @@ use tari_template_lib::{
         TemplateAddress,
         UtxoAddress,
         ValidatorFeePoolAddress,
-        access_rules::{ComponentAccessRules, ResourceAccessRules, ResourceAuthAction},
+        access_rules::{ComponentAccessRules, ResourceAuthAction, UpdateRule},
         bytes::Bytes,
         constants::{IMAGE_URL, TARI_TOKEN, TOKEN_SYMBOL},
         crypto::{RistrettoPublicKeyBytes, UtxoTag},
@@ -129,7 +130,7 @@ use tari_template_lib::{
     },
 };
 
-use super::{ActionIdent, Runtime, RuntimeEvent, working_state::WorkingState};
+use super::{ActionIdent, NativeAction, Runtime, RuntimeEvent, working_state::WorkingState};
 use crate::{
     runtime::{
         RuntimeError,
@@ -1177,40 +1178,45 @@ where
                     Ok(InvokeResult::unit())
                 })
             },
-            ResourceAction::UpdateAccessRules => {
+            ResourceAction::UpdateAccessRule => {
                 let resource_address =
                     resource_ref
                         .as_resource_address()
                         .ok_or_else(|| RuntimeError::InvalidArgument {
                             argument: "resource_ref",
-                            reason: "UpdateAccessRules resource action requires a resource address".to_string(),
+                            reason: "UpdateAccessRule resource action requires a resource address".to_string(),
                         })?;
-                let access_rules: ResourceAccessRules = args.assert_one_arg()?;
+                let UpdateAccessRuleArg { action, new_rule } = args.assert_one_arg()?;
 
-                let (resource_lock, maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                let resource_lock = self.tracker.write_with(|state_mut| {
                     let resource_lock = state_mut.write_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
+                    let updater = resource.access_rules().get_updater(&action);
 
-                    state_mut.authorization().check_resource_access_rules(
-                        ResourceAuthAction::UpdateAccessRules,
-                        resource.as_ownership(),
-                        resource.access_rules(),
-                    )?;
+                    let authorized = match updater {
+                        UpdateRule::Locked => false,
+                        UpdateRule::Owner => state_mut.authorization().check_ownership(resource.as_ownership())?,
+                        UpdateRule::AccessRule(rule) => state_mut.authorization().check_access_rule(rule)?,
+                    };
 
-                    let auth_caller = state_mut.get_auth_caller()?;
-                    Ok::<_, RuntimeError>((resource_lock, resource.auth_hook().cloned(), auth_caller))
+                    if !authorized {
+                        return Err(RuntimeError::AccessDenied {
+                            action_ident: ActionIdent::Native(NativeAction::UpdateResourceAccessRule(action)),
+                        });
+                    }
+
+                    Ok::<_, RuntimeError>(resource_lock)
                 })?;
-
-                if let Some(auth_hook) = maybe_auth_hook {
-                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::UpdateAccessRules)?;
-                }
 
                 self.tracker.write_with(|state_mut| {
                     let resource_mut = state_mut.get_resource_mut(&resource_lock)?;
-                    resource_mut.set_access_rules(access_rules);
-                    let payload = Metadata::from_iter([("resource_type", resource_mut.resource_type().to_string())]);
-                    Self::emit_std_event("resource", "update_access_rules", resource_address, payload, state_mut)?;
+                    resource_mut.update_access_rule(action, new_rule);
+                    let payload = Metadata::from_iter([
+                        ("resource_type", resource_mut.resource_type().to_string()),
+                        ("action", format!("{:?}", action)),
+                    ]);
+                    Self::emit_std_event("resource", "update_access_rule", resource_address, payload, state_mut)?;
 
                     state_mut.unlock_substate(resource_lock)?;
 

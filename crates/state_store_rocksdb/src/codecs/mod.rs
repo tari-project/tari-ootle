@@ -6,6 +6,7 @@ mod block_diff;
 mod byte_counter;
 mod bytes;
 mod column;
+mod minicbor;
 mod misc;
 #[macro_use]
 mod prefixed;
@@ -21,6 +22,7 @@ mod versioned;
 use std::io;
 
 pub use bincode::*;
+pub use minicbor::*;
 pub use block_diff::*;
 pub use bytes::*;
 pub use column::*;

@@ -12302,6 +12302,7 @@ dependencies = [
  "hex",
  "indexmap 2.13.0",
  "log",
+ "minicbor",
  "rand 0.10.1",
  "rocksdb",
  "serde",

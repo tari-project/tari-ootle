@@ -1,5 +1,5 @@
 [workspace.package]
-version = "0.30.12"
+version = "0.30.13"
 edition = "2024"
 authors = ["The Tari Development Community"]
 repository = "https://github.com/tari-project/tari-ootle"
@@ -129,8 +129,8 @@ tari_ootle_transaction = { path = "crates/transaction", version = "0.30" }
 # Template lib
 tari_ootle_template_build = { path = "crates/template_build", version = "0.6" }
 tari_ootle_template_metadata = { path = "crates/template_metadata", version = "0.6" }
-tari_template_lib = { version = "0.26", path = "crates/template_lib" }
-tari_template_lib_types = { version = "0.26", path = "crates/template_lib_types", default-features = false }
+tari_template_lib = { version = "0.27", path = "crates/template_lib" }
+tari_template_lib_types = { version = "0.27", path = "crates/template_lib_types", default-features = false }
 tari_template_abi = { version = "0.16", path = "crates/template_abi", default-features = false }
 tari_template_macros = { version = "0.19", path = "crates/template_macros" }
 tari_bor = { version = "0.13", path = "crates/tari_bor", default-features = false }

@@ -9,7 +9,7 @@ use tari_ootle_common_types::{NodeAddressable, NumPreshards};
 use tari_ootle_storage::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 use tari_ootle_transaction::Network;
 use tari_template_lib::{
-    prelude::{Metadata, ResourceAccessRules, ResourceType, rule},
+    prelude::{LOCKED, Metadata, ResourceAccessRules, ResourceType, rule},
     types::{
         SubstateOwnerRule,
         constants::{XTR_FAUCET_CLAIM_RESOURCE_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS},
@@ -34,8 +34,8 @@ where
         ResourceType::NonFungible,
         SubstateOwnerRule::None,
         ResourceAccessRules::new()
-            .mintable(rule!(component(XTR_FAUCET_COMPONENT_ADDRESS)))
-            .burnable(rule!(component(XTR_FAUCET_COMPONENT_ADDRESS))),
+            .mintable(rule!(component(XTR_FAUCET_COMPONENT_ADDRESS)), LOCKED)
+            .burnable(rule!(component(XTR_FAUCET_COMPONENT_ADDRESS)), LOCKED),
         Metadata::new(),
         None,
         None,

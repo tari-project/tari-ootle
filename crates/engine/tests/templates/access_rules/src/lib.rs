@@ -9,7 +9,7 @@ pub fn create_badge_resource(recall_rule: AccessRule) -> Bucket {
     let mut metadata = Metadata::new();
     metadata.insert("colour", "blue");
     ResourceBuilder::non_fungible()
-        .recallable(recall_rule)
+        .recallable(recall_rule, OWNER)
         .initial_supply_with_data(
             BADGE_NAMES
                 .into_iter()
@@ -124,22 +124,34 @@ mod access_rules_template {
 
             let badge_resource = badges.resource_address();
             let tokens = ResourceBuilder::public_fungible()
-                .mintable(rule!(non_fungible(NonFungibleAddress::new(
-                    badge_resource,
-                    NonFungibleId::from_string("mint")
-                ))))
-                .burnable(rule!(non_fungible(NonFungibleAddress::new(
-                    badge_resource,
-                    NonFungibleId::from_string("burn")
-                ))))
-                .withdrawable(rule!(non_fungible(NonFungibleAddress::new(
-                    badge_resource,
-                    NonFungibleId::from_string("withdraw")
-                ))))
-                .depositable(rule!(non_fungible(NonFungibleAddress::new(
-                    badge_resource,
-                    NonFungibleId::from_string("deposit")
-                ))))
+                .mintable(
+                    rule!(non_fungible(NonFungibleAddress::new(
+                        badge_resource,
+                        NonFungibleId::from_string("mint")
+                    ))),
+                    OWNER,
+                )
+                .burnable(
+                    rule!(non_fungible(NonFungibleAddress::new(
+                        badge_resource,
+                        NonFungibleId::from_string("burn")
+                    ))),
+                    OWNER,
+                )
+                .withdrawable(
+                    rule!(non_fungible(NonFungibleAddress::new(
+                        badge_resource,
+                        NonFungibleId::from_string("withdraw")
+                    ))),
+                    OWNER,
+                )
+                .depositable(
+                    rule!(non_fungible(NonFungibleAddress::new(
+                        badge_resource,
+                        NonFungibleId::from_string("deposit")
+                    ))),
+                    OWNER,
+                )
                 .initial_supply(1000u32);
 
             Component::new(Self {
@@ -158,10 +170,10 @@ mod access_rules_template {
 
             let badge_resource = badges.resource_address();
             let tokens = ResourceBuilder::public_fungible()
-                .mintable(rule!(resource(badge_resource)))
-                .burnable(rule!(resource(badge_resource)))
-                .withdrawable(rule!(resource(badge_resource)))
-                .depositable(rule!(resource(badge_resource)))
+                .mintable(rule!(resource(badge_resource)), OWNER)
+                .burnable(rule!(resource(badge_resource)), OWNER)
+                .withdrawable(rule!(resource(badge_resource)), OWNER)
+                .depositable(rule!(resource(badge_resource)), OWNER)
                 .initial_supply(1000u32);
 
             Component::new(Self {
@@ -180,7 +192,7 @@ mod access_rules_template {
 
             let allocation = CallerContext::allocate_component_address(None);
             let tokens = ResourceBuilder::public_fungible()
-                .mintable(rule!(component(allocation.get_address())))
+                .mintable(rule!(component(allocation.get_address())), LOCKED)
                 // Only access rules apply, this just makes the test simpler because we do not need to change the transaction signer
                 .with_owner_rule(OwnerRule::None)
                 .initial_supply(1000u32);
@@ -312,8 +324,8 @@ mod access_rules_template {
             ComponentManager::get(component_addr).set_access_rules(access_rules);
         }
 
-        pub fn set_tokens_access_rules(&mut self, access_rules: ResourceAccessRules) {
-            ResourceManager::get(self.tokens.resource_address()).set_access_rules(access_rules);
+        pub fn update_tokens_access_rule(&mut self, action: ResourceAuthAction, new_rule: AccessRule) {
+            ResourceManager::get(self.tokens.resource_address()).update_access_rule(action, new_rule);
         }
 
         pub fn set_tokens_metadata(&mut self, metadata: Metadata) {

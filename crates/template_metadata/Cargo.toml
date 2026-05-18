@@ -1,7 +1,7 @@
 [package]
 name = "tari_ootle_template_metadata"
 description = "Template metadata types, serialization, and hashing for Tari Ootle templates"
-version = "0.6.0"
+version = "0.6.1"
 edition.workspace = true
 authors.workspace = true
 repository.workspace = true

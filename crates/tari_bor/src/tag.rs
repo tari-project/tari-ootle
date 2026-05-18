@@ -1,10 +1,9 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+#[cfg(not(feature = "std"))]
+use alloc::format;
 use core::ops::{Deref, DerefMut};
-
-use ciborium::tag::Required;
-use serde::{Deserialize, Serialize, de, ser};
 
 pub trait MaybeTagged {
     fn maybe_tag(&self) -> Option<u64>;
@@ -38,8 +37,9 @@ impl MaybeTagged for crate::Value {
     }
 }
 
+/// CBOR-tagged value: encodes as `<TAG, inner>` per RFC 8949 §3.4.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct BorTag<T, const TAG: u64>(Required<T, TAG>);
+pub struct BorTag<T, const TAG: u64>(T);
 
 impl<T, const TAG: u64> Tagged for BorTag<T, TAG> {
     const TAG: u64 = TAG;
@@ -47,43 +47,43 @@ impl<T, const TAG: u64> Tagged for BorTag<T, TAG> {
 
 impl<T, const TAG: u64> BorTag<T, TAG> {
     pub const fn new(t: T) -> Self {
-        Self(Required(t))
+        Self(t)
     }
 
     pub const fn inner(&self) -> &T {
-        &self.0.0
+        &self.0
     }
 
     pub const fn inner_mut(&mut self) -> &mut T {
-        &mut self.0.0
+        &mut self.0
     }
 
     pub fn into_inner(self) -> T {
-        self.0.0
+        self.0
     }
 }
 
-impl<'de, V: Deserialize<'de>, const TAG: u64> Deserialize<'de> for BorTag<V, TAG> {
-    #[inline]
-    fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        if deserializer.is_human_readable() {
-            let v = V::deserialize(deserializer)?;
-            Ok(BorTag(Required(v)))
-        } else {
-            let v = Required::<V, TAG>::deserialize(deserializer)?;
-            Ok(BorTag(v))
-        }
+impl<C, T: minicbor::Encode<C>, const TAG: u64> minicbor::Encode<C> for BorTag<T, TAG> {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.tag(minicbor::data::Tag::new(TAG))?;
+        self.0.encode(e, ctx)?;
+        Ok(())
     }
 }
 
-impl<V: Serialize, const TAG: u64> Serialize for BorTag<V, TAG> {
-    #[inline]
-    fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        if serializer.is_human_readable() {
-            V::serialize(&self.0.0, serializer)
-        } else {
-            self.0.serialize(serializer)
+impl<'b, C, T: minicbor::Decode<'b, C>, const TAG: u64> minicbor::Decode<'b, C> for BorTag<T, TAG> {
+    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let actual: u64 = d.tag()?.into();
+        if actual != TAG {
+            return Err(minicbor::decode::Error::message(format!(
+                "BorTag<_, {TAG}> expected tag {TAG}, got {actual}"
+            )));
         }
+        Ok(BorTag(T::decode(d, ctx)?))
     }
 }
 
@@ -104,6 +104,29 @@ impl<T, const TAG: u64> DerefMut for BorTag<T, TAG> {
 impl<T: AsRef<[u8]>, const TAG: u64> AsRef<[u8]> for BorTag<T, TAG> {
     fn as_ref(&self) -> &[u8] {
         self.inner().as_ref()
+    }
+}
+
+#[cfg(feature = "serde")]
+mod serde_impl {
+    use serde::{Deserialize, Serialize, de, ser};
+
+    use super::*;
+
+    /// JSON / serde representation is the bare inner value — the CBOR tag is meaningless
+    /// outside CBOR. This matches how the JSON-RPC API rendered tagged types previously.
+    impl<T: Serialize, const TAG: u64> Serialize for BorTag<T, TAG> {
+        #[inline]
+        fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            T::serialize(&self.0, serializer)
+        }
+    }
+
+    impl<'de, T: Deserialize<'de>, const TAG: u64> Deserialize<'de> for BorTag<T, TAG> {
+        #[inline]
+        fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            Ok(BorTag(T::deserialize(deserializer)?))
+        }
     }
 }
 
@@ -200,27 +223,28 @@ mod tests {
     use crate::{decode_exact, encode};
 
     #[test]
-    fn encoding() {
-        let t = BorTag::<_, 123>::new(222u8);
-        let e = encode(&t).unwrap();
-
-        let t = Required::<_, 123>(222u8);
-        let e2 = encode(&t).unwrap();
-
-        assert_eq!(e, e2);
-
-        let t = BorTag::<_, 123>::new(222u8);
-        let a = serde_json::to_string(&t).unwrap();
-        assert_eq!(a, "222");
-        let b: BorTag<u8, 123> = serde_json::from_str(&a).unwrap();
-        assert_eq!(*b, 222u8);
+    fn round_trips_through_minicbor() {
+        let t = BorTag::<_, 123>::new(222u32);
+        let bytes = encode(&t).unwrap();
+        let decoded: BorTag<u32, 123> = decode_exact(&bytes).unwrap();
+        assert_eq!(decoded, t);
     }
 
     #[test]
-    fn decoding() {
+    fn rejects_wrong_tag() {
+        let t = BorTag::<_, 123>::new(222u32);
+        let bytes = encode(&t).unwrap();
+        let err = decode_exact::<BorTag<u32, 999>>(&bytes).unwrap_err();
+        assert!(err.into_string().contains("expected tag 999"));
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_json_is_unwrapped() {
         let t = BorTag::<_, 123>::new(222u8);
-        let e = encode(&t).unwrap();
-        let o: BorTag<u8, 123> = decode_exact(&e).unwrap();
-        assert_eq!(t, o);
+        let s = serde_json::to_string(&t).unwrap();
+        assert_eq!(s, "222");
+        let b: BorTag<u8, 123> = serde_json::from_str(&s).unwrap();
+        assert_eq!(*b, 222u8);
     }
 }

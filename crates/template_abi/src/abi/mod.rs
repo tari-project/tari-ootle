@@ -23,7 +23,7 @@
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 
-use serde::{Serialize, de::DeserializeOwned};
+use minicbor::{Decode, Encode};
 #[cfg(target_arch = "wasm32")]
 pub use wasm::*;
 #[cfg(not(target_arch = "wasm32"))]
@@ -54,7 +54,11 @@ pub fn wrap_ptr(v: Vec<u8>) -> *mut u8 {
 }
 
 /// Calls the engine with the given operation and input, returning the decoded output.
-pub fn call_engine<T: Serialize, U: DeserializeOwned>(op: EngineOp, input: &T) -> U {
+pub fn call_engine<T, U>(op: EngineOp, input: &T) -> U
+where
+    T: Encode<()> + ?Sized,
+    U: for<'b> Decode<'b, ()>,
+{
     let len = encoded_len(&input).unwrap();
     let mut encoded_input = Vec::with_capacity(len);
     encode_into_writer(input, &mut encoded_input).unwrap();
@@ -115,7 +119,7 @@ impl OwnedData {
 
 /// Allocates a length-prefixed block of memory containing the encoded value and returns a pointer to that value.
 /// This memory should be freed using `tari_free`.
-pub fn alloc_and_encode<T: Serialize>(val: &T) -> *mut u8 {
+pub fn alloc_and_encode<T: Encode<()> + ?Sized>(val: &T) -> *mut u8 {
     let len = encoded_len(val).expect("ENCDLENFAIL");
     let ptr = internal_alloc(len);
     let mut buf = unsafe { Vec::from_raw_parts(ptr, 0, len) };

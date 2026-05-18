@@ -8,9 +8,8 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-ciborium = { workspace = true, default-features = false }
-ciborium-io = { workspace = true, default-features = false }
-serde = { workspace = true, default-features = false }
+minicbor = { workspace = true, default-features = false, features = ["alloc"] }
+serde = { workspace = true, default-features = false, optional = true }
 ts-rs = { workspace = true, optional = true }
 borsh = { workspace = true, optional = true, default-features = false }
 
@@ -21,7 +20,7 @@ bincode = { workspace = true, features = ["serde"] }
 [features]
 default = ["std"]
 borsh = ["dep:borsh"]
-std = ["serde/std", "ciborium/std", "ciborium-io/std", "borsh?/std"]
-alloc = ["serde/alloc", "ciborium-io/alloc"]
-cbor_value_encoding_fix = []
+std = ["minicbor/std", "serde?/std", "borsh?/std"]
+alloc = ["minicbor/alloc", "serde?/alloc"]
+serde = ["dep:serde"]
 ts = ["dep:ts-rs"]

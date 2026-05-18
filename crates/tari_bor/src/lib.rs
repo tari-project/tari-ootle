@@ -4,109 +4,104 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 #[cfg(not(feature = "std"))]
-use alloc::{fmt, format, string::ToString, vec::Vec};
-
-#[cfg(not(feature = "std"))]
 extern crate alloc;
 
-#[cfg(feature = "std")]
-use std::fmt;
+#[cfg(not(feature = "std"))]
+use alloc::{format, vec::Vec};
 
-mod tag;
-pub use tag::*;
-
-mod byte_counter;
-#[cfg(all(feature = "std", feature = "cbor_value_encoding_fix"))]
-pub mod cbor_value_encoding_fix;
 mod error;
+mod macros;
+mod tag;
+mod value;
+#[cfg(feature = "serde")]
+mod value_serde;
 mod walker;
 
-pub use ciborium::{cbor, value::Value};
-use ciborium::{de::from_reader, ser::into_writer};
-pub use ciborium_io::{Read, Write};
+mod byte_counter;
+
+pub use byte_counter::ByteCounter;
 pub use error::BorError;
+pub use macros::__cbor_macro;
+pub use minicbor::{self, Decode, Encode};
+#[cfg(feature = "serde")]
 pub use serde::{self, Deserialize, Serialize, de::DeserializeOwned};
+pub use tag::*;
+pub use value::Value;
 pub use walker::*;
 
-pub use crate::byte_counter::ByteCounter;
-
-#[cfg(feature = "std")]
-pub fn encode_into_writer<T, W>(val: &T, writer: &mut W) -> Result<(), BorError>
-where
-    T: Serialize + ?Sized,
-    W: std::io::Write,
-{
-    into_writer(&val, writer).map_err(to_bor_error)
-}
-
-#[cfg(not(feature = "std"))]
-pub fn encode_into_writer<T, W>(val: &T, writer: W) -> Result<(), BorError>
-where
-    T: Serialize + ?Sized,
-    W: Write,
-    W::Error: fmt::Debug,
-{
-    into_writer(&val, writer).map_err(to_bor_error)
-}
-
-pub fn encode<T: Serialize + ?Sized>(val: &T) -> Result<Vec<u8>, BorError> {
-    let len = encoded_len(val)?;
-    let mut buf = Vec::with_capacity(len);
+/// Encode a value into a freshly allocated `Vec<u8>`.
+pub fn encode<T: Encode<()> + ?Sized>(val: &T) -> Result<Vec<u8>, BorError> {
+    let mut buf = Vec::with_capacity(encoded_len(val)?);
     encode_into_writer(val, &mut buf)?;
     Ok(buf)
 }
 
-pub fn encoded_len<T: Serialize + ?Sized>(val: &T) -> Result<usize, BorError> {
-    let mut counter = ByteCounter::new();
-    encode_into_writer(val, &mut counter)?;
-    Ok(counter.get())
-}
-pub fn encoded_len_with_limit<T: Serialize + ?Sized>(val: &T, limit: usize) -> Result<usize, BorError> {
-    let mut counter = ByteCounter::with_limit(limit);
-    encode_into_writer(val, &mut counter)?;
-    Ok(counter.get())
-}
-
-/// Encodes any Rust type using CBOR
-pub fn to_value<T: Serialize + ?Sized>(val: &T) -> Result<Value, BorError> {
-    Value::serialized(val).map_err(to_bor_error)
-}
-
-pub fn from_value<T: DeserializeOwned>(val: &Value) -> Result<T, BorError> {
-    Value::deserialized(val).map_err(to_bor_error)
-}
-
-pub fn decode<T: DeserializeOwned>(mut input: &[u8]) -> Result<T, BorError> {
-    decode_inner(&mut input)
-}
-
-fn decode_inner<T: DeserializeOwned>(input: &mut &[u8]) -> Result<T, BorError> {
-    let result = from_reader(input).map_err(to_bor_error)?;
-    Ok(result)
-}
-
-pub fn decode_from_reader<T, R>(reader: R) -> Result<T, BorError>
+/// Encode a value into a [`std::io::Write`] sink (std feature).
+#[cfg(feature = "std")]
+pub fn encode_into_writer<T, W>(val: &T, writer: &mut W) -> Result<(), BorError>
 where
-    T: DeserializeOwned,
-    R: Read,
-    R::Error: fmt::Debug,
+    T: Encode<()> + ?Sized,
+    W: std::io::Write,
 {
-    let result = from_reader(reader).map_err(to_bor_error)?;
-    Ok(result)
+    let writer = minicbor::encode::write::Writer::new(writer);
+    minicbor::encode(val, writer).map_err(BorError::from)
 }
 
-pub fn decode_exact<T: DeserializeOwned>(mut input: &[u8]) -> Result<T, BorError> {
-    let val = decode_inner(&mut input)?;
-    if !input.is_empty() {
+/// Encode a value into a [`minicbor::encode::Write`] sink (no-std).
+#[cfg(not(feature = "std"))]
+pub fn encode_into_writer<T, W>(val: &T, writer: W) -> Result<(), BorError>
+where
+    T: Encode<()> + ?Sized,
+    W: minicbor::encode::Write,
+    W::Error: core::fmt::Display,
+{
+    minicbor::encode(val, writer).map_err(BorError::from)
+}
+
+/// Pre-calculate the encoded length in bytes of a value, without allocating a buffer.
+pub fn encoded_len<T: Encode<()> + ?Sized>(val: &T) -> Result<usize, BorError> {
+    let mut counter = ByteCounter::new();
+    minicbor::encode(val, &mut counter).map_err(|e| BorError::new(format!("encoded_len failed: {e}")))?;
+    Ok(counter.get())
+}
+
+/// Pre-calculate the encoded length in bytes, returning an error if it exceeds `limit`.
+pub fn encoded_len_with_limit<T: Encode<()> + ?Sized>(val: &T, limit: usize) -> Result<usize, BorError> {
+    let mut counter = ByteCounter::with_limit(limit);
+    minicbor::encode(val, &mut counter).map_err(|e| BorError::new(format!("encoded_len failed: {e}")))?;
+    Ok(counter.get())
+}
+
+/// Encode a value into a dynamic [`Value`] tree.
+pub fn to_value<T: Encode<()> + ?Sized>(val: &T) -> Result<Value, BorError> {
+    let bytes = encode(val)?;
+    decode(&bytes)
+}
+
+/// Decode a value out of a dynamic [`Value`] tree by re-encoding to bytes and decoding via the
+/// target type. Useful for tests and dynamic conversion; for production paths prefer to
+/// `decode` the original bytes directly.
+pub fn from_value<T: for<'b> Decode<'b, ()>>(val: &Value) -> Result<T, BorError> {
+    let bytes = encode(val)?;
+    decode(&bytes)
+}
+
+/// Decode a single value from a byte slice. Extra trailing bytes are ignored.
+pub fn decode<T: for<'b> Decode<'b, ()>>(input: &[u8]) -> Result<T, BorError> {
+    minicbor::decode(input).map_err(BorError::from)
+}
+
+/// Decode a single value from a byte slice. Returns an error if any bytes remain after
+/// decoding.
+pub fn decode_exact<T: for<'b> Decode<'b, ()>>(input: &[u8]) -> Result<T, BorError> {
+    let mut d = minicbor::Decoder::new(input);
+    let value = d.decode().map_err(BorError::from)?;
+    let consumed = d.position();
+    if consumed != input.len() {
         return Err(BorError::new(format!(
             "decode_exact: {} bytes remaining on input",
-            input.len()
+            input.len() - consumed
         )));
     }
-    Ok(val)
-}
-
-fn to_bor_error<E>(e: E) -> BorError
-where E: fmt::Display {
-    BorError::new(e.to_string())
+    Ok(value)
 }

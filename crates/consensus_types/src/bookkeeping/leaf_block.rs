@@ -22,16 +22,21 @@
 
 use std::fmt::Display;
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup};
 
 use crate::{HighestSeenBlock, ids::BlockId};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct LeafBlock {
+    #[n(0)]
     pub block_id: BlockId,
+    #[n(1)]
     pub height: NodeHeight,
+    #[n(2)]
     pub epoch: Epoch,
+    #[n(3)]
     pub shard_group: ShardGroup,
 }
 

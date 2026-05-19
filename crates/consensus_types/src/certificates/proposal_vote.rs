@@ -3,6 +3,7 @@
 
 use std::fmt::Display;
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_hashing::layer2;
@@ -12,14 +13,21 @@ use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, SchnorrSignature
 
 use crate::{SignedMessage, ToSignatureMessage, Vote, ids::BlockId, validator_signature::ValidatorSignatureBytes};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct ProposalVote {
+    #[n(0)]
     pub epoch: Epoch,
+    #[n(1)]
     pub block_id: BlockId,
     /// The height of the view change - this should correspond to the height of the block.
     /// NOTE: that this is not validated explicitly and is mainly used to determine message age and ordering.
+    #[n(2)]
     pub block_height: NodeHeight,
+    // QuorumDecision is foreign (tari_sidechain) — bridge through serde.
+    #[n(3)]
+    #[cbor(with = "tari_bor::adapters::serde_bridge")]
     pub decision: QuorumDecision,
+    #[n(4)]
     pub signature: ValidatorSignatureBytes,
 }
 

@@ -8,6 +8,7 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
+minicbor = { workspace = true, default-features = false, features = ["derive"] }
 serde = { workspace = true, features = ["derive"], default-features = false, optional = true }
 thiserror = { workspace = true, optional = true }
 ts-rs = { workspace = true, optional = true }

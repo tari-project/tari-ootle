@@ -21,11 +21,15 @@ use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use super::{BlockPledge, Command, CommandOrHash, CommandsCommitProof, LockedEpoch};
 use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 pub struct ForeignProposalRecord {
+    #[n(0)]
     block_id: BlockId,
+    #[n(1)]
     proposal: ForeignProposal,
+    #[n(2)]
     proposed_in_block: Option<BlockId>,
+    #[n(3)]
     status: ForeignProposalStatus,
 }
 
@@ -274,16 +278,32 @@ impl ForeignProposalAtom {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, Eq, PartialEq)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    Default,
+    Eq,
+    PartialEq,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 pub enum ForeignProposalStatus {
     /// New foreign proposal that has not yet been proposed
     #[default]
+    #[n(0)]
     New,
     /// Foreign proposal has been proposed, but not yet locked.
+    #[n(1)]
     Proposed,
     /// Foreign proposal has been confirmed i.e. the block containing it has been locked.
+    #[n(2)]
     Confirmed,
     /// Foreign proposal has been rejected.
+    #[n(3)]
     Invalid,
 }
 
@@ -338,9 +358,11 @@ impl FromStr for ForeignProposalStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 pub struct ForeignProposal {
+    #[n(0)]
     commit_proof: CommandsCommitProof,
+    #[n(1)]
     block_pledge: BlockPledge,
 }
 

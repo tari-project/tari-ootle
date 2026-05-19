@@ -5,5 +5,7 @@ pub mod address;
 pub mod bor;
 pub mod error;
 pub mod hash;
+pub mod keys;
 pub mod sign;
+pub mod stealth;
 pub mod transaction;

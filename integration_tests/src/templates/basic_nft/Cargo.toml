@@ -8,7 +8,7 @@ edition = "2024"
 
 [dependencies]
 tari_template_lib = { path = "../../../../crates/template_lib" }
-serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
+minicbor = { version = "2.2", default-features = false, features = ["derive", "alloc"] }
 
 [profile.release]
 opt-level = 's'     # Optimize for size.

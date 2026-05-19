@@ -128,15 +128,14 @@ pub(crate) fn decode_public_key(hex_str: &str, field: &'static str) -> Result<Ri
 }
 
 fn decode_fixed_hex<const N: usize>(hex_str: &str, field: &'static str) -> Result<[u8; N], OotleWasmError> {
-    let bytes = hex::decode(hex_str)?;
-    if bytes.len() != N {
+    if hex_str.len() != N * 2 {
         return Err(OotleWasmError::InvalidByteLength {
             field,
             expected: N,
-            got: bytes.len(),
+            got: hex_str.len() / 2,
         });
     }
     let mut out = [0u8; N];
-    out.copy_from_slice(&bytes);
+    hex::decode_to_slice(hex_str, &mut out)?;
     Ok(out)
 }

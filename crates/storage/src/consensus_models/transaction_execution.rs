@@ -3,6 +3,7 @@
 
 use std::{fmt::Display, time::Duration};
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::{BlockId, Decision, LeafBlock};
 use tari_engine_types::commit_result::{ExecuteResult, RejectReason};
@@ -17,11 +18,14 @@ use crate::{
     consensus_models::{Evidence, VersionedSubstateIdLockIntent},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionExecution {
+    #[n(0)]
     pub result: ExecuteResult,
+    #[n(1)]
     pub resolved_inputs: Vec<VersionedSubstateIdLockIntent>,
+    #[n(2)]
     pub resulting_outputs: Vec<VersionedSubstateIdLockIntent>,
 }
 
@@ -131,10 +135,13 @@ impl Display for TransactionExecution {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct BlockTransactionExecution {
+    #[n(0)]
     block: LeafBlock,
+    #[n(1)]
     transaction_id: TransactionId,
+    #[n(2)]
     execution: TransactionExecution,
 }
 

@@ -22,10 +22,10 @@ mod versioned;
 use std::io;
 
 pub use bincode::*;
-pub use minicbor::*;
 pub use block_diff::*;
 pub use bytes::*;
 pub use column::*;
+pub use minicbor::*;
 pub use misc::*;
 pub use prefixed::*;
 pub use public_key::*;

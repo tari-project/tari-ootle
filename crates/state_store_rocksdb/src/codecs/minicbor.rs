@@ -6,7 +6,10 @@ use std::io::{Read, Write};
 use anyhow::anyhow;
 use minicbor::{CborLen, Decode, Encode};
 
-use crate::{codecs::{DbDecoder, DbEncoder}, error::RocksDbStorageError};
+use crate::{
+    codecs::{DbDecoder, DbEncoder},
+    error::RocksDbStorageError,
+};
 
 /// Codec that encodes/decodes values using `tari_bor`'s minicbor wire format.
 ///
@@ -35,8 +38,7 @@ where T: Encode<()> + CborLen<()>
     }
 
     fn encode_into<W: Write>(&self, value: &T, writer: &mut W) -> Result<(), RocksDbStorageError> {
-        tari_bor::encode_into_writer(value, writer)
-            .map_err(|e| RocksDbStorageError::EncodeError { source: e.into() })
+        tari_bor::encode_into_writer(value, writer).map_err(|e| RocksDbStorageError::EncodeError { source: e.into() })
     }
 }
 

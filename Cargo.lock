@@ -11206,6 +11206,7 @@ dependencies = [
  "minicbor",
  "ootle_serde",
  "serde",
+ "tari_bor",
  "tari_common_types",
  "tari_crypto",
  "tari_engine_types",

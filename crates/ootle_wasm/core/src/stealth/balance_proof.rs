@@ -95,10 +95,10 @@ mod tests {
         let output_mask = RistrettoSecretKey::random(&mut rng);
         let owner_pk = RistrettoPublicKey::from_secret_key(&output_mask);
 
-        let inputs = vec![StealthInputWitness {
+        let inputs = [StealthInputWitness {
             mask_and_value: MaskAndValue::new(2000, input_mask.clone()),
         }];
-        let outputs = vec![StealthOutputWitness {
+        let outputs = [StealthOutputWitness {
             witness: OutputWitness {
                 amount: 2000,
                 mask: output_mask.clone(),

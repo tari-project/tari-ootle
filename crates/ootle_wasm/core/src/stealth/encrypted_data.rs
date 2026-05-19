@@ -51,7 +51,7 @@ pub fn unblind_output(
     let decrypted = crypto_unblind_output(&commitment, &encrypted_data, &encryption_key, skip_memo)
         .map_err(|e| OotleWasmError::Stealth(e.to_string()))?;
 
-    let memo_json = decrypted.memo().map(|m| serde_json::to_string(m)).transpose()?;
+    let memo_json = decrypted.memo().map(serde_json::to_string).transpose()?;
 
     Ok(DecryptedOutputResult {
         mask: decrypted.mask().as_bytes().to_vec(),

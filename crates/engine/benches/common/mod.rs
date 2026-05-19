@@ -18,7 +18,7 @@ use tari_template_lib::types::{
     ResourceType,
     SubstateOwnerRule,
     VaultId,
-    access_rules::{ComponentAccessRules, ResourceAccessRules},
+    access_rules::{ComponentAccessRules, LOCKED, ResourceAccessRules},
     constants::{TARI_TOKEN, XTR_FAUCET_CLAIM_RESOURCE_ADDRESS},
     metadata,
     rule,
@@ -60,8 +60,8 @@ pub fn setup_store() -> MemoryStateStore {
         ResourceType::NonFungible,
         SubstateOwnerRule::None,
         ResourceAccessRules::new()
-            .mintable(rule!(component(FAUCET_COMPONENT_ADDRESS)))
-            .burnable(rule!(allow_all)),
+            .mintable(rule!(component(FAUCET_COMPONENT_ADDRESS)), LOCKED)
+            .burnable(rule!(allow_all), LOCKED),
         Default::default(),
         None,
         None,

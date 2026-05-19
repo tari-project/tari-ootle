@@ -425,7 +425,7 @@ mod template {
     impl StealthFaucet {
         pub fn new(initial_supply: Amount, mint: StealthTransferStatement) -> Component<Self> {
             let bucket = ResourceBuilder::stealth()
-                .mintable(rule!(allow_all))
+                .mintable(rule!(allow_all), LOCKED)
                 .initial_supply(initial_supply);
 
             let resource_address = bucket.resource_address();
@@ -479,7 +479,7 @@ Creating a stealth resource uses `ResourceBuilder::stealth()`. This is covered i
 let bucket = ResourceBuilder::stealth()
     .with_token_symbol("PRIV")
     .with_divisibility(6)
-    .mintable(rule!(allow_all))
+    .mintable(rule!(allow_all), LOCKED)
     .initial_supply(1_000_000);
 ```
 

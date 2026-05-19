@@ -56,7 +56,7 @@ use tari_template_lib_types::{
     ResourceInfo,
     UtxoId,
     VaultId,
-    access_rules::ResourceAccessRules,
+    access_rules::{AccessRule, ResourceAccessRules, ResourceAuthAction},
     confidential::ConfidentialOutputStatement,
     crypto::StealthValueProof,
     stealth::StealthTransferStatement,
@@ -79,6 +79,7 @@ use crate::{
         ResourceUpdateNonFungibleDataArg,
         SetFreezeStealthUtxosArg,
         StealthTransferResourceArg,
+        UpdateAccessRuleArg,
         VaultFreezeFlags,
     },
     models::{Bucket, BucketId, NonFungible, ResourceAddressAllocation},
@@ -907,34 +908,43 @@ impl ResourceManager {
         resp.decode().expect("[update_non_fungible_data] Failed")
     }
 
-    /// Updates access rules that determine who can operate the resource
+    /// Updates the access rule that gates a single resource action (mint, burn, recall, etc.).
     ///
-    /// The function allows the caller to overwrite the existing [`ResourceAccessRules`] for the resource with a new
-    /// set. This will replace the existing access rules entirely.
+    /// Authorization is gated by the per-field
+    /// [`UpdateRule`](tari_template_lib_types::access_rules::UpdateRule) configured for `action`:
+    ///
+    /// * [`UpdateRule::Locked`](tari_template_lib_types::access_rules::UpdateRule::Locked): the rule cannot be changed
+    ///   by anyone (not even the resource owner).
+    /// * [`UpdateRule::Owner`](tari_template_lib_types::access_rules::UpdateRule::Owner): only the resource owner can
+    ///   change the rule.
+    /// * [`UpdateRule::AccessRule`](tari_template_lib_types::access_rules::UpdateRule::AccessRule): the caller must
+    ///   satisfy the embedded [`AccessRule`].
+    ///
+    /// The updater rule itself is immutable once a resource is created.
     ///
     /// # Arguments
     ///
-    /// * `access_rules` - The new [`ResourceAccessRules`] to set for the resource.
+    /// * `action` - The [`ResourceAuthAction`] whose access rule should be replaced.
+    /// * `new_rule` - The new [`AccessRule`] for that action.
     ///
     /// # Panics
     ///
-    /// It will panic if:
-    /// - The caller does not have the necessary [`ResourceAccessRules`] or [`OwnerRule`] to update the access rules.
-    /// - The [`ResourceAccessRules`] are invalid or malformed.
+    /// Panics if the caller is not authorized to update the rule for `action`.
     ///
     /// # Examples
+    ///
     /// ```rust,ignore
-    /// let new_access_rules = ResourceAccessRules::default()
-    /// resource_manager.set_access_rules(new_access_rules);
+    /// use tari_template_lib::prelude::{ResourceAuthAction, rule};
+    /// resource_manager.update_access_rule(ResourceAuthAction::Mint, rule!(allow_all));
     /// ```
-    pub fn set_access_rules(&self, access_rules: ResourceAccessRules) {
+    pub fn update_access_rule(&self, action: ResourceAuthAction, new_rule: AccessRule) {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
             resource_ref: self.resource_address.into(),
-            action: ResourceAction::UpdateAccessRules,
-            args: invoke_args![access_rules],
+            action: ResourceAction::UpdateAccessRule,
+            args: invoke_args![UpdateAccessRuleArg { action, new_rule }],
         });
 
-        resp.decode().expect("[set_access_rules] Failed")
+        resp.decode().expect("[update_access_rule] Failed")
     }
 
     /// Replaces the resource's metadata map.

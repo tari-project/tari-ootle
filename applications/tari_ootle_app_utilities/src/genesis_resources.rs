@@ -3,14 +3,17 @@
 
 use tari_engine_types::resource::Resource;
 use tari_ootle_transaction::Network;
-use tari_template_lib::types::{
-    Metadata,
-    ResourceAddress,
-    ResourceType,
-    SubstateOwnerRule,
-    access_rules::ResourceAccessRules,
-    constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS, TOKEN_SYMBOL},
-    rule,
+use tari_template_lib::{
+    prelude::LOCKED,
+    types::{
+        Metadata,
+        ResourceAddress,
+        ResourceType,
+        SubstateOwnerRule,
+        access_rules::ResourceAccessRules,
+        constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS, TOKEN_SYMBOL},
+        rule,
+    },
 };
 
 pub fn get_public_identity_resource() -> (ResourceAddress, Resource) {
@@ -34,11 +37,10 @@ pub fn get_stealth_tari_resource(network: Network) -> (ResourceAddress, Resource
         SubstateOwnerRule::None,
         ResourceAccessRules::new()
             // These are defaults, but just for explicitness
-            .mintable(rule!(deny_all))
-            .burnable(rule!(deny_all))
-            .recallable(rule!(deny_all))
-            .freezable(rule!(deny_all))
-            .update_access_rules(rule!(deny_all)),
+            .mintable(rule!(deny_all), LOCKED)
+            .burnable(rule!(deny_all), LOCKED)
+            .recallable(rule!(deny_all), LOCKED)
+            .freezable(rule!(deny_all), LOCKED),
         Metadata::from([(TOKEN_SYMBOL, symbol)]),
         None,
         None,

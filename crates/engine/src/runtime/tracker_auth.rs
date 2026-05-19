@@ -97,6 +97,12 @@ impl<'a, TStore: StateReader> Authorization<'a, TStore> {
         check_access_rule(self.state, scope, rule)
     }
 
+    /// Returns `true` if the current call scope satisfies the given ownership rule.
+    pub fn check_ownership(&self, ownership: Ownership<'_>) -> Result<bool, RuntimeError> {
+        let scope = self.state.current_call_scope()?.auth_scope();
+        check_ownership(self.state, scope, ownership)
+    }
+
     pub fn require_ownership<A: Into<ActionIdent>>(
         &self,
         action: A,

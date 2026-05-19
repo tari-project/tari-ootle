@@ -39,8 +39,8 @@ mod sparkle_nft_template {
             let resource_address = ResourceBuilder::non_fungible()
                 .with_token_symbol("SPKL")
                 // AllowAll makes testing easier
-                .mintable(rule!(allow_all))
-                .burnable(rule!(allow_all))
+                .mintable(rule!(allow_all), OWNER)
+                .burnable(rule!(allow_all), OWNER)
                 .build();
             let vault = Vault::new_empty(resource_address);
 
@@ -57,8 +57,8 @@ mod sparkle_nft_template {
             let bucket = ResourceBuilder::non_fungible()
                 .with_token_symbol("SPKL")
                 // AllowAll makes testing easier
-                .mintable(rule!(allow_all))
-                .burnable(rule!(allow_all))
+                .mintable(rule!(allow_all), OWNER)
+                .burnable(rule!(allow_all), OWNER)
                 .initial_supply_with_data(Some((nft, (&(), &empty))));
 
             Component::new(Self {

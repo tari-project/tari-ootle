@@ -49,7 +49,7 @@ mod tickets {
             let resource_address = ResourceBuilder::non_fungible().with_token_symbol("tix")
                 // The event description is common for all tickets
                 .add_metadata("event", event_description)
-                .mintable(rule!(all_of(component(component.get_address()), public_key(owner))))
+                .mintable(rule!(all_of(component(component.get_address()), public_key(owner))), OWNER)
                 // We'll track it from inside the component
                 .disable_total_supply_tracking()
                 .build();

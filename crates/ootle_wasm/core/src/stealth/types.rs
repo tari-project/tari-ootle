@@ -1,0 +1,142 @@
+//   Copyright 2026 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+//! JSON wrapper types for stealth witnesses.
+//!
+//! The internal `OutputWitness`, `StealthOutputWitness` and `StealthInputWitness` types in
+//! `tari_ootle_wallet_crypto` are intentionally not `Serialize`/`Deserialize`. These mirror types provide a
+//! stable JSON shape for the WASM ABI and convert into the internal types via [`Into`].
+//!
+//! All 32-byte values (masks, public keys) are hex-encoded strings; `encrypted_data` follows the standard
+//! `EncryptedData` hex encoding; `spend_condition` and `tag` are the same shapes used by the wallet daemon
+//! RPC layer.
+
+use serde::Deserialize;
+use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
+use tari_ootle_wallet_crypto::{MaskAndValue, OutputWitness, StealthInputWitness, StealthOutputWitness};
+use tari_template_lib_types::{EncryptedData, crypto::UtxoTag, stealth::SpendCondition};
+
+use crate::{
+    error::OotleWasmError,
+    keys::{public_key_from_bytes, secret_key_from_bytes},
+};
+
+/// Unblinded data for a single stealth output (sender side).
+#[derive(Debug, Clone, Deserialize)]
+pub struct OutputWitnessJson {
+    pub amount: u64,
+    /// Hex-encoded 32-byte Ristretto scalar.
+    pub mask: String,
+    /// Hex-encoded 32-byte Ristretto public key.
+    pub sender_public_nonce: String,
+    #[serde(default)]
+    pub minimum_value_promise: u64,
+    pub encrypted_data: EncryptedData,
+    /// Optional hex-encoded 32-byte Ristretto public key for the resource view-key holder.
+    #[serde(default)]
+    pub resource_view_key: Option<String>,
+}
+
+impl OutputWitnessJson {
+    pub(crate) fn try_into_witness(self) -> Result<OutputWitness, OotleWasmError> {
+        let mask = decode_secret_key(&self.mask, "mask")?;
+        let sender_public_nonce = decode_public_key(&self.sender_public_nonce, "sender_public_nonce")?;
+        let resource_view_key = self
+            .resource_view_key
+            .as_deref()
+            .map(|h| decode_public_key(h, "resource_view_key"))
+            .transpose()?;
+        Ok(OutputWitness {
+            amount: self.amount,
+            mask,
+            sender_public_nonce,
+            minimum_value_promise: self.minimum_value_promise,
+            encrypted_data: self.encrypted_data,
+            resource_view_key,
+        })
+    }
+}
+
+/// A full stealth output witness: the unblinded data plus the spend condition and UTXO tag attached to it.
+#[derive(Debug, Clone, Deserialize)]
+pub struct StealthOutputWitnessJson {
+    pub witness: OutputWitnessJson,
+    pub spend_condition: SpendCondition,
+    pub tag: UtxoTag,
+}
+
+impl TryFrom<StealthOutputWitnessJson> for StealthOutputWitness {
+    type Error = OotleWasmError;
+
+    fn try_from(value: StealthOutputWitnessJson) -> Result<Self, Self::Error> {
+        Ok(StealthOutputWitness {
+            witness: value.witness.try_into_witness()?,
+            spend_condition: value.spend_condition,
+            tag: value.tag,
+        })
+    }
+}
+
+/// An input being spent: the plaintext value and the commitment mask used to bind it. Once decrypted, the
+/// receiver has both halves and can construct this directly.
+#[derive(Debug, Clone, Deserialize)]
+pub struct InputWitness {
+    pub value: u64,
+    /// Hex-encoded 32-byte Ristretto scalar.
+    pub mask: String,
+}
+
+/// A stealth input being spent (currently just the unblinded commitment opening).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum StealthInputWitnessJson {
+    /// Object form: `{ "mask_and_value": { "value": 100, "mask": "..." } }`.
+    Wrapped { mask_and_value: InputWitness },
+    /// Flat form: `{ "value": 100, "mask": "..." }`.
+    Flat(InputWitness),
+}
+
+impl StealthInputWitnessJson {
+    fn into_inner(self) -> InputWitness {
+        match self {
+            Self::Wrapped { mask_and_value } => mask_and_value,
+            Self::Flat(w) => w,
+        }
+    }
+}
+
+impl TryFrom<StealthInputWitnessJson> for StealthInputWitness {
+    type Error = OotleWasmError;
+
+    fn try_from(value: StealthInputWitnessJson) -> Result<Self, Self::Error> {
+        let inner = value.into_inner();
+        let mask = decode_secret_key(&inner.mask, "mask")?;
+        Ok(StealthInputWitness {
+            mask_and_value: MaskAndValue::new(inner.value, mask),
+        })
+    }
+}
+
+pub(crate) fn decode_secret_key(hex_str: &str, field: &'static str) -> Result<RistrettoSecretKey, OotleWasmError> {
+    let bytes = decode_fixed_hex::<32>(hex_str, field)?;
+    secret_key_from_bytes(&bytes)
+}
+
+pub(crate) fn decode_public_key(hex_str: &str, field: &'static str) -> Result<RistrettoPublicKey, OotleWasmError> {
+    let bytes = decode_fixed_hex::<32>(hex_str, field)?;
+    public_key_from_bytes(&bytes)
+}
+
+fn decode_fixed_hex<const N: usize>(hex_str: &str, field: &'static str) -> Result<[u8; N], OotleWasmError> {
+    let bytes = hex::decode(hex_str)?;
+    if bytes.len() != N {
+        return Err(OotleWasmError::InvalidByteLength {
+            field,
+            expected: N,
+            got: bytes.len(),
+        });
+    }
+    let mut out = [0u8; N];
+    out.copy_from_slice(&bytes);
+    Ok(out)
+}

@@ -17,11 +17,34 @@ pub struct KeypairResult {
     pub public_key: Vec<u8>,
 }
 
-/// Result of a Schnorr signature operation (raw bytes).
+/// Result of a Schnorr signature operation (raw bytes). Also used for balance proof signatures, which
+/// share the `(public_nonce, signature)` shape.
 #[wasm_bindgen(getter_with_clone)]
 pub struct SchnorrSignatureResult {
     pub public_nonce: Vec<u8>,
     pub signature: Vec<u8>,
+}
+
+/// Result of generating a stealth outputs statement.
+#[wasm_bindgen(getter_with_clone)]
+pub struct StealthOutputsResult {
+    /// JSON-serialized `StealthOutputsStatement` (the wire-format payload).
+    pub statement_json: String,
+    /// Sum of all witness masks, suitable for use as the `aggregated_output_mask` argument to
+    /// `generateStealthBalanceProofSignature`.
+    pub aggregated_output_mask: Vec<u8>,
+}
+
+/// Decrypted contents of an inbound stealth UTXO.
+#[wasm_bindgen(getter_with_clone)]
+pub struct DecryptedOutputResult {
+    /// The 32-byte commitment mask scalar.
+    pub mask: Vec<u8>,
+    /// The plaintext value (u64).
+    pub value: u64,
+    /// JSON-encoded `Memo` (variants: `U256` / `Message` / `Bytes` / `PayRefAndBytes`), or `null` if
+    /// the payload carried no memo or `skipMemo` was set.
+    pub memo_json: Option<String>,
 }
 
 /// A pair of Ootle secret keys (owner + view).
@@ -176,4 +199,232 @@ pub fn parse_ootle_address(address: &str) -> Result<ParsedOotleAddress, JsError>
         network: result.network,
         memo: result.memo,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Stealth crypto primitives
+// ---------------------------------------------------------------------------
+
+/// Generate the output side of a stealth transfer: per-output Pedersen commitments and encrypted data,
+/// optional ElGamal viewable-balance proofs (for outputs with a `resource_view_key`), and an aggregated
+/// bulletproof range proof.
+///
+/// `witnesses_json` is a JSON array of stealth output witnesses. Each entry has the shape:
+/// ```text
+/// {
+///   "witness": {
+///     "amount": <u64>,
+///     "mask": <hex 32 bytes>,
+///     "sender_public_nonce": <hex 32 bytes>,
+///     "minimum_value_promise": <u64>,
+///     "encrypted_data": <hex variable-length>,
+///     "resource_view_key": <hex 32 bytes | null>
+///   },
+///   "spend_condition": <SpendCondition>,
+///   "tag": <u32>
+/// }
+/// ```
+///
+/// Returns the serialized statement plus the aggregated output mask, which the sender feeds to
+/// `generateStealthBalanceProofSignature` together with the aggregated input mask.
+#[wasm_bindgen(js_name = "generateStealthOutputsStatement")]
+pub fn generate_stealth_outputs_statement(
+    witnesses_json: &str,
+    revealed_output_amount_microtari: u64,
+) -> Result<StealthOutputsResult, JsError> {
+    let result = ootle_wasm_core::stealth::outputs::generate_stealth_outputs_statement(
+        witnesses_json,
+        revealed_output_amount_microtari,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(StealthOutputsResult {
+        statement_json: result.statement_json,
+        aggregated_output_mask: result.aggregated_output_mask,
+    })
+}
+
+/// Build a `StealthInputsStatement` JSON from raw input commitments and a revealed amount.
+///
+/// `input_commitments` is the concatenated bytes of all 32-byte commitments (so the length must be a
+/// multiple of 32). Pass an empty array for a revealed-only statement.
+///
+/// This is a convenience helper so callers don't need to hand-craft the wire JSON; the result is used
+/// as the `inputs_statement_json` argument to `generateStealthBalanceProofSignature` and friends.
+#[wasm_bindgen(js_name = "buildStealthInputsStatement")]
+pub fn build_stealth_inputs_statement(
+    input_commitments: &[u8],
+    revealed_amount_microtari: u64,
+) -> Result<String, JsError> {
+    ootle_wasm_core::stealth::inputs::build_stealth_inputs_statement(input_commitments, revealed_amount_microtari)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Generate an extended bulletproof aggregating range proofs for a set of output witnesses, proving
+/// each amount is in `[minimum_value_promise, 2^64)`. The number of witnesses is padded to the next
+/// power of two internally.
+///
+/// `witnesses_json` is a JSON array of "flat" output witnesses (the `witness` field shape from
+/// [`generate_stealth_outputs_statement`] — without the surrounding `spend_condition` / `tag`).
+///
+/// Returns the raw range proof bytes (may be empty if the input array is empty).
+#[wasm_bindgen(js_name = "generateExtendedBulletProof")]
+pub fn generate_extended_bullet_proof(witnesses_json: &str) -> Result<Vec<u8>, JsError> {
+    ootle_wasm_core::stealth::outputs::generate_extended_bullet_proof(witnesses_json)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Sign the balance proof for a stealth transfer.
+///
+/// `aggregated_input_mask` and `aggregated_output_mask` are the 32-byte sums of all input / output
+/// commitment masks respectively. Returns a `(public_nonce, signature)` pair (each 32 bytes); the pair
+/// may be all-zeros for revealed-only transfers — callers normally omit the balance proof in that case.
+#[wasm_bindgen(js_name = "generateStealthBalanceProofSignature")]
+pub fn generate_stealth_balance_proof_signature(
+    aggregated_input_mask: &[u8],
+    aggregated_output_mask: &[u8],
+    inputs_statement_json: &str,
+    outputs_statement_json: &str,
+) -> Result<SchnorrSignatureResult, JsError> {
+    let result = ootle_wasm_core::stealth::balance_proof::generate_stealth_balance_proof_signature(
+        aggregated_input_mask,
+        aggregated_output_mask,
+        inputs_statement_json,
+        outputs_statement_json,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(SchnorrSignatureResult {
+        public_nonce: result.public_nonce,
+        signature: result.signature,
+    })
+}
+
+/// Pre-flight check that a balance proof signature is cryptographically valid for the given input /
+/// output statements. Returns `false` on a malformed proof or invalid signature; the engine performs
+/// the authoritative check at submission.
+#[wasm_bindgen(js_name = "validateBalanceProofSignature")]
+pub fn validate_balance_proof_signature(
+    public_nonce: &[u8],
+    signature: &[u8],
+    inputs_statement_json: &str,
+    outputs_statement_json: &str,
+) -> Result<bool, JsError> {
+    ootle_wasm_core::stealth::balance_proof::validate_balance_proof_signature(
+        public_nonce,
+        signature,
+        inputs_statement_json,
+        outputs_statement_json,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Run the same validation the engine performs on a complete `StealthTransferStatement` envelope:
+/// structural sanity, commitment well-formedness, range and balance-proof verification.
+///
+/// `view_key` is the 32-byte resource view public key, required for resources with a viewable balance
+/// and rejected otherwise. Pass `null` for resources without a view key.
+///
+/// Throws on a validation failure; returns successfully on a valid statement.
+#[wasm_bindgen(js_name = "validateStealthTransfer")]
+pub fn validate_stealth_transfer(transfer_json: &str, view_key: Option<Vec<u8>>) -> Result<(), JsError> {
+    ootle_wasm_core::stealth::validate::validate_stealth_transfer(transfer_json, view_key.as_deref())
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Decrypt and verify the AEAD payload of an inbound stealth UTXO.
+///
+/// `output_commitment` is the 32-byte Pedersen commitment; `encrypted_data` is the variable-length
+/// XChaCha20Poly1305-encrypted blob; `encryption_key` is the 32-byte AEAD key derived via
+/// `encryptedDataDhKdfAead`. Setting `skip_memo` to `true` returns no memo even if the payload carries
+/// one (useful when only the value / mask are needed).
+///
+/// Throws on AEAD failure or on a commitment mismatch — either indicates the payload was not produced
+/// for this view key.
+#[wasm_bindgen(js_name = "unblindOutput")]
+pub fn unblind_output(
+    output_commitment: &[u8],
+    encrypted_data: &[u8],
+    encryption_key: &[u8],
+    skip_memo: bool,
+) -> Result<DecryptedOutputResult, JsError> {
+    let result = ootle_wasm_core::stealth::encrypted_data::unblind_output(
+        output_commitment,
+        encrypted_data,
+        encryption_key,
+        skip_memo,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(DecryptedOutputResult {
+        mask: result.mask,
+        value: result.value,
+        memo_json: result.memo_json,
+    })
+}
+
+/// Derive the recipient's stealth spending scalar `c + k`, where `c = H(network || k.G * r)`. The
+/// receiver runs this with their account secret key (`private_key`) and the sender-provided public
+/// nonce to obtain the one-time secret that controls the stealth output.
+///
+/// `network` is the network byte (0x00 = MainNet, 0x10 = LocalNet, 0x26 = Esmeralda, ...).
+#[wasm_bindgen(js_name = "stealthDhSecret")]
+pub fn stealth_dh_secret(network: u8, private_key: &[u8], public_nonce: &[u8]) -> Result<Vec<u8>, JsError> {
+    ootle_wasm_core::stealth::kdfs::stealth_dh_secret(network, private_key, public_nonce)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Derive the AEAD encryption key for `encrypted_data` from a Diffie-Hellman shared secret: `H(DH(s, P))`.
+/// Sender derives it with `(sender_secret_nonce, recipient_view_pub)`; receiver derives the same key
+/// with `(recipient_view_secret, sender_public_nonce)`.
+#[wasm_bindgen(js_name = "encryptedDataDhKdfAead")]
+pub fn encrypted_data_dh_kdf_aead(private_key: &[u8], public_key: &[u8]) -> Result<Vec<u8>, JsError> {
+    ootle_wasm_core::stealth::kdfs::encrypted_data_dh_kdf(private_key, public_key)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Generate an ElGamal viewable-balance proof: a zero-knowledge proof that `amount` is the value bound
+/// by `commitment`, encrypted to the resource view-key holder.
+///
+/// Returns the JSON-encoded `ViewableBalanceProof` (8 × 32-byte fields).
+#[wasm_bindgen(js_name = "generateElgamalViewableBalanceProof")]
+pub fn generate_elgamal_viewable_balance_proof(
+    mask: &[u8],
+    amount: u64,
+    commitment: &[u8],
+    view_public_key: &[u8],
+) -> Result<String, JsError> {
+    ootle_wasm_core::stealth::viewable_balance::generate_elgamal_viewable_balance_proof(
+        mask,
+        amount,
+        commitment,
+        view_public_key,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Brute-force decrypt an ElGamal viewable-balance proof to recover the bound value.
+///
+/// Tries each value in `[min_value, max_value]` (inclusive). Returns `null` (via `Option`) if no
+/// candidate matches. Uses an on-the-fly value lookup — there is no precomputed table dependency, so
+/// callers should keep the range tight (large ranges produce proportional CPU cost).
+///
+/// `commitment` is the Pedersen commitment the proof is bound to. Both the view public key and the
+/// view secret key are required: the public key is used to re-verify the ZK proof (rejecting tampered
+/// proofs before decrypting), the secret key performs the ElGamal decryption itself.
+#[wasm_bindgen(js_name = "decryptElgamalViewableBalance")]
+pub fn decrypt_elgamal_viewable_balance(
+    proof_json: &str,
+    commitment: &[u8],
+    view_public_key: &[u8],
+    view_secret_key: &[u8],
+    min_value: u64,
+    max_value: u64,
+) -> Result<Option<u64>, JsError> {
+    ootle_wasm_core::stealth::viewable_balance::decrypt_elgamal_viewable_balance(
+        proof_json,
+        commitment,
+        view_public_key,
+        view_secret_key,
+        min_value,
+        max_value,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
 }

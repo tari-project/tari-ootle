@@ -15,7 +15,10 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 ootle-wasm-core = { path = "../core", version = "0.30" }
 wasm-bindgen = "0.2"
+# getrandom is pulled in transitively via `rand` and `tari_bulletproofs_plus`. The wasm32-unknown-unknown
+# target requires explicit feature opt-in for both major versions used in the graph.
 getrandom = { version = "0.2", features = ["js"] }
+getrandom_v04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }
 
 [features]
 default = []
@@ -27,8 +30,9 @@ optional = true
 
 [package.metadata.cargo-machete]
 ignored = [
-    # getrandom does not need to be imported in code
+    # getrandom is only needed to enable the js/wasm_js feature transitively
     "getrandom",
+    "getrandom_v04",
 ]
 
 

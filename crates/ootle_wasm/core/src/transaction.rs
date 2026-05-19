@@ -2,10 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::Deserialize;
-use tari_crypto::{ristretto::RistrettoSecretKey, tari_utilities::ByteArray};
 use tari_ootle_transaction::{UnsealedTransactionV1, UnsignedTransactionV1};
 
-use crate::{error::OotleWasmError, hash::public_key_bytes_from_bytes};
+use crate::{error::OotleWasmError, hash::public_key_bytes_from_bytes, keys::secret_key_from_bytes};
 
 /// An unsigned or unsealed transaction parsed from JSON.
 #[derive(Deserialize)]
@@ -26,10 +25,6 @@ impl TransactionInput {
 
 fn parse_transaction_json(tx_json: &str) -> Result<TransactionInput, OotleWasmError> {
     serde_json::from_str(tx_json).map_err(Into::into)
-}
-
-fn secret_key_from_bytes(bytes: &[u8]) -> Result<RistrettoSecretKey, OotleWasmError> {
-    RistrettoSecretKey::from_canonical_bytes(bytes).map_err(|e| OotleWasmError::InvalidSecretKey(e.to_string()))
 }
 
 /// Seal a transaction (accepts unsigned or unsealed JSON) with the seal signer's secret key.

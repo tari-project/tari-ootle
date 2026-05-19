@@ -19,4 +19,20 @@ pub enum OotleWasmError {
     InvalidPayRef(usize),
     #[error("Invalid address: {0}")]
     InvalidAddress(String),
+    #[error("Invalid hex: {0}")]
+    InvalidHex(#[from] hex::FromHexError),
+    #[error("Invalid commitment: {0}")]
+    InvalidCommitment(String),
+    #[error("Invalid encrypted data: {0}")]
+    InvalidEncryptedData(String),
+    #[error("Invalid byte length for {field}: expected {expected}, got {got}")]
+    InvalidByteLength {
+        field: &'static str,
+        expected: usize,
+        got: usize,
+    },
+    #[error("Stealth crypto error: {0}")]
+    Stealth(String),
+    #[error("Stealth transfer validation failed: {0}")]
+    StealthValidation(String),
 }

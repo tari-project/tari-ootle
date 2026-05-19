@@ -1,14 +1,14 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::io::{Read, Write};
+use std::io::Write;
 
 use tari_ootle_common_types::{Epoch, NodeHeight, shard::Shard};
 
 use crate::{
     codecs::{DbDecoder, DbEncoder, EncodeVec},
     error::RocksDbStorageError,
-    utils::read_to_fixed,
+    utils::take_fixed,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -29,7 +29,13 @@ impl DbEncoder<()> for UnitCodec {
 }
 
 impl DbDecoder<()> for UnitCodec {
-    fn decode_reader<R: Read>(&self, _reader: &mut R) -> Result<(), RocksDbStorageError> {
+    fn decode(&self, _bytes: &[u8]) -> Result<((), usize), RocksDbStorageError> {
+        Ok(((), 0))
+    }
+
+    // Allow trailing bytes: this codec stands in as a value codec for key-only iterators,
+    // where the underlying CF returns real value bytes that we want to discard.
+    fn decode_exact(&self, _bytes: &[u8]) -> Result<(), RocksDbStorageError> {
         Ok(())
     }
 }
@@ -57,15 +63,12 @@ impl DbEncoder<bool> for BoolCodec {
 }
 
 impl DbDecoder<bool> for BoolCodec {
-    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<bool, RocksDbStorageError> {
-        let mut buf = [0u8; 1];
-        reader
-            .read_exact(&mut buf)
-            .map_err(|e| RocksDbStorageError::MalformedData {
-                operation: "decode u8",
-                details: format!("Failed to read 1 byte for BoolCodec: {e}"),
-            })?;
-        Ok(buf[0] != 0)
+    fn decode(&self, bytes: &[u8]) -> Result<(bool, usize), RocksDbStorageError> {
+        let byte = bytes.first().ok_or_else(|| RocksDbStorageError::MalformedData {
+            operation: "decode bool",
+            details: "Not enough bytes for BoolCodec".to_string(),
+        })?;
+        Ok((*byte != 0, 1))
     }
 }
 
@@ -98,15 +101,12 @@ impl DbEncoder<u8> for NumberCodec<u8> {
 }
 
 impl DbDecoder<u8> for NumberCodec<u8> {
-    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<u8, RocksDbStorageError> {
-        let mut buf = [0u8; 1];
-        reader
-            .read_exact(&mut buf)
-            .map_err(|e| RocksDbStorageError::MalformedData {
-                operation: "decode u8",
-                details: format!("Failed to read 1 byte for NumberCodec<u8>: {e}"),
-            })?;
-        Ok(buf[0])
+    fn decode(&self, bytes: &[u8]) -> Result<(u8, usize), RocksDbStorageError> {
+        let byte = bytes.first().ok_or_else(|| RocksDbStorageError::MalformedData {
+            operation: "decode u8",
+            details: "Not enough bytes for NumberCodec<u8>".to_string(),
+        })?;
+        Ok((*byte, 1))
     }
 }
 
@@ -130,12 +130,12 @@ impl DbEncoder<u32> for NumberCodec<u32> {
 }
 
 impl DbDecoder<u32> for NumberCodec<u32> {
-    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<u32, RocksDbStorageError> {
-        let arr = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::MalformedData {
+    fn decode(&self, bytes: &[u8]) -> Result<(u32, usize), RocksDbStorageError> {
+        let arr: [u8; 4] = take_fixed(bytes).ok_or_else(|| RocksDbStorageError::MalformedData {
             operation: "decode u32",
             details: "Invalid bytes size for NumberCodec<u32>".to_string(),
         })?;
-        Ok(u32::from_be_bytes(arr))
+        Ok((u32::from_be_bytes(arr), 4))
     }
 }
 
@@ -158,12 +158,12 @@ impl DbEncoder<u64> for NumberCodec<u64> {
     }
 }
 impl DbDecoder<u64> for NumberCodec<u64> {
-    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<u64, RocksDbStorageError> {
-        let arr = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::MalformedData {
+    fn decode(&self, bytes: &[u8]) -> Result<(u64, usize), RocksDbStorageError> {
+        let arr: [u8; 8] = take_fixed(bytes).ok_or_else(|| RocksDbStorageError::MalformedData {
             operation: "decode u64",
             details: "Invalid bytes size for NumberCodec<u64>".to_string(),
         })?;
-        Ok(u64::from_be_bytes(arr))
+        Ok((u64::from_be_bytes(arr), 8))
     }
 }
 
@@ -187,13 +187,12 @@ impl DbEncoder<Epoch> for NumberCodec<Epoch> {
 }
 
 impl DbDecoder<Epoch> for NumberCodec<Epoch> {
-    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<Epoch, RocksDbStorageError> {
-        let arr = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::MalformedData {
+    fn decode(&self, bytes: &[u8]) -> Result<(Epoch, usize), RocksDbStorageError> {
+        let arr: [u8; 8] = take_fixed(bytes).ok_or_else(|| RocksDbStorageError::MalformedData {
             operation: "decode Epoch",
             details: "Invalid bytes size for NumberCodec<Epoch>".to_string(),
         })?;
-        let epoch = u64::from_be_bytes(arr);
-        Ok(Epoch(epoch))
+        Ok((Epoch(u64::from_be_bytes(arr)), 8))
     }
 }
 
@@ -217,13 +216,12 @@ impl DbEncoder<NodeHeight> for NumberCodec<NodeHeight> {
 }
 
 impl DbDecoder<NodeHeight> for NumberCodec<NodeHeight> {
-    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<NodeHeight, RocksDbStorageError> {
-        let arr = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::MalformedData {
+    fn decode(&self, bytes: &[u8]) -> Result<(NodeHeight, usize), RocksDbStorageError> {
+        let arr: [u8; 8] = take_fixed(bytes).ok_or_else(|| RocksDbStorageError::MalformedData {
             operation: "decode NodeHeight",
             details: "Invalid bytes size for NumberCodec<NodeHeight>".to_string(),
         })?;
-        let height = u64::from_be_bytes(arr);
-        Ok(NodeHeight::from(height))
+        Ok((NodeHeight::from(u64::from_be_bytes(arr)), 8))
     }
 }
 
@@ -247,13 +245,12 @@ impl DbEncoder<Shard> for NumberCodec<Shard> {
 }
 
 impl DbDecoder<Shard> for NumberCodec<Shard> {
-    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<Shard, RocksDbStorageError> {
-        let arr = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::MalformedData {
+    fn decode(&self, bytes: &[u8]) -> Result<(Shard, usize), RocksDbStorageError> {
+        let arr: [u8; 4] = take_fixed(bytes).ok_or_else(|| RocksDbStorageError::MalformedData {
             operation: "decode Shard",
             details: "Invalid bytes size for NumberCodec<Shard>".to_string(),
         })?;
-        let shard = u32::from_be_bytes(arr);
-        Ok(shard.into())
+        Ok((u32::from_be_bytes(arr).into(), 4))
     }
 }
 

@@ -1,9 +1,10 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::io::{Read, Write};
+use std::io::Write;
 
 use anyhow::anyhow;
+use tari_bor::serde_codec::Deserializer;
 
 use crate::{
     codecs::{DbDecoder, DbEncoder},
@@ -51,22 +52,16 @@ where T: serde::Serialize
 impl<T> DbDecoder<T> for SerdeBridgeCodec<T>
 where T: serde::de::DeserializeOwned
 {
-    fn decode(&self, bytes: &[u8]) -> Result<T, RocksDbStorageError> {
-        tari_bor::serde_codec::from_slice(bytes).map_err(|e| RocksDbStorageError::DecodeError {
+    fn decode(&self, bytes: &[u8]) -> Result<(T, usize), RocksDbStorageError> {
+        let mut de = Deserializer::new(bytes);
+        let value = T::deserialize(&mut de).map_err(|e| RocksDbStorageError::DecodeError {
             source: anyhow!(
                 "SerdeBridge decoding failed for type {}: {}",
                 std::any::type_name::<T>(),
                 e
             ),
-        })
-    }
-
-    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<T, RocksDbStorageError> {
-        let mut buf = Vec::new();
-        reader
-            .read_to_end(&mut buf)
-            .map_err(|e| RocksDbStorageError::DecodeError { source: e.into() })?;
-        self.decode(&buf)
+        })?;
+        Ok((value, de.decoder_mut().position()))
     }
 }
 

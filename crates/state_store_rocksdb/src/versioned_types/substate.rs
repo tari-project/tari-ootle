@@ -83,7 +83,7 @@ mod tests {
         };
         let versioned: VersionedSubstateRecord = original.into();
         let encoded = codec.encode(&versioned).expect("Encoding failed");
-        let decoded: VersionedSubstateRecord = codec.decode(&encoded).expect("Decoding failed");
+        let decoded: VersionedSubstateRecord = codec.decode_exact(&encoded).expect("Decoding failed");
         let _latest: LatestSubstateRecord = decoded.into_latest();
     }
 }

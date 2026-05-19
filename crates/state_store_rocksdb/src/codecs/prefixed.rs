@@ -97,23 +97,23 @@ impl<C: DbEncoder<T>, P: Prefixed, T> DbEncoder<T> for PrefixCodec<P, C> {
 }
 
 impl<C: DbDecoder<T>, P: Prefixed, T> DbDecoder<T> for PrefixCodec<P, C> {
-    fn decode_reader<R: std::io::Read>(&self, reader: &mut R) -> Result<T, RocksDbStorageError> {
+    fn decode(&self, bytes: &[u8]) -> Result<(T, usize), RocksDbStorageError> {
+        let mut consumed = 0;
         if let Some(p) = P::prefix() {
-            let mut prefix = [0u8; 1];
-            reader
-                .read_exact(&mut prefix)
-                .map_err(|e| RocksDbStorageError::MalformedData {
-                    operation: "PrefixCodec: read prefix",
-                    details: format!("PrefixCodec: Failed to read prefix: {}", e),
-                })?;
-            if prefix[0] != p {
+            let prefix = *bytes.first().ok_or_else(|| RocksDbStorageError::MalformedData {
+                operation: "PrefixCodec: read prefix",
+                details: "PrefixCodec: Not enough bytes for prefix".to_string(),
+            })?;
+            if prefix != p {
                 return Err(RocksDbStorageError::MalformedData {
                     operation: "PrefixCodec: validate prefix",
-                    details: format!("PrefixCodec: Invalid prefix byte. Expected {}, got {}", p, prefix[0]),
+                    details: format!("PrefixCodec: Invalid prefix byte. Expected {}, got {}", p, prefix),
                 });
             }
+            consumed = 1;
         }
-        self.inner.decode_reader(reader)
+        let (value, inner_consumed) = self.inner.decode(&bytes[consumed..])?;
+        Ok((value, consumed + inner_consumed))
     }
 }
 

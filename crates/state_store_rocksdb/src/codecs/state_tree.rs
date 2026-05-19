@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{io, io::Read};
+use std::io;
 
 use anyhow::anyhow;
 use tari_state_tree::{NibblePath, NodeKey, Version};
@@ -9,7 +9,7 @@ use tari_state_tree::{NibblePath, NodeKey, Version};
 use crate::{
     codecs::{DbDecoder, DbEncoder},
     error::RocksDbStorageError,
-    utils::{read_n_bytes, read_to_fixed},
+    utils::take_fixed,
 };
 
 /// Codec for `NodeKey`
@@ -61,35 +61,40 @@ impl DbEncoder<NodeKey> for NodeKeyCodec {
 }
 
 impl DbDecoder<NodeKey> for NodeKeyCodec {
-    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<NodeKey, RocksDbStorageError> {
-        let buf = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
+    fn decode(&self, bytes: &[u8]) -> Result<(NodeKey, usize), RocksDbStorageError> {
+        let version_bytes: [u8; 8] = take_fixed(bytes).ok_or_else(|| RocksDbStorageError::DecodeError {
             source: anyhow!("Invalid version bytes"),
         })?;
-        let version = Version::from_be_bytes(buf);
-        let num_nibbles = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
+        let version = Version::from_be_bytes(version_bytes);
+
+        let num_nibbles_bytes: [u8; 8] = take_fixed(&bytes[8..]).ok_or_else(|| RocksDbStorageError::DecodeError {
             source: anyhow!("Invalid num_nibbles bytes"),
         })?;
         let num_nibbles =
-            usize::try_from(u64::from_be_bytes(num_nibbles)).map_err(|_| RocksDbStorageError::DecodeError {
+            usize::try_from(u64::from_be_bytes(num_nibbles_bytes)).map_err(|_| RocksDbStorageError::DecodeError {
                 source: anyhow!("Number of nibbles exceeds usize"),
             })?;
+
         let is_even = num_nibbles % 2 == 0;
+        let num_path_bytes = if is_even {
+            num_nibbles / 2
+        } else {
+            num_nibbles.div_ceil(2)
+        };
+        let path_start = 16;
+        let path_end = path_start + num_path_bytes;
+        if bytes.len() < path_end {
+            return Err(RocksDbStorageError::DecodeError {
+                source: anyhow!("Invalid nibble path bytes. Could not read {} bytes", num_path_bytes),
+            });
+        }
+        let nibble_path_bytes = bytes[path_start..path_end].to_vec();
         let nibble_path = if is_even {
-            let num_bytes_even = num_nibbles / 2;
-            let nibble_path_bytes =
-                read_n_bytes(reader, num_bytes_even).ok_or_else(|| RocksDbStorageError::DecodeError {
-                    source: anyhow!("Invalid nibble path bytes. Could not read {} bytes", num_bytes_even),
-                })?;
             NibblePath::new_even(nibble_path_bytes)
         } else {
-            let num_bytes_odd = num_nibbles.div_ceil(2);
-            let nibble_path_bytes =
-                read_n_bytes(reader, num_bytes_odd).ok_or_else(|| RocksDbStorageError::DecodeError {
-                    source: anyhow!("Invalid nibble path bytes. Could not read {} bytes", num_bytes_odd),
-                })?;
             NibblePath::new_odd(nibble_path_bytes)
         };
-        Ok(NodeKey::new(version, nibble_path))
+        Ok((NodeKey::new(version, nibble_path), path_end))
     }
 }
 
@@ -126,7 +131,7 @@ mod tests {
         let key = NodeKey::new(version, nibble_path);
         let codec = NodeKeyCodec;
         let encoded1 = codec.encode(&key).unwrap();
-        let decoded = codec.decode(&encoded1).unwrap();
+        let decoded = codec.decode_exact(&encoded1).unwrap();
         assert_eq!(key, decoded);
 
         let version = 2;
@@ -135,7 +140,7 @@ mod tests {
 
         let encoded = codec.encode(&key).unwrap();
         assert_ne!(encoded, encoded1);
-        let decoded = codec.decode(&encoded).unwrap();
+        let decoded = codec.decode_exact(&encoded).unwrap();
         assert_eq!(key, decoded);
     }
 
@@ -152,7 +157,7 @@ mod tests {
         let codec = NodeKeyCodec;
         for (key, node) in update.node_batch {
             let encoded = codec.encode(&key).unwrap();
-            let decoded = codec.decode(&encoded).unwrap();
+            let decoded = codec.decode_exact(&encoded).unwrap();
             assert_eq!(key, decoded);
             store.insert_node(key, node).unwrap()
         }
@@ -173,7 +178,7 @@ mod tests {
 
         for (key, node) in update.node_batch {
             let encoded = codec.encode(&key).unwrap();
-            let decoded = codec.decode(&encoded).unwrap();
+            let decoded = codec.decode_exact(&encoded).unwrap();
             assert_eq!(key, decoded);
             store.insert_node(key, node).unwrap()
         }

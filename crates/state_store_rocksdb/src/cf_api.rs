@@ -81,7 +81,7 @@ impl<'db, CF: Cf, DB: RocksReader> CfContext<'db, DB, CF> {
             key: Box::new(EncodeVec::from_slice(key)),
             operation,
         })?;
-        let value = self.value_codec.decode(&bytes)?;
+        let value = self.value_codec.decode_exact(&bytes)?;
         Ok(value)
     }
 
@@ -204,7 +204,7 @@ impl<'db, CF: Cf, DB: RocksReader> CfContext<'db, DB, CF> {
             let Some(value) = maybe_value else {
                 continue;
             };
-            let value = self.value_codec.decode(&value)?;
+            let value = self.value_codec.decode_exact(&value)?;
             values.push(value);
         }
 
@@ -225,7 +225,7 @@ impl<'db, CF: Cf, DB: RocksReader> CfContext<'db, DB, CF> {
         let opts = create_prefixed_read_opts(prefix_bytes, mode);
         self.db.iterator_cf_opt(self.handle, opts, mode, move |res| {
             res.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })
-                .and_then(|(k, v)| Ok((self.key_codec.decode(k)?, self.value_codec.decode(v)?)))
+                .and_then(|(k, v)| Ok((self.key_codec.decode_exact(k)?, self.value_codec.decode_exact(v)?)))
         })
     }
 
@@ -243,7 +243,7 @@ impl<'db, CF: Cf, DB: RocksReader> CfContext<'db, DB, CF> {
         let opts = create_prefixed_read_opts(prefix_bytes, mode);
         self.db.iterator_cf_opt(self.handle, opts, mode, move |res| {
             res.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })
-                .and_then(|(k, _)| self.key_codec.decode(k))
+                .and_then(|(k, _)| self.key_codec.decode_exact(k))
         })
     }
 
@@ -261,7 +261,7 @@ impl<'db, CF: Cf, DB: RocksReader> CfContext<'db, DB, CF> {
         let opts = create_prefixed_read_opts(prefix_bytes, mode);
         self.db.iterator_cf_opt(self.handle, opts, mode, move |res| {
             res.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })
-                .and_then(|(_, v)| self.value_codec.decode(v))
+                .and_then(|(_, v)| self.value_codec.decode_exact(v))
         })
     }
 
@@ -277,7 +277,7 @@ impl<'db, CF: Cf, DB: RocksReader> CfContext<'db, DB, CF> {
                 operation: "range_iterator_with_codecs",
                 source: e,
             })
-            .and_then(|(k, v)| Ok((self.key_codec.decode(k)?, self.value_codec.decode(v)?)))
+            .and_then(|(k, v)| Ok((self.key_codec.decode_exact(k)?, self.value_codec.decode_exact(v)?)))
         })
     }
 
@@ -299,7 +299,7 @@ impl<'db, CF: Cf, DB: RocksReader> CfContext<'db, DB, CF> {
                 operation: "range_iterator_with_codecs",
                 source: e,
             })
-            .and_then(|(k, v)| Ok((KC::default().decode(k)?, VC::default().decode(v)?)))
+            .and_then(|(k, v)| Ok((KC::default().decode_exact(k)?, VC::default().decode_exact(v)?)))
         })
     }
 
@@ -613,8 +613,8 @@ impl<'db, TQuery: QueryCf, DB: RocksReader> CfContext<'db, DB, TQuery> {
         let key_codec = TQuery::make_cf_key_codec();
         let value_codec = TQuery::make_cf_value_codec();
         let (key, value) = result.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
-        let key = key_codec.decode(&key)?;
-        let value = value_codec.decode(&value)?;
+        let key = key_codec.decode_exact(&key)?;
+        let value = value_codec.decode_exact(&value)?;
         Ok((key, value))
     }
 }
@@ -632,14 +632,14 @@ where
         eprintln!("-------------- Dumping CF: {} ------------", CF::name());
         for result in iter {
             let (raw_key, value) = result.unwrap();
-            let key = match self.key_codec.decode(&raw_key) {
+            let key = match self.key_codec.decode_exact(&raw_key) {
                 Ok(key) => key,
                 Err(e) => {
                     eprintln!("Error decoding key: {}: raw: {}", e, raw_key.display());
                     continue;
                 },
             };
-            let value = self.value_codec.decode(&value).unwrap();
+            let value = self.value_codec.decode_exact(&value).unwrap();
             eprintln!("Key: {:?}, raw: {}, Value: {:?}", key, hex::encode(&raw_key), value);
             count += 1;
         }
@@ -660,8 +660,8 @@ where
         eprintln!("-------------- Dumping CF: {} ------------", CF::name());
         for result in iter {
             let (key, value) = result.unwrap();
-            let key = self.key_codec.decode(&key).unwrap();
-            let value = self.value_codec.decode(&value).unwrap();
+            let key = self.key_codec.decode_exact(&key).unwrap();
+            let value = self.value_codec.decode_exact(&value).unwrap();
             eprintln!("Key: {}, Value: {:?}", key, value);
             count += 1;
         }

@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::io::{Read, Write};
+use std::io::{Cursor, Write};
 
 use borsh::BorshDeserialize;
 use tari_engine_types::substate::SubstateId;
@@ -38,10 +38,14 @@ impl DbEncoder<SubstateId> for SubstateIdCodec {
 }
 
 impl DbDecoder<SubstateId> for SubstateIdCodec {
-    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<SubstateId, RocksDbStorageError> {
-        // We use the deserialize_reader here so that no error is returned if there are extra bytes in the buffer
-        // in order to use SubstateId as a prefix
-        SubstateId::deserialize_reader(reader).map_err(|e| RocksDbStorageError::DecodeError { source: e.into() })
+    fn decode(&self, bytes: &[u8]) -> Result<(SubstateId, usize), RocksDbStorageError> {
+        // We use deserialize_reader (rather than from_slice) so that no error is returned if there
+        // are extra bytes in the buffer — this codec is used as a prefix in composite keys.
+        // The cursor tracks how many bytes borsh consumed.
+        let mut cursor = Cursor::new(bytes);
+        let value = SubstateId::deserialize_reader(&mut cursor)
+            .map_err(|e| RocksDbStorageError::DecodeError { source: e.into() })?;
+        Ok((value, cursor.position() as usize))
     }
 }
 
@@ -106,7 +110,7 @@ mod tests {
         let substate_id = new_substate_id(1);
         let codec = SubstateIdCodec;
         let encoded = codec.encode(&substate_id).unwrap();
-        let decoded: SubstateId = codec.decode(&encoded).unwrap();
+        let decoded: SubstateId = codec.decode_exact(&encoded).unwrap();
         assert_eq!(substate_id, decoded);
     }
 
@@ -126,7 +130,7 @@ mod tests {
         let codec = SubstateIdCodec;
         let encoded = codec.encode(&key.substate_id).unwrap();
         assert_eq!(&compound_encoding.as_slice()[..encoded.len()], encoded.as_slice());
-        let decoded = block_diff_codec.decode(&compound_encoding).unwrap();
+        let decoded = block_diff_codec.decode_exact(&compound_encoding).unwrap();
         assert_eq!(key.substate_id, decoded.substate_id);
         assert_eq!(key.version, decoded.version);
         assert_eq!(key.is_up, decoded.is_up);

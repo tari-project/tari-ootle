@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::io::{Read, Write};
+use std::io::Write;
 
 use tari_ootle_common_types::ShardGroup;
 
@@ -36,9 +36,9 @@ impl DbEncoder<ShardGroup> for ShardGroupCodec {
 }
 
 impl DbDecoder<ShardGroup> for ShardGroupCodec {
-    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<ShardGroup, RocksDbStorageError> {
-        let start = self.inner.decode_reader(reader)?;
-        let end = self.inner.decode_reader(reader)?;
-        Ok(ShardGroup::new(start, end))
+    fn decode(&self, bytes: &[u8]) -> Result<(ShardGroup, usize), RocksDbStorageError> {
+        let (start, n_start) = self.inner.decode(bytes)?;
+        let (end, n_end) = self.inner.decode(&bytes[n_start..])?;
+        Ok((ShardGroup::new(start, end), n_start + n_end))
     }
 }

@@ -1,10 +1,10 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::io::{Read, Write};
+use std::io::Write;
 
 use anyhow::anyhow;
-use minicbor::{CborLen, Decode, Encode};
+use minicbor::{CborLen, Decode, Decoder, Encode};
 
 use crate::{
     codecs::{DbDecoder, DbEncoder},
@@ -45,23 +45,16 @@ where T: Encode<()> + CborLen<()>
 impl<T> DbDecoder<T> for Minicbor<T>
 where T: for<'b> Decode<'b, ()>
 {
-    fn decode(&self, bytes: &[u8]) -> Result<T, RocksDbStorageError> {
-        tari_bor::decode(bytes).map_err(|e| RocksDbStorageError::DecodeError {
+    fn decode(&self, bytes: &[u8]) -> Result<(T, usize), RocksDbStorageError> {
+        let mut decoder = Decoder::new(bytes);
+        let value = decoder.decode().map_err(|e| RocksDbStorageError::DecodeError {
             source: anyhow!(
                 "Minicbor decoding failed for type {}: {}",
                 std::any::type_name::<T>(),
                 e
             ),
-        })
-    }
-
-    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<T, RocksDbStorageError> {
-        // minicbor decodes from byte slices. Pull the full payload first.
-        let mut buf = Vec::new();
-        reader
-            .read_to_end(&mut buf)
-            .map_err(|e| RocksDbStorageError::DecodeError { source: e.into() })?;
-        self.decode(&buf)
+        })?;
+        Ok((value, decoder.position()))
     }
 }
 
@@ -100,7 +93,7 @@ mod tests {
         codec.encode_into(&original, &mut encoded).unwrap();
         let len = codec.encode_len(&original).unwrap();
         assert_eq!(len, encoded.len());
-        let decoded = codec.decode_reader(&mut &encoded[..]).unwrap();
+        let decoded = codec.decode_exact(&encoded).unwrap();
 
         assert_eq!(original, decoded);
     }

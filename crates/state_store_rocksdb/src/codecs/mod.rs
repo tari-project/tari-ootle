@@ -62,12 +62,26 @@ pub trait DbEncoder<T> {
 }
 
 pub trait DbDecoder<T> {
-    fn decode(&self, bytes: &[u8]) -> Result<T, RocksDbStorageError> {
-        let reader = &mut &bytes[..];
-        self.decode_reader(reader)
-    }
+    /// Decode a value from the front of `bytes`, returning the value together with
+    /// the number of bytes consumed. Composable codecs (e.g. tuples) chain by
+    /// advancing the slice past the returned length.
+    fn decode(&self, bytes: &[u8]) -> Result<(T, usize), RocksDbStorageError>;
 
-    fn decode_reader<R: io::Read>(&self, reader: &mut R) -> Result<T, RocksDbStorageError>;
+    /// Decode and assert that the entire slice was consumed.
+    fn decode_exact(&self, bytes: &[u8]) -> Result<T, RocksDbStorageError> {
+        let (value, consumed) = self.decode(bytes)?;
+        if consumed != bytes.len() {
+            return Err(RocksDbStorageError::MalformedData {
+                operation: "decode_exact",
+                details: format!(
+                    "trailing {} bytes after decoding type {}",
+                    bytes.len() - consumed,
+                    std::any::type_name::<T>(),
+                ),
+            });
+        }
+        Ok(value)
+    }
 }
 
 pub type DefaultCodec<T> = Minicbor<T>;

@@ -16,7 +16,7 @@ tari_template_lib = { path = "../../../../template_lib", default-features = fals
 #lol_alloc = "0.4.1"
 
 # Allocator for no_std environment
-talc = { version = "4.4.3", default-features = false, features = ["lock_api"] }
+talc = { version = "5.0.3", default-features = false }
 
 [lib]
 crate-type = ["cdylib"]

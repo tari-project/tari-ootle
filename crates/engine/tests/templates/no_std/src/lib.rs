@@ -6,8 +6,9 @@
 extern crate alloc;
 
 // Use talc as the global allocator
+#[cfg(target_arch = "wasm32")]
 #[global_allocator]
-static ALLOCATOR: talc::TalckWasm = unsafe { talc::TalckWasm::new_global() };
+static TALC: talc::wasm::WasmDynamicTalc = talc::wasm::new_wasm_dynamic_allocator();
 
 // WARN: dont use wee_alloc in production. https://github.com/rustwasm/wee_alloc/issues/106
 // #[global_allocator]

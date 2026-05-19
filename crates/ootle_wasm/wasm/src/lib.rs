@@ -259,6 +259,19 @@ pub fn build_stealth_inputs_statement(
         .map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// Aggregate the commitment masks of stealth inputs into a single 32-byte Ristretto scalar.
+///
+/// `masks_concat` is the concatenated bytes of all input masks (32 bytes per mask, so the input
+/// length must be a multiple of 32). Pass an empty array to obtain the zero scalar.
+///
+/// Returns the sum as 32 bytes, suitable as the `aggregated_input_mask` argument to
+/// `generateStealthBalanceProofSignature`. The output side of the same balance proof is aggregated
+/// automatically by `generateStealthOutputsStatement` (returned as `aggregated_output_mask`).
+#[wasm_bindgen(js_name = "aggregateInputMasks")]
+pub fn aggregate_input_masks(masks_concat: &[u8]) -> Result<Vec<u8>, JsError> {
+    ootle_wasm_core::stealth::inputs::aggregate_input_masks(masks_concat).map_err(|e| JsError::new(&e.to_string()))
+}
+
 /// Generate an extended bulletproof aggregating range proofs for a set of output witnesses, proving
 /// each amount is in `[minimum_value_promise, 2^64)`. The number of witnesses is padded to the next
 /// power of two internally.

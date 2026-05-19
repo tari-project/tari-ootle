@@ -221,6 +221,37 @@ pub struct StateHashTreeDiff<P> {
     pub stale_tree_nodes: Vec<StaleTreeNode>,
 }
 
+// NodeKey, Node and StaleTreeNode come from tari_jellyfish (external git dep) and only implement
+// serde. Bridge the whole struct through minicbor-serde rather than forking the upstream crate.
+// minicbor's derive doesn't accept where-bounds on generics, hence the manual impls.
+impl<C, P> minicbor::Encode<C> for StateHashTreeDiff<P>
+where P: serde::Serialize
+{
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        tari_bor::adapters::serde_bridge::encode(self, e, ctx)
+    }
+}
+
+impl<'b, C, P> minicbor::Decode<'b, C> for StateHashTreeDiff<P>
+where P: serde::Deserialize<'b>
+{
+    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        tari_bor::adapters::serde_bridge::decode(d, ctx)
+    }
+}
+
+impl<C, P> minicbor::CborLen<C> for StateHashTreeDiff<P>
+where P: serde::Serialize
+{
+    fn cbor_len(&self, ctx: &mut C) -> usize {
+        tari_bor::adapters::serde_bridge::cbor_len(self, ctx)
+    }
+}
+
 impl<P> StateHashTreeDiff<P> {
     pub fn new() -> Self {
         Self {

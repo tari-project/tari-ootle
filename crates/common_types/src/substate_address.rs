@@ -10,6 +10,7 @@ use std::{
 };
 
 use borsh::BorshSerialize;
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_crypto::tari_utilities::hex::Hex;
 use tari_engine_types::substate::SubstateId;
@@ -21,11 +22,13 @@ pub trait ToSubstateAddress {
     fn to_substate_address(&self) -> SubstateAddress;
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, BorshSerialize)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, BorshSerialize, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cbor(transparent)]
 pub struct SubstateAddress(
     #[serde(with = "ootle_serde::hex")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[n(0)]
     [u8; SubstateAddress::LENGTH],
 );
 

@@ -12,6 +12,8 @@ use alloc::{format, vec::Vec};
 pub mod adapters;
 mod error;
 mod macros;
+#[cfg(feature = "serde")]
+pub mod serde_codec;
 mod tag;
 mod value;
 #[cfg(feature = "serde")]

@@ -102,9 +102,7 @@ where
             access_rules: ComponentAccessRules::allow_all(),
             entity_id: EntityId::default(),
         },
-        body: ComponentBody::from_cbor_value(cbor!({
-            "vault" => tari_bor::to_value(&XTR_FAUCET_VAULT_ADDRESS).unwrap(),
-        })),
+        body: ComponentBody::from_cbor_value(cbor!([XTR_FAUCET_VAULT_ADDRESS])),
     };
     create_substate(tx, num_preshards, XTR_FAUCET_COMPONENT_ADDRESS, value)?;
 
@@ -141,7 +139,8 @@ where
             entity_id: EntityId::default(),
         },
         body: ComponentBody {
-            state: cbor!({"serial_number" => 0u64}),
+            // serial-number: 0
+            state: cbor!([0u64]),
         },
     };
     create_substate(tx, num_preshards, NFT_FAUCET_COMPONENT_ADDRESS, value)?;

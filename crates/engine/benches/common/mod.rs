@@ -82,12 +82,7 @@ pub fn setup_store() -> MemoryStateStore {
             access_rules: ComponentAccessRules::allow_all(),
             entity_id: Default::default(),
         },
-        body: ComponentBody::from_cbor_value(
-            cbor!({
-                "vault" => FAUCET_VAULT_ID,
-            })
-            .unwrap(),
-        ),
+        body: ComponentBody::from_cbor_value(cbor!([FAUCET_VAULT_ID])),
     };
     state_store
         .set_state(FAUCET_COMPONENT_ADDRESS.into(), Substate::new(0, component))

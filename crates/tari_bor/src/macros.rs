@@ -49,7 +49,7 @@ macro_rules! cbor {
         $crate::Value::Array(__a)
     }};
 
-    ($v:expr) => { $crate::Value::from($v) };
+    ($v:expr) => { $crate::__cbor_macro::value($v) };
 }
 
 /// Internal: parse `key => value, key => value, ...` map entries via tt-munching.
@@ -67,7 +67,7 @@ macro_rules! __cbor_map_entries {
         $m.push(($crate::__cbor_macro::key($k), $crate::cbor!({ $($inner)* })));
     };
     ($m:ident, $k:tt => $v:expr $(,)?) => {
-        $m.push(($crate::__cbor_macro::key($k), $crate::Value::from($v)));
+        $m.push(($crate::__cbor_macro::key($k), $crate::__cbor_macro::value($v)));
     };
 
     // === Continuation arms (entry followed by comma + more) ===
@@ -84,7 +84,7 @@ macro_rules! __cbor_map_entries {
         $crate::__cbor_map_entries!($m, $($rest)+);
     };
     ($m:ident, $k:tt => $v:expr, $($rest:tt)+) => {
-        $m.push(($crate::__cbor_macro::key($k), $crate::Value::from($v)));
+        $m.push(($crate::__cbor_macro::key($k), $crate::__cbor_macro::value($v)));
         $crate::__cbor_map_entries!($m, $($rest)+);
     };
 }
@@ -104,7 +104,7 @@ macro_rules! __cbor_array_entries {
         $a.push($crate::cbor!({ $($inner)* }));
     };
     ($a:ident, $v:expr $(,)?) => {
-        $a.push($crate::Value::from($v));
+        $a.push($crate::__cbor_macro::value($v));
     };
 
     // Continuation arms
@@ -121,7 +121,7 @@ macro_rules! __cbor_array_entries {
         $crate::__cbor_array_entries!($a, $($rest)+);
     };
     ($a:ident, $v:expr, $($rest:tt)+) => {
-        $a.push($crate::Value::from($v));
+        $a.push($crate::__cbor_macro::value($v));
         $crate::__cbor_array_entries!($a, $($rest)+);
     };
 }
@@ -135,6 +135,8 @@ pub mod __cbor_macro {
     #[cfg(feature = "std")]
     pub use std::vec::Vec;
 
+    use minicbor::Encode;
+
     use crate::Value;
 
     pub fn vec_new<T>() -> Vec<T> {
@@ -147,6 +149,15 @@ pub mod __cbor_macro {
     #[inline]
     pub fn key<K: Into<Value>>(k: K) -> Value {
         k.into()
+    }
+
+    /// Convert any minicbor-encodable expression into a [`Value`] by round-tripping through the
+    /// canonical wire encoding. Lets `cbor!(...)` accept arbitrary `Encode<()>` types
+    /// (e.g. `VaultId`, `Vault`, template structs) without callers having to wrap with
+    /// [`crate::to_value`] themselves.
+    #[inline]
+    pub fn value<V: Encode<()>>(v: V) -> Value {
+        crate::to_value(&v).expect("cbor! value: encode failed")
     }
 }
 
@@ -280,8 +291,8 @@ mod tests {
 
     #[test]
     fn trailing_comma() {
-        let _ = cbor!([1u32, 2u32,]);
-        let _ = cbor!({ "k" => "v", });
+        let _unused = cbor!([1u32, 2u32,]);
+        let _unused = cbor!({ "k" => "v", });
     }
 
     #[test]

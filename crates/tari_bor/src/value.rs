@@ -419,9 +419,9 @@ mod tests {
             -1,
             42,
             -42,
-            i64::MAX as i128,
-            i64::MIN as i128,
-            u64::MAX as i128,
+            i128::from(i64::MAX),
+            i128::from(i64::MIN),
+            i128::from(u64::MAX),
         ] {
             assert_eq!(roundtrip(&Value::Integer(v)), Value::Integer(v), "value: {v}");
         }

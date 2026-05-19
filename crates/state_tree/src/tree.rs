@@ -222,8 +222,9 @@ pub struct StateHashTreeDiff<P> {
 }
 
 // NodeKey, Node and StaleTreeNode come from tari_jellyfish (external git dep) and only implement
-// serde. Bridge the whole struct through minicbor-serde rather than forking the upstream crate.
-// minicbor's derive doesn't accept where-bounds on generics, hence the manual impls.
+// serde. Bridge the whole struct through `tari_bor::adapters::serde_bridge` rather than forking
+// the upstream crate. minicbor's derive doesn't accept where-bounds on generics, hence the
+// manual impls.
 impl<C, P> minicbor::Encode<C> for StateHashTreeDiff<P>
 where P: serde::Serialize
 {

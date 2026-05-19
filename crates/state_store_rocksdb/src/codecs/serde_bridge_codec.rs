@@ -11,10 +11,10 @@ use crate::{
 };
 
 /// Codec for foreign types that only carry `serde` derives (e.g. `tari_jellyfish::Node` and
-/// `StaleTreeNode`). Bytes are produced by `minicbor-serde` — RFC-8949-valid CBOR, but with
-/// string-keyed maps for struct fields rather than `#[n(N)]` tags, so it lacks the integer-
-/// tag size win that hand-derived types get. Acceptable since the only callers are state
-/// tree blobs we don't otherwise own.
+/// `StaleTreeNode`). Bytes are produced by `tari_bor::serde_codec` — RFC-8949-valid CBOR, but
+/// with string-keyed maps for struct fields rather than `#[n(N)]` tags, so it lacks the
+/// integer-tag size win that hand-derived types get. Acceptable since the only callers are
+/// state tree blobs we don't otherwise own.
 #[derive(Debug, Clone, Copy)]
 pub struct SerdeBridgeCodec<T> {
     _phantom: std::marker::PhantomData<T>,
@@ -32,14 +32,16 @@ impl<T> DbEncoder<T> for SerdeBridgeCodec<T>
 where T: serde::Serialize
 {
     fn encode_len(&self, value: &T) -> Result<usize, RocksDbStorageError> {
-        // minicbor-serde doesn't expose a length-only path, so we serialize and discard.
+        // serde_codec doesn't expose a length-only path, so we serialize and discard.
         // Bridged types are state-tree node blobs, encoded sparingly.
-        let bytes = minicbor_serde::to_vec(value).map_err(|e| RocksDbStorageError::EncodeError { source: e.into() })?;
+        let bytes =
+            tari_bor::serde_codec::to_vec(value).map_err(|e| RocksDbStorageError::EncodeError { source: e.into() })?;
         Ok(bytes.len())
     }
 
     fn encode_into<W: Write>(&self, value: &T, writer: &mut W) -> Result<(), RocksDbStorageError> {
-        let bytes = minicbor_serde::to_vec(value).map_err(|e| RocksDbStorageError::EncodeError { source: e.into() })?;
+        let bytes =
+            tari_bor::serde_codec::to_vec(value).map_err(|e| RocksDbStorageError::EncodeError { source: e.into() })?;
         writer
             .write_all(&bytes)
             .map_err(|e| RocksDbStorageError::EncodeError { source: e.into() })
@@ -50,7 +52,7 @@ impl<T> DbDecoder<T> for SerdeBridgeCodec<T>
 where T: serde::de::DeserializeOwned
 {
     fn decode(&self, bytes: &[u8]) -> Result<T, RocksDbStorageError> {
-        minicbor_serde::from_slice(bytes).map_err(|e| RocksDbStorageError::DecodeError {
+        tari_bor::serde_codec::from_slice(bytes).map_err(|e| RocksDbStorageError::DecodeError {
             source: anyhow!(
                 "SerdeBridge decoding failed for type {}: {}",
                 std::any::type_name::<T>(),

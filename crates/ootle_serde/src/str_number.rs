@@ -143,13 +143,13 @@ mod tests {
         assert_eq!(json, r#"{"value":5000000000}"#);
     }
 
-    // --- Binary (non-human-readable, minicbor-serde) ---
+    // --- Binary (non-human-readable, tari_bor::serde_codec) ---
 
     #[test]
     fn round_trip_binary() {
         for value in [0, 1, u64::from(u32::MAX), u64::MAX] {
-            let encoded = minicbor_serde::to_vec(w(value)).unwrap();
-            let decoded: Wrapper = minicbor_serde::from_slice(&encoded).unwrap();
+            let encoded = tari_bor::serde_codec::to_vec(w(value)).unwrap();
+            let decoded: Wrapper = tari_bor::serde_codec::from_slice(&encoded).unwrap();
             assert_eq!(decoded, w(value));
         }
     }

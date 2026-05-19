@@ -7,12 +7,12 @@ use serde::Serialize;
 use tari_ootle_storage::StorageError;
 
 // Function names retain the `_bincode` suffix to avoid churning a few dozen call sites;
-// on the wire the indexer now stores minicbor (via minicbor-serde) instead. bincode v2's
-// `deserialize_any` ban broke round-trips for any value containing tari_bor::Value, so
-// switching the indexer's sqlite blob format follows the same fix landed for the
-// rocksdb state store.
+// on the wire the indexer now stores minicbor (via `tari_bor::serde_codec`) instead. bincode
+// v2's `deserialize_any` ban broke round-trips for any value containing tari_bor::Value, so
+// switching the indexer's sqlite blob format follows the same fix landed for the rocksdb
+// state store.
 pub fn serialize_bincode<T: Serialize + ?Sized>(t: &T) -> Result<Vec<u8>, StorageError> {
-    minicbor_serde::to_vec(t).map_err(|e| StorageError::EncodingError {
+    tari_bor::serde_codec::to_vec(t).map_err(|e| StorageError::EncodingError {
         operation: "serialize_bincode",
         item: type_name::<T>(),
         details: e.to_string(),
@@ -20,7 +20,7 @@ pub fn serialize_bincode<T: Serialize + ?Sized>(t: &T) -> Result<Vec<u8>, Storag
 }
 
 pub fn deserialize_bincode<T: serde::de::DeserializeOwned, S: AsRef<[u8]>>(s: S) -> Result<T, StorageError> {
-    minicbor_serde::from_slice(s.as_ref()).map_err(|e| StorageError::DecodingError {
+    tari_bor::serde_codec::from_slice(s.as_ref()).map_err(|e| StorageError::DecodingError {
         operation: "deserialize_bincode",
         item: type_name::<T>(),
         details: e.to_string(),

@@ -23,7 +23,6 @@ indexmap = { workspace = true }
 hex = { workspace = true }
 log = { workspace = true }
 minicbor = { workspace = true, features = ["std", "derive"] }
-minicbor-serde = { workspace = true, features = ["std", "alloc"] }
 rocksdb = { workspace = true }
 serde = { workspace = true, default-features = true }
 strum_macros = { workspace = true }

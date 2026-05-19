@@ -8,7 +8,7 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-tari_bor = { workspace = true }
+tari_bor = { workspace = true, features = ["serde"] }
 tari_consensus = { workspace = true }
 tari_consensus_types = { workspace = true }
 tari_crypto = { workspace = true }
@@ -23,7 +23,6 @@ tari_jellyfish = { workspace = true }
 libp2p-identity = { workspace = true, features = ["sr25519", "serde", "peerid"] }
 
 anyhow = { workspace = true }
-minicbor-serde = { workspace = true, features = ["alloc"] }
 serde = { workspace = true, default-features = true }
 prost = { workspace = true }
 ts-rs = { workspace = true, optional = true }

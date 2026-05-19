@@ -1,6 +1,6 @@
 [package]
 name = "ootle_serde"
-version = "0.2.0"
+version = "0.3.0"
 description = "serde utilities for Tari Ootle"
 edition.workspace = true
 authors.workspace = true
@@ -17,7 +17,7 @@ hex = { workspace = true, optional = true }
 [dev-dependencies]
 serde_json = { workspace = true }
 tari_template_lib = { workspace = true }
-minicbor-serde = { workspace = true, features = ["std", "alloc"] }
+tari_bor = { workspace = true, features = ["std", "serde"] }
 
 [features]
 default = ["hex", "cbor"]

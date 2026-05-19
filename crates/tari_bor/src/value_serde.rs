@@ -332,6 +332,8 @@ fn parse_nibble(b: u8) -> Result<u8, &'static str> {
 
 #[cfg(test)]
 mod tests {
+    use std::f64::consts::PI;
+
     use super::*;
 
     fn json_roundtrip(v: &Value) -> Value {
@@ -347,9 +349,9 @@ mod tests {
             Value::Bool(false),
             Value::Integer(0),
             Value::Integer(-1),
-            Value::Integer(i64::MAX as i128),
-            Value::Integer(i64::MIN as i128),
-            Value::Float(3.14),
+            Value::Integer(i64::MAX.into()),
+            Value::Integer(i64::MIN.into()),
+            Value::Float(PI),
             Value::Text("hello world".into()),
         ] {
             assert_eq!(json_roundtrip(&v), v);
@@ -393,9 +395,9 @@ mod tests {
     #[test]
     fn decodes_serde_json_arbitrary_precision_float() {
         // Shape produced by serde_json when its `arbitrary_precision` feature is on.
-        let raw = r#"{"$serde_json::private::Number":"3.14"}"#;
+        let raw = r#"{"$serde_json::private::Number":"2.14"}"#;
         let decoded: Value = serde_json::from_str(raw).unwrap();
-        assert_eq!(decoded, Value::Float(3.14));
+        assert_eq!(decoded, Value::Float(2.14));
     }
 
     #[test]

@@ -11,17 +11,13 @@ pub mod boxed_slice {
 
     use minicbor::{CborLen, Decode, Decoder, Encode, Encoder};
 
-    pub fn encode<C, T, W>(
-        xs: &Box<[T]>,
-        e: &mut Encoder<W>,
-        ctx: &mut C,
-    ) -> Result<(), minicbor::encode::Error<W::Error>>
+    pub fn encode<C, T, W>(xs: &[T], e: &mut Encoder<W>, ctx: &mut C) -> Result<(), minicbor::encode::Error<W::Error>>
     where
         T: Encode<C>,
         W: minicbor::encode::Write,
     {
         e.array(xs.len() as u64)?;
-        for x in xs.as_ref() {
+        for x in xs {
             x.encode(e, ctx)?;
         }
         Ok(())
@@ -52,11 +48,11 @@ pub mod boxed_slice {
         }
     }
 
-    pub fn cbor_len<C, T>(xs: &Box<[T]>, ctx: &mut C) -> usize
+    pub fn cbor_len<C, T>(xs: &[T], ctx: &mut C) -> usize
     where T: CborLen<C> {
         let n = xs.len() as u64;
         let mut total = <u64 as CborLen<C>>::cbor_len(&n, ctx);
-        for x in xs.as_ref() {
+        for x in xs {
             total += x.cbor_len(ctx);
         }
         total
@@ -214,12 +210,95 @@ pub mod indexmap_codec {
     }
 }
 
+/// `#[cbor(with = "u128_codec")]` adapter for fields of type `u128`.
+///
+/// minicbor 2.2 has no built-in `Encode`/`Decode` for `u128` (upstream PR
+/// <https://github.com/twittner/minicbor/pull/63> is in flight). Until that lands, this adapter
+/// encodes the value using the RFC 8949 §3.4.3 positive-bignum tag — tag `2` wrapping a CBOR
+/// byte string of the big-endian magnitude with leading zero bytes stripped (canonical form).
+///
+/// Switching to the upstream `Encode for u128` once it ships should be wire-compatible: it will
+/// produce the same canonical form for values that don't fit in `u64`. (Values that *do* fit in
+/// `u64` will likely be emitted as a plain CBOR integer rather than a tagged bignum, so this is
+/// not a forever-stable wire format — call it out in the migration when the time comes.)
+pub mod u128_codec {
+    use minicbor::{CborLen, Decoder, Encoder, data::Tag};
+
+    const TAG_POSITIVE_BIGNUM: u64 = 2;
+
+    fn canonical_bytes(v: u128) -> ([u8; 16], usize) {
+        let bytes = v.to_be_bytes();
+        // unwrap_or(15) handles v == 0: encode as a single zero byte rather than an empty bstr,
+        // since RFC 8949 bignums must be non-empty.
+        let first = bytes.iter().position(|&b| b != 0).unwrap_or(15);
+        (bytes, first)
+    }
+
+    pub fn encode<C, W>(v: &u128, e: &mut Encoder<W>, _ctx: &mut C) -> Result<(), minicbor::encode::Error<W::Error>>
+    where W: minicbor::encode::Write {
+        let (bytes, first) = canonical_bytes(*v);
+        e.tag(Tag::new(TAG_POSITIVE_BIGNUM))?;
+        e.bytes(&bytes[first..])?;
+        Ok(())
+    }
+
+    pub fn decode<'b, C>(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<u128, minicbor::decode::Error> {
+        let tag: u64 = d.tag()?.into();
+        if tag != TAG_POSITIVE_BIGNUM {
+            return Err(minicbor::decode::Error::message(
+                "u128_codec: expected positive-bignum tag (2)",
+            ));
+        }
+        let bytes = d.bytes()?;
+        if bytes.len() > 16 {
+            return Err(minicbor::decode::Error::message("u128_codec: bignum exceeds 128 bits"));
+        }
+        let mut buf = [0u8; 16];
+        buf[16 - bytes.len()..].copy_from_slice(bytes);
+        Ok(u128::from_be_bytes(buf))
+    }
+
+    pub fn cbor_len<C>(v: &u128, ctx: &mut C) -> usize {
+        let (_, first) = canonical_bytes(*v);
+        let n = 16 - first;
+        // Tag header + bstr header (1 byte: payload length 1..=16 fits below the 24-element threshold) + payload.
+        <Tag as CborLen<C>>::cbor_len(&Tag::new(TAG_POSITIVE_BIGNUM), ctx) + 1 + n
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use minicbor::{Decoder, Encoder};
+
+        use super::*;
+
+        fn roundtrip(v: u128) {
+            let mut buf = Vec::new();
+            let mut e = Encoder::new(&mut buf);
+            encode(&v, &mut e, &mut ()).unwrap();
+            assert_eq!(buf.len(), cbor_len(&v, &mut ()), "cbor_len mismatch for {v}");
+            let mut d = Decoder::new(&buf);
+            let got = decode::<()>(&mut d, &mut ()).unwrap();
+            assert_eq!(got, v);
+        }
+
+        #[test]
+        fn boundary_values() {
+            roundtrip(0);
+            roundtrip(1);
+            roundtrip(u128::from(u64::MAX));
+            roundtrip(u128::from(u64::MAX) + 1);
+            roundtrip(u128::MAX);
+        }
+    }
+}
+
 /// Bridges any `serde::Serialize`/`serde::Deserialize` type into minicbor's `#[cbor(with = ...)]`
-/// system via the [`minicbor-serde`](https://docs.rs/minicbor-serde) crate.
+/// system via our local [`crate::serde_codec`] module (a fork of `minicbor-serde` with `u128`
+/// and `i128` support added).
 ///
 /// Use this on fields whose type is foreign (orphan-rule blocked) and only implements serde —
 /// most commonly the consensus proofs from `tari_sidechain`. The subtree is encoded as
-/// minicbor-serde would encode it (string-keyed maps for structs), so it does not get the
+/// `serde_codec` would encode it (string-keyed maps for structs), so it does not get the
 /// integer-tag size win, but it round-trips without requiring upstream changes.
 #[cfg(feature = "serde")]
 pub mod serde_bridge {
@@ -233,9 +312,9 @@ pub mod serde_bridge {
         T: serde::Serialize + ?Sized,
         W: minicbor::encode::Write,
     {
-        // minicbor-serde owns its own encoder, so we serialize to a buffer and copy the bytes
+        // serde_codec owns its own encoder, so we serialize to a buffer and copy the bytes
         // verbatim into the parent encoder. Cheap enough — typical foreign proofs are < 2KB.
-        let bytes = minicbor_serde::to_vec(v)
+        let bytes = crate::serde_codec::to_vec(v)
             .map_err(|err| minicbor::encode::Error::message(format!("serde_bridge encode failed: {err}")))?;
         e.writer_mut().write_all(&bytes).map_err(minicbor::encode::Error::write)
     }
@@ -243,20 +322,20 @@ pub mod serde_bridge {
     pub fn decode<'b, C, T>(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<T, minicbor::decode::Error>
     where T: serde::Deserialize<'b> {
         // Skip past the value first so the parent decoder advances correctly, then deserialize
-        // from the slice we just walked over. minicbor-serde reads `&'b [u8]`, so the borrow
-        // is preserved for zero-copy deserialization where possible.
+        // from the slice we just walked over. serde_codec reads `&'b [u8]`, so the borrow is
+        // preserved for zero-copy deserialization where possible.
         let start = d.position();
         d.skip()?;
         let end = d.position();
         let slice = &d.input()[start..end];
-        minicbor_serde::from_slice(slice)
+        crate::serde_codec::from_slice(slice)
             .map_err(|err| minicbor::decode::Error::message(format!("serde_bridge decode failed: {err}")))
     }
 
     pub fn cbor_len<C, T>(v: &T, _ctx: &mut C) -> usize
     where T: serde::Serialize + ?Sized {
-        // The only honest answer is "serialize and measure" since minicbor-serde's wire format
-        // depends on the inner type's serde implementation. Pays an extra encode per call.
-        minicbor_serde::to_vec(v).map(|bytes| bytes.len()).unwrap_or(0)
+        // The only honest answer is "serialize and measure" since the wire format depends on
+        // the inner type's serde implementation. Pays an extra encode per call.
+        crate::serde_codec::to_vec(v).map(|bytes| bytes.len()).unwrap_or(0)
     }
 }

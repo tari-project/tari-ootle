@@ -72,10 +72,10 @@ mod tests {
         assert_eq!(original, deserialized);
 
         // Serialize to binary (non-human-readable)
-        let binary = minicbor_serde::to_vec(&original).unwrap();
+        let binary = tari_bor::serde_codec::to_vec(&original).unwrap();
 
         // Deserialize from binary
-        let deserialized_bin: SampleData = minicbor_serde::from_slice(&binary).unwrap();
+        let deserialized_bin: SampleData = tari_bor::serde_codec::from_slice(&binary).unwrap();
         assert_eq!(original, deserialized_bin);
     }
 }

@@ -423,59 +423,59 @@ impl FromTagAndValue for WellKnownTariValue {
         let tag = BinaryTag::from_u64(tag).ok_or(IndexedValueError::InvalidTag(tag))?;
         match tag {
             BinaryTag::ComponentAddress => {
-                let component_address: ObjectKey = value.decoded().map_err(BorError::from)?;
+                let component_address: ObjectKey = value.decoded()?;
                 Ok(Self::ComponentAddress(component_address.into()))
             },
             BinaryTag::BucketId => {
-                let bucket_id: u32 = value.decoded().map_err(BorError::from)?;
+                let bucket_id: u32 = value.decoded()?;
                 Ok(Self::BucketId(bucket_id.into()))
             },
             BinaryTag::ResourceAddress => {
-                let resource_address: ObjectKey = value.decoded().map_err(BorError::from)?;
+                let resource_address: ObjectKey = value.decoded()?;
                 Ok(Self::ResourceAddress(resource_address.into()))
             },
             BinaryTag::TransactionReceipt => {
-                let tx_receipt_hash: Hash32 = value.decoded().map_err(BorError::from)?;
+                let tx_receipt_hash: Hash32 = value.decoded()?;
                 Ok(Self::TransactionReceiptAddress(tx_receipt_hash.into()))
             },
             BinaryTag::NonFungibleAddress => {
-                let non_fungible_address: NonFungibleAddressContents = value.decoded().map_err(BorError::from)?;
+                let non_fungible_address: NonFungibleAddressContents = value.decoded()?;
                 Ok(Self::NonFungibleAddress(non_fungible_address.into()))
             },
             BinaryTag::Metadata => {
-                let metadata: BTreeMap<String, String> = value.decoded().map_err(BorError::from)?;
+                let metadata: BTreeMap<String, String> = value.decoded()?;
                 Ok(Self::Metadata(metadata.into()))
             },
             BinaryTag::VaultId => {
-                let vault_id: ObjectKey = value.decoded().map_err(BorError::from)?;
+                let vault_id: ObjectKey = value.decoded()?;
                 Ok(Self::VaultId(vault_id.into()))
             },
             BinaryTag::ProofId => {
-                let value: u32 = value.decoded().map_err(BorError::from)?;
+                let value: u32 = value.decoded()?;
                 Ok(Self::ProofId(value.into()))
             },
             BinaryTag::ClaimedOutputTombstoneAddress => {
-                let value: ObjectKey = value.decoded().map_err(BorError::from)?;
+                let value: ObjectKey = value.decoded()?;
                 Ok(Self::ClaimedOutputTombstoneAddress(value.into()))
             },
             BinaryTag::TemplateAddress => {
-                let value: Hash32 = value.decoded().map_err(BorError::from)?;
+                let value: Hash32 = value.decoded()?;
                 Ok(Self::PublishedTemplateAddress(value.into()))
             },
             BinaryTag::ValidatorNodeFeePool => {
-                let value: [u8; 32] = value.decoded().map_err(BorError::from)?;
+                let value: [u8; 32] = value.decoded()?;
                 Ok(Self::ValidatorNodeFeePool(value.into()))
             },
             BinaryTag::AllocatedComponentAddress => {
-                let value = value.decoded().map_err(BorError::from)?;
+                let value = value.decoded()?;
                 Ok(Self::ComponentAddressAllocation(ComponentAddressAllocation::new(value)))
             },
             BinaryTag::AllocatedResourceAddress => {
-                let value = value.decoded().map_err(BorError::from)?;
+                let value = value.decoded()?;
                 Ok(Self::ResourceAddressAllocation(ResourceAddressAllocation::new(value)))
             },
             BinaryTag::Utxo => {
-                let value: UtxoAddressContents = value.decoded().map_err(BorError::from)?;
+                let value: UtxoAddressContents = value.decoded()?;
                 Ok(Self::Utxo(value.into()))
             },
         }

@@ -54,6 +54,11 @@ const SENTINEL_INT: &str = "int";
 const SENTINEL_MAP: &str = "map";
 const SENTINEL_TAG: &str = "tag";
 
+/// With `serde_json/arbitrary_precision` enabled, numbers are encoded as a one-entry map
+/// keyed on this sentinel string and a stringified value. Any workspace member can light
+/// this up; we must accept it on decode regardless of who turned the feature on.
+const JSON_NUMBER_SENTINEL: &str = "$serde_json::private::Number";
+
 impl Serialize for Value {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {
@@ -200,6 +205,11 @@ impl<'de> Visitor<'de> for ValueVisitor {
             return decode_sentinel(&kind, &mut map);
         }
 
+        if first_key == JSON_NUMBER_SENTINEL {
+            let raw: String = map.next_value()?;
+            return parse_json_arbitrary_number(&raw).map_err(de::Error::custom);
+        }
+
         let first_value: Value = map.next_value()?;
         let mut entries: Vec<(Value, Value)> = Vec::with_capacity(map.size_hint().unwrap_or(0) + 1);
         entries.push((Value::Text(first_key), first_value));
@@ -267,6 +277,17 @@ fn decode_sentinel<'de, A: MapAccess<'de>>(kind: &str, map: &mut A) -> Result<Va
         },
         other => Err(de::Error::custom(format!("unknown @cbor sentinel kind: {other}"))),
     }
+}
+
+/// Decode the string payload of a `$serde_json::private::Number` map. Integers prefer
+/// `Value::Integer` (lossless for the i128 range); anything else falls back to `Value::Float`.
+fn parse_json_arbitrary_number(raw: &str) -> Result<Value, String> {
+    if let Ok(i) = raw.parse::<i128>() {
+        return Ok(Value::Integer(i));
+    }
+    raw.parse::<f64>()
+        .map(Value::Float)
+        .map_err(|_| format!("invalid arbitrary_precision number: {raw}"))
 }
 
 fn encode_hex(bytes: &[u8]) -> String {
@@ -367,6 +388,28 @@ mod tests {
         let json = serde_json::to_string(&v).unwrap();
         assert!(!json.contains("@cbor"));
         assert_eq!(json_roundtrip(&v), v);
+    }
+
+    #[test]
+    fn decodes_serde_json_arbitrary_precision_float() {
+        // Shape produced by serde_json when its `arbitrary_precision` feature is on.
+        let raw = r#"{"$serde_json::private::Number":"3.14"}"#;
+        let decoded: Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(decoded, Value::Float(3.14));
+    }
+
+    #[test]
+    fn decodes_serde_json_arbitrary_precision_integer() {
+        let raw = r#"{"$serde_json::private::Number":"42"}"#;
+        let decoded: Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(decoded, Value::Integer(42));
+    }
+
+    #[test]
+    fn decodes_serde_json_arbitrary_precision_negative_integer() {
+        let raw = r#"{"$serde_json::private::Number":"-1"}"#;
+        let decoded: Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(decoded, Value::Integer(-1));
     }
 
     #[test]

@@ -8,9 +8,7 @@ on:
       - 'crates/ootle_wasm/**'
 
 env:
-  NODE_VERSION: '24'
-  PNPM_VERSION: '10'
-  stable_toolchain: stable
+  WASM_PACK_VERSION: '0.13.1'
 
 permissions:
   id-token: write
@@ -24,34 +22,30 @@ jobs:
         working-directory: crates/ootle_wasm
     steps:
       - name: checkout
-        uses: actions/checkout@v6
-
-      - name: toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          toolchain: ${{ env.stable_toolchain }}
-          targets: wasm32-unknown-unknown
+          persist-credentials: false
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: ubuntu dependencies
         run: |
           sudo apt-get update
           sudo bash ../../scripts/install_ubuntu_dependencies.sh
 
+      - name: Set up Rust target
+        run: |
+          rustup show
+          rustup target add wasm32-unknown-unknown
+
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        run: cargo install wasm-pack --version "$WASM_PACK_VERSION" --locked
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: Use Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v6.4.0
+      - name: Use Node.js from .nvmrc
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           registry-url: "https://registry.npmjs.org"
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
 
       - name: Build WASM package
         run: bash build.sh bundler release
@@ -69,9 +63,9 @@ jobs:
           echo "Package name:  $PACKAGE_NAME"
 
           echo "== Registry check =="
-          echo "Running: pnpm info $PACKAGE_NAME version"
+          echo "Running: npm view $PACKAGE_NAME version"
 
-          REMOTE_VERSION=$(pnpm info "$PACKAGE_NAME" version 2>/dev/null || echo "NOT_FOUND")
+          REMOTE_VERSION=$(npm view "$PACKAGE_NAME" version 2>/dev/null || echo "NOT_FOUND")
           echo "Remote version: $REMOTE_VERSION"
 
           if [ "$REMOTE_VERSION" = "$LOCAL_VERSION" ]; then
@@ -80,4 +74,4 @@ jobs:
           fi
 
           echo "== Publishing =="
-          pnpm publish --provenance --no-git-checks
+          npm publish --provenance

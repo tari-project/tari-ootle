@@ -82,10 +82,8 @@ impl Parse for TemplateAst {
                     if !matches!(item.vis, Visibility::Public(_)) {
                         return Err(Error::new(item.ident.span(), "template structs must be public"));
                     }
-                    item.attrs
-                        .push(parse_quote!(#[derive(minicbor::Encode, minicbor::Decode, minicbor::CborLen)]));
-                    inject_field_tags(&mut item.fields)?;
-                    // Use the first struct name as the template name
+                    // Use the first struct name as the template name. CBOR derive/tag injection
+                    // is applied later by `inject_cbor_derives`, gated on `TemplateOptions`.
                     if template_name.is_none() {
                         template_name = Some(item.ident.clone());
                     }
@@ -94,9 +92,6 @@ impl Parse for TemplateAst {
                     if !matches!(item.vis, Visibility::Public(_)) {
                         return Err(Error::new(item.ident.span(), "template structs must be public"));
                     }
-                    item.attrs
-                        .push(parse_quote!(#[derive(minicbor::Encode, minicbor::Decode, minicbor::CborLen)]));
-                    inject_variant_tags(&mut item.variants)?;
                     if template_name.is_none() {
                         template_name = Some(item.ident.clone());
                     }
@@ -193,6 +188,33 @@ impl Parse for TemplateAst {
             uses,
         })
     }
+}
+
+/// Inject `#[derive(minicbor::Encode, Decode, CborLen)]` and positional `#[n(N)]` tags onto
+/// every public struct and enum in the template module. Skips fields/variants that already
+/// carry an explicit index attribute (`#[n(..)]`, `#[b(..)]`, or `#[cbor(n(..))]`) so authors
+/// can override individual indices without disabling the whole pass.
+///
+/// Call this after parsing the template module unless
+/// [`crate::template::options::TemplateOptions::skip_cbor_derives`] is set, in which case the
+/// template author is responsible for providing their own derives and numbering.
+pub fn inject_cbor_derives(items: &mut [Item]) -> Result<()> {
+    for item in items {
+        match item {
+            Item::Struct(item) if matches!(item.vis, Visibility::Public(_)) => {
+                item.attrs
+                    .push(parse_quote!(#[derive(minicbor::Encode, minicbor::Decode, minicbor::CborLen)]));
+                inject_field_tags(&mut item.fields)?;
+            },
+            Item::Enum(item) if matches!(item.vis, Visibility::Public(_)) => {
+                item.attrs
+                    .push(parse_quote!(#[derive(minicbor::Encode, minicbor::Decode, minicbor::CborLen)]));
+                inject_variant_tags(&mut item.variants)?;
+            },
+            _ => {},
+        }
+    }
+    Ok(())
 }
 
 /// Detects a `#[n(N)]` or `#[cbor(n(N))]` attribute already present on a field/variant.

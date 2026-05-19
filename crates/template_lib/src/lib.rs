@@ -107,6 +107,22 @@
 //! }
 //! ```
 //!
+//! ## Customising the CBOR wire format
+//!
+//! By default the `template` macro injects `#[derive(minicbor::Encode, minicbor::Decode,
+//! minicbor::CborLen)]` and assigns sequential `#[n(N)]` indices to every field/variant of every
+//! struct and enum it sees. Two override knobs are available:
+//!
+//! - **Per-field**: write `#[n(N)]` (or `#[b(N)]`, `#[cbor(n(N))]`) on the field directly. The macro detects an
+//!   existing index and leaves the field alone. Useful for pinning an individual field to a stable index while letting
+//!   the rest auto-number.
+//! - **Per-template**: pass `skip_cbor_derives` to the macro, i.e. `#[template(skip_cbor_derives)]`. The macro will not
+//!   inject the `minicbor` derives or any `#[n(N)]` tags. The author is then responsible for writing the derives and
+//!   full index assignment themselves. Useful for templates that need a non-default wire format (e.g. preserving an
+//!   existing format across field reorders, or using `#[cbor(map)]` instead of the default array encoding).
+//!
+//! See the [`tari_template_macros`] crate docs for examples.
+//!
 //! ## Template Examples
 //!
 //! - <https://github.com/tari-project/wasm-examples>

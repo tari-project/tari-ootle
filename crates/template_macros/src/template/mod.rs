@@ -23,6 +23,7 @@
 mod ast;
 mod definition;
 mod dispatcher;
+pub mod options;
 mod template_def;
 
 use proc_macro2::TokenStream;
@@ -33,11 +34,24 @@ use self::{
     ast::TemplateAst,
     definition::generate_definition,
     dispatcher::generate_dispatcher,
+    options::TemplateOptions,
     template_def::generate_template_def,
 };
 
-pub fn generate_template(input: TokenStream) -> Result<TokenStream> {
-    let ast = parse2::<TemplateAst>(input).unwrap();
+/// Expand a `#[template(...)]` annotated module into the runtime template scaffolding
+/// (definition, dispatcher, ABI).
+///
+/// `options` controls optional knobs parsed from the macro attribute. The default behaviour
+/// (no flags) is to inject `#[derive(minicbor::Encode, Decode, CborLen)]` and positional
+/// `#[n(N)]` tags onto every template struct/enum. Setting
+/// [`TemplateOptions::skip_cbor_derives`] suppresses both, leaving the author to write the
+/// derives and indices by hand.
+pub fn generate_template(options: TemplateOptions, input: TokenStream) -> Result<TokenStream> {
+    let mut ast = parse2::<TemplateAst>(input)?;
+
+    if !options.skip_cbor_derives {
+        ast::inject_cbor_derives(&mut ast.module_content)?;
+    }
 
     let definition = generate_definition(&ast);
     let template_def = generate_template_def(&ast)?;

@@ -16,12 +16,11 @@ hex = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
-tari_template_lib = { workspace = true, features = ["bincode-compat"] }
-bincode = { workspace = true, features = ["serde"] }
+tari_template_lib = { workspace = true }
+minicbor-serde = { workspace = true, features = ["std", "alloc"] }
 
 [features]
 default = ["hex", "cbor"]
 hex = ["dep:hex"]
 cbor = ["dep:tari_bor"]
 base64 = ["dep:base64"]
-bincode-compat = []

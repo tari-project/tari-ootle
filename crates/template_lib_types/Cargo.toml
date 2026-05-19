@@ -17,9 +17,6 @@ borsh = ["dep:borsh", "tari_bor/borsh", "bnum?/borsh"]
 extra-maps = ["dep:indexmap", "dep:xxhash-rust", "tari_bor/indexmap"]
 serde = ["dep:serde", "tari_bor/serde", "tari_template_abi/serde"]
 ts = ["std", "ts-rs", "tari_template_abi/ts", "tari_bor/ts"]
-# This feature removes the ability to deserialize Amounts as an integer/string (using deserialize_any), as formats like bincode do not support this.
-# DO NOT USE if authoring contracts/templates as this will force transactions to convert integers to Amounts in instruction calls to your template.
-bincode-compat = []
 
 [dependencies]
 tari_template_abi = { workspace = true, default-features = false }
@@ -36,6 +33,5 @@ xxhash-rust = { workspace = true, optional = true, features = ["xxh3"] }
 
 [dev-dependencies]
 serde_json = { workspace = true }
-bincode = { workspace = true, features = ["serde"] }
 tari_crypto = { workspace = true, features = ["borsh"] }
 borsh = { workspace = true }

@@ -21,7 +21,7 @@ serde = { workspace = true, default-features = true, optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
-bincode = { workspace = true, features = ["serde"] }
+minicbor-serde = { workspace = true, features = ["std", "alloc"] }
 
 [features]
 ts = ["ts-rs"]

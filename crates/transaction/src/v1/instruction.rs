@@ -546,11 +546,10 @@ mod tests {
     }
 
     #[test]
-    fn decode_encode_bincode() {
+    fn decode_encode_minicbor() {
         let instruction = make_sample();
-        let encoded = bincode::serde::encode_to_vec(&instruction, bincode::config::standard()).unwrap();
-        let (decoded, _): (Instruction, usize) =
-            bincode::serde::decode_from_slice(&encoded, bincode::config::standard()).unwrap();
+        let encoded = tari_bor::encode(&instruction).unwrap();
+        let decoded: Instruction = tari_bor::decode(&encoded).unwrap();
         assert_eq!(instruction, decoded);
     }
 }

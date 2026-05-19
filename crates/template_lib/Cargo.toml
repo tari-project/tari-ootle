@@ -31,5 +31,4 @@ ts = ["std", "serde", "ts-rs", "tari_bor/ts", "tari_template_abi/ts", "tari_temp
 borsh = ["dep:borsh", "tari_template_lib_types/borsh", "tari_bor/borsh"]
 extra-arith = ["tari_template_lib_types/extra-arith"]
 precision = ["tari_template_lib_types/precision"]
-bincode-compat = ["tari_template_lib_types/bincode-compat"]
 extra-maps = ["tari_template_lib_types/extra-maps"]

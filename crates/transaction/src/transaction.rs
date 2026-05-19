@@ -472,16 +472,9 @@ mod tests {
     #[test]
     fn it_encodes_and_decodes_without_errors() {
         let (k, _) = create_key_pair();
-        // This test simply checks that there are no serde tags used that can cause encoding/decoding issues with
-        // tari_bor
         let subject = create_transaction().build_and_seal(&k);
         let encoded = tari_bor::encode(&subject).unwrap();
         let _decoded = tari_bor::decode::<Transaction>(&encoded).unwrap();
-
-        // bincode
-        let encoded = bincode::serde::encode_to_vec(&subject, bincode::config::standard()).unwrap();
-        let _decoded =
-            bincode::serde::decode_from_slice::<Transaction, _>(&encoded, bincode::config::standard()).unwrap();
     }
 
     #[test]

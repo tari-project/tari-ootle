@@ -7728,8 +7728,8 @@ name = "ootle_serde"
 version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
- "bincode 2.0.1",
  "hex",
+ "minicbor-serde",
  "serde",
  "serde_json",
  "tari_bor",
@@ -10971,7 +10971,6 @@ dependencies = [
 name = "tari_bor"
 version = "0.13.0"
 dependencies = [
- "bincode 2.0.1",
  "borsh",
  "indexmap 2.13.0",
  "minicbor",
@@ -11337,7 +11336,6 @@ dependencies = [
 name = "tari_engine_types"
 version = "0.30.13"
 dependencies = [
- "bincode 2.0.1",
  "blake2 0.10.6",
  "borsh",
  "bounded-vec",
@@ -11447,7 +11445,6 @@ dependencies = [
  "async-stream",
  "async-trait",
  "axum 0.8.8",
- "bincode 2.0.1",
  "bytes",
  "cacache",
  "clap 3.2.25",
@@ -11467,6 +11464,7 @@ dependencies = [
  "logroller",
  "mediatype",
  "mime_guess",
+ "minicbor-serde",
  "ootle_byte_type",
  "prometheus-client",
  "prost 0.14.3",
@@ -11686,7 +11684,7 @@ name = "tari_ootle_address"
 version = "0.5.1"
 dependencies = [
  "bech32",
- "bincode 2.0.1",
+ "minicbor-serde",
  "ootle-network",
  "ootle_byte_type",
  "serde",
@@ -11876,7 +11874,6 @@ dependencies = [
 name = "tari_ootle_transaction"
 version = "0.30.13"
 dependencies = [
- "bincode 2.0.1",
  "borsh",
  "hex",
  "indexmap 2.13.0",
@@ -12453,7 +12450,6 @@ dependencies = [
 name = "tari_template_lib_types"
 version = "0.27.0"
 dependencies = [
- "bincode 2.0.1",
  "bnum",
  "borsh",
  "indexmap 2.13.0",
@@ -13513,13 +13509,13 @@ name = "transaction_generator"
 version = "0.30.13"
 dependencies = [
  "anyhow",
- "bincode 2.0.1",
  "bytes",
  "clap 4.5.54",
  "once_cell",
  "ootle_byte_type",
  "rand 0.10.1",
  "rayon",
+ "tari_bor",
  "tari_crypto",
  "tari_ootle_common_types",
  "tari_ootle_transaction",

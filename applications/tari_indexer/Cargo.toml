@@ -50,8 +50,8 @@ async-graphql = { workspace = true }
 async-graphql-axum = { workspace = true }
 async-stream = { workspace = true }
 bytes = { workspace = true }
-bincode = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive", "env"] }
+minicbor-serde = { workspace = true, features = ["std", "alloc"] }
 config = { workspace = true }
 deadpool-diesel = { workspace = true, default-features = false, features = ["sqlite", "rt_tokio_1"] }
 diesel = { workspace = true, default-features = false, features = [

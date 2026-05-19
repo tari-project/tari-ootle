@@ -214,11 +214,6 @@ fn has_explicit_cbor_index<'a, I: IntoIterator<Item = &'a syn::Attribute>>(attrs
 
 /// Append a `#[n(idx)]` attribute to every field in declaration order (skipping
 /// fields that already carry an explicit `#[n(..)]`/`#[b(..)]`/`#[cbor(n(..))]`).
-///
-/// **Wire-format note:** field declaration order is the wire format for minicbor
-/// derives. Appending a field is forward-compatible; reordering or inserting
-/// is a breaking change. Template authors should never reorder existing fields
-/// once a template has been deployed.
 fn inject_field_tags(fields: &mut Fields) -> Result<()> {
     let mut idx: u32 = 0;
     let mut visit = |field: &mut Field| -> Result<()> {

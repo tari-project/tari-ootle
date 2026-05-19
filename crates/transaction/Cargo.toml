@@ -31,7 +31,6 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
-bincode = { workspace = true, features = ["serde"] }
 
 [features]
 ts = ["ts-rs", "tari_engine_types/ts", "tari_ootle_common_types/ts", "tari_template_lib_types/ts", "tari_bor/ts"]

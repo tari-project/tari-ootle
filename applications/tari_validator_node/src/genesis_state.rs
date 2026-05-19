@@ -4,7 +4,6 @@
 use std::ops::Deref;
 
 use serde::Serialize;
-use tari_bor::cbor;
 use tari_engine_types::{
     component::{Component, ComponentBody, ComponentHeader},
     resource::Resource,
@@ -24,6 +23,7 @@ use tari_ootle_storage::{
     consensus_models::{SubstateRecord, SubstateTransition, SubstateUpdateBatch},
 };
 use tari_ootle_transaction::Network;
+use tari_template_builtin::{NftFaucetState, XtrFaucetState};
 use tari_template_lib::types::{
     EntityId,
     Metadata,
@@ -102,7 +102,12 @@ where
             access_rules: ComponentAccessRules::allow_all(),
             entity_id: EntityId::default(),
         },
-        body: ComponentBody::from_cbor_value(cbor!([XTR_FAUCET_VAULT_ADDRESS])),
+        body: ComponentBody::from_cbor_value(
+            tari_bor::to_value(&XtrFaucetState {
+                vault: XTR_FAUCET_VAULT_ADDRESS,
+            })
+            .expect("XtrFaucetState encode is infallible"),
+        ),
     };
     create_substate(tx, num_preshards, XTR_FAUCET_COMPONENT_ADDRESS, value)?;
 
@@ -138,10 +143,9 @@ where
             access_rules: ComponentAccessRules::allow_all(),
             entity_id: EntityId::default(),
         },
-        body: ComponentBody {
-            // serial-number: 0
-            state: cbor!([0u64]),
-        },
+        body: ComponentBody::from_cbor_value(
+            tari_bor::to_value(&NftFaucetState { serial_number: 0 }).expect("NftFaucetState encode is infallible"),
+        ),
     };
     create_substate(tx, num_preshards, NFT_FAUCET_COMPONENT_ADDRESS, value)?;
 

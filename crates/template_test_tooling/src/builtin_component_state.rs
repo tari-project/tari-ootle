@@ -1,7 +1,6 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use tari_bor::cbor;
 use tari_engine::state_store::{StateStoreError, StateWriter};
 use tari_engine_types::{
     component::{Component, ComponentBody, ComponentHeader},
@@ -10,7 +9,7 @@ use tari_engine_types::{
     substate::{Substate, SubstateId},
     vault::Vault,
 };
-use tari_template_builtin::{NFT_FAUCET_TEMPLATE_ADDRESS, XTR_FAUCET_TEMPLATE_ADDRESS};
+use tari_template_builtin::{NFT_FAUCET_TEMPLATE_ADDRESS, NftFaucetState, XTR_FAUCET_TEMPLATE_ADDRESS, XtrFaucetState};
 use tari_template_lib::types::{
     Amount,
     EntityId,
@@ -89,11 +88,10 @@ pub fn initialize_builtin_faucet_state<TStore: StateWriter>(store: &mut TStore) 
         .set_state(SubstateId::Vault(XTR_FAUCET_VAULT_ADDRESS), Substate::new(0, vault))
         .unwrap();
 
-    // This must mirror the test faucet component (`XtrFaucet { vault: Vault }`). The `#[template]`
-    // macro derives minicbor, which encodes single-field structs as a 1-element array indexed by
-    // `#[n(N)]` — NOT a string-keyed map — so we have to seed the state as an array of one Value.
-    let state =
-        cbor!([tari_bor::to_value(&tari_template_lib::models::Vault::for_test(XTR_FAUCET_VAULT_ADDRESS)).unwrap(),]);
+    let state = tari_bor::to_value(&XtrFaucetState {
+        vault: XTR_FAUCET_VAULT_ADDRESS,
+    })
+    .expect("XtrFaucetState encode is infallible");
     store
         .set_state(
             SubstateId::Component(xtr_faucet_component()),
@@ -149,8 +147,7 @@ pub fn initialize_builtin_nft_faucet_state<TStore: StateWriter>(store: &mut TSto
         )
         .unwrap();
 
-    // NFT faucet struct has a single `serial_number: u64` field — same array encoding as the XTR faucet.
-    let state = cbor!([0u64]);
+    let state = tari_bor::to_value(&NftFaucetState { serial_number: 0 }).expect("NftFaucetState encode is infallible");
     store
         .set_state(
             SubstateId::Component(test_nft_faucet_component()),

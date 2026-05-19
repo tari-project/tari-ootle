@@ -7,25 +7,26 @@ import type { UnspentOutput } from "./UnspentOutput";
  * A statement for confidential and revealed outputs. A statement must contain either confidential outputs or non-zero
  * revealed funds or both.
  */
-export type ConfidentialOutputStatement = { 
-/**
- * Output that is transferred to the receiver account
- */
-output: UnspentOutput | null, 
-/**
- * Change output that goes back to the sender's vault
- */
-change_statement: UnspentOutput | null, 
-/**
- * Bulletproof range proof for the output and change commitments proving that values are in the range
- * [minimum_value_promise, 2^64)
- */
-range_proof: RangeProofBytes, 
-/**
- * The amount of revealed funds to output
- */
-output_revealed_amount: Amount, 
-/**
- * The amount of revealed funds to return to the sender
- */
-change_revealed_amount: Amount, };
+export type ConfidentialOutputStatement = {
+  /**
+   * Output that is transferred to the receiver account
+   */
+  output: UnspentOutput | null;
+  /**
+   * Change output that goes back to the sender's vault
+   */
+  change_statement: UnspentOutput | null;
+  /**
+   * Bulletproof range proof for the output and change commitments proving that values are in the range
+   * [minimum_value_promise, 2^64)
+   */
+  range_proof: RangeProofBytes;
+  /**
+   * The amount of revealed funds to output
+   */
+  output_revealed_amount: Amount;
+  /**
+   * The amount of revealed funds to return to the sender
+   */
+  change_revealed_amount: Amount;
+};

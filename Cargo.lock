@@ -12410,7 +12410,6 @@ version = "0.31.0"
 dependencies = [
  "anyhow",
  "minicbor",
- "tari_bor",
  "tari_engine_types",
  "tari_ootle_transaction",
  "tari_template_lib",

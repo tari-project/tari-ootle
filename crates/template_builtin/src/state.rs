@@ -45,20 +45,14 @@ mod tests {
     fn xtr_faucet_state_wire_format_matches_one_element_array_of_vault() {
         let vault = VaultId::new(ObjectKey::from_array([0xABu8; 32]));
         let from_struct = minicbor::to_vec(&XtrFaucetState { vault }).unwrap();
-
-        let mut expected = vec![0x81]; // CBOR array(1)
-        expected.extend(minicbor::to_vec(&vault).unwrap());
-
+        let expected = minicbor::to_vec([vault]).unwrap();
         assert_eq!(from_struct, expected);
     }
 
     #[test]
     fn nft_faucet_state_wire_format_matches_one_element_array_of_uint() {
         let from_struct = minicbor::to_vec(&NftFaucetState { serial_number: 42 }).unwrap();
-
-        let mut expected = vec![0x81]; // CBOR array(1)
-        expected.extend(minicbor::to_vec(&42u64).unwrap());
-
+        let expected = minicbor::to_vec([42u64]).unwrap();
         assert_eq!(from_struct, expected);
     }
 }

@@ -2,14 +2,22 @@
 import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
 import type { SchnorrSignatureBytes } from "./SchnorrSignatureBytes";
 
-export type ValueKnowledgeProof = { "Commitment": { 
-/**
- * Signed by C - v.H, where C is the commitment being proven and v is the claimed value
- * Proving knowledge of the opening to C, and that the commitment C = m.G + v.H
- */
-mask_knowledge_proof: SchnorrSignatureBytes, } } | { "ElgamalEncrypted": { 
-/**
- * The R.p term of the ElGamal encryption. This allows validators to check the provided value is correct using
- * the viewable balance. This assumes that the verifiable proof was originally validated correctly.
- */
-reveal_key: RistrettoPublicKeyBytes, } };
+export type ValueKnowledgeProof =
+  | {
+      Commitment: {
+        /**
+         * Signed by C - v.H, where C is the commitment being proven and v is the claimed value
+         * Proving knowledge of the opening to C, and that the commitment C = m.G + v.H
+         */
+        mask_knowledge_proof: SchnorrSignatureBytes;
+      };
+    }
+  | {
+      ElgamalEncrypted: {
+        /**
+         * The R.p term of the ElGamal encryption. This allows validators to check the provided value is correct using
+         * the viewable balance. This assumes that the verifiable proof was originally validated correctly.
+         */
+        reveal_key: RistrettoPublicKeyBytes;
+      };
+    };

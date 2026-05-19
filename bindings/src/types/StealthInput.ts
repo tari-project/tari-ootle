@@ -4,8 +4,9 @@ import type { PedersenCommitmentBytes } from "./PedersenCommitmentBytes";
 /**
  * A statement for stealth outputs to spend as inputs.
  */
-export type StealthInput = { 
-/**
- * The commitment of the unspent output being spent
- */
-commitment: PedersenCommitmentBytes, };
+export type StealthInput = {
+  /**
+   * The commitment of the unspent output being spent
+   */
+  commitment: PedersenCommitmentBytes;
+};

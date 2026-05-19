@@ -11,7 +11,6 @@ include = ["/src", "/compiled/*.wasm", "Cargo.toml", "README.md", "LICENSE*"]
 
 [dependencies]
 tari_template_lib_types = { workspace = true }
-tari_bor = { workspace = true, features = ["std"], optional = true }
 minicbor = { workspace = true, default-features = false, features = ["alloc", "derive"], optional = true }
 
 [dev-dependencies]
@@ -29,4 +28,4 @@ templates = []
 # Host-side mirrors of the WASM builtin templates' component state structs.
 # Pulled in by genesis bootstrap and test fixtures; not needed for consumers
 # that only want template addresses / WASM binaries.
-state = ["dep:tari_bor", "dep:minicbor"]
+state = ["dep:minicbor"]

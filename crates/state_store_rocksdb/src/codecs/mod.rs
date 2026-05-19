@@ -1,9 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-mod bincode;
 mod block_diff;
-mod byte_counter;
 mod bytes;
 mod column;
 mod minicbor;
@@ -22,7 +20,6 @@ mod versioned;
 
 use std::io;
 
-pub use bincode::*;
 pub use block_diff::*;
 pub use bytes::*;
 pub use column::*;

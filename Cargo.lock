@@ -12299,7 +12299,6 @@ name = "tari_state_store_rocksdb"
 version = "0.30.13"
 dependencies = [
  "anyhow",
- "bincode 2.0.1",
  "borsh",
  "hex",
  "indexmap 2.13.0",

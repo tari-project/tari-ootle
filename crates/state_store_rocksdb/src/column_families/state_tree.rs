@@ -24,7 +24,7 @@ use tari_ootle_common_types::shard::Shard;
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, StateTreePayload, Version};
 
 use crate::{
-    codecs::{DefaultCodec, KeyPrefix, NodeKeyCodec, NumberCodec, ShardCodec},
+    codecs::{KeyPrefix, NodeKeyCodec, NumberCodec, SerdeBridgeCodec, ShardCodec},
     column_families::cf_names,
     prefixed,
     traits::{Cf, QueryCf},
@@ -38,7 +38,8 @@ impl Cf for StateTreeCf {
     type KeyCodec = (ShardCodec, NodeKeyCodec);
     type Prefix = StateTreePrefix;
     type Value = Node<StateTreePayload>;
-    type ValueCodec = DefaultCodec<Self::Value>;
+    // Node<StateTreePayload> is foreign (tari_jellyfish), serde-only — bridge it.
+    type ValueCodec = SerdeBridgeCodec<Self::Value>;
 
     fn name() -> &'static str {
         cf_names::STATE_TREE
@@ -63,7 +64,8 @@ impl Cf for StateTreeStaleNodesCf {
     type KeyCodec = (ShardCodec, NumberCodec<Version>);
     type Prefix = StateTreeStaleNodesPrefix;
     type Value = Vec<StaleTreeNode>;
-    type ValueCodec = DefaultCodec<Self::Value>;
+    // StaleTreeNode is foreign (tari_jellyfish), serde-only — bridge it.
+    type ValueCodec = SerdeBridgeCodec<Self::Value>;
 
     fn name() -> &'static str {
         cf_names::STATE_TREE

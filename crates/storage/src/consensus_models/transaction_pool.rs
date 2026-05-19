@@ -225,22 +225,41 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
 }
 
 // Ord: ensure that the enum variants are ordered in the order of their progression
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum TransactionPoolStage {
     /// Transaction has just come in and has never been proposed
+    #[n(0)]
     New,
     /// Transaction is prepared in response to a LocalPrepare command. We have proof that all local committees have
     /// prepared the transaction
+    #[n(1)]
     LocalPrepared,
     /// All (Commit), Some or None (Abort) of involved shard groups have prepared and all have pledged their local
     /// inputs The local shard group should accept the transaction
+    #[n(2)]
     LocalAccepted,
     /// All involved shard groups have accepted the transaction
+    #[n(3)]
     AllAccepted,
     /// Some involved shard groups have accepted the transaction, but one or more have decided to ABORT
+    #[n(4)]
     SomeAccepted,
     /// Only involves local shards. This transaction can be executed and accepted without cross-shard agreement.
+    #[n(5)]
     LocalOnly,
 }
 

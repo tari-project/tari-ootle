@@ -12303,6 +12303,7 @@ dependencies = [
  "indexmap 2.13.0",
  "log",
  "minicbor",
+ "minicbor-serde",
  "rand 0.10.1",
  "rocksdb",
  "serde",
@@ -12331,7 +12332,9 @@ version = "0.30.13"
 dependencies = [
  "indexmap 2.13.0",
  "log",
+ "minicbor",
  "serde",
+ "tari_bor",
  "tari_engine_types",
  "tari_jellyfish",
  "tari_ootle_common_types",

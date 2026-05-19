@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{Epoch, SubstateAddress, shard::Shard};
@@ -60,9 +61,11 @@ impl Cf for SubstateCf {
 prefixed!(SubstatesHeadIndexPrefix, KeyPrefix::SubstatesHeadIndex);
 pub struct HeadIndex;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct SubstateHeadData {
+    #[n(0)]
     pub version: u32,
+    #[n(1)]
     pub is_up: bool,
 }
 

@@ -11,6 +11,7 @@ mod misc;
 #[macro_use]
 mod prefixed;
 mod public_key;
+mod serde_bridge_codec;
 mod shard_group;
 mod small_bytes;
 mod state_tree;
@@ -29,6 +30,7 @@ pub use minicbor::*;
 pub use misc::*;
 pub use prefixed::*;
 pub use public_key::*;
+pub use serde_bridge_codec::*;
 pub use shard_group::ShardGroupCodec;
 pub use state_tree::*;
 pub use substate_id::*;
@@ -71,5 +73,5 @@ pub trait DbDecoder<T> {
     fn decode_reader<R: io::Read>(&self, reader: &mut R) -> Result<T, RocksDbStorageError>;
 }
 
-pub type DefaultCodec<T> = Bincode<T>;
+pub type DefaultCodec<T> = Minicbor<T>;
 pub type DefaultVersionedCodec<T> = VersionedCodec<DefaultCodec<T>, T>;

@@ -1,6 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::BlockId;
 use tari_ootle_common_types::Epoch;
@@ -71,9 +72,11 @@ impl<'a> ValidatorStatsUpdate<'a> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct ValidatorConsensusStats {
+    #[n(0)]
     pub missed_proposals: u64,
+    #[n(1)]
     pub participation_shares: u64,
 }
 

@@ -52,9 +52,10 @@ mod tests {
     use super::*;
     use crate::{codecs::DefaultVersionedCodec, utils::read_to_fixed};
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
     enum VersionedSomething1 {
-        V1(u32),
+        #[n(0)]
+        V1(#[n(0)] u32),
     }
 
     impl Versioned for VersionedSomething1 {
@@ -77,11 +78,19 @@ mod tests {
         }
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
     enum VersionedSomething2 {
-        V1(u32),
-        V2(Vec<u8>),
-        V3 { s: String, decimals: u8 },
+        #[n(0)]
+        V1(#[n(0)] u32),
+        #[n(1)]
+        V2(#[n(0)] Vec<u8>),
+        #[n(2)]
+        V3 {
+            #[n(0)]
+            s: String,
+            #[n(1)]
+            decimals: u8,
+        },
     }
 
     impl Versioned for VersionedSomething2 {

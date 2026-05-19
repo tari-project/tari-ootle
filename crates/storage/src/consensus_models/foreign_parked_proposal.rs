@@ -3,6 +3,7 @@
 
 use std::{fmt::Display, ops::Deref};
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::BlockId;
 use tari_ootle_common_types::Epoch;
@@ -15,10 +16,13 @@ use crate::{
     consensus_models::{BlockPledge, CommandsCommitProof, ForeignProposal},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct ForeignParkedProposal {
+    #[n(0)]
     block_id: BlockId,
+    #[n(1)]
     commit_proof: CommandsCommitProof,
+    #[n(2)]
     block_pledge: BlockPledge,
 }
 

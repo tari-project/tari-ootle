@@ -7677,6 +7677,7 @@ version = "0.31.0"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.2.17",
+ "getrandom 0.4.2",
  "ootle-wasm-core",
  "wasm-bindgen",
 ]
@@ -7686,14 +7687,18 @@ name = "ootle-wasm-core"
 version = "0.31.0"
 dependencies = [
  "base64 0.22.1",
+ "hex",
+ "ootle-network",
  "ootle_byte_type",
  "rand 0.10.1",
  "serde",
  "serde_json",
  "tari_bor",
  "tari_crypto",
+ "tari_engine_types",
  "tari_ootle_address",
  "tari_ootle_transaction",
+ "tari_ootle_wallet_crypto",
  "tari_template_lib_types",
  "thiserror 2.0.18",
 ]

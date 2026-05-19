@@ -334,8 +334,17 @@ pub mod serde_bridge {
 
     pub fn cbor_len<C, T>(v: &T, _ctx: &mut C) -> usize
     where T: serde::Serialize + ?Sized {
-        // The only honest answer is "serialize and measure" since the wire format depends on
-        // the inner type's serde implementation. Pays an extra encode per call.
-        crate::serde_codec::to_vec(v).map(|bytes| bytes.len()).unwrap_or(0)
+        // Wire format depends on the inner type's serde impl, so we still have to drive a full
+        // serialize. ByteCounter implements minicbor::encode::Write but discards the bytes, so
+        // we avoid the Vec allocation an honest `to_vec(v).len()` would pay.
+        //
+        // We panic on serialize failure: if the foreign type can't serialize via serde, the
+        // downstream `encode` call would also fail and produce wrong wire bytes, so silently
+        // returning 0 (and letting the caller allocate too-small buffers) would hide the bug.
+        let mut counter = crate::ByteCounter::new();
+        let mut ser = crate::serde_codec::Serializer::new(&mut counter);
+        v.serialize(&mut ser)
+            .expect("serde_bridge cbor_len: foreign-type serialize failed");
+        counter.get()
     }
 }

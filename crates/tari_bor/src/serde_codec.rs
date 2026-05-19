@@ -652,10 +652,11 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
             Type::Array | Type::ArrayIndef => self.deserialize_seq(visitor),
             Type::Map | Type::MapIndef => self.deserialize_map(visitor),
             Type::Tag => {
-                // Could be a bignum — dispatch via deserialize_u128 to keep behaviour symmetric
-                // with the encoder. Anything else is currently unsupported, matching upstream.
-                let v = decode_u128(&mut self.decoder)?;
-                visitor.visit_u128(v)
+                // Could be a bignum (positive or negative). decode_i128 handles both
+                // TAG_POSITIVE_BIGNUM and TAG_NEGATIVE_BIGNUM; anything else is currently
+                // unsupported, matching upstream.
+                let v = decode_i128(&mut self.decoder)?;
+                visitor.visit_i128(v)
             },
             Type::BytesIndef => visitor.visit_byte_buf(collect_indef_bytes(&mut self.decoder)?),
             Type::StringIndef => {

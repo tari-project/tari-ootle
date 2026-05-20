@@ -91,18 +91,14 @@ pub fn template(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// Returns the template code without the wasm ABI code. This allows the code to compile for
-/// non-WASM targets and allows "intellisense" to work in IDEs. Struct items within the module
-/// get serde derives injected so that `Component::new` (which requires `T: serde::Serialize`)
-/// compiles on non-wasm targets.
+/// non-WASM targets and allows "intellisense" to work in IDEs. The macro mirrors the WASM
+/// path's CBOR injection so types stay encodable on host builds (tests, examples) where
+/// `Component::new` requires `T: minicbor::Encode<()>`.
 ///
-/// Accepts the same attribute flags as [`template`] but currently ignores them — the WASM-only
-/// CBOR derive injection that `skip_cbor_derives` controls is not emitted on non-WASM targets
-/// in the first place. Parsing the flags here keeps `#[template(...)]` source-compatible
-/// across `target_arch = "wasm32"` and host builds.
+/// Honours [`TemplateOptions::skip_cbor_derives`] identically to [`template`].
 #[proc_macro_attribute]
 pub fn template_non_wasm(attr: TokenStream, item: TokenStream) -> TokenStream {
-    // Parse to surface "unknown flag" errors consistently between WASM and non-WASM builds.
-    let _options = parse_macro_input!(attr as TemplateOptions);
+    let options = parse_macro_input!(attr as TemplateOptions);
 
     let mut module: syn::ItemMod = match syn::parse(item.clone()) {
         Ok(m) => m,
@@ -110,23 +106,20 @@ pub fn template_non_wasm(attr: TokenStream, item: TokenStream) -> TokenStream {
         Err(_) => return item,
     };
 
-    if let Some((brace, items)) = &mut module.content {
-        let new_items = items
-            .drain(..)
-            .map(|item| match item {
-                syn::Item::Struct(mut s) => {
-                    s.attrs.push(syn::parse_quote! {
-                        #[derive(::tari_template_lib::serde::Serialize, ::tari_template_lib::serde::Deserialize)]
-                    });
-                    s.attrs.push(syn::parse_quote! {
-                        #[serde(crate = "::tari_template_lib::serde")]
-                    });
-                    syn::Item::Struct(s)
-                },
-                other => other,
-            })
-            .collect();
-        module.content = Some((*brace, new_items));
+    if let Some((_, items)) = &mut module.content {
+        if !options.skip_cbor_derives {
+            if let Err(err) = template::ast::inject_cbor_derives(items) {
+                return err.to_compile_error().into();
+            }
+        }
+
+        // Bring `minicbor` into scope so the injected derives — and the code those
+        // derives emit (which references `minicbor::Encoder`, `minicbor::Decoder`, …) —
+        // resolve. The WASM path gets this via `use template_macro_deps::*` inside the
+        // generated wrapper module; here we inject the same alias directly.
+        items.insert(0, syn::parse_quote! {
+            use ::tari_template_lib::template_macro_deps::minicbor;
+        });
     }
 
     quote::quote!(#[allow(dead_code)] #module).into()

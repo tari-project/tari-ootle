@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 env:
-  WASM_PACK_VERSION: '0.13.1'
+  WASM_PACK_VERSION: '0.15.0'
 
 permissions:
   id-token: write

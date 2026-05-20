@@ -1,7 +1,6 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_bor::cbor;
 use tari_engine::state_store::{StateWriter, memory::MemoryStateStore};
 use tari_engine_types::{
     component::{Component, ComponentBody, ComponentHeader},
@@ -10,7 +9,7 @@ use tari_engine_types::{
     substate::Substate,
     vault::Vault,
 };
-use tari_template_builtin::XTR_FAUCET_TEMPLATE_ADDRESS;
+use tari_template_builtin::{XTR_FAUCET_TEMPLATE_ADDRESS, XtrFaucetState};
 use tari_template_lib::types::{
     Amount,
     ComponentAddress,
@@ -83,10 +82,8 @@ pub fn setup_store() -> MemoryStateStore {
             entity_id: Default::default(),
         },
         body: ComponentBody::from_cbor_value(
-            cbor!({
-                "vault" => FAUCET_VAULT_ID,
-            })
-            .unwrap(),
+            tari_bor::to_value(&XtrFaucetState { vault: FAUCET_VAULT_ID })
+                .expect("XtrFaucetState encode is infallible"),
         ),
     };
     state_store

@@ -13,15 +13,27 @@ use crate::{
     substate::{SubstateDiff, SubstateId, hash_substate},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize, borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionReceipt {
+    #[n(0)]
     pub outcome: FinalizeOutcome,
+    #[n(1)]
     pub diff_summary: DiffSummary,
+    #[n(2)]
+    #[cbor(with = "tari_bor::adapters::boxed_slice")]
     pub fee_withdrawals: Box<[ValidatorFeeWithdrawal]>,
+    #[n(3)]
+    #[cbor(with = "tari_bor::adapters::boxed_slice")]
     pub events: Box<[Event]>,
+    #[n(4)]
+    #[cbor(with = "tari_bor::adapters::boxed_slice")]
     pub logs: Box<[LogEntry]>,
+    #[n(5)]
     pub fee_receipt: FeeReceipt,
+    #[n(6)]
     pub epoch: Epoch,
 }
 
@@ -55,10 +67,22 @@ impl TransactionReceipt {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+    Serialize,
+    Deserialize,
+    borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum FinalizeOutcome {
+    #[n(0)]
     Commit,
+    #[n(1)]
     FeeIntentCommit,
 }
 
@@ -72,9 +96,21 @@ impl FinalizeOutcome {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+    Serialize,
+    Deserialize,
+    borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct DiffSummary {
+    #[n(0)]
+    #[cbor(with = "tari_bor::adapters::boxed_slice")]
     pub upped: Box<[UpSubstate]>,
 }
 
@@ -93,10 +129,15 @@ impl DiffSummary {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize, borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UpSubstate {
+    #[n(0)]
     pub substate_id: SubstateId,
+    #[n(1)]
     pub version: u32,
+    #[n(2)]
     pub value_hash: Hash32,
 }

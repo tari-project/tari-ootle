@@ -1,10 +1,83 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use serde::ser::Error;
-use tari_template_abi::rust::{cmp, fmt, iter::Sum, num, ops, prelude::*, str::FromStr, write};
+use tari_template_abi::rust::{cmp, fmt, format, iter::Sum, num, ops, prelude::*, str::FromStr, write};
 
 use crate::{impl_from, impl_try_from, partial_eq_impl, partial_ord_impl};
+
+// ---- minicbor codec ------------------------------------------------------
+
+impl<C> minicbor::Encode<C> for Amount {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        _ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        let [lo, hi] = self.to_le_digits();
+        e.array(2)?;
+        e.u64(lo)?;
+        e.u64(hi)?;
+        Ok(())
+    }
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for Amount {
+    fn decode(d: &mut minicbor::Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        use minicbor::data::Type;
+        let ty = d.datatype()?;
+        match ty {
+            Type::Array | Type::ArrayIndef => {
+                let n = d.array()?;
+                let mut digits = [0u64; 2];
+                match n {
+                    Some(len) => {
+                        if len != 2 {
+                            return Err(minicbor::decode::Error::message("Amount: expected 2-element array"));
+                        }
+                        for slot in &mut digits {
+                            *slot = d.u64()?;
+                        }
+                    },
+                    None => {
+                        let mut idx = 0usize;
+                        loop {
+                            if matches!(d.datatype()?, Type::Break) {
+                                d.skip()?;
+                                break;
+                            }
+                            if idx >= 2 {
+                                return Err(minicbor::decode::Error::message("Amount: too many elements"));
+                            }
+                            digits[idx] = d.u64()?;
+                            idx += 1;
+                        }
+                    },
+                }
+                Ok(Amount::from_le_digits(digits))
+            },
+            Type::U8 | Type::U16 | Type::U32 | Type::U64 => Ok(Amount::from(d.u64()?)),
+            Type::I8 | Type::I16 | Type::I32 | Type::I64 => {
+                let v = d.i64()?;
+                Amount::try_from(v).map_err(|e| minicbor::decode::Error::message(format!("Amount: {}", e)))
+            },
+            other => Err(minicbor::decode::Error::message(format!(
+                "Amount: unexpected CBOR datatype {:?}",
+                other
+            ))),
+        }
+    }
+}
+
+impl<C> minicbor::CborLen<C> for Amount {
+    fn cbor_len(&self, ctx: &mut C) -> usize {
+        let [lo, hi] = self.to_le_digits();
+        // array(2) + two u64 encodings
+        let mut total = <u64 as minicbor::CborLen<C>>::cbor_len(&2u64, ctx);
+        total += <u64 as minicbor::CborLen<C>>::cbor_len(&lo, ctx);
+        total += <u64 as minicbor::CborLen<C>>::cbor_len(&hi, ctx);
+        total
+    }
+}
 
 /// A 128-bit signed amount.
 ///
@@ -327,7 +400,7 @@ impl Amount {
 
         // i128 can represent up to ~10^38, so 38 decimal places is a safe upper bound
         if decimals > 38 {
-            return Err(fmt::Error::custom("Too many decimal places"));
+            return Err(fmt::Error);
         }
 
         let divisor = 10u128.pow(decimals);

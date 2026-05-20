@@ -6,6 +6,7 @@ use std::fmt::{Display, Formatter};
 use borsh::BorshSerialize;
 use indexmap::IndexMap;
 use log::*;
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::PcId;
 use tari_engine_types::substate::SubstateId;
@@ -26,13 +27,15 @@ use crate::consensus_models::{RequireLockIntentRef, SubstatePledge};
 
 const LOG_TARGET: &str = "tari::ootle::consensus_models::evidence";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, BorshSerialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, BorshSerialize, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Evidence {
     // Serialize JSON as an array of objects since ShardGroup is a non-string key
     #[serde(with = "ootle_serde::map")]
     #[cfg_attr(feature = "ts", ts(type = "Array<[any, any]>"))]
     #[borsh(serialize_with = "indexmap_borsh::serialize")]
+    #[n(0)]
+    #[cbor(with = "tari_bor::adapters::indexmap_codec")]
     evidence: IndexMap<ShardGroup, ShardGroupEvidence>,
 }
 
@@ -409,18 +412,24 @@ impl Display for Evidence {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, BorshSerialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, BorshSerialize, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ShardGroupEvidence {
     #[borsh(serialize_with = "indexmap_borsh::serialize")]
     #[cfg_attr(feature = "ts", ts(type = "Record<string, any>"))]
+    #[n(0)]
+    #[cbor(with = "tari_bor::adapters::indexmap_codec")]
     inputs: IndexMap<SubstateId, Option<EvidenceInputLockData>>,
     #[borsh(serialize_with = "indexmap_borsh::serialize")]
     #[cfg_attr(feature = "ts", ts(type = "Record<string, number>"))]
+    #[n(1)]
+    #[cbor(with = "tari_bor::adapters::indexmap_codec")]
     outputs: IndexMap<SubstateId, u32>,
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    #[n(2)]
     prepare_qc: Option<PcId>,
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    #[n(3)]
     accept_qc: Option<PcId>,
 }
 
@@ -601,10 +610,12 @@ impl Display for ShardGroupEvidence {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct EvidenceInputLockData {
+    #[n(0)]
     pub is_write: bool,
+    #[n(1)]
     pub version: u32,
 }
 

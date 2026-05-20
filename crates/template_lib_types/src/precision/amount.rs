@@ -2,7 +2,6 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use bnum::BUint;
-use serde::ser::Error;
 use tari_template_abi::rust::{cmp, fmt, fmt::Debug, iter::Sum, ops, prelude::*, str::FromStr, write};
 
 use crate::{Amount, impl_from, partial_eq_impl, partial_ord_impl};
@@ -20,6 +19,82 @@ type I192 = bnum::BInt<3>; // 3 x 64 bits = 192 bits
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PrecisionAmount(#[cfg_attr(feature = "ts", ts(type = "string | number"))] pub(super) I192);
+
+// ---- minicbor codec ------------------------------------------------------
+
+impl<C> minicbor::Encode<C> for PrecisionAmount {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        _ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        let digits = self.to_le_digits();
+        e.array(Self::NUM_DIGITS as u64)?;
+        for d in &digits {
+            e.u64(*d)?;
+        }
+        Ok(())
+    }
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for PrecisionAmount {
+    fn decode(d: &mut minicbor::Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        use minicbor::data::Type;
+        let ty = d.datatype()?;
+        match ty {
+            Type::Array | Type::ArrayIndef => {
+                let n = d.array()?;
+                let mut digits = [0u64; Self::NUM_DIGITS];
+                match n {
+                    Some(len) => {
+                        if len as usize != Self::NUM_DIGITS {
+                            return Err(minicbor::decode::Error::message(
+                                "PrecisionAmount: unexpected array length",
+                            ));
+                        }
+                        for slot in &mut digits {
+                            *slot = d.u64()?;
+                        }
+                    },
+                    None => {
+                        let mut idx = 0usize;
+                        loop {
+                            if matches!(d.datatype()?, Type::Break) {
+                                d.skip()?;
+                                break;
+                            }
+                            if idx >= Self::NUM_DIGITS {
+                                return Err(minicbor::decode::Error::message("PrecisionAmount: too many elements"));
+                            }
+                            digits[idx] = d.u64()?;
+                            idx += 1;
+                        }
+                    },
+                }
+                Ok(PrecisionAmount::from_le_digits(digits))
+            },
+            Type::U8 | Type::U16 | Type::U32 | Type::U64 => Ok(PrecisionAmount::from(d.u64()?)),
+            Type::I8 | Type::I16 | Type::I32 | Type::I64 => {
+                let v = d.i64()?;
+                Ok(PrecisionAmount::from(v))
+            },
+            other => Err(minicbor::decode::Error::message(format!(
+                "PrecisionAmount: unexpected CBOR datatype {:?}",
+                other
+            ))),
+        }
+    }
+}
+
+impl<C> minicbor::CborLen<C> for PrecisionAmount {
+    fn cbor_len(&self, ctx: &mut C) -> usize {
+        let mut total = <u64 as minicbor::CborLen<C>>::cbor_len(&(Self::NUM_DIGITS as u64), ctx);
+        for d in &self.to_le_digits() {
+            total += <u64 as minicbor::CborLen<C>>::cbor_len(d, ctx);
+        }
+        total
+    }
+}
 
 impl PrecisionAmount {
     pub const BITS: usize = I192::BITS as usize;
@@ -381,7 +456,7 @@ impl PrecisionAmount {
 
         // I192 can represent up to ~10^57, so 57 decimal places is a safe upper bound
         if decimals > 57 {
-            return Err(fmt::Error::custom("Too many decimal places"));
+            return Err(fmt::Error);
         }
 
         let ten = I192::from(10);

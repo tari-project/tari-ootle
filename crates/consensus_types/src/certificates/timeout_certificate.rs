@@ -4,17 +4,21 @@
 use std::{fmt::Display, hash::Hash};
 
 use borsh::BorshSerialize;
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::{Epoch, NodeHeight, hashing::timeout_certificate_id_hasher};
 
 use crate::{HighTc, TcId, validator_signature::ValidatorSignatureBytes};
 
-#[derive(Debug, Clone, Hash, Deserialize, Serialize, BorshSerialize)]
+#[derive(Debug, Clone, Hash, Deserialize, Serialize, BorshSerialize, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TimeoutCertificate {
+    #[n(0)]
     epoch: Epoch,
+    #[n(1)]
     height: NodeHeight,
     /// A quorum of validator signatures that sign the timeout certificate.
+    #[n(2)]
     signatures: Vec<ValidatorSignatureBytes>,
 }
 

@@ -22,15 +22,19 @@
 
 use std::fmt::Display;
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::{Epoch, NodeHeight};
 
 use crate::TcId;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct HighTc {
+    #[n(0)]
     pub epoch: Epoch,
+    #[n(1)]
     pub height: NodeHeight,
+    #[n(2)]
     pub tc_id: TcId,
 }
 

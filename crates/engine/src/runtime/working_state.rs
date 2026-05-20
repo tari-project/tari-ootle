@@ -1239,7 +1239,10 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 Ok(())
             },
             Assertion::IsNotNull => {
-                if value.is_null() {
+                // `is_unit` rather than `is_null`: with minicbor, `()` (e.g. from a method that
+                // returns nothing) serializes as an empty array, not CBOR null. Either form means
+                // "no value here" for this assertion.
+                if value.is_unit() {
                     return Err(RuntimeError::AssertError(AssertError::ValueIsNull));
                 }
                 Ok(())

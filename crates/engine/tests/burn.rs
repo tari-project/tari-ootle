@@ -24,10 +24,11 @@ fn it_burns_all_resource_types() {
 
     let component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
 
-    let fungible_vault = test.extract_component_value(component, "$.fungible");
-    let non_fungible_vault = test.extract_component_value(component, "$.non_fungible");
-    let confidential_vault = test.extract_component_value(component, "$.confidential");
-    let stealth_vault = test.extract_component_value(component, "$.stealth");
+    // Burn fields: 0=fungible, 1=non_fungible, 2=confidential, 3=stealth.
+    let fungible_vault = test.extract_component_value(component, "$.0");
+    let non_fungible_vault = test.extract_component_value(component, "$.1");
+    let confidential_vault = test.extract_component_value(component, "$.2");
+    let stealth_vault = test.extract_component_value(component, "$.3");
 
     {
         let store = test.read_only_state_store();

@@ -19,7 +19,7 @@
 //  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-use serde::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
 use tari_template_abi::{
     EngineOp,
     call_engine,
@@ -54,10 +54,16 @@ use crate::{
 };
 
 /// Encapsulates all the ways that a vault can be referenced
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum VaultRef {
-    Vault { address: ResourceAddress },
-    Ref(VaultId),
+    #[n(0)]
+    Vault {
+        #[n(0)]
+        address: ResourceAddress,
+    },
+    #[n(1)]
+    Ref(#[n(0)] VaultId),
 }
 
 impl VaultRef {
@@ -88,9 +94,11 @@ impl Display for VaultRef {
 /// References a secure container of a single resource and provides an abstraction for vault operations.
 /// A vault can hold fungible tokens, non-fungible tokens, or confidential tokens.
 /// A vault is identified by a globally-unique `VaultId`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
 pub struct Vault {
+    #[n(0)]
     vault_id: VaultId,
 }
 

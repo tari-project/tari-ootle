@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::BlockId;
 use tari_ootle_common_types::Epoch;
@@ -33,9 +34,11 @@ use crate::{
 };
 
 prefixed!(EvictedNodePrefix, KeyPrefix::EvictedNodes);
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct EvictedNodeData {
+    #[n(0)]
     pub epoch: Epoch,
+    #[n(1)]
     pub is_committed: bool,
 }
 

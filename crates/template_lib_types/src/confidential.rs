@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use serde::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
 use tari_template_abi::rust::{prelude::*, vec};
 
 use crate::{
@@ -12,19 +12,25 @@ use crate::{
 
 /// A statement for confidential and revealed outputs. A statement must contain either confidential outputs or non-zero
 /// revealed funds or both.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ConfidentialOutputStatement {
     /// Output that is transferred to the receiver account
+    #[n(0)]
     pub output: Option<UnspentOutput>,
     /// Change output that goes back to the sender's vault
+    #[n(1)]
     pub change_statement: Option<UnspentOutput>,
     /// Bulletproof range proof for the output and change commitments proving that values are in the range
     /// [minimum_value_promise, 2^64)
+    #[n(2)]
     pub range_proof: RangeProofBytes,
     /// The amount of revealed funds to output
+    #[n(3)]
     pub output_revealed_amount: Amount,
     /// The amount of revealed funds to return to the sender
+    #[n(4)]
     pub change_revealed_amount: Amount,
 }
 
@@ -51,14 +57,19 @@ impl ConfidentialOutputStatement {
 ///   where (0) is the excess. Knowledge of the excess is not possible unless the inputs and outputs balance.
 ///
 /// Withdrawals can be revealed only, confidential only, or a mix of both.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ConfidentialWithdrawProof {
+    #[n(0)]
     pub inputs: Vec<PedersenCommitmentBytes>,
     /// The amount to withdraw from revealed funds i.e. the revealed funds as inputs
+    #[n(1)]
     pub input_revealed_amount: Amount,
+    #[n(2)]
     pub output_proof: ConfidentialOutputStatement,
     /// Balance proof
+    #[n(3)]
     pub balance_proof: BalanceProofSignature,
 }
 

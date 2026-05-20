@@ -50,7 +50,8 @@ fn it_recalls_all_resource_types() {
         vec![],
     );
 
-    let vaults: BTreeMap<ResourceAddress, VaultId> = test.extract_component_value(account, "$.vaults");
+    // Account fields: 0=vaults, 1=approvals.
+    let vaults: BTreeMap<ResourceAddress, VaultId> = test.extract_component_value(account, "$.0");
     let fungible_vault = vaults[&fungible_resource];
     let non_fungible_vault = vaults[&non_fungible_resource];
     let confidential_vault = vaults[&confidential_resource];

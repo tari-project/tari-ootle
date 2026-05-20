@@ -1,7 +1,7 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use std::io::{Read, Write};
+use std::io::Write;
 
 use crate::{
     codecs::{DbDecoder, DbEncoder, EncodeVec},
@@ -30,9 +30,9 @@ impl<C: DbEncoder<T>, T: Versioned<Latest = V>, V: Into<T> + Clone> DbEncoder<V>
 }
 
 impl<C: DbDecoder<T>, T: Versioned<Latest = V>, V: Into<T> + Clone> DbDecoder<V> for VersionedCodec<C, T> {
-    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<V, RocksDbStorageError> {
-        let versioned = self.codec.decode_reader(reader)?;
-        Ok(versioned.full_upgrade().into_latest())
+    fn decode(&self, bytes: &[u8]) -> Result<(V, usize), RocksDbStorageError> {
+        let (versioned, consumed) = self.codec.decode(bytes)?;
+        Ok((versioned.full_upgrade().into_latest(), consumed))
     }
 }
 
@@ -47,14 +47,17 @@ impl<C: Default, T> Default for VersionedCodec<C, T> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Read;
+
     use serde::{Deserialize, Serialize};
 
     use super::*;
-    use crate::{codecs::DefaultVersionedCodec, utils::read_to_fixed};
+    use crate::codecs::DefaultVersionedCodec;
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
     enum VersionedSomething1 {
-        V1(u32),
+        #[n(0)]
+        V1(#[n(0)] u32),
     }
 
     impl Versioned for VersionedSomething1 {
@@ -77,11 +80,19 @@ mod tests {
         }
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
     enum VersionedSomething2 {
-        V1(u32),
-        V2(Vec<u8>),
-        V3 { s: String, decimals: u8 },
+        #[n(0)]
+        V1(#[n(0)] u32),
+        #[n(1)]
+        V2(#[n(0)] Vec<u8>),
+        #[n(2)]
+        V3 {
+            #[n(0)]
+            s: String,
+            #[n(1)]
+            decimals: u8,
+        },
     }
 
     impl Versioned for VersionedSomething2 {
@@ -92,10 +103,13 @@ mod tests {
                 Self::V1(value) => (Self::V2(value.to_be_bytes().to_vec()), true),
                 Self::V2(bytes) => {
                     let mut b = bytes.as_slice();
+
+                    let mut array = [0u8; 4];
+                    b.read_exact(&mut array).unwrap();
                     // NB: all upgrades must be infallible. If they are not, then the upgrade was implemented
                     // incorrectly, the database is corrupt and there's nothing further we can do (panic is
                     // appropriate).
-                    let n = u32::from_be_bytes(read_to_fixed(&mut b).unwrap());
+                    let n = u32::from_be_bytes(array);
                     (
                         Self::V3 {
                             s: n.to_string(),
@@ -132,13 +146,13 @@ mod tests {
 
         let codec = DefaultVersionedCodec::<VersionedSomething1>::default();
         let encoded = codec.encode(&42).expect("Encoding should succeed");
-        let decoded = codec.decode(&encoded).expect("Decoding should succeed");
+        let decoded = codec.decode_exact(&encoded).expect("Decoding should succeed");
         assert_eq!(decoded, 42);
 
         // Later on we load this data that is two versions behind. We check the previously encoded value upgrades
         // correctly.
         let codec = DefaultVersionedCodec::<VersionedSomething2>::default();
-        let decoded = codec.decode(&encoded).expect("Decoding should succeed");
+        let decoded = codec.decode_exact(&encoded).expect("Decoding should succeed");
         assert_eq!(decoded, ("42".to_string(), 8));
     }
 }

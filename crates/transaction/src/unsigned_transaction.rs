@@ -23,10 +23,11 @@ use crate::{
     unsealed::UnsealedTransaction,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum UnsignedTransaction {
-    V1(UnsignedTransactionV1),
+    #[n(0)]
+    V1(#[n(0)] UnsignedTransactionV1),
 }
 
 impl UnsignedTransaction {

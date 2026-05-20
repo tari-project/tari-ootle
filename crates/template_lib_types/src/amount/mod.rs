@@ -5,6 +5,7 @@
 mod amount;
 mod macros;
 mod ops;
+#[cfg(feature = "serde")]
 mod serde;
 
 pub use amount::*;
@@ -16,10 +17,10 @@ pub mod public_macros {
     ///
     /// # Examples
     /// ```rust
-    /// # use crate::models::{amount, Amount};
+    /// use tari_template_lib_types::{Amount, amount};
     /// const AMOUNT: Amount = amount!(1234567890);
-    /// assert_eq!(AMOUNT, 1234567890);
-    ///  ```
+    /// assert_eq!(AMOUNT, Amount::from(1234567890u64));
+    /// ```
     #[macro_export]
     macro_rules! amount {
         ($int:expr) => {{ $crate::Amount::new($int as u128) }};

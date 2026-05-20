@@ -1,6 +1,6 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
-use serde::Serialize;
+use minicbor::Encode;
 use tari_bor::to_value;
 use tari_template_abi::rust::prelude::*;
 use tari_template_lib_types::{
@@ -260,8 +260,8 @@ impl NonFungibleResourceBuilder {
     pub fn initial_supply_with_data<'a, I, T, U>(self, initial_supply: I) -> Bucket
     where
         I: IntoIterator<Item = (NonFungibleId, (&'a T, &'a U))>,
-        T: Serialize + ?Sized + 'a,
-        U: Serialize + ?Sized + 'a,
+        T: Encode<()> + ?Sized + 'a,
+        U: Encode<()> + ?Sized + 'a,
     {
         let mint_arg = MintArg::NonFungible {
             tokens: initial_supply

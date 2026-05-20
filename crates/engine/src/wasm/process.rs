@@ -21,7 +21,6 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use log::*;
-use serde::{Serialize, de::DeserializeOwned};
 use tari_bor::{ByteCounter, decode_exact, encode_into_writer, encoded_len};
 use tari_engine_types::{indexed_value::IndexedValue, instruction_result::InstructionResult, limits};
 use tari_template_abi::{CallInfo, EngineOp, FunctionDef, TemplateDef, func_hasher::hash_function_name, version};
@@ -267,8 +266,8 @@ impl WasmProcess {
         f: fn(&mut Runtime, T) -> Result<U, E>,
     ) -> Result<WasmPtr<u8>, WasmExecutionError>
     where
-        T: DeserializeOwned,
-        U: Serialize,
+        T: for<'b> tari_bor::Decode<'b, ()>,
+        U: tari_bor::Encode<()> + tari_bor::CborLen<()>,
         WasmExecutionError: From<E>,
     {
         // SAFETY: WasmProcess is not used concurrently and templates are not able to spawn threads

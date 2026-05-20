@@ -8,13 +8,14 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-tari_bor = { workspace = true, features = ["std", "cbor_value_encoding_fix"] }
+tari_bor = { workspace = true, features = ["std", "indexmap"] }
 tari_crypto = { workspace = true, features = ["borsh"] }
 tari_hashing = { workspace = true }
 tari_ootle_template_metadata = { workspace = true, features = ["borsh"] }
 tari_template_abi = { workspace = true, features = ["std"] }
-tari_template_lib = { workspace = true, features = ["borsh", "precision"] }
-ootle_serde = { workspace = true, features = ["base64", "bincode-compat"] }
+tari_template_lib = { workspace = true, features = ["borsh", "precision", "serde"] }
+minicbor = { workspace = true, default-features = false, features = ["alloc", "derive"] }
+ootle_serde = { workspace = true, features = ["base64"] }
 ootle_byte_type = { workspace = true, features = ["crypto"] }
 
 blake2 = { workspace = true }
@@ -31,9 +32,6 @@ serde = { workspace = true, default-features = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }
-
-[dev-dependencies]
-bincode = { workspace = true, features = ["serde"] }
 
 [features]
 default = []

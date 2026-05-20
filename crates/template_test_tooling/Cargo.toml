@@ -13,7 +13,7 @@ tari_crypto = { workspace = true }
 tari_template_lib = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_transaction_manifest = { workspace = true }
-tari_template_builtin = { workspace = true, features = ["templates"] }
+tari_template_builtin = { workspace = true, features = ["templates", "state"] }
 tari_ootle_transaction = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_bor = { workspace = true, default-features = true }

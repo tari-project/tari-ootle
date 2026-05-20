@@ -3,7 +3,7 @@
 
 use core::ops::ControlFlow;
 
-use ciborium::value::Value;
+use crate::Value;
 
 pub fn walk_all<V, T>(value: &Value, visitor: &mut V, max_depth: usize) -> Result<(), V::Error>
 where
@@ -31,12 +31,7 @@ where
     }
 
     match value {
-        Value::Integer(_) => {},
-        Value::Bytes(_) => {},
-        Value::Float(_) => {},
-        Value::Text(_) => {},
-        Value::Bool(_) => {},
-        Value::Null => {},
+        Value::Integer(_) | Value::Bytes(_) | Value::Float(_) | Value::Text(_) | Value::Bool(_) | Value::Null => {},
         Value::Tag(tag, val) => {
             let val = T::try_from_tag_and_value(*tag, val)?;
             let flow = visitor.visit(val)?;
@@ -59,7 +54,6 @@ where
                 }
             }
         },
-        _ => {},
     }
 
     Ok(ControlFlow::Continue(()))

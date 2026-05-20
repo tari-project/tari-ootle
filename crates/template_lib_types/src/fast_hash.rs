@@ -68,3 +68,67 @@ pub type FastMap<K, V> = IndexMap<K, V, Xxh3Builder>;
 /// Do NOT use with low-entropy keys — will degrade to O(n) lookup.
 /// When in doubt, use [`FastMap`] instead.
 pub type PrehashedMap<K, V> = IndexMap<K, V, BuildHasherDefault<PassthroughHasher>>;
+
+/// Adapter that lets `IndexMap<K, V, S>` (including [`FastMap`] and [`PrehashedMap`])
+/// participate in minicbor derives via `#[cbor(with = "indexmap_codec")]`.
+///
+/// On the wire this uses the standard CBOR map type, mirroring the encoding produced
+/// by `BTreeMap<K, V>`. On decode, the entries are inserted in iteration order so the
+/// resulting `IndexMap` preserves the order encoded by the sender.
+///
+/// Implementation lives in `tari_bor::adapters::indexmap_codec` so any crate can use it
+/// without re-implementing the codec.
+pub use tari_bor::adapters::indexmap_codec;
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use minicbor::{CborLen, Decode, Encode};
+
+    use super::*;
+
+    #[derive(Debug, PartialEq, Eq, Encode, Decode, CborLen)]
+    struct WrapPrehashed(#[cbor(n(0), with = "indexmap_codec")] PrehashedMap<u64, u32>);
+
+    #[derive(Debug, PartialEq, Eq, Encode, Decode, CborLen)]
+    struct WrapFast(#[cbor(n(0), with = "indexmap_codec")] FastMap<u32, u32>);
+
+    #[test]
+    fn indexmap_codec_round_trips_and_matches_btreemap_wire_format() {
+        let mut prehashed: PrehashedMap<u64, u32> = PrehashedMap::default();
+        prehashed.insert(1, 100);
+        prehashed.insert(2, 200);
+        prehashed.insert(3, 300);
+
+        let encoded = tari_bor::encode(&WrapPrehashed(prehashed.clone())).unwrap();
+        assert_eq!(encoded.len(), WrapPrehashed(prehashed.clone()).cbor_len(&mut ()));
+
+        // The map portion of the wire bytes must match the canonical BTreeMap encoding —
+        // both call `e.map(n)?` followed by alternating k/v.
+        let btree: BTreeMap<u64, u32> = prehashed.iter().map(|(k, v)| (*k, *v)).collect();
+        let btree_encoded = tari_bor::encode(&btree).unwrap();
+        assert!(encoded.ends_with(&btree_encoded));
+
+        let WrapPrehashed(decoded) = tari_bor::decode(&encoded).unwrap();
+        assert_eq!(decoded.len(), 3);
+        assert_eq!(decoded[&1], 100);
+        assert_eq!(decoded[&2], 200);
+        assert_eq!(decoded[&3], 300);
+    }
+
+    #[test]
+    fn indexmap_codec_preserves_insertion_order_on_decode() {
+        let mut m: FastMap<u32, u32> = FastMap::default();
+        m.insert(3, 30);
+        m.insert(1, 10);
+        m.insert(2, 20);
+
+        let encoded = tari_bor::encode(&WrapFast(m.clone())).unwrap();
+        let WrapFast(decoded) = tari_bor::decode(&encoded).unwrap();
+
+        let keys_in: Vec<u32> = m.keys().copied().collect();
+        let keys_out: Vec<u32> = decoded.keys().copied().collect();
+        assert_eq!(keys_in, keys_out, "IndexMap iteration order must round-trip");
+    }
+}

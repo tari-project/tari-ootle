@@ -12,8 +12,9 @@ tari_template_abi = { workspace = true, default-features = false }
 tari_template_lib_types = { workspace = true, default-features = false }
 tari_template_macros = { workspace = true, optional = true }
 tari_bor = { workspace = true, default-features = false }
+minicbor = { workspace = true, default-features = false, features = ["alloc", "derive"] }
 
-serde = { workspace = true, default-features = false, features = ["derive"] }
+serde = { workspace = true, default-features = false, optional = true, features = ["derive"] }
 ts-rs = { workspace = true, optional = true }
 borsh = { workspace = true, optional = true, features = ["derive"] }
 
@@ -23,11 +24,11 @@ serde_json = { workspace = true }
 [features]
 default = ["macro", "std"]
 macro = ["tari_template_macros"]
-std = ["serde/std", "tari_bor/std", "tari_template_abi/std", "tari_template_lib_types/std"]
-alloc = ["serde/alloc", "tari_bor/alloc", "tari_template_abi/alloc", "tari_template_lib_types/alloc"]
-ts = ["ts-rs", "tari_bor/ts", "tari_template_abi/ts", "tari_template_lib_types/ts"]
+std = ["minicbor/std", "serde?/std", "tari_bor/std", "tari_template_abi/std", "tari_template_lib_types/std"]
+alloc = ["serde?/alloc", "tari_bor/alloc", "tari_template_abi/alloc", "tari_template_lib_types/alloc"]
+serde = ["dep:serde", "tari_bor/serde", "tari_template_abi/serde", "tari_template_lib_types/serde"]
+ts = ["std", "serde", "ts-rs", "tari_bor/ts", "tari_template_abi/ts", "tari_template_lib_types/ts"]
 borsh = ["dep:borsh", "tari_template_lib_types/borsh", "tari_bor/borsh"]
 extra-arith = ["tari_template_lib_types/extra-arith"]
 precision = ["tari_template_lib_types/precision"]
-bincode-compat = ["tari_template_lib_types/bincode-compat"]
 extra-maps = ["tari_template_lib_types/extra-maps"]

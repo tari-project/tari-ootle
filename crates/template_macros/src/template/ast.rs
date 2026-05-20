@@ -22,8 +22,11 @@
 
 use std::fmt::{Debug, Formatter};
 
+use quote::ToTokens;
 use syn::{
     Error,
+    Field,
+    Fields,
     FnArg,
     Ident,
     ImplItem,
@@ -37,8 +40,10 @@ use syn::{
     TypePath,
     TypeTuple,
     UseTree,
+    Variant,
     Visibility,
     parse::{Parse, ParseStream},
+    parse_quote,
     punctuated::Punctuated,
     spanned::Spanned,
     token::Comma,
@@ -77,10 +82,8 @@ impl Parse for TemplateAst {
                     if !matches!(item.vis, Visibility::Public(_)) {
                         return Err(Error::new(item.ident.span(), "template structs must be public"));
                     }
-                    item.attrs
-                        .push(syn::parse_quote!(#[derive(serde::Serialize, serde::Deserialize)]));
-                    item.attrs.push(syn::parse_quote!(#[serde(crate = "self::serde")]));
-                    // Use the first struct name as the template name
+                    // Use the first struct name as the template name. CBOR derive/tag injection
+                    // is applied later by `inject_cbor_derives`, gated on `TemplateOptions`.
                     if template_name.is_none() {
                         template_name = Some(item.ident.clone());
                     }
@@ -89,9 +92,6 @@ impl Parse for TemplateAst {
                     if !matches!(item.vis, Visibility::Public(_)) {
                         return Err(Error::new(item.ident.span(), "template structs must be public"));
                     }
-                    item.attrs
-                        .push(syn::parse_quote!(#[derive(serde::Serialize, serde::Deserialize)]));
-                    item.attrs.push(syn::parse_quote!(#[serde(crate = "self::serde")]));
                     if template_name.is_none() {
                         template_name = Some(item.ident.clone());
                     }
@@ -188,6 +188,100 @@ impl Parse for TemplateAst {
             uses,
         })
     }
+}
+
+/// Inject `#[derive(minicbor::Encode, Decode, CborLen)]` and positional `#[n(N)]` tags onto
+/// every public struct and enum in the template module. Skips fields/variants that already
+/// carry an explicit index attribute (`#[n(..)]`, `#[b(..)]`, or `#[cbor(n(..))]`) so authors
+/// can override individual indices without disabling the whole pass.
+///
+/// Call this after parsing the template module unless
+/// [`crate::template::options::TemplateOptions::skip_cbor_derives`] is set, in which case the
+/// template author is responsible for providing their own derives and numbering.
+pub fn inject_cbor_derives(items: &mut [Item]) -> Result<()> {
+    for item in items {
+        match item {
+            Item::Struct(item) if matches!(item.vis, Visibility::Public(_)) => {
+                item.attrs
+                    .push(parse_quote!(#[derive(minicbor::Encode, minicbor::Decode, minicbor::CborLen)]));
+                inject_field_tags(&mut item.fields)?;
+            },
+            Item::Enum(item) if matches!(item.vis, Visibility::Public(_)) => {
+                item.attrs
+                    .push(parse_quote!(#[derive(minicbor::Encode, minicbor::Decode, minicbor::CborLen)]));
+                inject_variant_tags(&mut item.variants)?;
+            },
+            _ => {},
+        }
+    }
+    Ok(())
+}
+
+/// Detects a `#[n(N)]` or `#[cbor(n(N))]` attribute already present on a field/variant.
+fn has_explicit_cbor_index<'a, I: IntoIterator<Item = &'a syn::Attribute>>(attrs: I) -> bool {
+    for attr in attrs {
+        if attr.path().is_ident("n") || attr.path().is_ident("b") {
+            return true;
+        }
+        if attr.path().is_ident("cbor") {
+            // Crude but effective: parse the tokens and look for `n(...)` or `b(...)`.
+            let s = attr.to_token_stream().to_string();
+            if s.contains("n (") || s.contains("b (") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Append a `#[n(idx)]` attribute to every field in declaration order (skipping
+/// fields that already carry an explicit `#[n(..)]`/`#[b(..)]`/`#[cbor(n(..))]`).
+fn inject_field_tags(fields: &mut Fields) -> Result<()> {
+    let mut idx: u32 = 0;
+    let mut visit = |field: &mut Field| -> Result<()> {
+        if !has_explicit_cbor_index(field.attrs.iter()) {
+            let lit = syn::LitInt::new(&idx.to_string(), field.span());
+            field.attrs.push(parse_quote!(#[n(#lit)]));
+        }
+        idx = idx
+            .checked_add(1)
+            .ok_or_else(|| Error::new(field.span(), "too many fields for #[template] minicbor tag assignment"))?;
+        Ok(())
+    };
+    match fields {
+        Fields::Named(named) => {
+            for f in &mut named.named {
+                visit(f)?;
+            }
+        },
+        Fields::Unnamed(unnamed) => {
+            for f in &mut unnamed.unnamed {
+                visit(f)?;
+            }
+        },
+        Fields::Unit => {},
+    }
+    Ok(())
+}
+
+/// Append a `#[n(idx)]` attribute to every enum variant in declaration order,
+/// and tag each variant's payload fields the same way.
+fn inject_variant_tags(variants: &mut Punctuated<Variant, Comma>) -> Result<()> {
+    let mut idx: u32 = 0;
+    for variant in variants.iter_mut() {
+        if !has_explicit_cbor_index(variant.attrs.iter()) {
+            let lit = syn::LitInt::new(&idx.to_string(), variant.span());
+            variant.attrs.push(parse_quote!(#[n(#lit)]));
+        }
+        idx = idx.checked_add(1).ok_or_else(|| {
+            Error::new(
+                variant.span(),
+                "too many enum variants for #[template] minicbor tag assignment",
+            )
+        })?;
+        inject_field_tags(&mut variant.fields)?;
+    }
+    Ok(())
 }
 
 impl TemplateAst {

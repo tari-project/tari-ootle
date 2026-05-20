@@ -11,10 +11,25 @@ use crate::BlobIndex;
 
 pub type WorkspaceId = u16;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    borsh::BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct WorkspaceOffsetId {
+    #[n(0)]
     id: WorkspaceId,
+    #[n(1)]
     offset: Option<usize>,
 }
 
@@ -67,14 +82,27 @@ impl fmt::Display for WorkspaceOffsetId {
 
 /// Represents an argument that can be passed to a transaction instruction. Either a literal value or a reference to a
 /// item on the runtime's workspace, or a reference to a transaction blob by index.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    borsh::BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum InstructionArg {
     /// The argument is in the transaction execution's workspace, which means it is the result of a previous
     /// instruction
-    Workspace(WorkspaceOffsetId),
+    #[n(0)]
+    Workspace(#[n(0)] WorkspaceOffsetId),
     /// The argument is a value specified in the transaction
+    #[n(1)]
     Literal(
+        #[n(0)]
         #[serde(
             serialize_with = "ootle_serde::hex::serialize",
             deserialize_with = "ootle_serde::hex::deserialize_from_vec"
@@ -85,7 +113,8 @@ pub enum InstructionArg {
     /// The argument is the contents of a transaction blob, referenced by index. The engine
     /// resolves the index against the surrounding `Blobs` at execution time and passes the raw
     /// bytes to the call. Use `Blob` for large/opaque data; prefer `Literal` for small values.
-    Blob(BlobIndex),
+    #[n(2)]
+    Blob(#[n(0)] BlobIndex),
 }
 
 impl InstructionArg {
@@ -99,7 +128,7 @@ impl InstructionArg {
         Self::Literal(bytes.into())
     }
 
-    pub fn from_type<T: Serialize>(val: &T) -> Result<Self, tari_bor::BorError> {
+    pub fn from_type<T: Serialize + tari_bor::Encode<()>>(val: &T) -> Result<Self, tari_bor::BorError> {
         Ok(Self::raw_literal_bytes(encode(val)?))
     }
 

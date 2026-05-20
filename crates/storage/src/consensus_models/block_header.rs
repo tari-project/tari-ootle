@@ -7,6 +7,7 @@ use std::{
 };
 
 use borsh::BorshSerialize;
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{
@@ -30,53 +31,72 @@ use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureB
 
 use super::{BlockError, Command};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct BlockHeader {
     /// "Cached" block ID/hash. This is computed from the contents of the block header.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[n(0)]
     id: BlockId,
     /// Network this block belongs to.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[n(1)]
     network: Network,
     /// Parent block ID.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[n(2)]
     parent: BlockId,
     /// The quorum certificate proposed in this block. Note that this QC justifies a previous block.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[n(3)]
     justify_id: PcId,
     /// Block height.
+    #[n(4)]
     height: NodeHeight,
     /// Epoch this block belongs to.
+    #[n(5)]
     epoch: Epoch,
     /// Shard group that created this block.
+    #[n(6)]
     shard_group: ShardGroup,
     /// The public key of the proposer.
+    #[n(7)]
     proposed_by: RistrettoPublicKeyBytes,
     /// The total leader fee for this block. This should match the sum of the leader fees in the block's body.
+    #[n(8)]
     total_leader_fee: u64,
     /// A Merkle root hash committing to all state after this block has been applied.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "ootle_serde::hex")]
+    #[n(9)]
+    #[cbor(with = "tari_bor::adapters::serde_bridge")]
     state_merkle_root: FixedHash,
     /// A Merkle root hash committing to commands in this block. It is zero if the block has no commands.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "ootle_serde::hex")]
+    #[n(10)]
+    #[cbor(with = "tari_bor::adapters::serde_bridge")]
     command_merkle_root: FixedHash,
     /// Proposer signature that signs the Block ID
+    #[n(11)]
     signature: Option<SchnorrSignatureBytes>,
     /// The Unix Epoch timestamp indicating the creation time of the block. Currently, this can be chosen arbitrarily
     /// and is only informational/used for metrics.
+    #[n(12)]
     timestamp: u64,
     /// The epoch hash is a hash given by the epoch oracle. E.g. the base layer epoch oracle gives the first block hash
     /// of the epoch.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "ootle_serde::hex")]
+    #[n(13)]
+    #[cbor(with = "tari_bor::adapters::serde_bridge")]
     epoch_hash: FixedHash,
     /// Accumulated data for the shard group up to and including this block.
+    #[n(14)]
     accumulated_data: ShardGroupAccumulatedData,
     /// Extra data to allow for potential future data to be provided as necessary without breaking changes.
     /// Currently, this is used to store the block's sidechain_id (if applicable).
+    #[n(15)]
     extra_data: ExtraData,
 }
 

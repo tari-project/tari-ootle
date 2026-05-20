@@ -22,7 +22,9 @@
 
 //! Public types that are available to internal template code.
 
-pub use tari_bor::{decode, decode_exact, from_value, serde};
+#[cfg(feature = "serde")]
+pub use tari_bor::serde;
+pub use tari_bor::{decode, decode_exact, from_value, minicbor};
 pub use tari_template_abi::{CallInfo, OwnedData, alloc_and_encode, rust, wrap_ptr};
 pub use tari_template_lib_types::{OwnerRule, access_rules::ComponentAccessRules};
 

@@ -3,6 +3,7 @@
 
 use std::fmt::Display;
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::{Substate, SubstateId};
 use tari_ootle_common_types::{
@@ -17,15 +18,22 @@ use tari_state_tree::SubstateTreeChange;
 
 use crate::consensus_models::SubstateTransition;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub enum SubstateChange {
+    #[n(0)]
     Up {
+        #[n(0)]
         id: SubstateId,
+        #[n(1)]
         shard: Shard,
+        #[n(2)]
         substate: Box<Substate>,
     },
+    #[n(1)]
     Down {
+        #[n(0)]
         id: VersionedSubstateId,
+        #[n(1)]
         shard: Shard,
     },
 }

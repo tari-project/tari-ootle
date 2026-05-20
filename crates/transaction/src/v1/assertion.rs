@@ -9,21 +9,40 @@ use tari_template_lib_types::{Amount, MaxVec, NonFungibleId, ResourceAddress};
 
 pub type NftAssertVec = MaxVec<32, NonFungibleId>;
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    borsh::BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Assertion {
+    #[n(0)]
     #[serde(rename = "BktAmt")]
     BucketAmount {
+        #[n(0)]
         resource_address: ResourceAddress,
+        #[n(1)]
         is: CheckOrd,
+        #[n(2)]
         amount: Amount,
     },
+    #[n(1)]
     #[serde(rename = "NtNil")]
     IsNotNull,
+    #[n(2)]
     #[serde(rename = "BktCtnNft")]
     BucketContainsNonFungibles {
+        #[n(0)]
         resource_address: ResourceAddress,
+        #[n(1)]
         check: NftCheck,
+        #[n(2)]
         #[cfg_attr(feature = "ts", ts(as = "Vec<NonFungibleId>"))]
         nfts: NftAssertVec,
     },
@@ -57,13 +76,28 @@ impl Display for Assertion {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    borsh::BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum CheckOrd {
+    #[n(0)]
     Gt,
+    #[n(1)]
     Gte,
+    #[n(2)]
     Lt,
+    #[n(3)]
     Lte,
+    #[n(4)]
     Eq,
 }
 
@@ -92,12 +126,26 @@ impl Display for CheckOrd {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    borsh::BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum NftCheck {
+    #[n(0)]
     AnyOf,
+    #[n(1)]
     AllOf,
+    #[n(2)]
     NoneOf,
+    #[n(3)]
     NotAllOf,
 }
 

@@ -1,6 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::{Epoch, ShardGroup};
 
@@ -15,11 +16,16 @@ use tari_ootle_common_types::{Epoch, ShardGroup};
 /// This type lives in `tari_ootle_storage` (rather than the rollback tool) only because
 /// it is the value type of `RollbackHistoryCf` registered in the rocksdb schema. Reads
 /// and writes both go through the rollback tool's `storage` module.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct RollbackHistoryEntry {
+    #[n(0)]
     pub target_epoch: Epoch,
+    #[n(1)]
     pub shard_group: ShardGroup,
+    #[n(2)]
     pub applied_at_unix_secs: u64,
+    #[n(3)]
     pub tool_version: String,
+    #[n(4)]
     pub audit_file_basename: String,
 }

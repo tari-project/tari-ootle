@@ -4,6 +4,7 @@
 use std::{collections::HashMap, fmt::Display, hash::Hash};
 
 use log::*;
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::{Substate, SubstateId, SubstateValue};
 use tari_ootle_common_types::{
@@ -21,8 +22,9 @@ const LOG_TARGET: &str = "tari::ootle::storage::consensus_models::block_pledges"
 
 pub type SubstatePledges = Vec<SubstatePledge>;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, Encode, Decode, CborLen)]
 pub struct BlockPledge {
+    #[n(0)]
     pledges: HashMap<SubstateId, Substate>,
 }
 
@@ -106,14 +108,20 @@ impl Display for BlockPledge {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub enum SubstatePledge {
+    #[n(0)]
     Input {
+        #[n(0)]
         substate_id: VersionedSubstateId,
+        #[n(1)]
         is_write: bool,
+        #[n(2)]
         substate: Box<SubstateValue>,
     },
+    #[n(1)]
     Output {
+        #[n(0)]
         substate_id: VersionedSubstateId,
     },
 }

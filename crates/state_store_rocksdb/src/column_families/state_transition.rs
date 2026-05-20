@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::{Epoch, SubstateAddress, shard::Shard};
 use tari_state_tree::Version;
@@ -31,16 +32,20 @@ use crate::{
     traits::{Cf, QueryCf, Versioned},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct StateTransitionModelDataV1 {
+    #[n(0)]
     pub epoch: Epoch,
+    #[n(1)]
     pub transitions: Vec<StateTransitionRecordData>,
+    #[n(2)]
     pub state_version: Version,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub enum VersionedStateTransitionModelData {
-    V1(StateTransitionModelDataV1),
+    #[n(0)]
+    V1(#[n(0)] StateTransitionModelDataV1),
 }
 
 impl Versioned for VersionedStateTransitionModelData {
@@ -64,15 +69,19 @@ impl From<StateTransitionModelDataV1> for VersionedStateTransitionModelData {
         Self::V1(record)
     }
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct StateTransitionRecordData {
+    #[n(0)]
     pub substate_address: SubstateAddress,
+    #[n(1)]
     pub transition: StateTransitionType,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub enum StateTransitionType {
+    #[n(0)]
     Up,
+    #[n(1)]
     Down,
 }
 

@@ -554,9 +554,8 @@ mod tests {
         #[test]
         fn it_serializes_to_bytes() {
             let addr = sample(6);
-            let bytes = bincode::serde::encode_to_vec(&addr, bincode::config::standard()).unwrap();
-            let (deserialized, _): (OotleAddress, _) =
-                bincode::serde::decode_from_slice(&bytes, bincode::config::standard()).unwrap();
+            let bytes = tari_bor::serde_codec::to_vec(&addr).unwrap();
+            let deserialized: OotleAddress = tari_bor::serde_codec::from_slice(&bytes).unwrap();
             assert_eq!(addr.network(), deserialized.network());
             assert_eq!(addr.view_only_key(), deserialized.view_only_key());
             assert_eq!(addr.account_public_key(), deserialized.account_public_key());
@@ -582,9 +581,8 @@ mod tests {
             fn it_serializes_to_bytes_with_pay_ref() {
                 let pay_ref = PayRef::new_checked(vec![40, 50, 60, 70]).unwrap();
                 let addr = sample(8).with_pay_ref(pay_ref.clone());
-                let bytes = bincode::serde::encode_to_vec(&addr, bincode::config::standard()).unwrap();
-                let (deserialized, _): (OotleAddress, _) =
-                    bincode::serde::decode_from_slice(&bytes, bincode::config::standard()).unwrap();
+                let bytes = tari_bor::serde_codec::to_vec(&addr).unwrap();
+                let deserialized: OotleAddress = tari_bor::serde_codec::from_slice(&bytes).unwrap();
                 assert_eq!(addr.network(), deserialized.network());
                 assert_eq!(addr.view_only_key(), deserialized.view_only_key());
                 assert_eq!(addr.account_public_key(), deserialized.account_public_key());

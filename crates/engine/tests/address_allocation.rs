@@ -56,10 +56,8 @@ fn it_allocates_addresses_in_template_code() {
 
     let component_state = IndexedValue::from_value(component_state.state().clone()).unwrap();
 
-    let allocated = component_state
-        .get_value::<ResourceAddress>("$.resource")
-        .unwrap()
-        .unwrap();
+    // AddressAllocationTest: 0=resource, 1=vault.
+    let allocated = component_state.get_value::<ResourceAddress>("$.0").unwrap().unwrap();
     assert_eq!(actual, allocated);
 }
 

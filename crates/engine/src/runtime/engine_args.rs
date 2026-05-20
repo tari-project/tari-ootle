@@ -19,14 +19,16 @@ impl EngineArgs {
         Self { args: Vec::new() }
     }
 
-    pub fn get<T: DeserializeOwned>(&self, index: usize) -> Result<T, RuntimeError> {
+    pub fn get<T>(&self, index: usize) -> Result<T, RuntimeError>
+    where T: DeserializeOwned + for<'b> tari_bor::Decode<'b, ()> {
         self.get_opt(index)?.ok_or_else(|| RuntimeError::InvalidArgument {
             argument: type_name::<T>(),
             reason: "Argument not provided".to_string(),
         })
     }
 
-    pub fn get_opt<T: DeserializeOwned>(&self, index: usize) -> Result<Option<T>, RuntimeError> {
+    pub fn get_opt<T>(&self, index: usize) -> Result<Option<T>, RuntimeError>
+    where T: DeserializeOwned + for<'b> tari_bor::Decode<'b, ()> {
         self.args
             .get(index)
             .map(|arg| decode_exact(arg))
@@ -37,7 +39,8 @@ impl EngineArgs {
             })
     }
 
-    pub fn assert_one_arg<T: DeserializeOwned>(&self) -> Result<T, RuntimeError> {
+    pub fn assert_one_arg<T>(&self) -> Result<T, RuntimeError>
+    where T: DeserializeOwned + for<'b> tari_bor::Decode<'b, ()> {
         if self.len() == 1 {
             self.get(0)
         } else {

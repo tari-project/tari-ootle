@@ -13,10 +13,5 @@ export type ResourceAccessRules = {
   update_non_fungible_data: AccessRule;
   update_access_rules: AccessRule;
   freeze: AccessRule;
-  /**
-   * Added post-launch. Appended last to keep bincode field positions stable for prior fields;
-   * this is still a breaking change for pre-existing substates because bincode cannot read a
-   * missing trailing field, so the chain must be reset or data migrated on upgrade.
-   */
   update_metadata: AccessRule;
 };

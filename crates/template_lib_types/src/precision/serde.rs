@@ -118,22 +118,10 @@ impl<'de> Deserialize<'de> for Amount {
             }
         }
 
-        // Bincode format does not support deserialize_any - however in order to allow numbers/strings/digit arrays to
-        // be deserialized into the Amount type in user-facing formats, e.g. JSON/CBOR we need to use deserialize_any.
-        // We use a feature flag to allow for this, this feature flag should only be enabled in the storage layer.
-        // NOTE: If a template author enables this, users have to directly use the Amount type in calls.
-        #[cfg(not(feature = "bincode-compat"))]
-        let v = deserializer.deserialize_any(AmountVisitor)?;
-
-        #[cfg(feature = "bincode-compat")]
-        let v = if deserializer.is_human_readable() {
-            deserializer.deserialize_any(AmountVisitor)?
-        } else {
-            let digits = Deserialize::deserialize(deserializer)?;
-            Self::from_le_digits(digits)
-        };
-
-        Ok(v)
+        // Precision-Amount accepts a number, a string, a digit array, or raw bytes — driven by the actual shape
+        // via deserialize_any. Both JSON and `tari_bor::serde_codec` support this; bincode does not, but bincode
+        // is no longer part of the storage stack.
+        deserializer.deserialize_any(AmountVisitor)
     }
 }
 
@@ -172,27 +160,14 @@ mod tests {
         let decoded: Amount = decode_exact(&cbor).unwrap();
         assert_eq!(decoded, 123);
 
-        #[cfg(not(feature = "bincode-compat"))]
-        {
-            // Support for decoding directly from a number. Not supported with bincode-compat enabled
-            let amount = 123i32;
-            let cbor = encode(&amount).unwrap();
-            let decoded: Amount = decode_exact(&cbor).unwrap();
-            assert_eq!(decoded, amount);
-            let amount = -1234567890i128;
-            let cbor = encode(&amount).unwrap();
-            let decoded: Amount = decode_exact(&cbor).unwrap();
-            assert_eq!(decoded, amount);
-        }
-    }
-
-    #[test]
-    #[cfg(feature = "bincode-compat")]
-    fn bincode_encoding_decoding() {
-        let amount = Amount::from(12345678901234567890u128);
-        let encoded = bincode::serde::encode_to_vec(amount, bincode::config::standard()).unwrap();
-        let (decoded, _): (Amount, usize) =
-            bincode::serde::decode_from_slice(&encoded, bincode::config::standard()).unwrap();
+        // Decode directly from a number.
+        let amount = 123i32;
+        let cbor = encode(&amount).unwrap();
+        let decoded: Amount = decode_exact(&cbor).unwrap();
+        assert_eq!(decoded, amount);
+        let amount = -1234567890i64;
+        let cbor = encode(&amount).unwrap();
+        let decoded: Amount = decode_exact(&cbor).unwrap();
         assert_eq!(decoded, amount);
     }
 }

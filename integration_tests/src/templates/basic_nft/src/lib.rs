@@ -21,17 +21,16 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 use tari_template_lib::prelude::*;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Sparkle {
-    pub brightness: u32,
-}
-
 #[template]
 mod sparkle_nft_template {
     use super::*;
     pub struct SparkleNft {
         resource_address: ResourceAddress,
         vault: Vault,
+    }
+    pub struct Sparkle {
+        #[n(0)]
+        pub brightness: u32,
     }
 
     impl SparkleNft {

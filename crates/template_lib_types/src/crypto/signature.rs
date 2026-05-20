@@ -1,6 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use minicbor::{CborLen, Decode, Encode};
 use tari_template_abi::rust::{fmt, marker::PhantomData};
 
 use crate::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
@@ -53,10 +54,13 @@ macro_rules! custom_signature_domain {
 /// // Verify the signature
 /// let is_valid = signature.verify(&public_key, &message);
 /// ```
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Signature<D> {
+    #[n(0)]
     payload: SignaturePayload,
-    #[serde(skip)]
+    #[cfg_attr(feature = "serde", serde(skip))]
+    #[cbor(skip)]
     _domain: PhantomData<D>,
 }
 
@@ -65,9 +69,11 @@ impl<D: SignatureDomain, T: Into<SignaturePayload>> From<T> for Signature<D> {
         Self::new(value)
     }
 }
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SignaturePayload {
-    RistrettoSchnorrBlake2b(SchnorrSignatureBytes),
+    #[n(0)]
+    RistrettoSchnorrBlake2b(#[n(0)] SchnorrSignatureBytes),
 }
 
 impl SignaturePayload {
@@ -84,11 +90,14 @@ impl From<SchnorrSignatureBytes> for SignaturePayload {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PublicKey {
     #[default]
+    #[n(0)]
     Zero,
-    Ristretto25519(RistrettoPublicKeyBytes),
+    #[n(1)]
+    Ristretto25519(#[n(0)] RistrettoPublicKeyBytes),
 }
 
 impl PublicKey {

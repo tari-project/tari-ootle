@@ -1,6 +1,7 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_ootle_storage::consensus_models::SubstateRecord;
 
@@ -8,9 +9,10 @@ use crate::traits::Versioned;
 
 pub type LatestSubstateRecord = SubstateRecord;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub enum VersionedSubstateRecord {
-    V1(SubstateRecord),
+    #[n(0)]
+    V1(#[n(0)] SubstateRecord),
 }
 
 impl Versioned for VersionedSubstateRecord {
@@ -81,7 +83,7 @@ mod tests {
         };
         let versioned: VersionedSubstateRecord = original.into();
         let encoded = codec.encode(&versioned).expect("Encoding failed");
-        let decoded: VersionedSubstateRecord = codec.decode(&encoded).expect("Decoding failed");
+        let decoded: VersionedSubstateRecord = codec.decode_exact(&encoded).expect("Decoding failed");
         let _latest: LatestSubstateRecord = decoded.into_latest();
     }
 }

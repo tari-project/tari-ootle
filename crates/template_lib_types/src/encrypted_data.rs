@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use serde::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
 use tari_template_abi::rust::prelude::*;
 
 use crate::max_bytes::MaxBytes;
@@ -11,7 +11,9 @@ const MAX_SIZE: usize = EncryptedData::ENCRYPTED_DATA_SIZE_WITHOUT_MEMO + Encryp
 
 /// Used by the receiver to determine the value and mask of the commitment. Used in stealth and confidential transfers,
 /// as well as Minotari burns
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, CborLen)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct EncryptedData(#[cfg_attr(feature = "ts", ts(type = "string"))] MaxBytes<MAX_SIZE>);

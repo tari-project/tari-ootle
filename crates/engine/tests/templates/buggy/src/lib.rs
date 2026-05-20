@@ -37,16 +37,18 @@ pub static _ABI_TEMPLATE_DEF: [u8; 0] = [];
 #[unsafe(no_mangle)]
 pub static _ABI_TEMPLATE_DEF: [u8; 4] = [4, 0, 0, 0];
 
+// Hard-coded minicbor encoding of `TemplateDef::V1(TemplateDefV1 { template_name: "Buggy",
+// abi_version: 0, functions: [] })`. The leading 4 bytes are the little-endian length prefix used
+// by `encode_for_wasm_embedding`. Regenerate by running the snippet preserved in
+// `tests/test.rs::test_buggy_template` (currently commented out at the top of that function).
 #[cfg(not(any(
     feature = "return_empty_abi",
     feature = "return_null_abi",
     feature = "no_template_def"
 )))]
 #[unsafe(no_mangle)]
-pub static _ABI_TEMPLATE_DEF: [u8; 53] = [
-    53, 0, 0, 0, 161, 98, 86, 49, 163, 109, 116, 101, 109, 112, 108, 97, 116, 101, 95, 110, 97, 109, 101, 101, 66, 117,
-    103, 103, 121, 107, 97, 98, 105, 95, 118, 101, 114, 115, 105, 111, 110, 0, 105, 102, 117, 110, 99, 116, 105, 111,
-    110, 115, 128,
+pub static _ABI_TEMPLATE_DEF: [u8; 16] = [
+    16, 0, 0, 0, 130, 0, 129, 131, 101, 66, 117, 103, 103, 121, 0, 128,
 ];
 
 #[unsafe(no_mangle)]

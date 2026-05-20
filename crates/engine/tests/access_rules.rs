@@ -348,13 +348,16 @@ mod resource_access_rules {
             vec![owner_proof.clone()],
         );
 
-        let badge_vault: VaultId = test.extract_component_value(component_address, "$.badges");
+        // AccessRulesTest field layout (minicbor `#[n(N)]` tags by declaration order):
+        // 0: value, 1: tokens, 2: badges, 3: allowed, 4: attack_component.
+        let badge_vault: VaultId = test.extract_component_value(component_address, "$.2");
         let badge_resource = *test
             .read_only_state_store()
             .get_vault(&badge_vault)
             .unwrap()
             .resource_address();
-        let vaults: HashMap<ResourceAddress, VaultId> = test.extract_component_value(user_account, "$.vaults");
+        // Account: 0: vaults, 1: approvals.
+        let vaults: HashMap<ResourceAddress, VaultId> = test.extract_component_value(user_account, "$.0");
         let user_badge_vault_id = vaults[&badge_resource];
 
         // Now try recall them. This won't succeed because recall only respects access rules not ownership, so the call
@@ -393,14 +396,15 @@ mod resource_access_rules {
         let component_address = result.finalize.execution_results[0]
             .decode::<ComponentAddress>()
             .unwrap();
-        let vault: VaultId = test.extract_component_value(component_address, "$.badges");
+        // AccessRulesTest field layout: 0=value, 1=tokens, 2=badges, 3=allowed, 4=attack_component.
+        let vault: VaultId = test.extract_component_value(component_address, "$.2");
         // Find the resource address for the badge from the output substates
         let badge_resource = *test
             .read_only_state_store()
             .get_vault(&vault)
             .unwrap()
             .resource_address();
-        let vault: VaultId = test.extract_component_value(component_address, "$.tokens");
+        let vault: VaultId = test.extract_component_value(component_address, "$.1");
         let token_resource = *test
             .read_only_state_store()
             .get_vault(&vault)
@@ -458,7 +462,7 @@ mod resource_access_rules {
         let badge_data = result.finalize.execution_results[2].decode::<Vec<Metadata>>().unwrap();
         assert!(badge_data.iter().all(|b| b.contains_key("colour")));
 
-        let vaults: BTreeMap<ResourceAddress, VaultId> = test.extract_component_value(user_account, "$.vaults");
+        let vaults: BTreeMap<ResourceAddress, VaultId> = test.extract_component_value(user_account, "$.0");
         let user_badge_vault_id = vaults[&badge_resource];
 
         // Recall badge

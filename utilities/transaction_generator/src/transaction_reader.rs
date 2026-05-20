@@ -21,7 +21,7 @@ pub fn read_transactions<R: Read + Seek + Send + 'static>(
         while remaining > 0 {
             let mut len_bytes = [0u8; 2];
             reader.read_exact(&mut len_bytes).unwrap();
-            let len = u64::from(u16::from_le_bytes(len_bytes));
+            let len = usize::from(u16::from_le_bytes(len_bytes));
 
             if skip_remaining > 0 {
                 skip_remaining -= 1;
@@ -29,9 +29,9 @@ pub fn read_transactions<R: Read + Seek + Send + 'static>(
                 continue;
             }
 
-            let mut limited_reader = (&mut reader).take(len);
-            let transaction: Transaction =
-                bincode::serde::decode_from_std_read(&mut limited_reader, bincode::config::standard()).unwrap();
+            let mut buf = vec![0u8; len];
+            reader.read_exact(&mut buf).unwrap();
+            let transaction: Transaction = tari_bor::decode(&buf).unwrap();
             if sender.send(transaction).is_err() {
                 // Receiver has closed the channel, so we're done
                 break;

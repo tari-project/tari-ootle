@@ -17,7 +17,7 @@ path = "src/bin/indexer_gen_openapi.rs"
 
 [dependencies]
 tari_base_node_client = { workspace = true }
-tari_bor = { workspace = true }
+tari_bor = { workspace = true, features = ["serde"] }
 tari_common = { workspace = true }
 tari_consensus = { workspace = true }
 tari_template_builtin = { workspace = true, features = ["templates"] }
@@ -50,7 +50,6 @@ async-graphql = { workspace = true }
 async-graphql-axum = { workspace = true }
 async-stream = { workspace = true }
 bytes = { workspace = true }
-bincode = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive", "env"] }
 config = { workspace = true }
 deadpool-diesel = { workspace = true, default-features = false, features = ["sqlite", "rt_tokio_1"] }

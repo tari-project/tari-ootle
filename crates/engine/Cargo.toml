@@ -44,9 +44,10 @@ wasm-cache = ["dep:bytes", "dep:memmap2"]
 tari_template_test_tooling = { workspace = true }
 tari_transaction_manifest = { workspace = true }
 tari_ootle_transaction = { workspace = true }
-tari_template_builtin = { workspace = true, features = ["templates"] }
+tari_template_builtin = { workspace = true, features = ["templates", "state"] }
 
 criterion = { version = "0.8.1", features = ["html_reports"] }
+minicbor = { workspace = true, default-features = false, features = ["alloc", "derive"] }
 tempfile = { workspace = true }
 
 

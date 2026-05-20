@@ -22,16 +22,21 @@
 
 use std::fmt::Display;
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::{Epoch, NodeHeight};
 
 use crate::ids::{BlockId, PcId};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct HighPc {
+    #[n(0)]
     pub block_id: BlockId,
+    #[n(1)]
     pub block_height: NodeHeight,
+    #[n(2)]
     pub epoch: Epoch,
+    #[n(3)]
     pub qc_id: PcId,
 }
 

@@ -9,10 +9,14 @@ use tari_template_lib::types::{
 
 use crate::crypto::OutputBody;
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize, borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Utxo {
+    #[n(0)]
     pub output: Option<UtxoOutput>,
+    #[n(1)]
     pub is_frozen: bool,
 }
 
@@ -62,11 +66,16 @@ impl Utxo {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize, borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UtxoOutput {
+    #[n(0)]
     pub output: OutputBody,
+    #[n(1)]
     pub spend_condition: SpendCondition,
+    #[n(2)]
     pub tag: UtxoTag,
 }
 

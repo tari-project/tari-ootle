@@ -7,14 +7,36 @@ use std::{
 };
 
 use borsh::BorshSerialize;
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, BorshSerialize)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Deserialize,
+    Serialize,
+    BorshSerialize,
+    Encode,
+    Decode,
+    CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(TS), ts(export))]
 #[serde(transparent)]
-pub struct NodeHeight(#[cfg_attr(feature = "ts", ts(type = "number"))] pub u64);
+#[cbor(transparent)]
+pub struct NodeHeight(
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    #[n(0)]
+    pub u64,
+);
 
 impl NodeHeight {
     pub const fn as_u64(self) -> u64 {

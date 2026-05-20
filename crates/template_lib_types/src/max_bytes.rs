@@ -7,6 +7,7 @@ use tari_template_abi::rust::{
     prelude::*,
 };
 
+#[cfg(feature = "serde")]
 use crate::{
     hex::{bytes_from_hex, bytes_to_hex},
     serde_helpers::BytesVisitor,
@@ -104,6 +105,7 @@ impl<const N: usize> From<MaxBytes<N>> for Vec<u8> {
     }
 }
 
+#[cfg(feature = "serde")]
 impl<const N: usize> serde::Serialize for MaxBytes<N> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where S: serde::Serializer {
@@ -116,6 +118,7 @@ impl<const N: usize> serde::Serialize for MaxBytes<N> {
     }
 }
 
+#[cfg(feature = "serde")]
 impl<'de, const N: usize> serde::Deserialize<'de> for MaxBytes<N> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where D: serde::Deserializer<'de> {
@@ -140,6 +143,36 @@ impl<'de, const N: usize> serde::Deserialize<'de> for MaxBytes<N> {
             }
             Ok(MaxBytes::new_checked(bytes.into_owned()).expect("length checked above"))
         }
+    }
+}
+
+impl<C, const N: usize> minicbor::Encode<C> for MaxBytes<N> {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        _ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.bytes(self.as_slice())?;
+        Ok(())
+    }
+}
+
+impl<'b, C, const N: usize> minicbor::Decode<'b, C> for MaxBytes<N> {
+    fn decode(d: &mut minicbor::Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let bytes = d.bytes()?;
+        if bytes.len() > N {
+            return Err(minicbor::decode::Error::message(format!(
+                "byte array length exceeds maximum of {}",
+                N
+            )));
+        }
+        Ok(MaxBytes::new_checked(bytes.to_vec().into_boxed_slice()).expect("length checked above"))
+    }
+}
+
+impl<C, const N: usize> minicbor::CborLen<C> for MaxBytes<N> {
+    fn cbor_len(&self, ctx: &mut C) -> usize {
+        minicbor::bytes::cbor_len(self.as_slice(), ctx)
     }
 }
 

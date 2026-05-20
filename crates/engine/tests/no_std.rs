@@ -29,11 +29,10 @@ fn it_can_call_a_method() {
 
     let component = test.read_only_state_store().get_component(component_address).unwrap();
 
-    let value: u128 = IndexedValue::from_value(component.into_state())
-        .unwrap()
-        .get_value("$.value")
-        .unwrap()
-        .unwrap();
+    // NoStdCounter has a single `value: u64` field — minicbor encodes single-field structs as a
+    // 1-element array indexed by `#[n(0)]`, so the value lives at `$.0`.
+    let indexed = IndexedValue::from_value(component.into_state()).unwrap();
+    let value: u64 = indexed.get_value("$.0").unwrap().unwrap();
 
     assert_eq!(value, 1);
 }

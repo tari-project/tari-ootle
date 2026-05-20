@@ -16,10 +16,28 @@ use tari_template_lib_types::{
     hex::{fixed_bytes_from_hex, write_hex_fmt},
 };
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, Default, BorshSerialize)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Deserialize,
+    Serialize,
+    Default,
+    BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[serde(transparent)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionId(
+    #[n(0)]
+    #[cbor(with = "minicbor::bytes")]
     #[serde(with = "ootle_serde::hex")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     [u8; 32],

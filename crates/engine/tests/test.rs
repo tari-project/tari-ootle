@@ -725,8 +725,9 @@ mod basic_nft {
         let diff = result.finalize.result.expect("execution failed");
         let (_, state) = diff.up_iter().find(|(addr, _)| addr.is_non_fungible()).unwrap();
 
-        #[derive(Debug, Clone, Serialize, Deserialize)]
+        #[derive(Debug, Clone, Serialize, Deserialize, minicbor::Encode, minicbor::Decode)]
         pub struct Sparkle {
+            #[n(0)]
             pub brightness: u32,
         }
 
@@ -993,17 +994,22 @@ mod emoji_id {
 
     use super::*;
 
-    #[derive(Debug, Clone, Serialize, Deserialize, Hash)]
+    #[derive(Debug, Clone, Serialize, Deserialize, Hash, minicbor::Encode, minicbor::Decode)]
     #[repr(i32)]
     pub enum Emoji {
+        #[n(0)]
         Smile = 0x00,
+        #[n(1)]
         Sweat = 0x01,
+        #[n(2)]
         Laugh = 0x02,
+        #[n(3)]
         Wink = 0x03,
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize, Hash)]
-    pub struct EmojiId(Vec<Emoji>);
+    #[derive(Debug, Clone, Serialize, Deserialize, Hash, minicbor::Encode, minicbor::Decode)]
+    #[cbor(transparent)]
+    pub struct EmojiId(#[n(0)] Vec<Emoji>);
 
     fn mint_emoji_id(
         test: &mut TemplateTest,
@@ -1203,8 +1209,9 @@ mod tickets {
         )
         .unwrap();
 
-        #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+        #[derive(Debug, Clone, Serialize, Deserialize, Default, minicbor::Encode, minicbor::Decode)]
         pub struct Ticket {
+            #[n(0)]
             pub is_redeemed: bool,
         }
 

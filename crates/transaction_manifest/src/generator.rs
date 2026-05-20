@@ -394,7 +394,8 @@ impl ManifestInstructionGenerator {
         }
     }
 
-    fn extract_from_global<T: tari_bor::DeserializeOwned>(&self, name: &str) -> Result<T, ManifestError> {
+    fn extract_from_global<T>(&self, name: &str) -> Result<T, ManifestError>
+    where T: tari_bor::DeserializeOwned + for<'b> tari_bor::Decode<'b, ()> {
         let value = self
             .global_aliases
             .get(name)

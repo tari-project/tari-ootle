@@ -48,8 +48,8 @@ metadata.write_cbor_to(&mut file)?;
 ```rust
 use tari_ootle_template_metadata::TemplateMetadata;
 
-let file = std::fs::File::open("metadata.cbor")?;
-let metadata = TemplateMetadata::read_cbor_from(std::io::BufReader::new(file))?;
+let bytes = std::fs::read("metadata.cbor")?;
+let metadata = TemplateMetadata::from_cbor(&bytes)?;
 ```
 
 ### Using MetadataHashWriter directly

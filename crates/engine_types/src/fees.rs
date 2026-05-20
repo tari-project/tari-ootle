@@ -48,17 +48,23 @@ impl FeeReceiptBuilder {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize, borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct FeeReceipt {
     /// The total amount of the fee payment(s)
+    #[n(0)]
     total_fee_payment: u64,
     /// Total fees paid after refunds
+    #[n(1)]
     total_fees_paid: u64,
     /// The amount of non-refundable fees which the user overpaid. Fees cannot be refunded when paying purely with a
     /// stealth reveal (since we do not know the account/vault to refund).
+    #[n(2)]
     total_fee_overcharge: u64,
     /// Breakdown of fee costs
+    #[n(3)]
     cost_breakdown: FeeBreakdown,
 }
 
@@ -135,23 +141,59 @@ impl Default for FeeReceipt {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Hash, Eq, PartialEq, PartialOrd, Ord, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+    Serialize,
+    Deserialize,
+    Hash,
+    Eq,
+    PartialEq,
+    PartialOrd,
+    Ord,
+    borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum FeeSource {
+    #[n(0)]
     Initial,
+    #[n(1)]
     RuntimeCall,
+    #[n(2)]
     Storage,
+    #[n(3)]
     Events,
+    #[n(4)]
     Logs,
+    #[n(5)]
     TransactionWeight,
+    #[n(6)]
     SignatureVerification,
+    #[n(7)]
     TemplateLoad,
+    #[n(8)]
     SubstateCreate,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+    Serialize,
+    Deserialize,
+    Default,
+    borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct FeeBreakdown {
+    #[n(0)]
+    #[cbor(with = "tari_bor::adapters::indexmap_codec")]
     breakdown: IndexMap<FeeSource, u64>,
 }
 

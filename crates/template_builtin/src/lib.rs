@@ -49,6 +49,11 @@ pub fn is_builtin_template_address(addr: &TemplateAddress) -> bool {
         *addr == LIQUIDITY_POOL_TEMPLATE_ADDRESS
 }
 
+#[cfg(feature = "state")]
+mod state;
+#[cfg(feature = "state")]
+pub use state::*;
+
 #[cfg(feature = "templates")]
 mod templates;
 #[cfg(feature = "templates")]

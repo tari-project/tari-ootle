@@ -24,12 +24,16 @@ use std::{fmt, vec::Vec};
 
 use tari_template_lib::prelude::*;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Hash)]
+#[derive(Debug, Clone, Hash, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 #[repr(i32)]
 pub enum Emoji {
+    #[n(0)]
     Smile = 0x00,
+    #[n(1)]
     Sweat = 0x01,
+    #[n(2)]
     Laugh = 0x02,
+    #[n(3)]
     Wink = 0x03,
 }
 
@@ -45,8 +49,9 @@ impl fmt::Display for Emoji {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Hash)]
-pub struct EmojiId(Vec<Emoji>);
+#[derive(Debug, Clone, Hash, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
+#[cbor(transparent)]
+pub struct EmojiId(#[n(0)] Vec<Emoji>);
 
 impl fmt::Display for EmojiId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

@@ -2,22 +2,27 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 //! Access control rules for template-related data like component methods and resources
 
-use serde::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
+use tari_bor::adapters::boxed_slice;
 use tari_template_abi::rust::{collections::BTreeMap, prelude::*};
 
 use crate::{ComponentAddress, NonFungibleAddress, ResourceAddress, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 /// Represents the types of possible access control rules over a component method or resource
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum AccessRule {
     /// AccessRule always passes
+    #[n(0)]
     AllowAll,
     /// AccessRule always fails
+    #[n(1)]
     DenyAll,
     /// AccessRule that requires a specific condition to be met
-    Restricted(RestrictedAccessRule),
+    #[n(2)]
+    Restricted(#[n(0)] RestrictedAccessRule),
 }
 
 impl AccessRule {
@@ -43,16 +48,28 @@ impl AccessRule {
 }
 
 /// An enum that represents the possible ways to restrict access to components or resources
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum RestrictedAccessRule {
     /// Requires a specific condition to be met
-    Require(RequireRule),
+    #[n(0)]
+    Require(#[n(0)] RequireRule),
     /// Requires any of the specified conditions to be met (logical OR)
-    AnyOf(Box<[RestrictedAccessRule]>),
+    #[n(1)]
+    AnyOf(
+        #[n(0)]
+        #[cbor(with = "boxed_slice")]
+        Box<[RestrictedAccessRule]>,
+    ),
     /// Requires all of the specified conditions to be met (logical AND)
-    AllOf(Box<[RestrictedAccessRule]>),
+    #[n(2)]
+    AllOf(
+        #[n(0)]
+        #[cbor(with = "boxed_slice")]
+        Box<[RestrictedAccessRule]>,
+    ),
 }
 
 impl RestrictedAccessRule {
@@ -66,18 +83,23 @@ impl RestrictedAccessRule {
 }
 
 /// Specifies a requirement for a [RequireRule].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum RuleRequirement {
     /// Requires a proof of a specific resource
-    Resource(ResourceAddress),
+    #[n(0)]
+    Resource(#[n(0)] ResourceAddress),
     /// Requires a proof of a specific non-fungible token
-    NonFungibleAddress(NonFungibleAddress),
+    #[n(1)]
+    NonFungibleAddress(#[n(0)] NonFungibleAddress),
     /// Requires execution within a specific component
-    ScopedToComponent(ComponentAddress),
+    #[n(2)]
+    ScopedToComponent(#[n(0)] ComponentAddress),
     /// Requires execution within a specific template
-    ScopedToTemplate(TemplateAddress),
+    #[n(3)]
+    ScopedToTemplate(#[n(0)] TemplateAddress),
 }
 
 impl From<ResourceAddress> for RuleRequirement {
@@ -111,27 +133,48 @@ impl From<RistrettoPublicKeyBytes> for RuleRequirement {
 }
 
 /// A rule requiring specific condition(s) to be met
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum RequireRule {
     /// Requires a specific condition to be met
-    Require(RuleRequirement),
+    #[n(0)]
+    Require(#[n(0)] RuleRequirement),
     /// Requires any of the specified conditions to be met (logical OR)
-    AnyOf(Box<[RuleRequirement]>),
+    #[n(1)]
+    AnyOf(
+        #[n(0)]
+        #[cbor(with = "boxed_slice")]
+        Box<[RuleRequirement]>,
+    ),
     /// Requires all of the specified conditions to be met (logical AND)
-    AllOf(Box<[RuleRequirement]>),
+    #[n(2)]
+    AllOf(
+        #[n(0)]
+        #[cbor(with = "boxed_slice")]
+        Box<[RuleRequirement]>,
+    ),
     /// Requires N of the specified conditions to be met
-    MOfN(u16, Box<[RuleRequirement]>),
+    #[n(3)]
+    MOfN(
+        #[n(0)] u16,
+        #[n(1)]
+        #[cbor(with = "boxed_slice")]
+        Box<[RuleRequirement]>,
+    ),
 }
 
 /// Information needed to specify access rules to methods of a component
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct ComponentAccessRules {
     #[cfg_attr(feature = "ts", ts(type = "Record<string, AccessRule>"))]
+    #[n(0)]
     method_access: BTreeMap<String, AccessRule>,
+    #[n(1)]
     default: AccessRule,
 }
 
@@ -194,15 +237,24 @@ impl Default for ComponentAccessRules {
 }
 
 /// An enum that represents all the possible actions that can be performed on a resource
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Encode, Decode, CborLen, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ResourceAuthAction {
+    #[n(0)]
     Mint,
+    #[n(1)]
     Burn,
+    #[n(2)]
     Recall,
+    #[n(3)]
     Withdraw,
+    #[n(4)]
     Deposit,
+    #[n(5)]
     UpdateNonFungibleData,
+    #[n(6)]
     Freeze,
+    #[n(7)]
     UpdateMetadata,
 }
 
@@ -212,13 +264,17 @@ impl ResourceAuthAction {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum UpdateRule {
+    #[n(0)]
     Locked,
+    #[n(1)]
     Owner,
-    AccessRule(AccessRule),
+    #[n(2)]
+    AccessRule(#[n(0)] AccessRule),
 }
 
 impl From<AccessRule> for UpdateRule {
@@ -231,25 +287,42 @@ pub const LOCKED: UpdateRule = UpdateRule::Locked;
 pub const OWNER: UpdateRule = UpdateRule::Owner;
 
 /// Information needed to specify access rules to a resource
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ResourceAccessRules {
+    #[n(0)]
     mint: AccessRule,
+    #[n(1)]
     mint_updater: UpdateRule,
+    #[n(2)]
     burn: AccessRule,
+    #[n(3)]
     burn_updater: UpdateRule,
+    #[n(4)]
     recall: AccessRule,
+    #[n(5)]
     recall_updater: UpdateRule,
+    #[n(6)]
     withdraw: AccessRule,
+    #[n(7)]
     withdraw_updater: UpdateRule,
+    #[n(8)]
     deposit: AccessRule,
+    #[n(9)]
     deposit_updater: UpdateRule,
+    #[n(10)]
     update_nft_data: AccessRule,
+    #[n(11)]
     nft_data_updater: UpdateRule,
+    #[n(12)]
     freeze: AccessRule,
+    #[n(13)]
     freeze_updater: UpdateRule,
+    #[n(14)]
     update_metadata: AccessRule,
+    #[n(15)]
     metadata_updater: UpdateRule,
 }
 

@@ -345,7 +345,8 @@ impl TemplateTest {
     ///
     /// Panics if the component does not exist, the path is invalid, or the value cannot be deserialized
     /// into `T`.
-    pub fn extract_component_value<T: DeserializeOwned>(&self, component_address: ComponentAddress, path: &str) -> T {
+    pub fn extract_component_value<T>(&self, component_address: ComponentAddress, path: &str) -> T
+    where T: DeserializeOwned + for<'b> tari_bor::Decode<'b, ()> {
         self.read_only_state_store()
             .inspect_component(component_address)
             .unwrap()
@@ -469,7 +470,7 @@ impl TemplateTest {
         proofs: Vec<NonFungibleAddress>,
     ) -> T
     where
-        T: DeserializeOwned,
+        T: DeserializeOwned + for<'b> tari_bor::Decode<'b, ()>,
     {
         let address = self.get_template_address(template_name);
         let result = self.execute_expect_success(
@@ -504,7 +505,7 @@ impl TemplateTest {
         proofs: Vec<NonFungibleAddress>,
     ) -> T
     where
-        T: DeserializeOwned,
+        T: DeserializeOwned + for<'b> tari_bor::Decode<'b, ()>,
     {
         let result = self.execute_expect_success(
             self.transaction()

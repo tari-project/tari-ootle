@@ -7,12 +7,15 @@ use std::{
 };
 
 use borsh::BorshSerialize;
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct LeaderFee {
+    #[n(0)]
     pub fee: u64,
+    #[n(1)]
     pub exhaust_burn: u64,
 }
 

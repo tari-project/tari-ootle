@@ -3,6 +3,7 @@
 
 use std::{fmt, fmt::Display};
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_ootle_common_types::{
@@ -16,11 +17,15 @@ use tari_ootle_transaction::TransactionId;
 
 use crate::{StateStoreReadTransaction, StorageError, consensus_models::RequireLockIntentRef};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct SubstateLock {
+    #[n(0)]
     lock_type: SubstateLockType,
+    #[n(1)]
     transaction_id: TransactionId,
+    #[n(2)]
     version: u32,
+    #[n(3)]
     is_local_only: bool,
 }
 

@@ -1,14 +1,16 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_ootle_storage::consensus_models::TransactionRecord;
 
 use crate::traits::Versioned;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub enum VersionedTransactionRecord {
-    V1(TransactionRecord),
+    #[n(0)]
+    V1(#[n(0)] TransactionRecord),
 }
 
 impl Versioned for VersionedTransactionRecord {

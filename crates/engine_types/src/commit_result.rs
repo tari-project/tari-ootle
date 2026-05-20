@@ -25,7 +25,7 @@ use std::{
     time::Duration,
 };
 
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 use tari_template_lib::types::{ComponentAddress, Hash32, ResourceAddress, TemplateAddress};
 
 use crate::{
@@ -39,16 +39,20 @@ use crate::{
     transaction_receipt::TransactionReceipt,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ExecuteResult {
     /// The finalized result to commit. If the fee transaction succeeds but the transaction fails, this will be accept.
+    #[n(0)]
     pub finalize: FinalizeResult,
     /// The time taken to execute the transaction (excluding finalization).
     #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number}"))]
+    #[n(1)]
+    #[cbor(with = "tari_bor::adapters::serde_bridge")]
     pub execution_time: Duration,
     /// The epoch during which the transaction was executed. This may be None if consensus aborted before being able to
     /// lock to an epoch.
+    #[n(2)]
     pub execute_epoch: Option<Epoch>,
 }
 
@@ -126,7 +130,7 @@ impl ExecuteResult {
     }
 
     #[track_caller]
-    pub fn expect_return<T: DeserializeOwned>(&self, index: usize) -> T {
+    pub fn expect_return<T: for<'b> tari_bor::Decode<'b, ()>>(&self, index: usize) -> T {
         self.finalize
             .execution_results
             .get(index)
@@ -136,14 +140,20 @@ impl ExecuteResult {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct FinalizeResult {
+    #[n(0)]
     pub transaction_hash: Hash32,
+    #[n(1)]
     pub events: Vec<Event>,
+    #[n(2)]
     pub logs: Vec<LogEntry>,
+    #[n(3)]
     pub execution_results: Vec<InstructionResult>,
+    #[n(4)]
     pub result: TransactionResult,
+    #[n(5)]
     pub fee_receipt: FeeReceipt,
 }
 
@@ -263,12 +273,15 @@ impl FinalizeResult {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum TransactionResult {
-    Accept(SubstateDiff),
-    AcceptFeeRejectRest(SubstateDiff, RejectReason),
-    Reject(RejectReason),
+    #[n(0)]
+    Accept(#[n(0)] SubstateDiff),
+    #[n(1)]
+    AcceptFeeRejectRest(#[n(0)] SubstateDiff, #[n(1)] RejectReason),
+    #[n(2)]
+    Reject(#[n(0)] RejectReason),
 }
 
 impl TransactionResult {
@@ -364,22 +377,37 @@ impl Display for TransactionResult {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum RejectReason {
-    ExecutionFailure(String),
-    SubstateNotFound(String),
-    FailedToLockInputs(String),
-    FailedToLockOutputs(String),
+    #[n(0)]
+    ExecutionFailure(#[n(0)] String),
+    #[n(1)]
+    SubstateNotFound(#[n(0)] String),
+    #[n(2)]
+    FailedToLockInputs(#[n(0)] String),
+    #[n(3)]
+    FailedToLockOutputs(#[n(0)] String),
+    #[n(4)]
     ForeignPledgeInputConflict,
+    #[n(5)]
     ForeignShardGroupDecidedToAbort {
+        #[n(0)]
         start_shard: u32,
+        #[n(1)]
         end_shard: u32,
+        #[n(2)]
         abort_reason: AbortReason,
     },
-    InsufficientFeesPaid(String),
+    #[n(6)]
+    InsufficientFeesPaid(#[n(0)] String),
+    #[n(7)]
     FeePaymentInMainIntent,
+    #[n(8)]
     Abort {
+        #[n(0)]
         reason: AbortReason,
     },
 }
@@ -413,17 +441,39 @@ impl Display for RejectReason {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize, borsh::BorshSerialize)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    Deserialize,
+    Serialize,
+    borsh::BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum AbortReason {
+    #[n(0)]
     ForeignPledgeInputConflict,
+    #[n(1)]
     LockInputsFailed,
+    #[n(2)]
     LockOutputsFailed,
+    #[n(3)]
     LockInputsOutputsFailed,
+    #[n(4)]
     ExecutionFailure,
+    #[n(5)]
     OneOrMoreInputsNotFound,
+    #[n(6)]
     InsufficientFeesPaid,
+    #[n(7)]
     FeePaymentInMainIntent,
+    #[n(8)]
     EpochExpired,
 }
 

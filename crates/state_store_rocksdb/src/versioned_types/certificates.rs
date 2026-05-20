@@ -1,14 +1,16 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::{ProposalCertificate, TimeoutCertificate};
 
 use crate::traits::Versioned;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub enum VersionedProposalCertificate {
-    V1(ProposalCertificate),
+    #[n(0)]
+    V1(#[n(0)] ProposalCertificate),
 }
 
 impl Versioned for VersionedProposalCertificate {
@@ -33,9 +35,10 @@ impl From<ProposalCertificate> for VersionedProposalCertificate {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub enum VersionedTimeoutCertificate {
-    V1(TimeoutCertificate),
+    #[n(0)]
+    V1(#[n(0)] TimeoutCertificate),
 }
 
 impl Versioned for VersionedTimeoutCertificate {

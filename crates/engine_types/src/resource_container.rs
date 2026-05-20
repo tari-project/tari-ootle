@@ -27,29 +27,49 @@ use tari_template_lib::{
 use crate::{confidential, crypto::OutputBody, substate::SubstateId};
 
 /// Instances of a single resource kept in Buckets and Vaults
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize, borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum ResourceContainer {
+    #[n(0)]
     Fungible {
+        #[n(0)]
         address: ResourceAddress,
+        #[n(1)]
         amount: Amount,
+        #[n(2)]
         locked_amount: Amount,
     },
+    #[n(1)]
     NonFungible {
+        #[n(0)]
         address: ResourceAddress,
+        #[n(1)]
         token_ids: BTreeSet<NonFungibleId>,
+        #[n(2)]
         locked_token_ids: BTreeSet<NonFungibleId>,
     },
+    #[n(2)]
     Confidential {
+        #[n(0)]
         address: ResourceAddress,
+        #[n(1)]
         commitments: BTreeMap<PedersenCommitmentBytes, OutputBody>,
+        #[n(2)]
         revealed_amount: Amount,
+        #[n(3)]
         locked_commitments: BTreeMap<PedersenCommitmentBytes, OutputBody>,
+        #[n(4)]
         locked_revealed_amount: Amount,
     },
+    #[n(3)]
     Stealth {
+        #[n(0)]
         address: ResourceAddress,
+        #[n(1)]
         revealed_amount: Amount,
+        #[n(2)]
         locked_amount: Amount,
     },
 }

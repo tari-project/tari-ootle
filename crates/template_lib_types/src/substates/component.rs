@@ -20,16 +20,18 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use minicbor::{CborLen, Decode, Encode};
 use tari_bor::{BorTag, Tagged};
 use tari_template_abi::rust::{fmt, prelude::*, str::FromStr};
 
 use super::BinaryTag;
-use crate::{EntityId, KeyParseError, ObjectKey, address_prefixes, newtype_struct_serde_impl};
+use crate::{EntityId, KeyParseError, ObjectKey, address_prefixes};
 
 const TAG: u64 = BinaryTag::ComponentAddress.as_u64();
 
 /// A component's unique global identifier.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Encode, Decode, CborLen)]
+#[cbor(transparent)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct ComponentAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
@@ -103,4 +105,5 @@ impl AsRef<[u8]> for ComponentAddress {
     }
 }
 
-newtype_struct_serde_impl!(ComponentAddress, BorTag<ObjectKey, TAG>);
+#[cfg(feature = "serde")]
+crate::newtype_struct_serde_impl!(ComponentAddress, BorTag<ObjectKey, TAG>);

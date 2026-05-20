@@ -24,10 +24,23 @@ use crate::{
     v1::pruned::{PrunedUnsealedTransactionV1, PrunedUnsignedTransactionV1},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    Eq,
+    PartialEq,
+    borsh::BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionSealSignature {
+    #[n(0)]
     public_key: RistrettoPublicKeyBytes,
+    #[n(1)]
     signature: SchnorrSignatureBytes,
 }
 
@@ -141,10 +154,23 @@ impl From<SignatureOutput> for TransactionSealSignature {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    Eq,
+    PartialEq,
+    borsh::BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionSignature {
+    #[n(0)]
     public_key: RistrettoPublicKeyBytes,
+    #[n(1)]
     signature: SchnorrSignatureBytes,
 }
 

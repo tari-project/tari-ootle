@@ -23,6 +23,41 @@ macro_rules! create_hash_type {
         $(#[$meta])*
         pub struct $name(#[serde(with = "::ootle_serde::hex")] ::tari_common_types::types::FixedHash);
 
+        // Minicbor codec: encode as a CBOR byte string of the fixed-size hash, mirroring the
+        // serde `transparent` representation. FixedHash is a foreign type so derives on the
+        // wrapping struct are not possible — implement directly on the newtype.
+        impl<C> ::minicbor::Encode<C> for $name {
+            fn encode<W: ::minicbor::encode::Write>(
+                &self,
+                e: &mut ::minicbor::Encoder<W>,
+                _ctx: &mut C,
+            ) -> Result<(), ::minicbor::encode::Error<W::Error>> {
+                e.bytes(self.0.as_slice())?;
+                Ok(())
+            }
+        }
+
+        impl<'b, C> ::minicbor::Decode<'b, C> for $name {
+            fn decode(
+                d: &mut ::minicbor::Decoder<'b>,
+                _ctx: &mut C,
+            ) -> Result<Self, ::minicbor::decode::Error> {
+                let bytes = d.bytes()?;
+                let hash = ::tari_common_types::types::FixedHash::try_from(bytes)
+                    .map_err(|e| ::minicbor::decode::Error::message(::std::format!(
+                        concat!(stringify!($name), " decode failed: {}"), e
+                    )))?;
+                Ok(Self(hash))
+            }
+        }
+
+        impl<C> ::minicbor::CborLen<C> for $name {
+            fn cbor_len(&self, ctx: &mut C) -> usize {
+                let n = ::tari_common_types::types::FixedHash::byte_size();
+                <u64 as ::minicbor::CborLen<C>>::cbor_len(&(n as u64), ctx) + n
+            }
+        }
+
         impl $name {
             /// Represents a zero/null hash.
             pub const fn zero() -> Self {

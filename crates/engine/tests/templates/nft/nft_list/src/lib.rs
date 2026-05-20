@@ -21,8 +21,9 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 use tari_template_lib::prelude::*;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 pub struct Sparkle {
+    #[n(0)]
     pub brightness: u32,
 }
 

@@ -4,6 +4,7 @@
 use std::fmt::Display;
 
 use borsh::BorshSerialize;
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, hashing::quorum_certificate_id_hasher};
@@ -15,19 +16,30 @@ use crate::{
     validator_signature::ValidatorSignatureBytes,
 };
 
-#[derive(Debug, Clone, Deserialize, Serialize, BorshSerialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, BorshSerialize, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ProposalCertificate {
+    #[n(0)]
     height: NodeHeight,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "ootle_serde::hex")]
+    // FixedHash is from tari_common_types (external) — bridge through serde.
+    #[n(1)]
+    #[cbor(with = "tari_bor::adapters::serde_bridge")]
     header_hash: FixedHash,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[n(2)]
     parent_id: BlockId,
+    #[n(3)]
     epoch: Epoch,
+    #[n(4)]
     shard_group: ShardGroup,
+    #[n(5)]
     signatures: Vec<ValidatorSignatureBytes>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    // QuorumDecision is from tari_sidechain (external) — bridge through serde.
+    #[n(6)]
+    #[cbor(with = "tari_bor::adapters::serde_bridge")]
     decision: QuorumDecision,
 }
 

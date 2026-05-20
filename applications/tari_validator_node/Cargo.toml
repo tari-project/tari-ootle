@@ -41,7 +41,7 @@ tari_consensus = { workspace = true }
 tari_consensus_types = { workspace = true }
 tari_networking = { workspace = true }
 tari_rpc_framework = { workspace = true }
-tari_template_builtin = { workspace = true, features = ["templates"] }
+tari_template_builtin = { workspace = true, features = ["templates", "state"] }
 tari_swarm = { workspace = true }
 tari_state_tree = { workspace = true }
 ootle_byte_type = { workspace = true, features = ["crypto"] }

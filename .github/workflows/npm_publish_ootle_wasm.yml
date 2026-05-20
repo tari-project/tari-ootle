@@ -6,6 +6,7 @@ on:
     branches: development
     paths:
       - 'crates/ootle_wasm/**'
+  workflow_dispatch:
 
 env:
   WASM_PACK_VERSION: '0.13.1'

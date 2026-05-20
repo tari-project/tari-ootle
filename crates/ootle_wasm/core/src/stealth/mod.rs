@@ -15,4 +15,4 @@ mod types;
 pub mod validate;
 pub mod viewable_balance;
 
-pub use types::{InputWitness, StealthInputWitnessJson, StealthOutputWitnessJson};
+pub use types::{InputWitness, OutputWitnessJson, StealthInputWitnessJson, StealthOutputWitnessJson};

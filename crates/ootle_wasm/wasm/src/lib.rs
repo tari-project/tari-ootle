@@ -243,6 +243,68 @@ pub fn generate_stealth_outputs_statement(
     })
 }
 
+/// Build a single stealth output witness entirely client-side (sender side), mirroring the wallet
+/// daemon's `create_output_witness`.
+///
+/// A fresh commitment mask and ephemeral nonce are generated internally; the recipient recovers the
+/// value and mask by decrypting `encrypted_data`. Returns one witness as a JSON string with the shape:
+/// ```text
+/// {
+///   "witness": {
+///     "amount": <u64>,
+///     "mask": <hex 32 bytes>,
+///     "sender_public_nonce": <hex 32 bytes>,
+///     "minimum_value_promise": <u64>,
+///     "encrypted_data": <hex variable-length>,
+///     "resource_view_key": <hex 32 bytes | null>
+///   },
+///   "spend_condition": <SpendCondition>,
+///   "tag": <u32>
+/// }
+/// ```
+/// Collect one witness per output (including change) into a JSON array and pass it to
+/// `generateStealthOutputsStatement`.
+///
+/// - `network` is the network byte (0x00 = MainNet, 0x10 = LocalNet, 0x26 = Esmeralda, ...).
+/// - `destination_account_public_key` / `destination_view_public_key` are the recipient's 32-byte keys.
+/// - `resource_address` is the `resource_<hex>` string of the resource being sent.
+/// - `resource_view_key` is the resource view-key holder's 32-byte public key, or `null` for resources without a
+///   viewable balance (when set, the output receives an ElGamal proof at statement time).
+/// - `memo_json` is an optional JSON-encoded `Memo` to embed in the encrypted payload.
+/// - `pay_to_json` is an optional JSON-encoded `PayTo`: `"StealthPublicKey"` (the default when `null`, producing a
+///   one-time stealth spend key) or `{"AccessRule": <AccessRule>}`.
+/// - `minimum_value_promise` is the range-proof lower bound and must be `<= amount` (use `0` normally).
+// `#[wasm_bindgen]` exports must take primitive/JS-marshalled arguments, so the params cannot be passed
+// as a struct here — they are repacked into `CreateStealthOutputWitnessParams` for the core call.
+#[wasm_bindgen(js_name = "createStealthOutputWitness")]
+#[allow(clippy::too_many_arguments)]
+pub fn create_stealth_output_witness(
+    network: u8,
+    destination_account_public_key: &[u8],
+    destination_view_public_key: &[u8],
+    amount: u64,
+    resource_address: &str,
+    resource_view_key: Option<Vec<u8>>,
+    memo_json: Option<String>,
+    pay_to_json: Option<String>,
+    minimum_value_promise: u64,
+) -> Result<String, JsError> {
+    ootle_wasm_core::stealth::outputs::create_stealth_output_witness(
+        ootle_wasm_core::stealth::outputs::CreateStealthOutputWitnessParams {
+            network,
+            destination_account_public_key,
+            destination_view_public_key,
+            amount,
+            resource_address,
+            resource_view_key: resource_view_key.as_deref(),
+            memo_json: memo_json.as_deref(),
+            pay_to_json: pay_to_json.as_deref(),
+            minimum_value_promise,
+        },
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
+}
+
 /// Build a `StealthInputsStatement` JSON from raw input commitments and a revealed amount.
 ///
 /// `input_commitments` is the concatenated bytes of all 32-byte commitments (so the length must be a

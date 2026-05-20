@@ -11,8 +11,11 @@
 //! `EncryptedData` hex encoding; `spend_condition` and `tag` are the same shapes used by the wallet daemon
 //! RPC layer.
 
-use serde::Deserialize;
-use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
+use serde::{Deserialize, Serialize};
+use tari_crypto::{
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    tari_utilities::ByteArray,
+};
 use tari_ootle_wallet_crypto::{MaskAndValue, OutputWitness, StealthInputWitness, StealthOutputWitness};
 use tari_template_lib_types::{EncryptedData, crypto::UtxoTag, stealth::SpendCondition};
 
@@ -22,7 +25,7 @@ use crate::{
 };
 
 /// Unblinded data for a single stealth output (sender side).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutputWitnessJson {
     pub amount: u64,
     /// Hex-encoded 32-byte Ristretto scalar.
@@ -57,12 +60,45 @@ impl OutputWitnessJson {
     }
 }
 
+impl From<&OutputWitness> for OutputWitnessJson {
+    fn from(witness: &OutputWitness) -> Self {
+        // Destructured so adding a field to `OutputWitness` is a compile error here, keeping this in
+        // lock-step with the inverse `try_into_witness`.
+        let OutputWitness {
+            amount,
+            mask,
+            sender_public_nonce,
+            minimum_value_promise,
+            encrypted_data,
+            resource_view_key,
+        } = witness;
+        Self {
+            amount: *amount,
+            mask: hex::encode(mask.as_bytes()),
+            sender_public_nonce: hex::encode(sender_public_nonce.as_bytes()),
+            minimum_value_promise: *minimum_value_promise,
+            encrypted_data: encrypted_data.clone(),
+            resource_view_key: resource_view_key.as_ref().map(|k| hex::encode(k.as_bytes())),
+        }
+    }
+}
+
 /// A full stealth output witness: the unblinded data plus the spend condition and UTXO tag attached to it.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StealthOutputWitnessJson {
     pub witness: OutputWitnessJson,
     pub spend_condition: SpendCondition,
     pub tag: UtxoTag,
+}
+
+impl From<&StealthOutputWitness> for StealthOutputWitnessJson {
+    fn from(witness: &StealthOutputWitness) -> Self {
+        Self {
+            witness: OutputWitnessJson::from(&witness.witness),
+            spend_condition: witness.spend_condition.clone(),
+            tag: witness.tag,
+        }
+    }
 }
 
 impl TryFrom<StealthOutputWitnessJson> for StealthOutputWitness {

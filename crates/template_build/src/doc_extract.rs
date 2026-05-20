@@ -27,14 +27,13 @@ pub fn extract_function_docs(source: &Path) -> Result<Vec<FunctionMetadata>, Doc
 }
 
 fn extract_from_file(file: &syn::File) -> Vec<FunctionMetadata> {
-    for item in &file.items {
-        if let syn::Item::Mod(m) = item &&
-            has_template_attr(&m.attrs)
-        {
-            return extract_from_mod(m);
-        }
-    }
-    Vec::new()
+    file.items
+        .iter()
+        .find_map(|item| match item {
+            syn::Item::Mod(m) if has_template_attr(&m.attrs) => Some(extract_from_mod(m)),
+            _ => None,
+        })
+        .unwrap_or_default()
 }
 
 fn has_template_attr(attrs: &[syn::Attribute]) -> bool {
@@ -49,43 +48,35 @@ fn extract_from_mod(m: &syn::ItemMod) -> Vec<FunctionMetadata> {
     };
 
     // The template name is taken from the first public struct or enum (mirrors template_macros).
-    let template_name = items.iter().find_map(|item| match item {
-        syn::Item::Struct(s) if matches!(s.vis, syn::Visibility::Public(_)) => Some(s.ident.clone()),
-        syn::Item::Enum(e) if matches!(e.vis, syn::Visibility::Public(_)) => Some(e.ident.clone()),
+    let Some(template_name) = items.iter().find_map(|item| match item {
+        syn::Item::Struct(s) if matches!(s.vis, syn::Visibility::Public(_)) => Some(&s.ident),
+        syn::Item::Enum(e) if matches!(e.vis, syn::Visibility::Public(_)) => Some(&e.ident),
         _ => None,
-    });
-
-    let Some(template_name) = template_name else {
+    }) else {
         return Vec::new();
     };
 
-    let mut out = Vec::new();
-    for item in items {
-        let syn::Item::Impl(impl_block) = item else {
-            continue;
-        };
-        if impl_block.trait_.is_some() {
-            continue;
-        }
-        let syn::Type::Path(self_ty) = &*impl_block.self_ty else {
-            continue;
-        };
-        if !self_ty.path.is_ident(&template_name) {
-            continue;
-        }
-
-        for impl_item in &impl_block.items {
-            let syn::ImplItem::Fn(f) = impl_item else { continue };
-            if !matches!(f.vis, syn::Visibility::Public(_)) {
-                continue;
-            }
-            out.push(FunctionMetadata {
-                name: f.sig.ident.to_string(),
-                doc: extract_doc_lines(&f.attrs),
-            });
-        }
-    }
-    out
+    items
+        .iter()
+        .filter_map(|item| match item {
+            syn::Item::Impl(impl_block)
+                if impl_block.trait_.is_none() &&
+                    matches!(&*impl_block.self_ty, syn::Type::Path(p) if p.path.is_ident(template_name)) =>
+            {
+                Some(&impl_block.items)
+            },
+            _ => None,
+        })
+        .flatten()
+        .filter_map(|impl_item| match impl_item {
+            syn::ImplItem::Fn(f) if matches!(f.vis, syn::Visibility::Public(_)) => Some(f),
+            _ => None,
+        })
+        .map(|f| FunctionMetadata {
+            name: f.sig.ident.to_string(),
+            doc: extract_doc_lines(&f.attrs),
+        })
+        .collect()
 }
 
 fn extract_doc_lines(attrs: &[syn::Attribute]) -> String {

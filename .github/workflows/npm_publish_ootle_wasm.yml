@@ -47,6 +47,11 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           node-version-file: .nvmrc
 
+      # Node 23.x ships with npm 10.x, which cannot exchange the GitHub OIDC token for an
+      # npm publish token. Trusted-publisher auth on the registry PUT requires npm >= 11.5.1.
+      - name: Upgrade npm for OIDC trusted publishing
+        run: npm install -g npm@latest
+
       - name: Build WASM package
         run: bash build.sh bundler release
 

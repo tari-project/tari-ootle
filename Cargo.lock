@@ -12430,7 +12430,6 @@ dependencies = [
  "borsh",
  "minicbor",
  "serde",
- "serde_json",
  "tari_bor",
  "tari_template_abi",
  "tari_template_lib_types",

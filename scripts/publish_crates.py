@@ -31,12 +31,14 @@ import urllib.error
 CRATES = [
     ("tari_bor", "crates/tari_bor", 1),
     ("ootle-network", "crates/ootle_network", 1),
-    ("ootle_serde", "crates/ootle_serde", 1),
     ("tari_template_abi", "crates/template_abi", 2),
     ("tari_template_lib_types", "crates/template_lib_types", 2),
     ("ootle_byte_type", "crates/ootle_byte_type", 1),
     ("tari_template_macros", "crates/template_macros", 2),
     ("tari_template_lib", "crates/template_lib", 2),
+    # ootle_serde has a dev-dependency on tari_template_lib, so it must be
+    # published after tari_template_lib even though it's a stable/foundational crate.
+    ("ootle_serde", "crates/ootle_serde", 1),
     ("tari_ootle_template_metadata", "crates/template_metadata", 2),
     ("tari_ootle_template_build", "crates/template_build", 2),
     ("tari_engine_types", "crates/engine_types", 3),

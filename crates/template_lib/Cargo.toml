@@ -18,9 +18,6 @@ serde = { workspace = true, default-features = false, optional = true, features 
 ts-rs = { workspace = true, optional = true }
 borsh = { workspace = true, optional = true, features = ["derive"] }
 
-[dev-dependencies]
-serde_json = { workspace = true }
-
 [features]
 default = ["macro", "std"]
 macro = ["tari_template_macros"]

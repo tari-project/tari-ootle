@@ -41,7 +41,10 @@ default = []
 wasm-cache = ["dep:bytes", "dep:memmap2"]
 
 [dev-dependencies]
-tari_template_test_tooling = { workspace = true }
+# Path-only (no version) to break the circular dev-dep: tari_template_test_tooling
+# depends on tari_engine, so we can't list it with a published version here or
+# `cargo publish` can't resolve the manifest.
+tari_template_test_tooling = { path = "../template_test_tooling" }
 tari_transaction_manifest = { workspace = true }
 tari_ootle_transaction = { workspace = true }
 tari_template_builtin = { workspace = true, features = ["templates", "state"] }

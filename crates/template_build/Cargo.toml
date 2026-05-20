@@ -9,6 +9,7 @@ license.workspace = true
 
 [dependencies]
 tari_ootle_template_metadata = { workspace = true, features = ["json"] }
+syn = { workspace = true, features = ["full"] }
 thiserror = { workspace = true }
 url = { workspace = true }
 

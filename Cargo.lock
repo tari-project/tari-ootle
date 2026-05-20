@@ -11834,6 +11834,7 @@ dependencies = [
 name = "tari_ootle_template_build"
 version = "0.7.0"
 dependencies = [
+ "syn 2.0.117",
  "tari_ootle_template_metadata",
  "tempfile",
  "thiserror 2.0.18",

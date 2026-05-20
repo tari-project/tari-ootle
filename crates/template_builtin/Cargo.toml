@@ -14,7 +14,10 @@ tari_template_lib_types = { workspace = true }
 minicbor = { workspace = true, default-features = false, features = ["alloc", "derive"], optional = true }
 
 [dev-dependencies]
-tari_template_test_tooling = { workspace = true }
+# Path-only (no version) to break the circular dev-dep: tari_template_test_tooling
+# depends on tari_template_builtin, so we can't list it with a published version here
+# or `cargo publish` can't resolve the manifest.
+tari_template_test_tooling = { path = "../template_test_tooling" }
 tari_engine_types = { workspace = true }
 tari_template_lib = { workspace = true }
 tari_ootle_transaction = { workspace = true }

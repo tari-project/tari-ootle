@@ -111,15 +111,17 @@ pub fn template_non_wasm(attr: TokenStream, item: TokenStream) -> TokenStream {
             if let Err(err) = template::ast::inject_cbor_derives(items) {
                 return err.to_compile_error().into();
             }
-        }
 
-        // Bring `minicbor` into scope so the injected derives — and the code those
-        // derives emit (which references `minicbor::Encoder`, `minicbor::Decoder`, …) —
-        // resolve. The WASM path gets this via `use template_macro_deps::*` inside the
-        // generated wrapper module; here we inject the same alias directly.
-        items.insert(0, syn::parse_quote! {
-            use ::tari_template_lib::template_macro_deps::minicbor;
-        });
+            // Bring `minicbor` into scope so the injected derives — and the code those
+            // derives emit (which references `minicbor::Encoder`, `minicbor::Decoder`, …) —
+            // resolve. The WASM path gets this via `use template_macro_deps::*` inside the
+            // generated wrapper module; here we inject the same alias directly. Skipped
+            // alongside the derives under `skip_cbor_derives` so authors rolling their own
+            // encoding can manage their own `minicbor` import without collision.
+            items.insert(0, syn::parse_quote! {
+                use ::tari_template_lib::template_macro_deps::minicbor;
+            });
+        }
     }
 
     quote::quote!(#[allow(dead_code)] #module).into()

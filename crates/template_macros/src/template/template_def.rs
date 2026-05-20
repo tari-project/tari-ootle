@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{ToTokens, quote};
 use syn::{AngleBracketedGenericArguments, GenericArgument, PathArguments, PathSegment, Result, Type, TypeTuple};
 use tari_template_abi::{
     ArgDef,
@@ -209,7 +209,7 @@ fn path_segment_to_arg_type(template_name: &str, segment: Option<&PathSegment>) 
                                 GenericArgument::Type(Type::Tuple(tuple)) => {
                                     tuple_to_arg_type(template_name, tuple).to_string()
                                 },
-                                a => format!("{:?}", a),
+                                a => a.to_token_stream().to_string(),
                             })
                             .collect::<Vec<_>>()
                             .join(", ");
@@ -433,6 +433,24 @@ mod tests {
         });
         assert_eq!(f.arguments[1].arg_type, ArgType::Other {
             name: "ResourceAddress".to_string()
+        });
+    }
+
+    #[test]
+    fn test_const_generic_arg() {
+        let def = parse_template_def(indoc! {"
+            mod test_template {
+                pub struct TestTemplate {}
+                impl TestTemplate {
+                    pub fn create(name: MaxString<8>) { }
+                }
+            }
+        "});
+
+        let funcs = get_functions(&def);
+        let f = &funcs[0];
+        assert_eq!(f.arguments[0].arg_type, ArgType::Other {
+            name: "MaxString<8>".to_string()
         });
     }
 

@@ -9,12 +9,12 @@
 
 use std::{fs, path::Path};
 
-use tari_ootle_template_metadata::FunctionMetadata;
+use tari_ootle_template_metadata::FunctionDoc;
 
-/// Read the given source file and return one [`FunctionMetadata`] per public template function.
+/// Read the given source file and return one [`FunctionDoc`] per public template function.
 ///
 /// Returns an empty vec if the file contains no `#[template]` mod or no eligible public functions.
-pub fn extract_function_docs(source: &Path) -> Result<Vec<FunctionMetadata>, DocExtractError> {
+pub fn extract_function_docs(source: &Path) -> Result<Vec<FunctionDoc>, DocExtractError> {
     let content = fs::read_to_string(source).map_err(|e| DocExtractError::Io {
         path: source.to_path_buf(),
         source: e,
@@ -26,7 +26,7 @@ pub fn extract_function_docs(source: &Path) -> Result<Vec<FunctionMetadata>, Doc
     Ok(extract_from_file(&file))
 }
 
-fn extract_from_file(file: &syn::File) -> Vec<FunctionMetadata> {
+fn extract_from_file(file: &syn::File) -> Vec<FunctionDoc> {
     file.items
         .iter()
         .find_map(|item| match item {
@@ -42,7 +42,7 @@ fn has_template_attr(attrs: &[syn::Attribute]) -> bool {
         .any(|attr| attr.path().segments.last().is_some_and(|seg| seg.ident == "template"))
 }
 
-fn extract_from_mod(m: &syn::ItemMod) -> Vec<FunctionMetadata> {
+fn extract_from_mod(m: &syn::ItemMod) -> Vec<FunctionDoc> {
     let Some((_, items)) = &m.content else {
         return Vec::new();
     };
@@ -72,7 +72,7 @@ fn extract_from_mod(m: &syn::ItemMod) -> Vec<FunctionMetadata> {
             syn::ImplItem::Fn(f) if matches!(f.vis, syn::Visibility::Public(_)) => Some(f),
             _ => None,
         })
-        .map(|f| FunctionMetadata {
+        .map(|f| FunctionDoc {
             name: f.sig.ident.to_string(),
             doc: extract_doc_lines(&f.attrs),
         })
@@ -122,7 +122,7 @@ pub enum DocExtractError {
 mod tests {
     use super::*;
 
-    fn parse(src: &str) -> Vec<FunctionMetadata> {
+    fn parse(src: &str) -> Vec<FunctionDoc> {
         let file = syn::parse_file(src).unwrap();
         extract_from_file(&file)
     }

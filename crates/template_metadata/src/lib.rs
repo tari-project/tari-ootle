@@ -15,4 +15,4 @@ mod metadata;
 
 pub use cargo_toml::{CargoTomlError, from_cargo_toml, from_cargo_toml_str};
 pub use hash::{MetadataHash, MetadataHashError, MetadataHashWriter};
-pub use metadata::{FunctionMetadata, SCHEMA_VERSION, TemplateMetadata, TemplateMetadataError};
+pub use metadata::{FunctionDoc, SCHEMA_VERSION, TemplateMetadata, TemplateMetadataError};

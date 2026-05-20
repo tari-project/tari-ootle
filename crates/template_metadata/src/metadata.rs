@@ -73,7 +73,7 @@ pub struct TemplateMetadata {
     /// Rustdoc comments extracted from public functions of the template, keyed by source order.
     #[n(13)]
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub functions: Vec<FunctionMetadata>,
+    pub functions: Vec<FunctionDoc>,
     #[n(14)]
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, String>,
@@ -82,7 +82,7 @@ pub struct TemplateMetadata {
 /// Off-chain documentation for a single public template function.
 #[derive(Debug, Clone, Encode, Decode, CborLen, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct FunctionMetadata {
+pub struct FunctionDoc {
     #[n(0)]
     pub name: String,
     #[n(1)]
@@ -265,7 +265,7 @@ mod tests {
             supersedes: Some(
                 TemplateAddress::from_hex("0000000000000000000000000000000000000000000000000000000000000001").unwrap(),
             ),
-            functions: vec![FunctionMetadata {
+            functions: vec![FunctionDoc {
                 name: "transfer".to_string(),
                 doc: "Move funds between accounts.".to_string(),
             }],

@@ -3,18 +3,18 @@
 
 use blake2::Blake2b;
 use chacha20poly1305::{
-    AeadCore,
     AeadInPlace,
     KeyInit,
     Tag,
     XChaCha20Poly1305,
     XNonce,
     aead,
-    aead::{OsRng, generic_array::GenericArray},
+    aead::generic_array::GenericArray,
     consts::U32,
 };
 use digest::FixedOutput;
 use ootle_byte_type::ToByteType;
+use rand::Rng;
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
     hashing::DomainSeparatedHasher,
@@ -106,8 +106,13 @@ fn encrypt_data_inner(
             .expect("invariant violation: nonce length is less than payload_offset")
     }
 
-    // Produce a secure random nonce and the AEAD
-    let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+    // Produce a secure random nonce and the AEAD. The nonce is drawn via `rand` (backed by getrandom
+    // 0.4) rather than aead's `OsRng` (rand_core 0.6 -> getrandom 0.2). Both are CSPRNGs, but routing
+    // through `rand` keeps wasm32 builds on a single getrandom backend instead of dragging in
+    // getrandom 0.2's JS env-detection import shim. See crates/ootle_wasm.
+    let mut nonce_bytes = [0u8; EncryptedData::SIZE_NONCE];
+    rand::rng().fill_bytes(&mut nonce_bytes);
+    let nonce = XNonce::from_slice(&nonce_bytes);
     let aead_key = inner_encrypted_data_kdf_aead(encryption_key, commitment);
     let cipher = XChaCha20Poly1305::new(GenericArray::from_slice(aead_key.reveal()));
 
@@ -138,10 +143,10 @@ fn encrypt_data_inner(
     }
 
     // Encrypt in place
-    match cipher.encrypt_in_place_detached(&nonce, ENCRYPTED_DATA_TAG, payload_mut) {
+    match cipher.encrypt_in_place_detached(nonce, ENCRYPTED_DATA_TAG, payload_mut) {
         Ok(tag) => {
             tag_slice_mut(&mut bytes).copy_from_slice(&tag);
-            nonce_slice_mut(&mut bytes).copy_from_slice(&nonce);
+            nonce_slice_mut(&mut bytes).copy_from_slice(&nonce_bytes);
 
             Ok(EncryptedData::try_from(bytes).expect("bytes length <= EncryptedData::max_size()"))
         },

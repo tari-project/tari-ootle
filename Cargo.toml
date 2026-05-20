@@ -104,7 +104,7 @@ tari_indexer_lib = { path = "crates/indexer_lib" }
 tari_rpc_state_sync = { path = "crates/rpc_state_sync" }
 tari_state_store_rocksdb = { path = "crates/state_store_rocksdb" }
 tari_state_tree = { path = "crates/state_tree" }
-tari_template_test_tooling = { path = "crates/template_test_tooling" }
+tari_template_test_tooling = { path = "crates/template_test_tooling", version = "0.31" }
 tari_transaction_manifest = { path = "crates/transaction_manifest", version = "0.31" }
 tari_validator_node_rpc = { path = "crates/validator_node_rpc" }
 sqlite_message_logger = { path = "networking/sqlite_message_logger" }

@@ -23,6 +23,7 @@ use std::{
 use tari_consensus::messages::HotstuffMessage;
 use tari_consensus_types::Decision;
 use tari_ootle_common_types::{Epoch, NodeHeight};
+use tari_ootle_storage::{StateStore, consensus_models::Block};
 
 use crate::support::{Test, TestVnDestination, logging::setup_logger};
 
@@ -67,16 +68,33 @@ async fn first_round_votes_dropped_recovers_via_stale_qc_carry_forward() {
 
     test.start_epoch(Epoch(1)).await;
 
-    // Drive the test loop until either the transaction is finalised everywhere or we've waited
-    // too many blocks. We deliberately observe block commits past height 1 (the dropped round)
-    // to assert that consensus actually moved forward.
+    // Drive the test loop until the transaction is finalised everywhere AND we've witnessed a
+    // real (non-dummy) block commit past the dropped-vote height — that's the only proof the
+    // recovery path actually carried forward, not just the dummy filler the chain-commit
+    // cascade walks back to.
+    //
+    // Why both conditions: the cascade emits a `BlockCommitted` event for the dummy at
+    // target_height (height matches but it's a filler) before the event for the real recovery
+    // block at target_height+1. Both publishes happen inside the same storage write
+    // transaction, so substates become visible roughly together across the committee. Without
+    // the dummy filter, `has_committed_substates` can return true for everyone while the loop
+    // has only consumed the dummy events, leaving `saw_past_target` false even though recovery
+    // succeeded.
     let mut saw_past_target = false;
     loop {
-        let (_, _, _, committed_height) = test.on_block_committed().await;
+        let (address, block_id, _, committed_height) = test.on_block_committed().await;
         if committed_height > target_height {
-            saw_past_target = true;
+            let is_dummy = test
+                .get_validator(&address)
+                .state_store()
+                .with_read_tx(|tx| Block::get(tx, &block_id))
+                .expect("block from BlockCommitted event must exist in the validator's store")
+                .is_dummy();
+            if !is_dummy {
+                saw_past_target = true;
+            }
         }
-        if test.validators_iter().all(|v| v.has_committed_substates(&tx_id)) {
+        if saw_past_target && test.validators_iter().all(|v| v.has_committed_substates(&tx_id)) {
             break;
         }
         if committed_height > NodeHeight(50) {

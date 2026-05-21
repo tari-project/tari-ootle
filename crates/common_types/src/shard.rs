@@ -82,34 +82,17 @@ impl Shard {
         }
 
         let num_shards = num_shards.as_u32();
-
-        let shard_u256 = U256::from(self.0) - 1;
-        let shard_index = self.0 - 1;
-
-        // Power of two integer division using bit shifts
-        let shard_size = U256::MAX >> num_shards.trailing_zeros();
-        if shard_index == 0 {
-            return RangeInclusive::new(
-                SubstateAddress::zero(),
-                SubstateAddress::from_u256_zero_version(shard_size - 1),
-            );
-        }
-
-        // Add one to each start to account for remainder
-        let start = shard_u256 * shard_size;
-
-        if shard_index == num_shards - 1 {
-            return RangeInclusive::new(
-                SubstateAddress::from_u256_zero_version(start + shard_u256 - 1),
-                SubstateAddress::max(),
-            );
-        }
-
-        let end = start + shard_size;
-        RangeInclusive::new(
-            SubstateAddress::from_u256_zero_version(start + shard_u256 - 1),
-            SubstateAddress::from_u256_zero_version(end + shard_u256 - 1),
-        )
+        let shard_index = U256::from(self.0 - 1);
+        // `num_shards` is a power of two, so `shard_size = 2^(256 - log2(num_shards))`. We compute it as
+        // `(U256::MAX >> log2(num_shards)) + 1` to sidestep the 2^256 overflow.
+        let shard_size = (U256::MAX >> num_shards.trailing_zeros()) + U256::ONE;
+        let start = shard_index * shard_size;
+        let end = if self.0 == num_shards {
+            SubstateAddress::max()
+        } else {
+            SubstateAddress::from_u256_zero_version(start + shard_size - U256::ONE)
+        };
+        RangeInclusive::new(SubstateAddress::from_u256_zero_version(start), end)
     }
 }
 

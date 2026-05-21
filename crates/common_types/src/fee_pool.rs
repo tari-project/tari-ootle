@@ -3,19 +3,34 @@
 
 use tari_template_lib_types::{ValidatorFeePoolAddress, crypto::RistrettoPublicKeyBytes};
 
-use crate::{NumPreshards, shard::Shard, uint::U256};
+use crate::{NumPreshards, shard::Shard};
 
+/// Derives a deterministic [`ValidatorFeePoolAddress`] that lives in `shard` when partitioned into `num_preshards`.
+///
+/// Layout: two shard-prefix bytes followed by 30 bytes of the public key. The top `log2(num_preshards)` bits of the
+/// prefix encode `shard - 1`; the remaining prefix bits are zero so they are stable if `NumPreshards` is later
+/// grown — every existing pool then migrates to the lower-numbered child shard rather than fanning out by pk bits.
+/// Reserving two bytes lets `NumPreshards` grow to at most `2^16` without changing the layout.
 pub fn derive_fee_pool_address(
     public_key_bytes: &RistrettoPublicKeyBytes,
     num_preshards: NumPreshards,
     shard: Shard,
 ) -> ValidatorFeePoolAddress {
-    let mut masked_public_key_bytes = [0u8; 32];
-    // We offset the start shard by 128 LSBs of the public key's MSB (big-endian)
-    masked_public_key_bytes[16..].copy_from_slice(public_key_bytes.get(..16).expect("public key is 32 bytes"));
-    let range = shard.to_substate_address_range(num_preshards);
-    let offset_addr = range.start().to_u256() + U256::from_be_bytes(masked_public_key_bytes);
-    ValidatorFeePoolAddress::from_array(offset_addr.to_be_bytes())
+    // For num_preshards = 256, log2(256) = 8
+    let shard_bits = num_preshards.as_u32().trailing_zeros();
+    // shift required to place the shard index in the top `shard_bits` of the 2-byte prefix
+    let shift = u16::BITS - shard_bits;
+    // shard 0 is global, so shard is count-based; convert to an index
+    let shard_index = shard
+        .as_u32()
+        .checked_sub(1)
+        .expect("derive_fee_pool_address: shard 0 is reserved for global");
+    let prefix = (shard_index << shift) as u16;
+
+    let mut address = [0u8; 32];
+    address[..2].copy_from_slice(&prefix.to_be_bytes());
+    address[2..].copy_from_slice(&public_key_bytes[2..]);
+    ValidatorFeePoolAddress::from_array(address)
 }
 
 #[cfg(test)]
@@ -26,20 +41,59 @@ mod tests {
     use super::*;
     use crate::SubstateAddress;
 
+    fn assert_pool_lands_in_shard(pk: &RistrettoPublicKeyBytes, num_preshards: NumPreshards, shard: Shard) {
+        let fee_pool_address = derive_fee_pool_address(pk, num_preshards, shard);
+        let addr = SubstateAddress::from_substate_id(&fee_pool_address.into(), 0);
+        assert_eq!(addr.to_shard(num_preshards), shard);
+    }
+
     #[test]
     fn it_creates_a_pool_address_that_naturally_falls_in_the_shard() {
         let pk = RistrettoPublicKeyBytes::from([0xff; 32]);
-        let num_preshards = NumPreshards::P256;
-        let fee_pool_address = derive_fee_pool_address(&pk, num_preshards, Shard::from(1));
-        let addr = SubstateAddress::from_substate_id(&fee_pool_address.into(), 0);
-        let shard = addr.to_shard(num_preshards);
-
-        assert_eq!(shard, Shard::from(1));
+        assert_pool_lands_in_shard(&pk, NumPreshards::P256, Shard::from(1));
 
         let (_, pk) = RistrettoPublicKey::random_keypair(&mut rand::rng());
-        let fee_pool_address = derive_fee_pool_address(&pk.to_byte_type(), num_preshards, Shard::from(212));
-        let addr = SubstateAddress::from_substate_id(&fee_pool_address.into(), 0);
-        let shard = addr.to_shard(num_preshards);
-        assert_eq!(shard, Shard::from(212));
+        assert_pool_lands_in_shard(&pk.to_byte_type(), NumPreshards::P256, Shard::from(212));
+    }
+
+    #[test]
+    fn it_works_for_shard_256_and_other_n() {
+        let pk = RistrettoPublicKeyBytes::from([0xff; 32]);
+        assert_pool_lands_in_shard(&pk, NumPreshards::P256, Shard::from(256));
+        assert_pool_lands_in_shard(&pk, NumPreshards::P128, Shard::from(128));
+        assert_pool_lands_in_shard(&pk, NumPreshards::P64, Shard::from(50));
+        assert_pool_lands_in_shard(&pk, NumPreshards::P2, Shard::from(2));
+    }
+
+    #[test]
+    fn it_preserves_pk_entropy_beyond_the_shard_prefix() {
+        // Two pks differing only in bytes 2.. should produce different addresses but the same shard.
+        let mut pk_a = [0u8; 32];
+        let mut pk_b = [0u8; 32];
+        pk_a[5] = 0xAB;
+        pk_b[5] = 0xCD;
+        let pk_a = RistrettoPublicKeyBytes::from(pk_a);
+        let pk_b = RistrettoPublicKeyBytes::from(pk_b);
+
+        let addr_a = derive_fee_pool_address(&pk_a, NumPreshards::P256, Shard::from(42));
+        let addr_b = derive_fee_pool_address(&pk_b, NumPreshards::P256, Shard::from(42));
+        assert_ne!(addr_a, addr_b);
+        assert_pool_lands_in_shard(&pk_a, NumPreshards::P256, Shard::from(42));
+        assert_pool_lands_in_shard(&pk_b, NumPreshards::P256, Shard::from(42));
+    }
+
+    #[test]
+    fn it_migrates_predictably_under_a_finer_split() {
+        // A pool derived for shard X of P_k must land in the lower-numbered child (shard 2X-1) of P_{k+1},
+        // regardless of pk. This relies on the prefix bits below the current shard-bits being zero.
+        let pk = RistrettoPublicKeyBytes::from([0xff; 32]);
+        for shard in [1u32, 17, 64, 128, 256] {
+            let addr = derive_fee_pool_address(&pk, NumPreshards::P256, Shard::from(shard));
+            // P256 has no finer NumPreshards variant yet, so simulate the split by reading top 9 bits manually:
+            // under a hypothetical P512, the shard index would be (byte0 << 1) | (byte1 >> 7).
+            let bytes = SubstateAddress::from_substate_id(&addr.into(), 0).into_array();
+            let p512_index = (u32::from(bytes[0]) << 1) | u32::from(bytes[1] >> 7);
+            assert_eq!(p512_index + 1, 2 * shard - 1, "shard {shard}");
+        }
     }
 }

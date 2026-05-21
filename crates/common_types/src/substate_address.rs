@@ -129,27 +129,21 @@ impl SubstateAddress {
 
     pub fn to_u256(&self) -> U256 {
         let mut buf = [0u8; ObjectKey::LENGTH];
-        buf.copy_from_slice(&self.0[..ObjectKey::LENGTH]);
+        buf.copy_from_slice(self.object_key_bytes());
         U256::from_be_bytes(buf)
     }
 
     /// Calculates and returns the shard number that this SubstateAddress belongs.
-    /// A shard is a division of the 256-bit shard space where the boundary of the division if always a power of two.
+    /// `NumPreshards` is always a power of two, so the 256-bit address space is split into `N = 2^k` equal shards by
+    /// reading the top `k` bits of the address as the (zero-indexed) shard number. Shard numbers are one-indexed
+    /// because shard 0 is reserved for global substates.
     pub fn to_shard(&self, num_shards: NumPreshards) -> Shard {
-        if num_shards.as_u32() == 1 || self.is_zero() {
+        if num_shards.is_one() {
             return Shard::first();
         }
-        let addr_u256 = self.to_u256();
-
-        let num_shards = num_shards.as_u32();
-        let shard_size = U256::MAX >> num_shards.trailing_zeros();
-        let shard_number = u32::try_from(addr_u256 / shard_size)
-            .expect("to_shard: num_shards is a u32, so this cannot fail")
-            .checked_add(1)
-            .expect("to_shard: num_shards overflow. num_shards is u32 so this cannot fail")
-            .min(num_shards);
-
-        Shard::from(shard_number)
+        let shift = u8::BITS - num_shards.as_u32().trailing_zeros();
+        let mask = u8::MAX << shift;
+        Shard::from_u32(u32::from((self.0[0] & mask) >> shift) + 1)
     }
 
     pub fn to_shard_group(&self, num_shards: NumPreshards, num_committees: u32) -> ShardGroup {
@@ -329,6 +323,8 @@ mod tests {
     fn to_shard() {
         let shard = SubstateAddress::zero().to_shard(NumPreshards::P2);
         assert_eq!(shard, 1);
+        let shard = minus_one(address_at(1, 2)).to_shard(NumPreshards::P2);
+        assert_eq!(shard, 1);
         let shard = address_at(1, 2).to_shard(NumPreshards::P2);
         assert_eq!(shard, 2);
         let shard = plus_one(address_at(1, 2)).to_shard(NumPreshards::P2);
@@ -341,15 +337,16 @@ mod tests {
             assert_eq!(shard, 1, "failed for shard {}", i);
         }
 
-        // 2 shards, exactly half of the physical shard space
-        for i in 0..=8 {
+        // 2 shards, exactly half of the physical shard space. The natural boundary lands at i = 8 (= 2^255) which
+        // belongs to shard 2.
+        for i in 0..8 {
             let shard = divide_shard_space(i, 16).to_shard(NumPreshards::P2);
             assert_eq!(shard, 1, "{shard} is not 1 for i: {i}");
         }
 
-        for i in 9..16 {
+        for i in 8..16 {
             let shard = divide_shard_space(i, 16).to_shard(NumPreshards::P2);
-            assert_eq!(shard, 2, "{shard} is not 1 for i: {i}");
+            assert_eq!(shard, 2, "{shard} is not 2 for i: {i}");
         }
 
         // If the number of shards is a power of two, then to_shard should always return the equally divided
@@ -377,8 +374,12 @@ mod tests {
             }
         }
 
-        let shard = divide_floor(SubstateAddress::max(), 2).to_shard(NumPreshards::P256);
+        // Address at the half-way boundary (2^255) is the start of shard 129 when split into 256 equal shards.
+        let shard = divide_shard_space(128, 256).to_shard(NumPreshards::P256);
         assert_eq!(shard, 129);
+        // The element just below it is the last of shard 128.
+        let shard = minus_one(divide_shard_space(128, 256)).to_shard(NumPreshards::P256);
+        assert_eq!(shard, 128);
     }
 
     #[test]
@@ -388,27 +389,24 @@ mod tests {
         assert_eq!(shard, NumPreshards::MAX.as_u32());
     }
 
-    /// Returns the address of the floor division of the shard space
+    /// Returns the address `part / of` of the way through the shard space using the natural power-of-two boundary.
+    /// `of` must be a power of two.
     fn divide_shard_space(part: u32, of: u32) -> SubstateAddress {
         assert!(part <= of);
+        assert!(of.is_power_of_two(), "`of` must be a power of two");
         if part == 0 {
             return SubstateAddress::zero();
         }
         if part == of {
             return SubstateAddress::max();
         }
-        let size = U256::MAX / U256::from(of);
-        SubstateAddress::from_u256_zero_version(U256::from(part) * size)
+        let shard_size = (U256::MAX >> of.trailing_zeros()) + U256::ONE;
+        SubstateAddress::from_u256_zero_version(U256::from(part) * shard_size)
     }
 
     /// Returns the start address of the shard with given num_shards
     fn address_at(shard: u32, num_shards: u32) -> SubstateAddress {
-        // + shard: For each shard we add 1 to account for remainder
-        add(divide_shard_space(shard, num_shards), shard.saturating_sub(1))
-    }
-
-    fn divide_floor(shard: SubstateAddress, by: u32) -> SubstateAddress {
-        SubstateAddress::from_u256_zero_version(shard.to_u256() / U256::from(by))
+        divide_shard_space(shard, num_shards)
     }
 
     fn minus_one(shard: SubstateAddress) -> SubstateAddress {
@@ -503,8 +501,9 @@ mod tests {
             let group = address_at(16, 64).to_shard_group(NumPreshards::P64, 32);
             assert_eq!(group.as_range_inclusive(), Shard::from(17)..=Shard::from(18));
 
+            // The last address of shard 1-of-4 lies in the 16th of 64 sub-shards.
             let group = minus_one(address_at(1, 4)).to_shard_group(NumPreshards::P64, 64);
-            assert_eq!(group.as_range_inclusive(), Shard::from(17)..=Shard::from(17));
+            assert_eq!(group.as_range_inclusive(), Shard::from(16)..=Shard::from(16));
 
             let group = address_at(66, 256).to_shard_group(NumPreshards::P64, 16);
             assert_eq!(group.as_range_inclusive(), Shard::from(17)..=Shard::from(20));
@@ -630,17 +629,17 @@ mod tests {
         #[test]
         fn it_works() {
             let range = ShardGroup::new(1, 9).to_substate_address_range(NumPreshards::P16);
-            assert_range(range, SubstateAddress::zero()..address_at(10, 16));
+            assert_range(range, SubstateAddress::zero()..address_at(9, 16));
 
             let range = ShardGroup::new(1, 16).to_substate_address_range(NumPreshards::P16);
             // Last shard always includes SubstateAddress::max
             assert_range(range, address_at(0, 16)..=address_at(16, 16));
 
             let range = ShardGroup::new(1, 8).to_substate_address_range(NumPreshards::P16);
-            assert_range(range, address_at(0, 16)..address_at(9, 16));
+            assert_range(range, address_at(0, 16)..address_at(8, 16));
 
             let range = ShardGroup::new(8, 16).to_substate_address_range(NumPreshards::P16);
-            assert_range(range, address_at(8, 16)..=address_at(16, 16));
+            assert_range(range, address_at(7, 16)..=address_at(16, 16));
         }
     }
 

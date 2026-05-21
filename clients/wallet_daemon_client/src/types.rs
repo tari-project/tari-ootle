@@ -920,6 +920,10 @@ pub struct ClaimValidatorFeesRequest {
     pub max_fee: u64,
     pub shards: Vec<Shard>,
     pub dry_run: bool,
+    /// If true, claim into the account's revealed vault. If false (default), claim into a per-shard stealth UTXO
+    /// addressed to the account's own owner key.
+    #[serde(default)]
+    pub output_to_revealed: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

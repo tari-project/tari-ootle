@@ -1,16 +1,18 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashMap;
+use std::{collections::HashMap, iter};
 
 use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
 use either::Either;
 use log::*;
 use ootle_byte_type::ToByteType;
+use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{SubstateAddress, SubstateRequirement, derive_fee_pool_address};
 use tari_ootle_transaction::args;
+use tari_ootle_wallet_crypto::{OutputWitness, StealthInputWitness, StealthOutputWitness, memo::Memo};
 use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId};
 use tari_ootle_walletd_client::{
     permissions::JrpcPermission,
@@ -22,6 +24,11 @@ use tari_ootle_walletd_client::{
         GetValidatorFeesRequest,
         GetValidatorFeesResponse,
     },
+};
+use tari_template_lib_types::{
+    ValidatorFeePoolAddress,
+    constants::{STEALTH_TARI_RESOURCE_ADDRESS, TARI_TOKEN},
+    stealth::{SpendCondition, StealthTransferStatement},
 };
 
 use crate::{
@@ -125,24 +132,27 @@ pub async fn handle_claim_validator_fees(
         None => *account.address.account_public_key(),
     };
 
-    let fee_pool_addresses = req
+    let fee_pool_addresses: Vec<ValidatorFeePoolAddress> = req
         .shards
-        .into_iter()
-        .map(|shard| derive_fee_pool_address(&claim_public_key, NUM_PRESHARDS, shard));
+        .iter()
+        .map(|shard| derive_fee_pool_address(&claim_public_key, NUM_PRESHARDS, *shard))
+        .collect();
 
     // build the transaction
     let max_fee = req.max_fee.max(1);
+    let account_public_key = *account.address.account_public_key();
 
-    let unsigned_transaction = context
-        .transaction_builder()
-        .with_dry_run(req.dry_run)
-        .with_fee_instructions_builder(|builder| {
+    let builder = context.transaction_builder().with_dry_run(req.dry_run);
+
+    let builder = if req.output_to_revealed {
+        builder.with_fee_instructions_builder(|builder| {
             builder
-                .create_account(*account.address.account_public_key())
+                .create_account(account_public_key)
                 .then(|builder| {
                     let mut bucket_names = vec![];
                     fee_pool_addresses
-                        .clone()
+                        .iter()
+                        .copied()
                         .enumerate()
                         .fold(builder, |builder, (i, address)| {
                             bucket_names.push(format!("b{}", i));
@@ -162,16 +172,39 @@ pub async fn handle_claim_validator_fees(
                 })
                 .call_method(account_component_address, "pay_fee", args![max_fee])
         })
+    } else {
+        let stealth_outputs =
+            build_self_stealth_statements(&sdk, &account, account_key_id, &fee_pool_addresses).await?;
+        builder.with_fee_instructions_builder(move |builder| {
+            builder
+                .create_account(account_public_key)
+                .then(|builder| {
+                    stealth_outputs
+                        .into_iter()
+                        .enumerate()
+                        .fold(builder, |builder, (i, (address, statement))| {
+                            let bucket = format!("b{}", i);
+                            builder
+                                .claim_validator_fees(address)
+                                .put_last_instruction_output_on_workspace(bucket.clone())
+                                .stealth_transfer_with_input_bucket(TARI_TOKEN, statement, bucket)
+                        })
+                })
+                .call_method(account_component_address, "pay_fee", args![max_fee])
+        })
+    };
+
+    let unsigned_transaction = builder
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
-        .with_inputs(fee_pool_addresses.map(SubstateRequirement::unversioned))
+        .with_inputs(fee_pool_addresses.iter().copied().map(SubstateRequirement::unversioned))
         .map(|builder| {
             if let Some(index) = req.claim_key_index {
-                if claim_public_key == *account.address.account_public_key() {
+                if claim_public_key == account_public_key {
                     Ok(builder.finish())
                 } else {
                     // If the claim key is different from the account secret, we need to sign with both
                     sdk.signer_api()
-                        .with_context(account.address.account_public_key())
+                        .with_context(&account_public_key)
                         .sign(KeyId::derived(KeyBranch::Account, index), builder.finish())
                 }
             } else {
@@ -224,4 +257,94 @@ pub async fn handle_claim_validator_fees(
         fee: finalized.final_fee,
         result: finalized.finalize,
     })
+}
+
+/// Fetches each fee pool's current amount and builds a per-shard [`StealthTransferStatement`] that converts the claimed
+/// revealed amount into a stealth UTXO addressed to the account's own owner key. Each statement consumes the full
+/// claimed bucket as revealed input and produces a single stealth output of the same amount (no revealed output).
+async fn build_self_stealth_statements(
+    sdk: &crate::WalletSdk,
+    account: &tari_ootle_wallet_sdk::models::AccountWithAddress,
+    account_owner_key_id: tari_ootle_wallet_sdk::models::KeyId,
+    fee_pool_addresses: &[ValidatorFeePoolAddress],
+) -> Result<Vec<(ValidatorFeePoolAddress, StealthTransferStatement)>, anyhow::Error> {
+    let network = sdk.config_api().get_network()?;
+    let account_owner = sdk.key_manager_api().get_public_key(account_owner_key_id)?;
+    let view_only = sdk.key_manager_api().get_public_key(account.view_only_key_id())?;
+
+    let substate_ids: Vec<SubstateId> = fee_pool_addresses.iter().copied().map(SubstateId::from).collect();
+    let mut amounts: HashMap<ValidatorFeePoolAddress, u64> = HashMap::with_capacity(substate_ids.len());
+    const CHUNK_SIZE: usize = 20;
+    for chunk in substate_ids.chunks(CHUNK_SIZE) {
+        let substates = sdk.substate_api().get_substates_from_network(chunk.to_vec()).await?;
+        for (id, substate) in substates {
+            let Some(addr) = id.as_validator_fee_pool_address() else {
+                continue;
+            };
+            let Some(amount) = substate.substate_value().as_validator_fee_pool().map(|p| p.amount()) else {
+                continue;
+            };
+            amounts.insert(addr, amount);
+        }
+    }
+
+    let memo = Memo::new_message("Validator fees claimed to stealth").expect("valid memo");
+
+    fee_pool_addresses
+        .iter()
+        .copied()
+        .map(|address| {
+            let amount = amounts.get(&address).copied().unwrap_or(0);
+            if amount == 0 {
+                return Err(invalid_params(
+                    "shards",
+                    Some(format!("Fee pool {address} is empty or could not be fetched")),
+                ));
+            }
+
+            let mask = sdk.key_manager_api().next_key(KeyBranch::StealthMask)?;
+            let (nonce, output_public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+
+            let encrypted_data = sdk.stealth_crypto_api().encrypt_value_and_mask(
+                amount,
+                &mask.key,
+                view_only.public_key(),
+                &nonce,
+                Some(&memo),
+            )?;
+
+            let tag = sdk.stealth_crypto_api().derive_stealth_output_tag(
+                network,
+                &nonce,
+                view_only.public_key(),
+                &STEALTH_TARI_RESOURCE_ADDRESS,
+            );
+
+            let stealth_owner_public_key =
+                sdk.stealth_crypto_api()
+                    .derive_stealth_owner_public_key(network, account_owner.public_key(), &nonce);
+
+            let output_witness = StealthOutputWitness {
+                witness: OutputWitness {
+                    amount,
+                    mask: mask.key,
+                    sender_public_nonce: output_public_nonce,
+                    minimum_value_promise: 0,
+                    encrypted_data,
+                    resource_view_key: None,
+                },
+                spend_condition: SpendCondition::Signed(stealth_owner_public_key.to_byte_type()),
+                tag,
+            };
+
+            let statement = sdk.stealth_crypto_api().generate_transfer_statement(
+                iter::empty::<StealthInputWitness>(),
+                amount,
+                iter::once(&output_witness),
+                0u64,
+            )?;
+
+            Ok((address, statement))
+        })
+        .collect()
 }

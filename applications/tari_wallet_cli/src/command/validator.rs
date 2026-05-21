@@ -29,6 +29,10 @@ pub struct ClaimFeesArgs {
     pub max_fee: Option<u32>,
     #[clap(long)]
     pub dry_run: bool,
+    /// Deposit the claim into the account's revealed vault. By default, the claim is sent to a stealth UTXO addressed
+    /// to the account's own owner key.
+    #[clap(long)]
+    pub revealed: bool,
 }
 
 fn parse_shard(s: &str) -> Result<Shard, String> {
@@ -84,6 +88,7 @@ pub async fn handle_claim_validator_fees(
         shard,
         max_fee,
         dry_run,
+        revealed,
     } = args;
 
     println!("Submitting claim validator fees transaction...");
@@ -97,6 +102,7 @@ pub async fn handle_claim_validator_fees(
             max_fee: max_fee.map(Into::into).unwrap_or(1500),
             shards: vec![shard],
             dry_run,
+            output_to_revealed: revealed,
         })
         .await?;
 

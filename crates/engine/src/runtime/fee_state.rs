@@ -16,6 +16,11 @@ pub struct FeeState {
     fee_payments: Vec<(ResourceContainer, VaultId)>,
     running_payments_total: u64,
     fee_charges: FeeBreakdown,
+    /// Raw Wasmer metering points consumed across every WASM invocation in this transaction.
+    /// Summed across invocations so the divisor in `FeeModule::on_before_finalize` rounds once
+    /// against the total — dividing per-call would let small invocations round to zero and let a
+    /// caller evade WASM fees by splitting work below the divisor.
+    accumulated_wasm_points: u64,
     /// When true, fee charges are still metered but the executor will not abort if payments are insufficient.
     /// Set out-of-band by `FeeModule` during runtime initialization (only ever true for indexer dry-runs).
     dry_run: bool,
@@ -76,6 +81,14 @@ impl FeeState {
 
     pub fn add_charge(&mut self, source: FeeSource, amount: u64) {
         self.fee_charges.add(source, amount)
+    }
+
+    pub fn accumulate_wasm_points(&mut self, points: u64) {
+        self.accumulated_wasm_points = self.accumulated_wasm_points.saturating_add(points);
+    }
+
+    pub fn accumulated_wasm_points(&self) -> u64 {
+        self.accumulated_wasm_points
     }
 
     pub fn take_fee_charges(&mut self) -> FeeBreakdown {

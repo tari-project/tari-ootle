@@ -61,9 +61,8 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
             return Ok(());
         }
 
-        const TEMPLATE_BYTES_LOADED_COST_DIVISOR: u64 = 3000; // 3 KB = 1 cost unit
         let template_load_cost_unit =
-            u64::try_from(bytes_loaded).unwrap_or(u64::MAX) / TEMPLATE_BYTES_LOADED_COST_DIVISOR;
+            u64::try_from(bytes_loaded).unwrap_or(u64::MAX) / self.fee_table.template_load_bytes_cost_divisor();
 
         let fee_charge = template_load_cost_unit
             .checked_mul(self.fee_table.per_template_load_cost_unit())
@@ -89,13 +88,7 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
             .per_byte_storage_cost()
             .checked_mul(total_storage as u64)
             .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating storage cost".to_string()))?;
-        // TODO: Cost per byte of storage is reduced by a pretty arbitrarily chosen factor (floor(cost*0.25))
-        const STORAGE_COST_REDUCTION_DIVISOR: u64 = 4;
-        track.add_fee_charge(
-            FeeSource::Storage,
-            // Divide a storage cost reduction factor
-            cost / STORAGE_COST_REDUCTION_DIVISOR,
-        );
+        track.add_fee_charge(FeeSource::Storage, cost / self.fee_table.storage_cost_divisor());
 
         let new_substate_count = track
             .count_newly_created_substates()
@@ -115,6 +108,16 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
             .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating event cost".to_string()))?;
         track.add_fee_charge(FeeSource::Events, event_cost);
 
+        // WASM execution: charge once against the transaction's accumulated points so the divisor
+        // rounds against the total. Per-call rounding would let a transaction split work into
+        // sub-divisor chunks and pay zero for any single one (each `points/divisor` is `0`), even
+        // though the summed work is non-trivial.
+        let units = track.accumulated_wasm_points() / self.fee_table.wasm_points_cost_divisor();
+        let wasm_cost = units
+            .checked_mul(self.fee_table.per_wasm_point_cost())
+            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating WASM execution cost".to_string()))?;
+        track.add_fee_charge(FeeSource::WasmExecution, wasm_cost);
+
         Ok(())
     }
 
@@ -132,6 +135,17 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
             },
         }
 
+        Ok(())
+    }
+
+    fn on_wasm_execution(
+        &self,
+        track: &mut StateTracker<TStore>,
+        points_consumed: u64,
+    ) -> Result<(), RuntimeModuleError> {
+        // Accumulate raw points; the divisor is applied once in `on_before_finalize` so
+        // sub-divisor calls cannot round to zero individually.
+        track.accumulate_wasm_points(points_consumed);
         Ok(())
     }
 }

@@ -503,3 +503,58 @@ pub fn decrypt_elgamal_viewable_balance(
     )
     .map_err(|e| JsError::new(&e.to_string()))
 }
+
+/// Decrypt a viewable balance straight from its persisted ElGamal ciphertext — the read / audit path for
+/// viewable resources.
+///
+/// Unlike [`decryptElgamalViewableBalance`], this consumes the 2-field ciphertext the chain actually
+/// persists in `OutputBody.viewable_balance` — `encrypted` (E) and `public_nonce` (R) — and needs only the
+/// view *secret* key. No `ViewableBalanceProof` and no commitment are required: the proof is verified once
+/// by consensus at submission and then dropped, so a reader of a persisted UTXO never has it (and
+/// re-verification would be redundant for an output the chain already accepted). Decryption is
+/// `V.G = E - p.R` followed by a brute-force lookup of `V` over `[min_value, max_value]` (inclusive);
+/// returns `null` when nothing in the range matches.
+///
+/// Keep the range tight — the lookup cost is proportional to its width.
+#[wasm_bindgen(js_name = "decryptViewableBalance")]
+pub fn decrypt_viewable_balance(
+    encrypted: &[u8],
+    public_nonce: &[u8],
+    view_secret_key: &[u8],
+    min_value: u64,
+    max_value: u64,
+) -> Result<Option<u64>, JsError> {
+    ootle_wasm_core::stealth::viewable_balance::decrypt_viewable_balance(
+        encrypted,
+        public_nonce,
+        view_secret_key,
+        min_value,
+        max_value,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Batch variant of [`decryptViewableBalance`]: decrypt many persisted viewable-balance ciphertexts in a
+/// single call, amortising the value lookup across all of them.
+///
+/// `ciphertexts_json` is a JSON array matching the on-chain `OutputBody.viewable_balance` shape:
+/// `[{ "encrypted": "<hex32>", "public_nonce": "<hex32>" }, ...]`. Every entry is decrypted with the same
+/// view secret key and `[min_value, max_value]` range.
+///
+/// Returns a JSON array of `number | null`, positionally aligned with the input (`null` where no value in
+/// the range matched that entry).
+#[wasm_bindgen(js_name = "decryptViewableBalanceBatch")]
+pub fn decrypt_viewable_balance_batch(
+    ciphertexts_json: &str,
+    view_secret_key: &[u8],
+    min_value: u64,
+    max_value: u64,
+) -> Result<String, JsError> {
+    ootle_wasm_core::stealth::viewable_balance::decrypt_viewable_balance_batch(
+        ciphertexts_json,
+        view_secret_key,
+        min_value,
+        max_value,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
+}

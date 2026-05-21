@@ -108,7 +108,7 @@ pub async fn handle_get_validator_fees(
 pub async fn handle_claim_validator_fees(
     context: &HandlerContext,
     token: Option<&Bearer>,
-    req: ClaimValidatorFeesRequest,
+    mut req: ClaimValidatorFeesRequest,
 ) -> Result<ClaimValidatorFeesResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
     context.check_auth(token, &[JrpcPermission::Admin])?;
@@ -132,11 +132,13 @@ pub async fn handle_claim_validator_fees(
         None => *account.address.account_public_key(),
     };
 
-    let fee_pool_addresses: Vec<ValidatorFeePoolAddress> = req
+    req.shards.sort();
+    req.shards.dedup();
+    let fee_pool_addresses = req
         .shards
         .iter()
         .map(|shard| derive_fee_pool_address(&claim_public_key, NUM_PRESHARDS, *shard))
-        .collect();
+        .collect::<Vec<_>>();
 
     // build the transaction
     let max_fee = req.max_fee.max(1);

@@ -270,6 +270,14 @@ impl<TStore: StateReader> StateTracker<TStore> {
         })
     }
 
+    pub fn accumulate_wasm_points(&mut self, points: u64) {
+        self.write_with(|state| state.fee_state_mut().accumulate_wasm_points(points))
+    }
+
+    pub fn accumulated_wasm_points(&self) -> u64 {
+        self.read_with(|state| state.fee_state().accumulated_wasm_points())
+    }
+
     pub fn finalize(&mut self, failure: Option<RejectReason>) -> Result<FinalizeResult, RuntimeError> {
         let failure = failure.or_else(|| {
             self.read_with(|state| {

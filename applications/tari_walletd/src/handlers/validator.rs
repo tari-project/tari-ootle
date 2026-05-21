@@ -1,16 +1,18 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashMap;
+use std::{collections::HashMap, iter};
 
 use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
 use either::Either;
 use log::*;
 use ootle_byte_type::ToByteType;
+use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{SubstateAddress, SubstateRequirement, derive_fee_pool_address};
 use tari_ootle_transaction::args;
+use tari_ootle_wallet_crypto::{OutputWitness, StealthInputWitness, StealthOutputWitness, memo::Memo};
 use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId};
 use tari_ootle_walletd_client::{
     permissions::JrpcPermission,
@@ -22,6 +24,11 @@ use tari_ootle_walletd_client::{
         GetValidatorFeesRequest,
         GetValidatorFeesResponse,
     },
+};
+use tari_template_lib_types::{
+    ValidatorFeePoolAddress,
+    constants::{STEALTH_TARI_RESOURCE_ADDRESS, TARI_TOKEN},
+    stealth::{SpendCondition, StealthTransferStatement},
 };
 
 use crate::{
@@ -101,7 +108,7 @@ pub async fn handle_get_validator_fees(
 pub async fn handle_claim_validator_fees(
     context: &HandlerContext,
     token: Option<&Bearer>,
-    req: ClaimValidatorFeesRequest,
+    mut req: ClaimValidatorFeesRequest,
 ) -> Result<ClaimValidatorFeesResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
     context.check_auth(token, &[JrpcPermission::Admin])?;
@@ -125,53 +132,78 @@ pub async fn handle_claim_validator_fees(
         None => *account.address.account_public_key(),
     };
 
+    req.shards.sort();
+    req.shards.dedup();
     let fee_pool_addresses = req
         .shards
-        .into_iter()
-        .map(|shard| derive_fee_pool_address(&claim_public_key, NUM_PRESHARDS, shard));
+        .iter()
+        .map(|shard| derive_fee_pool_address(&claim_public_key, NUM_PRESHARDS, *shard))
+        .collect::<Vec<_>>();
 
     // build the transaction
     let max_fee = req.max_fee.max(1);
+    let account_public_key = *account.address.account_public_key();
 
-    let unsigned_transaction = context
-        .transaction_builder()
-        .with_dry_run(req.dry_run)
-        .with_fee_instructions_builder(|builder| {
-            builder
-                .create_account(*account.address.account_public_key())
-                .then(|builder| {
-                    let mut bucket_names = vec![];
-                    fee_pool_addresses
-                        .clone()
-                        .enumerate()
-                        .fold(builder, |builder, (i, address)| {
-                            bucket_names.push(format!("b{}", i));
-                            builder
-                                .claim_validator_fees(address)
-                                .put_last_instruction_output_on_workspace(bucket_names.last().unwrap())
-                        })
-                        .then(|builder| {
-                            // TODO: improve this - suggest: the workspace implicitly collect all returned resources
-                            // (buckets) and we should create buckets by taking from the
-                            // workspace. Then we could collect all buckets and
-                            // deposit once. Greatly reducing gas for this (and a lot of other) transactions.
-                            bucket_names.into_iter().fold(builder, |builder, bucket| {
-                                builder.call_method(account_component_address, "deposit", args![Workspace(bucket)])
+    let builder = context.transaction_builder().with_dry_run(req.dry_run);
+
+    let builder = if req.output_to_revealed {
+        builder
+            .with_fee_instructions_builder(|builder| {
+                builder
+                    .create_account(account_public_key)
+                    .then(|builder| {
+                        let mut bucket_names = vec![];
+                        fee_pool_addresses
+                            .iter()
+                            .copied()
+                            .enumerate()
+                            .fold(builder, |builder, (i, address)| {
+                                bucket_names.push(format!("b{}", i));
+                                builder
+                                    .claim_validator_fees(address)
+                                    .put_last_instruction_output_on_workspace(bucket_names.last().unwrap())
                             })
-                        })
-                })
-                .call_method(account_component_address, "pay_fee", args![max_fee])
+                            .then(|builder| {
+                                // TODO: improve this - suggest: the workspace implicitly collect all returned resources
+                                // (buckets) and we should create buckets by taking from the
+                                // workspace. Then we could collect all buckets and
+                                // deposit once. Greatly reducing gas for this (and a lot of other) transactions.
+                                bucket_names.into_iter().fold(builder, |builder, bucket| {
+                                    builder.call_method(account_component_address, "deposit", args![Workspace(bucket)])
+                                })
+                            })
+                    })
+                    .call_method(account_component_address, "pay_fee", args![max_fee])
+            })
+            .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
+    } else {
+        let plan = build_self_stealth_plan(&sdk, &account, account_key_id, &fee_pool_addresses, max_fee).await?;
+        builder.with_fee_instructions_builder(move |builder| {
+            let mut builder = builder;
+            for (i, (address, statement)) in plan.statements.into_iter().enumerate() {
+                let bucket = format!("b{}", i);
+                builder = builder
+                    .claim_validator_fees(address)
+                    .put_last_instruction_output_on_workspace(bucket.clone())
+                    .stealth_transfer_with_input_bucket(TARI_TOKEN, statement, bucket);
+                if i == plan.fee_carrier_idx {
+                    builder = builder.put_last_instruction_output_on_workspace("fee");
+                }
+            }
+            builder.pay_fee_from_bucket("fee")
         })
-        .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
-        .with_inputs(fee_pool_addresses.map(SubstateRequirement::unversioned))
+    };
+
+    let unsigned_transaction = builder
+        .with_inputs(fee_pool_addresses.iter().copied().map(SubstateRequirement::unversioned))
         .map(|builder| {
             if let Some(index) = req.claim_key_index {
-                if claim_public_key == *account.address.account_public_key() {
+                if claim_public_key == account_public_key {
                     Ok(builder.finish())
                 } else {
                     // If the claim key is different from the account secret, we need to sign with both
                     sdk.signer_api()
-                        .with_context(account.address.account_public_key())
+                        .with_context(&account_public_key)
                         .sign(KeyId::derived(KeyBranch::Account, index), builder.finish())
                 }
             } else {
@@ -223,5 +255,130 @@ pub async fn handle_claim_validator_fees(
         transaction_id: tx_id,
         fee: finalized.final_fee,
         result: finalized.finalize,
+    })
+}
+
+struct StealthClaimPlan {
+    statements: Vec<(ValidatorFeePoolAddress, StealthTransferStatement)>,
+    /// Index of the pool whose stealth_transfer carves out `max_fee` as a revealed-output bucket to pay the network
+    /// fee. All other pools carve out 0.
+    fee_carrier_idx: usize,
+}
+
+/// Fetches each fee pool's current amount and builds a per-shard [`StealthTransferStatement`] that converts the
+/// claimed revealed amount into a stealth UTXO addressed to the account's own owner key. The pool with the largest
+/// amount additionally carves `max_fee` as a revealed-output bucket which the caller pays the network fee from — so
+/// no funds need to come from the user's account.
+async fn build_self_stealth_plan(
+    sdk: &crate::WalletSdk,
+    account: &tari_ootle_wallet_sdk::models::AccountWithAddress,
+    account_owner_key_id: tari_ootle_wallet_sdk::models::KeyId,
+    fee_pool_addresses: &[ValidatorFeePoolAddress],
+    max_fee: u64,
+) -> Result<StealthClaimPlan, anyhow::Error> {
+    let network = sdk.config_api().get_network()?;
+    let account_owner = sdk.key_manager_api().get_public_key(account_owner_key_id)?;
+    let view_only = sdk.key_manager_api().get_public_key(account.view_only_key_id())?;
+
+    let substate_ids: Vec<SubstateId> = fee_pool_addresses.iter().copied().map(SubstateId::from).collect();
+    let mut amounts: HashMap<ValidatorFeePoolAddress, u64> = HashMap::with_capacity(substate_ids.len());
+    const CHUNK_SIZE: usize = 20;
+    for chunk in substate_ids.chunks(CHUNK_SIZE) {
+        let substates = sdk.substate_api().get_substates_from_network(chunk.to_vec()).await?;
+        for (id, substate) in substates {
+            let Some(addr) = id.as_validator_fee_pool_address() else {
+                continue;
+            };
+            let Some(amount) = substate.substate_value().as_validator_fee_pool().map(|p| p.amount()) else {
+                continue;
+            };
+            amounts.insert(addr, amount);
+        }
+    }
+
+    let (fee_carrier_idx, fee_carrier_amount) = fee_pool_addresses
+        .iter()
+        .enumerate()
+        .map(|(i, addr)| (i, amounts.get(addr).copied().unwrap_or(0)))
+        .max_by_key(|(_, amount)| *amount)
+        .ok_or_else(|| invalid_params("shards", Some("no fee pool addresses to claim")))?;
+
+    if fee_carrier_amount < max_fee {
+        return Err(invalid_params(
+            "max_fee",
+            Some(format!(
+                "max_fee ({max_fee}) exceeds the largest claimable fee pool amount ({fee_carrier_amount}); reduce \
+                 max_fee or include shards with larger balances"
+            )),
+        ));
+    }
+
+    let memo = Memo::new_message("Validator fees claimed to stealth").expect("valid memo");
+
+    let statements = fee_pool_addresses
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(i, address)| {
+            let amount = amounts.get(&address).copied().unwrap_or(0);
+            if amount == 0 {
+                return Err(invalid_params(
+                    "shards",
+                    Some(format!("Fee pool {address} is empty or could not be fetched")),
+                ));
+            }
+
+            let revealed_output = if i == fee_carrier_idx { max_fee } else { 0 };
+            let stealth_amount = amount - revealed_output;
+
+            let mask = sdk.key_manager_api().next_key(KeyBranch::StealthMask)?;
+            let (nonce, output_public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+
+            let encrypted_data = sdk.stealth_crypto_api().encrypt_value_and_mask(
+                stealth_amount,
+                &mask.key,
+                view_only.public_key(),
+                &nonce,
+                Some(&memo),
+            )?;
+
+            let tag = sdk.stealth_crypto_api().derive_stealth_output_tag(
+                network,
+                &nonce,
+                view_only.public_key(),
+                &STEALTH_TARI_RESOURCE_ADDRESS,
+            );
+
+            let stealth_owner_public_key =
+                sdk.stealth_crypto_api()
+                    .derive_stealth_owner_public_key(network, account_owner.public_key(), &nonce);
+
+            let output_witness = StealthOutputWitness {
+                witness: OutputWitness {
+                    amount: stealth_amount,
+                    mask: mask.key,
+                    sender_public_nonce: output_public_nonce,
+                    minimum_value_promise: 0,
+                    encrypted_data,
+                    resource_view_key: None,
+                },
+                spend_condition: SpendCondition::Signed(stealth_owner_public_key.to_byte_type()),
+                tag,
+            };
+
+            let statement = sdk.stealth_crypto_api().generate_transfer_statement(
+                iter::empty::<StealthInputWitness>(),
+                amount,
+                iter::once(&output_witness),
+                revealed_output,
+            )?;
+
+            Ok((address, statement))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(StealthClaimPlan {
+        statements,
+        fee_carrier_idx,
     })
 }

@@ -95,6 +95,7 @@ pub async fn claim_fees(
                 .start(),
         ],
         dry_run,
+        output_to_revealed: true,
     };
 
     client.claim_validator_fees(request).await

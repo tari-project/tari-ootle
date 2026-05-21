@@ -23,9 +23,10 @@
 import PopupTitle from "@/components/PopupTitle";
 import { useAccountsList } from "@api/hooks/useAccounts";
 import { useKeysList } from "@api/hooks/useKeys";
-import { FormControl, InputLabel, MenuItem, Select, SelectChangeEvent } from "@mui/material";
+import { FormControl, FormControlLabel, InputLabel, MenuItem, Select, SelectChangeEvent, Typography } from "@mui/material";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import CheckBox from "@mui/material/Checkbox";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import { useTheme } from "@mui/material/styles";
@@ -50,13 +51,15 @@ interface FormState {
   fee: string;
   shards: Array<number>;
   keyIndex: number | null;
+  outputToRevealed: boolean;
 }
 
-const INITIAL_VALUES = {
+const INITIAL_VALUES: FormState = {
   account: null,
   fee: "",
   shards: [],
   keyIndex: null,
+  outputToRevealed: false,
 };
 
 const INITIAL_VALIDITY = {
@@ -140,6 +143,7 @@ export default function ClaimFees() {
       max_fee: isFeeSet ? BigInt(formState.fee) : 1n,
       shards: formState.shards,
       dry_run: !isFeeSet,
+      output_to_revealed: formState.outputToRevealed,
     })
       .then((resp) => {
         if ("Accept" in resp.result.result) {
@@ -282,6 +286,24 @@ export default function ClaimFees() {
               style={{ flexGrow: 1 }}
               disabled={disabled}
             />
+
+            <FormControlLabel
+              control={
+                <CheckBox
+                  name="outputToRevealed"
+                  checked={formState.outputToRevealed}
+                  onChange={(e) => setFormState({ ...formState, outputToRevealed: e.target.checked })}
+                  disabled={disabled}
+                />
+              }
+              label="Claim to revealed funds"
+            />
+            {formState.outputToRevealed ? (
+              <Typography color="warning.main">
+                ⚠️ Warning: Revealed funds are visible on the blockchain and can be viewed by anyone. By default, fees
+                are claimed into a stealth UTXO that is private to your wallet.
+              </Typography>
+            ) : null}
 
             <Box
               className="flex-container"

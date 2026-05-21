@@ -205,8 +205,9 @@ fn fail_partial_paid_fees() {
     let orig_balance: Amount = test.call_method(account, "balance", args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
     test.enable_fees();
 
-    // Must be smaller than the full transaction's fee so InsufficientFeesPaid is triggered.
-    const FEE_PAID: u64 = 30;
+    // Must cover the fee section's own cost (so the fee instructions succeed) yet stay smaller
+    // than the full transaction's fee (so InsufficientFeesPaid is triggered on commit).
+    const FEE_PAID: u64 = 100;
 
     let result = test.execute_expect_commit(
         Transaction::builder_localnet()
@@ -296,10 +297,10 @@ fn fail_pay_less_fees_than_fee_transaction() {
                         .call_method(
                             account,
                             "pay_fee".to_string(),
-                            // Lands between the fee-instructions cost (~62) and the full
-                            // transaction cost (~108), so the fee section is accepted while the
-                            // rest fails for InsufficientFeesPaid.
-                            args![80],
+                            // Lands between the fee-instructions cost and the full transaction
+                            // cost, so the fee section is accepted while the rest fails for
+                            // InsufficientFeesPaid.
+                            args![150],
                         )
 
                 })
@@ -323,7 +324,7 @@ fn fail_pay_less_fees_than_fee_transaction() {
     let (_, s) = diff.up_iter().find(|(id, _)| id.is_vault()).expect("Account not found");
     assert_eq!(
         s.substate_value().as_vault().unwrap().balance(),
-        orig_balance - Amount::from(80u64)
+        orig_balance - Amount::from(150u64)
     );
 
     // Fee was not deducted
@@ -407,7 +408,7 @@ fn failure_pay_fee_in_main_instructions() {
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
             // Pay in fee intent, enough to pass this step
-            .pay_fee_from_component(account, 20u64)
+            .pay_fee_from_component(account, 100u64)
             // Call pay_fee in main instructions (outside fee instructions) not permitted
             .call_method(account, "pay_fee", args![100])
             .call_method(account, "balance", args![STEALTH_TARI_RESOURCE_ADDRESS])

@@ -3095,6 +3095,13 @@ where
         Ok(())
     }
 
+    fn record_wasm_execution(&mut self, points_consumed: u64) -> Result<(), RuntimeError> {
+        for module in self.modules.iter() {
+            module.on_wasm_execution(&mut self.tracker, points_consumed)?;
+        }
+        Ok(())
+    }
+
     fn resolve_args(
         &self,
         prepend: Option<InstructionArg>,

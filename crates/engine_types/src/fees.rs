@@ -177,6 +177,9 @@ pub enum FeeSource {
     TemplateLoad,
     #[n(8)]
     SubstateCreate,
+    /// WASM execution metering, charged in proportion to consumed Wasmer metering points.
+    #[n(9)]
+    WasmExecution,
 }
 
 #[derive(

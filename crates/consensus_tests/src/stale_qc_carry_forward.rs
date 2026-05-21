@@ -88,8 +88,8 @@ async fn first_round_votes_dropped_recovers_via_stale_qc_carry_forward() {
                 .get_validator(&address)
                 .state_store()
                 .with_read_tx(|tx| Block::get(tx, &block_id))
-                .map(|b| b.is_dummy())
-                .unwrap_or(false);
+                .expect("block from BlockCommitted event must exist in the validator's store")
+                .is_dummy();
             if !is_dummy {
                 saw_past_target = true;
             }

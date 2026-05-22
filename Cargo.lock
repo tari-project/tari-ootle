@@ -12067,6 +12067,7 @@ dependencies = [
  "blake2 0.10.6",
  "clap 3.2.25",
  "config",
+ "dashmap 5.5.3",
  "dirs-next 2.0.0",
  "either",
  "futures 0.3.31",

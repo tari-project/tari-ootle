@@ -45,7 +45,6 @@ use types::{
     AccountsTransferResponse,
     AuthCreateApiKeyRequest,
     AuthCreateApiKeyResponse,
-    AuthCredentials,
     AuthListApiKeysRequest,
     AuthListApiKeysResponse,
     AuthLoginRequest,
@@ -642,29 +641,6 @@ impl WalletDaemonClient {
         req: T,
     ) -> Result<AuthRevokeApiKeyResponse, WalletDaemonClientError> {
         self.send_request("auth.revoke_api_key", req.borrow()).await
-    }
-
-    /// Convenience: connect to a wallet daemon and authenticate using an
-    /// API key in one step. Calls `auth.request` with
-    /// `AuthCredentials::ApiKey(key)`, captures the issued JWT, and sets
-    /// it as the bearer token for subsequent requests on this client.
-    ///
-    /// The permissions encoded in the JWT come from the stored API key
-    /// row — the `permissions` field of the underlying `AuthLoginRequest`
-    /// is ignored by the daemon for API-key auth.
-    pub async fn authenticate_with_api_key(
-        &mut self,
-        api_key: impl Into<crate::types::EncodedApiKey>,
-    ) -> Result<AuthLoginResponse, WalletDaemonClientError> {
-        let request = AuthLoginRequest {
-            // The daemon ignores `permissions` for API-key auth; the
-            // permission set comes from the persisted api_key row.
-            permissions: Vec::new(),
-            credentials: AuthCredentials::ApiKey(api_key.into()),
-        };
-        let response: AuthLoginResponse = self.send_request("auth.request", &request).await?;
-        self.set_auth_token(response.token.clone());
-        Ok(response)
     }
 
     /// Initiates a WebRTC signalling session with the wallet daemon.

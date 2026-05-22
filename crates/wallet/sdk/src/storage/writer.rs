@@ -250,10 +250,12 @@ pub trait WalletStoreWriter: CommittableStore {
     /// layer. `permissions` is the textual `JrpcPermissions` form
     /// (comma-separated; the same format the JWT layer already uses).
     fn api_key_insert(&mut self, name: &str, key_hash: &str, permissions: &str) -> Result<ApiKey, WalletStorageError>;
-    /// Bump `last_used_at` on a key after a successful authentication. Best-effort:
+    /// Bump `last_used_at` on a key after a successful authentication, only if
+    /// the stored timestamp is at least `throttle` old (or NULL). Best-effort:
     /// callers should not let a write error abort the request — the auth
-    /// already succeeded, this just refreshes the UI hint.
-    fn api_key_touch_last_used(&mut self, id: i32) -> Result<(), WalletStorageError>;
+    /// already succeeded, this just refreshes the UI hint. Pass
+    /// `Duration::ZERO` to bump unconditionally.
+    fn api_key_touch_last_used(&mut self, id: i32, throttle: std::time::Duration) -> Result<(), WalletStorageError>;
     /// Soft-delete a key by stamping `revoked_at`. The row is preserved so
     /// the admin UI can still show the historical `last_used_at` for
     /// already-revoked credentials.

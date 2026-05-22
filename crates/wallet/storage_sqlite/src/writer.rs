@@ -1801,22 +1801,32 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(api_key_from_row(row))
     }
 
-    fn api_key_touch_last_used(&mut self, id: i32) -> Result<(), WalletStorageError> {
+    fn api_key_touch_last_used(&mut self, id: i32, throttle: std::time::Duration) -> Result<(), WalletStorageError> {
         use crate::schema::api_keys;
 
         let now = time::OffsetDateTime::now_utc();
+        let cutoff = now - time::Duration::seconds(throttle.as_secs() as i64);
         let now = time::PrimitiveDateTime::new(now.date(), now.time());
+        let cutoff = time::PrimitiveDateTime::new(cutoff.date(), cutoff.time());
 
-        // The active filter (`revoked_at IS NULL`) makes this a no-op on a
-        // revoked row. The auth path calls this AFTER credential verification,
-        // so it can race a concurrent revoke; in that race the row is gone
-        // from the active set and `affected = 0` is the correct outcome (not
-        // an error). Auth has already succeeded so we must not surface a
-        // write failure to the caller either way.
+        // Filter chain encodes three invariants:
+        //   1. `revoked_at IS NULL` — never resurrect a revoked row. The auth shim verifies credentials and then spawns
+        //      this in the background; a concurrent revoke must not be undone here.
+        //   2. `last_used_at IS NULL OR last_used_at <= cutoff` — the throttle. Skips the write when the timestamp was
+        //      bumped within the last `throttle` window, capping write QPS under a busy agent.
+        //   3. `id = ?` — the obvious one.
+        // `affected = 0` is the correct outcome for any of (1) revoked, (2)
+        // throttled, or (3) unknown id — none of which the caller should
+        // surface as an error.
         let _ = diesel::update(
             api_keys::table
                 .filter(api_keys::id.eq(id))
-                .filter(api_keys::revoked_at.is_null()),
+                .filter(api_keys::revoked_at.is_null())
+                .filter(
+                    api_keys::last_used_at
+                        .is_null()
+                        .or(api_keys::last_used_at.le(Some(cutoff))),
+                ),
         )
         .set(models::ApiKeyLastUsedChangeset {
             last_used_at: Some(now),

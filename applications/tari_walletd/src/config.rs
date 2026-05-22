@@ -179,6 +179,12 @@ pub enum WalletDaemonAuth {
     WebAuthn,
 }
 
+impl WalletDaemonAuth {
+    pub fn is_none(self) -> bool {
+        matches!(self, WalletDaemonAuth::None)
+    }
+}
+
 impl Display for WalletDaemonAuth {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {

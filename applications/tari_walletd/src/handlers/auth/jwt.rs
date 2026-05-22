@@ -25,18 +25,18 @@ impl<'a> JwtApi<'a> {
         }
     }
 
-    pub fn generate_auth_claims(&self, permissions: JrpcPermissions) -> Result<Claims, JwtApiError> {
+    pub fn generate_auth_claims(&self, permissions: JrpcPermissions) -> Result<Claims, AuthError> {
         let valid_till = SystemTime::now() + self.default_expiry;
         let exp = valid_till
             .duration_since(UNIX_EPOCH)
-            .map_err(|_| JwtApiError::InvalidExpiry)?;
+            .map_err(|_| AuthError::InvalidExpiry)?;
         Ok(Claims {
             permissions,
             exp: exp.as_secs(),
         })
     }
 
-    fn decode_jwt(&self, token: &str) -> Result<TokenData<Claims>, JwtApiError> {
+    fn decode_jwt(&self, token: &str) -> Result<TokenData<Claims>, AuthError> {
         let token_data = jsonwebtoken::decode::<Claims>(
             token,
             &DecodingKey::from_secret(self.jwt_secret_key.reveal()),
@@ -45,7 +45,7 @@ impl<'a> JwtApi<'a> {
         Ok(token_data)
     }
 
-    pub fn grant(&self, claims: &Claims) -> Result<EncodedJwtString, JwtApiError> {
+    pub fn grant(&self, claims: &Claims) -> Result<EncodedJwtString, AuthError> {
         let permissions_token = jsonwebtoken::encode(
             &Header::default(),
             claims,
@@ -55,26 +55,32 @@ impl<'a> JwtApi<'a> {
         Ok(permissions_token.into())
     }
 
-    pub fn check_auth(&self, token: Option<&Bearer>, req_permissions: &[JrpcPermission]) -> Result<(), JwtApiError> {
-        let token = token.ok_or(JwtApiError::AccessDeniedNoBearerToken)?;
+    pub fn check_auth(&self, token: Option<&Bearer>, req_permissions: &[JrpcPermission]) -> Result<(), AuthError> {
+        let token = token.ok_or(AuthError::AccessDeniedNoBearerToken)?;
         let token_data = self.decode_jwt(token.token())?;
-        let token_permissions = &token_data.claims.permissions;
-        if token_permissions.has_permission(&JrpcPermission::Admin) {
-            return Ok(());
-        }
-        for permission in req_permissions {
-            if !token_permissions.has_permission(permission) {
-                return Err(JwtApiError::InsufficientPermissions {
-                    required: permission.clone(),
-                });
-            }
-        }
-        Ok(())
+        enforce_scopes(&token_data.claims.permissions, req_permissions)
     }
 }
 
+/// Apply the Admin shortcut + per-required-scope check to a granted set.
+/// Shared by the JWT path and the bearer-API-key path so they enforce the
+/// exact same policy.
+pub fn enforce_scopes(granted: &JrpcPermissions, required: &[JrpcPermission]) -> Result<(), AuthError> {
+    if granted.has_permission(&JrpcPermission::Admin) {
+        return Ok(());
+    }
+    for permission in required {
+        if !granted.has_permission(permission) {
+            return Err(AuthError::InsufficientPermissions {
+                required: permission.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, thiserror::Error)]
-pub enum JwtApiError {
+pub enum AuthError {
     #[error("Store error: {0}")]
     StoreError(#[from] WalletStorageError),
     #[error("JWT error: {0}")]
@@ -85,13 +91,24 @@ pub enum JwtApiError {
     AccessDeniedInvalidBearerToken,
     #[error("Access denied. Expired token")]
     AccessDeniedExpiredToken,
+    // Same wording for "no such key" and "key revoked" so an attacker can't
+    // distinguish via the error string. Mapped to the same 401 Unauthorized
+    // status as the other bearer-token failures.
+    #[error("Access denied. API key is invalid or revoked")]
+    ApiKeyInvalidOrRevoked,
+    // The endpoint requires an interactive user session (WebAuthn) — API
+    // keys are deliberately excluded so a leaked Admin key cannot mint or
+    // revoke further keys, limiting blast radius of a compromise to the
+    // lifetime of that single key.
+    #[error("Access denied. This endpoint requires an interactive user session, not an API key")]
+    UserAuthOnly,
     #[error("Insufficient permissions. Required '{required:?}'")]
     InsufficientPermissions { required: JrpcPermission },
     #[error("Invalid expiry")]
     InvalidExpiry,
 }
 
-impl From<jsonwebtoken::errors::Error> for JwtApiError {
+impl From<jsonwebtoken::errors::Error> for AuthError {
     fn from(err: jsonwebtoken::errors::Error) -> Self {
         match err.kind() {
             jsonwebtoken::errors::ErrorKind::InvalidToken => Self::AccessDeniedInvalidBearerToken,

@@ -746,19 +746,18 @@ pub struct AuthLoginRequest {
     pub credentials: AuthCredentials,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+/// Credentials for the `auth.request` JSON-RPC entry point. Used by humans
+/// authenticating via WebAuthN (or in `none` auth mode); agent automation
+/// authenticates by sending the raw API key as the `Authorization: Bearer
+/// …` header on every JSON-RPC call instead, with no `auth.request`
+/// round-trip.
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub enum AuthCredentials {
     /// Credentials for 'none' auth mode
     None,
     /// Credentials for WebAuthN auth mode. Contains the request from the client to finish the auth.
     WebAuthN(Box<WebauthnFinishAuthRequest>),
-    /// Long-lived API key issued by an Admin user. The wallet daemon hashes
-    /// the supplied raw key with SHA-256, looks up the hash in `api_keys`,
-    /// and on a hit issues a JWT scoped to the key's stored permissions.
-    /// The requested-permissions field of the outer `AuthLoginRequest` is
-    /// IGNORED for API key auth — scopes come from the key, not the request.
-    ApiKey(#[cfg_attr(feature = "ts", ts(type = "string"))] EncodedApiKey),
 }
 
 impl AuthCredentials {
@@ -773,25 +772,6 @@ impl AuthCredentials {
         match self {
             Self::WebAuthN(req) => Some(req),
             _ => None,
-        }
-    }
-
-    pub fn as_api_key(&self) -> Option<&str> {
-        match self {
-            Self::ApiKey(s) => Some(s.as_str()),
-            _ => None,
-        }
-    }
-}
-
-// Manual Debug: never leak raw API key material via tracing/log/error context.
-// `WebAuthN` and `None` carry no secret, so the standard form is fine.
-impl std::fmt::Debug for AuthCredentials {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::None => f.write_str("None"),
-            Self::WebAuthN(req) => f.debug_tuple("WebAuthN").field(req).finish(),
-            Self::ApiKey(_) => f.write_str("ApiKey(<redacted>)"),
         }
     }
 }

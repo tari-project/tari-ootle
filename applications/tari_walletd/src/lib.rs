@@ -75,6 +75,7 @@ impl WalletSdkSpec for OotleWalletDaemonSpec {
 
 pub type WalletSdk = Sdk<OotleWalletDaemonSpec>;
 
+#[allow(clippy::too_many_lines)]
 pub async fn run_tari_ootle_walletd(
     config: ApplicationConfig,
     seed_words: Option<&SeedWords>,
@@ -142,6 +143,14 @@ pub async fn run_tari_ootle_walletd(
         "🔐 Authentication method set to {:?}",
         config.ootle_wallet_daemon.authentication
     );
+    if config.ootle_wallet_daemon.authentication.is_none() {
+        warn!(
+            target: LOG_TARGET,
+            "⚠️ Setting auth to none is dangerous. Your wallet has no password and any program on this computer, \
+             or anyone who can reach it over the network, can spend your funds without your consent. If this is \
+             not a temporary local-only test wallet, switch authentication=webauthn before sending any value to it.",
+        );
+    }
     let authenticator = create_authenticator(&config.ootle_wallet_daemon, wallet_store.clone())?;
 
     // Generate a new secret each time the daemon starts. This means that all JWT tokens will be invalidated on restart.

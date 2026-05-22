@@ -1812,7 +1812,9 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         use crate::schema::api_keys;
 
         let now = time::OffsetDateTime::now_utc();
-        let cutoff = now - time::Duration::seconds(throttle.as_secs() as i64);
+        // Use millisecond precision so sub-second throttle values aren't
+        // silently zeroed by `as_secs` truncation.
+        let cutoff = now - time::Duration::milliseconds(throttle.as_millis() as i64);
         let now = time::PrimitiveDateTime::new(now.date(), now.time());
         let cutoff = time::PrimitiveDateTime::new(cutoff.date(), cutoff.time());
 

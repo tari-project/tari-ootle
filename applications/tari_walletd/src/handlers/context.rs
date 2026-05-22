@@ -153,8 +153,12 @@ impl HandlerContext {
     /// in-memory entry.
     fn maybe_spawn_last_used_bump(&self, id: i32) {
         let now = Instant::now();
+        // `saturating_duration_since` avoids the panic that
+        // `Instant::duration_since` would raise on a non-monotonic clock
+        // (rare on Linux but observed under VM suspend/resume). A request
+        // handler must not panic over a missed throttle observation.
         if let Some(prev) = self.api_key_last_used_bumps.get(&id) &&
-            now.duration_since(*prev) < api_keys::LAST_USED_BUMP_THROTTLE
+            now.saturating_duration_since(*prev) < api_keys::LAST_USED_BUMP_THROTTLE
         {
             return;
         }
@@ -163,7 +167,10 @@ impl HandlerContext {
         self.api_key_last_used_bumps.insert(id, now);
 
         let store = self.wallet_sdk.store().clone();
-        tokio::spawn(async move {
+        // `spawn_blocking`, not `spawn`: the closure runs synchronous diesel
+        // I/O. The blocking-pool keeps the executor's worker threads free
+        // for actual async work.
+        tokio::task::spawn_blocking(move || {
             if let Err(e) = api_keys::touch_last_used_throttled(&store, id, api_keys::LAST_USED_BUMP_THROTTLE) {
                 log::warn!(
                     target: "tari::ootle::walletd::auth",

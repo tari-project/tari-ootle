@@ -177,20 +177,27 @@ pub async fn handle_claim_validator_fees(
             })
             .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
     } else {
-        let plan = build_self_stealth_plan(&sdk, &account, account_key_id, &fee_pool_addresses, max_fee).await?;
+        let statement =
+            build_self_stealth_statement(&sdk, &account, account_key_id, &fee_pool_addresses, max_fee).await?;
+        let pool_addresses = fee_pool_addresses.clone();
         builder.with_fee_instructions_builder(move |builder| {
-            let mut builder = builder;
-            for (i, (address, statement)) in plan.statements.into_iter().enumerate() {
-                let bucket = format!("b{}", i);
-                builder = builder
-                    .claim_validator_fees(address)
-                    .put_last_instruction_output_on_workspace(bucket.clone())
-                    .stealth_transfer_with_input_bucket(TARI_TOKEN, statement, bucket);
-                if i == plan.fee_carrier_idx {
-                    builder = builder.put_last_instruction_output_on_workspace("fee");
-                }
-            }
-            builder.pay_fee_from_bucket("fee")
+            let mut iter = pool_addresses.into_iter();
+            let first = iter
+                .next()
+                .expect("fee_pool_addresses non-empty (req.shards.is_empty() checked above)");
+            let builder = builder
+                .claim_validator_fees(first)
+                .put_last_instruction_output_on_workspace("joined");
+            iter.enumerate()
+                .fold(builder, |b, (i, address)| {
+                    let tmp = format!("tmp{i}");
+                    b.claim_validator_fees(address)
+                        .put_last_instruction_output_on_workspace(tmp.clone())
+                        .put_into_bucket(tmp, "joined")
+                })
+                .take_from_bucket("joined", max_fee, "fee")
+                .pay_fee_from_bucket("fee")
+                .stealth_transfer_with_input_bucket(TARI_TOKEN, statement, "joined")
         })
     };
 
@@ -258,24 +265,16 @@ pub async fn handle_claim_validator_fees(
     })
 }
 
-struct StealthClaimPlan {
-    statements: Vec<(ValidatorFeePoolAddress, StealthTransferStatement)>,
-    /// Index of the pool whose stealth_transfer carves out `max_fee` as a revealed-output bucket to pay the network
-    /// fee. All other pools carve out 0.
-    fee_carrier_idx: usize,
-}
-
-/// Fetches each fee pool's current amount and builds a per-shard [`StealthTransferStatement`] that converts the
-/// claimed revealed amount into a stealth UTXO addressed to the account's own owner key. The pool with the largest
-/// amount additionally carves `max_fee` as a revealed-output bucket which the caller pays the network fee from — so
-/// no funds need to come from the user's account.
-async fn build_self_stealth_plan(
+/// Fetches each fee pool's current amount, sums them, and builds a single [`StealthTransferStatement`] that converts
+/// the consolidated revealed bucket (minus `max_fee` which is carved into a separate revealed bucket on-chain to pay
+/// the network fee) into one stealth UTXO addressed to the account's own owner key.
+async fn build_self_stealth_statement(
     sdk: &crate::WalletSdk,
     account: &tari_ootle_wallet_sdk::models::AccountWithAddress,
     account_owner_key_id: tari_ootle_wallet_sdk::models::KeyId,
     fee_pool_addresses: &[ValidatorFeePoolAddress],
     max_fee: u64,
-) -> Result<StealthClaimPlan, anyhow::Error> {
+) -> Result<StealthTransferStatement, anyhow::Error> {
     let network = sdk.config_api().get_network()?;
     let account_owner = sdk.key_manager_api().get_public_key(account_owner_key_id)?;
     let view_only = sdk.key_manager_api().get_public_key(account.view_only_key_id())?;
@@ -296,89 +295,74 @@ async fn build_self_stealth_plan(
         }
     }
 
-    let (fee_carrier_idx, fee_carrier_amount) = fee_pool_addresses
-        .iter()
-        .enumerate()
-        .map(|(i, addr)| (i, amounts.get(addr).copied().unwrap_or(0)))
-        .max_by_key(|(_, amount)| *amount)
-        .ok_or_else(|| invalid_params("shards", Some("no fee pool addresses to claim")))?;
+    let mut total: u64 = 0;
+    for address in fee_pool_addresses {
+        let amount = amounts.get(address).copied().unwrap_or(0);
+        if amount == 0 {
+            return Err(invalid_params(
+                "shards",
+                Some(format!("Fee pool {address} is empty or could not be fetched")),
+            ));
+        }
+        total = total
+            .checked_add(amount)
+            .ok_or_else(|| invalid_params("shards", Some("Total claimable fee pool amount overflows u64")))?;
+    }
 
-    if fee_carrier_amount < max_fee {
+    if total <= max_fee {
         return Err(invalid_params(
             "max_fee",
             Some(format!(
-                "max_fee ({max_fee}) exceeds the largest claimable fee pool amount ({fee_carrier_amount}); reduce \
-                 max_fee or include shards with larger balances"
+                "max_fee ({max_fee}) is not less than the total claimable fee pool amount ({total}); reduce max_fee \
+                 or include shards with larger balances"
             )),
         ));
     }
 
+    let stealth_amount = total - max_fee;
+
     let memo = Memo::new_message("Validator fees claimed to stealth").expect("valid memo");
+    let mask = sdk.key_manager_api().next_key(KeyBranch::StealthMask)?;
+    let (nonce, output_public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
 
-    let statements = fee_pool_addresses
-        .iter()
-        .copied()
-        .enumerate()
-        .map(|(i, address)| {
-            let amount = amounts.get(&address).copied().unwrap_or(0);
-            if amount == 0 {
-                return Err(invalid_params(
-                    "shards",
-                    Some(format!("Fee pool {address} is empty or could not be fetched")),
-                ));
-            }
+    let encrypted_data = sdk.stealth_crypto_api().encrypt_value_and_mask(
+        stealth_amount,
+        &mask.key,
+        view_only.public_key(),
+        &nonce,
+        Some(&memo),
+    )?;
 
-            let revealed_output = if i == fee_carrier_idx { max_fee } else { 0 };
-            let stealth_amount = amount - revealed_output;
+    let tag = sdk.stealth_crypto_api().derive_stealth_output_tag(
+        network,
+        &nonce,
+        view_only.public_key(),
+        &STEALTH_TARI_RESOURCE_ADDRESS,
+    );
 
-            let mask = sdk.key_manager_api().next_key(KeyBranch::StealthMask)?;
-            let (nonce, output_public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+    let stealth_owner_public_key =
+        sdk.stealth_crypto_api()
+            .derive_stealth_owner_public_key(network, account_owner.public_key(), &nonce);
 
-            let encrypted_data = sdk.stealth_crypto_api().encrypt_value_and_mask(
-                stealth_amount,
-                &mask.key,
-                view_only.public_key(),
-                &nonce,
-                Some(&memo),
-            )?;
+    let output_witness = StealthOutputWitness {
+        witness: OutputWitness {
+            amount: stealth_amount,
+            mask: mask.key,
+            sender_public_nonce: output_public_nonce,
+            minimum_value_promise: 0,
+            encrypted_data,
+            resource_view_key: None,
+        },
+        spend_condition: SpendCondition::Signed(stealth_owner_public_key.to_byte_type()),
+        tag,
+    };
 
-            let tag = sdk.stealth_crypto_api().derive_stealth_output_tag(
-                network,
-                &nonce,
-                view_only.public_key(),
-                &STEALTH_TARI_RESOURCE_ADDRESS,
-            );
+    let statement = sdk.stealth_crypto_api().generate_transfer_statement(
+        iter::empty::<StealthInputWitness>(),
+        stealth_amount,
+        iter::once(&output_witness),
+        0,
+    )?;
 
-            let stealth_owner_public_key =
-                sdk.stealth_crypto_api()
-                    .derive_stealth_owner_public_key(network, account_owner.public_key(), &nonce);
-
-            let output_witness = StealthOutputWitness {
-                witness: OutputWitness {
-                    amount: stealth_amount,
-                    mask: mask.key,
-                    sender_public_nonce: output_public_nonce,
-                    minimum_value_promise: 0,
-                    encrypted_data,
-                    resource_view_key: None,
-                },
-                spend_condition: SpendCondition::Signed(stealth_owner_public_key.to_byte_type()),
-                tag,
-            };
-
-            let statement = sdk.stealth_crypto_api().generate_transfer_statement(
-                iter::empty::<StealthInputWitness>(),
-                amount,
-                iter::once(&output_witness),
-                revealed_output,
-            )?;
-
-            Ok((address, statement))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    Ok(StealthClaimPlan {
-        statements,
-        fee_carrier_idx,
-    })
+    Ok(statement)
 }

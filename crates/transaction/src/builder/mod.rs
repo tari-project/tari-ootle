@@ -548,6 +548,18 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
+    /// Drains the bucket at `src_label` into the existing bucket at `dest_label`. The `src_label`
+    /// workspace slot remains bound but its bucket is consumed.
+    pub fn put_into_bucket<S: Into<BuilderWorkspaceKey>, T: Into<BuilderWorkspaceKey>>(
+        self,
+        src_label: S,
+        dest_label: T,
+    ) -> Self {
+        let src = self.get_workspace_offset_id_from_named_arg(src_label.into());
+        let dest = self.get_workspace_offset_id_from_named_arg(dest_label.into());
+        self.add_instruction(Instruction::PutIntoBucket { src, dest })
+    }
+
     pub fn assert_bucket_contains_any<T: AsRef<str>>(self, label: T, resource_address: ResourceAddress) -> Self {
         self.assert_bucket_amount(label, resource_address, CheckOrd::Gt, Amount::zero())
     }
@@ -915,6 +927,7 @@ impl<D> TransactionBuilder<D> {
             Instruction::ClaimBurn { .. } |
             Instruction::DropAllProofsInWorkspace |
             Instruction::TakeFromBucket { .. } |
+            Instruction::PutIntoBucket { .. } |
             Instruction::PublishTemplate { .. } |
             Instruction::AllocateAddress { .. } |
             Instruction::PayFeeFromBucket { .. } => {},

@@ -56,7 +56,14 @@ pub enum ManifestIntent {
     Log(LogIntent),
     DropAllProofs,
     PublishTemplate(PublishTemplateIntent),
+    PutIntoBucket(PutIntoBucketIntent),
     CallLocalFunction(Ident),
+}
+
+#[derive(Debug, Clone)]
+pub struct PutIntoBucketIntent {
+    pub src: Ident,
+    pub dest: Ident,
 }
 
 /// `publish_template!(blob!(name))` — publishes the WASM binary referenced by the named blob.
@@ -472,6 +479,18 @@ fn macro_call(mac: &Ident, tokens: TokenStream) -> Result<ManifestIntent, syn::E
             message: parse2::<LitStr>(tokens)?.value(),
         })),
         "drop_all_proofs" => Ok(ManifestIntent::DropAllProofs),
+        "put_into_bucket" => {
+            let args = syn::parse::Parser::parse2(
+                |input: ParseStream| {
+                    let src: Ident = input.parse()?;
+                    input.parse::<syn::Token![,]>()?;
+                    let dest: Ident = input.parse()?;
+                    Ok(PutIntoBucketIntent { src, dest })
+                },
+                tokens,
+            )?;
+            Ok(ManifestIntent::PutIntoBucket(args))
+        },
         "create_account" => {
             let args = parse_create_account_args(tokens)?;
             Ok(ManifestIntent::CreateAccount(CreateAccountIntent {

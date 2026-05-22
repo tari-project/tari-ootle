@@ -9,4 +9,4 @@ import type { PrunedTransactionV1 } from "./PrunedTransactionV1";
  * Constructed only via `From<Transaction>` (which derives commitments from the full blobs and
  * drops the payloads) or via deserialization of bytes previously written by the storage layer.
  */
-export type PrunedTransaction = { "V1": PrunedTransactionV1 };
+export type PrunedTransaction = { V1: PrunedTransactionV1 };

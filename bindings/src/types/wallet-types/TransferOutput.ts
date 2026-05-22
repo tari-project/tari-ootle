@@ -4,21 +4,23 @@ import type { Memo } from "../Memo";
 import type { OotleAddress } from "../OotleAddress";
 import type { PayTo } from "./PayTo";
 
-export type TransferOutput = { 
-/**
- * Destination address used to derive the UTXO encryption keys, owner signature and the account in which to
- * deposit revealed funds
- */
-address: OotleAddress, 
-/**
- * Amount to spend to a revealed output
- */
-revealed_amount: Amount, 
-/**
- * Amount to spend to a blinded output
- */
-blinded_amount: bigint, 
-/**
- * Optional memo to include a memo in the output. This memo is encrypted and can only be read by the recipient.
- */
-memo: Memo | null, pay_to: PayTo, };
+export type TransferOutput = {
+  /**
+   * Destination address used to derive the UTXO encryption keys, owner signature and the account in which to
+   * deposit revealed funds
+   */
+  address: OotleAddress;
+  /**
+   * Amount to spend to a revealed output
+   */
+  revealed_amount: Amount;
+  /**
+   * Amount to spend to a blinded output
+   */
+  blinded_amount: bigint;
+  /**
+   * Optional memo to include a memo in the output. This memo is encrypted and can only be read by the recipient.
+   */
+  memo: Memo | null;
+  pay_to: PayTo;
+};

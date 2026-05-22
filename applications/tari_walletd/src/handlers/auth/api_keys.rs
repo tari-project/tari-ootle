@@ -154,7 +154,7 @@ pub async fn handle_create_api_key(
     // Admin + interactive user session. An API key — even one carrying
     // `Admin` — cannot mint further keys, so a leaked admin key cannot
     // establish persistence beyond its own revocation.
-    context.check_auth_user_only(token, &[Permission::Admin])?;
+    context.authorize_user_only(token, &[Permission::Admin])?;
 
     if request.name.trim().is_empty() {
         return Err(anyhow!("API key name must not be empty"));
@@ -234,7 +234,7 @@ pub async fn handle_list_api_keys(
 ) -> Result<AuthListApiKeysResponse, anyhow::Error> {
     // User-auth-only: enumeration is an admin-tooling operation; an API
     // key shouldn't be able to enumerate the wallet's other keys.
-    context.check_auth_user_only(token, &[Permission::Admin])?;
+    context.authorize_user_only(token, &[Permission::Admin])?;
 
     let rows = {
         let mut tx = context
@@ -280,7 +280,7 @@ pub async fn handle_revoke_api_key(
     // User-auth-only: a leaked admin key cannot revoke other (or its own
     // sibling) keys; an attacker cannot use a compromised key to "clean
     // up" the audit trail.
-    context.check_auth_user_only(token, &[Permission::Admin])?;
+    context.authorize_user_only(token, &[Permission::Admin])?;
 
     let mut tx = context
         .wallet_sdk()
@@ -349,7 +349,7 @@ mod tests {
         // authentication.
         let original: Permissions = vec![
             Permission::Accounts(Crud::Read, None),
-            Permission::Transactions(Crud::Read, None),
+            Permission::Transactions(Crud::Read),
             Permission::Keys(Crud::Read),
         ]
         .into();
@@ -359,7 +359,7 @@ mod tests {
         // direct equality.
         assert_eq!(parsed.len(), 3);
         assert!(parsed.has_permission(&Permission::Accounts(Crud::Read, None)));
-        assert!(parsed.has_permission(&Permission::Transactions(Crud::Read, None)));
+        assert!(parsed.has_permission(&Permission::Transactions(Crud::Read)));
         assert!(parsed.has_permission(&Permission::Keys(Crud::Read)));
     }
 
@@ -371,11 +371,11 @@ mod tests {
         // see the same canonical string.
         let a: Permissions = vec![
             Permission::Accounts(Crud::Read, None),
-            Permission::Transactions(Crud::Read, None),
+            Permission::Transactions(Crud::Read),
         ]
         .into();
         let b: Permissions = vec![
-            Permission::Transactions(Crud::Read, None),
+            Permission::Transactions(Crud::Read),
             Permission::Accounts(Crud::Read, None),
         ]
         .into();
@@ -446,7 +446,7 @@ mod shim_tests {
             "agent",
             vec![
                 Permission::Accounts(Crud::Read, None),
-                Permission::Transactions(Crud::Read, None),
+                Permission::Transactions(Crud::Read),
             ]
             .into(),
         );
@@ -459,11 +459,11 @@ mod shim_tests {
     fn out_of_scope_call_is_rejected() {
         let store = open_store();
         let (raw, _) = mint_key(&store, "info-only", vec![Permission::Accounts(Crud::Read, None)].into());
-        let err = resolve(&store, &raw, &[Permission::Transactions(Crud::Read, None)])
-            .expect_err("out-of-scope must be rejected");
+        let err =
+            resolve(&store, &raw, &[Permission::Transactions(Crud::Read)]).expect_err("out-of-scope must be rejected");
         assert!(
             matches!(err, AuthError::InsufficientPermissions {
-                required: Permission::Transactions(Crud::Read, None)
+                required: Permission::Transactions(Crud::Read)
             }),
             "expected InsufficientPermissions(transactions:read), got {err:?}"
         );
@@ -575,7 +575,7 @@ mod shim_tests {
         let (raw, _) = mint_key(&store, "everything", vec![Permission::Admin].into());
         resolve(&store, &raw, &[
             Permission::Accounts(Crud::Read, None),
-            Permission::Transactions(Crud::Read, None),
+            Permission::Transactions(Crud::Read),
         ])
         .expect("Admin grant must satisfy any required scopes");
     }

@@ -24,7 +24,7 @@ pub enum Permission {
     Admin,
     Accounts(Crud, Option<ComponentAddress>),
     Keys(Crud),
-    Transactions(Crud, Option<ComponentAddress>),
+    Transactions(Crud),
     Transfer(Crud, Option<ComponentAddress>),
     Templates(Crud),
     Nfts(Crud, Option<ResourceAddress>),
@@ -75,9 +75,7 @@ impl Permission {
                 crud_satisfies(*ga, *ra) && scope_satisfies(gs, rs)
             },
             (Permission::Keys(ga), Permission::Keys(ra)) => crud_satisfies(*ga, *ra),
-            (Permission::Transactions(ga, gs), Permission::Transactions(ra, rs)) => {
-                crud_satisfies(*ga, *ra) && scope_satisfies(gs, rs)
-            },
+            (Permission::Transactions(ga), Permission::Transactions(ra)) => crud_satisfies(*ga, *ra),
             (Permission::Transfer(ga, gs), Permission::Transfer(ra, rs)) => {
                 crud_satisfies(*ga, *ra) && scope_satisfies(gs, rs)
             },
@@ -145,7 +143,7 @@ impl Display for Permission {
             Permission::Webrtc => write!(f, "webrtc"),
             Permission::Accounts(a, s) => display_scoped(f, "accounts", *a, s),
             Permission::Keys(a) => write!(f, "keys:{a}"),
-            Permission::Transactions(a, s) => display_scoped(f, "transactions", *a, s),
+            Permission::Transactions(a) => write!(f, "transactions:{a}"),
             Permission::Transfer(a, s) => display_scoped(f, "transfer", *a, s),
             Permission::Templates(a) => write!(f, "templates:{a}"),
             Permission::Nfts(a, s) => display_scoped(f, "nfts", *a, s),
@@ -196,7 +194,7 @@ impl FromStr for Permission {
         match resource {
             "accounts" => parse_scoped(action_str, entity_str, Permission::Accounts),
             "keys" => parse_unscoped(action_str, entity_str, Permission::Keys),
-            "transactions" => parse_scoped(action_str, entity_str, Permission::Transactions),
+            "transactions" => parse_unscoped(action_str, entity_str, Permission::Transactions),
             "transfer" => parse_scoped(action_str, entity_str, Permission::Transfer),
             "templates" => parse_unscoped(action_str, entity_str, Permission::Templates),
             "nfts" => parse_scoped(action_str, entity_str, Permission::Nfts),
@@ -307,6 +305,18 @@ impl Permissions {
         self.0.iter().any(|granted| granted.satisfies(required))
     }
 
+    /// Check that every required permission is satisfied by some granted
+    /// permission. Returns `Err(required)` with the first unsatisfied
+    /// permission so the caller can surface a precise error.
+    pub fn check(&self, required: &[Permission]) -> Result<(), Permission> {
+        for perm in required {
+            if !self.satisfies(perm) {
+                return Err(perm.clone());
+            }
+        }
+        Ok(())
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &Permission> {
         self.0.iter()
     }
@@ -379,7 +389,7 @@ mod tests {
         for action in [Crud::Read, Crud::Create, Crud::Update, Crud::Delete] {
             round_trip(Permission::Accounts(action, None));
             round_trip(Permission::Keys(action));
-            round_trip(Permission::Transactions(action, None));
+            round_trip(Permission::Transactions(action));
             round_trip(Permission::Transfer(action, None));
             round_trip(Permission::Templates(action));
             round_trip(Permission::Nfts(action, None));
@@ -395,7 +405,6 @@ mod tests {
     fn round_trip_scoped_component_resources() {
         let c = component(7);
         round_trip(Permission::Accounts(Crud::Read, Some(c)));
-        round_trip(Permission::Transactions(Crud::Create, Some(c)));
         round_trip(Permission::Transfer(Crud::Create, Some(c)));
         round_trip(Permission::Confidential(Crud::Update, Some(c)));
         round_trip(Permission::StealthUtxos(Crud::Read, Some(c)));
@@ -565,7 +574,7 @@ mod tests {
         let granted = Permission::Accounts(Crud::Read, None);
         assert!(!granted.satisfies(&Permission::Keys(Crud::Read)));
         assert!(!granted.satisfies(&Permission::Substates(ReadOnly::Read)));
-        assert!(!granted.satisfies(&Permission::Transactions(Crud::Read, None)));
+        assert!(!granted.satisfies(&Permission::Transactions(Crud::Read)));
     }
 
     #[test]
@@ -573,7 +582,7 @@ mod tests {
         // The split is intentional: a power-key with transactions:create
         // must still be granted transfer:create explicitly to use the
         // narrow transfer handlers. Verifies no implicit containment.
-        let granted = Permission::Transactions(Crud::Create, None);
+        let granted = Permission::Transactions(Crud::Create);
         assert!(!granted.satisfies(&Permission::Transfer(Crud::Create, None)));
     }
 
@@ -590,6 +599,18 @@ mod tests {
         assert!(set.satisfies(&Permission::Transfer(Crud::Create, Some(component(1)))));
         assert!(!set.satisfies(&Permission::Transfer(Crud::Create, Some(component(2)))));
         assert!(!set.satisfies(&Permission::Keys(Crud::Read)));
+    }
+
+    #[test]
+    fn transactions_is_unscoped() {
+        // `Transactions` deliberately carries no entity scope: the wallet
+        // cannot statically determine which accounts an arbitrary
+        // instruction list will touch. Round-trip via `parse_scoped` would
+        // accept a third segment — verify the unscoped parser rejects it.
+        assert!("transactions:create".parse::<Permission>().is_ok());
+        let c = component(1);
+        let s = format!("transactions:create:{c}");
+        assert!(s.parse::<Permission>().is_err());
     }
 
     #[test]

@@ -3,4 +3,8 @@ import type { FinalizeResult } from "../FinalizeResult";
 import type { TransactionId } from "../TransactionId";
 import type { TransactionStatus } from "../TransactionStatus";
 
-export type TransactionGetResultResponse = { transaction_id: TransactionId, status: TransactionStatus, result: FinalizeResult | null, };
+export type TransactionGetResultResponse = {
+  transaction_id: TransactionId;
+  status: TransactionStatus;
+  result: FinalizeResult | null;
+};

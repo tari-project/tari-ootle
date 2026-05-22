@@ -33,7 +33,7 @@ pub async fn handle_get(
     req: TemplatesGetRequest,
 ) -> Result<TemplatesGetResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    context.check_auth(token, &[Permission::Templates(Crud::Read)])?;
+    context.authorize(token, &[Permission::Templates(Crud::Read)])?;
 
     if let Some(template) = sdk
         .template_api()
@@ -60,7 +60,7 @@ pub async fn handle_list_owned(
     token: Option<&Bearer>,
     req: TemplatesListAuthoredRequest,
 ) -> Result<TemplatesListAuthoredResponse, anyhow::Error> {
-    context.check_auth(token, &[Permission::Templates(Crud::Read)])?;
+    context.authorize(token, &[Permission::Templates(Crud::Read)])?;
 
     let (templates, total_templates) = context.wallet_sdk().template_api().list_templates(
         req.author_public_key.as_ref(),
@@ -80,7 +80,7 @@ pub async fn handle_sign_metadata(
     token: Option<&Bearer>,
     req: SignTemplateMetadataRequest,
 ) -> Result<SignTemplateMetadataResponse, anyhow::Error> {
-    context.check_auth(token, &[Permission::Templates(Crud::Create)])?;
+    context.authorize(token, &[Permission::Templates(Crud::Create)])?;
 
     let sdk = context.wallet_sdk();
     let key = sdk.key_manager_api().get_key(req.key_id)?;

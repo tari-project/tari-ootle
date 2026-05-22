@@ -3,4 +3,4 @@
 /**
  * The unique identification of a non-fungible token inside it's parent resource
  */
-export type NonFungibleId = { "U256": string } | { "String": string } | { "Uint32": number } | { "Uint64": number };
+export type NonFungibleId = { U256: string } | { String: string } | { Uint32: number } | { Uint64: number };

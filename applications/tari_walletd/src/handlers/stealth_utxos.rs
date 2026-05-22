@@ -34,7 +34,7 @@ pub async fn handle_list(
     token: Option<&Bearer>,
     req: StealthUtxosListRequest,
 ) -> Result<StealthUtxosListResponse, anyhow::Error> {
-    context.check_auth(token, &[Permission::StealthUtxos(Crud::Read, req.account_address)])?;
+    context.authorize(token, &[Permission::StealthUtxos(Crud::Read, req.account_address)])?;
 
     let utxos = context.wallet_sdk().stealth_outputs_api().utxos_get_many(
         &req.resource_address,
@@ -66,7 +66,7 @@ pub async fn handle_decrypt_value(
     req: StealthUtxosDecryptValueRequest,
 ) -> Result<StealthUtxosDecryptValueResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[Permission::StealthUtxos(Crud::Read, None)])?;
+    context.authorize(token, &[Permission::StealthUtxos(Crud::Read, None)])?;
     if req.ids.is_empty() {
         return Err(invalid_params("ids", Some("At least one UTXO ID must be provided")));
     }

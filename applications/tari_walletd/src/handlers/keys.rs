@@ -24,7 +24,7 @@ pub async fn handle_create(
     req: KeysCreateRequest,
 ) -> Result<KeysCreateResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[Permission::Keys(Crud::Create)])?;
+    context.authorize(token, &[Permission::Keys(Crud::Create)])?;
     let key_manager = sdk.key_manager_api();
     let key = req
         .specific_index
@@ -42,7 +42,7 @@ pub async fn handle_list(
     req: KeysListRequest,
 ) -> Result<KeysListResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[Permission::Keys(Crud::Read)])?;
+    context.authorize(token, &[Permission::Keys(Crud::Read)])?;
     let keys = sdk.key_manager_api().get_all_derived_keys(req.branch)?;
     Ok(KeysListResponse {
         keys: keys
@@ -58,7 +58,7 @@ pub async fn handle_set_active(
     req: KeysSetActiveRequest,
 ) -> Result<KeysSetActiveResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[Permission::Keys(Crud::Update)])?;
+    context.authorize(token, &[Permission::Keys(Crud::Update)])?;
     let km = sdk.key_manager_api();
     km.set_active_key(KeyBranch::Account, req.index)?;
     let key = km.get_active_key(KeyBranch::Account)?;

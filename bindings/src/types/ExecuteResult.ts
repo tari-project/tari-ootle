@@ -2,17 +2,18 @@
 import type { Epoch } from "./Epoch";
 import type { FinalizeResult } from "./FinalizeResult";
 
-export type ExecuteResult = { 
-/**
- * The finalized result to commit. If the fee transaction succeeds but the transaction fails, this will be accept.
- */
-finalize: FinalizeResult, 
-/**
- * The time taken to execute the transaction (excluding finalization).
- */
-execution_time: {secs: number, nanos: number}, 
-/**
- * The epoch during which the transaction was executed. This may be None if consensus aborted before being able to
- * lock to an epoch.
- */
-execute_epoch: Epoch | null, };
+export type ExecuteResult = {
+  /**
+   * The finalized result to commit. If the fee transaction succeeds but the transaction fails, this will be accept.
+   */
+  finalize: FinalizeResult;
+  /**
+   * The time taken to execute the transaction (excluding finalization).
+   */
+  execution_time: { secs: number; nanos: number };
+  /**
+   * The epoch during which the transaction was executed. This may be None if consensus aborted before being able to
+   * lock to an epoch.
+   */
+  execute_epoch: Epoch | null;
+};

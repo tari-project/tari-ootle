@@ -5,4 +5,11 @@ import type { ResourceAddress } from "../ResourceAddress";
 import type { RistrettoPublicKeyBytes } from "../RistrettoPublicKeyBytes";
 import type { ComponentAddressOrName } from "./ComponentAddressOrName";
 
-export type ProofsGenerateRequest = { confidential_amount: Amount, reveal_amount: Amount, account: ComponentAddressOrName | null, resource_address: ResourceAddress, destination_public_key: RistrettoPublicKeyBytes, memo?: Memo | null, };
+export type ProofsGenerateRequest = {
+  confidential_amount: Amount;
+  reveal_amount: Amount;
+  account: ComponentAddressOrName | null;
+  resource_address: ResourceAddress;
+  destination_public_key: RistrettoPublicKeyBytes;
+  memo?: Memo | null;
+};

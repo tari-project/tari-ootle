@@ -2,4 +2,4 @@
 import type { ComponentAddress } from "../ComponentAddress";
 import type { BalanceEntry } from "./BalanceEntry";
 
-export type AccountsGetBalancesResponse = { address: ComponentAddress, balances: Array<BalanceEntry>, };
+export type AccountsGetBalancesResponse = { address: ComponentAddress; balances: Array<BalanceEntry> };

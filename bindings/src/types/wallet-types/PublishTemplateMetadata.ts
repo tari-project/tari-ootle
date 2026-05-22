@@ -5,4 +5,7 @@ import type { TemplateMetadata } from "../TemplateMetadata";
  * Template metadata input for publishing. Either provide the metadata for server-side hashing,
  * or a pre-computed hash.
  */
-export type PublishTemplateMetadata = { "type": "Literal", "data": TemplateMetadata } | { "type": "RawCbor", "data": string } | { "type": "Hash", "data": string };
+export type PublishTemplateMetadata =
+  | { type: "Literal"; data: TemplateMetadata }
+  | { type: "RawCbor"; data: string }
+  | { type: "Hash"; data: string };

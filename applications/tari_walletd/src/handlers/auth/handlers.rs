@@ -83,7 +83,7 @@ pub async fn handle_revoke(
     token: Option<&Bearer>,
     revoke_request: AuthRevokeTokenRequest,
 ) -> Result<AuthRevokeTokenResponse, anyhow::Error> {
-    context.check_auth(token, &[Permission::Admin])?;
+    context.authorize(token, &[Permission::Admin])?;
     context
         .refresh_token_store()
         .revoke_token(&revoke_request.refresh_token_id)
@@ -96,7 +96,7 @@ pub async fn handle_list_sessions(
     token: Option<&Bearer>,
     _request: AuthListSessionsRequest,
 ) -> Result<AuthListSessionsResponse, anyhow::Error> {
-    context.check_auth(token, &[Permission::Admin])?;
+    context.authorize(token, &[Permission::Admin])?;
     context.refresh_token_store().clear_expired().await;
     let sessions = context
         .refresh_token_store()

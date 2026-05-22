@@ -3,4 +3,10 @@ import type { ResourceAddress } from "../ResourceAddress";
 import type { UtxoId } from "../UtxoId";
 import type { KeyId } from "./KeyId";
 
-export type StealthUtxosDecryptValueRequest = { resource_address: ResourceAddress, ids: Array<UtxoId>, view_key_id: KeyId, minimum_expected_value: bigint | null, maximum_expected_value: bigint, };
+export type StealthUtxosDecryptValueRequest = {
+  resource_address: ResourceAddress;
+  ids: Array<UtxoId>;
+  view_key_id: KeyId;
+  minimum_expected_value: bigint | null;
+  maximum_expected_value: bigint;
+};

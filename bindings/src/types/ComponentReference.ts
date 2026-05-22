@@ -4,4 +4,4 @@ import type { ComponentAddress } from "./ComponentAddress";
 /**
  * A reference to a component, either by its address or by a workspace ID.
  */
-export type ComponentReference = { "Address": ComponentAddress } | { "Workspace": number };
+export type ComponentReference = { Address: ComponentAddress } | { Workspace: number };

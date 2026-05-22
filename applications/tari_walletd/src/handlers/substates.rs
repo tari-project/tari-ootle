@@ -24,7 +24,7 @@ pub async fn handle_get(
     req: SubstatesGetRequest,
 ) -> Result<SubstatesGetResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    context.check_auth(token, &[Permission::Substates(ReadOnly::Read)])?;
+    context.authorize(token, &[Permission::Substates(ReadOnly::Read)])?;
 
     let record = sdk.substate_api().get_substate(&req.substate_id).optional()?;
 
@@ -60,7 +60,7 @@ pub async fn handle_list(
     req: SubstatesListRequest,
 ) -> Result<SubstatesListResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    context.check_auth(token, &[Permission::Substates(ReadOnly::Read)])?;
+    context.authorize(token, &[Permission::Substates(ReadOnly::Read)])?;
     let substates = sdk.substate_api().list_substates(
         req.filter_by_type,
         req.filter_by_template.as_ref(),

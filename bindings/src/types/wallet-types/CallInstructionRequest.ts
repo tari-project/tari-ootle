@@ -3,4 +3,14 @@ import type { Instruction } from "../Instruction";
 import type { SubstateRequirement } from "../SubstateRequirement";
 import type { ComponentAddressOrName } from "./ComponentAddressOrName";
 
-export type CallInstructionRequest = { instructions: Array<Instruction>, fee_account: ComponentAddressOrName, max_fee: bigint, inputs: Array<SubstateRequirement>, override_inputs: boolean | null, new_outputs: number | null, proof_ids: Array<number>, min_epoch: number | null, max_epoch: number | null, };
+export type CallInstructionRequest = {
+  instructions: Array<Instruction>;
+  fee_account: ComponentAddressOrName;
+  max_fee: bigint;
+  inputs: Array<SubstateRequirement>;
+  override_inputs: boolean | null;
+  new_outputs: number | null;
+  proof_ids: Array<number>;
+  min_epoch: number | null;
+  max_epoch: number | null;
+};

@@ -4,4 +4,12 @@ import type { NodeHeight } from "./NodeHeight";
 import type { ShardGroup } from "./ShardGroup";
 import type { ValidatorSignatureBytes } from "./ValidatorSignatureBytes";
 
-export type ProposalCertificate = { height: NodeHeight, header_hash: string, parent_id: string, epoch: Epoch, shard_group: ShardGroup, signatures: Array<ValidatorSignatureBytes>, decision: string, };
+export type ProposalCertificate = {
+  height: NodeHeight;
+  header_hash: string;
+  parent_id: string;
+  epoch: Epoch;
+  shard_group: ShardGroup;
+  signatures: Array<ValidatorSignatureBytes>;
+  decision: string;
+};

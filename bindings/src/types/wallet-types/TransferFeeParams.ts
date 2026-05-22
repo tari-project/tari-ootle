@@ -2,4 +2,4 @@
 import type { UtxoInputSelection } from "../UtxoInputSelection";
 import type { PayFeeWithSwapParams } from "./PayFeeWithSwapParams";
 
-export type TransferFeeParams = { input_selection: UtxoInputSelection, pay_fee_with_swap: PayFeeWithSwapParams | null, };
+export type TransferFeeParams = { input_selection: UtxoInputSelection; pay_fee_with_swap: PayFeeWithSwapParams | null };

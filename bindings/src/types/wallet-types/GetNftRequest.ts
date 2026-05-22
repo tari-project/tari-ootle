@@ -2,4 +2,4 @@
 import type { NonFungibleId } from "../NonFungibleId";
 import type { ResourceAddress } from "../ResourceAddress";
 
-export type GetNftRequest = { resource_address: ResourceAddress, nft_id: NonFungibleId, };
+export type GetNftRequest = { resource_address: ResourceAddress; nft_id: NonFungibleId };

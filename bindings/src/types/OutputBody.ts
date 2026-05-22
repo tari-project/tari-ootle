@@ -3,4 +3,9 @@ import type { ElgamalVerifiableBalanceBytes } from "./ElgamalVerifiableBalanceBy
 import type { EncryptedData } from "./EncryptedData";
 import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
 
-export type OutputBody = { public_nonce: RistrettoPublicKeyBytes, encrypted_data: EncryptedData, minimum_value_promise: number | bigint, viewable_balance: ElgamalVerifiableBalanceBytes | null, };
+export type OutputBody = {
+  public_nonce: RistrettoPublicKeyBytes;
+  encrypted_data: EncryptedData;
+  minimum_value_promise: number | bigint;
+  viewable_balance: ElgamalVerifiableBalanceBytes | null;
+};

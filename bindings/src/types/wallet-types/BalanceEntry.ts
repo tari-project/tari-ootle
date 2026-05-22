@@ -4,4 +4,12 @@ import type { ResourceAddress } from "../ResourceAddress";
 import type { ResourceType } from "../ResourceType";
 import type { VaultId } from "../VaultId";
 
-export type BalanceEntry = { vault_address: VaultId | null, resource_address: ResourceAddress, balance: Amount, resource_type: ResourceType, confidential_balance: Amount, token_symbol: string | null, divisibility: number, };
+export type BalanceEntry = {
+  vault_address: VaultId | null;
+  resource_address: ResourceAddress;
+  balance: Amount;
+  resource_type: ResourceType;
+  confidential_balance: Amount;
+  token_symbol: string | null;
+  divisibility: number;
+};

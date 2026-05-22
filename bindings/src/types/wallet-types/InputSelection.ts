@@ -2,4 +2,4 @@
 import type { Amount } from "../Amount";
 import type { UtxoInputSelection } from "../UtxoInputSelection";
 
-export type InputSelection = { "FromBucket": { revealed_amount: Amount, } } | { "Selection": UtxoInputSelection };
+export type InputSelection = { FromBucket: { revealed_amount: Amount } } | { Selection: UtxoInputSelection };

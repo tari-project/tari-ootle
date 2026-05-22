@@ -6,4 +6,13 @@ import type { ComponentAddressOrName } from "./ComponentAddressOrName";
 import type { StealthTransfer } from "./StealthTransfer";
 import type { TransferFeeParams } from "./TransferFeeParams";
 
-export type StealthTransferRequest = { owner_account: ComponentAddressOrName, fee_params: TransferFeeParams, input_selection: UtxoInputSelection, resource_address: ResourceAddress, badge_usage?: BadgeUsage, transfers: Array<StealthTransfer>, max_fee: bigint, dry_run: boolean, };
+export type StealthTransferRequest = {
+  owner_account: ComponentAddressOrName;
+  fee_params: TransferFeeParams;
+  input_selection: UtxoInputSelection;
+  resource_address: ResourceAddress;
+  badge_usage?: BadgeUsage;
+  transfers: Array<StealthTransfer>;
+  max_fee: bigint;
+  dry_run: boolean;
+};

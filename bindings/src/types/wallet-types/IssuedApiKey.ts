@@ -6,25 +6,29 @@ import type { Permission } from "../Permission";
  * minus the hash (which the admin doesn't need to see) and the raw key
  * (which doesn't exist anywhere persistent).
  */
-export type IssuedApiKey = { id: number, name: string, permissions: Array<Permission>, 
-/**
- * Unix timestamp (seconds).
- */
-created_at: bigint, 
-/**
- * Unix timestamp (seconds). `None` if the key has never been used to
- * authenticate since creation.
- */
-last_used_at: bigint | null, 
-/**
- * Unix timestamp (seconds). `None` for an active key; non-null means
- * the key has been revoked and is no longer usable.
- */
-revoked_at: bigint | null, 
-/**
- * Unix timestamp (seconds). `None` means the key does not expire.
- * Once the timestamp has passed, the auth shim's active-row filter
- * stops surfacing the key — the agent gets the same opaque error as
- * for a revoked key.
- */
-expires_at: bigint | null, };
+export type IssuedApiKey = {
+  id: number;
+  name: string;
+  permissions: Array<Permission>;
+  /**
+   * Unix timestamp (seconds).
+   */
+  created_at: bigint;
+  /**
+   * Unix timestamp (seconds). `None` if the key has never been used to
+   * authenticate since creation.
+   */
+  last_used_at: bigint | null;
+  /**
+   * Unix timestamp (seconds). `None` for an active key; non-null means
+   * the key has been revoked and is no longer usable.
+   */
+  revoked_at: bigint | null;
+  /**
+   * Unix timestamp (seconds). `None` means the key does not expire.
+   * Once the timestamp has passed, the auth shim's active-row filter
+   * stops surfacing the key — the agent gets the same opaque error as
+   * for a revoked key.
+   */
+  expires_at: bigint | null;
+};

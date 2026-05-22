@@ -2,4 +2,4 @@
 import type { Permission } from "../Permission";
 import type { RefreshTokenHash } from "./RefreshTokenHash";
 
-export type AuthSessionInfo = { id: RefreshTokenHash, permissions: Array<Permission>, exp: bigint, };
+export type AuthSessionInfo = { id: RefreshTokenHash; permissions: Array<Permission>; exp: bigint };

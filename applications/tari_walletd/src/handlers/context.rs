@@ -16,7 +16,7 @@ use tari_ootle_wallet_sdk_services::{
     transaction_service::TransactionServiceHandle,
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
-use tari_ootle_walletd_client::permissions::Permission;
+use tari_ootle_walletd_client::permissions::{Permission, Permissions};
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::SafePassword;
 use webauthn_rs::Webauthn;
@@ -86,16 +86,24 @@ impl HandlerContext {
         &self.wallet_sdk
     }
 
-    /// Authorise an incoming request. Bearer tokens prefixed with the API
-    /// key marker (`tw_…`) are resolved directly against the `api_keys`
-    /// table — there is no `auth.request` round-trip or JWT exchange for
-    /// agent credentials. Every other bearer is treated as a JWT.
+    /// Resolve an incoming bearer token and return its granted permissions
+    /// **without** checking any specific requirement. Use this when a
+    /// handler needs to resolve a request entity before scope-checking
+    /// (e.g. `accounts.get` looks up the account so it can require
+    /// `accounts:read:<addr>`); call [`enforce_scopes`] or
+    /// [`Permissions::check`] on the returned set with the resolved scope.
+    /// For the common "check these permissions" case, prefer [`authorize`].
+    ///
+    /// Bearer tokens prefixed with the API key marker (`tw_…`) are
+    /// resolved directly against the `api_keys` table — there is no
+    /// `auth.request` round-trip or JWT exchange for agent credentials.
+    /// Every other bearer is treated as a JWT.
     ///
     /// The `tw_` prefix is a routing hint, not a security boundary. A
     /// malformed `tw_` string fails by hash-miss in exactly the same way a
     /// non-`tw_` string does (and surfaces the same `ApiKeyInvalidOrRevoked`
     /// error to avoid enumeration leaks).
-    pub fn check_auth(&self, token: Option<&Bearer>, permissions: &[Permission]) -> Result<(), AuthError> {
+    pub fn check_auth(&self, token: Option<&Bearer>) -> Result<Permissions, AuthError> {
         let bearer = token.ok_or(AuthError::AccessDeniedNoBearerToken)?;
         if bearer.token().starts_with(api_keys::API_KEY_PREFIX) {
             let row = api_keys::find_active_by_raw(self.wallet_sdk.store(), bearer.token())
@@ -113,29 +121,46 @@ impl HandlerContext {
                 );
                 AuthError::ApiKeyInvalidOrRevoked
             })?;
-            enforce_scopes(&granted, permissions)?;
             self.maybe_spawn_last_used_bump(row.id);
-            return Ok(());
+            return Ok(granted);
         }
-        self.jwt_api().check_auth(Some(bearer), permissions)
+        self.jwt_api().check_auth(Some(bearer))
     }
 
-    /// Like `check_auth`, but rejects API-key bearers up front. Use this
-    /// for endpoints that must NOT be reachable with a programmatically
-    /// minted credential — currently the API-key management endpoints
-    /// themselves (create / list / revoke). Restricting them to an
-    /// interactive WebAuthn session means a leaked Admin API key cannot
-    /// mint further keys to survive a revoke; the attacker's persistence
-    /// is bounded by the lifetime of the original compromised key.
-    ///
-    /// The `tw_` prefix is the same routing hint used by `check_auth`;
-    /// here it's the reject criterion instead of the accept criterion.
-    pub fn check_auth_user_only(&self, token: Option<&Bearer>, permissions: &[Permission]) -> Result<(), AuthError> {
+    /// Validate the bearer and enforce the required permissions in one
+    /// call. Equivalent to `check_auth(token)?` then `enforce_scopes(...)`.
+    /// Most handlers should use this; the split form is for handlers that
+    /// need to resolve a request entity before scope-checking.
+    pub fn authorize(&self, token: Option<&Bearer>, required: &[Permission]) -> Result<Permissions, AuthError> {
+        let granted = self.check_auth(token)?;
+        enforce_scopes(&granted, required)?;
+        Ok(granted)
+    }
+
+    /// Like [`check_auth`], but rejects API-key bearers up front. Use for
+    /// endpoints that must NOT be reachable with a programmatically minted
+    /// credential — currently the API-key management endpoints themselves
+    /// (create / list / revoke). Restricting them to an interactive
+    /// WebAuthn session means a leaked Admin API key cannot mint further
+    /// keys to survive a revoke; the attacker's persistence is bounded by
+    /// the lifetime of the original compromised key.
+    pub fn check_auth_user_only(&self, token: Option<&Bearer>) -> Result<Permissions, AuthError> {
         let bearer = token.ok_or(AuthError::AccessDeniedNoBearerToken)?;
         if bearer.token().starts_with(api_keys::API_KEY_PREFIX) {
             return Err(AuthError::UserAuthOnly);
         }
-        self.jwt_api().check_auth(Some(bearer), permissions)
+        self.jwt_api().check_auth(Some(bearer))
+    }
+
+    /// Convenience: [`check_auth_user_only`] + [`enforce_scopes`].
+    pub fn authorize_user_only(
+        &self,
+        token: Option<&Bearer>,
+        required: &[Permission],
+    ) -> Result<Permissions, AuthError> {
+        let granted = self.check_auth_user_only(token)?;
+        enforce_scopes(&granted, required)?;
+        Ok(granted)
     }
 
     /// Spawn a `last_used_at` write only when the in-memory throttle says

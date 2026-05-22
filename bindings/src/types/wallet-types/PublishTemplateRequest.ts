@@ -2,14 +2,19 @@
 import type { ComponentAddressOrName } from "./ComponentAddressOrName";
 import type { PublishTemplateMetadata } from "./PublishTemplateMetadata";
 
-export type PublishTemplateRequest = { binary: string, fee_account: ComponentAddressOrName | null, max_fee: bigint, 
-/**
- * Attempt to infer inputs and their dependencies from instructions. If false, the provided transaction must
- * contain the required inputs.
- */
-detect_inputs: boolean, dry_run: boolean, 
-/**
- * Optional template metadata. Can be provided as raw JSON/CBOR (base64-encoded) for server-side
- * hashing, or as a pre-computed hash.
- */
-metadata?: PublishTemplateMetadata | null, };
+export type PublishTemplateRequest = {
+  binary: string;
+  fee_account: ComponentAddressOrName | null;
+  max_fee: bigint;
+  /**
+   * Attempt to infer inputs and their dependencies from instructions. If false, the provided transaction must
+   * contain the required inputs.
+   */
+  detect_inputs: boolean;
+  dry_run: boolean;
+  /**
+   * Optional template metadata. Can be provided as raw JSON/CBOR (base64-encoded) for server-side
+   * hashing, or as a pre-computed hash.
+   */
+  metadata?: PublishTemplateMetadata | null;
+};

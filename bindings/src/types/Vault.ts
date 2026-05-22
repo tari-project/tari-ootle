@@ -2,4 +2,4 @@
 import type { ResourceContainer } from "./ResourceContainer";
 import type { VaultFreezeFlags } from "./VaultFreezeFlags";
 
-export type Vault = { resource_container: ResourceContainer, freeze_flags: VaultFreezeFlags, };
+export type Vault = { resource_container: ResourceContainer; freeze_flags: VaultFreezeFlags };

@@ -2,4 +2,4 @@
 import type { Permission } from "../Permission";
 import type { AuthCredentials } from "./AuthCredentials";
 
-export type AuthLoginRequest = { permissions: Array<Permission>, credentials: AuthCredentials, };
+export type AuthLoginRequest = { permissions: Array<Permission>; credentials: AuthCredentials };

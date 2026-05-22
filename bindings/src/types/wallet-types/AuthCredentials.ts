@@ -8,4 +8,4 @@ import type { WebauthnFinishAuthRequest } from "./WebauthnFinishAuthRequest";
  * …` header on every JSON-RPC call instead, with no `auth.request`
  * round-trip.
  */
-export type AuthCredentials = "None" | { "WebAuthN": WebauthnFinishAuthRequest };
+export type AuthCredentials = "None" | { WebAuthN: WebauthnFinishAuthRequest };

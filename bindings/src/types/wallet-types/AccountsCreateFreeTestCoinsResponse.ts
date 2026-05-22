@@ -5,4 +5,11 @@ import type { FinalizeResult } from "../FinalizeResult";
 import type { OotleAddress } from "../OotleAddress";
 import type { TransactionId } from "../TransactionId";
 
-export type AccountsCreateFreeTestCoinsResponse = { account: Account, transaction_id: TransactionId, amount: Amount, fee: bigint, result: FinalizeResult, address: OotleAddress, };
+export type AccountsCreateFreeTestCoinsResponse = {
+  account: Account;
+  transaction_id: TransactionId;
+  amount: Amount;
+  fee: bigint;
+  result: FinalizeResult;
+  address: OotleAddress;
+};

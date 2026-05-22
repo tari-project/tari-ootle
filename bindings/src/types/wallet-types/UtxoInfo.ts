@@ -5,4 +5,13 @@ import type { OutputStatus } from "../OutputStatus";
 import type { SpendCondition } from "../SpendCondition";
 import type { UtxoAddress } from "../UtxoAddress";
 
-export type UtxoInfo = { address: UtxoAddress, value: Amount, status: OutputStatus, memo: Memo | null, spend_condition: SpendCondition, is_burnt: boolean, is_frozen: boolean, is_on_chain: boolean, };
+export type UtxoInfo = {
+  address: UtxoAddress;
+  value: Amount;
+  status: OutputStatus;
+  memo: Memo | null;
+  spend_condition: SpendCondition;
+  is_burnt: boolean;
+  is_frozen: boolean;
+  is_on_chain: boolean;
+};

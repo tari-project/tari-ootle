@@ -3,4 +3,8 @@ import type { ComponentAddress } from "../ComponentAddress";
 import type { OutputStatus } from "../OutputStatus";
 import type { ResourceAddress } from "../ResourceAddress";
 
-export type StealthUtxosListRequest = { resource_address: ResourceAddress, account_address: ComponentAddress | null, filter_by_status: OutputStatus | null, };
+export type StealthUtxosListRequest = {
+  resource_address: ResourceAddress;
+  account_address: ComponentAddress | null;
+  filter_by_status: OutputStatus | null;
+};

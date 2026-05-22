@@ -3,4 +3,4 @@ import type { OutputBody } from "./OutputBody";
 import type { SpendCondition } from "./SpendCondition";
 import type { UtxoTag } from "./UtxoTag";
 
-export type UtxoOutput = { output: OutputBody, spend_condition: SpendCondition, tag: UtxoTag, };
+export type UtxoOutput = { output: OutputBody; spend_condition: SpendCondition; tag: UtxoTag };

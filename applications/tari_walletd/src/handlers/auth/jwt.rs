@@ -55,26 +55,23 @@ impl<'a> JwtApi<'a> {
         Ok(permissions_token.into())
     }
 
-    pub fn check_auth(&self, token: Option<&Bearer>, req_permissions: &[Permission]) -> Result<(), AuthError> {
+    /// Validate the bearer JWT and return its granted permissions. Does
+    /// not check any specific requirement — use [`enforce_scopes`] (or
+    /// `HandlerContext::authorize` for the combined check).
+    pub fn check_auth(&self, token: Option<&Bearer>) -> Result<Permissions, AuthError> {
         let token = token.ok_or(AuthError::AccessDeniedNoBearerToken)?;
         let token_data = self.decode_jwt(token.token())?;
-        enforce_scopes(&token_data.claims.permissions, req_permissions)
+        Ok(token_data.claims.permissions)
     }
 }
 
-/// Apply the resource-aware matcher to a granted set. Shared by the JWT path
-/// and the bearer-API-key path so they enforce the exact same policy.
-/// `Permissions::satisfies` folds in Admin, mutation-implies-read, and scope
-/// coverage — see `permissions.rs` for the full semantics.
+/// Surface [`Permissions::check`] as an `AuthError` so handlers can use a
+/// single `?` operator. Shared by the JWT and API-key paths so both enforce
+/// the exact same policy.
 pub fn enforce_scopes(granted: &Permissions, required: &[Permission]) -> Result<(), AuthError> {
-    for permission in required {
-        if !granted.satisfies(permission) {
-            return Err(AuthError::InsufficientPermissions {
-                required: permission.clone(),
-            });
-        }
-    }
-    Ok(())
+    granted
+        .check(required)
+        .map_err(|required| AuthError::InsufficientPermissions { required })
 }
 
 #[derive(Debug, thiserror::Error)]

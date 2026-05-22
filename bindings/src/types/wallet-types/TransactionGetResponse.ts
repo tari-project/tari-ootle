@@ -3,14 +3,19 @@ import type { FinalizeResult } from "../FinalizeResult";
 import type { PrunedTransaction } from "../PrunedTransaction";
 import type { TransactionStatus } from "../TransactionStatus";
 
-export type TransactionGetResponse = { 
-/**
- * Pruned transaction — blob commitments are present but raw blob bytes are omitted to
- * keep API responses small. Use a separate endpoint to fetch blob payloads if required.
- */
-transaction: PrunedTransaction, result: FinalizeResult | null, status: TransactionStatus, 
-/**
- * The estimated fee required for the transaction. For dry runs, this is the minimum fee
- * that should be used as `max_fee` for the actual submission.
- */
-final_fee: number | null, invalid_reason: string | null, last_update_time: string, };
+export type TransactionGetResponse = {
+  /**
+   * Pruned transaction — blob commitments are present but raw blob bytes are omitted to
+   * keep API responses small. Use a separate endpoint to fetch blob payloads if required.
+   */
+  transaction: PrunedTransaction;
+  result: FinalizeResult | null;
+  status: TransactionStatus;
+  /**
+   * The estimated fee required for the transaction. For dry runs, this is the minimum fee
+   * that should be used as `max_fee` for the actual submission.
+   */
+  final_fee: number | null;
+  invalid_reason: string | null;
+  last_update_time: string;
+};

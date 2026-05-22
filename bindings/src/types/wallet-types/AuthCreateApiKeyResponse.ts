@@ -9,8 +9,13 @@ import type { Permission } from "../Permission";
  * immediately (clipboard / secrets manager). The daemon only persists a
  * SHA-256 hash, so a database leak does not expose this string.
  */
-export type AuthCreateApiKeyResponse = { id: number, name: string, permissions: Array<Permission>, api_key: string, 
-/**
- * Unix timestamp (seconds) of creation.
- */
-created_at: bigint, };
+export type AuthCreateApiKeyResponse = {
+  id: number;
+  name: string;
+  permissions: Array<Permission>;
+  api_key: string;
+  /**
+   * Unix timestamp (seconds) of creation.
+   */
+  created_at: bigint;
+};

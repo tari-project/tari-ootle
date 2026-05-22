@@ -4,4 +4,4 @@ import type { AccessRule } from "./AccessRule";
 /**
  * An enum for all possible ways to specify ownership of values
  */
-export type OwnerRule = "OwnedBySigner" | "None" | { "ByAccessRule": AccessRule } | { "ByPublicKey": Array<number> };
+export type OwnerRule = "OwnedBySigner" | "None" | { ByAccessRule: AccessRule } | { ByPublicKey: Array<number> };

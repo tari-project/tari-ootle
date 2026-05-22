@@ -2,4 +2,4 @@
 import type { FinalizeResult } from "../FinalizeResult";
 import type { TransactionId } from "../TransactionId";
 
-export type MintFaucetNftResponse = { transaction_id: TransactionId, finalize: FinalizeResult, fee: bigint, };
+export type MintFaucetNftResponse = { transaction_id: TransactionId; finalize: FinalizeResult; fee: bigint };

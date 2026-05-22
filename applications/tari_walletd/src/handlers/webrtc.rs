@@ -28,7 +28,7 @@ pub fn handle_start(
     addresses: (SocketAddr, SocketAddr),
 ) -> JrpcResult {
     let answer_id = value.get_answer_id();
-    context.check_auth(token, &[Permission::Webrtc]).map_err(|e| {
+    context.authorize(token, &[Permission::Webrtc]).map_err(|e| {
         JsonRpcResponse::error(
             answer_id.clone(),
             JsonRpcError::new(

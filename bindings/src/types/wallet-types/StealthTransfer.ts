@@ -4,4 +4,10 @@ import type { Memo } from "../Memo";
 import type { OotleAddress } from "../OotleAddress";
 import type { PayTo } from "./PayTo";
 
-export type StealthTransfer = { destination_address: OotleAddress, blinded_output_amount: number | bigint | string, revealed_output_amount: Amount, output_memo?: Memo | null, pay_to: PayTo, };
+export type StealthTransfer = {
+  destination_address: OotleAddress;
+  blinded_output_amount: number | bigint | string;
+  revealed_output_amount: Amount;
+  output_memo?: Memo | null;
+  pay_to: PayTo;
+};

@@ -4,4 +4,12 @@ import type { ResourceAddress } from "../ResourceAddress";
 import type { RistrettoPublicKeyBytes } from "../RistrettoPublicKeyBytes";
 import type { ComponentAddressOrName } from "./ComponentAddressOrName";
 
-export type AccountsTransferRequest = { account: ComponentAddressOrName | null, amount: Amount, resource_address: ResourceAddress, destination_public_key: RistrettoPublicKeyBytes, max_fee: bigint, proof_from_badge_resource: ResourceAddress | null, dry_run: boolean, };
+export type AccountsTransferRequest = {
+  account: ComponentAddressOrName | null;
+  amount: Amount;
+  resource_address: ResourceAddress;
+  destination_public_key: RistrettoPublicKeyBytes;
+  max_fee: bigint;
+  proof_from_badge_resource: ResourceAddress | null;
+  dry_run: boolean;
+};

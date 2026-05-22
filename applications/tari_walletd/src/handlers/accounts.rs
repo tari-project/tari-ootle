@@ -92,20 +92,23 @@ use tari_template_lib_types::{
 use tokio::task;
 
 use super::context::HandlerContext;
-use crate::handlers::helpers::{
-    complete_burn_proof_to_contents,
-    faucet_already_claimed,
-    general_error,
-    get_account,
-    get_account_by_key_index,
-    get_account_or_default,
-    get_account_with_inputs,
-    invalid_params,
-    invalid_request,
-    not_found,
-    transaction_rejected,
-    wait_for_result,
-    wait_for_result_and_account,
+use crate::handlers::{
+    auth::jwt::enforce_scopes,
+    helpers::{
+        complete_burn_proof_to_contents,
+        faucet_already_claimed,
+        general_error,
+        get_account,
+        get_account_by_key_index,
+        get_account_or_default,
+        get_account_with_inputs,
+        invalid_params,
+        invalid_request,
+        not_found,
+        transaction_rejected,
+        wait_for_result,
+        wait_for_result_and_account,
+    },
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::transaction";
@@ -115,7 +118,7 @@ pub async fn handle_create(
     token: Option<&Bearer>,
     req: AccountsCreateRequest,
 ) -> Result<AccountsCreateResponse, anyhow::Error> {
-    context.check_auth(token, &[Permission::Accounts(Crud::Create, None)])?;
+    context.authorize(token, &[Permission::Accounts(Crud::Create, None)])?;
     let sdk = context.wallet_sdk();
     let accounts_api = sdk.accounts_api();
 
@@ -155,7 +158,7 @@ pub async fn handle_create_or_get(
     token: Option<&Bearer>,
     req: AccountsCreateOrGetRequest,
 ) -> Result<AccountsCreateOrGetResponse, anyhow::Error> {
-    context.check_auth(token, &[Permission::Accounts(Crud::Create, None)])?;
+    context.authorize(token, &[Permission::Accounts(Crud::Create, None)])?;
     let sdk = context.wallet_sdk();
     let accounts_api = sdk.accounts_api();
 
@@ -227,7 +230,7 @@ pub async fn handle_set_default(
     token: Option<&Bearer>,
     req: AccountSetDefaultRequest,
 ) -> Result<AccountSetDefaultResponse, anyhow::Error> {
-    context.check_auth(token, &[Permission::Accounts(Crud::Update, None)])?;
+    context.authorize(token, &[Permission::Accounts(Crud::Update, None)])?;
     let sdk = context.wallet_sdk();
     let account = get_account(&req.account, &sdk.accounts_api())?;
     sdk.accounts_api().set_default_account(account.component_address())?;
@@ -239,9 +242,12 @@ pub async fn handle_rename(
     token: Option<&Bearer>,
     req: AccountsRenameRequest,
 ) -> Result<AccountsRenameResponse, anyhow::Error> {
+    // Resolve before scope-check, but require a valid token first so the
+    // resolve doesn't leak account existence to unauthenticated callers.
+    let granted = context.check_auth(token)?;
     let sdk = context.wallet_sdk();
     let account = get_account(&req.account, &sdk.accounts_api())?;
-    context.check_auth(token, &[Permission::Accounts(
+    enforce_scopes(&granted, &[Permission::Accounts(
         Crud::Update,
         Some(*account.component_address()),
     )])?;
@@ -255,7 +261,7 @@ pub async fn handle_list(
     token: Option<&Bearer>,
     req: AccountsListRequest,
 ) -> Result<AccountsListResponse, anyhow::Error> {
-    context.check_auth(token, &[Permission::Accounts(Crud::Read, None)])?;
+    context.authorize(token, &[Permission::Accounts(Crud::Read, None)])?;
     let sdk = context.wallet_sdk();
     let limit = usize::try_from(req.limit)
         .map_err(|e| invalid_params("limit", Some(&format!("limit overflowed usize: {}", e))))?;
@@ -283,9 +289,10 @@ pub async fn handle_get_balances(
     token: Option<&Bearer>,
     req: AccountsGetBalancesRequest,
 ) -> Result<AccountsGetBalancesResponse, anyhow::Error> {
+    let granted = context.check_auth(token)?;
     let sdk = context.wallet_sdk();
     let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
-    context.check_auth(token, &[Permission::Accounts(
+    enforce_scopes(&granted, &[Permission::Accounts(
         Crud::Read,
         Some(*account.component_address()),
     )])?;
@@ -370,6 +377,7 @@ pub async fn handle_get(
     token: Option<&Bearer>,
     req: AccountGetRequest,
 ) -> Result<AccountGetResponse, anyhow::Error> {
+    let granted = context.check_auth(token)?;
     let sdk = context.wallet_sdk();
     let account = get_account(&req.name_or_address, &sdk.accounts_api())
         .optional()?
@@ -379,7 +387,7 @@ pub async fn handle_get(
                 req.name_or_address
             ))
         })?;
-    context.check_auth(token, &[Permission::Accounts(
+    enforce_scopes(&granted, &[Permission::Accounts(
         Crud::Read,
         Some(*account.component_address()),
     )])?;
@@ -394,11 +402,17 @@ pub async fn handle_get_by_key_index(
     token: Option<&Bearer>,
     req: AccountGetByKeyIndexRequest,
 ) -> Result<AccountGetResponse, anyhow::Error> {
-    context.check_auth(token, &[Permission::Accounts(Crud::Read, None)])?;
+    // Resolve by key index then scope-check against the resolved address
+    // so a scoped agent can fetch its own account this way.
+    let granted = context.check_auth(token)?;
     let sdk = context.wallet_sdk();
     let account = get_account_by_key_index(sdk, req.key_index)
         .optional()?
         .ok_or_else(|| not_found(format!("Account with key index {} not found", req.key_index)))?;
+    enforce_scopes(&granted, &[Permission::Accounts(
+        Crud::Read,
+        Some(*account.component_address()),
+    )])?;
     Ok(AccountGetResponse {
         account: account.account,
         address: account.address,
@@ -410,9 +424,15 @@ pub async fn handle_get_default(
     token: Option<&Bearer>,
     _req: AccountGetDefaultRequest,
 ) -> Result<AccountGetResponse, anyhow::Error> {
-    context.check_auth(token, &[Permission::Accounts(Crud::Read, None)])?;
+    // Resolve default then scope-check so a scoped agent can fetch the
+    // default if the default happens to be its account.
+    let granted = context.check_auth(token)?;
     let sdk = context.wallet_sdk();
     let account = get_account_or_default(None, &sdk.accounts_api())?;
+    enforce_scopes(&granted, &[Permission::Accounts(
+        Crud::Read,
+        Some(*account.component_address()),
+    )])?;
     Ok(AccountGetResponse {
         account: account.account,
         address: account.address,
@@ -424,6 +444,7 @@ pub async fn handle_claim_burn(
     token: Option<&Bearer>,
     req: ClaimBurnRequest,
 ) -> Result<ClaimBurnResponse, anyhow::Error> {
+    let granted = context.check_auth(token)?;
     let sdk = context.wallet_sdk();
     let network = sdk.network();
 
@@ -438,7 +459,7 @@ pub async fn handle_claim_burn(
 
     let accounts_api = sdk.accounts_api();
     let account = get_account(&account, &accounts_api)?;
-    context.check_auth(token, &[Permission::Transfer(
+    enforce_scopes(&granted, &[Permission::Transfer(
         Crud::Create,
         Some(*account.component_address()),
     )])?;
@@ -667,7 +688,7 @@ pub async fn handle_create_free_test_coins(
     token: Option<&Bearer>,
     req: AccountsCreateFreeTestCoinsRequest,
 ) -> Result<AccountsCreateFreeTestCoinsResponse, anyhow::Error> {
-    context.check_auth(token, &[Permission::Admin])?;
+    context.authorize(token, &[Permission::Admin])?;
     let sdk = context.wallet_sdk();
     let accounts_api = sdk.accounts_api();
 
@@ -824,10 +845,11 @@ pub async fn handle_transfer(
     token: Option<&Bearer>,
     req: AccountsTransferRequest,
 ) -> Result<AccountsTransferResponse, anyhow::Error> {
+    let granted = context.check_auth(token)?;
     let sdk = context.wallet_sdk().clone();
 
     let (account, mut inputs) = get_account_with_inputs(req.account.as_ref(), &sdk)?;
-    context.check_auth(token, &[Permission::Transfer(
+    enforce_scopes(&granted, &[Permission::Transfer(
         Crud::Create,
         Some(*account.component_address()),
     )])?;
@@ -990,6 +1012,7 @@ pub async fn handle_confidential_transfer(
     token: Option<&Bearer>,
     req: ConfidentialTransferRequest,
 ) -> Result<ConfidentialTransferResponse, anyhow::Error> {
+    let granted = context.check_auth(token)?;
     let sdk = context.wallet_sdk().clone();
     let notifier = context.notifier().clone();
 
@@ -997,7 +1020,7 @@ pub async fn handle_confidential_transfer(
         return Err(invalid_params("amount", Some("must be positive")));
     }
     let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
-    context.check_auth(token, &[Permission::Transfer(
+    enforce_scopes(&granted, &[Permission::Transfer(
         Crud::Create,
         Some(*account.component_address()),
     )])?;
@@ -1049,11 +1072,12 @@ pub async fn handle_stealth_transfer(
     token: Option<&Bearer>,
     req: StealthTransferRequest,
 ) -> Result<StealthTransferResponse, anyhow::Error> {
+    let granted = context.check_auth(token)?;
     let sdk = context.wallet_sdk().clone();
     let network = sdk.sdk_config().network;
     let notifier = context.notifier().clone();
     let owner_account = get_account(&req.owner_account, &sdk.accounts_api())?;
-    context.check_auth(token, &[Permission::Transfer(
+    enforce_scopes(&granted, &[Permission::Transfer(
         Crud::Create,
         Some(*owner_account.component_address()),
     )])?;
@@ -1183,6 +1207,7 @@ pub async fn handle_create_stealth_transfer_statement(
     token: Option<&Bearer>,
     req: AccountsCreateStealthTransferStatementRequest,
 ) -> Result<AccountsCreateStealthTransferStatementResponse, anyhow::Error> {
+    let granted = context.check_auth(token)?;
     let sdk = context.wallet_sdk().clone();
     if req.requests.is_empty() {
         return Err(invalid_params(
@@ -1204,7 +1229,7 @@ pub async fn handle_create_stealth_transfer_statement(
     let mut statements = Vec::with_capacity(req.requests.len());
     for req in req.requests {
         let sender_account = get_account(&req.sender_account, &sdk.accounts_api())?;
-        context.check_auth(token, &[Permission::Transfer(
+        enforce_scopes(&granted, &[Permission::Transfer(
             Crud::Create,
             Some(*sender_account.component_address()),
         )])?;
@@ -1307,9 +1332,10 @@ pub async fn handle_associate_stealth_resource(
     token: Option<&Bearer>,
     req: AccountsAssociateStealthResourceRequest,
 ) -> Result<AccountsAssociateStealthResourceResponse, anyhow::Error> {
+    let granted = context.check_auth(token)?;
     let sdk = context.wallet_sdk().clone();
     let account = get_account(&req.account, &sdk.accounts_api())?;
-    context.check_auth(token, &[Permission::Accounts(
+    enforce_scopes(&granted, &[Permission::Accounts(
         Crud::Update,
         Some(*account.component_address()),
     )])?;

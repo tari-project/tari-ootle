@@ -7,4 +7,4 @@
  * `last_used_at` is useful audit context. The raw key material is
  * NEVER included in the response.
  */
-export type AuthListApiKeysRequest = { include_revoked: boolean, };
+export type AuthListApiKeysRequest = { include_revoked: boolean };

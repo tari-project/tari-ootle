@@ -14,4 +14,20 @@ import type { ResourceAddress } from "./ResourceAddress";
  * Mutation actions (`Create`/`Update`/`Delete`) imply `Read` on the same
  * resource.
  */
-export type Permission = "Admin" | { "Accounts": [Crud, ComponentAddress | null] } | { "Keys": Crud } | { "Transactions": [Crud, ComponentAddress | null] } | { "Transfer": [Crud, ComponentAddress | null] } | { "Templates": Crud } | { "Nfts": [Crud, ResourceAddress | null] } | { "Confidential": [Crud, ComponentAddress | null] } | { "StealthUtxos": [Crud, ComponentAddress | null] } | { "Validators": Crud } | { "Settings": Crud } | { "AddressBook": Crud } | { "Substates": ReadOnly } | { "BurnProofs": ReadOnly } | { "SwapPools": ReadOnly } | "Webrtc";
+export type Permission =
+  | "Admin"
+  | { Accounts: [Crud, ComponentAddress | null] }
+  | { Keys: Crud }
+  | { Transactions: Crud }
+  | { Transfer: [Crud, ComponentAddress | null] }
+  | { Templates: Crud }
+  | { Nfts: [Crud, ResourceAddress | null] }
+  | { Confidential: [Crud, ComponentAddress | null] }
+  | { StealthUtxos: [Crud, ComponentAddress | null] }
+  | { Validators: Crud }
+  | { Settings: Crud }
+  | { AddressBook: Crud }
+  | { Substates: ReadOnly }
+  | { BurnProofs: ReadOnly }
+  | { SwapPools: ReadOnly }
+  | "Webrtc";

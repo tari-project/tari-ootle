@@ -4,4 +4,9 @@ import type { ComponentAddressOrName } from "./ComponentAddressOrName";
 import type { InputSelection } from "./InputSelection";
 import type { TransferOutput } from "./TransferOutput";
 
-export type TransferStatementRequest = { sender_account: ComponentAddressOrName, resource_address: ResourceAddress, input_selection: InputSelection, outputs: Array<TransferOutput>, };
+export type TransferStatementRequest = {
+  sender_account: ComponentAddressOrName;
+  resource_address: ResourceAddress;
+  input_selection: InputSelection;
+  outputs: Array<TransferOutput>;
+};

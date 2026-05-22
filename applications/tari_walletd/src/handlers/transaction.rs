@@ -60,13 +60,13 @@ pub async fn handle_submit_instruction(
     token: Option<&Bearer>,
     req: CallInstructionRequest,
 ) -> Result<TransactionSubmitResponse, anyhow::Error> {
+    // Arbitrary instructions can touch any account the wallet owns — the
+    // fee account is only the fee payer, not a scope boundary. Require the
+    // broad `transactions:create` grant.
+    context.authorize(token, &[Permission::Transactions(Crud::Create)])?;
     let sdk = context.wallet_sdk();
 
     let fee_account = get_account(&req.fee_account, &sdk.accounts_api())?;
-    context.check_auth(token, &[Permission::Transactions(
-        Crud::Create,
-        Some(*fee_account.component_address()),
-    )])?;
     let owner_key_id = fee_account.owner_key_id().ok_or_else(|| {
         invalid_params(
             "fee_account",
@@ -97,12 +97,11 @@ pub async fn handle_submit(
     token: Option<&Bearer>,
     req: TransactionSubmitRequest,
 ) -> Result<TransactionSubmitResponse, anyhow::Error> {
-    // Direct submission is the broadest entry point — the wallet cannot
-    // statically determine the source account of a pre-built transaction,
-    // so this path requires the unscoped grant. Callers that already know
-    // the source account (transfer family, publish_template, etc.) call
-    // `submit_inner` directly with a scoped check upstream.
-    context.check_auth(token, &[Permission::Transactions(Crud::Create, None)])?;
+    // Direct submission accepts any pre-built transaction; the wallet
+    // cannot constrain which accounts it touches. Callers that already
+    // hold a narrower capability (transfer family, publish_template) call
+    // `submit_inner` directly with their own scoped check upstream.
+    context.authorize(token, &[Permission::Transactions(Crud::Create)])?;
     submit_inner(context, req).await
 }
 
@@ -210,10 +209,9 @@ pub async fn handle_submit_dry_run(
     token: Option<&Bearer>,
     req: TransactionSubmitDryRunRequest,
 ) -> Result<TransactionSubmitDryRunResponse, anyhow::Error> {
-    // Dry-run does not change wallet or chain state, so it gates on the
-    // read action. Like `handle_submit`, source account is not statically
-    // known here, so the requirement is unscoped.
-    context.check_auth(token, &[Permission::Transactions(Crud::Read, None)])?;
+    // Dry-run doesn't change state but uses the submission machinery for
+    // an arbitrary transaction. Gated on `transactions:read`.
+    context.authorize(token, &[Permission::Transactions(Crud::Read)])?;
     submit_dry_run_inner(context, req).await
 }
 
@@ -291,15 +289,15 @@ pub async fn handle_submit_manifest(
 ) -> Result<TransactionSubmitManifestResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
 
+    // Manifests carry arbitrary instructions; the default account is the
+    // implicit fee payer but instructions can touch any account. Require
+    // the broad `transactions:create` grant.
+    context.authorize(token, &[Permission::Transactions(Crud::Create)])?;
     let default_account = sdk
         .accounts_api()
         .get_default()
         .optional()?
         .ok_or_else(|| invalid_request("No default account found".to_string()))?;
-    context.check_auth(token, &[Permission::Transactions(
-        Crud::Create,
-        Some(*default_account.component_address()),
-    )])?;
 
     let variables = req
         .variables
@@ -414,7 +412,7 @@ pub async fn handle_get(
     token: Option<&Bearer>,
     req: TransactionGetRequest,
 ) -> Result<TransactionGetResponse, anyhow::Error> {
-    context.check_auth(token, &[Permission::Transactions(Crud::Read, None)])?;
+    context.authorize(token, &[Permission::Transactions(Crud::Read)])?;
     let transaction = context
         .wallet_sdk()
         .transaction_api()
@@ -437,7 +435,7 @@ pub async fn handle_get_all(
     token: Option<&Bearer>,
     req: TransactionGetAllRequest,
 ) -> Result<TransactionGetAllResponse, anyhow::Error> {
-    context.check_auth(token, &[Permission::Transactions(Crud::Read, None)])?;
+    context.authorize(token, &[Permission::Transactions(Crud::Read)])?;
     let transactions =
         context
             .wallet_sdk()
@@ -451,7 +449,7 @@ pub async fn handle_get_result(
     token: Option<&Bearer>,
     req: TransactionGetResultRequest,
 ) -> Result<TransactionGetResultResponse, anyhow::Error> {
-    context.check_auth(token, &[Permission::Transactions(Crud::Read, None)])?;
+    context.authorize(token, &[Permission::Transactions(Crud::Read)])?;
     let transaction = context
         .wallet_sdk()
         .transaction_api()
@@ -471,7 +469,7 @@ pub async fn handle_wait_result(
     token: Option<&Bearer>,
     req: TransactionWaitResultRequest,
 ) -> Result<TransactionWaitResultResponse, anyhow::Error> {
-    context.check_auth(token, &[Permission::Transactions(Crud::Read, None)])?;
+    context.authorize(token, &[Permission::Transactions(Crud::Read)])?;
     let mut events = context.notifier().subscribe();
     let transaction = context
         .wallet_sdk()
@@ -545,7 +543,7 @@ pub async fn handle_publish_template(
     token: Option<&Bearer>,
     req: PublishTemplateRequest,
 ) -> Result<PublishTemplateResponse, anyhow::Error> {
-    context.check_auth(token, &[Permission::Templates(Crud::Create)])?;
+    context.authorize(token, &[Permission::Templates(Crud::Create)])?;
     let sdk = context.wallet_sdk();
 
     let fee_account = get_account_or_default(req.fee_account.as_ref(), &sdk.accounts_api())?;

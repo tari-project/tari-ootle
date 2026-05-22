@@ -2,4 +2,4 @@
 import type { Substate } from "../Substate";
 import type { WalletSubstateInfo } from "./WalletSubstateInfo";
 
-export type SubstatesGetResponse = { local_record: WalletSubstateInfo | null, substate_from_remote: Substate | null, };
+export type SubstatesGetResponse = { local_record: WalletSubstateInfo | null; substate_from_remote: Substate | null };

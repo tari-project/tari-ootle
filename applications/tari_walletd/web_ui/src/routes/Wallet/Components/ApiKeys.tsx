@@ -187,9 +187,8 @@ export default function ApiKeys() {
   return (
     <Stack spacing={2}>
       <Alert severity="info">
-        API keys are long-lived credentials used by AI agents and other automated clients. They authenticate without
-        WebAuthn and are bounded to the permission scopes you choose at creation time. Revocation is immediate. The raw
-        key is shown exactly once — the daemon only stores its SHA-256 hash.
+        API keys are long-lived credentials used by AI agents and other automated clients. They are bound to the
+        permission scopes you choose at creation time.
       </Alert>
 
       <Stack direction="row" justifyContent="flex-end">
@@ -400,7 +399,7 @@ export default function ApiKeys() {
         <DialogContent>
           <DialogContentText sx={{ mb: 2 }}>
             <strong>This is the only time the raw key will be shown.</strong> Copy it now and store it in a secrets
-            manager. The daemon persists only a SHA-256 hash and cannot surface it again.
+            manager.
           </DialogContentText>
           {createdKey && (
             <Stack spacing={1}>

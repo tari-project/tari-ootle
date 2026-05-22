@@ -33,10 +33,10 @@ import {
   ListItemText,
   MenuItem,
   OutlinedInput,
-  Radio,
-  RadioGroup,
   Select,
   Stack,
+  ToggleButton,
+  ToggleButtonGroup,
   Table,
   TableBody,
   TableCell,
@@ -118,15 +118,16 @@ const ADMIN_PERMISSION_VALUE = "Admin";
 /// time, not dialog-open time) so the wire timestamp reflects when the
 /// admin clicked Create. `custom` reveals a date picker; `never` maps to
 /// `null` on the wire.
-type ExpiryChoice = "1h" | "5h" | "24h" | "5d" | "custom" | "never";
+type ExpiryChoice = "5m" | "1h" | "24h" | "5d" | "custom" | "never";
 
-/// Preset durations in seconds, paired with their human label. Order
-/// matches the radio render so changing this list updates the UI in place.
+/// Preset durations in seconds, paired with their compact button label.
+/// Order matches the button-group render so changing this list updates
+/// the UI in place.
 const EXPIRY_PRESETS: Array<{ value: ExpiryChoice; label: string; seconds: number }> = [
-  { value: "1h", label: "1 hour", seconds: 60 * 60 },
-  { value: "5h", label: "5 hours", seconds: 5 * 60 * 60 },
-  { value: "24h", label: "24 hours", seconds: 24 * 60 * 60 },
-  { value: "5d", label: "5 days", seconds: 5 * 24 * 60 * 60 },
+  { value: "5m", label: "5m", seconds: 5 * 60 },
+  { value: "1h", label: "1h", seconds: 60 * 60 },
+  { value: "24h", label: "24h", seconds: 24 * 60 * 60 },
+  { value: "5d", label: "5d", seconds: 5 * 24 * 60 * 60 },
 ];
 
 /// Render a unix-second timestamp as a locale string. `null` -> "never".
@@ -483,29 +484,31 @@ export default function ApiKeys() {
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
                 Shorter is safer — the daemon stops accepting the key the moment its expiry passes.
               </Typography>
-              <RadioGroup
+              <ToggleButtonGroup
                 value={expiryChoice}
-                onChange={(e) => setExpiryChoice(e.target.value as ExpiryChoice)}
+                exclusive
+                size="small"
+                color="primary"
+                onChange={(_event, value: ExpiryChoice | null) => {
+                  // `exclusive` lets the group's value be `null` when the
+                  // user clicks the currently-selected button (toggling it
+                  // off). We don't want a null state — re-selecting the
+                  // same button is a no-op.
+                  if (value !== null) {
+                    setExpiryChoice(value);
+                  }
+                }}
+                aria-label="API key expiry"
+                sx={{ flexWrap: "wrap", gap: 0.5 }}
               >
                 {EXPIRY_PRESETS.map((p) => (
-                  <FormControlLabel
-                    key={p.value}
-                    value={p.value}
-                    control={<Radio size="small" />}
-                    label={<Typography variant="body2">{p.label}</Typography>}
-                  />
+                  <ToggleButton key={p.value} value={p.value} aria-label={p.label}>
+                    {p.label}
+                  </ToggleButton>
                 ))}
-                <FormControlLabel
-                  value="custom"
-                  control={<Radio size="small" />}
-                  label={<Typography variant="body2">Custom date</Typography>}
-                />
-                <FormControlLabel
-                  value="never"
-                  control={<Radio size="small" />}
-                  label={<Typography variant="body2">Never expires</Typography>}
-                />
-              </RadioGroup>
+                <ToggleButton value="custom">Custom</ToggleButton>
+                <ToggleButton value="never">Never</ToggleButton>
+              </ToggleButtonGroup>
               {expiryChoice === "custom" && (
                 <TextField
                   type="date"

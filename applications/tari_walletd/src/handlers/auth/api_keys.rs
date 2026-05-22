@@ -203,7 +203,7 @@ pub async fn handle_create_api_key(
             .create_write_tx()
             .context("Failed to open write transaction")?;
         let row = tx
-            .api_key_insert(&request.name, &hash, &permissions_str)
+            .api_key_insert(request.name.trim(), &hash, &permissions_str)
             .context("Failed to insert api_key row")?;
         tx.commit().context("Failed to commit api_key insert")?;
         row

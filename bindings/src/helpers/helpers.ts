@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-import { JrpcPermission } from "../types/JrpcPermission";
+import { Permission } from "../types/Permission";
 import { RejectReason } from "../types/RejectReason";
 import { SubstateDiff } from "../types/SubstateDiff";
 import { SubstateId } from "../types/SubstateId";
@@ -141,26 +141,45 @@ export function getRejectReasonFromTransactionResult(result: TransactionResult):
   return null;
 }
 
-export function jrpcPermissionToString(jrpcPermission: JrpcPermission): string {
-  if (typeof jrpcPermission === "string") {
-    return jrpcPermission;
+// Render a Permission to its canonical grant string, e.g.
+//   `admin`, `webrtc`, `accounts:read`, `transfer:create:component_abc…`,
+//   `substates:read`. Round-trips with the Rust `Permission::FromStr`.
+export function permissionToString(permission: Permission): string {
+  if (typeof permission === "string") {
+    // Bare variants (`Admin`, `Webrtc`) serialise to lowercase strings.
+    return permission.toLowerCase();
   }
-  if ("NftGetOwnershipProof" in jrpcPermission) {
-    return `NftGetOwnershipProof(${jrpcPermission.NftGetOwnershipProof})`;
-  }
-  if ("AccountBalance" in jrpcPermission) {
-    return `AccountBalance(${substateIdToString(jrpcPermission.AccountBalance)})`;
-  }
-  if ("AccountList" in jrpcPermission) {
-    return `AccountList(${jrpcPermission.AccountList})`;
-  }
-  if ("TransactionSend" in jrpcPermission) {
-    return `TransactionSend(${jrpcPermission.TransactionSend})`;
-  }
-  if ("GetNft" in jrpcPermission) {
-    return `GetNft(${substateIdToString(jrpcPermission.GetNft[0])}, ${jrpcPermission.GetNft[1]})`;
-  }
-  return "Unknown";
+
+  // Read-only resources: { Substates: "Read" } / { BurnProofs: "Read" } /
+  // { SwapPools: "Read" } — render with the resource name in snake_case
+  // plus explicit `:read`.
+  if ("Substates" in permission) return "substates:read";
+  if ("BurnProofs" in permission) return "burn_proofs:read";
+  if ("SwapPools" in permission) return "swap_pools:read";
+
+  // Unscoped CRUD resources: { Keys: "Read" } -> "keys:read".
+  if ("Keys" in permission) return `keys:${permission.Keys.toLowerCase()}`;
+  if ("Templates" in permission) return `templates:${permission.Templates.toLowerCase()}`;
+  if ("Validators" in permission) return `validators:${permission.Validators.toLowerCase()}`;
+  if ("Settings" in permission) return `settings:${permission.Settings.toLowerCase()}`;
+  if ("AddressBook" in permission) return `address_book:${permission.AddressBook.toLowerCase()}`;
+
+  // Scoped CRUD resources: { Accounts: ["Read", "component_abc..." | null] }.
+  if ("Accounts" in permission) return scoped("accounts", permission.Accounts);
+  if ("Transactions" in permission) return scoped("transactions", permission.Transactions);
+  if ("Transfer" in permission) return scoped("transfer", permission.Transfer);
+  if ("Nfts" in permission) return scoped("nfts", permission.Nfts);
+  if ("Confidential" in permission) return scoped("confidential", permission.Confidential);
+  if ("StealthUtxos" in permission) return scoped("stealth_utxos", permission.StealthUtxos);
+
+  console.error("Unknown permission", permission);
+  return JSON.stringify(permission);
+}
+
+function scoped(resource: string, value: [string, string | null]): string {
+  const [action, entity] = value;
+  const base = `${resource}:${action.toLowerCase()}`;
+  return entity ? `${base}:${entity}` : base;
 }
 
 function splitOnce(str: string, separator: string): [string, string] | null {

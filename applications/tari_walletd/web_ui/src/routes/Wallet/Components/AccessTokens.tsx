@@ -47,11 +47,11 @@ import DialogTitle from "@mui/material/DialogTitle";
 import IconButton from "@mui/material/IconButton";
 import type {
   AuthSessionInfo,
-  JrpcPermission,
-  JrpcPermissions,
+  Permission,
+  Permissions,
   RefreshTokenHash,
 } from "@tari-project/ootle-ts-bindings";
-import { jrpcPermissionToString } from "@tari-project/ootle-ts-bindings";
+import { permissionToString } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 import { IoCloseCircleOutline } from "react-icons/io5";
 
@@ -126,7 +126,7 @@ export default function AccessTokens() {
     formattedDate,
   }: {
     id: RefreshTokenHash;
-    permissions: JrpcPermissions;
+    permissions: Permissions;
     formattedDate: string;
   }) {
     const [open, setOpen] = useState(false);
@@ -175,8 +175,8 @@ export default function AccessTokens() {
               <CodeBlock style={{ marginBottom: "10px" }}>
                 Permissions:
                 <List>
-                  {permissions.map((item: JrpcPermission) => {
-                    let permission = jrpcPermissionToString(item);
+                  {permissions.map((item: Permission) => {
+                    let permission = permissionToString(item);
                     return <ListItem key={permission}>{permission}</ListItem>;
                   })}
                 </List>

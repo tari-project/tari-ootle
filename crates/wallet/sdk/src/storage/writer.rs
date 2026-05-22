@@ -247,7 +247,7 @@ pub trait WalletStoreWriter: CommittableStore {
     // API keys
     /// Persist a new API key. `key_hash` is the SHA-256 hex digest of the
     /// raw key bytes — the raw key itself is never passed to the storage
-    /// layer. `permissions` is the textual `JrpcPermissions` form
+    /// layer. `permissions` is the textual `Permissions` form
     /// (comma-separated; the same format the JWT layer already uses).
     /// `expires_at` is `None` for a never-expiring key; otherwise the
     /// `find_active_by_hash` filter excludes the row once that timestamp

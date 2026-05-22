@@ -16,7 +16,7 @@ use tari_ootle_common_types::{SubstateRequirement, optional::Optional};
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::apis::substate::ValidatorScanResult;
 use tari_ootle_walletd_client::{
-    permissions::JrpcPermission,
+    permissions::{Crud, Permission},
     types::{
         GetNftRequest,
         GetNftResponse,
@@ -37,12 +37,15 @@ use tari_template_lib_types::{
 
 use super::{context::HandlerContext, helpers::get_account_or_default};
 use crate::{
-    handlers::helpers::{
-        application_error,
-        get_account,
-        get_account_with_inputs,
-        invalid_params,
-        wait_for_result_and_account,
+    handlers::{
+        auth::jwt::enforce_scopes,
+        helpers::{
+            application_error,
+            get_account,
+            get_account_with_inputs,
+            invalid_params,
+            wait_for_result_and_account,
+        },
     },
     server::ApplicationErrorCode,
 };
@@ -55,7 +58,7 @@ pub async fn handle_get(
     req: GetNftRequest,
 ) -> Result<GetNftResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.authorize(token, &[Permission::Nfts(Crud::Read, Some(req.resource_address))])?;
 
     let non_fungible_api = sdk.non_fungible_api();
 
@@ -71,7 +74,7 @@ pub async fn handle_list(
     token: Option<&Bearer>,
     req: ListNftsRequest,
 ) -> Result<ListNftsResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.authorize(token, &[Permission::Nfts(Crud::Read, None)])?;
     let ListNftsRequest { account, limit, offset } = req;
     let sdk = context.wallet_sdk();
     let account = get_account_or_default(account.as_ref(), &sdk.accounts_api())?;
@@ -91,7 +94,8 @@ pub async fn handle_mint_faucet(
     req: MintFaucetNftRequest,
 ) -> Result<MintFaucetNftResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    // Faucet operation: testnet-only mass-mint. Stays admin-only.
+    context.authorize(token, &[Permission::Admin])?;
 
     let account = get_account(&req.account, &sdk.accounts_api())?;
     let account = account.account;
@@ -228,8 +232,8 @@ pub async fn handle_transfer(
     token: Option<&Bearer>,
     req: TransferNftRequest,
 ) -> Result<TransferNftResponse, anyhow::Error> {
+    let granted = context.check_auth(token)?;
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
 
     // fetch accounts and its inputs
     let (fee_payer_account, fee_payer_account_inputs) = get_account_with_inputs(Some(&req.fee_payer_account), sdk)?;
@@ -242,6 +246,10 @@ pub async fn handle_transfer(
     })?;
     let fee_payer_account_address = fee_payer_account.component_address;
     let (source_account, mut inputs) = get_account_with_inputs(Some(&req.source_account), sdk)?;
+    enforce_scopes(&granted, &[Permission::Transfer(
+        Crud::Create,
+        Some(*source_account.component_address()),
+    )])?;
     let account_owner_key_id = source_account.account.owner_key_id().ok_or_else(|| {
         invalid_params(
             "source_account",

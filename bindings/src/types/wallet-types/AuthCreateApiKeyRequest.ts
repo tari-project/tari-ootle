@@ -3,7 +3,7 @@
 /**
  * Admin → daemon: mint a new long-lived API key with the supplied scopes.
  *
- * `permissions` is the same textual form `JrpcPermissions::from_str`
+ * `permissions` is the same textual form `Permissions::from_str`
  * accepts (e.g. `["AccountInfo", "TransactionGet"]`). `confirm_admin`
  * must be set to `true` if and only if the list contains the `Admin`
  * permission — this is a deliberate speed-bump so the UI can render an
@@ -18,5 +18,10 @@ export type AuthCreateApiKeyRequest = {
   name: string;
   permissions: Array<string>;
   confirm_admin: boolean;
+  /**
+   * Unix timestamp (seconds) at which the key becomes unusable. `None`
+   * for a never-expiring key. Rejected at the handler if it lies in the
+   * past — refusing to mint an instantly-expired credential.
+   */
   expires_at: bigint | null;
 };

@@ -68,7 +68,7 @@ impl Wallet {
         let mut client = WalletDaemonClient::connect(address, None)?;
         let resp = client
             .auth_request(AuthLoginRequest {
-                permissions: vec!["Admin".parse()?],
+                permissions: vec!["admin".parse()?],
                 credentials: AuthCredentials::None,
             })
             .await?;

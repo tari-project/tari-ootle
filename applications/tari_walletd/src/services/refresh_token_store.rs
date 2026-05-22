@@ -10,7 +10,7 @@ use std::{
 
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use tari_ootle_walletd_client::{
-    permissions::{Claims, JrpcPermissions},
+    permissions::{Claims, Permissions},
     types::RefreshTokenHash,
 };
 use tokio::sync::RwLock;
@@ -54,7 +54,7 @@ impl RefreshTokenStore {
         }
     }
 
-    pub async fn new_token(&self, permissions: JrpcPermissions, exp: u64) -> RefreshToken {
+    pub async fn new_token(&self, permissions: Permissions, exp: u64) -> RefreshToken {
         let mut write = self.tokens.write().await;
         clear_expired_tokens(&mut write);
         let data = RefreshTokenData {

@@ -8,7 +8,7 @@ use jsonwebtoken::{DecodingKey, EncodingKey, Header, TokenData, Validation};
 use tari_crypto::tari_utilities::SafePassword;
 use tari_ootle_wallet_sdk::storage::WalletStorageError;
 use tari_ootle_walletd_client::{
-    permissions::{Claims, JrpcPermission, JrpcPermissions},
+    permissions::{Claims, Permission, Permissions},
     types::EncodedJwtString,
 };
 
@@ -25,7 +25,7 @@ impl<'a> JwtApi<'a> {
         }
     }
 
-    pub fn generate_auth_claims(&self, permissions: JrpcPermissions) -> Result<Claims, AuthError> {
+    pub fn generate_auth_claims(&self, permissions: Permissions) -> Result<Claims, AuthError> {
         let valid_till = SystemTime::now() + self.default_expiry;
         let exp = valid_till
             .duration_since(UNIX_EPOCH)
@@ -55,28 +55,23 @@ impl<'a> JwtApi<'a> {
         Ok(permissions_token.into())
     }
 
-    pub fn check_auth(&self, token: Option<&Bearer>, req_permissions: &[JrpcPermission]) -> Result<(), AuthError> {
+    /// Validate the bearer JWT and return its granted permissions. Does
+    /// not check any specific requirement — use [`enforce_scopes`] (or
+    /// `HandlerContext::authorize` for the combined check).
+    pub fn check_auth(&self, token: Option<&Bearer>) -> Result<Permissions, AuthError> {
         let token = token.ok_or(AuthError::AccessDeniedNoBearerToken)?;
         let token_data = self.decode_jwt(token.token())?;
-        enforce_scopes(&token_data.claims.permissions, req_permissions)
+        Ok(token_data.claims.permissions)
     }
 }
 
-/// Apply the Admin shortcut + per-required-scope check to a granted set.
-/// Shared by the JWT path and the bearer-API-key path so they enforce the
-/// exact same policy.
-pub fn enforce_scopes(granted: &JrpcPermissions, required: &[JrpcPermission]) -> Result<(), AuthError> {
-    if granted.has_permission(&JrpcPermission::Admin) {
-        return Ok(());
-    }
-    for permission in required {
-        if !granted.has_permission(permission) {
-            return Err(AuthError::InsufficientPermissions {
-                required: permission.clone(),
-            });
-        }
-    }
-    Ok(())
+/// Surface [`Permissions::check`] as an `AuthError` so handlers can use a
+/// single `?` operator. Shared by the JWT and API-key paths so both enforce
+/// the exact same policy.
+pub fn enforce_scopes(granted: &Permissions, required: &[Permission]) -> Result<(), AuthError> {
+    granted
+        .check(required)
+        .map_err(|required| AuthError::InsufficientPermissions { required })
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -103,7 +98,7 @@ pub enum AuthError {
     #[error("Access denied. This endpoint requires an interactive user session, not an API key")]
     UserAuthOnly,
     #[error("Insufficient permissions. Required '{required:?}'")]
-    InsufficientPermissions { required: JrpcPermission },
+    InsufficientPermissions { required: Permission },
     #[error("Invalid expiry")]
     InvalidExpiry,
 }

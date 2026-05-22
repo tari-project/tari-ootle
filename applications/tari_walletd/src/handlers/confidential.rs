@@ -15,7 +15,7 @@ use tari_ootle_common_types::{displayable::Displayable, optional::Optional};
 use tari_ootle_wallet_crypto::{GenerateValueLookup, MMapValueLookup, OutputWitness};
 use tari_ootle_wallet_sdk::models::{ConfidentialOutputModel, KeyBranch, OutputStatus};
 use tari_ootle_walletd_client::{
-    permissions::JrpcPermission,
+    permissions::{Crud, Permission},
     types::{
         ConfidentialCreateOutputProofRequest,
         ConfidentialCreateOutputProofResponse,
@@ -34,6 +34,7 @@ use tokio::{task::block_in_place, time::Instant};
 
 use crate::handlers::{
     HandlerContext,
+    auth::jwt::enforce_scopes,
     helpers::{get_account_or_default, invalid_params, invalid_request},
 };
 
@@ -45,8 +46,8 @@ pub async fn handle_create_transfer_proof(
     token: Option<&Bearer>,
     req: ProofsGenerateRequest,
 ) -> Result<ProofsGenerateResponse, anyhow::Error> {
+    let granted = context.check_auth(token)?;
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
 
     if req.reveal_amount.is_negative() {
         return Err(invalid_request(format!(
@@ -56,6 +57,10 @@ pub async fn handle_create_transfer_proof(
     }
 
     let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
+    enforce_scopes(&granted, &[Permission::Confidential(
+        Crud::Create,
+        Some(*account.component_address()),
+    )])?;
     let account_owner_key_id = account
         .owner_key_id()
         .ok_or_else(|| invalid_request("Account does not have an owner key"))?;
@@ -203,7 +208,7 @@ pub async fn handle_finalize_transfer(
     req: ProofsFinalizeRequest,
 ) -> Result<ProofsFinalizeResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.authorize(token, &[Permission::Confidential(Crud::Update, None)])?;
     let transaction = sdk
         .transaction_api()
         .get(req.transaction_id)
@@ -256,7 +261,7 @@ pub async fn handle_cancel_transfer(
     req: ProofsCancelRequest,
 ) -> Result<ProofsCancelResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.authorize(token, &[Permission::Confidential(Crud::Delete, None)])?;
     sdk.locks_api().release_lock(req.proof_id)?;
     Ok(ProofsCancelResponse {})
 }
@@ -267,7 +272,7 @@ pub async fn handle_create_output_proof(
     req: ConfidentialCreateOutputProofRequest,
 ) -> Result<ConfidentialCreateOutputProofResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.authorize(token, &[Permission::Confidential(Crud::Create, None)])?;
 
     let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask)?;
     let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
@@ -301,7 +306,7 @@ pub async fn handle_view_vault_balance(
     req: ConfidentialViewVaultBalanceRequest,
 ) -> Result<ConfidentialViewVaultBalanceResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.authorize(token, &[Permission::Confidential(Crud::Read, None)])?;
 
     let substate = sdk
         .substate_api()

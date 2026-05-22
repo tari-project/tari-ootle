@@ -27,19 +27,19 @@ import FormGroup from "@mui/material/FormGroup";
 import FormHelperText from "@mui/material/FormHelperText";
 import Switch from "@mui/material/Switch";
 import Typography from "@mui/material/Typography";
-import { TariPermission } from "@tari-project/tari-permissions";
+import { permissionToString, type Permission } from "@tari-project/ootle-ts-bindings";
 import React, { useEffect, useState } from "react";
 import "./Permissions.css";
 
 export default function Permissions(props: {
-  requiredPermissions: TariPermission[];
-  optionalPermissions: TariPermission[];
+  requiredPermissions: Permission[];
+  optionalPermissions: Permission[];
   setOptionalPermissions: any;
 }) {
   const { requiredPermissions, optionalPermissions, setOptionalPermissions } = props;
   const [permissions, setPermissions] = useState(
     optionalPermissions.map((permission, index) => {
-      return { id: index, name: permission.toString(), checked: true };
+      return { id: index, name: permissionToString(permission), checked: true };
     }),
   );
 
@@ -67,18 +67,21 @@ export default function Permissions(props: {
       <FormControl component="fieldset" variant="standard" style={{ width: "100%" }}>
         <Divider />
         <FormGroup>
-          {requiredPermissions.map((permission, i) => (
-            <React.Fragment key={i}>
-              <FormControlLabel
-                control={<Switch checked={true} disabled={true} />}
-                label={permission?.toString()}
-                labelPlacement="start"
-                key={permission?.toString()}
-                className="permissions-switch"
-              />
-              <Divider />
-            </React.Fragment>
-          ))}
+          {requiredPermissions.map((permission, i) => {
+            const label = permissionToString(permission);
+            return (
+              <React.Fragment key={i}>
+                <FormControlLabel
+                  control={<Switch checked={true} disabled={true} />}
+                  label={label}
+                  labelPlacement="start"
+                  key={label}
+                  className="permissions-switch"
+                />
+                <Divider />
+              </React.Fragment>
+            );
+          })}
         </FormGroup>
         <FormGroup>
           {permissions.map(({ checked, name, id }, i) => (

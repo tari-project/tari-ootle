@@ -23,7 +23,7 @@ pub struct ApiKey {
     pub name: String,
     /// SHA-256 hex digest of the raw key bytes. Index for fast lookup.
     pub key_hash: String,
-    /// Textual `JrpcPermissions` form (comma-separated). The auth layer
+    /// Textual `Permissions` form (comma-separated). The auth layer
     /// parses this on every credential presentation; we keep the same
     /// format already used by the JWT claims so there is exactly one
     /// permission string codec in the wallet daemon.

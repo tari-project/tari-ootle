@@ -16,8 +16,8 @@ use crate::schema::api_keys;
 
 /// One row of the `api_keys` table.
 ///
-/// `permissions` is the textual `JrpcPermissions` form (comma-separated;
-/// see `JrpcPermissions::from_str`) so the schema does not have to track
+/// `permissions` is the textual `Permissions` form (comma-separated;
+/// see `Permissions::from_str`) so the schema does not have to track
 /// individual permission variants.
 #[derive(Debug, Clone, Queryable, Identifiable)]
 #[diesel(table_name = api_keys)]

@@ -52,7 +52,7 @@ import type {
   ConfidentialViewVaultBalanceResponse,
   GetValidatorFeesRequest,
   GetValidatorFeesResponse,
-  JrpcPermission,
+  Permission,
   KeysCreateRequest,
   KeysCreateResponse,
   KeysListRequest,
@@ -181,7 +181,7 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
     return this.sendRequest("auth.list_sessions", params);
   }
 
-  public async authRequest(permissions: JrpcPermission[], credentials: AuthCredentials): Promise<string> {
+  public async authRequest(permissions: Permission[], credentials: AuthCredentials): Promise<string> {
     let request: AuthLoginRequest = {
       permissions: permissions,
       credentials,
@@ -338,9 +338,7 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
     return this.sendRequest("substates.list", params);
   }
 
-  public swapPoolGetExchangeRate(
-    params: SwapPoolGetExchangeRateRequest,
-  ): Promise<SwapPoolGetExchangeRateResponse> {
+  public swapPoolGetExchangeRate(params: SwapPoolGetExchangeRateRequest): Promise<SwapPoolGetExchangeRateResponse> {
     return this.sendRequest("swap_pools.get_exchange_rate", params);
   }
 

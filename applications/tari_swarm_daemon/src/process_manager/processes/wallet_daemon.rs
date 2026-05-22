@@ -31,7 +31,7 @@ impl WalletDaemonProcess {
         let mut client = WalletDaemonClient::connect(format!("http://localhost:{port}/json_rpc"), None)?;
         let AuthLoginResponse { token } = client
             .auth_request(AuthLoginRequest {
-                permissions: vec!["Admin".parse()?],
+                permissions: vec!["admin".parse()?],
                 credentials: webauthn_finish_auth_request
                     .map(|r| AuthCredentials::WebAuthN(Box::new(r)))
                     .unwrap_or(AuthCredentials::None),

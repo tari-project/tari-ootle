@@ -10,6 +10,7 @@ management, transactions, stealth/confidential transfers, NFTs, and more.
 
 ```rust,ignore
 use tari_ootle_walletd_client::WalletDaemonClient;
+use tari_ootle_walletd_client::permissions::Permission;
 use tari_ootle_walletd_client::types::*;
 
 // Connect to a running wallet daemon
@@ -17,7 +18,7 @@ let mut client = WalletDaemonClient::connect("http://localhost:18000", None)?;
 
 // Authenticate and set the JWT token
 let auth_resp = client.auth_request(AuthLoginRequest {
-    permissions: vec![JrpcPermission::Admin],
+    permissions: vec![Permission::Admin],
     // For simplicity, we're assuming auth is disabled. Use appropriate credentials that match the configured authentication method of your wallet daemon.
     credentials: AuthCredentials::None,
 }).await?;

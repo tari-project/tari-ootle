@@ -134,7 +134,7 @@ impl TariWalletDaemonProcess {
         // authenticate
         let AuthLoginResponse { token } = client
             .auth_request(AuthLoginRequest {
-                permissions: vec!["Admin".parse().unwrap()],
+                permissions: vec!["admin".parse().unwrap()],
                 credentials: AuthCredentials::None,
             })
             .await

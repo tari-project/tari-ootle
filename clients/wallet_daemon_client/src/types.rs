@@ -842,8 +842,8 @@ pub struct AuthRevokeTokenResponse {}
 /// Admin → daemon: mint a new long-lived API key with the supplied scopes.
 ///
 /// `permissions` is the same textual form `Permissions::from_str`
-/// accepts (e.g. `["AccountInfo", "TransactionGet"]`). `confirm_admin`
-/// must be set to `true` if and only if the list contains the `Admin`
+/// accepts (e.g. `["accounts:read", "transactions:read"]`). `confirm_admin`
+/// must be set to `true` if and only if the list contains the `admin`
 /// permission — this is a deliberate speed-bump so the UI can render an
 /// explicit warning before issuing a fully-privileged credential.
 ///

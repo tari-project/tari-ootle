@@ -27,7 +27,15 @@ import {
   DialogContentText,
   DialogTitle,
   Divider,
+  FormControl,
   FormControlLabel,
+  InputLabel,
+  ListItemText,
+  MenuItem,
+  OutlinedInput,
+  Radio,
+  RadioGroup,
+  Select,
   Stack,
   Table,
   TableBody,
@@ -38,6 +46,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
+import type { SelectChangeEvent } from "@mui/material";
 import type { AuthCreateApiKeyResponse, IssuedApiKey } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 
@@ -105,6 +114,21 @@ const PERMISSION_OPTIONS: Array<{ value: string; label: string; description: str
 
 const ADMIN_PERMISSION_VALUE = "Admin";
 
+/// Expiry radio choices. Presets are duration-relative (applied at submit
+/// time, not dialog-open time) so the wire timestamp reflects when the
+/// admin clicked Create. `custom` reveals a date picker; `never` maps to
+/// `null` on the wire.
+type ExpiryChoice = "1h" | "5h" | "24h" | "5d" | "custom" | "never";
+
+/// Preset durations in seconds, paired with their human label. Order
+/// matches the radio render so changing this list updates the UI in place.
+const EXPIRY_PRESETS: Array<{ value: ExpiryChoice; label: string; seconds: number }> = [
+  { value: "1h", label: "1 hour", seconds: 60 * 60 },
+  { value: "5h", label: "5 hours", seconds: 5 * 60 * 60 },
+  { value: "24h", label: "24 hours", seconds: 24 * 60 * 60 },
+  { value: "5d", label: "5 days", seconds: 5 * 24 * 60 * 60 },
+];
+
 /// Render a unix-second timestamp as a locale string. `null` -> "never".
 function fmtTs(ts: bigint | null | undefined): string {
   if (ts == null) {
@@ -133,12 +157,12 @@ export default function ApiKeys() {
   const [selectedPerms, setSelectedPerms] = useState<Set<string>>(() => new Set());
   const [grantAdmin, setGrantAdmin] = useState(false);
   const [confirmAdmin, setConfirmAdmin] = useState(false);
-  // Expiry is optional. `expiresOn` is a YYYY-MM-DD string from a native
-  // `<input type="date">`; empty means "never expires". We convert to a
-  // unix-seconds timestamp at submit time. A "never expires" choice maps
-  // to `null` on the wire.
-  const [expiresOn, setExpiresOn] = useState<string>("");
-  const [neverExpires, setNeverExpires] = useState<boolean>(true);
+  // Expiry as a radio choice. Presets ("1h" / "5h" / "24h" / "5d") encode
+  // a duration applied at submit time so the absolute timestamp matches the
+  // instant the user clicks Create — not the moment they opened the dialog.
+  // "custom" reveals a date picker; "never" sends `null` on the wire.
+  const [expiryChoice, setExpiryChoice] = useState<ExpiryChoice>("never");
+  const [customExpiresOn, setCustomExpiresOn] = useState<string>("");
   const [createError, setCreateError] = useState<string | null>(null);
 
   const resetCreateForm = () => {
@@ -146,21 +170,9 @@ export default function ApiKeys() {
     setSelectedPerms(new Set());
     setGrantAdmin(false);
     setConfirmAdmin(false);
-    setExpiresOn("");
-    setNeverExpires(true);
+    setExpiryChoice("never");
+    setCustomExpiresOn("");
     setCreateError(null);
-  };
-
-  const togglePermission = (value: string) => {
-    setSelectedPerms((current) => {
-      const next = new Set(current);
-      if (next.has(value)) {
-        next.delete(value);
-      } else {
-        next.add(value);
-      }
-      return next;
-    });
   };
 
   const { mutate: createKey, isPending: isCreating } = useCreateApiKey((response) => {
@@ -186,23 +198,28 @@ export default function ApiKeys() {
       setCreateError("Granting the Admin permission requires explicit confirmation. Tick the box below to proceed.");
       return;
     }
-    // Convert the date-only picker value (`YYYY-MM-DD`, browser-local) into
-    // unix-seconds at end-of-day in the user's timezone. End-of-day
-    // (23:59:59) is the friendlier interpretation of "expires on this
-    // date" — a key minted to "expire 2026-12-31" stays usable through
-    // the whole of that day rather than dying at midnight at the start.
+    // Resolve the expiry radio choice to a unix-seconds wire value. Presets
+    // are applied at submit time (now + duration) so the timestamp matches
+    // the instant of click; "custom" parses a local-tz YYYY-MM-DD picked
+    // by the user (end-of-day in that tz); "never" leaves it null.
     let expires_at: bigint | null = null;
-    if (!neverExpires) {
-      if (!expiresOn) {
-        setCreateError("Pick an expiry date, or tick 'Never expires'.");
+    const preset = EXPIRY_PRESETS.find((p) => p.value === expiryChoice);
+    if (preset) {
+      const ts = Math.floor(Date.now() / 1000) + preset.seconds;
+      expires_at = BigInt(ts);
+    } else if (expiryChoice === "custom") {
+      if (!customExpiresOn) {
+        setCreateError("Pick an expiry date, or choose 'Never expires'.");
         return;
       }
-      // Parse as YYYY-MM-DD in local time, set to 23:59:59.
-      const [y, m, d] = expiresOn.split("-").map((s) => parseInt(s, 10));
+      const [y, m, d] = customExpiresOn.split("-").map((s) => parseInt(s, 10));
       if (!y || !m || !d) {
         setCreateError("Expiry date must be a valid calendar date.");
         return;
       }
+      // End-of-day in local time is the friendlier reading of "expires on
+      // this date" — the key stays usable through the whole of that day
+      // rather than dying at midnight at the start.
       const localEndOfDay = new Date(y, m - 1, d, 23, 59, 59);
       const ts = Math.floor(localEndOfDay.getTime() / 1000);
       if (ts <= Math.floor(Date.now() / 1000)) {
@@ -211,6 +228,7 @@ export default function ApiKeys() {
       }
       expires_at = BigInt(ts);
     }
+    // expiryChoice === "never" → leave expires_at null
     createKey(
       {
         name: createName,
@@ -358,35 +376,57 @@ export default function ApiKeys() {
                 Permissions
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-                Pick the smallest set the agent needs. Each box maps to one entry of the daemon's{" "}
+                Pick the smallest set the agent needs. Each entry maps to one variant of the daemon's{" "}
                 <code>JrpcPermissions</code> set.
               </Typography>
-              <Stack>
-                {PERMISSION_OPTIONS.map((opt) => (
-                  <FormControlLabel
-                    key={opt.value}
-                    sx={{ alignItems: "flex-start", mr: 0, my: 0.25 }}
-                    control={
-                      <Checkbox
-                        size="small"
-                        sx={{ pt: 0.5 }}
-                        checked={selectedPerms.has(opt.value)}
-                        onChange={() => togglePermission(opt.value)}
-                      />
-                    }
-                    label={
-                      <Box>
-                        <Typography variant="body2" component="span">
-                          {opt.label}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                          {opt.description}
-                        </Typography>
+              <FormControl fullWidth size="small">
+                <InputLabel id="api-key-permissions-label">Permissions</InputLabel>
+                <Select<string[]>
+                  labelId="api-key-permissions-label"
+                  multiple
+                  value={Array.from(selectedPerms)}
+                  onChange={(event: SelectChangeEvent<string[]>) => {
+                    // MUI types `target.value` as `string | string[]` even
+                    // with `multiple`. The string case only happens if the
+                    // <select> is rendered as a native form control (it's
+                    // not, here), but we handle it for type-safety.
+                    const value = event.target.value;
+                    const next: string[] = Array.isArray(value) ? value : value.split(",");
+                    setSelectedPerms(new Set(next));
+                  }}
+                  input={<OutlinedInput label="Permissions" />}
+                  renderValue={(selected: string[]) =>
+                    selected.length === 0 ? (
+                      <Typography variant="body2" color="text.secondary">
+                        None selected
+                      </Typography>
+                    ) : (
+                      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                        {selected.map((value: string) => (
+                          <Chip key={value} label={value} size="small" />
+                        ))}
                       </Box>
-                    }
-                  />
-                ))}
-              </Stack>
+                    )
+                  }
+                  // Cap dropdown height so long permission lists stay scrollable
+                  // instead of pushing the dialog past the viewport.
+                  MenuProps={{
+                    PaperProps: { sx: { maxHeight: 320 } },
+                  }}
+                >
+                  {PERMISSION_OPTIONS.map((opt) => (
+                    <MenuItem key={opt.value} value={opt.value}>
+                      <Checkbox size="small" checked={selectedPerms.has(opt.value)} />
+                      <ListItemText
+                        primary={opt.label}
+                        secondary={opt.description}
+                        primaryTypographyProps={{ variant: "body2" }}
+                        secondaryTypographyProps={{ variant: "caption" }}
+                      />
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
               <Divider sx={{ my: 1.5 }} />
               <FormControlLabel
                 sx={{ alignItems: "flex-start", mr: 0 }}
@@ -441,34 +481,42 @@ export default function ApiKeys() {
                 Expiry
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-                Pick a date for this key to stop working. Shorter is safer — the daemon stops accepting the key the
-                moment the date passes.
+                Shorter is safer — the daemon stops accepting the key the moment its expiry passes.
               </Typography>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    size="small"
-                    checked={neverExpires}
-                    onChange={(e) => {
-                      setNeverExpires(e.target.checked);
-                      if (e.target.checked) {
-                        setExpiresOn("");
-                      }
-                    }}
+              <RadioGroup
+                value={expiryChoice}
+                onChange={(e) => setExpiryChoice(e.target.value as ExpiryChoice)}
+              >
+                {EXPIRY_PRESETS.map((p) => (
+                  <FormControlLabel
+                    key={p.value}
+                    value={p.value}
+                    control={<Radio size="small" />}
+                    label={<Typography variant="body2">{p.label}</Typography>}
                   />
-                }
-                label={<Typography variant="body2">Never expires</Typography>}
-              />
-              {!neverExpires && (
+                ))}
+                <FormControlLabel
+                  value="custom"
+                  control={<Radio size="small" />}
+                  label={<Typography variant="body2">Custom date</Typography>}
+                />
+                <FormControlLabel
+                  value="never"
+                  control={<Radio size="small" />}
+                  label={<Typography variant="body2">Never expires</Typography>}
+                />
+              </RadioGroup>
+              {expiryChoice === "custom" && (
                 <TextField
                   type="date"
                   label="Expires on"
-                  value={expiresOn}
-                  onChange={(e) => setExpiresOn(e.target.value)}
+                  value={customExpiresOn}
+                  onChange={(e) => setCustomExpiresOn(e.target.value)}
                   InputLabelProps={{ shrink: true }}
                   inputProps={{ min: minExpiryDate }}
                   helperText="Key stops working at end of day in your local time."
                   fullWidth
+                  size="small"
                   sx={{ mt: 1 }}
                 />
               )}

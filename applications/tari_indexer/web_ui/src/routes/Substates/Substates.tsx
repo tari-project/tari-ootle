@@ -44,10 +44,9 @@ import {
 import React, { useState, useCallback, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { renderJson } from "../../utils/helpers";
-import { convertCborValue } from "../../utils/cbor";
 import CopyToClipboard from "../../Components/CopyToClipboard";
 import { useGetSubstate } from "../../api/hooks/useSubstates";
-import type { Component, SubstateValue } from "@tari-project/ootle-ts-bindings";
+import { convertCborValue, type Component, type SubstateValue } from "@tari-project/ootle-ts-bindings";
 import SearchIcon from "@mui/icons-material/Search";
 import ClearIcon from "@mui/icons-material/Clear";
 

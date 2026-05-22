@@ -27,7 +27,7 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import { Box, Chip, Collapse, Table, TableBody, TableContainer, TableRow, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
-import { Substate, SubstateId, substateIdToString, TransactionResult } from "@tari-project/ootle-ts-bindings";
+import { convertCborValue, Substate, SubstateId, substateIdToString, TransactionResult } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 import { IoArrowDownCircle, IoArrowUpCircle } from "react-icons/io5";
 
@@ -36,6 +36,14 @@ interface SubstateRowDataProps {
   substate?: Substate | number;
   state: string;
   index: number;
+}
+
+function cborObjectEntries(value: any): [string, string][] | null {
+  const decoded = convertCborValue(value);
+  if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) {
+    return null;
+  }
+  return Object.entries(decoded).map(([k, v]) => [k, typeof v === "string" ? v : JSON.stringify(v)]);
 }
 
 function renderSubstateDetails(substate: any, id: SubstateId) {
@@ -51,55 +59,47 @@ function renderSubstateDetails(substate: any, id: SubstateId) {
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <Typography variant="subtitle2">NFT Details</Typography>
 
-        {nft.data && (
-          <Box>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              Immutable Data:
-            </Typography>
-            <Box sx={{ pl: 2 }}>
-              {nft.data.Tag && nft.data.Tag[1]?.Map && (
+        {(() => {
+          const entries = cborObjectEntries(nft.data);
+          return entries && (
+            <Box>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Immutable Data:
+              </Typography>
+              <Box sx={{ pl: 2 }}>
                 <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                  {nft.data.Tag[1].Map.map((item: any, index: number) => (
+                  {entries.map(([key, val], index) => (
                     <Box key={index} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                      <Chip
-                        label={item[0]?.Text || JSON.stringify(item[0])}
-                        size="small"
-                        color="primary"
-                        variant="outlined"
-                      />
-                      <Typography variant="body2">{item[1]?.Text || JSON.stringify(item[1])}</Typography>
+                      <Chip label={key} size="small" color="primary" variant="outlined" />
+                      <Typography variant="body2">{val}</Typography>
                     </Box>
                   ))}
                 </Box>
-              )}
+              </Box>
             </Box>
-          </Box>
-        )}
+          );
+        })()}
 
-        {nft.mutable_data && (
-          <Box>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              Mutable Data:
-            </Typography>
-            <Box sx={{ pl: 2 }}>
-              {nft.mutable_data.Map && (
+        {(() => {
+          const entries = cborObjectEntries(nft.mutable_data);
+          return entries && (
+            <Box>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Mutable Data:
+              </Typography>
+              <Box sx={{ pl: 2 }}>
                 <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                  {nft.mutable_data.Map.map((item: any, index: number) => (
+                  {entries.map(([key, val], index) => (
                     <Box key={index} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                      <Chip
-                        label={item[0]?.Text || JSON.stringify(item[0])}
-                        size="small"
-                        color="secondary"
-                        variant="outlined"
-                      />
-                      <Typography variant="body2">{item[1]?.Text || JSON.stringify(item[1])}</Typography>
+                      <Chip label={key} size="small" color="secondary" variant="outlined" />
+                      <Typography variant="body2">{val}</Typography>
                     </Box>
                   ))}
                 </Box>
-              )}
+              </Box>
             </Box>
-          </Box>
-        )}
+          );
+        })()}
       </Box>
     );
   }

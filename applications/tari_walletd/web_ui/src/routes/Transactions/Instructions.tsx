@@ -27,7 +27,7 @@ import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import { Box, Collapse, Table, TableBody, TableContainer, TableRow, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import type { Instruction } from "@tari-project/ootle-ts-bindings";
-import { BinaryTag } from "@utils/cbor";
+import { TariTypeTag } from "@tari-project/ootle-ts-bindings";
 import { toHexString } from "@utils/helpers";
 import { decode } from "cbor2";
 import { useState } from "react";
@@ -91,17 +91,17 @@ function inspectify(instruction: Instruction) {
     return instruction;
   }
 
-  const addressMapper = (tag: BinaryTag, prefix: string): [BinaryTag, (value: any) => string] => [
+  const addressMapper = (tag: TariTypeTag, prefix: string): [TariTypeTag, (value: any) => string] => [
     tag,
     (value: any) => prefix + "_" + toHexString(value.contents),
   ];
 
   const tags = new Map([
-    addressMapper(BinaryTag.VaultId, "vault"),
-    addressMapper(BinaryTag.ResourceAddress, "resource"),
-    addressMapper(BinaryTag.ComponentAddress, "component"),
-    addressMapper(BinaryTag.FeeClaim, "vnfp"),
-    addressMapper(BinaryTag.TransactionReceipt, "txreceipt"),
+    addressMapper(TariTypeTag.VaultId, "vault"),
+    addressMapper(TariTypeTag.ResourceAddress, "resource"),
+    addressMapper(TariTypeTag.ComponentAddress, "component"),
+    addressMapper(TariTypeTag.ValidatorNodeFeePool, "vnfp"),
+    addressMapper(TariTypeTag.TransactionReceipt, "txreceipt"),
   ]);
 
   const contents = instruction[method] as any;

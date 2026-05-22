@@ -38,8 +38,7 @@ import {
   TableRow,
   Typography,
 } from "@mui/material";
-import type { NonFungibleToken } from "@tari-project/ootle-ts-bindings";
-import { convertCborValue } from "@utils/cbor";
+import { convertCborValue, type NonFungibleToken } from "@tari-project/ootle-ts-bindings";
 import { displayNftId, shortenSubstateId } from "@utils/helpers";
 import { Fragment } from "react/jsx-runtime";
 import SendNft from "./SendNft";

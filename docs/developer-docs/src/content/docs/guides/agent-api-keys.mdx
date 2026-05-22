@@ -25,13 +25,14 @@ permission-scoped API keys that an **Admin** user mints once and that the agent 
    prefixes them with `tw_`, base64-encodes the result, and returns it to you **exactly once**. Only a SHA-256 hash
    of that string is persisted; a database leak does not expose the key.
 3. You hand the raw key to the agent — environment variable, secrets manager, etc.
-4. The agent calls `auth.request` with `credentials: { ApiKey: "tw_…" }`. The daemon hashes the supplied string,
-   looks up an unrevoked row matching that hash, parses the stored permission set, and issues a normal short-lived
-   JWT scoped to those permissions.
-5. The agent uses that JWT for subsequent requests until it expires, then re-presents the same API key to refresh.
+4. The agent sends the raw key as the `Authorization: Bearer …` header on every JSON-RPC call. There is no
+   `auth.request` round-trip and no JWT exchange. The daemon's auth middleware detects the `tw_` prefix on the
+   bearer string, resolves it against the `api_keys` table, parses the stored permission set, and enforces it
+   against the called endpoint's required scopes.
 
-The permissions encoded in the JWT come from the **stored API key row**, not from the agent's login request — an
-agent cannot self-promote by asking for `Admin` when its key only grants `AccountInfo`.
+The permissions enforced for each request come from the **stored API key row**, not from anything the agent sends —
+an agent cannot self-promote by claiming `Admin` when its key only grants `AccountInfo`. Revocation is immediate:
+the storage-layer lookup filters revoked rows, so the very next request after a revoke fails.
 
 <Aside type="caution">
 The raw key is returned exactly once at creation. There is no "show me my key again" endpoint by design — the daemon
@@ -55,6 +56,48 @@ For a trading agent that needs to submit transactions from one specific account:
 
 Granting `Admin` to an API key is allowed (since you have it), but the daemon requires you to set
 `confirm_admin: true` in the create request so a UI checkbox can be the gate, not the JSON-RPC payload alone.
+
+### Setting an expiry
+
+API keys can optionally carry an `expires_at` timestamp (unix seconds). When set, the daemon's active-row filter
+stops surfacing the key once that timestamp has passed — the agent's next request fails with the same opaque
+`ApiKey is invalid or revoked` error as for an unknown or revoked key. Prefer the shortest expiry that fits the
+agent's job: shorter is safer, since a leaked short-lived key dies on its own without manual revocation.
+
+```bash
+# CLI: relative duration, parsed with `humantime`. Accepts forms like
+# 30d, 12h, 1y, 90 days, 1day 6h.
+tari-wallet-cli auth api-key create \
+    --name monitoring-agent \
+    --permissions AccountInfo,TransactionGet \
+    --expires-in 30d
+```
+
+```rust
+// Rust: absolute unix-seconds. `None` means the key never expires.
+use std::time::{SystemTime, UNIX_EPOCH, Duration};
+
+let expires_at = (SystemTime::now() + Duration::from_secs(30 * 24 * 3600))
+    .duration_since(UNIX_EPOCH)?
+    .as_secs() as i64;
+
+admin_client.auth_create_api_key(AuthCreateApiKeyRequest {
+    name: "monitoring-agent".into(),
+    permissions: vec!["AccountInfo".into(), "TransactionGet".into()],
+    confirm_admin: false,
+    expires_at: Some(expires_at),
+}).await?;
+```
+
+The Web UI exposes this as a "Never expires" checkbox plus a date picker on the create dialog. The list view
+shows the expiry column and renders a yellow `EXPIRED` pill for keys whose expiry has passed.
+
+<Aside type="note">
+The three key-management endpoints (`auth.create_api_key`, `auth.list_api_keys`, `auth.revoke_api_key`) require an
+interactive **user session** (WebAuthn). An Admin-scoped API key cannot mint, list, or revoke further keys — this
+bounds the blast radius of a leaked admin key to the lifetime of that key itself. An attacker holding a leaked admin
+key cannot establish persistence by minting fresh keys, and cannot wipe their own audit trail by revoking.
+</Aside>
 
 ### Mint a key (Wallet Web UI)
 
@@ -124,13 +167,11 @@ println!("Hand this to the agent, then forget it: {}", response.api_key);
 ```rust
 use tari_ootle_walletd_client::WalletDaemonClient;
 
-let mut agent_client = WalletDaemonClient::connect(daemon_url, None)?;
-// One call: sends auth.request with AuthCredentials::ApiKey, captures the
-// JWT, and stores it as the bearer token for subsequent requests on this
-// client.
-agent_client.authenticate_with_api_key(api_key_from_env).await?;
+// Pass the raw API key as the bearer token at connect time; subsequent
+// JSON-RPC calls go out with `Authorization: Bearer tw_…`, which the
+// daemon resolves against the api_keys table on every request.
+let mut agent_client = WalletDaemonClient::connect(daemon_url, Some(api_key_from_env))?;
 
-// Now the agent can call any scope-permitted endpoint.
 let info = agent_client.get_wallet_info().await?;
 ```
 
@@ -140,9 +181,10 @@ let info = agent_client.get_wallet_info().await?;
 import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
 
 const client = WalletDaemonClient.usingFetchTransport("http://localhost:5100/json_rpc");
-await client.authenticateWithApiKey(process.env.TARI_AGENT_API_KEY!);
+// Sets the raw API key as the bearer token. No auth.request round-trip;
+// the daemon authorises each call directly against the api_keys table.
+client.authenticateWithApiKey(process.env.TARI_AGENT_API_KEY!);
 
-// JWT is now set on the client; subsequent calls are authenticated.
 const info = await client.walletGetInfo();
 ```
 
@@ -167,18 +209,20 @@ admin_client
     .await?;
 ```
 
-Revoke is immediate: the storage layer filters revoked rows out of the authentication lookup, so any in-flight
-authentication using a just-revoked key will fail at the next request.
+Revoke is immediate: the storage layer filters revoked rows out of the authentication lookup, so the next request
+after a revoke fails — there is no client-side cache and no JWT to outlive the revoke.
 
 ### Failure modes the daemon handles for you
 
 - **Wrong / revoked / unknown key**: same error message and timing for all three. An attacker probing the endpoint
   can't enumerate valid hashes.
-- **Out-of-scope request**: the JWT carries the scopes the key was minted with. Any handler that requires a scope
-  not on that list rejects the request with the standard `InsufficientPermissions` error.
+- **Out-of-scope request**: the daemon enforces the stored scope set against every endpoint's required scopes. Any
+  handler that requires a scope not on that list rejects the request with the standard `InsufficientPermissions`
+  error.
 - **Non-admin trying to mint/list/revoke keys**: rejected with the same `InsufficientPermissions` error — only the
   `Admin` permission grants access to the key-management endpoints.
 - **Empty permission list at creation**: rejected. An unusable key is worse than no key.
-- **Concurrent revoke during authentication**: the daemon's `last_used_at` bump is best-effort; if the row gets
-  revoked between the credential match and the timestamp write, the auth call still succeeds (the credentials *were*
-  valid at the moment of the read transaction) but the bump is a silent no-op.
+- **Concurrent revoke during authentication**: a request whose lookup wins the race authenticates successfully (the
+  key *was* active at the moment of the read); the very next request, against the now-revoked row, fails. The
+  `last_used_at` bump is throttled and best-effort — a write failure here cannot abort the already-successful
+  request.

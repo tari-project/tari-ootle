@@ -28,7 +28,7 @@ use crate::handlers::{
     Handler,
     accounts,
     address_book,
-    auth::jwt::JwtApiError,
+    auth::jwt::AuthError,
     burn_proofs,
     confidential,
     error::HandlerError,
@@ -340,7 +340,7 @@ fn resolve_any_error(answer_id: axum_jrpc::Id, e: &anyhow::Error) -> JsonRpcResp
         );
     }
 
-    if let Some(error) = e.downcast_ref::<JwtApiError>() {
+    if let Some(error) = e.downcast_ref::<AuthError>() {
         JsonRpcResponse::error(
             answer_id,
             JsonRpcError::new(

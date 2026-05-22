@@ -20,6 +20,8 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
 use clap::{Args, Subcommand};
 use tari_ootle_common_types::displayable::Displayable;
 use tari_ootle_walletd_client::{
@@ -64,9 +66,10 @@ pub enum ApiKeySubcommand {
     /// exactly once — store it immediately. The daemon persists only a
     /// SHA-256 hash and cannot surface the key again on a subsequent list.
     Create(CreateApiKeyArgs),
-    /// List all API keys (active and revoked) along with their granted
-    /// scopes and last-used timestamps.
-    List,
+    /// List API keys (active by default; pass `--include-revoked` for the
+    /// full audit history) along with their granted scopes, last-used
+    /// timestamps, and any expiry.
+    List(ListApiKeyArgs),
     /// Revoke an API key by id. Revocation is effective immediately.
     Revoke(RevokeApiKeyArgs),
 }
@@ -84,6 +87,23 @@ pub struct CreateApiKeyArgs {
     /// so an admin doesn't accidentally mint a fully-privileged key.
     #[clap(long)]
     pub confirm_admin: bool,
+    /// Optional expiry, expressed as a duration from now. Accepts the
+    /// usual human-friendly forms (`30d`, `12h`, `1y`, `90 days`,
+    /// `1day 6h`). Omit for a never-expiring key.
+    #[clap(long, value_parser = parse_human_duration)]
+    pub expires_in: Option<Duration>,
+}
+
+fn parse_human_duration(s: &str) -> Result<Duration, String> {
+    humantime::parse_duration(s).map_err(|e| format!("invalid duration '{s}': {e}"))
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct ListApiKeyArgs {
+    /// Include revoked keys in the listing. Off by default — the typical
+    /// admin view only shows still-usable credentials.
+    #[clap(long)]
+    pub include_revoked: bool,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -141,11 +161,27 @@ impl ApiKeySubcommand {
                     anyhow::bail!("--permissions must contain at least one scope; refusing to mint an unusable key");
                 }
                 let perm_strings: Vec<String> = args.permissions.iter().map(|p| p.to_string()).collect();
+                // Convert the relative `--expires-in` duration to the absolute
+                // unix-seconds the wire type expects. Done client-side because
+                // the absolute timestamp is what gets persisted; subsequent
+                // listings show absolute timestamps anyway.
+                let expires_at = args
+                    .expires_in
+                    .map(|d| -> anyhow::Result<i64> {
+                        let when = SystemTime::now() + d;
+                        let secs = when
+                            .duration_since(UNIX_EPOCH)
+                            .map_err(|e| anyhow::anyhow!("expires_in produced a pre-epoch timestamp: {e}"))?
+                            .as_secs();
+                        Ok(secs as i64)
+                    })
+                    .transpose()?;
                 let resp = client
                     .auth_create_api_key(AuthCreateApiKeyRequest {
                         name: args.name,
                         permissions: perm_strings,
                         confirm_admin: args.confirm_admin,
+                        expires_at,
                     })
                     .await?;
                 println!("API key created.");
@@ -153,6 +189,11 @@ impl ApiKeySubcommand {
                 println!("  name:        {}", resp.name);
                 println!("  permissions: {:?}", resp.permissions);
                 println!("  created_at:  {} (unix s)", resp.created_at);
+                if let Some(exp) = expires_at {
+                    println!("  expires_at:  {exp} (unix s)");
+                } else {
+                    println!("  expires_at:  never");
+                }
                 println!();
                 // Print the raw key on its own line, prefixed with a label so
                 // a copy-paste of the line still parses cleanly. Subsequent
@@ -160,21 +201,39 @@ impl ApiKeySubcommand {
                 println!("KEY (shown ONCE — store immediately):");
                 println!("{}", resp.api_key.as_str());
             },
-            List => {
-                let resp = client.auth_list_api_keys(AuthListApiKeysRequest {}).await?;
+            List(args) => {
+                let resp = client
+                    .auth_list_api_keys(AuthListApiKeysRequest {
+                        include_revoked: args.include_revoked,
+                    })
+                    .await?;
                 if resp.keys.is_empty() {
                     println!("No API keys issued.");
                     return Ok(());
                 }
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0);
                 for k in &resp.keys {
-                    let status = if k.revoked_at.is_some() { "REVOKED" } else { "active" };
+                    let status = if k.revoked_at.is_some() {
+                        "REVOKED"
+                    } else if k.expires_at.is_some_and(|exp| exp <= now) {
+                        "EXPIRED"
+                    } else {
+                        "active"
+                    };
                     let last_used = k
                         .last_used_at
                         .map(|t| t.to_string())
                         .unwrap_or_else(|| "never".to_string());
+                    let expires = k
+                        .expires_at
+                        .map(|t| t.to_string())
+                        .unwrap_or_else(|| "never".to_string());
                     println!(
-                        "[{}] id={} name={} scopes={:?} created={} last_used={}",
-                        status, k.id, k.name, k.permissions, k.created_at, last_used
+                        "[{}] id={} name={} scopes={:?} created={} last_used={} expires={}",
+                        status, k.id, k.name, k.permissions, k.created_at, last_used, expires
                     );
                 }
             },

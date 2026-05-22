@@ -218,8 +218,14 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
     return this.sendRequest("auth.create_api_key", params);
   }
 
-  /** List all API keys (active and revoked). Never returns the raw key material. */
-  public authListApiKeys(params: AuthListApiKeysRequest = {}): Promise<AuthListApiKeysResponse> {
+  /**
+   * List API keys. By default returns only active (non-revoked) keys; pass
+   * `{ include_revoked: true }` to retrieve the full audit history.
+   * Expired keys are always included. Never returns raw key material.
+   */
+  public authListApiKeys(
+    params: AuthListApiKeysRequest = { include_revoked: false },
+  ): Promise<AuthListApiKeysResponse> {
     return this.sendRequest("auth.list_api_keys", params);
   }
 
@@ -233,17 +239,15 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
   }
 
   /**
-   * Convenience: authenticate this client using an API key string.
-   *
-   * Sends `auth.request` with `AuthCredentials::ApiKey`, captures the
-   * issued JWT, and sets it as the bearer token for subsequent requests.
-   * The permissions encoded in the JWT come from the stored api_key row;
-   * the `permissions` parameter of the underlying login request is
-   * ignored by the daemon for API-key auth.
+   * Authenticate this client using an API key string. Agents submit the raw
+   * key as the `Authorization: Bearer …` header on every JSON-RPC call —
+   * the daemon resolves the `tw_`-prefixed bearer against the api_keys
+   * table on each call, so there is no `auth.request` round-trip and no
+   * JWT exchange. Equivalent to `setToken(apiKey)` but reads better at the
+   * call site.
    */
-  public async authenticateWithApiKey(apiKey: string): Promise<string> {
-    const credentials: AuthCredentials = { ApiKey: apiKey };
-    return await this.authRequest([], credentials);
+  public authenticateWithApiKey(apiKey: string): void {
+    this.setToken(apiKey);
   }
 
   public walletGetInfo(): Promise<WalletGetInfoResponse> {

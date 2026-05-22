@@ -27,8 +27,16 @@ import {
   DialogContentText,
   DialogTitle,
   Divider,
+  FormControl,
   FormControlLabel,
+  InputLabel,
+  ListItemText,
+  MenuItem,
+  OutlinedInput,
+  Select,
   Stack,
+  ToggleButton,
+  ToggleButtonGroup,
   Table,
   TableBody,
   TableCell,
@@ -38,6 +46,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
+import type { SelectChangeEvent } from "@mui/material";
 import type { AuthCreateApiKeyResponse, IssuedApiKey } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 
@@ -105,6 +114,22 @@ const PERMISSION_OPTIONS: Array<{ value: string; label: string; description: str
 
 const ADMIN_PERMISSION_VALUE = "Admin";
 
+/// Expiry radio choices. Presets are duration-relative (applied at submit
+/// time, not dialog-open time) so the wire timestamp reflects when the
+/// admin clicked Create. `custom` reveals a date picker; `never` maps to
+/// `null` on the wire.
+type ExpiryChoice = "5m" | "1h" | "24h" | "5d" | "custom" | "never";
+
+/// Preset durations in seconds, paired with their compact button label.
+/// Order matches the button-group render so changing this list updates
+/// the UI in place.
+const EXPIRY_PRESETS: Array<{ value: ExpiryChoice; label: string; seconds: number }> = [
+  { value: "5m", label: "5m", seconds: 5 * 60 },
+  { value: "1h", label: "1h", seconds: 60 * 60 },
+  { value: "24h", label: "24h", seconds: 24 * 60 * 60 },
+  { value: "5d", label: "5d", seconds: 5 * 24 * 60 * 60 },
+];
+
 /// Render a unix-second timestamp as a locale string. `null` -> "never".
 function fmtTs(ts: bigint | null | undefined): string {
   if (ts == null) {
@@ -114,7 +139,11 @@ function fmtTs(ts: bigint | null | undefined): string {
 }
 
 export default function ApiKeys() {
-  const { data, isLoading, error, isError } = useListApiKeys();
+  // The "Show revoked" toggle defaults off — the typical admin view is
+  // the currently-usable set. Flipping it refetches against the daemon
+  // because `useListApiKeys` includes the flag in its query key.
+  const [includeRevoked, setIncludeRevoked] = useState(false);
+  const { data, isLoading, error, isError } = useListApiKeys(includeRevoked);
   const { mutate: revoke } = useRevokeApiKey();
 
   // Stash the create-result here so the dialog can show the raw key
@@ -129,6 +158,12 @@ export default function ApiKeys() {
   const [selectedPerms, setSelectedPerms] = useState<Set<string>>(() => new Set());
   const [grantAdmin, setGrantAdmin] = useState(false);
   const [confirmAdmin, setConfirmAdmin] = useState(false);
+  // Expiry as a radio choice. Presets ("1h" / "5h" / "24h" / "5d") encode
+  // a duration applied at submit time so the absolute timestamp matches the
+  // instant the user clicks Create — not the moment they opened the dialog.
+  // "custom" reveals a date picker; "never" sends `null` on the wire.
+  const [expiryChoice, setExpiryChoice] = useState<ExpiryChoice>("never");
+  const [customExpiresOn, setCustomExpiresOn] = useState<string>("");
   const [createError, setCreateError] = useState<string | null>(null);
 
   const resetCreateForm = () => {
@@ -136,19 +171,9 @@ export default function ApiKeys() {
     setSelectedPerms(new Set());
     setGrantAdmin(false);
     setConfirmAdmin(false);
+    setExpiryChoice("never");
+    setCustomExpiresOn("");
     setCreateError(null);
-  };
-
-  const togglePermission = (value: string) => {
-    setSelectedPerms((current) => {
-      const next = new Set(current);
-      if (next.has(value)) {
-        next.delete(value);
-      } else {
-        next.add(value);
-      }
-      return next;
-    });
   };
 
   const { mutate: createKey, isPending: isCreating } = useCreateApiKey((response) => {
@@ -174,8 +199,44 @@ export default function ApiKeys() {
       setCreateError("Granting the Admin permission requires explicit confirmation. Tick the box below to proceed.");
       return;
     }
+    // Resolve the expiry radio choice to a unix-seconds wire value. Presets
+    // are applied at submit time (now + duration) so the timestamp matches
+    // the instant of click; "custom" parses a local-tz YYYY-MM-DD picked
+    // by the user (end-of-day in that tz); "never" leaves it null.
+    let expires_at: bigint | null = null;
+    const preset = EXPIRY_PRESETS.find((p) => p.value === expiryChoice);
+    if (preset) {
+      const ts = Math.floor(Date.now() / 1000) + preset.seconds;
+      expires_at = BigInt(ts);
+    } else if (expiryChoice === "custom") {
+      if (!customExpiresOn) {
+        setCreateError("Pick an expiry date, or choose 'Never expires'.");
+        return;
+      }
+      const [y, m, d] = customExpiresOn.split("-").map((s) => parseInt(s, 10));
+      if (!y || !m || !d) {
+        setCreateError("Expiry date must be a valid calendar date.");
+        return;
+      }
+      // End-of-day in local time is the friendlier reading of "expires on
+      // this date" — the key stays usable through the whole of that day
+      // rather than dying at midnight at the start.
+      const localEndOfDay = new Date(y, m - 1, d, 23, 59, 59);
+      const ts = Math.floor(localEndOfDay.getTime() / 1000);
+      if (ts <= Math.floor(Date.now() / 1000)) {
+        setCreateError("Expiry must be in the future.");
+        return;
+      }
+      expires_at = BigInt(ts);
+    }
+    // expiryChoice === "never" → leave expires_at null
     createKey(
-      { name: createName, permissions, confirm_admin: grantAdmin && confirmAdmin },
+      {
+        name: createName,
+        permissions,
+        confirm_admin: grantAdmin && confirmAdmin,
+        expires_at,
+      },
       {
         onError: (err: unknown) => {
           setCreateError(err instanceof Error ? err.message : "Create failed");
@@ -184,6 +245,18 @@ export default function ApiKeys() {
     );
   };
 
+  /// Tomorrow's date in YYYY-MM-DD as the minimum the date picker accepts —
+  /// the daemon rejects past expiries server-side anyway, but pre-validating
+  /// here keeps the UX honest.
+  const minExpiryDate = (() => {
+    const t = new Date();
+    t.setDate(t.getDate() + 1);
+    const y = t.getFullYear();
+    const m = String(t.getMonth() + 1).padStart(2, "0");
+    const d = String(t.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  })();
+
   return (
     <Stack spacing={2}>
       <Alert severity="info">
@@ -191,7 +264,17 @@ export default function ApiKeys() {
         permission scopes you choose at creation time.
       </Alert>
 
-      <Stack direction="row" justifyContent="flex-end">
+      <Stack direction="row" justifyContent="space-between" alignItems="center">
+        <FormControlLabel
+          control={
+            <Checkbox
+              size="small"
+              checked={includeRevoked}
+              onChange={(e) => setIncludeRevoked(e.target.checked)}
+            />
+          }
+          label={<Typography variant="body2">Show revoked</Typography>}
+        />
         <Button variant="contained" onClick={() => setCreateOpen(true)}>
           Create API Key
         </Button>
@@ -212,6 +295,7 @@ export default function ApiKeys() {
                   <TableCell>Permissions</TableCell>
                   <TableCell>Created</TableCell>
                   <TableCell>Last used</TableCell>
+                  <TableCell>Expires</TableCell>
                   <TableCell>Status</TableCell>
                   <TableCell align="right">Actions</TableCell>
                 </TableRow>
@@ -219,6 +303,17 @@ export default function ApiKeys() {
               <TableBody>
                 {(data?.keys || []).map((k: IssuedApiKey) => {
                   const revoked = k.revoked_at != null;
+                  // Treat the row as expired only when there's an expiry
+                  // timestamp and it lies in the past. Revoked takes
+                  // precedence in the status pill (a revoked key that was
+                  // also going to expire is still presented as REVOKED).
+                  const expired = !revoked && k.expires_at != null && Number(k.expires_at) * 1000 <= Date.now();
+                  const statusLabel = revoked ? "REVOKED" : expired ? "EXPIRED" : "active";
+                  const statusColor: "default" | "warning" | "success" = revoked
+                    ? "default"
+                    : expired
+                      ? "warning"
+                      : "success";
                   return (
                     <TableRow key={k.id}>
                       <TableCell>{k.id}</TableCell>
@@ -232,12 +327,9 @@ export default function ApiKeys() {
                       </TableCell>
                       <TableCell>{fmtTs(k.created_at)}</TableCell>
                       <TableCell>{fmtTs(k.last_used_at)}</TableCell>
+                      <TableCell>{k.expires_at == null ? "never" : fmtTs(k.expires_at)}</TableCell>
                       <TableCell>
-                        <Chip
-                          label={revoked ? "REVOKED" : "active"}
-                          color={revoked ? "default" : "success"}
-                          size="small"
-                        />
+                        <Chip label={statusLabel} color={statusColor} size="small" />
                       </TableCell>
                       <TableCell align="right">
                         <Button variant="outlined" size="small" disabled={revoked} onClick={() => revoke({ id: k.id })}>
@@ -249,7 +341,7 @@ export default function ApiKeys() {
                 })}
                 {(data?.keys || []).length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} align="center">
+                    <TableCell colSpan={8} align="center">
                       No API keys issued.
                     </TableCell>
                   </TableRow>
@@ -285,35 +377,57 @@ export default function ApiKeys() {
                 Permissions
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-                Pick the smallest set the agent needs. Each box maps to one entry of the daemon's{" "}
+                Pick the smallest set the agent needs. Each entry maps to one variant of the daemon's{" "}
                 <code>JrpcPermissions</code> set.
               </Typography>
-              <Stack>
-                {PERMISSION_OPTIONS.map((opt) => (
-                  <FormControlLabel
-                    key={opt.value}
-                    sx={{ alignItems: "flex-start", mr: 0, my: 0.25 }}
-                    control={
-                      <Checkbox
-                        size="small"
-                        sx={{ pt: 0.5 }}
-                        checked={selectedPerms.has(opt.value)}
-                        onChange={() => togglePermission(opt.value)}
-                      />
-                    }
-                    label={
-                      <Box>
-                        <Typography variant="body2" component="span">
-                          {opt.label}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                          {opt.description}
-                        </Typography>
+              <FormControl fullWidth size="small">
+                <InputLabel id="api-key-permissions-label">Permissions</InputLabel>
+                <Select<string[]>
+                  labelId="api-key-permissions-label"
+                  multiple
+                  value={Array.from(selectedPerms)}
+                  onChange={(event: SelectChangeEvent<string[]>) => {
+                    // MUI types `target.value` as `string | string[]` even
+                    // with `multiple`. The string case only happens if the
+                    // <select> is rendered as a native form control (it's
+                    // not, here), but we handle it for type-safety.
+                    const value = event.target.value;
+                    const next: string[] = Array.isArray(value) ? value : value.split(",");
+                    setSelectedPerms(new Set(next));
+                  }}
+                  input={<OutlinedInput label="Permissions" />}
+                  renderValue={(selected: string[]) =>
+                    selected.length === 0 ? (
+                      <Typography variant="body2" color="text.secondary">
+                        None selected
+                      </Typography>
+                    ) : (
+                      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                        {selected.map((value: string) => (
+                          <Chip key={value} label={value} size="small" />
+                        ))}
                       </Box>
-                    }
-                  />
-                ))}
-              </Stack>
+                    )
+                  }
+                  // Cap dropdown height so long permission lists stay scrollable
+                  // instead of pushing the dialog past the viewport.
+                  MenuProps={{
+                    PaperProps: { sx: { maxHeight: 320 } },
+                  }}
+                >
+                  {PERMISSION_OPTIONS.map((opt) => (
+                    <MenuItem key={opt.value} value={opt.value}>
+                      <Checkbox size="small" checked={selectedPerms.has(opt.value)} />
+                      <ListItemText
+                        primary={opt.label}
+                        secondary={opt.description}
+                        primaryTypographyProps={{ variant: "body2" }}
+                        secondaryTypographyProps={{ variant: "caption" }}
+                      />
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
               <Divider sx={{ my: 1.5 }} />
               <FormControlLabel
                 sx={{ alignItems: "flex-start", mr: 0 }}
@@ -359,6 +473,54 @@ export default function ApiKeys() {
                       I understand granting Admin gives this agent full control of the wallet daemon.
                     </Typography>
                   }
+                />
+              )}
+            </Box>
+            <Divider />
+            <Box>
+              <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+                Expiry
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                Shorter is safer — the daemon stops accepting the key the moment its expiry passes.
+              </Typography>
+              <ToggleButtonGroup
+                value={expiryChoice}
+                exclusive
+                size="small"
+                color="primary"
+                onChange={(_event, value: ExpiryChoice | null) => {
+                  // `exclusive` lets the group's value be `null` when the
+                  // user clicks the currently-selected button (toggling it
+                  // off). We don't want a null state — re-selecting the
+                  // same button is a no-op.
+                  if (value !== null) {
+                    setExpiryChoice(value);
+                  }
+                }}
+                aria-label="API key expiry"
+                sx={{ flexWrap: "wrap", gap: 0.5 }}
+              >
+                {EXPIRY_PRESETS.map((p) => (
+                  <ToggleButton key={p.value} value={p.value} aria-label={p.label}>
+                    {p.label}
+                  </ToggleButton>
+                ))}
+                <ToggleButton value="custom">Custom</ToggleButton>
+                <ToggleButton value="never">Never</ToggleButton>
+              </ToggleButtonGroup>
+              {expiryChoice === "custom" && (
+                <TextField
+                  type="date"
+                  label="Expires on"
+                  value={customExpiresOn}
+                  onChange={(e) => setCustomExpiresOn(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                  inputProps={{ min: minExpiryDate }}
+                  helperText="Key stops working at end of day in your local time."
+                  fullWidth
+                  size="small"
+                  sx={{ mt: 1 }}
                 />
               )}
             </Box>

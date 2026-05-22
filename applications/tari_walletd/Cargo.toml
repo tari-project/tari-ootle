@@ -42,6 +42,7 @@ clap = { workspace = true, features = ["derive", "env"] }
 dirs-next = { workspace = true }
 notify = "8.2.0"
 config = { workspace = true }
+dashmap = { workspace = true }
 either = { workspace = true }
 hex = { workspace = true }
 humantime-serde = { workspace = true }

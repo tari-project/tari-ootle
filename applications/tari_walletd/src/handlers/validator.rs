@@ -179,16 +179,17 @@ pub async fn handle_claim_validator_fees(
     } else {
         let statement =
             build_self_stealth_statement(&sdk, &account, account_key_id, &fee_pool_addresses, max_fee).await?;
-        let pool_addresses = fee_pool_addresses.clone();
+        let (first, rest) = fee_pool_addresses
+            .split_first()
+            .ok_or_else(|| invalid_params("shards", Some("At least one shard must be specified")))?;
+        let first = *first;
+        let rest = rest.to_vec();
         builder.with_fee_instructions_builder(move |builder| {
-            let mut iter = pool_addresses.into_iter();
-            let first = iter
-                .next()
-                .expect("fee_pool_addresses non-empty (req.shards.is_empty() checked above)");
             let builder = builder
                 .claim_validator_fees(first)
                 .put_last_instruction_output_on_workspace("joined");
-            iter.enumerate()
+            rest.into_iter()
+                .enumerate()
                 .fold(builder, |b, (i, address)| {
                     let tmp = format!("tmp{i}");
                     b.claim_validator_fees(address)

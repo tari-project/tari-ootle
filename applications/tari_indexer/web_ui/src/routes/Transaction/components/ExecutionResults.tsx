@@ -32,9 +32,9 @@ import {
   TableRow,
   Typography,
 } from "@mui/material";
+import { convertCborValue } from "@tari-project/ootle-ts-bindings";
 import { ReactNode } from "react";
 import { DataTableCell } from "../../../Components/StyledComponents";
-import { convertCborValue } from "../../../utils/cbor";
 
 function ResultRowData({ result, index }: { result: any; index: number }) {
   const returnTypeLabel =

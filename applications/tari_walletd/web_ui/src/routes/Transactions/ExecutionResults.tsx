@@ -33,7 +33,7 @@ import {
   TableRow,
   Typography,
 } from "@mui/material";
-import { convertCborValue } from "@utils/cbor";
+import { convertCborValue } from "@tari-project/ootle-ts-bindings";
 import { ReactNode } from "react";
 
 function ResultRowData({ result, index }: { result: any; index: number }) {

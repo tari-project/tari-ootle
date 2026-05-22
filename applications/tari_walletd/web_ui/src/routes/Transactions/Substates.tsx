@@ -27,8 +27,7 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import { Box, Chip, Collapse, Table, TableBody, TableContainer, TableRow, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
-import { Substate, SubstateId, substateIdToString, TransactionResult } from "@tari-project/ootle-ts-bindings";
-import { convertCborValue } from "@utils/cbor";
+import { convertCborValue, Substate, SubstateId, substateIdToString, TransactionResult } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 import { IoArrowDownCircle, IoArrowUpCircle } from "react-icons/io5";
 

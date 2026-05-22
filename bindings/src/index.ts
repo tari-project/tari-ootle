@@ -204,6 +204,7 @@ export * from "./validator-node-client";
 export * from "./wallet-types";
 export * from "./helpers/BigAmount";
 export * from "./helpers/NetworkByte";
+export * from "./helpers/cbor";
 export * from "./helpers/consts";
 export * from "./helpers/enum";
 export * from "./helpers/helpers";

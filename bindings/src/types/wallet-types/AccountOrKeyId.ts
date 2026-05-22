@@ -2,4 +2,4 @@
 import type { ComponentAddressOrName } from "./ComponentAddressOrName";
 import type { KeyId } from "./KeyId";
 
-export type AccountOrKeyId = { Account: ComponentAddressOrName | null } | { KeyId: KeyId };
+export type AccountOrKeyId = { "Account": ComponentAddressOrName | null } | { "KeyId": KeyId };

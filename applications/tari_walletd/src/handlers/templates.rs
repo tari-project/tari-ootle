@@ -11,7 +11,7 @@ use tari_crypto::{
 use tari_ootle_common_types::optional::Optional;
 use tari_ootle_wallet_sdk::network::WalletNetworkInterface;
 use tari_ootle_walletd_client::{
-    permissions::JrpcPermission,
+    permissions::{Crud, Permission},
     types::{
         AuthoredTemplate,
         SignTemplateMetadataRequest,
@@ -33,7 +33,7 @@ pub async fn handle_get(
     req: TemplatesGetRequest,
 ) -> Result<TemplatesGetResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    context.check_auth(token, &[JrpcPermission::TemplatesRead])?;
+    context.check_auth(token, &[Permission::Templates(Crud::Read)])?;
 
     if let Some(template) = sdk
         .template_api()
@@ -60,7 +60,7 @@ pub async fn handle_list_owned(
     token: Option<&Bearer>,
     req: TemplatesListAuthoredRequest,
 ) -> Result<TemplatesListAuthoredResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::TemplatesRead])?;
+    context.check_auth(token, &[Permission::Templates(Crud::Read)])?;
 
     let (templates, total_templates) = context.wallet_sdk().template_api().list_templates(
         req.author_public_key.as_ref(),
@@ -80,7 +80,7 @@ pub async fn handle_sign_metadata(
     token: Option<&Bearer>,
     req: SignTemplateMetadataRequest,
 ) -> Result<SignTemplateMetadataResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[Permission::Templates(Crud::Create)])?;
 
     let sdk = context.wallet_sdk();
     let key = sdk.key_manager_api().get_key(req.key_id)?;

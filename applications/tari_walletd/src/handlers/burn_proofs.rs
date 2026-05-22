@@ -7,7 +7,7 @@ use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
 use log::*;
 use tari_ootle_walletd_client::{
-    permissions::JrpcPermission,
+    permissions::{Permission, ReadOnly},
     types::{
         BurnProofFileInfo,
         BurnProofsGetRequest,
@@ -38,7 +38,7 @@ pub async fn handle_list(
     token: Option<&Bearer>,
     req: BurnProofsListRequest,
 ) -> Result<BurnProofsListResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[Permission::BurnProofs(ReadOnly::Read)])?;
     let dir = context.config().get_burn_proof_dir(context.wallet_sdk().network());
 
     let mut read_dir = match tokio::fs::read_dir(&dir).await {
@@ -114,7 +114,7 @@ pub async fn handle_get(
     token: Option<&Bearer>,
     req: BurnProofsGetRequest,
 ) -> Result<BurnProofsGetResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[Permission::BurnProofs(ReadOnly::Read)])?;
     let dir = context.config().get_burn_proof_dir(context.wallet_sdk().network());
 
     // Prevent path traversal

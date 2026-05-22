@@ -16,7 +16,7 @@ use tari_ootle_wallet_sdk_services::{
     transaction_service::TransactionServiceHandle,
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
-use tari_ootle_walletd_client::permissions::JrpcPermission;
+use tari_ootle_walletd_client::permissions::Permission;
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::SafePassword;
 use webauthn_rs::Webauthn;
@@ -95,7 +95,7 @@ impl HandlerContext {
     /// malformed `tw_` string fails by hash-miss in exactly the same way a
     /// non-`tw_` string does (and surfaces the same `ApiKeyInvalidOrRevoked`
     /// error to avoid enumeration leaks).
-    pub fn check_auth(&self, token: Option<&Bearer>, permissions: &[JrpcPermission]) -> Result<(), AuthError> {
+    pub fn check_auth(&self, token: Option<&Bearer>, permissions: &[Permission]) -> Result<(), AuthError> {
         let bearer = token.ok_or(AuthError::AccessDeniedNoBearerToken)?;
         if bearer.token().starts_with(api_keys::API_KEY_PREFIX) {
             let row = api_keys::find_active_by_raw(self.wallet_sdk.store(), bearer.token())
@@ -130,11 +130,7 @@ impl HandlerContext {
     ///
     /// The `tw_` prefix is the same routing hint used by `check_auth`;
     /// here it's the reject criterion instead of the accept criterion.
-    pub fn check_auth_user_only(
-        &self,
-        token: Option<&Bearer>,
-        permissions: &[JrpcPermission],
-    ) -> Result<(), AuthError> {
+    pub fn check_auth_user_only(&self, token: Option<&Bearer>, permissions: &[Permission]) -> Result<(), AuthError> {
         let bearer = token.ok_or(AuthError::AccessDeniedNoBearerToken)?;
         if bearer.token().starts_with(api_keys::API_KEY_PREFIX) {
             return Err(AuthError::UserAuthOnly);

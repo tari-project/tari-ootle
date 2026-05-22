@@ -7,4 +7,4 @@
  * revoked rows out of authentication lookups so revocation takes effect
  * immediately.
  */
-export type AuthRevokeApiKeyRequest = { id: number };
+export type AuthRevokeApiKeyRequest = { id: number, };

@@ -2,4 +2,4 @@
 import type { ShardGroup } from "../ShardGroup";
 import type { AccountOrKeyId } from "./AccountOrKeyId";
 
-export type GetValidatorFeesRequest = { account_or_key: AccountOrKeyId; shard_group: ShardGroup | null };
+export type GetValidatorFeesRequest = { account_or_key: AccountOrKeyId, shard_group: ShardGroup | null, };

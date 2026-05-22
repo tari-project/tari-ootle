@@ -7,12 +7,4 @@ import type { FinalizeOutcome } from "./FinalizeOutcome";
 import type { LogEntry } from "./LogEntry";
 import type { ValidatorFeeWithdrawal } from "./ValidatorFeeWithdrawal";
 
-export type TransactionReceipt = {
-  outcome: FinalizeOutcome;
-  diff_summary: DiffSummary;
-  fee_withdrawals: Array<ValidatorFeeWithdrawal>;
-  events: Array<Event>;
-  logs: Array<LogEntry>;
-  fee_receipt: FeeReceipt;
-  epoch: Epoch;
-};
+export type TransactionReceipt = { outcome: FinalizeOutcome, diff_summary: DiffSummary, fee_withdrawals: Array<ValidatorFeeWithdrawal>, events: Array<Event>, logs: Array<LogEntry>, fee_receipt: FeeReceipt, epoch: Epoch, };

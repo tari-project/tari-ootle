@@ -37,7 +37,7 @@ use tari_ootle_wallet_sdk::{
 use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceHandle;
 use tari_ootle_walletd_client::{
     ComponentAddressOrName,
-    permissions::JrpcPermission,
+    permissions::{Crud, Permission},
     types::{
         AccountGetByKeyIndexRequest,
         AccountGetDefaultRequest,
@@ -115,8 +115,7 @@ pub async fn handle_create(
     token: Option<&Bearer>,
     req: AccountsCreateRequest,
 ) -> Result<AccountsCreateResponse, anyhow::Error> {
-    // TODO: fine-grain permissions
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[Permission::Accounts(Crud::Create, None)])?;
     let sdk = context.wallet_sdk();
     let accounts_api = sdk.accounts_api();
 
@@ -156,8 +155,7 @@ pub async fn handle_create_or_get(
     token: Option<&Bearer>,
     req: AccountsCreateOrGetRequest,
 ) -> Result<AccountsCreateOrGetResponse, anyhow::Error> {
-    // TODO: fine-grain permissions
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[Permission::Accounts(Crud::Create, None)])?;
     let sdk = context.wallet_sdk();
     let accounts_api = sdk.accounts_api();
 
@@ -229,7 +227,7 @@ pub async fn handle_set_default(
     token: Option<&Bearer>,
     req: AccountSetDefaultRequest,
 ) -> Result<AccountSetDefaultResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[Permission::Accounts(Crud::Update, None)])?;
     let sdk = context.wallet_sdk();
     let account = get_account(&req.account, &sdk.accounts_api())?;
     sdk.accounts_api().set_default_account(account.component_address())?;
@@ -241,9 +239,12 @@ pub async fn handle_rename(
     token: Option<&Bearer>,
     req: AccountsRenameRequest,
 ) -> Result<AccountsRenameResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::Admin])?;
     let sdk = context.wallet_sdk();
     let account = get_account(&req.account, &sdk.accounts_api())?;
+    context.check_auth(token, &[Permission::Accounts(
+        Crud::Update,
+        Some(*account.component_address()),
+    )])?;
     sdk.accounts_api()
         .rename_account(account.component_address(), &req.new_name)?;
     Ok(AccountsRenameResponse {})
@@ -254,7 +255,7 @@ pub async fn handle_list(
     token: Option<&Bearer>,
     req: AccountsListRequest,
 ) -> Result<AccountsListResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::AccountList(None)])?;
+    context.check_auth(token, &[Permission::Accounts(Crud::Read, None)])?;
     let sdk = context.wallet_sdk();
     let limit = usize::try_from(req.limit)
         .map_err(|e| invalid_params("limit", Some(&format!("limit overflowed usize: {}", e))))?;
@@ -284,8 +285,9 @@ pub async fn handle_get_balances(
 ) -> Result<AccountsGetBalancesResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
-    context.check_auth(token, &[JrpcPermission::AccountBalance(
-        account.account.component_address.into(),
+    context.check_auth(token, &[Permission::Accounts(
+        Crud::Read,
+        Some(*account.component_address()),
     )])?;
     if req.refresh {
         context
@@ -368,7 +370,6 @@ pub async fn handle_get(
     token: Option<&Bearer>,
     req: AccountGetRequest,
 ) -> Result<AccountGetResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::AccountInfo])?;
     let sdk = context.wallet_sdk();
     let account = get_account(&req.name_or_address, &sdk.accounts_api())
         .optional()?
@@ -378,6 +379,10 @@ pub async fn handle_get(
                 req.name_or_address
             ))
         })?;
+    context.check_auth(token, &[Permission::Accounts(
+        Crud::Read,
+        Some(*account.component_address()),
+    )])?;
     Ok(AccountGetResponse {
         account: account.account,
         address: account.address,
@@ -389,7 +394,7 @@ pub async fn handle_get_by_key_index(
     token: Option<&Bearer>,
     req: AccountGetByKeyIndexRequest,
 ) -> Result<AccountGetResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::AccountInfo])?;
+    context.check_auth(token, &[Permission::Accounts(Crud::Read, None)])?;
     let sdk = context.wallet_sdk();
     let account = get_account_by_key_index(sdk, req.key_index)
         .optional()?
@@ -405,7 +410,7 @@ pub async fn handle_get_default(
     token: Option<&Bearer>,
     _req: AccountGetDefaultRequest,
 ) -> Result<AccountGetResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::AccountInfo])?;
+    context.check_auth(token, &[Permission::Accounts(Crud::Read, None)])?;
     let sdk = context.wallet_sdk();
     let account = get_account_or_default(None, &sdk.accounts_api())?;
     Ok(AccountGetResponse {
@@ -419,7 +424,6 @@ pub async fn handle_claim_burn(
     token: Option<&Bearer>,
     req: ClaimBurnRequest,
 ) -> Result<ClaimBurnResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::Admin])?;
     let sdk = context.wallet_sdk();
     let network = sdk.network();
 
@@ -432,6 +436,13 @@ pub async fn handle_claim_burn(
 
     let max_fee = max_fee.max(1);
 
+    let accounts_api = sdk.accounts_api();
+    let account = get_account(&account, &accounts_api)?;
+    context.check_auth(token, &[Permission::Transfer(
+        Crud::Create,
+        Some(*account.component_address()),
+    )])?;
+
     // Capture the file name before resolving so we can mark it as claimed after submission
     let proof_file_name = match &claim_proof {
         ClaimBurnProof::FromFile { file_name } => Some(file_name.clone()),
@@ -443,9 +454,6 @@ pub async fn handle_claim_burn(
         error!(target: LOG_TARGET, "Error resolving claim proof: {}", e);
         invalid_request(format!("Could not resolve claim proof. {e} Is the file name correct?"))
     })?;
-
-    let accounts_api = sdk.accounts_api();
-    let account = get_account(&account, &accounts_api)?;
 
     execute_claim_burn(
         sdk,
@@ -659,7 +667,7 @@ pub async fn handle_create_free_test_coins(
     token: Option<&Bearer>,
     req: AccountsCreateFreeTestCoinsRequest,
 ) -> Result<AccountsCreateFreeTestCoinsResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[Permission::Admin])?;
     let sdk = context.wallet_sdk();
     let accounts_api = sdk.accounts_api();
 
@@ -816,10 +824,13 @@ pub async fn handle_transfer(
     token: Option<&Bearer>,
     req: AccountsTransferRequest,
 ) -> Result<AccountsTransferResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::Admin])?;
     let sdk = context.wallet_sdk().clone();
 
     let (account, mut inputs) = get_account_with_inputs(req.account.as_ref(), &sdk)?;
+    context.check_auth(token, &[Permission::Transfer(
+        Crud::Create,
+        Some(*account.component_address()),
+    )])?;
 
     let account_owner_key_id = account
         .owner_key_id()
@@ -979,20 +990,23 @@ pub async fn handle_confidential_transfer(
     token: Option<&Bearer>,
     req: ConfidentialTransferRequest,
 ) -> Result<ConfidentialTransferResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::Admin])?;
     let sdk = context.wallet_sdk().clone();
     let notifier = context.notifier().clone();
 
     if req.amount.is_negative() {
         return Err(invalid_params("amount", Some("must be positive")));
     }
+    let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
+    context.check_auth(token, &[Permission::Transfer(
+        Crud::Create,
+        Some(*account.component_address()),
+    )])?;
+
     let transaction_service = context.transaction_service().clone();
 
     // Spawn here is to prevent the async block from being aborted if the caller aborts the request early as this can
     // cause funds to remain locked indefinitely.
     task::spawn(async move {
-        let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
-
         let transfer = sdk
             .confidential_transfer_api()
             .transfer(ConfidentialTransferParams {
@@ -1029,16 +1043,20 @@ pub async fn handle_confidential_transfer(
     .await?
 }
 
+#[allow(clippy::too_many_lines)]
 pub async fn handle_stealth_transfer(
     context: &HandlerContext,
     token: Option<&Bearer>,
     req: StealthTransferRequest,
 ) -> Result<StealthTransferResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
     let sdk = context.wallet_sdk().clone();
     let network = sdk.sdk_config().network;
     let notifier = context.notifier().clone();
     let owner_account = get_account(&req.owner_account, &sdk.accounts_api())?;
+    context.check_auth(token, &[Permission::Transfer(
+        Crud::Create,
+        Some(*owner_account.component_address()),
+    )])?;
     if owner_account.owner_key_id().is_none() {
         return Err(invalid_params(
             "owner_account",
@@ -1165,7 +1183,6 @@ pub async fn handle_create_stealth_transfer_statement(
     token: Option<&Bearer>,
     req: AccountsCreateStealthTransferStatementRequest,
 ) -> Result<AccountsCreateStealthTransferStatementResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
     let sdk = context.wallet_sdk().clone();
     if req.requests.is_empty() {
         return Err(invalid_params(
@@ -1187,6 +1204,10 @@ pub async fn handle_create_stealth_transfer_statement(
     let mut statements = Vec::with_capacity(req.requests.len());
     for req in req.requests {
         let sender_account = get_account(&req.sender_account, &sdk.accounts_api())?;
+        context.check_auth(token, &[Permission::Transfer(
+            Crud::Create,
+            Some(*sender_account.component_address()),
+        )])?;
         let Some(sender_key_id) = sender_account.owner_key_id() else {
             return Err(invalid_params(
                 "owner_account",
@@ -1286,9 +1307,12 @@ pub async fn handle_associate_stealth_resource(
     token: Option<&Bearer>,
     req: AccountsAssociateStealthResourceRequest,
 ) -> Result<AccountsAssociateStealthResourceResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::Admin])?;
     let sdk = context.wallet_sdk().clone();
     let account = get_account(&req.account, &sdk.accounts_api())?;
+    context.check_auth(token, &[Permission::Accounts(
+        Crud::Update,
+        Some(*account.component_address()),
+    )])?;
     let resource = sdk.substate_api().fetch_resource(req.resource_address).await?; // validate resource exists and cache it
     if !resource.resource_type().is_stealth() {
         return Err(invalid_params(

@@ -2,7 +2,4 @@
 import type { ResourceAddress } from "../ResourceAddress";
 import type { ComponentAddressOrName } from "./ComponentAddressOrName";
 
-export type AccountsAssociateStealthResourceRequest = {
-  account: ComponentAddressOrName;
-  resource_address: ResourceAddress;
-};
+export type AccountsAssociateStealthResourceRequest = { account: ComponentAddressOrName, resource_address: ResourceAddress, };

@@ -2,4 +2,4 @@
 import type { RistrettoPublicKeyBytes } from "../RistrettoPublicKeyBytes";
 import type { KeyId } from "./KeyId";
 
-export type StealthUtxoSpendKeyId = { account_key_id: KeyId; public_nonce: RistrettoPublicKeyBytes };
+export type StealthUtxoSpendKeyId = { account_key_id: KeyId, public_nonce: RistrettoPublicKeyBytes, };

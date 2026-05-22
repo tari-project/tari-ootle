@@ -2,8 +2,4 @@
 import type { SubstateAddress } from "../SubstateAddress";
 import type { TransactionId } from "../TransactionId";
 
-export type TransactionClaimBurnResponse = {
-  transaction_id: TransactionId;
-  inputs: Array<SubstateAddress>;
-  outputs: Array<SubstateAddress>;
-};
+export type TransactionClaimBurnResponse = { transaction_id: TransactionId, inputs: Array<SubstateAddress>, outputs: Array<SubstateAddress>, };

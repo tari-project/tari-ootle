@@ -5,7 +5,7 @@ use axum_extra::headers::authorization::Bearer;
 use tari_ootle_common_types::optional::Optional;
 use tari_ootle_wallet_sdk::apis::config::ConfigKey;
 use tari_ootle_walletd_client::{
-    permissions::JrpcPermission,
+    permissions::{Crud, Permission},
     types::{NetworkInfo, SettingsGetResponse, SettingsSetRequest, SettingsSetResponse},
 };
 
@@ -17,7 +17,7 @@ pub async fn handle_get(
     _value: serde_json::Value,
 ) -> Result<SettingsGetResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[Permission::Settings(Crud::Read)])?;
     let indexer_url = sdk
         .config_api()
         .get(ConfigKey::IndexerUrl)
@@ -52,7 +52,7 @@ pub async fn handle_set(
     req: SettingsSetRequest,
 ) -> Result<SettingsSetResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[Permission::Settings(Crud::Update)])?;
     if let Some(indexer_url) = req.indexer_url {
         sdk.config_api().set(ConfigKey::IndexerUrl, &indexer_url)?;
         sdk.get_network_interface().set_endpoint(indexer_url);

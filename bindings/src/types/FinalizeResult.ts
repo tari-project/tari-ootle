@@ -6,11 +6,4 @@ import type { InstructionResult } from "./InstructionResult";
 import type { LogEntry } from "./LogEntry";
 import type { TransactionResult } from "./TransactionResult";
 
-export type FinalizeResult = {
-  transaction_hash: Hash32;
-  events: Array<Event>;
-  logs: Array<LogEntry>;
-  execution_results: Array<InstructionResult>;
-  result: TransactionResult;
-  fee_receipt: FeeReceipt;
-};
+export type FinalizeResult = { transaction_hash: Hash32, events: Array<Event>, logs: Array<LogEntry>, execution_results: Array<InstructionResult>, result: TransactionResult, fee_receipt: FeeReceipt, };

@@ -7,7 +7,7 @@ use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
 use tari_ootle_address::{Network, OotleAddress};
 use tari_ootle_walletd_client::{
-    permissions::{AddressBookPermission, JrpcPermission},
+    permissions::{Crud, Permission},
     types::{
         AddressBookAddRequest,
         AddressBookAddResponse,
@@ -42,7 +42,7 @@ pub async fn handle_add(
     req: AddressBookAddRequest,
 ) -> Result<AddressBookAddResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::AddressBook(AddressBookPermission::Create)])?;
+    context.check_auth(token, &[Permission::AddressBook(Crud::Create)])?;
 
     validate_address(&req.address, sdk.network())?;
 
@@ -59,7 +59,7 @@ pub async fn handle_list(
     _req: AddressBookListRequest,
 ) -> Result<AddressBookListResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::AddressBook(AddressBookPermission::Read)])?;
+    context.check_auth(token, &[Permission::AddressBook(Crud::Read)])?;
 
     let entries = sdk.address_book_api().list()?;
 
@@ -72,7 +72,7 @@ pub async fn handle_get(
     req: AddressBookGetRequest,
 ) -> Result<AddressBookGetResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::AddressBook(AddressBookPermission::Read)])?;
+    context.check_auth(token, &[Permission::AddressBook(Crud::Read)])?;
 
     let entry = sdk.address_book_api().get(&req.name)?;
 
@@ -85,7 +85,7 @@ pub async fn handle_update(
     req: AddressBookUpdateRequest,
 ) -> Result<AddressBookUpdateResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::AddressBook(AddressBookPermission::Update)])?;
+    context.check_auth(token, &[Permission::AddressBook(Crud::Update)])?;
 
     if let Some(ref address) = req.address {
         validate_address(address, sdk.network())?;
@@ -107,7 +107,7 @@ pub async fn handle_delete(
     req: AddressBookDeleteRequest,
 ) -> Result<AddressBookDeleteResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::AddressBook(AddressBookPermission::Delete)])?;
+    context.check_auth(token, &[Permission::AddressBook(Crud::Delete)])?;
 
     sdk.address_book_api().delete(&req.name)?;
 

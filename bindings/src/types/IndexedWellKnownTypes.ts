@@ -12,19 +12,4 @@ import type { UtxoAddress } from "./UtxoAddress";
 import type { ValidatorFeePoolAddress } from "./ValidatorFeePoolAddress";
 import type { VaultId } from "./VaultId";
 
-export type IndexedWellKnownTypes = {
-  bucket_ids: Array<BucketId>;
-  proof_ids: Array<ProofId>;
-  component_addresses: Array<ComponentAddress>;
-  resource_addresses: Array<ResourceAddress>;
-  transaction_receipt_addresses: Array<TransactionReceiptAddress>;
-  non_fungible_addresses: Array<NonFungibleAddress>;
-  vault_ids: Array<VaultId>;
-  metadata: Array<Metadata>;
-  unclaimed_confidential_output_address: Array<ClaimedOutputTombstoneAddress>;
-  published_template_addresses: Array<PublishedTemplateAddress>;
-  validator_node_fee_pools: Array<ValidatorFeePoolAddress>;
-  utxos: Array<UtxoAddress>;
-  component_address_allocations: number[];
-  resource_address_allocations: number[];
-};
+export type IndexedWellKnownTypes = { bucket_ids: Array<BucketId>, proof_ids: Array<ProofId>, component_addresses: Array<ComponentAddress>, resource_addresses: Array<ResourceAddress>, transaction_receipt_addresses: Array<TransactionReceiptAddress>, non_fungible_addresses: Array<NonFungibleAddress>, vault_ids: Array<VaultId>, metadata: Array<Metadata>, unclaimed_confidential_output_address: Array<ClaimedOutputTombstoneAddress>, published_template_addresses: Array<PublishedTemplateAddress>, validator_node_fee_pools: Array<ValidatorFeePoolAddress>, utxos: Array<UtxoAddress>, component_address_allocations: number[], resource_address_allocations: number[], };

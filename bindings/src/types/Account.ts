@@ -4,13 +4,4 @@ import type { Epoch } from "./Epoch";
 import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
 import type { KeyId } from "./wallet-types/KeyId";
 
-export type Account = {
-  name: string | null;
-  component_address: ComponentAddress;
-  view_only_key_id: KeyId;
-  owner_key_id: KeyId | null;
-  owner_public_key: RistrettoPublicKeyBytes;
-  birthday_epoch: Epoch;
-  is_confirmed_on_chain: boolean;
-  is_default: boolean;
-};
+export type Account = { name: string | null, component_address: ComponentAddress, view_only_key_id: KeyId, owner_key_id: KeyId | null, owner_public_key: RistrettoPublicKeyBytes, birthday_epoch: Epoch, is_confirmed_on_chain: boolean, is_default: boolean, };

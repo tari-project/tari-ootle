@@ -13,7 +13,7 @@ use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::{apis::transaction::TransactionApiError, models::WalletEvent};
 use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceError;
 use tari_ootle_walletd_client::{
-    permissions::JrpcPermission,
+    permissions::{Crud, Permission},
     types::{
         CallInstructionRequest,
         PublishTemplateRequest,
@@ -60,11 +60,13 @@ pub async fn handle_submit_instruction(
     token: Option<&Bearer>,
     req: CallInstructionRequest,
 ) -> Result<TransactionSubmitResponse, anyhow::Error> {
-    // TODO: fine-grained checks of individual addresses involved (resources, components, etc)
-    context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
     let sdk = context.wallet_sdk();
 
     let fee_account = get_account(&req.fee_account, &sdk.accounts_api())?;
+    context.check_auth(token, &[Permission::Transactions(
+        Crud::Create,
+        Some(*fee_account.component_address()),
+    )])?;
     let owner_key_id = fee_account.owner_key_id().ok_or_else(|| {
         invalid_params(
             "fee_account",
@@ -87,7 +89,7 @@ pub async fn handle_submit_instruction(
         detect_inputs_use_unversioned: true,
         lock_ids: vec![],
     };
-    handle_submit(context, token, request).await
+    submit_inner(context, request).await
 }
 
 pub async fn handle_submit(
@@ -95,8 +97,19 @@ pub async fn handle_submit(
     token: Option<&Bearer>,
     req: TransactionSubmitRequest,
 ) -> Result<TransactionSubmitResponse, anyhow::Error> {
-    // TODO: fine-grained checks of individual addresses involved (resources, components, etc)
-    context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
+    // Direct submission is the broadest entry point — the wallet cannot
+    // statically determine the source account of a pre-built transaction,
+    // so this path requires the unscoped grant. Callers that already know
+    // the source account (transfer family, publish_template, etc.) call
+    // `submit_inner` directly with a scoped check upstream.
+    context.check_auth(token, &[Permission::Transactions(Crud::Create, None)])?;
+    submit_inner(context, req).await
+}
+
+async fn submit_inner(
+    context: &HandlerContext,
+    req: TransactionSubmitRequest,
+) -> Result<TransactionSubmitResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     req.transaction
         .validate_blob_references()
@@ -197,8 +210,17 @@ pub async fn handle_submit_dry_run(
     token: Option<&Bearer>,
     req: TransactionSubmitDryRunRequest,
 ) -> Result<TransactionSubmitDryRunResponse, anyhow::Error> {
-    // TODO: fine-grained checks of individual addresses involved (resources, components, etc)
-    context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
+    // Dry-run does not change wallet or chain state, so it gates on the
+    // read action. Like `handle_submit`, source account is not statically
+    // known here, so the requirement is unscoped.
+    context.check_auth(token, &[Permission::Transactions(Crud::Read, None)])?;
+    submit_dry_run_inner(context, req).await
+}
+
+async fn submit_dry_run_inner(
+    context: &HandlerContext,
+    req: TransactionSubmitDryRunRequest,
+) -> Result<TransactionSubmitDryRunResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     req.transaction
         .validate_blob_references()
@@ -267,8 +289,17 @@ pub async fn handle_submit_manifest(
     token: Option<&Bearer>,
     req: TransactionSubmitManifestRequest,
 ) -> Result<TransactionSubmitManifestResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
     let sdk = context.wallet_sdk();
+
+    let default_account = sdk
+        .accounts_api()
+        .get_default()
+        .optional()?
+        .ok_or_else(|| invalid_request("No default account found".to_string()))?;
+    context.check_auth(token, &[Permission::Transactions(
+        Crud::Create,
+        Some(*default_account.component_address()),
+    )])?;
 
     let variables = req
         .variables
@@ -290,12 +321,6 @@ pub async fn handle_submit_manifest(
         .collect();
     let instructions = parse_manifest(&req.manifest, variables, Default::default(), blob_inputs)
         .map_err(|e| invalid_params("manifest", Some(format!("Failed to parse manifest: {}", e))))?;
-
-    let default_account = sdk
-        .accounts_api()
-        .get_default()
-        .optional()?
-        .ok_or_else(|| invalid_request("No default account found".to_string()))?;
 
     let default_owner_key_id = default_account.owner_key_id().ok_or_else(|| {
         invalid_params(
@@ -389,7 +414,7 @@ pub async fn handle_get(
     token: Option<&Bearer>,
     req: TransactionGetRequest,
 ) -> Result<TransactionGetResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::TransactionGet])?;
+    context.check_auth(token, &[Permission::Transactions(Crud::Read, None)])?;
     let transaction = context
         .wallet_sdk()
         .transaction_api()
@@ -412,7 +437,7 @@ pub async fn handle_get_all(
     token: Option<&Bearer>,
     req: TransactionGetAllRequest,
 ) -> Result<TransactionGetAllResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::TransactionGet])?;
+    context.check_auth(token, &[Permission::Transactions(Crud::Read, None)])?;
     let transactions =
         context
             .wallet_sdk()
@@ -426,7 +451,7 @@ pub async fn handle_get_result(
     token: Option<&Bearer>,
     req: TransactionGetResultRequest,
 ) -> Result<TransactionGetResultResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::TransactionGet])?;
+    context.check_auth(token, &[Permission::Transactions(Crud::Read, None)])?;
     let transaction = context
         .wallet_sdk()
         .transaction_api()
@@ -446,7 +471,7 @@ pub async fn handle_wait_result(
     token: Option<&Bearer>,
     req: TransactionWaitResultRequest,
 ) -> Result<TransactionWaitResultResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::TransactionGet])?;
+    context.check_auth(token, &[Permission::Transactions(Crud::Read, None)])?;
     let mut events = context.notifier().subscribe();
     let transaction = context
         .wallet_sdk()
@@ -520,7 +545,7 @@ pub async fn handle_publish_template(
     token: Option<&Bearer>,
     req: PublishTemplateRequest,
 ) -> Result<PublishTemplateResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
+    context.check_auth(token, &[Permission::Templates(Crud::Create)])?;
     let sdk = context.wallet_sdk();
 
     let fee_account = get_account_or_default(req.fee_account.as_ref(), &sdk.accounts_api())?;
@@ -570,7 +595,7 @@ pub async fn handle_publish_template(
             detect_inputs_use_unversioned: true,
             lock_ids: vec![],
         };
-        let resp = handle_submit_dry_run(context, token, request).await?;
+        let resp = submit_dry_run_inner(context, request).await?;
         if let Some(reject) = resp.result.finalize.any_reject() {
             return Err(JsonRpcError::new(
                 JsonRpcErrorReason::ApplicationError(5),
@@ -592,7 +617,7 @@ pub async fn handle_publish_template(
         detect_inputs_use_unversioned: true,
         lock_ids: vec![],
     };
-    let resp = handle_submit(context, token, request).await?;
+    let resp = submit_inner(context, request).await?;
     Ok(PublishTemplateResponse {
         transaction_id: resp.transaction_id,
         dry_run_fee: None,

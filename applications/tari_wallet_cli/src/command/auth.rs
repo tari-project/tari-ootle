@@ -26,7 +26,7 @@ use clap::{Args, Subcommand};
 use tari_ootle_common_types::displayable::Displayable;
 use tari_ootle_walletd_client::{
     WalletDaemonClient,
-    permissions::JrpcPermission,
+    permissions::Permission,
     types::{
         AuthCreateApiKeyRequest,
         AuthCredentials,
@@ -52,7 +52,7 @@ pub enum AuthSubcommand {
 
 #[derive(Debug, Args, Clone)]
 pub struct RequestArgs {
-    permissions: Vec<JrpcPermission>,
+    permissions: Vec<Permission>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -79,11 +79,15 @@ pub struct CreateApiKeyArgs {
     /// Human-readable label for this key. Shown in `list`. Not required to be unique.
     #[clap(long)]
     pub name: String,
-    /// Permission scopes granted to this key, comma-separated. Example:
-    /// `--permissions AccountInfo,TransactionGet`.
+    /// Permission scopes granted to this key, comma-separated. Format is
+    /// `<resource>:<action>[:<entity>]`, lowercase, snake_case. Examples:
+    /// `--permissions accounts:read,transactions:read` (read-only key),
+    /// `--permissions transfer:create:component_abc123` (transfer from one
+    /// account only), `--permissions admin` (full access — also requires
+    /// `--confirm-admin`).
     #[clap(long, value_delimiter = ',')]
-    pub permissions: Vec<JrpcPermission>,
-    /// Required if `permissions` includes `Admin`. Deliberate speed-bump
+    pub permissions: Vec<Permission>,
+    /// Required if `permissions` includes `admin`. Deliberate speed-bump
     /// so an admin doesn't accidentally mint a fully-privileged key.
     #[clap(long)]
     pub confirm_admin: bool,

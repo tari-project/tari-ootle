@@ -2,4 +2,4 @@
 import type { EncryptedData } from "../EncryptedData";
 import type { MinotariBurnClaimProof } from "../MinotariBurnClaimProof";
 
-export type ClaimBurnProofContents = { claim_proof: MinotariBurnClaimProof; encrypted_data: EncryptedData };
+export type ClaimBurnProofContents = { claim_proof: MinotariBurnClaimProof, encrypted_data: EncryptedData, };

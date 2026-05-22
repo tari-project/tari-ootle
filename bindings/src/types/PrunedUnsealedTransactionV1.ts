@@ -5,7 +5,4 @@ import type { TransactionSignature } from "./TransactionSignature";
 /**
  * Mirror of `UnsealedTransactionV1` for the pruned form.
  */
-export type PrunedUnsealedTransactionV1 = {
-  transaction: PrunedUnsignedTransactionV1;
-  signatures: Array<TransactionSignature>;
-};
+export type PrunedUnsealedTransactionV1 = { transaction: PrunedUnsignedTransactionV1, signatures: Array<TransactionSignature>, };

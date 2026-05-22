@@ -6,7 +6,7 @@ use log::warn;
 use tari_engine_types::{component::Component, indexed_value::IndexedWellKnownTypes, substate::SubstateId};
 use tari_ootle_wallet_sdk::network::WalletNetworkInterface;
 use tari_ootle_walletd_client::{
-    permissions::JrpcPermission,
+    permissions::{Permission, ReadOnly},
     types::{
         SwapPoolGetExchangeRateRequest,
         SwapPoolGetExchangeRateResponse,
@@ -118,7 +118,7 @@ pub async fn handle_get_exchange_rate(
     req: SwapPoolGetExchangeRateRequest,
 ) -> Result<SwapPoolGetExchangeRateResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    context.check_auth(token, &[JrpcPermission::SubstatesRead])?;
+    context.check_auth(token, &[Permission::SwapPools(ReadOnly::Read)])?;
 
     let result = sdk
         .get_network_interface()
@@ -168,7 +168,7 @@ pub async fn handle_list(
     req: SwapPoolsListRequest,
 ) -> Result<SwapPoolsListResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    context.check_auth(token, &[JrpcPermission::SubstatesRead])?;
+    context.check_auth(token, &[Permission::SwapPools(ReadOnly::Read)])?;
 
     let limit = req.limit.unwrap_or(10).min(50) as usize;
     let offset = req.offset.unwrap_or(0);

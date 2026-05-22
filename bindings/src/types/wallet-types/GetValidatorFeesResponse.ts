@@ -2,4 +2,4 @@
 import type { Shard } from "../Shard";
 import type { FeePoolDetails } from "./FeePoolDetails";
 
-export type GetValidatorFeesResponse = { fees: { [key in Shard]?: FeePoolDetails } };
+export type GetValidatorFeesResponse = { fees: { [key in Shard]?: FeePoolDetails }, };

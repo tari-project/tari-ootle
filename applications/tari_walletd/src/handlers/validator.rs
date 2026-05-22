@@ -15,7 +15,7 @@ use tari_ootle_transaction::args;
 use tari_ootle_wallet_crypto::{OutputWitness, StealthInputWitness, StealthOutputWitness, memo::Memo};
 use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId};
 use tari_ootle_walletd_client::{
-    permissions::JrpcPermission,
+    permissions::{Crud, Permission},
     types::{
         AccountOrKeyId,
         ClaimValidatorFeesRequest,
@@ -47,7 +47,7 @@ pub async fn handle_get_validator_fees(
     req: GetValidatorFeesRequest,
 ) -> Result<GetValidatorFeesResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[Permission::Validators(Crud::Read)])?;
 
     let claim_key = match req.account_or_key {
         AccountOrKeyId::Account(acc) => {
@@ -111,7 +111,7 @@ pub async fn handle_claim_validator_fees(
     mut req: ClaimValidatorFeesRequest,
 ) -> Result<ClaimValidatorFeesResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[Permission::Validators(Crud::Update)])?;
 
     if req.shards.is_empty() {
         return Err(invalid_params("shards", Some("At least one shard must be specified")));

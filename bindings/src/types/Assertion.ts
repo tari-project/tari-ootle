@@ -5,7 +5,4 @@ import type { NftCheck } from "./NftCheck";
 import type { NonFungibleId } from "./NonFungibleId";
 import type { ResourceAddress } from "./ResourceAddress";
 
-export type Assertion =
-  | { BktAmt: { resource_address: ResourceAddress; is: CheckOrd; amount: Amount } }
-  | "NtNil"
-  | { BktCtnNft: { resource_address: ResourceAddress; check: NftCheck; nfts: Array<NonFungibleId> } };
+export type Assertion = { "BktAmt": { resource_address: ResourceAddress, is: CheckOrd, amount: Amount, } } | "NtNil" | { "BktCtnNft": { resource_address: ResourceAddress, check: NftCheck, nfts: Array<NonFungibleId>, } };

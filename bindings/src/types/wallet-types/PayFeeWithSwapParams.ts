@@ -3,9 +3,4 @@ import type { Amount } from "../Amount";
 import type { ComponentAddress } from "../ComponentAddress";
 import type { ResourceAddress } from "../ResourceAddress";
 
-export type PayFeeWithSwapParams = {
-  pool_address: ComponentAddress;
-  input_resource: ResourceAddress;
-  input_amount: Amount;
-  min_xtr_output_amount: Amount;
-};
+export type PayFeeWithSwapParams = { pool_address: ComponentAddress, input_resource: ResourceAddress, input_amount: Amount, min_xtr_output_amount: Amount, };

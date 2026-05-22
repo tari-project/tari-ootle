@@ -89,7 +89,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     ComponentAddressOrName,
-    permissions::JrpcPermission,
+    permissions::Permission,
     serialize::{opt_string_or_struct, string_or_struct},
 };
 
@@ -742,7 +742,7 @@ pub struct AuthRefreshResponse {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AuthLoginRequest {
-    pub permissions: Vec<JrpcPermission>,
+    pub permissions: Vec<Permission>,
     pub credentials: AuthCredentials,
 }
 
@@ -841,7 +841,7 @@ pub struct AuthRevokeTokenResponse {}
 
 /// Admin → daemon: mint a new long-lived API key with the supplied scopes.
 ///
-/// `permissions` is the same textual form `JrpcPermissions::from_str`
+/// `permissions` is the same textual form `Permissions::from_str`
 /// accepts (e.g. `["AccountInfo", "TransactionGet"]`). `confirm_admin`
 /// must be set to `true` if and only if the list contains the `Admin`
 /// permission — this is a deliberate speed-bump so the UI can render an
@@ -876,7 +876,7 @@ pub struct AuthCreateApiKeyRequest {
 pub struct AuthCreateApiKeyResponse {
     pub id: i32,
     pub name: String,
-    pub permissions: Vec<JrpcPermission>,
+    pub permissions: Vec<Permission>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub api_key: EncodedApiKey,
     /// Unix timestamp (seconds) of creation.
@@ -923,7 +923,7 @@ pub struct AuthListApiKeysResponse {
 pub struct IssuedApiKey {
     pub id: i32,
     pub name: String,
-    pub permissions: Vec<JrpcPermission>,
+    pub permissions: Vec<Permission>,
     /// Unix timestamp (seconds).
     pub created_at: i64,
     /// Unix timestamp (seconds). `None` if the key has never been used to
@@ -1010,7 +1010,7 @@ pub struct AuthListSessionsResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AuthSessionInfo {
     pub id: RefreshTokenHash,
-    pub permissions: Vec<JrpcPermission>,
+    pub permissions: Vec<Permission>,
     pub exp: u64,
 }
 
@@ -1254,7 +1254,7 @@ pub struct WebauthnFinishRegisterRequest {
     #[cfg_attr(feature = "ts", ts(type = "object"))]
     pub credential: RegisterPublicKeyCredential,
     /// Permissions requested by the client to be associated with the registered credential.
-    pub requested_permissions: Vec<JrpcPermission>,
+    pub requested_permissions: Vec<Permission>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

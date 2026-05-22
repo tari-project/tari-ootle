@@ -2,9 +2,4 @@
 import type { FinalizeResult } from "../FinalizeResult";
 import type { TransactionId } from "../TransactionId";
 
-export type TransferNftResponse = {
-  transaction_id: TransactionId;
-  fee: bigint;
-  fee_refunded: bigint;
-  result: FinalizeResult;
-};
+export type TransferNftResponse = { transaction_id: TransactionId, fee: bigint, fee_refunded: bigint, result: FinalizeResult, };

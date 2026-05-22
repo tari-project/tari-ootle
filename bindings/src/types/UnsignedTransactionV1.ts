@@ -4,23 +4,15 @@ import type { Epoch } from "./Epoch";
 import type { Instruction } from "./Instruction";
 import type { SubstateRequirement } from "./SubstateRequirement";
 
-export type UnsignedTransactionV1 = {
-  network: number;
-  fee_instructions: Array<Instruction>;
-  instructions: Array<Instruction>;
-  /**
-   * Input objects that may be read/write
-   */
-  inputs: Array<SubstateRequirement>;
-  min_epoch: Epoch | null;
-  max_epoch: Epoch | null;
-  is_seal_signer_authorized: boolean;
-  dry_run: boolean;
-  /**
-   * Prunable side-channel of opaque payloads referenced by instructions via `BlobIndex`.
-   * Only the per-blob commitments (`blobs.hashes()`) participate in the signing domain —
-   * raw blob bytes are excluded so that storage layers can drop them without affecting
-   * signature verifiability or transaction id.
-   */
-  blobs: Blobs;
-};
+export type UnsignedTransactionV1 = { network: number, fee_instructions: Array<Instruction>, instructions: Array<Instruction>, 
+/**
+ * Input objects that may be read/write
+ */
+inputs: Array<SubstateRequirement>, min_epoch: Epoch | null, max_epoch: Epoch | null, is_seal_signer_authorized: boolean, dry_run: boolean, 
+/**
+ * Prunable side-channel of opaque payloads referenced by instructions via `BlobIndex`.
+ * Only the per-blob commitments (`blobs.hashes()`) participate in the signing domain —
+ * raw blob bytes are excluded so that storage layers can drop them without affecting
+ * signature verifiability or transaction id.
+ */
+blobs: Blobs, };

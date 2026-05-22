@@ -8,29 +8,16 @@ import type { FunctionDoc } from "./FunctionDoc";
  * `[package.metadata.tari-template]` sections. The CBOR encoding of this struct is
  * hashed to produce a [`MetadataHash`] that is stored on-chain alongside the template binary.
  */
-export type TemplateMetadata = {
-  schema_version: number;
-  name: string;
-  version: string;
-  description?: string;
-  tags?: Array<string>;
-  category?: string | null;
-  repository?: string | null;
-  /**
-   * The commit hash of the source code used to build this template, for reproducible build verification.
-   */
-  commit_hash?: { Sha1: string } | null;
-  documentation?: string | null;
-  homepage?: string | null;
-  license?: string | null;
-  logo_url?: string | null;
-  /**
-   * The template address of a previous version that this template supersedes.
-   */
-  supersedes?: string | null;
-  /**
-   * Rustdoc comments extracted from public functions of the template, keyed by source order.
-   */
-  functions?: Array<FunctionDoc>;
-  extra?: { [key in string]?: string };
-};
+export type TemplateMetadata = { schema_version: number, name: string, version: string, description?: string, tags?: Array<string>, category?: string | null, repository?: string | null, 
+/**
+ * The commit hash of the source code used to build this template, for reproducible build verification.
+ */
+commit_hash?: { Sha1: string } | null, documentation?: string | null, homepage?: string | null, license?: string | null, logo_url?: string | null, 
+/**
+ * The template address of a previous version that this template supersedes.
+ */
+supersedes?: string | null, 
+/**
+ * Rustdoc comments extracted from public functions of the template, keyed by source order.
+ */
+functions?: Array<FunctionDoc>, extra?: { [key in string]?: string }, };

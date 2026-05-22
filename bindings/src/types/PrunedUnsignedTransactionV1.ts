@@ -10,24 +10,15 @@ import type { SubstateRequirement } from "./SubstateRequirement";
  * All non-blob fields are preserved verbatim so the field projection used in the signing /
  * id digest is byte-identical to the full form.
  */
-export type PrunedUnsignedTransactionV1 = {
-  network: number;
-  fee_instructions: Array<Instruction>;
-  instructions: Array<Instruction>;
-  inputs: Array<SubstateRequirement>;
-  min_epoch: Epoch | null;
-  max_epoch: Epoch | null;
-  is_seal_signer_authorized: boolean;
-  dry_run: boolean;
-  /**
-   * Per-blob commitments. Mirrors `UnsignedTransactionV1::blobs.hashes()` of the full form.
-   */
-  blob_hashes: BlobHashes;
-  /**
-   * Byte size of each blob, parallel to `blob_hashes`. **Not part of the signing/id domain**
-   * — populated at conversion time from `Blobs` so that API consumers and UIs can show
-   * blob sizes without downloading payloads. May be empty when deserialised from older
-   * archives that didn't record sizes.
-   */
-  blob_sizes: Array<number>;
-};
+export type PrunedUnsignedTransactionV1 = { network: number, fee_instructions: Array<Instruction>, instructions: Array<Instruction>, inputs: Array<SubstateRequirement>, min_epoch: Epoch | null, max_epoch: Epoch | null, is_seal_signer_authorized: boolean, dry_run: boolean, 
+/**
+ * Per-blob commitments. Mirrors `UnsignedTransactionV1::blobs.hashes()` of the full form.
+ */
+blob_hashes: BlobHashes, 
+/**
+ * Byte size of each blob, parallel to `blob_hashes`. **Not part of the signing/id domain**
+ * — populated at conversion time from `Blobs` so that API consumers and UIs can show
+ * blob sizes without downloading payloads. May be empty when deserialised from older
+ * archives that didn't record sizes.
+ */
+blob_sizes: Array<number>, };

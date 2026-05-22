@@ -3,8 +3,4 @@ import type { ComponentAddress } from "../ComponentAddress";
 import type { RistrettoPublicKeyBytes } from "../RistrettoPublicKeyBytes";
 import type { TransactionStatus } from "../TransactionStatus";
 
-export type TransactionGetAllRequest = {
-  status: TransactionStatus | null;
-  component: ComponentAddress | null;
-  signer_public_key: RistrettoPublicKeyBytes | null;
-};
+export type TransactionGetAllRequest = { status: TransactionStatus | null, component: ComponentAddress | null, signer_public_key: RistrettoPublicKeyBytes | null, };

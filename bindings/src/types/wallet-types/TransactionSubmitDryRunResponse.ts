@@ -2,15 +2,12 @@
 import type { ExecuteResult } from "../ExecuteResult";
 import type { TransactionId } from "../TransactionId";
 
-export type TransactionSubmitDryRunResponse = {
-  transaction_id: TransactionId;
-  /**
-   * The minimum fee required to submit this transaction. Includes a +1 buffer over
-   * `total_fees_charged` to account for storage fee rounding differences between the dry run
-   * and actual submission (the vault balance changes with a different max_fee, which can shift
-   * `floor(total_bytes / 4)` by 1 at a rounding boundary). Non-refundable overcharge is
-   * subtracted since it won't recur with a tighter max_fee.
-   */
-  required_fees: bigint;
-  result: ExecuteResult;
-};
+export type TransactionSubmitDryRunResponse = { transaction_id: TransactionId, 
+/**
+ * The minimum fee required to submit this transaction. Includes a +1 buffer over
+ * `total_fees_charged` to account for storage fee rounding differences between the dry run
+ * and actual submission (the vault balance changes with a different max_fee, which can shift
+ * `floor(total_bytes / 4)` by 1 at a rounding boundary). Non-refundable overcharge is
+ * subtracted since it won't recur with a tighter max_fee.
+ */
+required_fees: bigint, result: ExecuteResult, };

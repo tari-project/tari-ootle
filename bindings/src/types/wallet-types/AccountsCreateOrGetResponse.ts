@@ -2,4 +2,4 @@
 import type { Account } from "../Account";
 import type { OotleAddress } from "../OotleAddress";
 
-export type AccountsCreateOrGetResponse = { account: Account; address: OotleAddress; created: boolean };
+export type AccountsCreateOrGetResponse = { account: Account, address: OotleAddress, created: boolean, };

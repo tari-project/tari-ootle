@@ -3,13 +3,13 @@
 
 import { useWebauthnAlreadyRegistered } from "@api/hooks/useWebauthn";
 import Loading from "@components/Loading";
-import { JrpcPermission } from "@tari-project/ootle-ts-bindings";
+import type { Permission } from "@tari-project/ootle-ts-bindings";
 import { useEffect, useState } from "react";
 import WebauthnLogin from "./components/Login";
 import WebauthnRegistration from "./components/Registration";
 
 export const APP_NAME: string = "tari-wallet-webui";
-export const DEFAULT_PERMISSIONS: JrpcPermission[] = ["Admin"];
+export const DEFAULT_PERMISSIONS: Permission[] = ["Admin"];
 
 export interface WebauthnProps {
   onAuthenticated: () => void;

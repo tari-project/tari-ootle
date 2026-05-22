@@ -2,10 +2,4 @@
 import type { Hash32 } from "../Hash32";
 import type { SubstateId } from "../SubstateId";
 
-export type WalletSubstateInfo = {
-  substate_id: SubstateId;
-  parent_id: SubstateId | null;
-  module_name: string | null;
-  version: number;
-  template_address: Hash32 | null;
-};
+export type WalletSubstateInfo = { substate_id: SubstateId, parent_id: SubstateId | null, module_name: string | null, version: number, template_address: Hash32 | null, };

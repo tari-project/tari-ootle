@@ -5,22 +5,10 @@ import type { PrunedTransaction } from "./PrunedTransaction";
 import type { TransactionStatus } from "./TransactionStatus";
 import type { NewAccountData } from "./wallet-types/NewAccountData";
 
-export type WalletTransaction = {
-  id: string;
-  /**
-   * The transaction in its pruned (blob-bytes-stripped) form. Blob commitments are retained
-   * so the `TransactionId` and signatures remain verifiable. Wallet daemon storage keeps the
-   * full form on disk for re-submission, but the public API returns this slimmer view.
-   */
-  transaction: PrunedTransaction;
-  status: TransactionStatus;
-  finalize: FinalizeResult | null;
-  final_fee: bigint | null;
-  qcs: Array<ProposalCertificate>;
-  invalid_reason: string | null;
-  execution_time: { secs: number; nanos: number } | null;
-  finalized_time: { secs: number; nanos: number } | null;
-  new_account_info: NewAccountData | null;
-  is_dry_run: boolean;
-  last_update_time: string;
-};
+export type WalletTransaction = { id: string, 
+/**
+ * The transaction in its pruned (blob-bytes-stripped) form. Blob commitments are retained
+ * so the `TransactionId` and signatures remain verifiable. Wallet daemon storage keeps the
+ * full form on disk for re-submission, but the public API returns this slimmer view.
+ */
+transaction: PrunedTransaction, status: TransactionStatus, finalize: FinalizeResult | null, final_fee: bigint | null, qcs: Array<ProposalCertificate>, invalid_reason: string | null, execution_time: {secs: number, nanos: number} | null, finalized_time: {secs: number, nanos: number} | null, new_account_info: NewAccountData | null, is_dry_run: boolean, last_update_time: string, };

@@ -2,10 +2,4 @@
 import type { ArgDef } from "./ArgDef";
 import type { Type } from "./Type";
 
-export type FunctionDef = {
-  name: string;
-  arguments: Array<ArgDef>;
-  output: Type;
-  is_mut: boolean;
-  is_migration?: boolean;
-};
+export type FunctionDef = { name: string, arguments: Array<ArgDef>, output: Type, is_mut: boolean, is_migration?: boolean, };

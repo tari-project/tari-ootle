@@ -2,11 +2,8 @@
 import type { TemplateMetadata } from "../TemplateMetadata";
 import type { KeyId } from "./KeyId";
 
-export type SignTemplateMetadataRequest = {
-  key_id: KeyId;
-  template_address: string;
-  /**
-   * The template metadata to sign. Provided as an inline JSON object.
-   */
-  metadata: TemplateMetadata;
-};
+export type SignTemplateMetadataRequest = { key_id: KeyId, template_address: string, 
+/**
+ * The template metadata to sign. Provided as an inline JSON object.
+ */
+metadata: TemplateMetadata, };

@@ -8,9 +8,9 @@
 //!
 //! - API keys are long-lived credentials minted by an Admin user. The raw key bytes leave the daemon exactly once (the
 //!   response of `auth.create_api_key`). Only a SHA-256 hex digest is persisted.
-//! - The granted scopes on a key are an arbitrary subset of `JrpcPermissions`, chosen at creation time by the admin.
-//!   The `Admin` scope itself is permitted as a grant (since the admin issuing the key has Admin), but the creator must
-//!   set `confirm_admin: true` to acknowledge they're minting a credential that has full access.
+//! - The granted scopes on a key are an arbitrary subset of `Permissions`, chosen at creation time by the admin. The
+//!   `Admin` scope itself is permitted as a grant (since the admin issuing the key has Admin), but the creator must set
+//!   `confirm_admin: true` to acknowledge they're minting a credential that has full access.
 //! - Revocation is immediate: the storage layer filters revoked rows out of `api_key_find_active_by_hash`, so a key
 //!   whose `revoked_at` is set cannot authenticate even if a request is mid-flight.
 //! - Agents present the raw key as the `Authorization: Bearer …` token on **every** JSON-RPC call. The shim in
@@ -45,7 +45,7 @@ use tari_ootle_wallet_sdk::{
     },
 };
 use tari_ootle_walletd_client::{
-    permissions::{JrpcPermission, JrpcPermissions},
+    permissions::{Permission, Permissions},
     types::{
         AuthCreateApiKeyRequest,
         AuthCreateApiKeyResponse,
@@ -138,8 +138,8 @@ where
     tx.commit()
 }
 
-pub fn parse_permissions(s: &str) -> Result<JrpcPermissions, anyhow::Error> {
-    JrpcPermissions::from_str(s).map_err(|e| anyhow!("invalid permission string '{s}': {e}"))
+pub fn parse_permissions(s: &str) -> Result<Permissions, anyhow::Error> {
+    Permissions::from_str(s).map_err(|e| anyhow!("invalid permission string '{s}': {e}"))
 }
 
 // -----------------------------------------------------------------------------
@@ -154,13 +154,13 @@ pub async fn handle_create_api_key(
     // Admin + interactive user session. An API key — even one carrying
     // `Admin` — cannot mint further keys, so a leaked admin key cannot
     // establish persistence beyond its own revocation.
-    context.check_auth_user_only(token, &[JrpcPermission::Admin])?;
+    context.check_auth_user_only(token, &[Permission::Admin])?;
 
     if request.name.trim().is_empty() {
         return Err(anyhow!("API key name must not be empty"));
     }
 
-    let permissions = JrpcPermissions::try_from(request.permissions.as_slice())
+    let permissions = Permissions::try_from(request.permissions.as_slice())
         .map_err(|e| anyhow!("Invalid permissions in API key request: {e}"))?;
     if permissions.is_empty() {
         return Err(anyhow!(
@@ -170,7 +170,7 @@ pub async fn handle_create_api_key(
     // Granting Admin to an API key is allowed (the issuer already has it)
     // but is dangerous, so we require explicit acknowledgement so a UI
     // checkbox can be the gate rather than the JSON-RPC payload alone.
-    if permissions.has_permission(&JrpcPermission::Admin) && !request.confirm_admin {
+    if permissions.has_permission(&Permission::Admin) && !request.confirm_admin {
         return Err(anyhow!(
             "Granting the Admin permission to an API key requires `confirm_admin: true` in the request"
         ));
@@ -198,7 +198,7 @@ pub async fn handle_create_api_key(
 
     // Serialise the permission set back to its textual form. We could
     // store JSON here but the JWT layer already uses the comma-separated
-    // form and `JrpcPermissions::from_str` round-trips it, so this keeps
+    // form and `Permissions::from_str` round-trips it, so this keeps
     // exactly one codec across the daemon.
     let permissions_str = format_permissions(&permissions);
 
@@ -234,7 +234,7 @@ pub async fn handle_list_api_keys(
 ) -> Result<AuthListApiKeysResponse, anyhow::Error> {
     // User-auth-only: enumeration is an admin-tooling operation; an API
     // key shouldn't be able to enumerate the wallet's other keys.
-    context.check_auth_user_only(token, &[JrpcPermission::Admin])?;
+    context.check_auth_user_only(token, &[Permission::Admin])?;
 
     let rows = {
         let mut tx = context
@@ -248,8 +248,8 @@ pub async fn handle_list_api_keys(
     let keys = rows
         .into_iter()
         .map(|k| {
-            let permissions = JrpcPermissions::from_str(&k.permissions)
-                .map(JrpcPermissions::into_vec)
+            let permissions = Permissions::from_str(&k.permissions)
+                .map(Permissions::into_vec)
                 .unwrap_or_default();
             IssuedApiKey {
                 id: k.id,
@@ -280,7 +280,7 @@ pub async fn handle_revoke_api_key(
     // User-auth-only: a leaked admin key cannot revoke other (or its own
     // sibling) keys; an attacker cannot use a compromised key to "clean
     // up" the audit trail.
-    context.check_auth_user_only(token, &[JrpcPermission::Admin])?;
+    context.check_auth_user_only(token, &[Permission::Admin])?;
 
     let mut tx = context
         .wallet_sdk()
@@ -293,11 +293,11 @@ pub async fn handle_revoke_api_key(
     Ok(AuthRevokeApiKeyResponse {})
 }
 
-/// Round-trip a `JrpcPermissions` back to the comma-separated textual form
-/// that `JrpcPermissions::from_str` accepts. We keep the order
+/// Round-trip a `Permissions` back to the comma-separated textual form
+/// that `Permissions::from_str` accepts. We keep the order
 /// deterministic (sorted by display form) so a re-list returns the same
 /// string the user supplied at creation time.
-fn format_permissions(p: &JrpcPermissions) -> String {
+fn format_permissions(p: &Permissions) -> String {
     let mut parts: Vec<String> = p.iter().map(|p| p.to_string()).collect();
     parts.sort();
     parts.join(", ")
@@ -305,6 +305,8 @@ fn format_permissions(p: &JrpcPermissions) -> String {
 
 #[cfg(test)]
 mod tests {
+    use tari_ootle_walletd_client::permissions::Crud;
+
     use super::*;
 
     #[test]
@@ -341,24 +343,24 @@ mod tests {
     #[test]
     fn format_permissions_round_trips_through_from_str() {
         // `format_permissions` must produce a string that
-        // `JrpcPermissions::from_str` accepts and reconstructs into the
+        // `Permissions::from_str` accepts and reconstructs into the
         // same logical permission set. This is the single most important
         // invariant for the storage column: we re-parse it on every
         // authentication.
-        let original: JrpcPermissions = vec![
-            JrpcPermission::AccountInfo,
-            JrpcPermission::TransactionGet,
-            JrpcPermission::KeyList,
+        let original: Permissions = vec![
+            Permission::Accounts(Crud::Read, None),
+            Permission::Transactions(Crud::Read, None),
+            Permission::Keys(Crud::Read),
         ]
         .into();
         let s = format_permissions(&original);
-        let parsed: JrpcPermissions = JrpcPermissions::from_str(&s).expect("must re-parse");
+        let parsed: Permissions = Permissions::from_str(&s).expect("must re-parse");
         // HashSet order is not guaranteed; compare membership instead of
         // direct equality.
         assert_eq!(parsed.len(), 3);
-        assert!(parsed.has_permission(&JrpcPermission::AccountInfo));
-        assert!(parsed.has_permission(&JrpcPermission::TransactionGet));
-        assert!(parsed.has_permission(&JrpcPermission::KeyList));
+        assert!(parsed.has_permission(&Permission::Accounts(Crud::Read, None)));
+        assert!(parsed.has_permission(&Permission::Transactions(Crud::Read, None)));
+        assert!(parsed.has_permission(&Permission::Keys(Crud::Read)));
     }
 
     #[test]
@@ -367,8 +369,16 @@ mod tests {
         // supplied at creation time. Sorting the parts before joining
         // means the order they typed them in is irrelevant — they always
         // see the same canonical string.
-        let a: JrpcPermissions = vec![JrpcPermission::AccountInfo, JrpcPermission::TransactionGet].into();
-        let b: JrpcPermissions = vec![JrpcPermission::TransactionGet, JrpcPermission::AccountInfo].into();
+        let a: Permissions = vec![
+            Permission::Accounts(Crud::Read, None),
+            Permission::Transactions(Crud::Read, None),
+        ]
+        .into();
+        let b: Permissions = vec![
+            Permission::Transactions(Crud::Read, None),
+            Permission::Accounts(Crud::Read, None),
+        ]
+        .into();
         assert_eq!(format_permissions(&a), format_permissions(&b));
     }
 }
@@ -385,7 +395,7 @@ mod shim_tests {
 
     use tari_ootle_wallet_sdk::storage::{CommittableStore, WalletStoreWriter, WriteableWalletStore};
     use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
-    use tari_ootle_walletd_client::permissions::{JrpcPermission, JrpcPermissions};
+    use tari_ootle_walletd_client::permissions::{Crud, Permission, Permissions};
 
     use super::*;
     use crate::handlers::auth::jwt::{AuthError, enforce_scopes};
@@ -396,14 +406,14 @@ mod shim_tests {
         db
     }
 
-    fn mint_key(store: &SqliteWalletStore, name: &str, perms: JrpcPermissions) -> (EncodedApiKey, i32) {
+    fn mint_key(store: &SqliteWalletStore, name: &str, perms: Permissions) -> (EncodedApiKey, i32) {
         mint_key_with_expiry(store, name, perms, None)
     }
 
     fn mint_key_with_expiry(
         store: &SqliteWalletStore,
         name: &str,
-        perms: JrpcPermissions,
+        perms: Permissions,
         expires_at: Option<time::PrimitiveDateTime>,
     ) -> (EncodedApiKey, i32) {
         let raw = mint_raw_api_key();
@@ -419,11 +429,7 @@ mod shim_tests {
     /// adds a `tokio::spawn` for the `last_used_at` bump, which is covered
     /// by the storage-layer throttle tests; the auth decision itself is
     /// exactly this composition.
-    fn resolve(
-        store: &SqliteWalletStore,
-        raw: &str,
-        required: &[JrpcPermission],
-    ) -> Result<JrpcPermissions, AuthError> {
+    fn resolve(store: &SqliteWalletStore, raw: &str, required: &[Permission]) -> Result<Permissions, AuthError> {
         let row = find_active_by_raw(store, raw)
             .map_err(AuthError::from)?
             .ok_or(AuthError::ApiKeyInvalidOrRevoked)?;
@@ -438,23 +444,28 @@ mod shim_tests {
         let (raw, _) = mint_key(
             &store,
             "agent",
-            vec![JrpcPermission::AccountInfo, JrpcPermission::TransactionGet].into(),
+            vec![
+                Permission::Accounts(Crud::Read, None),
+                Permission::Transactions(Crud::Read, None),
+            ]
+            .into(),
         );
-        let granted = resolve(&store, &raw, &[JrpcPermission::AccountInfo]).expect("in-scope must succeed");
-        assert!(granted.has_permission(&JrpcPermission::AccountInfo));
-        assert!(!granted.has_permission(&JrpcPermission::Admin));
+        let granted = resolve(&store, &raw, &[Permission::Accounts(Crud::Read, None)]).expect("in-scope must succeed");
+        assert!(granted.has_permission(&Permission::Accounts(Crud::Read, None)));
+        assert!(!granted.has_permission(&Permission::Admin));
     }
 
     #[test]
     fn out_of_scope_call_is_rejected() {
         let store = open_store();
-        let (raw, _) = mint_key(&store, "info-only", vec![JrpcPermission::AccountInfo].into());
-        let err = resolve(&store, &raw, &[JrpcPermission::TransactionGet]).expect_err("out-of-scope must be rejected");
+        let (raw, _) = mint_key(&store, "info-only", vec![Permission::Accounts(Crud::Read, None)].into());
+        let err = resolve(&store, &raw, &[Permission::Transactions(Crud::Read, None)])
+            .expect_err("out-of-scope must be rejected");
         assert!(
             matches!(err, AuthError::InsufficientPermissions {
-                required: JrpcPermission::TransactionGet
+                required: Permission::Transactions(Crud::Read, None)
             }),
-            "expected InsufficientPermissions(TransactionSend), got {err:?}"
+            "expected InsufficientPermissions(transactions:read), got {err:?}"
         );
     }
 
@@ -465,7 +476,7 @@ mod shim_tests {
         // the same code path so the error parity is a direct property of
         // the storage-layer active filter.
         let store = open_store();
-        let err = resolve(&store, "tw_does-not-exist", &[JrpcPermission::AccountInfo])
+        let err = resolve(&store, "tw_does-not-exist", &[Permission::Accounts(Crud::Read, None)])
             .expect_err("unknown key must be rejected");
         assert!(
             matches!(err, AuthError::ApiKeyInvalidOrRevoked),
@@ -476,12 +487,12 @@ mod shim_tests {
     #[test]
     fn revoked_key_yields_api_key_invalid_or_revoked() {
         let store = open_store();
-        let (raw, id) = mint_key(&store, "ephemeral", vec![JrpcPermission::AccountInfo].into());
-        resolve(&store, &raw, &[JrpcPermission::AccountInfo]).expect("pre-revoke must succeed");
+        let (raw, id) = mint_key(&store, "ephemeral", vec![Permission::Accounts(Crud::Read, None)].into());
+        resolve(&store, &raw, &[Permission::Accounts(Crud::Read, None)]).expect("pre-revoke must succeed");
 
         store.with_write_tx(|tx| tx.api_key_revoke(id)).unwrap();
 
-        let err = resolve(&store, &raw, &[JrpcPermission::AccountInfo]).expect_err("post-revoke must fail");
+        let err = resolve(&store, &raw, &[Permission::Accounts(Crud::Read, None)]).expect_err("post-revoke must fail");
         assert!(matches!(err, AuthError::ApiKeyInvalidOrRevoked));
     }
 
@@ -506,7 +517,7 @@ mod shim_tests {
         }
 
         let store = open_store();
-        let (raw, _) = mint_key(&store, "admin-leaked", vec![JrpcPermission::Admin].into());
+        let (raw, _) = mint_key(&store, "admin-leaked", vec![Permission::Admin].into());
         let err = user_only_gate(&raw).expect_err("admin API key MUST NOT pass the user-only gate");
         assert!(matches!(err, AuthError::UserAuthOnly));
 
@@ -523,9 +534,15 @@ mod shim_tests {
         let store = open_store();
         let past = time::OffsetDateTime::now_utc() - time::Duration::seconds(60);
         let past = time::PrimitiveDateTime::new(past.date(), past.time());
-        let (raw, _id) = mint_key_with_expiry(&store, "expired", vec![JrpcPermission::AccountInfo].into(), Some(past));
+        let (raw, _id) = mint_key_with_expiry(
+            &store,
+            "expired",
+            vec![Permission::Accounts(Crud::Read, None)].into(),
+            Some(past),
+        );
 
-        let err = resolve(&store, &raw, &[JrpcPermission::AccountInfo]).expect_err("expired key must be rejected");
+        let err =
+            resolve(&store, &raw, &[Permission::Accounts(Crud::Read, None)]).expect_err("expired key must be rejected");
         assert!(
             matches!(err, AuthError::ApiKeyInvalidOrRevoked),
             "expected ApiKeyInvalidOrRevoked, got {err:?}"
@@ -539,9 +556,14 @@ mod shim_tests {
         let store = open_store();
         let future = time::OffsetDateTime::now_utc() + time::Duration::seconds(3600);
         let future = time::PrimitiveDateTime::new(future.date(), future.time());
-        let (raw, _) = mint_key_with_expiry(&store, "future", vec![JrpcPermission::AccountInfo].into(), Some(future));
+        let (raw, _) = mint_key_with_expiry(
+            &store,
+            "future",
+            vec![Permission::Accounts(Crud::Read, None)].into(),
+            Some(future),
+        );
 
-        resolve(&store, &raw, &[JrpcPermission::AccountInfo]).expect("future-expiry key must authenticate");
+        resolve(&store, &raw, &[Permission::Accounts(Crud::Read, None)]).expect("future-expiry key must authenticate");
     }
 
     #[test]
@@ -550,10 +572,10 @@ mod shim_tests {
         // carrying `Admin` passes ANY required scope check without the
         // per-permission iteration.
         let store = open_store();
-        let (raw, _) = mint_key(&store, "everything", vec![JrpcPermission::Admin].into());
+        let (raw, _) = mint_key(&store, "everything", vec![Permission::Admin].into());
         resolve(&store, &raw, &[
-            JrpcPermission::AccountInfo,
-            JrpcPermission::TransactionGet,
+            Permission::Accounts(Crud::Read, None),
+            Permission::Transactions(Crud::Read, None),
         ])
         .expect("Admin grant must satisfy any required scopes");
     }
@@ -565,7 +587,7 @@ mod shim_tests {
         // produce more than one write — the storage-layer filter enforces
         // it independently of the in-memory DashMap on `HandlerContext`.
         let store = open_store();
-        let (_, id) = mint_key(&store, "throttled", vec![JrpcPermission::AccountInfo].into());
+        let (_, id) = mint_key(&store, "throttled", vec![Permission::Accounts(Crud::Read, None)].into());
 
         touch_last_used_throttled(&store, id, LAST_USED_BUMP_THROTTLE).unwrap();
         let first = {

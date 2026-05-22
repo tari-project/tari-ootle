@@ -3,4 +3,4 @@
 /**
  * Off-chain documentation for a single public template function.
  */
-export type FunctionDoc = { name: string; doc?: string };
+export type FunctionDoc = { name: string, doc?: string, };

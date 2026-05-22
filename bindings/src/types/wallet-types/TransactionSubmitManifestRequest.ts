@@ -2,22 +2,17 @@
 import type { Blob } from "../Blob";
 import type { KeyId } from "./KeyId";
 
-export type TransactionSubmitManifestRequest = {
-  manifest: string;
-  variables: { [key in string]?: string };
-  /**
-   * The key used for the seal (owner) signature. If not provided, defaults to the default account's owner key.
-   */
-  seal_signer_key_id: KeyId | null;
-  /**
-   * Additional signing keys for accounts involved in the transaction (e.g. for multi-account manifests).
-   */
-  signing_key_ids: Array<KeyId>;
-  max_fee: bigint;
-  dry_run: boolean;
-  /**
-   * Blob payloads referenced from the manifest via `blob!(name)`. Keys are the names used
-   * in the manifest text; values are base64-encoded byte payloads in JSON.
-   */
-  blobs: { [key in string]?: Blob };
-};
+export type TransactionSubmitManifestRequest = { manifest: string, variables: { [key in string]?: string }, 
+/**
+ * The key used for the seal (owner) signature. If not provided, defaults to the default account's owner key.
+ */
+seal_signer_key_id: KeyId | null, 
+/**
+ * Additional signing keys for accounts involved in the transaction (e.g. for multi-account manifests).
+ */
+signing_key_ids: Array<KeyId>, max_fee: bigint, dry_run: boolean, 
+/**
+ * Blob payloads referenced from the manifest via `blob!(name)`. Keys are the names used
+ * in the manifest text; values are base64-encoded byte payloads in JSON.
+ */
+blobs: { [key in string]?: Blob }, };

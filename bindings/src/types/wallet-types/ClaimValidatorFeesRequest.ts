@@ -2,15 +2,9 @@
 import type { Shard } from "../Shard";
 import type { ComponentAddressOrName } from "./ComponentAddressOrName";
 
-export type ClaimValidatorFeesRequest = {
-  account: ComponentAddressOrName | null;
-  claim_key_index: number | null;
-  max_fee: bigint;
-  shards: Array<Shard>;
-  dry_run: boolean;
-  /**
-   * If true, claim into the account's revealed vault. If false (default), claim into a per-shard stealth UTXO
-   * addressed to the account's own owner key.
-   */
-  output_to_revealed: boolean;
-};
+export type ClaimValidatorFeesRequest = { account: ComponentAddressOrName | null, claim_key_index: number | null, max_fee: bigint, shards: Array<Shard>, dry_run: boolean, 
+/**
+ * If true, claim into the account's revealed vault. If false (default), claim into a per-shard stealth UTXO
+ * addressed to the account's own owner key.
+ */
+output_to_revealed: boolean, };

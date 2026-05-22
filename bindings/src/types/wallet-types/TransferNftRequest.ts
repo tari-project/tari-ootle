@@ -4,12 +4,4 @@ import type { OotleAddress } from "../OotleAddress";
 import type { ResourceAddress } from "../ResourceAddress";
 import type { ComponentAddressOrName } from "./ComponentAddressOrName";
 
-export type TransferNftRequest = {
-  resource_address: ResourceAddress;
-  nfts: Array<NonFungibleId>;
-  fee_payer_account: ComponentAddressOrName;
-  source_account: ComponentAddressOrName;
-  target_account_address: OotleAddress;
-  max_fee: bigint;
-  dry_run: boolean;
-};
+export type TransferNftRequest = { resource_address: ResourceAddress, nfts: Array<NonFungibleId>, fee_payer_account: ComponentAddressOrName, source_account: ComponentAddressOrName, target_account_address: OotleAddress, max_fee: bigint, dry_run: boolean, };

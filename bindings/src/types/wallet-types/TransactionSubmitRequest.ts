@@ -2,20 +2,15 @@
 import type { UnsignedTransaction } from "../UnsignedTransaction";
 import type { KeyId } from "./KeyId";
 
-export type TransactionSubmitRequest = {
-  transaction: UnsignedTransaction;
-  seal_signer: KeyId;
-  other_signers: Array<KeyId>;
-  /**
-   * Attempt to infer inputs and their dependencies from instructions. If false, the provided transaction must
-   * contain the required inputs.
-   */
-  detect_inputs: boolean;
-  /**
-   * If true(default), detected inputs will omit versions allowing consensus to resolve input substates.
-   * If false, the wallet will try to determine versions for the inputs. These may be outdated if the substate has
-   * changed since detection.
-   */
-  detect_inputs_use_unversioned: boolean;
-  lock_ids: Array<number>;
-};
+export type TransactionSubmitRequest = { transaction: UnsignedTransaction, seal_signer: KeyId, other_signers: Array<KeyId>, 
+/**
+ * Attempt to infer inputs and their dependencies from instructions. If false, the provided transaction must
+ * contain the required inputs.
+ */
+detect_inputs: boolean, 
+/**
+ * If true(default), detected inputs will omit versions allowing consensus to resolve input substates.
+ * If false, the wallet will try to determine versions for the inputs. These may be outdated if the substate has
+ * changed since detection.
+ */
+detect_inputs_use_unversioned: boolean, lock_ids: Array<number>, };

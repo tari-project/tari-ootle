@@ -47,72 +47,148 @@ import {
   Typography,
 } from "@mui/material";
 import type { SelectChangeEvent } from "@mui/material";
-import type { AuthCreateApiKeyResponse, IssuedApiKey } from "@tari-project/ootle-ts-bindings";
+import { permissionToString, type AuthCreateApiKeyResponse, type IssuedApiKey } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 
 /// Permissions the create-key dialog offers as selectable checkboxes.
 ///
-/// We deliberately surface only the unparameterised forms here: any permission
-/// whose Rust variant requires a substate / resource / component address would
-/// need additional input UX which is out of scope for this iteration. The
-/// daemon's `JrpcPermissions::from_str` accepts every entry below verbatim.
+/// Grants are encoded as `<resource>:<action>[:<entity>]` strings (lowercase,
+/// snake_case for two-word resources). The picker here surfaces the
+/// unscoped forms only — narrowing to a specific account/resource/NFT
+/// would need an entity input which is out of scope for this iteration.
+/// The daemon's `Permissions::from_str` accepts every entry below verbatim.
 ///
-/// `Admin` is gated by a separate explicit confirmation checkbox below the list
-/// because granting it to a long-lived agent key is high-risk.
+/// `admin` is gated by a separate explicit confirmation checkbox below the
+/// list because granting it to a long-lived agent key is high-risk.
 const PERMISSION_OPTIONS: Array<{ value: string; label: string; description: string }> = [
   {
-    value: "AccountInfo",
-    label: "AccountInfo",
-    description: "Read account metadata (address, public keys, name).",
+    value: "accounts:read",
+    label: "accounts:read",
+    description: "Read account metadata and list accounts.",
   },
   {
-    value: "AccountList",
-    label: "AccountList",
-    description: "Enumerate accounts known to the wallet.",
+    value: "accounts:create",
+    label: "accounts:create",
+    description: "Create new accounts.",
   },
   {
-    value: "KeyList",
-    label: "KeyList",
+    value: "accounts:update",
+    label: "accounts:update",
+    description: "Rename accounts, set the default, associate stealth resources.",
+  },
+  {
+    value: "keys:read",
+    label: "keys:read",
     description: "Enumerate keys held by the key manager.",
   },
   {
-    value: "TransactionGet",
-    label: "TransactionGet",
-    description: "Read transaction history and detail.",
+    value: "keys:create",
+    label: "keys:create",
+    description: "Mint new keys.",
   },
   {
-    value: "TransactionSend",
-    label: "TransactionSend",
-    description: "Submit transactions from any account.",
+    value: "transactions:read",
+    label: "transactions:read",
+    description: "Read transaction history and dry-run results.",
   },
   {
-    value: "SubstatesRead",
-    label: "SubstatesRead",
-    description: "Read on-chain substate data.",
+    value: "transactions:create",
+    label: "transactions:create",
+    description: "Submit arbitrary transactions, including raw instructions and manifests.",
   },
   {
-    value: "TemplatesRead",
-    label: "TemplatesRead",
+    value: "transfer:create",
+    label: "transfer:create",
+    description: "Submit transfers (fund, NFT, stealth, confidential, burn-claim) from any account.",
+  },
+  {
+    value: "templates:read",
+    label: "templates:read",
     description: "Read deployed contract templates.",
   },
   {
-    value: "NftGetOwnershipProof",
-    label: "NftGetOwnershipProof",
-    description: "Produce ownership proofs for owned NFTs.",
+    value: "templates:create",
+    label: "templates:create",
+    description: "Publish templates and sign template metadata.",
   },
   {
-    value: "GetNft",
-    label: "GetNft",
+    value: "nfts:read",
+    label: "nfts:read",
     description: "Read NFT data the wallet holds.",
   },
   {
-    value: "StartWebrtc",
-    label: "StartWebrtc",
-    description: "Initiate the WebRTC signalling flow.",
+    value: "confidential:read",
+    label: "confidential:read",
+    description: "View confidential vault balances.",
+  },
+  {
+    value: "confidential:create",
+    label: "confidential:create",
+    description: "Generate confidential transfer / output proofs.",
+  },
+  {
+    value: "stealth_utxos:read",
+    label: "stealth_utxos:read",
+    description: "List and decrypt stealth UTXOs.",
+  },
+  {
+    value: "validators:read",
+    label: "validators:read",
+    description: "Read validator fee pools.",
+  },
+  {
+    value: "validators:update",
+    label: "validators:update",
+    description: "Claim validator fees.",
+  },
+  {
+    value: "address_book:read",
+    label: "address_book:read",
+    description: "Read address book entries.",
+  },
+  {
+    value: "address_book:create",
+    label: "address_book:create",
+    description: "Add address book entries.",
+  },
+  {
+    value: "address_book:update",
+    label: "address_book:update",
+    description: "Edit address book entries.",
+  },
+  {
+    value: "address_book:delete",
+    label: "address_book:delete",
+    description: "Remove address book entries.",
+  },
+  {
+    value: "settings:read",
+    label: "settings:read",
+    description: "Read wallet daemon settings.",
+  },
+  {
+    value: "settings:update",
+    label: "settings:update",
+    description: "Modify wallet daemon settings.",
+  },
+  {
+    value: "substates:read",
+    label: "substates:read",
+    description: "Read on-chain substate data.",
+  },
+  {
+    value: "burn_proofs:read",
+    label: "burn_proofs:read",
+    description: "Read burn proofs known to the wallet.",
+  },
+  {
+    value: "swap_pools:read",
+    label: "swap_pools:read",
+    description: "Read swap pool state and exchange rates.",
   },
 ];
 
-const ADMIN_PERMISSION_VALUE = "Admin";
+const ADMIN_PERMISSION_VALUE = "admin";
 
 /// Expiry radio choices. Presets are duration-relative (applied at submit
 /// time, not dialog-open time) so the wire timestamp reflects when the
@@ -321,7 +397,7 @@ export default function ApiKeys() {
                       <TableCell>
                         <Stack direction="row" spacing={0.5} flexWrap="wrap">
                           {k.permissions.map((p, idx) => (
-                            <Chip key={idx} label={JSON.stringify(p)} size="small" />
+                            <Chip key={idx} label={permissionToString(p)} size="small" />
                           ))}
                         </Stack>
                       </TableCell>
@@ -378,7 +454,7 @@ export default function ApiKeys() {
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
                 Pick the smallest set the agent needs. Each entry maps to one variant of the daemon's{" "}
-                <code>JrpcPermissions</code> set.
+                <code>Permissions</code> set.
               </Typography>
               <FormControl fullWidth size="small">
                 <InputLabel id="api-key-permissions-label">Permissions</InputLabel>

@@ -9,13 +9,4 @@ import type { Utxo } from "./Utxo";
 import type { ValidatorFeePool } from "./ValidatorFeePool";
 import type { Vault } from "./Vault";
 
-export type SubstateValue =
-  | { Component: Component }
-  | { Resource: Resource }
-  | { Vault: Vault }
-  | { NonFungible: NonFungibleContainer }
-  | { ClaimedOutputTombstone: ClaimedOutputTombstone }
-  | { TransactionReceipt: TransactionReceipt }
-  | { Template: PublishedTemplate }
-  | { ValidatorFeePool: ValidatorFeePool }
-  | { Utxo: Utxo };
+export type SubstateValue = { "Component": Component } | { "Resource": Resource } | { "Vault": Vault } | { "NonFungible": NonFungibleContainer } | { "ClaimedOutputTombstone": ClaimedOutputTombstone } | { "TransactionReceipt": TransactionReceipt } | { "Template": PublishedTemplate } | { "ValidatorFeePool": ValidatorFeePool } | { "Utxo": Utxo };

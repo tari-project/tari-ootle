@@ -12,7 +12,7 @@ use axum_jrpc::{
 };
 use log::*;
 use tari_ootle_walletd_client::{
-    permissions::{JrpcPermission, JrpcPermissions},
+    permissions::{Permission, Permissions},
     types::{WebRtcStartRequest, WebRtcStartResponse},
 };
 
@@ -28,7 +28,7 @@ pub fn handle_start(
     addresses: (SocketAddr, SocketAddr),
 ) -> JrpcResult {
     let answer_id = value.get_answer_id();
-    context.check_auth(token, &[JrpcPermission::StartWebrtc]).map_err(|e| {
+    context.check_auth(token, &[Permission::Webrtc]).map_err(|e| {
         JsonRpcResponse::error(
             answer_id.clone(),
             JsonRpcError::new(
@@ -39,7 +39,7 @@ pub fn handle_start(
         )
     })?;
     let webrtc_start_request = value.parse_params::<WebRtcStartRequest>()?;
-    let permissions = serde_json::from_value::<JrpcPermissions>(webrtc_start_request.permissions).map_err(|e| {
+    let permissions = serde_json::from_value::<Permissions>(webrtc_start_request.permissions).map_err(|e| {
         JsonRpcResponse::error(
             answer_id.clone(),
             JsonRpcError::new(

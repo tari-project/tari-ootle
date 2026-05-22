@@ -3,8 +3,4 @@ import type { Amount } from "../Amount";
 import type { NonFungibleAddress } from "../NonFungibleAddress";
 import type { ResourceAddress } from "../ResourceAddress";
 
-export type BadgeUsage =
-  | "None"
-  | { Resource: ResourceAddress }
-  | { NonFungible: NonFungibleAddress }
-  | { AmountOfResource: { resource: ResourceAddress; amount: Amount } };
+export type BadgeUsage = "None" | { "Resource": ResourceAddress } | { "NonFungible": NonFungibleAddress } | { "AmountOfResource": { resource: ResourceAddress, amount: Amount, } };

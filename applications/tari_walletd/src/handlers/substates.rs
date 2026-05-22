@@ -6,7 +6,7 @@ use tari_engine_types::substate::Substate;
 use tari_ootle_common_types::optional::Optional;
 use tari_ootle_wallet_sdk::network::WalletNetworkInterface;
 use tari_ootle_walletd_client::{
-    permissions::JrpcPermission,
+    permissions::{Permission, ReadOnly},
     types::{
         SubstatesGetRequest,
         SubstatesGetResponse,
@@ -24,7 +24,7 @@ pub async fn handle_get(
     req: SubstatesGetRequest,
 ) -> Result<SubstatesGetResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    context.check_auth(token, &[JrpcPermission::SubstatesRead])?;
+    context.check_auth(token, &[Permission::Substates(ReadOnly::Read)])?;
 
     let record = sdk.substate_api().get_substate(&req.substate_id).optional()?;
 
@@ -60,7 +60,7 @@ pub async fn handle_list(
     req: SubstatesListRequest,
 ) -> Result<SubstatesListResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    context.check_auth(token, &[JrpcPermission::SubstatesRead])?;
+    context.check_auth(token, &[Permission::Substates(ReadOnly::Read)])?;
     let substates = sdk.substate_api().list_substates(
         req.filter_by_type,
         req.filter_by_template.as_ref(),

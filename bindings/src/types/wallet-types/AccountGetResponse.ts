@@ -2,4 +2,4 @@
 import type { Account } from "../Account";
 import type { OotleAddress } from "../OotleAddress";
 
-export type AccountGetResponse = { account: Account; address: OotleAddress };
+export type AccountGetResponse = { account: Account, address: OotleAddress, };

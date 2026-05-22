@@ -7,7 +7,7 @@
 --     is returned to the admin exactly once at creation time and is never
 --     recoverable from the database.
 --   * Granted permissions are stored as a comma-separated string in the
---     same format as `JrpcPermissions`'s `FromStr`/`Display`.
+--     same format as `Permissions`'s `FromStr`/`Display`.
 --   * Revocation is soft (`revoked_at`) so we can still log a "last seen"
 --     timestamp for already-revoked credentials; queries filter on this.
 --   * `expires_at` is a forward-compatibility hook: the auth path will

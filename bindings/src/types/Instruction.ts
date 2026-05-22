@@ -17,47 +17,13 @@ import type { StealthTransferStatement } from "./StealthTransferStatement";
 import type { ValidatorFeePoolAddress } from "./ValidatorFeePoolAddress";
 import type { WorkspaceOffsetId } from "./WorkspaceOffsetId";
 
-export type Instruction =
-  | {
-      CreateAccount: {
-        owner_public_key: RistrettoPublicKeyBytes;
-        owner_rule: OwnerRule | null;
-        access_rules: ComponentAccessRules | null;
-        bucket_workspace_id: WorkspaceOffsetId | null;
-      };
-    }
-  | { CallFunction: { address: Hash32; function: string; args: Array<InstructionArg> } }
-  | { CallMethod: { call: ComponentReference; method: string; args: Array<InstructionArg> } }
-  | { PutLastInstructionOutputOnWorkspace: { key: number } }
-  | { EmitLog: { level: LogLevel; message: string } }
-  | { ClaimBurn: { claim: MinotariBurnClaimProof; output_data: ClaimBurnOutputData } }
-  | { ClaimValidatorFees: { address: ValidatorFeePoolAddress } }
-  | "DropAllProofsInWorkspace"
-  | { Assert: { key: WorkspaceOffsetId; assertion: Assertion } }
-  | { TakeFromBucket: { input_bucket: WorkspaceOffsetId; amount: Amount; output_bucket: number } }
-  | {
-      PublishTemplate: {
-        /**
-         * Index into the transaction's `blobs` list. The referenced blob's bytes are the WASM
-         * binary, which the engine resolves via the surrounding `Blobs` at execution time.
-         */
-        binary: number;
-        /**
-         * Optional multihash of off-chain CBOR metadata
-         */
-        metadata_hash: string | null;
-      };
-    }
-  | { AllocateAddress: { allocatable_type: AllocatableAddressType; workspace_id: number } }
-  | {
-      StealthTransfer: {
-        resource_address_ref: ResourceAddressRef;
-        statement: StealthTransferStatement;
-        revealed_input_bucket: WorkspaceOffsetId | null;
-      };
-    }
-  | { PayFeeFromBucket: { bucket: WorkspaceOffsetId } }
-  | {
-      UpdateComponentTemplate: { component: ComponentReference; migrate: MigrateFunction | null; new_template: Hash32 };
-    }
-  | { PutIntoBucket: { src: WorkspaceOffsetId; dest: WorkspaceOffsetId } };
+export type Instruction = { "CreateAccount": { owner_public_key: RistrettoPublicKeyBytes, owner_rule: OwnerRule | null, access_rules: ComponentAccessRules | null, bucket_workspace_id: WorkspaceOffsetId | null, } } | { "CallFunction": { address: Hash32, function: string, args: Array<InstructionArg>, } } | { "CallMethod": { call: ComponentReference, method: string, args: Array<InstructionArg>, } } | { "PutLastInstructionOutputOnWorkspace": { key: number, } } | { "EmitLog": { level: LogLevel, message: string, } } | { "ClaimBurn": { claim: MinotariBurnClaimProof, output_data: ClaimBurnOutputData, } } | { "ClaimValidatorFees": { address: ValidatorFeePoolAddress, } } | "DropAllProofsInWorkspace" | { "Assert": { key: WorkspaceOffsetId, assertion: Assertion, } } | { "TakeFromBucket": { input_bucket: WorkspaceOffsetId, amount: Amount, output_bucket: number, } } | { "PublishTemplate": { 
+/**
+ * Index into the transaction's `blobs` list. The referenced blob's bytes are the WASM
+ * binary, which the engine resolves via the surrounding `Blobs` at execution time.
+ */
+binary: number, 
+/**
+ * Optional multihash of off-chain CBOR metadata
+ */
+metadata_hash: string | null, } } | { "AllocateAddress": { allocatable_type: AllocatableAddressType, workspace_id: number, } } | { "StealthTransfer": { resource_address_ref: ResourceAddressRef, statement: StealthTransferStatement, revealed_input_bucket: WorkspaceOffsetId | null, } } | { "PayFeeFromBucket": { bucket: WorkspaceOffsetId, } } | { "UpdateComponentTemplate": { component: ComponentReference, migrate: MigrateFunction | null, new_template: Hash32, } } | { "PutIntoBucket": { src: WorkspaceOffsetId, dest: WorkspaceOffsetId, } };

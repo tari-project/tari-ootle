@@ -5,15 +5,8 @@ import type { PedersenCommitmentBytes } from "./PedersenCommitmentBytes";
 import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
 import type { SchnorrSignatureBytes } from "./SchnorrSignatureBytes";
 
-export type MinotariBurnClaimProof = {
-  /**
-   * This is typically the public nonce that the UTXO was burnt with
-   */
-  burn_public_key: RistrettoPublicKeyBytes;
-  commitment: PedersenCommitmentBytes;
-  ownership_proof: SchnorrSignatureBytes;
-  encoded_merkle_proof: EncodedMerkleProof;
-  kernel: AbridgedTransactionKernel;
-  value: bigint;
-  sender_offset_public_key: RistrettoPublicKeyBytes;
-};
+export type MinotariBurnClaimProof = { 
+/**
+ * This is typically the public nonce that the UTXO was burnt with
+ */
+burn_public_key: RistrettoPublicKeyBytes, commitment: PedersenCommitmentBytes, ownership_proof: SchnorrSignatureBytes, encoded_merkle_proof: EncodedMerkleProof, kernel: AbridgedTransactionKernel, value: bigint, sender_offset_public_key: RistrettoPublicKeyBytes, };

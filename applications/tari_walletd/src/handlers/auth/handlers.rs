@@ -5,7 +5,7 @@ use axum_extra::{extract::CookieJar, headers::authorization::Bearer};
 use axum_jrpc::JsonRpcResponse;
 use tari_ootle_wallet_sdk::models::AuthLoginRequestEvent;
 use tari_ootle_walletd_client::{
-    permissions::JrpcPermission,
+    permissions::Permission,
     types::{
         AuthGetMethodRequest,
         AuthGetMethodResponse,
@@ -83,7 +83,7 @@ pub async fn handle_revoke(
     token: Option<&Bearer>,
     revoke_request: AuthRevokeTokenRequest,
 ) -> Result<AuthRevokeTokenResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[Permission::Admin])?;
     context
         .refresh_token_store()
         .revoke_token(&revoke_request.refresh_token_id)
@@ -96,7 +96,7 @@ pub async fn handle_list_sessions(
     token: Option<&Bearer>,
     _request: AuthListSessionsRequest,
 ) -> Result<AuthListSessionsResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[Permission::Admin])?;
     context.refresh_token_store().clear_expired().await;
     let sessions = context
         .refresh_token_store()

@@ -2,9 +2,8 @@
 import type { RistrettoPublicKeyBytes } from "../RistrettoPublicKeyBytes";
 import type { KeyId } from "./KeyId";
 
-export type KeysListResponse = {
-  /**
-   * (KeyId, public key, is_active)
-   */
-  keys: Array<[KeyId, RistrettoPublicKeyBytes, boolean]>;
-};
+export type KeysListResponse = { 
+/**
+ * (KeyId, public key, is_active)
+ */
+keys: Array<[KeyId, RistrettoPublicKeyBytes, boolean]>, };

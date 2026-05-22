@@ -45,9 +45,11 @@ use tari_ootle_walletd_client::{
         AuthListApiKeysResponse,
         AuthRevokeApiKeyRequest,
         AuthRevokeApiKeyResponse,
+        EncodedApiKey,
         IssuedApiKey,
     },
 };
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::handlers::HandlerContext;
 
@@ -72,14 +74,27 @@ pub fn hash_api_key(raw: &str) -> String {
 /// Mint a fresh random API key string in the canonical form
 /// `tw_<urlsafe_b64(32 random bytes)>`. Entropy comes from `OsRng` via
 /// `rand::thread_rng()`. Never returns the same string twice.
-fn mint_raw_api_key() -> String {
+///
+/// The raw-byte buffer is wrapped in `Zeroizing` so it is wiped after
+/// encoding, and the returned string is wrapped in `Zeroizing<String>`
+/// (`EncodedApiKey`) so its heap buffer is wiped on drop. Callers MUST
+/// keep it as `EncodedApiKey` end-to-end — converting to a plain `String`
+/// would defeat the wipe.
+fn mint_raw_api_key() -> EncodedApiKey {
     // `rand::rng()` returns a thread-local CSPRNG seeded from the OS;
     // appropriate for issuing credentials whose entire security rests on
     // unpredictability. `fill_bytes` is on the infallible `Rng` trait in
     // rand 0.10.
-    let mut bytes = [0u8; API_KEY_RAW_BYTES];
-    rand::rng().fill_bytes(&mut bytes);
-    format!("{}{}", API_KEY_PREFIX, URL_SAFE_NO_PAD.encode(bytes))
+    let mut bytes = Zeroizing::new([0u8; API_KEY_RAW_BYTES]);
+    rand::rng().fill_bytes(bytes.as_mut_slice());
+    let mut encoded = URL_SAFE_NO_PAD.encode(bytes.as_slice());
+    let mut out = String::with_capacity(API_KEY_PREFIX.len() + encoded.len());
+    out.push_str(API_KEY_PREFIX);
+    out.push_str(&encoded);
+    // Wipe the intermediate base64 buffer before its drop runs — that
+    // allocation also held the raw key in encoded form.
+    encoded.zeroize();
+    Zeroizing::new(out)
 }
 
 /// Look up the API key matching `raw_key`, parse its stored permissions,
@@ -172,7 +187,7 @@ pub async fn handle_create_api_key(
         ));
     }
 
-    let raw_key = mint_raw_api_key();
+    let raw_key: EncodedApiKey = mint_raw_api_key();
     let hash = hash_api_key(&raw_key);
 
     // Serialise the permission set back to its textual form. We could
@@ -290,7 +305,7 @@ mod tests {
         // shared-state regression in the minter.
         let a = mint_raw_api_key();
         let b = mint_raw_api_key();
-        assert!(a.starts_with(API_KEY_PREFIX), "key {a} missing prefix");
+        assert!(a.starts_with(API_KEY_PREFIX), "key {} missing prefix", &*a);
         assert!(b.starts_with(API_KEY_PREFIX));
         assert_ne!(a, b, "two consecutive mints must not collide");
         // Prefix (3) + ceil(32 * 4 / 3) without padding = 3 + 43 = 46
@@ -407,7 +422,7 @@ mod e2e_tests {
     /// Helper: insert an API key with the given scope set, return the raw key.
     /// Stand-in for what `handle_create_api_key` does after passing the
     /// admin check + payload validation.
-    fn mint_key(store: &SqliteWalletStore, name: &str, perms: JrpcPermissions) -> (String, i32) {
+    fn mint_key(store: &SqliteWalletStore, name: &str, perms: JrpcPermissions) -> (EncodedApiKey, i32) {
         let raw = mint_raw_api_key();
         let hash = hash_api_key(&raw);
         let perm_str = format_permissions(&perms);
@@ -536,7 +551,7 @@ mod e2e_tests {
             // External clients submit `{"ApiKey": "tw_..."}` and expect the
             // enum to deserialise back. serde defaults to externally-tagged
             // for this enum, so the variant name is the key. Pin that here.
-            let cred = AuthCredentials::ApiKey("tw_test123".to_string());
+            let cred = AuthCredentials::ApiKey("tw_test123".to_string().into());
             let v = serde_json::to_value(&cred).unwrap();
             assert_eq!(v, json!({"ApiKey": "tw_test123"}));
 
@@ -551,7 +566,7 @@ mod e2e_tests {
             // direct-curl users depend on.
             let req = AuthLoginRequest {
                 permissions: vec![],
-                credentials: AuthCredentials::ApiKey("tw_secret".to_string()),
+                credentials: AuthCredentials::ApiKey("tw_secret".to_string().into()),
             };
             let v = serde_json::to_value(&req).unwrap();
             assert_eq!(
@@ -607,7 +622,7 @@ mod e2e_tests {
                 id: 42,
                 name: "monitor".to_string(),
                 permissions: vec![JrpcPermission::AccountInfo, JrpcPermission::TransactionGet],
-                api_key: "tw_secretmaterial".to_string(),
+                api_key: "tw_secretmaterial".to_string().into(),
                 created_at: 1_700_000_000,
             };
             let v = serde_json::to_value(&resp).unwrap();
@@ -688,7 +703,7 @@ mod e2e_tests {
         }
 
         assert!(
-            !issues_refresh_cookie(&AuthCredentials::ApiKey("tw_anything".to_string())),
+            !issues_refresh_cookie(&AuthCredentials::ApiKey("tw_anything".to_string().into())),
             "API-key sessions MUST NOT get a refresh cookie"
         );
         assert!(

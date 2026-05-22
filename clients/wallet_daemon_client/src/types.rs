@@ -746,7 +746,7 @@ pub struct AuthLoginRequest {
     pub credentials: AuthCredentials,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub enum AuthCredentials {
     /// Credentials for 'none' auth mode
@@ -758,7 +758,7 @@ pub enum AuthCredentials {
     /// and on a hit issues a JWT scoped to the key's stored permissions.
     /// The requested-permissions field of the outer `AuthLoginRequest` is
     /// IGNORED for API key auth — scopes come from the key, not the request.
-    ApiKey(String),
+    ApiKey(#[cfg_attr(feature = "ts", ts(type = "string"))] EncodedApiKey),
 }
 
 impl AuthCredentials {
@@ -784,8 +784,25 @@ impl AuthCredentials {
     }
 }
 
+// Manual Debug: never leak raw API key material via tracing/log/error context.
+// `WebAuthN` and `None` carry no secret, so the standard form is fine.
+impl std::fmt::Debug for AuthCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => f.write_str("None"),
+            Self::WebAuthN(req) => f.debug_tuple("WebAuthN").field(req).finish(),
+            Self::ApiKey(_) => f.write_str("ApiKey(<redacted>)"),
+        }
+    }
+}
+
 /// Represents a JWT token. The token is zeroized from memory on drop.
 pub type EncodedJwtString = Zeroizing<String>;
+
+/// Raw API key material. Zeroized on drop so a freed allocation does not
+/// leave the plaintext behind in memory. Used for both the
+/// `auth.request` ApiKey credential and the one-shot create response.
+pub type EncodedApiKey = Zeroizing<String>;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
@@ -864,15 +881,30 @@ pub struct AuthCreateApiKeyRequest {
 /// EXACTLY ONCE; it cannot be retrieved again. The admin/UI must store it
 /// immediately (clipboard / secrets manager). The daemon only persists a
 /// SHA-256 hash, so a database leak does not expose this string.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AuthCreateApiKeyResponse {
     pub id: i32,
     pub name: String,
     pub permissions: Vec<JrpcPermission>,
-    pub api_key: String,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub api_key: EncodedApiKey,
     /// Unix timestamp (seconds) of creation.
     pub created_at: i64,
+}
+
+// Manual Debug: do not leak the one-shot raw key into logs / error context
+// if a caller ever `?`-bubbles a response or wraps it in `anyhow::Context`.
+impl std::fmt::Debug for AuthCreateApiKeyResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthCreateApiKeyResponse")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("permissions", &self.permissions)
+            .field("api_key", &"<redacted>")
+            .field("created_at", &self.created_at)
+            .finish()
+    }
 }
 
 /// Admin → daemon: list all API keys, active and revoked. The raw key

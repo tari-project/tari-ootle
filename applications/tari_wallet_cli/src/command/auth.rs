@@ -158,7 +158,7 @@ impl ApiKeySubcommand {
                 // a copy-paste of the line still parses cleanly. Subsequent
                 // listings will NEVER include this value.
                 println!("KEY (shown ONCE — store immediately):");
-                println!("{}", resp.api_key);
+                println!("{}", resp.api_key.as_str());
             },
             List => {
                 let resp = client.auth_list_api_keys(AuthListApiKeysRequest {}).await?;

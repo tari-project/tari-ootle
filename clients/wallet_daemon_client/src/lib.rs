@@ -654,7 +654,7 @@ impl WalletDaemonClient {
     /// is ignored by the daemon for API-key auth.
     pub async fn authenticate_with_api_key(
         &mut self,
-        api_key: impl Into<String>,
+        api_key: impl Into<crate::types::EncodedApiKey>,
     ) -> Result<AuthLoginResponse, WalletDaemonClientError> {
         let request = AuthLoginRequest {
             // The daemon ignores `permissions` for API-key auth; the

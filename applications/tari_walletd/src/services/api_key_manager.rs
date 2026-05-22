@@ -191,7 +191,7 @@ impl ApiKeyManager {
                             })
                         })
                         .transpose()?,
-                    revoked: false,
+                    revoked: key.revoked != 0,
                 })
             })
             .collect::<Result<Vec<_>, _>>()
@@ -250,6 +250,6 @@ fn hash_api_key(raw_key: &str) -> String {
     hex::encode(hasher.finalize())
 }
 
-fn current_unix_timestamp() -> Result<i64, ApiKeyError> {
-    Ok(time::OffsetDateTime::now_utc().unix_timestamp())
+fn current_unix_timestamp() -> i64 {
+    time::OffsetDateTime::now_utc().unix_timestamp()
 }

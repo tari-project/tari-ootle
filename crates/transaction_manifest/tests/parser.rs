@@ -701,3 +701,42 @@ fn blob_macro_unknown_name_errors() {
     };
     assert!(err.contains("blob!('missing')"), "unexpected error: {err}");
 }
+
+#[test]
+fn put_into_bucket_macro() {
+    let manifest = r#"
+        use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as MyTemplate;
+
+        fn main() {
+            let a = MyTemplate::make_bucket();
+            let b = MyTemplate::make_bucket();
+            put_into_bucket!(b, a);
+        }
+    "#;
+
+    let ManifestInstructions { instructions, .. } =
+        parse_manifest(manifest, HashMap::new(), Default::default(), Default::default()).unwrap();
+
+    assert_eq!(instructions[4], Instruction::PutIntoBucket {
+        src: WorkspaceOffsetId::new(1),
+        dest: WorkspaceOffsetId::new(0),
+    });
+}
+
+#[test]
+fn put_into_bucket_unknown_variable_errors() {
+    let manifest = r#"
+        use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as MyTemplate;
+
+        fn main() {
+            let a = MyTemplate::make_bucket();
+            put_into_bucket!(missing, a);
+        }
+    "#;
+
+    let err = match parse_manifest(manifest, HashMap::new(), Default::default(), HashMap::new()) {
+        Ok(_) => panic!("expected an error"),
+        Err(e) => e.to_string(),
+    };
+    assert!(err.contains("missing"), "unexpected error: {err}");
+}

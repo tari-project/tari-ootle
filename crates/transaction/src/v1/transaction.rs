@@ -270,6 +270,7 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::DropAllProofsInWorkspace => 1,
         Instruction::Assert { .. } => 1,
         Instruction::TakeFromBucket { .. } => 1,
+        Instruction::PutIntoBucket { .. } => 1,
         // The binary's bytes are charged at the transaction-level via `calc_blobs_weight`,
         // uniformly with any other blob references. The instruction itself is a fixed cost.
         Instruction::PublishTemplate { .. } => 1,

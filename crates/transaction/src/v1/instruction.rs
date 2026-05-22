@@ -162,6 +162,16 @@ pub enum Instruction {
         #[n(2)]
         new_template: TemplateAddress,
     },
+    /// Drains the bucket at `src` into the existing bucket at `dest`. The `src` workspace slot
+    /// remains bound but its bucket is consumed; reusing it for further bucket operations will
+    /// error at the bucket-state layer (matching `TakeFromBucket`'s slot semantics).
+    #[n(15)]
+    PutIntoBucket {
+        #[n(0)]
+        src: WorkspaceOffsetId,
+        #[n(1)]
+        dest: WorkspaceOffsetId,
+    },
 }
 
 impl Instruction {
@@ -206,6 +216,7 @@ impl Instruction {
             Self::DropAllProofsInWorkspace |
             Self::Assert { .. } |
             Self::TakeFromBucket { .. } |
+            Self::PutIntoBucket { .. } |
             Self::AllocateAddress { .. } |
             Self::StealthTransfer { .. } |
             Self::PayFeeFromBucket { .. } => {},
@@ -251,6 +262,7 @@ impl Instruction {
             Self::DropAllProofsInWorkspace |
             Self::Assert { .. } |
             Self::TakeFromBucket { .. } |
+            Self::PutIntoBucket { .. } |
             Self::AllocateAddress { .. } |
             Self::StealthTransfer { .. } |
             Self::PayFeeFromBucket { .. } => {},
@@ -312,6 +324,10 @@ impl Instruction {
                 *output_bucket = output_bucket
                     .checked_add(id_offset)
                     .expect("Workspace ID overflow during merge");
+            },
+            Self::PutIntoBucket { src, dest } => {
+                src.remap_id(id_offset);
+                dest.remap_id(id_offset);
             },
             Self::AllocateAddress { workspace_id, .. } => {
                 *workspace_id = workspace_id
@@ -431,6 +447,9 @@ impl Display for Instruction {
                     input_bucket, amount, output_bucket
                 )
             },
+            Self::PutIntoBucket { src, dest } => {
+                write!(f, "PutIntoBucket {{ src: {}, dest: {} }}", src, dest)
+            },
             Self::PublishTemplate { .. } => {
                 write!(f, "PublishTemplate")
             },
@@ -548,6 +567,14 @@ mod tests {
     #[test]
     fn decode_encode_minicbor() {
         let instruction = make_sample();
+        let encoded = tari_bor::encode(&instruction).unwrap();
+        let decoded: Instruction = tari_bor::decode(&encoded).unwrap();
+        assert_eq!(instruction, decoded);
+
+        let instruction = Instruction::PutIntoBucket {
+            src: WorkspaceOffsetId::new(1),
+            dest: WorkspaceOffsetId::new(2),
+        };
         let encoded = tari_bor::encode(&instruction).unwrap();
         let decoded: Instruction = tari_bor::decode(&encoded).unwrap();
         assert_eq!(instruction, decoded);

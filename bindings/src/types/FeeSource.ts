@@ -9,4 +9,5 @@ export type FeeSource =
   | "TransactionWeight"
   | "SignatureVerification"
   | "TemplateLoad"
-  | "SubstateCreate";
+  | "SubstateCreate"
+  | "WasmExecution";

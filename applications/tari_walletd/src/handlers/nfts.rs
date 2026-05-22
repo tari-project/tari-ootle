@@ -273,8 +273,9 @@ pub async fn handle_transfer(
     inputs.insert(src_vault_substate.substate_id.into());
     inputs.insert(SubstateRequirement::unversioned(src_vault.resource_address));
 
-    for (i, nft_id) in req.nfts.into_iter().enumerate() {
-        // Check if the NFT is owned by this wallet
+    let nfts = req.nfts;
+    // Validate every NFT exists on the source wallet before emitting any instructions.
+    for nft_id in &nfts {
         let nft = non_fungible_api
             .get(req.resource_address, nft_id.clone())
             .optional()
@@ -288,14 +289,31 @@ pub async fn handle_transfer(
                 )),
             ));
         }
+    }
 
+    // Withdraw each NFT into a workspace bucket, merge them all into "joined" via put_into_bucket,
+    // and deposit once on the target account. All NFTs share `req.resource_address`, so the join
+    // is always resource-compatible. With N NFTs this trades (N-1) template `deposit` calls for
+    // (N-1) native engine ops.
+    let mut iter = nfts.into_iter();
+    if let Some(first_nft) = iter.next() {
         builder = builder
             .call_method(source_account_address, "withdraw_non_fungible", args![
                 req.resource_address,
-                nft_id,
+                first_nft,
             ])
-            .put_last_instruction_output_on_workspace(format!("b-{i}"))
-            .call_method(target_account_address, "deposit", args![Workspace(format!("b-{i}"))]);
+            .put_last_instruction_output_on_workspace("joined");
+        for (i, nft_id) in iter.enumerate() {
+            let tmp = format!("tmp{i}");
+            builder = builder
+                .call_method(source_account_address, "withdraw_non_fungible", args![
+                    req.resource_address,
+                    nft_id,
+                ])
+                .put_last_instruction_output_on_workspace(tmp.clone())
+                .put_into_bucket(tmp, "joined");
+        }
+        builder = builder.call_method(target_account_address, "deposit", args![Workspace("joined")]);
     }
 
     let fee_owner_key = sdk.key_manager_api().get_public_key(fee_payer_key_id)?;

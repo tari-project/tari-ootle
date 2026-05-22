@@ -223,7 +223,6 @@ fn custom_access_rules() {
         .add_method_rule("balance", rule!(allow_all))
         .add_method_rule("get_balances", rule!(allow_all))
         .add_method_rule("deposit", rule!(allow_all))
-        .add_method_rule("deposit_all", rule!(allow_all))
         // We are going to make it so anyone can withdraw
         .default(rule!(allow_all));
 
@@ -297,4 +296,81 @@ fn take_from_bucket() {
 
     assert_eq!(alice_balance, 100u64);
     assert_eq!(bob_balance, 999_999_900u64);
+}
+
+#[test]
+fn put_into_bucket_merges_same_resource() {
+    let mut test = TemplateTest::new(CRATE_PATH, Vec::<&str>::new());
+
+    let (alice, _proof, alice_sk) = test.create_funded_account();
+    let (bob, _proof, _bob_sk) = test.create_empty_account();
+
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_method(alice, "withdraw", args![TARI_TOKEN, 600u64])
+            .put_last_instruction_output_on_workspace("first")
+            .call_method(alice, "withdraw", args![TARI_TOKEN, 400u64])
+            .put_last_instruction_output_on_workspace("second")
+            .put_into_bucket("second", "first")
+            .call_method(bob, "deposit", args![Workspace("first")])
+            .add_signer(&test.to_public_key_bytes(), &alice_sk)
+            .seal(test.secret_key()),
+        vec![],
+    );
+
+    let bob_acc = test.read_only_state_store().get_account(bob).unwrap();
+    let bob_balance = test
+        .read_only_state_store()
+        .get_vault(&bob_acc.get_vault_by_resource(&TARI_TOKEN).unwrap().vault_id())
+        .unwrap()
+        .balance();
+    assert_eq!(bob_balance, 1000u64);
+}
+
+#[test]
+fn put_into_bucket_rejects_resource_mismatch() {
+    let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/faucet"]);
+
+    let faucet_template = test.get_template_address("TestFaucet");
+    let (alice, _alice_proof, alice_sk) = test.create_funded_account();
+
+    // Mint a non-TARI fungible resource and fund alice with it.
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .allocate_component_address("faucet_address")
+            .call_function(faucet_template, "mint_with_opts", args![
+                Amount::from(1_000_000u64),
+                "TT".to_string(),
+                Workspace("faucet_address")
+            ])
+            .call_method("faucet_address", "take_free_coins", args![])
+            .put_last_instruction_output_on_workspace("free_coins")
+            .call_method(alice, "deposit", args![Workspace("free_coins")])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    let resources = test.read_only_state_store().get_all_resources().unwrap();
+    let (tt_resource, _) = resources
+        .into_iter()
+        .find(|(_, r)| r.token_symbol() == Some("TT"))
+        .expect("TT resource not found");
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .call_method(alice, "withdraw", args![TARI_TOKEN, 100u64])
+            .put_last_instruction_output_on_workspace("tari_bucket")
+            .call_method(alice, "withdraw", args![tt_resource, 100u64])
+            .put_last_instruction_output_on_workspace("tt_bucket")
+            // Different resources — engine should refuse the join.
+            .put_into_bucket("tt_bucket", "tari_bucket")
+            .add_signer(&test.to_public_key_bytes(), &alice_sk)
+            .seal(test.secret_key()),
+        vec![],
+    );
+
+    assert!(
+        format!("{reason}").contains("Resource addresses do not match"),
+        "expected ResourceAddressMismatch, got: {reason}"
+    );
 }

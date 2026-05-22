@@ -234,6 +234,18 @@ impl ManifestInstructionGenerator {
                 })?,
             }]),
             ManifestIntent::DropAllProofs => Ok(vec![Instruction::DropAllProofsInWorkspace]),
+            ManifestIntent::PutIntoBucket(p) => {
+                let resolve = |name: &Ident| {
+                    let name_str = name.to_string();
+                    self.workspace_ids
+                        .get(&name_str)
+                        .copied()
+                        .ok_or(ManifestError::UndefinedVariable { name: name_str })
+                };
+                let src = resolve(&p.src)?;
+                let dest = resolve(&p.dest)?;
+                Ok(vec![Instruction::PutIntoBucket { src, dest }])
+            },
             ManifestIntent::PublishTemplate(pt) => {
                 // Reuse the same blob-resolution path as `blob!(name)` — the binary is
                 // registered in the output Blobs on first reference and assigned the next

@@ -147,32 +147,26 @@ pub async fn handle_claim_validator_fees(
     let builder = context.transaction_builder().with_dry_run(req.dry_run);
 
     let builder = if req.output_to_revealed {
+        let (first, rest) = fee_pool_addresses
+            .split_first()
+            .ok_or_else(|| invalid_params("shards", Some("At least one shard must be specified")))?;
+        let first = *first;
+        let rest = rest.to_vec();
         builder
-            .with_fee_instructions_builder(|builder| {
-                builder
+            .with_fee_instructions_builder(move |builder| {
+                let builder = builder
                     .create_account(account_public_key)
-                    .then(|builder| {
-                        let mut bucket_names = vec![];
-                        fee_pool_addresses
-                            .iter()
-                            .copied()
-                            .enumerate()
-                            .fold(builder, |builder, (i, address)| {
-                                bucket_names.push(format!("b{}", i));
-                                builder
-                                    .claim_validator_fees(address)
-                                    .put_last_instruction_output_on_workspace(bucket_names.last().unwrap())
-                            })
-                            .then(|builder| {
-                                // TODO: improve this - suggest: the workspace implicitly collect all returned resources
-                                // (buckets) and we should create buckets by taking from the
-                                // workspace. Then we could collect all buckets and
-                                // deposit once. Greatly reducing gas for this (and a lot of other) transactions.
-                                bucket_names.into_iter().fold(builder, |builder, bucket| {
-                                    builder.call_method(account_component_address, "deposit", args![Workspace(bucket)])
-                                })
-                            })
+                    .claim_validator_fees(first)
+                    .put_last_instruction_output_on_workspace("joined");
+                rest.into_iter()
+                    .enumerate()
+                    .fold(builder, |b, (i, address)| {
+                        let tmp = format!("tmp{i}");
+                        b.claim_validator_fees(address)
+                            .put_last_instruction_output_on_workspace(tmp.clone())
+                            .put_into_bucket(tmp, "joined")
                     })
+                    .call_method(account_component_address, "deposit", args![Workspace("joined")])
                     .call_method(account_component_address, "pay_fee", args![max_fee])
             })
             .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))

@@ -746,13 +746,19 @@ pub struct AuthLoginRequest {
     pub credentials: AuthCredentials,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub enum AuthCredentials {
     /// Credentials for 'none' auth mode
     None,
     /// Credentials for WebAuthN auth mode. Contains the request from the client to finish the auth.
     WebAuthN(Box<WebauthnFinishAuthRequest>),
+    /// Long-lived API key issued by an Admin user. The wallet daemon hashes
+    /// the supplied raw key with SHA-256, looks up the hash in `api_keys`,
+    /// and on a hit issues a JWT scoped to the key's stored permissions.
+    /// The requested-permissions field of the outer `AuthLoginRequest` is
+    /// IGNORED for API key auth — scopes come from the key, not the request.
+    ApiKey(#[cfg_attr(feature = "ts", ts(type = "string"))] EncodedApiKey),
 }
 
 impl AuthCredentials {
@@ -769,10 +775,34 @@ impl AuthCredentials {
             _ => None,
         }
     }
+
+    pub fn as_api_key(&self) -> Option<&str> {
+        match self {
+            Self::ApiKey(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+}
+
+// Manual Debug: never leak raw API key material via tracing/log/error context.
+// `WebAuthN` and `None` carry no secret, so the standard form is fine.
+impl std::fmt::Debug for AuthCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => f.write_str("None"),
+            Self::WebAuthN(req) => f.debug_tuple("WebAuthN").field(req).finish(),
+            Self::ApiKey(_) => f.write_str("ApiKey(<redacted>)"),
+        }
+    }
 }
 
 /// Represents a JWT token. The token is zeroized from memory on drop.
 pub type EncodedJwtString = Zeroizing<String>;
+
+/// Raw API key material. Zeroized on drop so a freed allocation does not
+/// leave the plaintext behind in memory. Used for both the
+/// `auth.request` ApiKey credential and the one-shot create response.
+pub type EncodedApiKey = Zeroizing<String>;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
@@ -820,6 +850,113 @@ impl Display for RefreshTokenHash {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AuthRevokeTokenResponse {}
+
+// -----------------------------------------------------------------------------
+// API key management (issue #1957) — admin-only CRUD over long-lived
+// credentials that AI agents and other automated clients use to authenticate
+// without webauthn. Every endpoint that handles these structures requires
+// the caller to already hold the `Admin` permission; non-admin sessions are
+// rejected at the JSON-RPC layer.
+// -----------------------------------------------------------------------------
+
+/// Admin → daemon: mint a new long-lived API key with the supplied scopes.
+///
+/// `permissions` is the same textual form `JrpcPermissions::from_str`
+/// accepts (e.g. `["AccountInfo", "TransactionGet"]`). `confirm_admin`
+/// must be set to `true` if and only if the list contains the `Admin`
+/// permission — this is a deliberate speed-bump so the UI can render an
+/// explicit warning before issuing a fully-privileged credential.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthCreateApiKeyRequest {
+    pub name: String,
+    pub permissions: Vec<String>,
+    #[serde(default)]
+    pub confirm_admin: bool,
+}
+
+/// Daemon → admin: response after successful key creation.
+///
+/// `api_key` is the RAW key material and is included in this response
+/// EXACTLY ONCE; it cannot be retrieved again. The admin/UI must store it
+/// immediately (clipboard / secrets manager). The daemon only persists a
+/// SHA-256 hash, so a database leak does not expose this string.
+#[derive(Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthCreateApiKeyResponse {
+    pub id: i32,
+    pub name: String,
+    pub permissions: Vec<JrpcPermission>,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub api_key: EncodedApiKey,
+    /// Unix timestamp (seconds) of creation.
+    pub created_at: i64,
+}
+
+// Manual Debug: do not leak the one-shot raw key into logs / error context
+// if a caller ever `?`-bubbles a response or wraps it in `anyhow::Context`.
+impl std::fmt::Debug for AuthCreateApiKeyResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthCreateApiKeyResponse")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("permissions", &self.permissions)
+            .field("api_key", &"<redacted>")
+            .field("created_at", &self.created_at)
+            .finish()
+    }
+}
+
+/// Admin → daemon: list all API keys, active and revoked. The raw key
+/// material is NEVER included in the response.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthListApiKeysRequest {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthListApiKeysResponse {
+    pub keys: Vec<IssuedApiKey>,
+}
+
+/// Metadata returned by `auth.list_api_keys`. Mirrors the storage row
+/// minus the hash (which the admin doesn't need to see) and the raw key
+/// (which doesn't exist anywhere persistent).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct IssuedApiKey {
+    pub id: i32,
+    pub name: String,
+    pub permissions: Vec<JrpcPermission>,
+    /// Unix timestamp (seconds).
+    pub created_at: i64,
+    /// Unix timestamp (seconds). `None` if the key has never been used to
+    /// authenticate since creation.
+    pub last_used_at: Option<i64>,
+    /// Unix timestamp (seconds). `None` for an active key; non-null means
+    /// the key has been revoked and is no longer usable.
+    pub revoked_at: Option<i64>,
+    /// Unix timestamp (seconds). `None` means the key does not expire.
+    /// Always `None` for keys created by the current implementation; the
+    /// field exists so an expiry-enforcement feature can be added later
+    /// without a wire-format change.
+    pub expires_at: Option<i64>,
+}
+
+/// Admin → daemon: revoke an API key by its id. The row is soft-deleted
+/// (`revoked_at` stamped) so admin tooling can still see the historical
+/// `last_used_at` of revoked credentials, but the storage layer filters
+/// revoked rows out of authentication lookups so revocation takes effect
+/// immediately.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthRevokeApiKeyRequest {
+    pub id: i32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AuthRevokeApiKeyResponse {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]

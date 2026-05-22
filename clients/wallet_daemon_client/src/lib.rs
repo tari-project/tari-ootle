@@ -43,9 +43,16 @@ use types::{
     AccountsCreateFreeTestCoinsResponse,
     AccountsTransferRequest,
     AccountsTransferResponse,
+    AuthCreateApiKeyRequest,
+    AuthCreateApiKeyResponse,
+    AuthCredentials,
+    AuthListApiKeysRequest,
+    AuthListApiKeysResponse,
     AuthLoginRequest,
     AuthLoginResponse,
     AuthRefreshRequest,
+    AuthRevokeApiKeyRequest,
+    AuthRevokeApiKeyResponse,
     CallInstructionRequest,
     ClaimBurnRequest,
     ClaimBurnResponse,
@@ -598,6 +605,66 @@ impl WalletDaemonClient {
         req: T,
     ) -> Result<AuthListSessionsResponse, WalletDaemonClientError> {
         self.send_request("auth.list_sessions", req.borrow()).await
+    }
+
+    /// Mint a new long-lived API key with the supplied permission scopes.
+    ///
+    /// Requires the current session to hold the `Admin` permission. The raw
+    /// key string is returned in the response EXACTLY ONCE — the caller
+    /// must persist it immediately (clipboard, secrets manager, env file
+    /// for the agent) because the daemon only stores a SHA-256 hash.
+    ///
+    /// If the granted permissions include `Admin`, the request must set
+    /// `confirm_admin: true`. This is a deliberate speed-bump so a UI
+    /// checkbox can be the gate rather than the request payload alone.
+    pub async fn auth_create_api_key<T: Borrow<AuthCreateApiKeyRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AuthCreateApiKeyResponse, WalletDaemonClientError> {
+        self.send_request("auth.create_api_key", req.borrow()).await
+    }
+
+    /// List all API keys issued by this wallet, active and revoked. Returns
+    /// only metadata — never the raw key material (the daemon does not
+    /// store it).
+    pub async fn auth_list_api_keys<T: Borrow<AuthListApiKeysRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AuthListApiKeysResponse, WalletDaemonClientError> {
+        self.send_request("auth.list_api_keys", req.borrow()).await
+    }
+
+    /// Revoke an API key by id. Revocation is immediate — subsequent
+    /// authentication attempts using the revoked key will fail at the
+    /// storage layer's active-row filter.
+    pub async fn auth_revoke_api_key<T: Borrow<AuthRevokeApiKeyRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<AuthRevokeApiKeyResponse, WalletDaemonClientError> {
+        self.send_request("auth.revoke_api_key", req.borrow()).await
+    }
+
+    /// Convenience: connect to a wallet daemon and authenticate using an
+    /// API key in one step. Calls `auth.request` with
+    /// `AuthCredentials::ApiKey(key)`, captures the issued JWT, and sets
+    /// it as the bearer token for subsequent requests on this client.
+    ///
+    /// The permissions encoded in the JWT come from the stored API key
+    /// row — the `permissions` field of the underlying `AuthLoginRequest`
+    /// is ignored by the daemon for API-key auth.
+    pub async fn authenticate_with_api_key(
+        &mut self,
+        api_key: impl Into<crate::types::EncodedApiKey>,
+    ) -> Result<AuthLoginResponse, WalletDaemonClientError> {
+        let request = AuthLoginRequest {
+            // The daemon ignores `permissions` for API-key auth; the
+            // permission set comes from the persisted api_key row.
+            permissions: Vec::new(),
+            credentials: AuthCredentials::ApiKey(api_key.into()),
+        };
+        let response: AuthLoginResponse = self.send_request("auth.request", &request).await?;
+        self.set_auth_token(response.token.clone());
+        Ok(response)
     }
 
     /// Initiates a WebRTC signalling session with the wallet daemon.

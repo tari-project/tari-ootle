@@ -126,6 +126,14 @@ impl JrpcPermissions {
         self.0.contains(permission)
     }
 
+    /// Borrow-iterate the granted permissions without consuming or
+    /// cloning the set. Useful for serialisation paths that just need
+    /// to render each permission to a string — avoids the
+    /// `clone().into_vec().iter()` triple-dance.
+    pub fn iter(&self) -> impl Iterator<Item = &JrpcPermission> {
+        self.0.iter()
+    }
+
     pub fn into_vec(self) -> Vec<JrpcPermission> {
         self.0.into_iter().collect()
     }

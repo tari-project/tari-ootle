@@ -21,6 +21,7 @@ use crate::{
     models::{
         Account,
         AddressBookEntry,
+        ApiKey,
         AuthoredTemplateModel,
         ConfidentialOutputModel,
         Config,
@@ -235,4 +236,17 @@ pub trait WalletStoreReader {
     // Address book
     fn address_book_get(&mut self, name: &str) -> Result<AddressBookEntry, WalletStorageError>;
     fn address_book_get_all(&mut self) -> Result<Vec<AddressBookEntry>, WalletStorageError>;
+
+    // API keys (agent-friendly long-lived credentials)
+    /// Look up a non-revoked API key by its SHA-256 hash hex digest. Returns
+    /// `None` if no row matches, or if the matching row has been revoked.
+    /// Used by the authenticator on every agent-presented credential, so
+    /// kept as a single indexed lookup.
+    fn api_key_find_active_by_hash(&mut self, key_hash: &str) -> Result<Option<ApiKey>, WalletStorageError>;
+    /// Enumerate all API keys including revoked ones. Used by the admin
+    /// `auth.list_api_keys` endpoint, which renders status + last-used.
+    fn api_key_list_all(&mut self) -> Result<Vec<ApiKey>, WalletStorageError>;
+    /// Fetch a single key by id; surfaces both active and revoked rows so
+    /// admin tooling can show history.
+    fn api_key_get_by_id(&mut self, id: i32) -> Result<ApiKey, WalletStorageError>;
 }

@@ -26,6 +26,7 @@ use crate::{
     models::{
         AccountUpdate,
         AddressBookEntry,
+        ApiKey,
         AuthoredTemplateModel,
         ConfidentialOutputModel,
         ImportedKeyId,
@@ -242,6 +243,21 @@ pub trait WalletStoreWriter: CommittableStore {
         note: Option<&str>,
     ) -> Result<AddressBookEntry, WalletStorageError>;
     fn address_book_delete(&mut self, name: &str) -> Result<(), WalletStorageError>;
+
+    // API keys
+    /// Persist a new API key. `key_hash` is the SHA-256 hex digest of the
+    /// raw key bytes — the raw key itself is never passed to the storage
+    /// layer. `permissions` is the textual `JrpcPermissions` form
+    /// (comma-separated; the same format the JWT layer already uses).
+    fn api_key_insert(&mut self, name: &str, key_hash: &str, permissions: &str) -> Result<ApiKey, WalletStorageError>;
+    /// Bump `last_used_at` on a key after a successful authentication. Best-effort:
+    /// callers should not let a write error abort the request — the auth
+    /// already succeeded, this just refreshes the UI hint.
+    fn api_key_touch_last_used(&mut self, id: i32) -> Result<(), WalletStorageError>;
+    /// Soft-delete a key by stamping `revoked_at`. The row is preserved so
+    /// the admin UI can still show the historical `last_used_at` for
+    /// already-revoked credentials.
+    fn api_key_revoke(&mut self, id: i32) -> Result<(), WalletStorageError>;
 }
 
 pub trait WalletEventStoreWriter {

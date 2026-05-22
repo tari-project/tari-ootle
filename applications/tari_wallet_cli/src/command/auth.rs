@@ -25,7 +25,15 @@ use tari_ootle_common_types::displayable::Displayable;
 use tari_ootle_walletd_client::{
     WalletDaemonClient,
     permissions::JrpcPermission,
-    types::{AuthCredentials, AuthListSessionsRequest, AuthLoginRequest, AuthRevokeTokenRequest},
+    types::{
+        AuthCreateApiKeyRequest,
+        AuthCredentials,
+        AuthListApiKeysRequest,
+        AuthListSessionsRequest,
+        AuthLoginRequest,
+        AuthRevokeApiKeyRequest,
+        AuthRevokeTokenRequest,
+    },
 };
 
 #[derive(Debug, Subcommand, Clone)]
@@ -33,6 +41,11 @@ pub enum AuthSubcommand {
     Request(RequestArgs),
     Revoke(RevokeArgs),
     List,
+    /// Manage long-lived API keys used by AI agents and other automated
+    /// clients. All subcommands require the active session to hold the
+    /// `Admin` permission.
+    #[clap(subcommand)]
+    ApiKey(ApiKeySubcommand),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -43,6 +56,41 @@ pub struct RequestArgs {
 #[derive(Debug, Args, Clone)]
 pub struct RevokeArgs {
     permission_token_id: String,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+pub enum ApiKeySubcommand {
+    /// Mint a new long-lived API key. The raw key is printed to stdout
+    /// exactly once — store it immediately. The daemon persists only a
+    /// SHA-256 hash and cannot surface the key again on a subsequent list.
+    Create(CreateApiKeyArgs),
+    /// List all API keys (active and revoked) along with their granted
+    /// scopes and last-used timestamps.
+    List,
+    /// Revoke an API key by id. Revocation is effective immediately.
+    Revoke(RevokeApiKeyArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct CreateApiKeyArgs {
+    /// Human-readable label for this key. Shown in `list`. Not required to be unique.
+    #[clap(long)]
+    pub name: String,
+    /// Permission scopes granted to this key, comma-separated. Example:
+    /// `--permissions AccountInfo,TransactionGet`.
+    #[clap(long, value_delimiter = ',')]
+    pub permissions: Vec<JrpcPermission>,
+    /// Required if `permissions` includes `Admin`. Deliberate speed-bump
+    /// so an admin doesn't accidentally mint a fully-privileged key.
+    #[clap(long)]
+    pub confirm_admin: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct RevokeApiKeyArgs {
+    /// The numeric `id` of the key to revoke. See `auth api-key list`.
+    #[clap(long)]
+    pub id: i32,
 }
 
 impl AuthSubcommand {
@@ -76,6 +124,65 @@ impl AuthSubcommand {
                 for session in &resp.sessions {
                     println!("Id {} name {}", session.id, session.permissions.display());
                 }
+            },
+            ApiKey(sub) => sub.handle(client).await?,
+        }
+        Ok(())
+    }
+}
+
+impl ApiKeySubcommand {
+    pub async fn handle(self, mut client: WalletDaemonClient) -> anyhow::Result<()> {
+        #[allow(clippy::enum_glob_use)]
+        use ApiKeySubcommand::*;
+        match self {
+            Create(args) => {
+                if args.permissions.is_empty() {
+                    anyhow::bail!("--permissions must contain at least one scope; refusing to mint an unusable key");
+                }
+                let perm_strings: Vec<String> = args.permissions.iter().map(|p| p.to_string()).collect();
+                let resp = client
+                    .auth_create_api_key(AuthCreateApiKeyRequest {
+                        name: args.name,
+                        permissions: perm_strings,
+                        confirm_admin: args.confirm_admin,
+                    })
+                    .await?;
+                println!("API key created.");
+                println!("  id:          {}", resp.id);
+                println!("  name:        {}", resp.name);
+                println!("  permissions: {:?}", resp.permissions);
+                println!("  created_at:  {} (unix s)", resp.created_at);
+                println!();
+                // Print the raw key on its own line, prefixed with a label so
+                // a copy-paste of the line still parses cleanly. Subsequent
+                // listings will NEVER include this value.
+                println!("KEY (shown ONCE — store immediately):");
+                println!("{}", resp.api_key.as_str());
+            },
+            List => {
+                let resp = client.auth_list_api_keys(AuthListApiKeysRequest {}).await?;
+                if resp.keys.is_empty() {
+                    println!("No API keys issued.");
+                    return Ok(());
+                }
+                for k in &resp.keys {
+                    let status = if k.revoked_at.is_some() { "REVOKED" } else { "active" };
+                    let last_used = k
+                        .last_used_at
+                        .map(|t| t.to_string())
+                        .unwrap_or_else(|| "never".to_string());
+                    println!(
+                        "[{}] id={} name={} scopes={:?} created={} last_used={}",
+                        status, k.id, k.name, k.permissions, k.created_at, last_used
+                    );
+                }
+            },
+            Revoke(args) => {
+                client
+                    .auth_revoke_api_key(AuthRevokeApiKeyRequest { id: args.id })
+                    .await?;
+                println!("API key {} revoked.", args.id);
             },
         }
         Ok(())

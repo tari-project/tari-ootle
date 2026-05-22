@@ -254,7 +254,7 @@ pub async fn handle_list(
     token: Option<&Bearer>,
     req: AccountsListRequest,
 ) -> Result<AccountsListResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::AccountList(None)])?;
     let sdk = context.wallet_sdk();
     let limit = usize::try_from(req.limit)
         .map_err(|e| invalid_params("limit", Some(&format!("limit overflowed usize: {}", e))))?;

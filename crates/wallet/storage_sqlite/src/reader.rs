@@ -29,6 +29,7 @@ use tari_ootle_wallet_sdk::{
     models::{
         Account,
         AddressBookEntry,
+        ApiKey,
         AuthoredTemplateModel,
         ConfidentialOutputModel,
         Config,
@@ -1589,6 +1590,65 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 note: row.note,
             })
             .collect())
+    }
+
+    fn api_key_find_active_by_hash(&mut self, key_hash: &str) -> Result<Option<ApiKey>, WalletStorageError> {
+        use crate::schema::api_keys;
+
+        // Filter `revoked_at IS NULL` in SQL so the authenticator never sees
+        // revoked rows, even if the index lookup matches one. This keeps the
+        // "revoke is immediate" guarantee on the data-layer boundary rather
+        // than relying on every caller to remember to check `is_active`.
+        let row = api_keys::table
+            .filter(api_keys::key_hash.eq(key_hash))
+            .filter(api_keys::revoked_at.is_null())
+            .first::<models::ApiKey>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general("api_key_find_active_by_hash", e))?;
+
+        Ok(row.map(map_api_key_row))
+    }
+
+    fn api_key_list_all(&mut self) -> Result<Vec<ApiKey>, WalletStorageError> {
+        use crate::schema::api_keys;
+
+        // Active first (revoked_at IS NULL ranks before NOT NULL on SQLite
+        // because NULL sorts before any value), then most-recently-created.
+        // The admin UI typically wants active keys near the top of the list.
+        let rows = api_keys::table
+            .order((api_keys::revoked_at.asc(), api_keys::created_at.desc()))
+            .load::<models::ApiKey>(self.connection())
+            .map_err(|e| WalletStorageError::general("api_key_list_all", e))?;
+
+        Ok(rows.into_iter().map(map_api_key_row).collect())
+    }
+
+    fn api_key_get_by_id(&mut self, id: i32) -> Result<ApiKey, WalletStorageError> {
+        const OPERATION: &str = "api_key_get_by_id";
+        use crate::schema::api_keys;
+
+        let row = api_keys::table
+            .filter(api_keys::id.eq(id))
+            .first::<models::ApiKey>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(map_api_key_row(row))
+    }
+}
+
+/// Convert the storage-layer `models::ApiKey` row into the SDK-level
+/// `ApiKey`. Kept as a free fn so the reader module doesn't depend on the
+/// writer module (and vice versa).
+fn map_api_key_row(row: models::ApiKey) -> ApiKey {
+    ApiKey {
+        id: row.id,
+        name: row.name,
+        key_hash: row.key_hash,
+        permissions: row.permissions,
+        created_at: row.created_at,
+        last_used_at: row.last_used_at,
+        revoked_at: row.revoked_at,
+        expires_at: row.expires_at,
     }
 }
 

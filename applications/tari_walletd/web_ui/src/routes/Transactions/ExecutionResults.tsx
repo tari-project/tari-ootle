@@ -33,6 +33,7 @@ import {
   TableRow,
   Typography,
 } from "@mui/material";
+import { convertCborValue } from "@utils/cbor";
 import { ReactNode } from "react";
 
 function ResultRowData({ result, index }: { result: any; index: number }) {
@@ -40,17 +41,11 @@ function ResultRowData({ result, index }: { result: any; index: number }) {
     typeof result.return_type === "string" ? result.return_type : result.return_type?.Other?.name || "Unknown";
 
   const renderValue = () => {
-    if (!result.indexed?.value) return null;
-
-    if (typeof result.indexed.value === "string") {
-      return result.indexed.value;
-    }
-
-    if (result.indexed.value.Tag) {
-      return `Tag ${result.indexed.value.Tag[0]}: ${JSON.stringify(result.indexed.value.Tag[1])}`;
-    }
-
-    return JSON.stringify(result.indexed.value);
+    if (result.indexed?.value === undefined || result.indexed?.value === null) return null;
+    const decoded = convertCborValue(result.indexed.value);
+    if (decoded === null) return null;
+    if (typeof decoded === "string") return decoded;
+    return JSON.stringify(decoded);
   };
 
   const renderIndexedData = () => {

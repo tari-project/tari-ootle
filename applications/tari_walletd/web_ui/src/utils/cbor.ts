@@ -1,88 +1,102 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-export function getValueByPath(cborRepr: object, path: string): any {
-  let value = cborRepr;
-  for (const part of path.split(".")) {
-    if (part == "$") {
-      continue;
-    }
-    if ("Map" in value) {
-      // @ts-ignore
-      value = value.Map.find((v) => convertCborValue(v[0]) === part)?.[1];
-      if (!value) {
-        return null;
-      }
-      continue;
-    }
+// JSON-side decoder for `tari_bor::Value`.
+//
+// The minicbor-based encoding (see `crates/tari_bor/src/value_serde.rs`) emits values as natural
+// JSON for primitives, text-keyed maps and arrays, and uses `@cbor` sentinel objects otherwise:
+//   - `{ "@cbor": "bytes", "hex": "..." }`
+//   - `{ "@cbor": "int",   "value": "..." }`   (integers outside i64/u64)
+//   - `{ "@cbor": "map",   "entries": [[k, v], ...] }`
+//   - `{ "@cbor": "tag",   "tag": N, "value": v }`
 
-    if ("Array" in value) {
-      // @ts-ignore
-      value = value.Array[parseInt(part)];
-      continue;
-    }
-
-    return null;
-  }
-  return convertCborValue(value);
-}
+const SENTINEL_KEY = "@cbor";
 
 export function convertCborValue(value: any): any {
-  // TODO: The value === "Null" case should be fixed
-  if (value === null || value === "Null") {
+  if (value === null || value === undefined) {
     return null;
   }
 
-  if ("Map" in value) {
-    const result = {};
-    for (const [key, val] of value.Map) {
-      // @ts-ignore
-      result[convertCborValue(key)] = convertCborValue(val);
-    }
-    return result;
-  }
-  if ("Tag" in value) {
-    return convertTaggedValue(value.Tag[0], value.Tag[1]);
-  }
-  if ("Text" in value) {
-    return value.Text;
-  }
-  if ("Bytes" in value) {
-    return value.Bytes;
+  if (typeof value !== "object") {
+    return value;
   }
 
-  if ("Array" in value) {
-    return value.Array.map(convertCborValue);
+  if (Array.isArray(value)) {
+    return value.map(convertCborValue);
   }
-  if ("Integer" in value) {
-    return value.Integer;
+
+  if (SENTINEL_KEY in value) {
+    return convertSentinel(value);
   }
-  if ("Bool" in value) {
-    return value.Bool;
+
+  const result: Record<string, any> = {};
+  for (const [k, v] of Object.entries(value)) {
+    result[k] = convertCborValue(v);
   }
-  return value;
+  return result;
 }
 
-function bytesToAddressString(type: String, tag: ArrayLike<number>): string {
-  const hex = Array.from(tag, function (byte) {
-    return ("0" + (byte & 0xff).toString(16)).slice(-2);
-  }).join("");
+function convertSentinel(value: Record<string, any>): any {
+  switch (value[SENTINEL_KEY]) {
+    case "bytes":
+      return hexToBytes(value.hex);
+    case "int": {
+      const big = BigInt(value.value);
+      const num = Number(big);
+      return Number.isSafeInteger(num) && BigInt(num) === big ? num : big;
+    }
+    case "map": {
+      const result: Record<string, any> = {};
+      for (const [k, v] of value.entries) {
+        result[String(convertCborValue(k))] = convertCborValue(v);
+      }
+      return result;
+    }
+    case "tag":
+      return convertTaggedValue(value.tag, value.value);
+    default:
+      return value;
+  }
+}
 
+function hexToBytes(hex: string): number[] {
+  const out: number[] = [];
+  for (let i = 0; i + 1 < hex.length; i += 2) {
+    out.push(parseInt(hex.substring(i, i + 2), 16));
+  }
+  return out;
+}
+
+function bytesToAddressString(type: string, value: any): string {
+  let hex: string;
+  if (value && typeof value === "object" && value[SENTINEL_KEY] === "bytes") {
+    hex = value.hex;
+  } else if (Array.isArray(value)) {
+    hex = value.map((b: number) => ("0" + (b & 0xff).toString(16)).slice(-2)).join("");
+  } else if (typeof value === "string") {
+    hex = value;
+  } else {
+    return JSON.stringify(value);
+  }
   return `${type}_${hex}`;
 }
 
-export function convertTaggedValue(tag: number, value: any): string | any {
+export function convertTaggedValue(tag: number, value: any): any {
   switch (tag) {
     case BinaryTag.VaultId:
-      return bytesToAddressString("vault", value.Bytes!);
+      return bytesToAddressString("vault", value);
     case BinaryTag.ComponentAddress:
-      return bytesToAddressString("component", value.Bytes!);
+      return bytesToAddressString("component", value);
     case BinaryTag.ResourceAddress:
-      return bytesToAddressString("resource", value.Bytes!);
+      return bytesToAddressString("resource", value);
+    case BinaryTag.NonFungibleAddress:
+      return bytesToAddressString("nft", value);
+    case BinaryTag.TransactionReceipt:
+      return bytesToAddressString("txreceipt", value);
     case BinaryTag.Metadata:
       return convertCborValue(value);
     default:
-      return value;
+      return convertCborValue(value);
   }
 }
 

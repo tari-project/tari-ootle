@@ -34,18 +34,18 @@ import {
 } from "@mui/material";
 import { ReactNode } from "react";
 import { DataTableCell } from "../../../Components/StyledComponents";
+import { convertCborValue } from "../../../utils/cbor";
 
 function ResultRowData({ result, index }: { result: any; index: number }) {
   const returnTypeLabel =
     typeof result.return_type === "string" ? result.return_type : result.return_type?.Other?.name || "Unknown";
 
   const renderValue = () => {
-    if (!result.indexed?.value) return null;
-    if (typeof result.indexed.value === "string") return result.indexed.value;
-    if (result.indexed.value.Tag) {
-      return `Tag ${result.indexed.value.Tag[0]}: ${JSON.stringify(result.indexed.value.Tag[1])}`;
-    }
-    return JSON.stringify(result.indexed.value);
+    if (result.indexed?.value === undefined || result.indexed?.value === null) return null;
+    const decoded = convertCborValue(result.indexed.value);
+    if (decoded === null) return null;
+    if (typeof decoded === "string") return decoded;
+    return JSON.stringify(decoded);
   };
 
   const renderIndexedData = () => {
